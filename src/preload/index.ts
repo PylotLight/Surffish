@@ -3,7 +3,9 @@ import type {
   BrowserBounds,
   BrowserProxySettings,
   BrowserProxyTestResult,
-  BrowserState
+  BrowserState,
+  BrowserTabSummary,
+  BrowsingHistoryEntry
 } from '../shared/types'
 
 const api = {
@@ -16,6 +18,26 @@ const api = {
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
     stop: (): Promise<void> => ipcRenderer.invoke('browser:stop'),
     setBounds: (bounds: BrowserBounds): Promise<void> => ipcRenderer.invoke('browser:set-bounds', bounds),
+    tabs: {
+      get: (): Promise<BrowserTabSummary[]> => ipcRenderer.invoke('browser:tabs:get'),
+      create: (input?: string): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new', input),
+      activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
+      close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
+      onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, tabs: BrowserTabSummary[]): void => callback(tabs)
+        ipcRenderer.on('browser:tabs', listener)
+        return () => ipcRenderer.removeListener('browser:tabs', listener)
+      }
+    },
+    history: {
+      get: (): Promise<BrowsingHistoryEntry[]> => ipcRenderer.invoke('browser:history:get'),
+      clear: (): Promise<void> => ipcRenderer.invoke('browser:history:clear'),
+      onChange: (callback: () => void): (() => void) => {
+        const listener = (): void => callback()
+        ipcRenderer.on('browser:history-changed', listener)
+        return () => ipcRenderer.removeListener('browser:history-changed', listener)
+      }
+    },
     onState: (callback: (state: BrowserState) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, state: BrowserState): void => callback(state)
       ipcRenderer.on('browser:state', listener)

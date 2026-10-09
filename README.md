@@ -1,6 +1,6 @@
 # Sockfish
 
-Sockfish is a compact Electron browser with an isolated Chromium page and an optional local SOCKS5 proxy. The main window is kept deliberately browser-like: back, forward, reload, one combined address/search bar, and a small proxy control. The template dashboard and sample demo screens have been removed.
+Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical sidebar, local browsing history, and an optional local SOCKS5 proxy. The template dashboard and sample demo screens have been removed.
 
 ## Quick start
 
@@ -15,6 +15,14 @@ bun run build
 ## Address bar
 
 Enter a web address or a search phrase in the same bar. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Plain text is searched with DuckDuckGo. Only HTTP(S) pages can be opened.
+
+## Tabs and history
+
+Use the left sidebar to switch tabs, create a tab, or close one. **Ctrl/⌘+T** creates a tab, **Ctrl/⌘+W** closes the current tab, and **Ctrl/⌘+Tab** switches tabs. Choose **History** in the sidebar to search recent visits; history is stored locally in Sockfish's app data, limited to the latest 5,000 entries, and can be cleared from that view.
+
+## Browser engine and extensions
+
+Sockfish already uses Chromium with Blink through Electron, so adding Blink would not change the engine. Electron's extension support is intentionally partial and loads unpacked extensions only; see the [official compatibility list](https://www.electronjs.org/docs/latest/api/extensions). For an extension-specific app, first test the exact extensions against Electron's supported APIs. Moving to [CEF](https://chromiumembedded.github.io/cef/) still embeds Chromium/Blink and requires replacing much of this Electron shell; it does not by itself provide Chrome-browser extension compatibility. Broad Chrome-extension compatibility is a product-level browser project, not an engine toggle. GeckoView is Mozilla's maintained Gecko embedder for Android, rather than a drop-in desktop Electron replacement ([GeckoView overview](https://mozilla.github.io/geckoview/)).
 
 ## Use a local SSH SOCKS tunnel
 

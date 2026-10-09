@@ -16,6 +16,19 @@ export interface BrowserState {
   canGoForward: boolean
   error: string | null
 }
+export interface BrowserTabSummary {
+  id: string
+  url: string
+  title: string
+  loading: boolean
+  active: boolean
+}
+export interface BrowsingHistoryEntry {
+  id: string
+  url: string
+  title: string
+  visitedAt: number
+}
 export interface BrowserBounds {
   x: number
   y: number

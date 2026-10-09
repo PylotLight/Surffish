@@ -1,13 +1,18 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import {
+  activateBrowserTab,
   browserBack,
   browserForward,
   browserReload,
   browserStop,
+  closeBrowserTab,
   getBrowserState,
+  getBrowserTabs,
   navigateBrowser,
+  newBrowserTab,
   setBrowserBounds
 } from './browser'
+import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
 
@@ -22,6 +27,22 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return getBrowserState()
   })
+  ipcMain.handle('browser:tabs:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserTabs()
+  })
+  ipcMain.handle('browser:tabs:new', (event, input?: string) => {
+    assertMainRenderer(event)
+    return typeof input === 'string' ? newBrowserTab(input) : newBrowserTab()
+  })
+  ipcMain.handle('browser:tabs:activate', (event, id: string) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && activateBrowserTab(id)
+  })
+  ipcMain.handle('browser:tabs:close', (event, id: string) => {
+    assertMainRenderer(event)
+    if (typeof id === 'string') closeBrowserTab(id)
+  })
   ipcMain.handle('browser:navigate', (event, input: string) => {
     assertMainRenderer(event)
     return typeof input === 'string' ? navigateBrowser(input) : false
@@ -33,6 +54,15 @@ export function registerIpc(): void {
   ipcMain.handle('browser:set-bounds', (event, bounds: unknown) => {
     assertMainRenderer(event)
     setBrowserBounds(bounds)
+  })
+  ipcMain.handle('browser:history:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowsingHistory()
+  })
+  ipcMain.handle('browser:history:clear', (event) => {
+    assertMainRenderer(event)
+    clearBrowsingHistory()
+    getMainWindow()?.webContents.send('browser:history-changed')
   })
   ipcMain.handle('browser:proxy:get', (event) => {
     assertMainRenderer(event)

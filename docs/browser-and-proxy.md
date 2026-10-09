@@ -3,9 +3,11 @@
 ## Browser flow
 
 1. On startup, `src/main/proxy.ts` reads the saved loopback-only settings and configures `session.fromPartition('persist:fish-browser')` before the remote page is created.
-2. `src/main/browser.ts` creates the remote `WebContentsView` on that same persistent session. The React window reports the page rectangle; the main process positions the native view beneath the browser toolbar.
-3. The narrow preload bridge provides address navigation, back/forward/reload, view bounds, and SOCKS5 settings. The remote page does not receive the app preload bridge.
+2. `src/main/browser.ts` creates one remote `WebContentsView` per tab on that same persistent session. Tabs keep independent page state while sharing the browser's cookies and SOCKS configuration. The React window reports the active page rectangle; inactive views are assigned zero-size bounds.
+3. The narrow preload bridge provides tab switching, address navigation, back/forward/reload, view bounds, browsing history, and SOCKS5 settings. Remote pages do not receive the app preload bridge.
 4. `src/shared/navigation.ts` resolves omnibox input: HTTP(S) URLs and domain-like hosts navigate directly, loopback addresses use HTTP, and other text becomes a DuckDuckGo query. Non-HTTP(S) schemes are rejected.
+
+Each committed HTTP(S) page navigation is added to `browsing-history.json` in the application's user-data directory. The store keeps at most 5,000 visits; the sidebar can search or clear it. Closing tabs does not clear history.
 
 ## SSH dynamic forwarding
 
