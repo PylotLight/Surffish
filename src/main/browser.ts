@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow } from 'electron'
+import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
 import type { SearchEngineId } from '../shared/types'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { loadBrowserSession, saveBrowserSession } from './browser-persistence'
+import { showBrowserContextMenu } from './context-menu'
 
 export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
 interface BrowserTab {
@@ -99,6 +100,26 @@ function activateTabInternal(id: string): boolean {
   return true
 }
 
+function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
+  if (!browserWindow || browserWindow.isDestroyed()) return
+  const isBrowserPage = tabs.some((tab) => tab.view.webContents === contents)
+  showBrowserContextMenu(event, contents, params, {
+    window: browserWindow,
+    pageActions: isBrowserPage,
+    offsetX: isBrowserPage ? browserBounds.x : 0,
+    offsetY: isBrowserPage ? browserBounds.y : 0,
+    searchEngine: selectedSearchEngine,
+    openInNewTab: (url) => {
+      const id = createTab(url, selectedSearchEngine)
+      if (id) persistOpenTabs()
+    },
+    openInBackgroundTab: (url) => {
+      const id = createTab(url, selectedSearchEngine, false)
+      if (id) persistOpenTabs()
+    }
+  })
+}
+
 function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
@@ -118,6 +139,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
+  contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   if (process.platform === 'darwin') {
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
@@ -220,6 +242,7 @@ export function attachBrowserView(win: BrowserWindow): void {
   activeTabId = null
   browserWindow = win
   browserBounds = { x: 0, y: 0, width: 0, height: 0 }
+  win.webContents.on('context-menu', (event, params) => showTabContextMenu(win.webContents, event, params))
   if (process.platform === 'darwin') {
     win.on('swipe', (_event, direction) => {
       const contents = getTab()?.view.webContents
