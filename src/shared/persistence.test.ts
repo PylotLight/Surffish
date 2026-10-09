@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MAX_RESTORED_TABS,
+  DEFAULT_TAB_SLEEP_MINUTES,
   normalizeBrowserSession,
   parseBrowserPreferences,
   parseBrowserSession
@@ -32,4 +33,11 @@ test('rejects invalid session data and bounds restored tab count', () => {
 test('falls back to the default search engine for invalid preferences', () => {
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google' }).searchEngine, 'google')
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'unknown' }).searchEngine, 'brave')
+})
+
+test('uses a validated default tab-sleep interval for new and older preferences', () => {
+  assert.equal(parseBrowserPreferences(null).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
+  assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google' }).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
+  assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 15 }).tabSleepMinutes, 15)
+  assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 10 }).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
 })

@@ -1,36 +1,43 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents } from 'electron'
-import type { BrowserBounds, BrowserState, BrowserTabSummary } from '../shared/types'
+import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
-import type { SearchEngineId } from '../shared/types'
+import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
-import { loadBrowserSession, saveBrowserSession } from './browser-persistence'
+import { getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 
 export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
 interface BrowserTab {
   id: string
-  view: WebContentsView
+  view: WebContentsView | null
   error: string | null
   lastUrl: string
+  pendingUrl: string
+  inactiveSince: number | null
+  sleepTimer: ReturnType<typeof setTimeout> | null
 }
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
 let browserWindow: BrowserWindow | null = null
 let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
+let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 
 function getTab(id: string | null = activeTabId): BrowserTab | undefined {
   return tabs.find((tab) => tab.id === id)
 }
 
+function currentUrl(tab: BrowserTab): string {
+  return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || START_PAGE
+}
+
 function pageTitle(tab: BrowserTab): string {
-  const title = tab.view.webContents.getTitle().trim()
+  const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
-  const url = tab.view.webContents.getURL()
   try {
-    return url ? new URL(url).hostname : 'New tab'
+    return new URL(currentUrl(tab)).hostname || 'New tab'
   } catch {
     return 'New tab'
   }
@@ -38,9 +45,9 @@ function pageTitle(tab: BrowserTab): string {
 
 function getState(): BrowserState {
   const tab = getTab()
-  const contents = tab?.view.webContents
+  const contents = tab?.view?.webContents
   return {
-    url: contents?.getURL() || tab?.lastUrl || START_PAGE,
+    url: tab ? currentUrl(tab) : START_PAGE,
     title: tab ? pageTitle(tab) : 'New tab',
     loading: contents?.isLoading() ?? false,
     canGoBack: contents?.navigationHistory.canGoBack() ?? false,
@@ -52,10 +59,11 @@ function getState(): BrowserState {
 function getTabSummaries(): BrowserTabSummary[] {
   return tabs.map((tab) => ({
     id: tab.id,
-    url: tab.view.webContents.getURL() || tab.lastUrl || START_PAGE,
+    url: currentUrl(tab),
     title: pageTitle(tab),
-    loading: tab.view.webContents.isLoading(),
-    active: tab.id === activeTabId
+    loading: tab.view?.webContents.isLoading() ?? false,
+    active: tab.id === activeTabId,
+    sleeping: tab.view === null
   }))
 }
 
@@ -71,38 +79,102 @@ function publishState(): void {
 }
 
 function persistOpenTabs(): void {
-  const urls = tabs.map((tab) => tab.view.webContents.getURL() || tab.lastUrl)
+  const urls = tabs.map(currentUrl)
   saveBrowserSession(urls, tabs.findIndex((tab) => tab.id === activeTabId))
 }
 
 function applyTabBounds(): void {
   for (const tab of tabs) {
+    if (!tab.view) continue
     const visible = tab.id === activeTabId
     tab.view.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
   }
 }
 
-function detachTab(tab: BrowserTab): void {
-  const contents = tab.view.webContents
-  if (browserWindow && !browserWindow.isDestroyed()) {
-    browserWindow.contentView.removeChildView(tab.view)
+function cancelSleepTimer(tab: BrowserTab): void {
+  if (tab.sleepTimer) clearTimeout(tab.sleepTimer)
+  tab.sleepTimer = null
+}
+
+function hibernateTab(tab: BrowserTab): void {
+  if (tab.id === activeTabId || !tab.view) return
+  tab.lastUrl = currentUrl(tab)
+  tab.pendingUrl = tab.lastUrl
+  disposeTabView(tab)
+  persistOpenTabs()
+  publishState()
+}
+
+function scheduleTabSleep(tab: BrowserTab): void {
+  cancelSleepTimer(tab)
+  if (tabSleepMinutes === 0 || !tab.view || tab.id === activeTabId || tab.inactiveSince === null) return
+  const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
+  tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
+}
+
+function markTabInactive(tab: BrowserTab): void {
+  tab.inactiveSince = Date.now()
+  const contents = tab.view?.webContents
+  if (contents && !contents.isDestroyed()) {
+    contents.setAudioMuted(true)
+    // Stop page media immediately rather than merely hiding a still-playing player.
+    void contents.executeJavaScript(
+      'document.querySelectorAll("video, audio").forEach((media) => { try { media.pause() } catch {} })'
+    ).catch(() => {})
   }
-  if (!contents.isDestroyed()) contents.close()
+  scheduleTabSleep(tab)
+}
+
+function disposeTabView(tab: BrowserTab): void {
+  cancelSleepTimer(tab)
+  const view = tab.view
+  if (!view) return
+  // Clear the reference first so its destroyed event cannot remove the logical tab.
+  tab.view = null
+  if (browserWindow && !browserWindow.isDestroyed()) browserWindow.contentView.removeChildView(view)
+  if (!view.webContents.isDestroyed()) view.webContents.close()
+  applyTabBounds()
+}
+
+function ensureTabLoaded(tab: BrowserTab): void {
+  if (tab.view || !browserWindow || browserWindow.isDestroyed()) return
+  const target = tab.pendingUrl || tab.lastUrl || START_PAGE
+  tab.pendingUrl = target
+  const view = createTabView(tab)
+  if (!view) return
+  tab.pendingUrl = ''
+  tab.inactiveSince = null
+  applyTabBounds()
+  const contents = view.webContents
+  void contents.loadURL(target).catch((error: unknown) => {
+    if (tab.view?.webContents !== contents) return
+    tab.error = error instanceof Error ? error.message : String(error)
+    publishState()
+  })
 }
 
 function activateTabInternal(id: string): boolean {
   const tab = getTab(id)
-  if (!tab || tab.view.webContents.isDestroyed()) return false
+  if (!tab) return false
+  const previous = getTab()
+  if (previous && previous.id !== id) markTabInactive(previous)
+  cancelSleepTimer(tab)
+  tab.inactiveSince = null
   activeTabId = id
+  ensureTabLoaded(tab)
+  const contents = tab.view?.webContents
+  if (contents && !contents.isDestroyed()) {
+    contents.setAudioMuted(false)
+    contents.focus()
+  }
   applyTabBounds()
-  tab.view.webContents.focus()
   publishState()
   return true
 }
 
 function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
-  const isBrowserPage = tabs.some((tab) => tab.view.webContents === contents)
+  const isBrowserPage = tabs.some((tab) => tab.view?.webContents === contents)
   showBrowserContextMenu(event, contents, params, {
     window: browserWindow,
     pageActions: isBrowserPage,
@@ -120,9 +192,8 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
   })
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true): string | null {
+function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
   const view = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
@@ -133,12 +204,12 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
       partition: BROWSER_SESSION_PARTITION
     }
   })
-  const tab: BrowserTab = { id: randomUUID(), view, error: null, lastUrl: target }
-  tabs.push(tab)
+  tab.view = view
   browserWindow.contentView.addChildView(view)
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
+  const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   if (process.platform === 'darwin') {
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
@@ -178,16 +249,18 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     if (!/^https?:\/\//i.test(url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
+    if (!isCurrentContents()) return
     tab.error = null
     publishState()
   })
   contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
-    if (!isMainFrame || !/^https?:\/\//i.test(url)) return
+    if (!isCurrentContents() || !isMainFrame || !/^https?:\/\//i.test(url)) return
     tab.lastUrl = url
     persistOpenTabs()
   })
-  contents.on('did-stop-loading', publishState)
+  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState() })
   contents.on('did-navigate', (_event, url) => {
+    if (!isCurrentContents()) return
     tab.lastUrl = url
     recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
@@ -195,7 +268,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     browserWindow?.webContents.send('browser:history-changed')
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-    if (!isMainFrame) return
+    if (!isCurrentContents() || !isMainFrame) return
     tab.lastUrl = url
     recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
@@ -203,59 +276,96 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     browserWindow?.webContents.send('browser:history-changed')
   })
   contents.on('page-title-updated', (_event, title) => {
+    if (!isCurrentContents()) return
     updateLatestVisitTitle(contents.getURL(), title)
     publishState()
     browserWindow?.webContents.send('browser:history-changed')
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3) return
+    if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
     tab.error = `${errorDescription} (${errorCode})`
     publishState()
   })
   contents.on('destroyed', () => {
+    if (!isCurrentContents()) return
     const index = tabs.findIndex((candidate) => candidate.id === tab.id)
     if (index < 0) return
     tabs.splice(index, 1)
     if (activeTabId === tab.id) {
-      activeTabId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null
-      if (tabs.length === 0 && browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
-      else applyTabBounds()
+      activeTabId = null
+      const replacement = tabs[Math.min(index, tabs.length - 1)]
+      if (replacement) activateTabInternal(replacement.id)
+      else if (browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
     }
     publishState()
   })
+  return view
+}
 
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false): string | null {
+  if (!browserWindow || browserWindow.isDestroyed()) return null
+  const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
+  const tab: BrowserTab = {
+    id: randomUUID(),
+    view: null,
+    error: null,
+    lastUrl: target,
+    pendingUrl: target,
+    inactiveSince: null,
+    sleepTimer: null
+  }
+  const previous = getTab()
   const shouldActivate = activate || activeTabId === null
-  if (shouldActivate) activeTabId = tab.id
+  tabs.push(tab)
+  if (shouldActivate) {
+    if (previous && previous.id !== tab.id) markTabInactive(previous)
+    activeTabId = tab.id
+    tab.inactiveSince = null
+  } else {
+    tab.inactiveSince = Date.now()
+  }
+  if (shouldActivate && !deferLoad) ensureTabLoaded(tab)
   applyTabBounds()
-  if (shouldActivate) contents.focus()
+  if (!shouldActivate) scheduleTabSleep(tab)
+  else tab.view?.webContents.focus()
   publishState()
-  void contents.loadURL(target).catch((error: unknown) => {
-    tab.error = error instanceof Error ? error.message : String(error)
-    publishState()
-  })
   return tab.id
 }
 
 export function attachBrowserView(win: BrowserWindow): void {
-  for (const tab of [...tabs]) detachTab(tab)
+  for (const tab of [...tabs]) {
+    cancelSleepTimer(tab)
+    disposeTabView(tab)
+  }
   tabs.length = 0
   activeTabId = null
   browserWindow = win
   browserBounds = { x: 0, y: 0, width: 0, height: 0 }
+  tabSleepMinutes = getBrowserTabSleepMinutes()
   win.webContents.on('context-menu', (event, params) => showTabContextMenu(win.webContents, event, params))
   if (process.platform === 'darwin') {
     win.on('swipe', (_event, direction) => {
-      const contents = getTab()?.view.webContents
+      const contents = getTab()?.view?.webContents
       if (!contents) return
       if (direction === 'right' && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
       else if (direction === 'left' && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     })
   }
   const saved = loadBrowserSession()
-  for (const url of saved.urls) createTab(url)
+  for (const url of saved.urls) createTab(url, selectedSearchEngine, false, true)
   if (tabs.length === 0) createTab(START_PAGE)
   activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
+  const now = Date.now()
+  for (const tab of tabs) {
+    if (tab.id !== activeTabId) {
+      tab.inactiveSince ??= now
+      scheduleTabSleep(tab)
+    } else {
+      tab.inactiveSince = null
+    }
+  }
   applyTabBounds()
+  publishState()
   persistOpenTabs()
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
@@ -265,8 +375,10 @@ export function attachBrowserView(win: BrowserWindow): void {
     activeTabId = null
     browserWindow = null
     for (const tab of closingTabs) {
-      const contents = tab.view.webContents
-      if (!contents.isDestroyed()) contents.close()
+      cancelSleepTimer(tab)
+      const view = tab.view
+      tab.view = null
+      if (view && !view.webContents.isDestroyed()) view.webContents.close()
     }
   })
 }
@@ -289,6 +401,16 @@ export function setBrowserSearchEngine(engine: SearchEngineId): void {
   selectedSearchEngine = engine
 }
 
+export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | null {
+  if (!isTabSleepMinutes(value)) return null
+  tabSleepMinutes = value
+  for (const tab of tabs) {
+    if (tab.id === activeTabId) continue
+    scheduleTabSleep(tab)
+  }
+  return tabSleepMinutes
+}
+
 export function activateBrowserTab(id: string): boolean {
   const activated = activateTabInternal(id)
   if (activated) persistOpenTabs()
@@ -308,16 +430,23 @@ export function closeBrowserTab(id: string): void {
   if (index < 0) return
   const tab = tabs[index]
   if (!tab) return
+  const wasActive = activeTabId === id
   tabs.splice(index, 1)
-  if (activeTabId === id) activeTabId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null
-  detachTab(tab)
+  cancelSleepTimer(tab)
+  if (wasActive) activeTabId = null
+  disposeTabView(tab)
   if (tabs.length === 0) {
     activeTabId = null
     createTab(START_PAGE)
     persistOpenTabs()
     return
   }
-  applyTabBounds()
+  if (wasActive) {
+    const replacement = tabs[Math.min(index, tabs.length - 1)]
+    if (replacement) activateTabInternal(replacement.id)
+  } else {
+    applyTabBounds()
+  }
   persistOpenTabs()
   publishState()
 }
@@ -327,9 +456,12 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   const tab = getTab()
   if (!url || !tab) return false
   tab.error = null
+  ensureTabLoaded(tab)
+  const contents = tab.view?.webContents
+  if (!contents) return false
   publishState()
   try {
-    await tab.view.webContents.loadURL(url)
+    await contents.loadURL(url)
     return true
   } catch (error) {
     tab.error = error instanceof Error ? error.message : String(error)
@@ -353,19 +485,19 @@ export function setBrowserBounds(input: unknown): void {
 }
 
 export function browserBack(): void {
-  const contents = getTab()?.view.webContents
+  const contents = getTab()?.view?.webContents
   if (contents?.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
 }
 
 export function browserForward(): void {
-  const contents = getTab()?.view.webContents
+  const contents = getTab()?.view?.webContents
   if (contents?.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
 }
 
 export function browserReload(): void {
-  getTab()?.view.webContents.reload()
+  getTab()?.view?.webContents.reload()
 }
 
 export function browserStop(): void {
-  getTab()?.view.webContents.stop()
+  getTab()?.view?.webContents.stop()
 }

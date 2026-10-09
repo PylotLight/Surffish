@@ -6,7 +6,8 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
-  SearchEngineId
+  SearchEngineId,
+  TabSleepMinutes
 } from '../shared/types'
 
 const api = {
@@ -17,6 +18,8 @@ const api = {
     navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
     setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
     getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),
+    getTabSleepMinutes: (): Promise<TabSleepMinutes> => ipcRenderer.invoke('browser:tab-sleep:get'),
+    setTabSleepMinutes: (minutes: TabSleepMinutes): Promise<TabSleepMinutes | null> => ipcRenderer.invoke('browser:tab-sleep:set', minutes),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),

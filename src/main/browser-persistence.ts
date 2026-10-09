@@ -3,18 +3,19 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import { DEFAULT_SEARCH_ENGINE } from '../shared/navigation'
 import {
+  DEFAULT_TAB_SLEEP_MINUTES,
   normalizeBrowserSession,
   parseBrowserPreferences,
   parseBrowserSession,
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
-import type { SearchEngineId } from '../shared/types'
+import type { SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
 let preferencesLoaded = false
-let preferences: BrowserPreferences = { searchEngine: DEFAULT_SEARCH_ENGINE }
+let preferences: BrowserPreferences = { searchEngine: DEFAULT_SEARCH_ENGINE, tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES }
 
 function readJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
@@ -58,7 +59,29 @@ export function getBrowserSearchEngine(): SearchEngineId {
 }
 
 export function saveBrowserSearchEngine(searchEngine: SearchEngineId): void {
-  preferences = { searchEngine }
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, searchEngine }
+  savePreferences()
+}
+
+export function getBrowserTabSleepMinutes(): TabSleepMinutes {
+  loadPreferencesIfNeeded()
+  return preferences.tabSleepMinutes
+}
+
+export function saveBrowserTabSleepMinutes(tabSleepMinutes: TabSleepMinutes): void {
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, tabSleepMinutes }
+  savePreferences()
+}
+
+function loadPreferencesIfNeeded(): void {
+  if (preferencesLoaded) return
+  preferences = parseBrowserPreferences(readJson(PREFERENCES_FILE))
   preferencesLoaded = true
-  writeJson(PREFERENCES_FILE, { version: 1, searchEngine })
+}
+
+function savePreferences(): void {
+  preferencesLoaded = true
+  writeJson(PREFERENCES_FILE, { version: 1, ...preferences })
 }

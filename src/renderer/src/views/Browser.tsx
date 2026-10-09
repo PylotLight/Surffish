@@ -4,7 +4,8 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
-  SearchEngineId
+  SearchEngineId,
+  TabSleepMinutes
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES } from '../../../shared/navigation'
 import './Browser.css'
@@ -50,6 +51,7 @@ export default function Browser(): React.JSX.Element {
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
+  const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -83,6 +85,7 @@ export default function Browser(): React.JSX.Element {
     })
     void window.api.browser.tabs.get().then(setTabs)
     void refreshHistory()
+    void window.api.browser.getTabSleepMinutes().then(setTabSleepMinutes)
     void window.api.browser.proxy.get().then((settings) => {
       setProxy(settings)
       setAppliedProxy(settings)
@@ -242,6 +245,7 @@ export default function Browser(): React.JSX.Element {
     const query = historyQuery.trim().toLowerCase()
     return !query || entry.title.toLowerCase().includes(query) || entry.url.toLowerCase().includes(query)
   })
+  const activeSleepingTab = tabs.find((tab) => tab.active && tab.sleeping)
 
   return (
     <section className={`browser-layout${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`} aria-label="Sockfish browser">
@@ -323,16 +327,16 @@ export default function Browser(): React.JSX.Element {
           <div className="tab-list" role="tablist" aria-label="Open tabs">
             {tabs.map((tab) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}`}
                 key={tab.id}
                 role="tab"
                 aria-selected={tab.active}
                 tabIndex={0}
-                title={tab.title}
+                title={tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title}
                 onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
                 onKeyDown={(event) => selectTabOnKeyboard(event, tab.id)}
               >
-                <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}`} aria-hidden="true">{tab.loading ? '' : tab.title.slice(0, 1).toUpperCase()}</span>
+                <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}${tab.sleeping ? ' is-sleeping' : ''}`} aria-hidden="true">{tab.loading ? '' : tab.sleeping ? 'Z' : tab.title.slice(0, 1).toUpperCase()}</span>
                 <span className="tab-title">{tab.title}</span>
                 <button
                   className="tab-close"
@@ -428,6 +432,29 @@ export default function Browser(): React.JSX.Element {
                   </label>
                   <p className="settings-help">Used for searches typed into the address bar.</p>
                 </section>
+                <section className="settings-section" aria-label="Background tab sleep settings">
+                  <label className="settings-field">
+                    <span>Hibernate inactive tabs after</span>
+                    <select
+                      className="settings-select"
+                      value={tabSleepMinutes}
+                      onChange={(event) => {
+                        const minutes = Number(event.target.value) as TabSleepMinutes
+                        void window.api.browser.setTabSleepMinutes(minutes).then((saved) => {
+                          if (saved !== null) setTabSleepMinutes(saved)
+                        })
+                      }}
+                      aria-label="Hibernate inactive tabs after"
+                    >
+                      <option value={0}>Never</option>
+                      <option value={5}>5 minutes</option>
+                      <option value={15}>15 minutes</option>
+                      <option value={30}>30 minutes</option>
+                      <option value={60}>1 hour</option>
+                    </select>
+                  </label>
+                  <p className="settings-help">Background tabs do not load until selected; restored tabs stay paused until resumed. Media is paused when you leave a tab. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
+                </section>
                 <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
                   <div className="settings-section-heading">
                     <div>
@@ -459,6 +486,14 @@ export default function Browser(): React.JSX.Element {
                   <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
                 </section>
               </div>
+            </div>
+          )}
+          {sidebarMode !== 'settings' && activeSleepingTab && (
+            <div className="sleeping-tab-prompt">
+              <span className="sleeping-tab-mark" aria-hidden="true">Z</span>
+              <strong>Tab paused to prevent autoplay</strong>
+              <p>Restored tabs stay unloaded until you choose to resume them.</p>
+              <button className="settings-action primary" type="button" onClick={() => void window.api.browser.tabs.activate(activeSleepingTab.id)}>Load page</button>
             </div>
           )}
         </div>

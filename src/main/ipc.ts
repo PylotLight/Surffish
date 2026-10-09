@@ -10,6 +10,7 @@ import {
   getBrowserTabs,
   navigateBrowser,
   newBrowserTab,
+  setBrowserTabSleepMinutes,
   setBrowserSearchEngine,
   setBrowserBounds
 } from './browser'
@@ -17,7 +18,12 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
-import { getBrowserSearchEngine, saveBrowserSearchEngine } from './browser-persistence'
+import {
+  getBrowserSearchEngine,
+  getBrowserTabSleepMinutes,
+  saveBrowserSearchEngine,
+  saveBrowserTabSleepMinutes
+} from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (event.sender !== getMainWindow()?.webContents) {
@@ -60,6 +66,16 @@ export function registerIpc(): void {
   ipcMain.handle('browser:search-engine:get', (event) => {
     assertMainRenderer(event)
     return getBrowserSearchEngine()
+  })
+  ipcMain.handle('browser:tab-sleep:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserTabSleepMinutes()
+  })
+  ipcMain.handle('browser:tab-sleep:set', (event, value: unknown) => {
+    assertMainRenderer(event)
+    const saved = setBrowserTabSleepMinutes(value)
+    if (saved !== null) saveBrowserTabSleepMinutes(saved)
+    return saved
   })
   ipcMain.handle('app:quit', (event) => {
     assertMainRenderer(event)

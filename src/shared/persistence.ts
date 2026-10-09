@@ -1,7 +1,9 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId } from './navigation.ts'
-import type { SearchEngineId } from './types'
+import type { SearchEngineId, TabSleepMinutes } from './types'
 
 export const MAX_RESTORED_TABS = 50
+export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
+export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
 
 export interface SavedBrowserSession {
   urls: string[]
@@ -10,6 +12,11 @@ export interface SavedBrowserSession {
 
 export interface BrowserPreferences {
   searchEngine: SearchEngineId
+  tabSleepMinutes: TabSleepMinutes
+}
+
+export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
+  return typeof value === 'number' && TAB_SLEEP_OPTIONS.includes(value as TabSleepMinutes)
 }
 
 export function isHttpUrl(value: unknown): value is string {
@@ -45,9 +52,12 @@ export function parseBrowserSession(value: unknown): SavedBrowserSession {
 }
 
 export function parseBrowserPreferences(value: unknown): BrowserPreferences {
-  if (typeof value !== 'object' || value === null) return { searchEngine: DEFAULT_SEARCH_ENGINE }
-  const record = value as { version?: unknown; searchEngine?: unknown }
-  return record.version === 1 && isSearchEngineId(record.searchEngine)
-    ? { searchEngine: record.searchEngine }
-    : { searchEngine: DEFAULT_SEARCH_ENGINE }
+  const defaults: BrowserPreferences = { searchEngine: DEFAULT_SEARCH_ENGINE, tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES }
+  if (typeof value !== 'object' || value === null) return defaults
+  const record = value as { version?: unknown; searchEngine?: unknown; tabSleepMinutes?: unknown }
+  if (record.version !== 1) return defaults
+  return {
+    searchEngine: isSearchEngineId(record.searchEngine) ? record.searchEngine : defaults.searchEngine,
+    tabSleepMinutes: isTabSleepMinutes(record.tabSleepMinutes) ? record.tabSleepMinutes : defaults.tabSleepMinutes
+  }
 }

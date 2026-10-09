@@ -1,5 +1,6 @@
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
+export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
 
 export interface BrowserProxySettings {
   enabled: boolean
@@ -24,6 +25,7 @@ export interface BrowserTabSummary {
   title: string
   loading: boolean
   active: boolean
+  sleeping: boolean
 }
 export interface BrowsingHistoryEntry {
   id: string
