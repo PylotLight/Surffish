@@ -4,14 +4,19 @@ import { APP_ID } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
 import { createWindow, showWindow } from './window'
+import { setBrowserSearchEngine } from './browser'
+import { getBrowserSearchEngine } from './browser-persistence'
+import { initializeSessionCookiePersistence } from './session-cookies'
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(async () => {
+  if (!app.isPackaged) console.info('Sockfish browser profile:', app.getPath('userData'))
   try {
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()
+    await initializeSessionCookiePersistence()
   } catch (error) {
-    console.error('Could not initialize the browser proxy session:', error)
+    console.error('Could not initialize the browser profile:', error)
     app.quit()
     return
   }
@@ -36,6 +41,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   registerIpc()
+  setBrowserSearchEngine(getBrowserSearchEngine())
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

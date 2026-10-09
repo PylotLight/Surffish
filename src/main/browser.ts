@@ -5,12 +5,14 @@ import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } fro
 import type { SearchEngineId } from '../shared/types'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
+import { loadBrowserSession, saveBrowserSession } from './browser-persistence'
 
 export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
 interface BrowserTab {
   id: string
   view: WebContentsView
   error: string | null
+  lastUrl: string
 }
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
@@ -37,7 +39,7 @@ function getState(): BrowserState {
   const tab = getTab()
   const contents = tab?.view.webContents
   return {
-    url: contents?.getURL() || START_PAGE,
+    url: contents?.getURL() || tab?.lastUrl || START_PAGE,
     title: tab ? pageTitle(tab) : 'New tab',
     loading: contents?.isLoading() ?? false,
     canGoBack: contents?.navigationHistory.canGoBack() ?? false,
@@ -49,7 +51,7 @@ function getState(): BrowserState {
 function getTabSummaries(): BrowserTabSummary[] {
   return tabs.map((tab) => ({
     id: tab.id,
-    url: tab.view.webContents.getURL() || START_PAGE,
+    url: tab.view.webContents.getURL() || tab.lastUrl || START_PAGE,
     title: pageTitle(tab),
     loading: tab.view.webContents.isLoading(),
     active: tab.id === activeTabId
@@ -65,6 +67,11 @@ function publishState(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
   browserWindow.webContents.send('browser:state', getState())
   publishTabs()
+}
+
+function persistOpenTabs(): void {
+  const urls = tabs.map((tab) => tab.view.webContents.getURL() || tab.lastUrl)
+  saveBrowserSession(urls, tabs.findIndex((tab) => tab.id === activeTabId))
 }
 
 function applyTabBounds(): void {
@@ -105,7 +112,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
       partition: BROWSER_SESSION_PARTITION
     }
   })
-  const tab: BrowserTab = { id: randomUUID(), view, error: null }
+  const tab: BrowserTab = { id: randomUUID(), view, error: null, lastUrl: target }
   tabs.push(tab)
   browserWindow.contentView.addChildView(view)
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
@@ -124,7 +131,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
       browserWindow?.webContents.send('browser:focus-address')
     } else if (key === 't' && !inputEvent.shift) {
       event.preventDefault()
-      createTab()
+      newBrowserTab()
     } else if (key === 'w' && !inputEvent.shift) {
       event.preventDefault()
       closeBrowserTab(tab.id)
@@ -143,15 +150,24 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     tab.error = null
     publishState()
   })
+  contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
+    if (!isMainFrame || !/^https?:\/\//i.test(url)) return
+    tab.lastUrl = url
+    persistOpenTabs()
+  })
   contents.on('did-stop-loading', publishState)
   contents.on('did-navigate', (_event, url) => {
+    tab.lastUrl = url
     recordBrowsingVisit(url, pageTitle(tab))
+    persistOpenTabs()
     publishState()
     browserWindow?.webContents.send('browser:history-changed')
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (!isMainFrame) return
+    tab.lastUrl = url
     recordBrowsingVisit(url, pageTitle(tab))
+    persistOpenTabs()
     publishState()
     browserWindow?.webContents.send('browser:history-changed')
   })
@@ -171,7 +187,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     tabs.splice(index, 1)
     if (activeTabId === tab.id) {
       activeTabId = tabs[Math.min(index, tabs.length - 1)]?.id ?? null
-      if (tabs.length === 0 && browserWindow && !browserWindow.isDestroyed()) createTab()
+      if (tabs.length === 0 && browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
       else applyTabBounds()
     }
     publishState()
@@ -202,7 +218,13 @@ export function attachBrowserView(win: BrowserWindow): void {
       else if (direction === 'left' && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     })
   }
-  createTab(START_PAGE)
+  const saved = loadBrowserSession()
+  for (const url of saved.urls) createTab(url)
+  if (tabs.length === 0) createTab(START_PAGE)
+  activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
+  applyTabBounds()
+  persistOpenTabs()
+  win.on('close', persistOpenTabs)
   win.on('closed', () => {
     if (browserWindow !== win) return
     const closingTabs = [...tabs]
@@ -225,7 +247,9 @@ export function getBrowserTabs(): BrowserTabSummary[] {
 }
 
 export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {
-  return createTab(input, engine ?? selectedSearchEngine)
+  const id = createTab(input, engine ?? selectedSearchEngine)
+  if (id) persistOpenTabs()
+  return id
 }
 
 export function setBrowserSearchEngine(engine: SearchEngineId): void {
@@ -233,7 +257,9 @@ export function setBrowserSearchEngine(engine: SearchEngineId): void {
 }
 
 export function activateBrowserTab(id: string): boolean {
-  return activateTabInternal(id)
+  const activated = activateTabInternal(id)
+  if (activated) persistOpenTabs()
+  return activated
 }
 
 export function cycleBrowserTab(offset: number): void {
@@ -241,7 +267,7 @@ export function cycleBrowserTab(offset: number): void {
   const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId)
   const nextIndex = (activeIndex + offset + tabs.length) % tabs.length
   const next = tabs[nextIndex]
-  if (next) activateTabInternal(next.id)
+  if (next) activateBrowserTab(next.id)
 }
 
 export function closeBrowserTab(id: string): void {
@@ -255,9 +281,11 @@ export function closeBrowserTab(id: string): void {
   if (tabs.length === 0) {
     activeTabId = null
     createTab(START_PAGE)
+    persistOpenTabs()
     return
   }
   applyTabBounds()
+  persistOpenTabs()
   publishState()
 }
 

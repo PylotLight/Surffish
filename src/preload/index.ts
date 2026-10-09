@@ -12,9 +12,11 @@ import type {
 const api = {
   platform: process.platform,
   browser: {
+    quit: (): Promise<void> => ipcRenderer.invoke('app:quit'),
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
     navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
     setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
+    getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),

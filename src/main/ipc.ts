@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import {
   activateBrowserTab,
   browserBack,
@@ -17,6 +17,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
+import { getBrowserSearchEngine, saveBrowserSearchEngine } from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (event.sender !== getMainWindow()?.webContents) {
@@ -51,7 +52,18 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:search-engine:set', (event, engine: unknown) => {
     assertMainRenderer(event)
-    if (isSearchEngineId(engine)) setBrowserSearchEngine(engine)
+    if (isSearchEngineId(engine)) {
+      setBrowserSearchEngine(engine)
+      saveBrowserSearchEngine(engine)
+    }
+  })
+  ipcMain.handle('browser:search-engine:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserSearchEngine()
+  })
+  ipcMain.handle('app:quit', (event) => {
+    assertMainRenderer(event)
+    app.quit()
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })

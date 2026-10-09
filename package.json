@@ -13,7 +13,7 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts",
+    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts",
     "postinstall": "install-electron"
   },
   "devDependencies": {

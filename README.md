@@ -14,11 +14,11 @@ bun run build
 
 ## Address bar
 
-Enter a web address or a search phrase in the same bar. Use the selector beside the address field to search with Brave Search (the default), DuckDuckGo, Google, or Bing; your choice is saved locally. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Only HTTP(S) pages can be opened.
+Enter a web address or a search phrase in the slim address bar. Choose Brave Search (the default), DuckDuckGo, Google, or Bing from **Settings** in the sidebar; the choice is saved in Sockfish's app data. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Only HTTP(S) pages can be opened.
 
 ## Tabs and history
 
-Use the left sidebar to switch tabs, create a tab, or close one. **Alt-click** the new-tab button for options to open the selected search provider’s start page or duplicate the active tab. **Ctrl/⌘+T** creates a tab, **Ctrl/⌘+W** closes the current tab, and **Ctrl/⌘+Tab** switches tabs. The web page is hidden at launch; choose **Show page** to open it as an inset popover, and use the same control to hide it again. On macOS, trackpad pinch zoom is enabled and horizontal page swipes go back/forward (subject to the macOS trackpad swipe preference). Choose **History** in the sidebar to search recent visits; history is stored locally in Sockfish's app data, limited to the latest 5,000 entries, and can be cleared from that view.
+Use the left sidebar to switch tabs, create a tab, or close one. **Alt-click** the new-tab button for options to open the selected search provider’s start page or duplicate the active tab. **Ctrl/⌘+T** creates a tab, **Ctrl/⌘+W** closes the current tab, and **Ctrl/⌘+Tab** switches tabs. Sockfish restores open tabs and the active tab after a normal quit/restart. The web page is hidden at launch; choose the compact page icon beside the address bar to show or hide it. On macOS, trackpad pinch zoom is enabled and horizontal page swipes go back/forward (subject to the macOS trackpad swipe preference). Choose **History** in the sidebar to search recent visits; history is stored locally in Sockfish's app data, limited to the latest 5,000 entries, and can be cleared from that view. **Settings** contains the search-engine and SOCKS5 choices; **Quit Sockfish** is at the bottom of the sidebar.
 
 ## Browser engine and extensions
 
@@ -32,7 +32,7 @@ Run the tunnel on the same computer as Sockfish:
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host
 ```
 
-Replace `user@your-ssh-host` with your SSH account/host or an SSH config alias, and keep the command running. Click **SOCKS5** in the browser toolbar to test the local port or change the host/port, then choose **Save & apply**. The loopback-only proxy setting is saved for later launches. If the tunnel is down while proxying is enabled, pages fail to load rather than silently falling back to a direct connection. Turn **Use proxy** off to browse directly.
+Replace `user@your-ssh-host` with your SSH account/host or an SSH config alias, and keep the command running. Open **Settings** in the sidebar to test the local port or change the host/port, then choose **Save**. The loopback-only proxy setting is saved for later launches. If the tunnel is down while proxying is enabled, pages fail to load rather than silently falling back to a direct connection. Turn **Use proxy** off to browse directly.
 
 A successful port test confirms only that something is listening; it does not authenticate or validate the SOCKS handshake or SSH destination.
 
@@ -43,6 +43,7 @@ Sockfish uses Ghostery's Electron adapter and its maintained ads-only filter lis
 ## Scope and security
 
 - Remote pages run in Electron `WebContentsView`, not in the React renderer. Node integration is off; context isolation, sandboxing, and web security are on. Popups and web permission requests are denied.
+- Cookies and site storage use the persistent `persist:fish-browser` Chromium profile under Electron's app-data directory. Open tab URLs and the selected search engine are also saved there. Session-only cookies are separately encrypted with Electron safeStorage and the operating system's credential store when available; on Linux without a secure keyring, these cookies are not backed up. Sites can still expire or revoke login sessions.
 - SOCKS5 is configured on the dedicated persistent browser session before its first remote page loads. It affects this browser session only, not other apps or system traffic.
 - This is a small browser prototype, not an audited privacy browser. It does not promise that every traffic type uses the proxy or provide DNS/WebRTC leak guarantees.
 - There is no extension manager, cosmetic ad blocker, download manager, or password manager in the current build. See [`docs/extensions-roadmap.md`](docs/extensions-roadmap.md) for feasible next steps.
