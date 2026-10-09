@@ -3,26 +3,22 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 import { attachBrowserView } from './browser'
-import { WINDOW } from '../shared/config'
-import type { GlassState, VibrancyName } from '../shared/types'
+import { APP_NAME, WINDOW } from '../shared/config'
 
 const isMac = process.platform === 'darwin'
 let mainWindow: BrowserWindow | null = null
-const DEFAULT_VIBRANCY: VibrancyName = 'fullscreen-ui'
-let currentVibrancy: VibrancyName | null = isMac ? DEFAULT_VIBRANCY : null
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
-
 function resolvePreload(): string {
   const base = join(__dirname, '../preload/index')
   if (existsSync(`${base}.js`)) return `${base}.js`
   return `${base}.mjs`
 }
-
 export function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
+    title: APP_NAME,
     width: WINDOW.width,
     height: WINDOW.height,
     minWidth: WINDOW.minWidth,
@@ -32,7 +28,7 @@ export function createWindow(): BrowserWindow {
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
     transparent: isMac,
-    vibrancy: currentVibrancy ?? undefined,
+    vibrancy: isMac ? 'fullscreen-ui' : undefined,
     visualEffectState: isMac ? 'active' : undefined,
     backgroundColor: isMac ? '#00000000' : '#101418',
     webPreferences: {
@@ -48,7 +44,6 @@ export function createWindow(): BrowserWindow {
     if (details.url.startsWith('https://')) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
-
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -59,7 +54,6 @@ export function createWindow(): BrowserWindow {
   })
   return win
 }
-
 export function showWindow(): void {
   if (isMac) app.show()
   const win = mainWindow
@@ -70,18 +64,4 @@ export function showWindow(): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
-}
-
-export function hideWindow(): void {
-  mainWindow?.hide()
-}
-
-export function getGlassState(): GlassState {
-  return { platform: process.platform, vibrancy: currentVibrancy, transparent: isMac }
-}
-
-export function setGlassVibrancy(name: VibrancyName | null): GlassState {
-  currentVibrancy = isMac ? name : null
-  mainWindow?.setVibrancy(currentVibrancy)
-  return getGlassState()
 }

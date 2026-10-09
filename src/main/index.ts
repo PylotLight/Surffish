@@ -3,11 +3,9 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { APP_ID } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
-import { createAppTray, destroyTray } from './tray'
-import { createWindow, hideWindow, showWindow } from './window'
+import { createWindow, showWindow } from './window'
 
 if (!app.requestSingleInstanceLock()) app.quit()
-
 app.whenReady().then(async () => {
   try {
     // Set the browser session's proxy before any remote page is created.
@@ -17,16 +15,10 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
-
   electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   registerIpc()
   createWindow()
-  createAppTray({
-    onShow: showWindow,
-    onHide: hideWindow,
-    onQuit: () => app.quit()
-  })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -34,9 +26,7 @@ app.whenReady().then(async () => {
   console.error('App startup failed:', error)
   app.quit()
 })
-
 app.on('second-instance', () => showWindow())
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
-app.on('will-quit', () => destroyTray())

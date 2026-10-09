@@ -3,52 +3,14 @@ import type {
   BrowserBounds,
   BrowserProxySettings,
   BrowserProxyTestResult,
-  BrowserState,
-  GlassState,
-  SysInfo,
-  VibrancyName
+  BrowserState
 } from '../shared/types'
 
-export interface Versions {
-  node: () => string
-  chrome: () => string
-  electron: () => string
-}
-
 const api = {
-  ping: (): Promise<string> => ipcRenderer.invoke('ping'),
-  versions: {
-    node: (): string => process.versions.node,
-    chrome: (): string => process.versions.chrome,
-    electron: (): string => process.versions.electron
-  } satisfies Versions,
-  sys: {
-    info: (): Promise<SysInfo> => ipcRenderer.invoke('sys:info')
-  },
-  notify: (title: string, body: string): Promise<boolean> =>
-    ipcRenderer.invoke('notify:send', { title, body }),
-  dock: {
-    setBadge: (count: number): Promise<boolean> => ipcRenderer.invoke('dock:set-badge', count),
-    hide: (): Promise<boolean> => ipcRenderer.invoke('dock:hide'),
-    show: (): Promise<boolean> => ipcRenderer.invoke('dock:show')
-  },
-  glass: {
-    get: (): Promise<GlassState> => ipcRenderer.invoke('glass:get'),
-    set: (name: VibrancyName | null): Promise<GlassState> => ipcRenderer.invoke('glass:set', name),
-    options: (): Promise<VibrancyName[]> => ipcRenderer.invoke('glass:options')
-  },
-  win: {
-    hide: (): Promise<void> => ipcRenderer.invoke('win:hide'),
-    show: (): Promise<void> => ipcRenderer.invoke('win:show'),
-    minimize: (): Promise<void> => ipcRenderer.invoke('win:minimize'),
-    flash: (): Promise<void> => ipcRenderer.invoke('win:flash')
-  },
-  shell: {
-    open: (url: string): Promise<boolean> => ipcRenderer.invoke('shell:open', url)
-  },
+  platform: process.platform,
   browser: {
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
-    navigate: (url: string): Promise<boolean> => ipcRenderer.invoke('browser:navigate', url),
+    navigate: (input: string): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
@@ -59,17 +21,16 @@ const api = {
       ipcRenderer.on('browser:state', listener)
       return () => ipcRenderer.removeListener('browser:state', listener)
     },
+    onFocusAddress: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('browser:focus-address', listener)
+      return () => ipcRenderer.removeListener('browser:focus-address', listener)
+    },
     proxy: {
       get: (): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:get'),
-      set: (settings: BrowserProxySettings): Promise<BrowserProxySettings> =>
-        ipcRenderer.invoke('browser:proxy:set', settings),
-      test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> =>
-        ipcRenderer.invoke('browser:proxy:test', settings)
+      set: (settings: BrowserProxySettings): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:set', settings),
+      test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> => ipcRenderer.invoke('browser:proxy:test', settings)
     }
-  },
-  app: {
-    hide: (): Promise<boolean> => ipcRenderer.invoke('app:hide'),
-    quit: (): Promise<void> => ipcRenderer.invoke('app:quit')
   }
 }
 
@@ -78,5 +39,4 @@ if (process.contextIsolated) {
 } else {
   window.api = api
 }
-
 export type PreloadAPI = typeof api

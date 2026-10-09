@@ -1,11 +1,9 @@
 // Single source of truth for app identity and window defaults.
 export const APP_NAME = 'Sockfish'
-export const APP_TAGLINE = 'a small browser · local SOCKS5'
 export const APP_ID = 'com.pylotlight.sockfish'
 export const WINDOW = {
   width: 1240,
   height: 820,
-  minWidth: 980,
-  minHeight: 640
+  minWidth: 800,
+  minHeight: 540
 } as const
-export const TRAY_TOOLTIP = `${APP_NAME} — click for menu`

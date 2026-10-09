@@ -1,7 +1,7 @@
 {
   "name": "sockfish",
   "version": "0.1.0",
-  "description": "A compact Electron browser prototype with a local SOCKS5 proxy toggle",
+  "description": "A compact Electron browser with a local SOCKS5 proxy toggle",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -13,7 +13,7 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "tsc --noEmit",
-    "assets": "bun scripts/make-tray-icon.ts",
+    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts",
     "postinstall": "install-electron"
   },
   "devDependencies": {

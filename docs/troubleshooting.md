@@ -1,41 +1,26 @@
 # Troubleshooting
 
-## Garbage characters after exiting dev (`^[[?62;22c`, `^[[9;1R`, `^[[11;rgb:...`)
+## The proxy is on but pages do not load
 
-On startup Electron probes terminal capabilities (device attributes, cursor position,
-background color). The terminal answers by injecting reply bytes into stdin; they sit in
-the pty queue, and after `^C` your shell reads them as keystrokes. This affects many
-Electron apps, not just this one.
+Make sure the SSH dynamic-forwarding command is still running on the same computer, and that its `-D` port matches Sockfish's **SOCKS5** settings. **Test port** checks only whether a TCP service is listening; it does not test the SOCKS handshake or SSH destination. Turn **Use proxy** off to test a direct connection.
 
-`bun run dev` runs through `scripts/dev.ts`, which owns shutdown: on child exit it drains
-leftover stdin bytes (in raw mode, so they can't trigger anything) and restores the
-cursor before returning your prompt. If you kill the process from *another* terminal the
-wrapper never runs — use `reset`. `bun run dev:bare` skips the wrapper for raw
-`electron-vite dev` behavior.
+## Address bar does not open the expected page
+
+Press Enter after typing. Domain-like hosts are opened as URLs; ordinary text is sent to DuckDuckGo. Only HTTP(S) schemes are accepted. `localhost` and loopback IP addresses use HTTP automatically.
+
+## Garbage characters after exiting development (`^[[?62;22c`, `^[[9;1R`, etc.)
+
+Electron probes terminal capabilities at startup. `bun run dev` runs through `scripts/dev.ts`, which drains leftover terminal reply bytes on shutdown. If the app is killed from another terminal, run `reset` in the affected terminal. `bun run dev:bare` skips the cleanup wrapper.
 
 ## `bun run dev` fails with `Error: spawn ENOEXEC`
 
-The `electron` npm package ships **without** its binary; an install script downloads it,
-and Bun does not run that script. Recovery (bun only):
+The `electron` npm package ships without its binary, and Bun does not run install scripts automatically. Recover with:
 
 ```bash
 rm -rf node_modules/electron/dist
-bun install   # root postinstall → checksum-verified install-electron
+bun install
 ```
 
-Verify before running dev: `cat node_modules/electron/dist/version` matches `package.json`,
-and on macOS `file node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`
-reports a Mach-O executable.
+## Preload changes do not take effect
 
-## Window is opaque, no blur on macOS
-
-Checklist: `transparent: true` + `backgroundColor: '#00000000'` in `window.ts`, a vibrancy
-material set, and — most commonly — no opaque full-window CSS background. See
-`docs/vibrancy-and-tray.md`.
-
-## Preload changes not taking effect
-
-`window.api` is baked at build time. `bun run dev` rebuilds main/preload on change and
-restarts Electron automatically; if you edited the bridge and the renderer disagrees,
-restart dev. Type errors across the bridge mean `src/main/ipc.ts` and
-`src/preload/index.ts` disagree — they must mirror each other.
+Restart development after changing `src/preload/index.ts`. The preload bridge is part of the Electron build, and its methods must match the IPC handlers in `src/main/ipc.ts`.

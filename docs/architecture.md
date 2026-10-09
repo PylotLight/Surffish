@@ -1,41 +1,25 @@
 # Architecture
 
-Three processes, one bridge, one shared contract layer.
+Sockfish has a trusted Electron main process, a small React browser-chrome renderer, and one isolated remote `WebContentsView`.
 
+```text
+React browser chrome ── typed preload bridge ──▶ Electron main ──▶ remote WebContentsView
+                                                   │
+                                                   └── persistent SOCKS5 session
 ```
-main (Node, Electron)  ──ipcMain.handle──┐
-                                         ├─▶ preload (contextBridge → window.api)
-renderer (React, browser) ──invoke───────┘
-```
 
-- `src/main/index.ts` — app lifecycle only: single-instance lock, `whenReady` wiring,
-  quit handling. No business logic.
-- `src/main/window.ts` — `BrowserWindow` creation, `showWindow`/`hideWindow`, vibrancy state.
-- `src/main/tray.ts` — system tray + context menu. Left-click pops the menu; it never
-  auto-shows the window.
-- `src/main/ipc.ts` — every renderer→main call. Sections mirror the preload bridge.
-- `src/preload/index.ts` — typed `window.api`. Nothing here but forwarding.
-- `src/shared/config.ts` — runtime values safe to import anywhere (app name, id, geometry).
-- `src/shared/types.ts` — type-only contracts (`SysInfo`, `GlassState`, `VibrancyName`).
-- `src/renderer/` — React shell (`App.tsx`: sidebar + top bar) and example views in `views/`.
+- `src/main/index.ts` — application startup; configures the browser proxy before creating the window.
+- `src/main/window.ts` — native window lifecycle and platform chrome.
+- `src/main/browser.ts` — isolated remote view, navigation history, bounds, and state events.
+- `src/main/proxy.ts` — validates loopback-only SOCKS5 settings, persists them, and configures the browser session.
+- `src/main/ipc.ts` — browser-only renderer-to-main IPC, guarded to the app window.
+- `src/preload/index.ts` — narrow, typed browser API exposed through `contextBridge`.
+- `src/shared/navigation.ts` — HTTP(S)-only address parsing and DuckDuckGo query routing.
+- `src/shared/types.ts` — browser and proxy contracts shared across processes.
+- `src/renderer/` — compact navigation toolbar, optional proxy settings panel, and the native web-page viewport.
 
-## Rules
+## Security boundaries
 
-1. **Renderer never imports main-process modules.** Type-only imports from `src/shared/`
-   are allowed and erased at build time.
-2. **New IPC tool = 3 edits:** `ipcMain.handle` in `src/main/ipc.ts`, expose in
-   `src/preload/index.ts`, call via `window.api`. Shared payload types go in
-   `src/shared/types.ts`. The bridge is typed end-to-end, so the renderer sees the new
-   call immediately.
-3. **New section = 2 edits:** add a view in `src/renderer/src/views/`, register it in the
-   `TABS` array in `App.tsx`. Nav, layout, and glass styling come free.
-4. **Tray items** go in the menu template in `src/main/tray.ts`; window actions reuse the
-   helpers in `src/main/window.ts`.
-5. **Agent tools** are just IPC tools with a visible plan around them — see the Agent view.
-   Add yours via rule 2, then list them as plan steps.
-
-## Layout model
-
-The app shell is locked to the viewport (`.shell { height: 100vh; overflow: hidden }`).
-Sidebar and top bar are fixed; only `.view` scrolls. Keep it that way — any opaque
-full-window background also kills the native vibrancy (see vibrancy doc).
+1. Remote content is not loaded into the React renderer. Its `WebContentsView` uses `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`.
+2. The remote view receives no preload bridge; the local renderer can call only the explicit browser/proxy methods.
+3. Non-HTTP(S) navigations, popups, and web permission requests are blocked. SOCKS settings accept loopback hosts only.

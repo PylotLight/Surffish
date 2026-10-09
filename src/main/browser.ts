@@ -1,24 +1,11 @@
 import { WebContentsView, type BrowserWindow } from 'electron'
 import type { BrowserBounds, BrowserState } from '../shared/types'
+import { resolveNavigationTarget } from '../shared/navigation'
 
-export const START_PAGE = 'https://example.com/'
+export const START_PAGE = 'https://duckduckgo.com/'
 let browserView: WebContentsView | null = null
 let browserWindow: BrowserWindow | null = null
 let lastError: string | null = null
-
-function webUrl(input: string): string | null {
-  const value = input.trim()
-  if (!value) return null
-  const withScheme = /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value) ? value : `https://${value}`
-  try {
-    const url = new URL(withScheme)
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
-    if (!url.hostname) return null
-    return url.toString()
-  } catch {
-    return null
-  }
-}
 
 function getState(): BrowserState {
   const contents = browserView?.webContents
@@ -31,12 +18,10 @@ function getState(): BrowserState {
     error: lastError
   }
 }
-
 function publishState(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
   browserWindow.webContents.send('browser:state', getState())
 }
-
 export function attachBrowserView(win: BrowserWindow): void {
   if (browserView && !browserView.webContents.isDestroyed()) {
     browserWindow?.contentView.removeChildView(browserView)
@@ -58,11 +43,16 @@ export function attachBrowserView(win: BrowserWindow): void {
   browserView.setBounds({ x: 0, y: 0, width: 0, height: 0 })
   const contents = browserView.webContents
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.key.toLowerCase() !== 'l') return
+    event.preventDefault()
+    browserWindow?.webContents.send('browser:focus-address')
+  })
   contents.on('will-navigate', (event, url) => {
-    if (!webUrl(url)) event.preventDefault()
+    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
   })
   contents.on('will-redirect', (event, url) => {
-    if (!webUrl(url)) event.preventDefault()
+    if (!/^https?:\/\//i.test(url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
     lastError = null
@@ -91,13 +81,11 @@ export function attachBrowserView(win: BrowserWindow): void {
     publishState()
   })
 }
-
 export function getBrowserState(): BrowserState {
   return getState()
 }
-
 export async function navigateBrowser(input: string): Promise<boolean> {
-  const url = webUrl(input)
+  const url = resolveNavigationTarget(input)
   if (!url || !browserView) return false
   lastError = null
   publishState()
@@ -110,7 +98,6 @@ export async function navigateBrowser(input: string): Promise<boolean> {
     return false
   }
 }
-
 export function setBrowserBounds(input: unknown): void {
   if (!browserView || typeof input !== 'object' || input === null) return
   const bounds = input as Partial<BrowserBounds>
@@ -122,19 +109,15 @@ export function setBrowserBounds(input: unknown): void {
   const height = Math.max(0, Math.round(bounds.height!))
   browserView.setBounds({ x, y, width, height })
 }
-
 export function browserBack(): void {
   if (browserView?.webContents.navigationHistory.canGoBack()) browserView.webContents.navigationHistory.goBack()
 }
-
 export function browserForward(): void {
   if (browserView?.webContents.navigationHistory.canGoForward()) browserView.webContents.navigationHistory.goForward()
 }
-
 export function browserReload(): void {
   browserView?.webContents.reload()
 }
-
 export function browserStop(): void {
   browserView?.webContents.stop()
 }

@@ -1,25 +1,25 @@
-# Browser view and local SOCKS5 proxy
+# Browser and local SOCKS5 proxy
 
-## Request flow
+## Browser flow
 
-1. On app startup, `src/main/proxy.ts` reads the saved loopback-only settings and calls `session.fromPartition('persist:fish-browser').setProxy(...)` before the browser view is constructed. The internal partition name is intentionally retained across the Sockfish rename so existing browser-session data remains available.
-2. `src/main/browser.ts` creates the remote `WebContentsView` on that same persistent partition. The main-process IPC layer exposes a narrow set of address/history/reload/bounds/proxy operations to the trusted local React renderer.
-3. The renderer reports the page-area rectangle; the main process positions the native view below the toolbar. The embedded page does not receive the app preload bridge.
-4. A settings change updates the browser session, closes pooled connections, persists the choice, and reloads the current page. When enabled, the proxy rules use `socks5://<loopback-host>:<port>` and `<local>` bypasses local hostnames/IPs.
+1. On startup, `src/main/proxy.ts` reads the saved loopback-only settings and configures `session.fromPartition('persist:fish-browser')` before the remote page is created.
+2. `src/main/browser.ts` creates the remote `WebContentsView` on that same persistent session. The React window reports the page rectangle; the main process positions the native view beneath the browser toolbar.
+3. The narrow preload bridge provides address navigation, back/forward/reload, view bounds, and SOCKS5 settings. The remote page does not receive the app preload bridge.
+4. `src/shared/navigation.ts` resolves omnibox input: HTTP(S) URLs and domain-like hosts navigate directly, loopback addresses use HTTP, and other text becomes a DuckDuckGo query. Non-HTTP(S) schemes are rejected.
 
 ## SSH dynamic forwarding
 
-On the Mac where this app is running, start:
+On the computer running Sockfish, start:
 
 ```bash
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host
 ```
 
-This creates a local SOCKS endpoint on `127.0.0.1:1080` for the lifetime of the SSH process. Choose another local port if needed, and set the same host/port in the Browser tab. This sample does not start or manage the SSH process, store SSH credentials, or authenticate the SOCKS endpoint.
+This creates a local SOCKS endpoint on `127.0.0.1:1080` for the lifetime of the SSH process. Choose another local port if needed and set the same host/port in the toolbar's **SOCKS5** panel. Sockfish does not start or manage the SSH process, store SSH credentials, or authenticate the SOCKS endpoint.
 
 ## Boundaries
 
-- Proxy changes apply only to the `fish-browser` Electron session. Other app traffic is not redirected.
+- Proxy changes apply only to the `fish-browser` Electron session.
 - The local port check is a TCP connect test, not a SOCKS protocol handshake.
-- HTTP(S) pages can be opened; other URL schemes are rejected. Popups and web permission requests are blocked.
-- This implementation is a prototype, not a full-featured or audited browser. It does not promise that every browser-related traffic type uses the proxy or make DNS/WebRTC leak guarantees.
+- Web pages may navigate only over HTTP(S); popups and web permission requests are blocked.
+- This implementation is a prototype, not a system-wide VPN or audited browser. Proxy configuration alone does not guarantee that every browser-related traffic type is proxied or prevent DNS/WebRTC leaks.

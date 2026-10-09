@@ -1,46 +1,31 @@
 # Getting started
 
-Template repo: create your app with **Use this template** on GitHub (or clone and
-re-point the remote). Everything below uses Bun only.
-
-## Run it
+## Run the app
 
 ```bash
-bun install   # also guarantees the Electron binary via postinstall
-bun run dev   # dev server + app (wrapped: cleans terminal state on exit)
+bun install
+bun run dev
 ```
 
-## Verify it
+The combined address bar accepts web addresses and search queries. Click **SOCKS5** in the toolbar to view the optional local-proxy settings.
+
+## Verify a change
 
 ```bash
 bun run typecheck
-bun run build     # → out/{main,preload,renderer}/
-bun run start     # launch the built app
+bun run test
+bun run build
+bun run start
 ```
 
-## Make it yours
+`bun run test` exercises omnibox routing for web URLs, local addresses, search queries, and rejected schemes. The build writes the main process, preload, and renderer into `out/`.
 
-When starting a real app from this template, touch these and nothing else:
+## Useful scripts
 
-| # | File | Change |
-|---|------|--------|
-| 1 | `package.json` | `name`, `version`, `description` |
-| 2 | `src/shared/config.ts` | `APP_NAME`, `APP_TAGLINE`, `APP_ID`, window size |
-| 3 | `src/renderer/index.html` | `<title>` |
-| 4 | `assets/` | Replace tray icons, or regenerate: `bun run assets` (`trayTemplate.png` for macOS, `tray.png` elsewhere) |
-| 5 | `LICENSE` | Copyright holder |
-| 6 | `.github/workflows/ci.yml` | Keep as-is (install → typecheck → build) |
-
-## Scripts
-
-| Script | What it does |
-|--------|--------------|
-| `dev` | `bun scripts/dev.ts` — dev server + app with terminal cleanup on exit |
-| `dev:bare` | Raw `electron-vite dev` (no wrapper) |
-| `build` | Production build into `out/` |
-| `start` | Launch the built app (`electron ./out/main/index.js`) |
-| `preview` | Serve the built renderer only |
-| `clean` | Remove `out/` |
-| `typecheck` | `tsc --noEmit` over `src/`, `scripts/`, and config |
-| `assets` | Regenerate tray PNGs, zero dependencies |
-| `postinstall` | Runs automatically: downloads the Electron binary Bun skips |
+- `dev` — development server and Electron app with terminal cleanup on exit.
+- `dev:bare` — raw `electron-vite dev`.
+- `typecheck` — TypeScript check across application and scripts.
+- `test` — focused address-bar routing tests.
+- `build` — production build into `out/`.
+- `start` — launch the built app.
+- `clean` — remove `out/`.
