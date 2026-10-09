@@ -99,7 +99,7 @@ function activateTabInternal(id: string): boolean {
   return true
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
   const view = new WebContentsView({
@@ -122,7 +122,16 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   }
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.setWindowOpenHandler((details) => {
+    if (details.disposition === 'background-tab') {
+      const target = resolveNavigationTarget(details.url, selectedSearchEngine)
+      if (target && /^https?:\/\//i.test(target)) {
+        const backgroundTabId = createTab(target, selectedSearchEngine, false)
+        if (backgroundTabId) persistOpenTabs()
+      }
+    }
+    return { action: 'deny' }
+  })
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
     const key = inputEvent.key.toLowerCase()
@@ -193,9 +202,10 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     publishState()
   })
 
-  activeTabId = tab.id
+  const shouldActivate = activate || activeTabId === null
+  if (shouldActivate) activeTabId = tab.id
   applyTabBounds()
-  contents.focus()
+  if (shouldActivate) contents.focus()
   publishState()
   void contents.loadURL(target).catch((error: unknown) => {
     tab.error = error instanceof Error ? error.message : String(error)
