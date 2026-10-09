@@ -98,6 +98,11 @@ function cancelSleepTimer(tab: BrowserTab): void {
 
 function hibernateTab(tab: BrowserTab): void {
   if (tab.id === activeTabId || !tab.view) return
+  const contents = tab.view.webContents
+  if (!contents.isDestroyed() && contents.isCurrentlyAudible()) {
+    tab.sleepTimer = setTimeout(() => hibernateTab(tab), 60_000)
+    return
+  }
   tab.lastUrl = currentUrl(tab)
   tab.pendingUrl = tab.lastUrl
   disposeTabView(tab)
@@ -114,14 +119,6 @@ function scheduleTabSleep(tab: BrowserTab): void {
 
 function markTabInactive(tab: BrowserTab): void {
   tab.inactiveSince = Date.now()
-  const contents = tab.view?.webContents
-  if (contents && !contents.isDestroyed()) {
-    contents.setAudioMuted(true)
-    // Stop page media immediately rather than merely hiding a still-playing player.
-    void contents.executeJavaScript(
-      'document.querySelectorAll("video, audio").forEach((media) => { try { media.pause() } catch {} })'
-    ).catch(() => {})
-  }
   scheduleTabSleep(tab)
 }
 
@@ -164,7 +161,6 @@ function activateTabInternal(id: string): boolean {
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
-    contents.setAudioMuted(false)
     contents.focus()
   }
   applyTabBounds()

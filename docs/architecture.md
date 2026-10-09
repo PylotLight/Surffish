@@ -1,6 +1,6 @@
 # Architecture
 
-Sockfish has a trusted Electron main process, a small React browser-chrome renderer, and an isolated remote `WebContentsView` for each loaded tab. New background tabs remain URL-only until selected; all restored tabs remain unloaded until explicitly resumed. Inactive media is paused and optional hibernation releases the view for reuse later.
+Sockfish has a trusted Electron main process, a small React browser-chrome renderer, and an isolated remote `WebContentsView` for each loaded tab. New background tabs remain URL-only until selected; all restored tabs remain unloaded until explicitly resumed. Loaded tabs continue playing media when inactive, and optional hibernation releases inactive, non-audible views for reuse later.
 
 ```text
 React sidebar and browser chrome ── typed preload bridge ──▶ Electron main ──▶ tab WebContentsViews
@@ -12,7 +12,7 @@ React sidebar and browser chrome ── typed preload bridge ──▶ Electron 
 
 - `src/main/index.ts` — application startup; restores protected session cookies and configures the browser proxy before creating tabs.
 - `src/main/window.ts` — native window lifecycle and platform chrome.
-- `src/main/browser.ts` — lazy per-tab views, inactive-media pausing, configurable tab hibernation, active-tab switching, bounds, navigation, and restoration of the last open tabs.
+- `src/main/browser.ts` — lazy per-tab views, configurable tab hibernation, active-tab switching, bounds, navigation, and restoration of the last open tabs.
 - `src/main/browser-persistence.ts` — app-data persistence for open tab URLs, active tab, and browser preferences including the tab-sleep interval.
 - `src/main/session-cookies.ts` — encrypted snapshot/restore of session-only cookies using Electron safeStorage when OS-backed encryption is available.
 - `src/main/history.ts` — validated, bounded browsing history persisted in the app's user-data directory.

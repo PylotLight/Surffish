@@ -453,7 +453,7 @@ export default function Browser(): React.JSX.Element {
                       <option value={60}>1 hour</option>
                     </select>
                   </label>
-                  <p className="settings-help">Background tabs do not load until selected; restored tabs stay paused until resumed. Media is paused when you leave a tab. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
+                  <p className="settings-help">New background tabs stay unloaded until selected; restored tabs stay unloaded until selected or resumed. Loaded tabs keep playing media when you switch away, and audible tabs stay awake while playing. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
                 </section>
                 <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
                   <div className="settings-section-heading">
@@ -491,8 +491,8 @@ export default function Browser(): React.JSX.Element {
           {sidebarMode !== 'settings' && activeSleepingTab && (
             <div className="sleeping-tab-prompt">
               <span className="sleeping-tab-mark" aria-hidden="true">Z</span>
-              <strong>Tab paused to prevent autoplay</strong>
-              <p>Restored tabs stay unloaded until you choose to resume them.</p>
+              <strong>Tab unloaded to prevent autoplay</strong>
+              <p>This page stays unloaded until you choose to load or resume it.</p>
               <button className="settings-action primary" type="button" onClick={() => void window.api.browser.tabs.activate(activeSleepingTab.id)}>Load page</button>
             </div>
           )}
