@@ -1,6 +1,6 @@
 # Sockfish
 
-Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical sidebar, local browsing history, and an optional local SOCKS5 proxy. The template dashboard and sample demo screens have been removed.
+Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical sidebar, local browsing history, network-only ad blocking, and an optional local SOCKS5 proxy. The template dashboard and sample demo screens have been removed.
 
 ## Quick start
 
@@ -36,11 +36,15 @@ Replace `user@your-ssh-host` with your SSH account/host or an SSH config alias, 
 
 A successful port test confirms only that something is listening; it does not authenticate or validate the SOCKS handshake or SSH destination.
 
+## Network-only ad blocking
+
+Sockfish uses Ghostery's Electron adapter and its maintained ads-only filter lists to block matching subresource requests in the browser session. It does not inject cosmetic CSS or scripts, hide ad placeholders, or apply tracker/annoyance lists; some empty ad spaces may remain visible. Filter lists are refreshed at startup when the cached engine is older than 24 hours. Updates use the same browser session (and configured SOCKS proxy); if an update is unavailable, Sockfish uses the last cached engine, or starts without filtering on a first launch. This does not block requests made by Sockfish's app UI outside the browser session.
+
 ## Scope and security
 
 - Remote pages run in Electron `WebContentsView`, not in the React renderer. Node integration is off; context isolation, sandboxing, and web security are on. Popups and web permission requests are denied.
 - SOCKS5 is configured on the dedicated persistent browser session before its first remote page loads. It affects this browser session only, not other apps or system traffic.
 - This is a small browser prototype, not an audited privacy browser. It does not promise that every traffic type uses the proxy or provide DNS/WebRTC leak guarantees.
-- There is no extension manager, ad blocker, download manager, or password manager in the current build. See [`docs/extensions-roadmap.md`](docs/extensions-roadmap.md) for feasible next steps.
+- There is no extension manager, cosmetic ad blocker, download manager, or password manager in the current build. See [`docs/extensions-roadmap.md`](docs/extensions-roadmap.md) for feasible next steps.
 
 See [`docs/browser-and-proxy.md`](docs/browser-and-proxy.md) for implementation details.

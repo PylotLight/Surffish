@@ -3,6 +3,7 @@ import { WebContentsView, type BrowserWindow } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary } from '../shared/types'
 import { resolveNavigationTarget } from '../shared/navigation'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
+import { BROWSER_SESSION_PARTITION } from './browser-session'
 
 export const START_PAGE = 'https://duckduckgo.com/'
 interface BrowserTab {
@@ -99,7 +100,7 @@ function createTab(input: string = START_PAGE): string | null {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      partition: 'persist:fish-browser'
+      partition: BROWSER_SESSION_PARTITION
     }
   })
   const tab: BrowserTab = { id: randomUUID(), view, error: null }

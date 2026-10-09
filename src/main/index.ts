@@ -15,6 +15,24 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
+  const originalSecurityWarnings = process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
+  let initializeNetworkAdblock: (() => Promise<void>) | undefined
+  try {
+    // The adapter sets this environment variable as an import side effect.
+    // Restore the app's previous setting before any windows are created.
+    const adblock = await import('./adblock')
+    initializeNetworkAdblock = adblock.initializeNetworkAdblock
+  } catch (error) {
+    console.warn('Could not load the network ad-filter adapter; continuing without it:', error)
+  } finally {
+    if (originalSecurityWarnings === undefined) delete process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
+    else process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = originalSecurityWarnings
+  }
+  try {
+    await initializeNetworkAdblock?.()
+  } catch (error) {
+    console.warn('Could not initialize network ad filtering; continuing without it:', error)
+  }
   electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   registerIpc()

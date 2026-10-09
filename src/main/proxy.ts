@@ -1,8 +1,9 @@
-import { app, session } from 'electron'
+import { app } from 'electron'
 import { createConnection } from 'node:net'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { BrowserProxySettings, BrowserProxyTestResult } from '../shared/types'
+import { getBrowserSession } from './browser-session'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = {
   enabled: true,
@@ -12,7 +13,6 @@ export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = {
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let currentSettings: BrowserProxySettings = { ...DEFAULT_PROXY_SETTINGS }
-const browserSession = (): Electron.Session => session.fromPartition('persist:fish-browser')
 
 function settingsPath(): string {
   return join(app.getPath('userData'), 'browser-proxy.json')
@@ -45,22 +45,22 @@ function persistSettings(settings: BrowserProxySettings): void {
 
 async function configureSession(settings: BrowserProxySettings): Promise<void> {
   if (settings.enabled) {
-    await browserSession().setProxy({
+    await getBrowserSession().setProxy({
       mode: 'fixed_servers',
       proxyRules: `socks5://${settings.host.includes(':') ? `[${settings.host}]` : settings.host}:${settings.port}`,
       proxyBypassRules: '<local>'
     })
   } else {
-    await browserSession().setProxy({ mode: 'direct' })
+    await getBrowserSession().setProxy({ mode: 'direct' })
   }
-  await browserSession().closeAllConnections()
+  await getBrowserSession().closeAllConnections()
 }
 
 /** Called after app.whenReady and before any browser content is created. */
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
   await configureSession(currentSettings)
-  browserSession().setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  getBrowserSession().setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   return { ...currentSettings }
 }
 
