@@ -14,11 +14,11 @@ bun run build
 
 ## Address bar
 
-Enter a web address or a search phrase in the same bar. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Plain text is searched with DuckDuckGo. Only HTTP(S) pages can be opened.
+Enter a web address or a search phrase in the same bar. Use the selector beside the address field to search with Brave Search (the default), DuckDuckGo, Google, or Bing; your choice is saved locally. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Only HTTP(S) pages can be opened.
 
 ## Tabs and history
 
-Use the left sidebar to switch tabs, create a tab, or close one. **Ctrl/⌘+T** creates a tab, **Ctrl/⌘+W** closes the current tab, and **Ctrl/⌘+Tab** switches tabs. Choose **History** in the sidebar to search recent visits; history is stored locally in Sockfish's app data, limited to the latest 5,000 entries, and can be cleared from that view.
+Use the left sidebar to switch tabs, create a tab, or close one. **Alt-click** the new-tab button for options to open the selected search provider’s start page or duplicate the active tab. **Ctrl/⌘+T** creates a tab, **Ctrl/⌘+W** closes the current tab, and **Ctrl/⌘+Tab** switches tabs. The web page is hidden at launch; choose **Show page** to open it as an inset popover, and use the same control to hide it again. On macOS, trackpad pinch zoom is enabled and horizontal page swipes go back/forward (subject to the macOS trackpad swipe preference). Choose **History** in the sidebar to search recent visits; history is stored locally in Sockfish's app data, limited to the latest 5,000 entries, and can be cleared from that view.
 
 ## Browser engine and extensions
 

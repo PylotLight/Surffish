@@ -5,14 +5,16 @@ import type {
   BrowserProxyTestResult,
   BrowserState,
   BrowserTabSummary,
-  BrowsingHistoryEntry
+  BrowsingHistoryEntry,
+  SearchEngineId
 } from '../shared/types'
 
 const api = {
   platform: process.platform,
   browser: {
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
-    navigate: (input: string): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input),
+    navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
+    setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
@@ -20,7 +22,7 @@ const api = {
     setBounds: (bounds: BrowserBounds): Promise<void> => ipcRenderer.invoke('browser:set-bounds', bounds),
     tabs: {
       get: (): Promise<BrowserTabSummary[]> => ipcRenderer.invoke('browser:tabs:get'),
-      create: (input?: string): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new', input),
+      create: (input?: string, engine?: SearchEngineId): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new', input, engine),
       activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
       close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
       onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {

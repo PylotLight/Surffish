@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary } from '../shared/types'
-import { resolveNavigationTarget } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
+import type { SearchEngineId } from '../shared/types'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
 
-export const START_PAGE = 'https://duckduckgo.com/'
+export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
 interface BrowserTab {
   id: string
   view: WebContentsView
@@ -15,6 +16,7 @@ const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
 let browserWindow: BrowserWindow | null = null
 let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
+let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 
 function getTab(id: string | null = activeTabId): BrowserTab | undefined {
   return tabs.find((tab) => tab.id === id)
@@ -90,9 +92,9 @@ function activateTabInternal(id: string): boolean {
   return true
 }
 
-function createTab(input: string = START_PAGE): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = resolveNavigationTarget(input) ?? START_PAGE
+  const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
   const view = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
@@ -109,6 +111,10 @@ function createTab(input: string = START_PAGE): string | null {
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
+  if (process.platform === 'darwin') {
+    // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
+    void contents.setVisualZoomLevelLimits(0.5, 3).catch(() => {})
+  }
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
@@ -188,6 +194,14 @@ export function attachBrowserView(win: BrowserWindow): void {
   activeTabId = null
   browserWindow = win
   browserBounds = { x: 0, y: 0, width: 0, height: 0 }
+  if (process.platform === 'darwin') {
+    win.on('swipe', (_event, direction) => {
+      const contents = getTab()?.view.webContents
+      if (!contents) return
+      if (direction === 'right' && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
+      else if (direction === 'left' && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
+    })
+  }
   createTab(START_PAGE)
   win.on('closed', () => {
     if (browserWindow !== win) return
@@ -210,8 +224,12 @@ export function getBrowserTabs(): BrowserTabSummary[] {
   return getTabSummaries()
 }
 
-export function newBrowserTab(input?: string): string | null {
-  return createTab(input ?? START_PAGE)
+export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {
+  return createTab(input, engine ?? selectedSearchEngine)
+}
+
+export function setBrowserSearchEngine(engine: SearchEngineId): void {
+  selectedSearchEngine = engine
 }
 
 export function activateBrowserTab(id: string): boolean {
@@ -243,8 +261,8 @@ export function closeBrowserTab(id: string): void {
   publishState()
 }
 
-export async function navigateBrowser(input: string): Promise<boolean> {
-  const url = resolveNavigationTarget(input)
+export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<boolean> {
+  const url = resolveNavigationTarget(input, engine)
   const tab = getTab()
   if (!url || !tab) return false
   tab.error = null

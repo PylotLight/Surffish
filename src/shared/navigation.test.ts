@@ -17,9 +17,15 @@ test('uses HTTP for loopback development addresses', () => {
   assert.equal(resolveNavigationTarget('127.0.0.1:8080'), 'http://127.0.0.1:8080/')
 })
 
-test('sends ordinary text to DuckDuckGo', () => {
-  assert.equal(resolveNavigationTarget('cats'), 'https://duckduckgo.com/?q=cats')
-  assert.equal(resolveNavigationTarget('best coffee near me'), 'https://duckduckgo.com/?q=best+coffee+near+me')
+test('sends ordinary text to Brave Search by default', () => {
+  assert.equal(resolveNavigationTarget('cats'), 'https://search.brave.com/search?q=cats')
+  assert.equal(resolveNavigationTarget('best coffee near me'), 'https://search.brave.com/search?q=best+coffee+near+me')
+})
+
+test('sends searches to the selected provider', () => {
+  assert.equal(resolveNavigationTarget('cats', 'duckduckgo'), 'https://duckduckgo.com/?q=cats')
+  assert.equal(resolveNavigationTarget('cats', 'google'), 'https://www.google.com/search?q=cats')
+  assert.equal(resolveNavigationTarget('cats', 'bing'), 'https://www.bing.com/search?q=cats')
 })
 
 test('rejects unsafe schemes and empty input', () => {

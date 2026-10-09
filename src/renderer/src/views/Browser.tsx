@@ -3,14 +3,16 @@ import type {
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
-  BrowsingHistoryEntry
+  BrowsingHistoryEntry,
+  SearchEngineId
 } from '../../../shared/types'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isSearchEngineId, SEARCH_ENGINES } from '../../../shared/navigation'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const EMPTY_BROWSER: BrowserState = {
-  url: 'https://duckduckgo.com/',
-  title: 'DuckDuckGo',
+  url: getSearchHomepage(DEFAULT_SEARCH_ENGINE),
+  title: 'Brave Search',
   loading: true,
   canGoBack: false,
   canGoForward: false,
@@ -39,12 +41,19 @@ function formatVisitedAt(timestamp: number): string {
 export default function Browser(): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const addressRef = useRef<HTMLInputElement>(null)
+  const newTabControlRef = useRef<HTMLDivElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
+  const [searchEngine, setSearchEngine] = useState<SearchEngineId>(() => {
+    const saved = localStorage.getItem('sockfish.searchEngine')
+    return isSearchEngineId(saved) ? saved : DEFAULT_SEARCH_ENGINE
+  })
+  const [browserVisible, setBrowserVisible] = useState(false)
+  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [proxyOpen, setProxyOpen] = useState(false)
@@ -68,6 +77,9 @@ export default function Browser(): React.JSX.Element {
     void window.api.browser.state().then((current) => {
       setBrowser(current)
       setAddress(current.url)
+      if (searchEngine !== DEFAULT_SEARCH_ENGINE && current.url === getSearchHomepage(DEFAULT_SEARCH_ENGINE)) {
+        void window.api.browser.navigate(getSearchHomepage(searchEngine), searchEngine)
+      }
     })
     void window.api.browser.tabs.get().then(setTabs)
     void refreshHistory()
@@ -84,11 +96,36 @@ export default function Browser(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    localStorage.setItem('sockfish.searchEngine', searchEngine)
+    void window.api.browser.setSearchEngine(searchEngine)
+  }, [searchEngine])
+
+  useEffect(() => {
+    if (!newTabMenuOpen) return
+    const closeOnOutsideClick = (event: PointerEvent): void => {
+      if (!newTabControlRef.current?.contains(event.target as Node)) setNewTabMenuOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setNewTabMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', closeOnOutsideClick)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsideClick)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [newTabMenuOpen])
+
+  useEffect(() => {
     const element = viewportRef.current
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      void window.api.browser.setBounds({ x: rect.left, y: rect.top, width: rect.width, height: rect.height })
+      const inset = 22
+      const canShow = browserVisible && rect.width > inset * 2 && rect.height > inset * 2
+      void window.api.browser.setBounds(canShow
+        ? { x: rect.left + inset, y: rect.top + inset, width: rect.width - inset * 2, height: rect.height - inset * 2 }
+        : { x: 0, y: 0, width: 0, height: 0 })
     }
     const observer = new ResizeObserver(updateBounds)
     observer.observe(element)
@@ -99,7 +136,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [])
+  }, [browserVisible])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(browser.url)
@@ -111,7 +148,7 @@ export default function Browser(): React.JSX.Element {
       const key = event.key.toLowerCase()
       if (key === 't' && !event.shiftKey) {
         event.preventDefault()
-        void window.api.browser.tabs.create()
+        void window.api.browser.tabs.create(undefined, searchEngine)
         setSidebarMode('tabs')
       } else if (key === 'w' && !event.shiftKey) {
         const activeTab = tabs.find((tab) => tab.active)
@@ -129,13 +166,13 @@ export default function Browser(): React.JSX.Element {
     }
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [tabs])
+  }, [tabs, searchEngine])
 
   async function navigate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     const value = address.trim()
     if (!value) return
-    const ok = await window.api.browser.navigate(value)
+    const ok = await window.api.browser.navigate(value, searchEngine)
     if (!ok) {
       setNavigationError('That address could not be opened. Use an HTTP(S) address or search terms.')
     } else {
@@ -214,9 +251,35 @@ export default function Browser(): React.JSX.Element {
         <div className="sidebar-heading">
           <strong>{sidebarMode === 'tabs' ? 'Tabs' : 'History'}</strong>
           {sidebarMode === 'tabs' ? (
-            <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={() => { void window.api.browser.tabs.create() }}>
-              <span aria-hidden="true">＋</span>
-            </button>
+            <div className="new-tab-control" ref={newTabControlRef}>
+              <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
+                if (event.altKey) {
+                  setNewTabMenuOpen((open) => !open)
+                  return
+                }
+                setNewTabMenuOpen(false)
+                void window.api.browser.tabs.create(undefined, searchEngine)
+              }}>
+                <span aria-hidden="true">＋</span>
+              </button>
+              {newTabMenuOpen && (
+                <div className="new-tab-menu" role="menu" aria-label="New tab options">
+                  <button type="button" role="menuitem" onClick={() => {
+                    void window.api.browser.tabs.create(undefined, searchEngine)
+                    setNewTabMenuOpen(false)
+                  }}>
+                    <strong>New tab</strong><span>{SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page</span>
+                  </button>
+                  <button type="button" role="menuitem" disabled={!tabs.some((tab) => tab.active)} onClick={() => {
+                    const activeTab = tabs.find((tab) => tab.active)
+                    if (activeTab) void window.api.browser.tabs.create(activeTab.url, searchEngine)
+                    setNewTabMenuOpen(false)
+                  }}>
+                    <strong>Duplicate active tab</strong><span>Open the same address in a new tab</span>
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button className="sidebar-icon-button" type="button" aria-label="Clear browsing history" title="Clear history" disabled={history.length === 0} onClick={() => void clearHistory()}>
               <span aria-hidden="true">⌫</span>
@@ -308,6 +371,15 @@ export default function Browser(): React.JSX.Element {
                 <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
               </button>
             </div>
+            <select
+              className="search-engine-select"
+              value={searchEngine}
+              onChange={(event) => setSearchEngine(event.target.value as SearchEngineId)}
+              aria-label="Search engine"
+              title="Choose search engine"
+            >
+              {SEARCH_ENGINES.map((engine) => <option key={engine.id} value={engine.id}>{engine.label}</option>)}
+            </select>
             <label className="omnibox">
               <span className={`omnibox-mark${browser.url.startsWith('https://') ? ' secure' : ''}`} aria-hidden="true">
                 {browser.url.startsWith('https://') ? '●' : '⌕'}
@@ -339,6 +411,15 @@ export default function Browser(): React.JSX.Element {
             >
               <span className="proxy-dot" aria-hidden="true" />
               <span>SOCKS5</span>
+            </button>
+            <button
+              className={`page-toggle-chip${browserVisible ? ' is-open' : ''}`}
+              type="button"
+              aria-pressed={browserVisible}
+              onClick={() => setBrowserVisible((visible) => !visible)}
+              title={browserVisible ? 'Hide browser page' : 'Show browser page'}
+            >
+              <span aria-hidden="true">▣</span><span>{browserVisible ? 'Hide page' : 'Show page'}</span>
             </button>
           </form>
           {proxyOpen && (
@@ -398,7 +479,16 @@ export default function Browser(): React.JSX.Element {
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label="Web page area" />
+        <div className={`browser-viewport${browserVisible ? ' is-page-visible' : ''}`} ref={viewportRef} aria-label="Web page area">
+          {!browserVisible && (
+            <div className="page-hidden-state">
+              <span className="page-hidden-icon" aria-hidden="true">◫</span>
+              <strong>Your page is tucked away</strong>
+              <p>Search or enter an address above, then show the browser when you’re ready.</p>
+              <button type="button" onClick={() => setBrowserVisible(true)}>Show browser</button>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   )

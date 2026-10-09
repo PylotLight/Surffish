@@ -10,8 +10,10 @@ import {
   getBrowserTabs,
   navigateBrowser,
   newBrowserTab,
+  setBrowserSearchEngine,
   setBrowserBounds
 } from './browser'
+import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
@@ -31,9 +33,9 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return getBrowserTabs()
   })
-  ipcMain.handle('browser:tabs:new', (event, input?: string) => {
+  ipcMain.handle('browser:tabs:new', (event, input?: string, engine?: unknown) => {
     assertMainRenderer(event)
-    return typeof input === 'string' ? newBrowserTab(input) : newBrowserTab()
+    return newBrowserTab(typeof input === 'string' ? input : undefined, isSearchEngineId(engine) ? engine : undefined)
   })
   ipcMain.handle('browser:tabs:activate', (event, id: string) => {
     assertMainRenderer(event)
@@ -43,9 +45,13 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     if (typeof id === 'string') closeBrowserTab(id)
   })
-  ipcMain.handle('browser:navigate', (event, input: string) => {
+  ipcMain.handle('browser:navigate', (event, input: string, engine?: unknown) => {
     assertMainRenderer(event)
-    return typeof input === 'string' ? navigateBrowser(input) : false
+    return typeof input === 'string' ? navigateBrowser(input, isSearchEngineId(engine) ? engine : undefined) : false
+  })
+  ipcMain.handle('browser:search-engine:set', (event, engine: unknown) => {
+    assertMainRenderer(event)
+    if (isSearchEngineId(engine)) setBrowserSearchEngine(engine)
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })
