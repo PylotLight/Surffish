@@ -1,4 +1,5 @@
 .browser-layout {
+  position: relative;
   display: flex;
   width: 100%;
   height: 100%;
@@ -6,23 +7,33 @@
   overflow: hidden;
 }
 .browser-sidebar {
-  position: relative;
-  z-index: 2;
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: auto;
+  bottom: 0;
+  left: 0;
   display: flex;
-  flex: 0 0 220px;
   flex-direction: column;
+  width: min(220px, calc(100% - 56px));
   min-width: 0;
-  height: 100%;
   overflow: hidden;
-  border-right: 1px solid rgba(255, 255, 255, 0.16);
-  background: linear-gradient(155deg, rgba(42, 49, 58, 0.68), rgba(17, 21, 26, 0.64));
-  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.035), 8px 0 28px rgba(0, 0, 0, 0.12);
-  backdrop-filter: blur(30px) saturate(175%);
-  -webkit-backdrop-filter: blur(30px) saturate(175%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-left: 0;
+  border-radius: 0 13px 13px 0;
+  background: linear-gradient(150deg, rgba(240, 247, 255, 0.16), rgba(39, 46, 55, 0.78) 42%, rgba(16, 20, 25, 0.86));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.1), 12px 0 34px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(34px) saturate(185%);
+  -webkit-backdrop-filter: blur(34px) saturate(185%);
+  transform: translateX(-100%);
+  visibility: hidden;
+  pointer-events: none;
   -webkit-app-region: no-drag;
 }
-.app-shell[data-platform='darwin'] .browser-sidebar {
-  padding-top: 28px;
+.browser-layout.is-sidebar-visible .browser-sidebar {
+  transform: translateX(0);
+  visibility: visible;
+  pointer-events: auto;
 }
 .sidebar-brand {
   display: flex;
@@ -553,7 +564,17 @@
   background: rgba(18, 21, 25, 0.82);
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+.window-drag-region {
+  display: none;
+  height: 28px;
+  flex: 0 0 28px;
   -webkit-app-region: drag;
+}
+.app-shell[data-platform='darwin'] .window-drag-region {
+  display: block;
+  width: calc(100% - 82px);
+  margin-left: 82px;
 }
 .browser-toolbar {
   display: flex;
@@ -562,6 +583,13 @@
   min-width: 0;
   padding: 7px 14px;
   -webkit-app-region: drag;
+}
+.sidebar-toggle-button {
+  flex: 0 0 auto;
+}
+.sidebar-toggle-button[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.09);
+  color: #a4edbd;
 }
 .browser-nav-buttons {
   display: flex;
@@ -696,7 +724,11 @@
 }
 @media (max-width: 760px) {
   .browser-sidebar {
-    flex-basis: 190px;
+    width: min(190px, calc(100% - 56px));
+  }
+  .browser-layout.is-sidebar-visible .settings-view {
+    width: calc(100% - 190px);
+    margin-left: 190px;
   }
   .browser-toolbar {
     gap: 5px;
@@ -704,56 +736,16 @@
     padding-left: 9px;
   }
 }
-
-.browser-layout.is-sidebar-collapsed .browser-sidebar {
-  flex-basis: 56px;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-brand {
-  justify-content: center;
-  padding: 0;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-brand-mark,
-.browser-layout.is-sidebar-collapsed .sidebar-brand > strong,
-.browser-layout.is-sidebar-collapsed .sidebar-heading > strong {
-  display: none;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-collapse-button {
-  width: 32px;
-  margin-left: 0;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-heading {
-  justify-content: center;
-  padding: 0;
-}
-.browser-layout.is-sidebar-collapsed .tab-list {
-  padding-right: 5px;
-  padding-left: 5px;
-}
-.browser-layout.is-sidebar-collapsed .tab-item {
-  justify-content: center;
-  padding: 0;
-}
-.browser-layout.is-sidebar-collapsed .tab-title,
-.browser-layout.is-sidebar-collapsed .tab-close,
-.browser-layout.is-sidebar-collapsed .history-sidebar {
-  display: none;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-mode-button {
-  justify-content: center;
-  padding: 0;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-mode-button > span:first-child {
-  width: auto;
-}
-.browser-layout.is-sidebar-collapsed .sidebar-mode-button > span:nth-child(2) {
-  display: none;
-}
 .settings-view {
   align-items: center;
   gap: 20px;
   width: 100%;
   height: 100%;
   padding: 30px;
+}
+.browser-layout.is-sidebar-visible .settings-view {
+  width: calc(100% - 220px);
+  margin-left: 220px;
 }
 .settings-page-header,
 .settings-content {

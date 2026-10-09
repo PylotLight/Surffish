@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   BrowserProxySettings,
   BrowserState,
@@ -41,13 +41,20 @@ function formatVisitedAt(timestamp: number): string {
 
 export default function Browser(): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
+  const browserChromeRef = useRef<HTMLElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null)
+  const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const newTabControlRef = useRef<HTMLDivElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarPinned, setSidebarPinned] = useState(false)
+  const [sidebarHovered, setSidebarHovered] = useState(false)
+  const [sidebarFocused, setSidebarFocused] = useState(false)
+  const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 73 : 45)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
@@ -60,6 +67,34 @@ export default function Browser(): React.JSX.Element {
   const [proxyMessage, setProxyMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
+  const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode === 'settings'
+
+  function revealSidebar(): void {
+    if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
+    sidebarHideTimerRef.current = null
+    setSidebarHovered(true)
+  }
+
+  function scheduleSidebarHide(): void {
+    if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
+    sidebarHideTimerRef.current = setTimeout(() => {
+      sidebarHideTimerRef.current = null
+      setSidebarHovered(false)
+    }, 180)
+  }
+
+  function keepSidebarVisibleForFocus(): void {
+    if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
+    sidebarHideTimerRef.current = null
+    setSidebarFocused(true)
+  }
+
+  function releaseSidebarFocus(event: React.FocusEvent<HTMLElement>): void {
+    const nextTarget = event.relatedTarget as Node | null
+    if (nextTarget && (sidebarRef.current?.contains(nextTarget) || sidebarToggleRef.current?.contains(nextTarget))) return
+    setSidebarFocused(false)
+    scheduleSidebarHide()
+  }
 
   async function refreshHistory(): Promise<void> {
     setHistory(await window.api.browser.history.get())
@@ -119,13 +154,33 @@ export default function Browser(): React.JSX.Element {
   }, [newTabMenuOpen])
 
   useEffect(() => {
+    const element = browserChromeRef.current
+    if (!element) return
+    const updateChromeHeight = (): void => setBrowserChromeHeight(element.getBoundingClientRect().height)
+    const observer = new ResizeObserver(updateChromeHeight)
+    observer.observe(element)
+    window.addEventListener('resize', updateChromeHeight)
+    updateChromeHeight()
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', updateChromeHeight)
+    }
+  }, [])
+
+  useEffect(() => () => {
+    if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
+  }, [])
+
+  useLayoutEffect(() => {
     const element = viewportRef.current
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = sidebarMode !== 'settings' && rect.width > 0 && rect.height > 0
+      const sidebarInset = sidebarVisible ? Math.min(sidebarRef.current?.offsetWidth ?? 0, Math.max(0, rect.width - 48)) : 0
+      const contentWidth = rect.width - sidebarInset
+      const canShow = sidebarMode !== 'settings' && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
-        ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+        ? { x: rect.left + sidebarInset, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
     }
     const observer = new ResizeObserver(updateBounds)
@@ -137,7 +192,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode])
+  }, [sidebarMode, sidebarVisible])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(browser.url)
@@ -248,18 +303,28 @@ export default function Browser(): React.JSX.Element {
   const activeSleepingTab = tabs.find((tab) => tab.active && tab.sleeping)
 
   return (
-    <section className={`browser-layout${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`} aria-label="Sockfish browser">
-      <aside className="browser-sidebar" aria-label="Browser sidebar">
+    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser">
+      <aside
+        ref={sidebarRef}
+        className="browser-sidebar"
+        style={{ top: `${browserChromeHeight}px` }}
+        aria-label="Browser sidebar"
+        onMouseEnter={revealSidebar}
+        onMouseLeave={scheduleSidebarHide}
+        onFocusCapture={keepSidebarVisibleForFocus}
+        onBlurCapture={releaseSidebarFocus}
+      >
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" aria-hidden="true">S</span>
           <strong>Sockfish</strong>
           <button
             className="sidebar-collapse-button"
             type="button"
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
-          ><span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span></button>
+            aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+            aria-pressed={sidebarPinned}
+            title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+            onClick={() => setSidebarPinned((pinned) => !pinned)}
+          ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
         </div>
         <div className="sidebar-heading">
           <strong>{sidebarMode === 'history' ? 'History' : 'Tabs'}</strong>
@@ -369,8 +434,24 @@ export default function Browser(): React.JSX.Element {
       </aside>
 
       <div className="browser-main">
-        <header className="browser-chrome">
+        <header className="browser-chrome" ref={browserChromeRef}>
+          <div className="window-drag-region" aria-hidden="true" />
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
+            <button
+              ref={sidebarToggleRef}
+              className="toolbar-button sidebar-toggle-button"
+              type="button"
+              aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+              aria-pressed={sidebarPinned}
+              title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+              onMouseEnter={revealSidebar}
+              onMouseLeave={scheduleSidebarHide}
+              onFocus={revealSidebar}
+              onBlurCapture={releaseSidebarFocus}
+              onClick={() => setSidebarPinned((pinned) => !pinned)}
+            >
+              <span aria-hidden="true">▤</span>
+            </button>
             <div className="browser-nav-buttons">
               <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
                 <span aria-hidden="true">‹</span>
