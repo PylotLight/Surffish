@@ -120,7 +120,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   const contents = view.webContents
   if (process.platform === 'darwin') {
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
-    void contents.setVisualZoomLevelLimits(0.5, 3).catch(() => {})
+    void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   }
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('before-input-event', (event, inputEvent) => {

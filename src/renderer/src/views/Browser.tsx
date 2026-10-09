@@ -46,11 +46,11 @@ export default function Browser(): React.JSX.Element {
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
-  const [browserVisible, setBrowserVisible] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -120,10 +120,9 @@ export default function Browser(): React.JSX.Element {
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const inset = 22
-      const canShow = browserVisible && rect.width > inset * 2 && rect.height > inset * 2
+      const canShow = sidebarMode !== 'settings' && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
-        ? { x: rect.left + inset, y: rect.top + inset, width: rect.width - inset * 2, height: rect.height - inset * 2 }
+        ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
     }
     const observer = new ResizeObserver(updateBounds)
@@ -135,7 +134,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [browserVisible])
+  }, [sidebarMode])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(browser.url)
@@ -171,6 +170,7 @@ export default function Browser(): React.JSX.Element {
     event.preventDefault()
     const value = address.trim()
     if (!value) return
+    setSidebarMode('tabs')
     const ok = await window.api.browser.navigate(value, searchEngine)
     if (!ok) {
       setNavigationError('That address could not be opened. Use an HTTP(S) address or search terms.')
@@ -244,12 +244,22 @@ export default function Browser(): React.JSX.Element {
   })
 
   return (
-    <section className="browser-layout" aria-label="Sockfish browser">
+    <section className={`browser-layout${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`} aria-label="Sockfish browser">
       <aside className="browser-sidebar" aria-label="Browser sidebar">
-        <div className="sidebar-brand"><span className="sidebar-brand-mark" aria-hidden="true">S</span><strong>Sockfish</strong></div>
+        <div className="sidebar-brand">
+          <span className="sidebar-brand-mark" aria-hidden="true">S</span>
+          <strong>Sockfish</strong>
+          <button
+            className="sidebar-collapse-button"
+            type="button"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          ><span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span></button>
+        </div>
         <div className="sidebar-heading">
-          <strong>{sidebarMode === 'tabs' ? 'Tabs' : sidebarMode === 'history' ? 'History' : 'Settings'}</strong>
-          {sidebarMode === 'tabs' ? (
+          <strong>{sidebarMode === 'history' ? 'History' : 'Tabs'}</strong>
+          {sidebarMode !== 'history' ? (
             <div className="new-tab-control" ref={newTabControlRef}>
               <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
                 if (event.altKey) {
@@ -286,8 +296,31 @@ export default function Browser(): React.JSX.Element {
           ) : null}
         </div>
 
-        {sidebarMode === 'tabs' ? (
-          <div className="tab-list" role="tablist" aria-label="Open tabs" aria-orientation="vertical">
+        {sidebarMode === 'history' ? (
+          <div className="history-sidebar">
+            <label className="history-search">
+              <span aria-hidden="true">⌕</span>
+              <input
+                type="search"
+                value={historyQuery}
+                onChange={(event) => setHistoryQuery(event.target.value)}
+                placeholder="Search history"
+                aria-label="Search browsing history"
+              />
+            </label>
+            <div className="history-list" aria-label="Recent browsing history">
+              {filteredHistory.map((entry) => (
+                <button className="history-item" key={entry.id} type="button" onClick={() => void openHistoryEntry(entry)} title={entry.url}>
+                  <strong>{entry.title}</strong>
+                  <span className="history-host">{historyHost(entry.url)}</span>
+                  <time dateTime={new Date(entry.visitedAt).toISOString()}>{formatVisitedAt(entry.visitedAt)}</time>
+                </button>
+              ))}
+              {filteredHistory.length === 0 && <p className="sidebar-empty">{historyQuery ? 'No matching history' : 'No browsing history yet'}</p>}
+            </div>
+          </div>
+        ) : (
+          <div className="tab-list" role="tablist" aria-label="Open tabs">
             {tabs.map((tab) => (
               <div
                 className={`tab-item${tab.active ? ' is-active' : ''}`}
@@ -312,85 +345,20 @@ export default function Browser(): React.JSX.Element {
             ))}
             {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
           </div>
-        ) : sidebarMode === 'history' ? (
-          <div className="history-sidebar">
-            <label className="history-search">
-              <span aria-hidden="true">⌕</span>
-              <input
-                type="search"
-                value={historyQuery}
-                onChange={(event) => setHistoryQuery(event.target.value)}
-                placeholder="Search history"
-                aria-label="Search browsing history"
-              />
-            </label>
-            <div className="history-list" aria-label="Recent browsing history">
-              {filteredHistory.map((entry) => (
-                <button className="history-item" key={entry.id} type="button" onClick={() => void openHistoryEntry(entry)} title={entry.url}>
-                  <strong>{entry.title}</strong>
-                  <span className="history-host">{historyHost(entry.url)}</span>
-                  <time dateTime={new Date(entry.visitedAt).toISOString()}>{formatVisitedAt(entry.visitedAt)}</time>
-                </button>
-              ))}
-              {filteredHistory.length === 0 && <p className="sidebar-empty">{historyQuery ? 'No matching history' : 'No browsing history yet'}</p>}
-            </div>
-          </div>
-        ) : (
-          <div className="settings-sidebar">
-            <section className="settings-section">
-              <label className="settings-field">
-                <span>Search engine</span>
-                <select className="settings-select" value={searchEngine} disabled={!searchEngineLoaded} onChange={(event) => setSearchEngine(event.target.value as SearchEngineId)} aria-label="Default search engine">
-                  {SEARCH_ENGINES.map((engine) => <option key={engine.id} value={engine.id}>{engine.label}</option>)}
-                </select>
-              </label>
-              <p className="settings-help">Used for searches typed into the address bar.</p>
-            </section>
-            <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
-              <div className="settings-section-heading">
-                <div>
-                  <strong>SOCKS5 proxy</strong>
-                  <span className={`settings-status${appliedProxy.enabled ? ' is-on' : ''}`}>{appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}</span>
-                </div>
-                <label className="settings-toggle" title="Use local SOCKS5 proxy">
-                  <input type="checkbox" checked={proxy.enabled} onChange={(event) => setProxy((current) => ({ ...current, enabled: event.target.checked }))} />
-                  <span>On</span>
-                </label>
-              </div>
-              <label className="settings-field">
-                <span>Host</span>
-                <input type="text" value={proxy.host} spellCheck={false} onChange={(event) => setProxy((current) => ({ ...current, host: event.target.value }))} aria-label="Local SOCKS5 host" />
-              </label>
-              <label className="settings-field">
-                <span>Port</span>
-                <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
-              </label>
-              <div className="settings-actions">
-                <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void testProxy()}>Test port</button>
-                <button className="settings-action primary" type="button" disabled={busy} onClick={() => void saveProxy()}>{busy ? 'Working…' : 'Save'}</button>
-              </div>
-              <p className="settings-help">Start an SSH tunnel locally first: <code>ssh -N -D 127.0.0.1:1080 user@your-ssh-host</code></p>
-              {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
-            </section>
-            <section className="settings-section settings-data-note">
-              <strong>Browser data stays local</strong>
-              <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
-            </section>
-          </div>
         )}
 
         <div className="sidebar-footer">
-          <button className={`sidebar-mode-button${sidebarMode === 'tabs' ? ' is-current' : ''}`} type="button" aria-current={sidebarMode === 'tabs' ? 'page' : undefined} onClick={() => setSidebarMode('tabs')}>
+          <button className={`sidebar-mode-button${sidebarMode === 'tabs' ? ' is-current' : ''}`} type="button" aria-label="Tabs" title="Tabs" aria-current={sidebarMode === 'tabs' ? 'page' : undefined} onClick={() => setSidebarMode('tabs')}>
             <span aria-hidden="true">▤</span><span>Tabs</span>
           </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-current={sidebarMode === 'history' ? 'page' : undefined} onClick={() => { setSidebarMode('history'); void refreshHistory() }}>
+          <button className={`sidebar-mode-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="History" title="History" aria-current={sidebarMode === 'history' ? 'page' : undefined} onClick={() => { setSidebarMode('history'); void refreshHistory() }}>
             <span aria-hidden="true">◷</span><span>History</span>
           </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'settings' ? ' is-current' : ''}`} type="button" aria-current={sidebarMode === 'settings' ? 'page' : undefined} onClick={() => setSidebarMode('settings')}>
+          <button className={`sidebar-mode-button${sidebarMode === 'settings' ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={sidebarMode === 'settings' ? 'page' : undefined} onClick={() => setSidebarMode('settings')}>
             <span aria-hidden="true">⚙</span><span>Settings</span>
           </button>
           <div className="sidebar-footer-divider" />
-          <button className="sidebar-mode-button sidebar-quit-button" type="button" onClick={() => void window.api.browser.quit()}>
+          <button className="sidebar-mode-button sidebar-quit-button" type="button" aria-label="Quit Sockfish" title="Quit Sockfish" onClick={() => void window.api.browser.quit()}>
             <span aria-hidden="true">⏻</span><span>Quit Sockfish</span>
           </button>
         </div>
@@ -436,16 +404,6 @@ export default function Browser(): React.JSX.Element {
                 placeholder="Search or enter address"
               />
             </label>
-            <button
-              className={`toolbar-button page-toggle-button${browserVisible ? ' is-open' : ''}`}
-              type="button"
-              aria-pressed={browserVisible}
-              onClick={() => setBrowserVisible((visible) => !visible)}
-              title={browserVisible ? 'Hide browser page' : 'Show browser page'}
-              aria-label={browserVisible ? 'Hide browser page' : 'Show browser page'}
-            >
-              <span aria-hidden="true">▣</span>
-            </button>
           </form>
           {(browser.error || navigationError) && (
             <p className="browser-error" role="status">
@@ -453,13 +411,54 @@ export default function Browser(): React.JSX.Element {
             </p>
           )}
         </header>
-        <div className={`browser-viewport${browserVisible ? ' is-page-visible' : ''}`} ref={viewportRef} aria-label="Web page area">
-          {!browserVisible && (
-            <div className="page-hidden-state">
-              <span className="page-hidden-icon" aria-hidden="true">◫</span>
-              <strong>Your page is tucked away</strong>
-              <p>Search or enter an address above, then show the browser when you’re ready.</p>
-              <button type="button" onClick={() => setBrowserVisible(true)}>Show browser</button>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : 'Web page area'}>
+          {sidebarMode === 'settings' && (
+            <div className="settings-view">
+              <header className="settings-page-header">
+                <h1>Settings</h1>
+                <p>Choose your search engine and manage this browser’s connection.</p>
+              </header>
+              <div className="settings-content">
+                <section className="settings-section">
+                  <label className="settings-field">
+                    <span>Search engine</span>
+                    <select className="settings-select" value={searchEngine} disabled={!searchEngineLoaded} onChange={(event) => setSearchEngine(event.target.value as SearchEngineId)} aria-label="Default search engine">
+                      {SEARCH_ENGINES.map((engine) => <option key={engine.id} value={engine.id}>{engine.label}</option>)}
+                    </select>
+                  </label>
+                  <p className="settings-help">Used for searches typed into the address bar.</p>
+                </section>
+                <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong>SOCKS5 proxy</strong>
+                      <span className={`settings-status${appliedProxy.enabled ? ' is-on' : ''}`}>{appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}</span>
+                    </div>
+                    <label className="settings-toggle" title="Use local SOCKS5 proxy">
+                      <input type="checkbox" checked={proxy.enabled} onChange={(event) => setProxy((current) => ({ ...current, enabled: event.target.checked }))} />
+                      <span>On</span>
+                    </label>
+                  </div>
+                  <label className="settings-field">
+                    <span>Host</span>
+                    <input type="text" value={proxy.host} spellCheck={false} onChange={(event) => setProxy((current) => ({ ...current, host: event.target.value }))} aria-label="Local SOCKS5 host" />
+                  </label>
+                  <label className="settings-field">
+                    <span>Port</span>
+                    <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
+                  </label>
+                  <div className="settings-actions">
+                    <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void testProxy()}>Test port</button>
+                    <button className="settings-action primary" type="button" disabled={busy} onClick={() => void saveProxy()}>{busy ? 'Working…' : 'Save'}</button>
+                  </div>
+                  <p className="settings-help">Start an SSH tunnel locally first: <code>ssh -N -D 127.0.0.1:1080 user@your-ssh-host</code></p>
+                  {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
+                </section>
+                <section className="settings-section settings-data-note">
+                  <strong>Browser data stays local</strong>
+                  <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
+                </section>
+              </div>
             </div>
           )}
         </div>
