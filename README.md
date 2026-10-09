@@ -24,9 +24,12 @@ Use the left sidebar to switch tabs, create a tab, or close one. On macOS, **⌘
 
 Sockfish already uses Chromium with Blink through Electron, so adding Blink would not change the engine. Electron's extension support is intentionally partial and loads unpacked extensions only; see the [official compatibility list](https://www.electronjs.org/docs/latest/api/extensions). For an extension-specific app, first test the exact extensions against Electron's supported APIs. Moving to [CEF](https://chromiumembedded.github.io/cef/) still embeds Chromium/Blink and requires replacing much of this Electron shell; it does not by itself provide Chrome-browser extension compatibility. Broad Chrome-extension compatibility is a product-level browser project, not an engine toggle. GeckoView is Mozilla's maintained Gecko embedder for Android, rather than a drop-in desktop Electron replacement ([GeckoView overview](https://mozilla.github.io/geckoview/)).
 
+An isolated [native macOS WebKit proof of concept](native/macos/README.md) now exercises Apple's embedded WebExtension, SOCKSv5 proxy, and passkey-detection APIs on macOS 15.4+. It does not change the Electron app; see the [evaluation and extension installation notes](docs/native-webkit-evaluation.md) for the supported test paths and Apple entitlement limits.
+
 ## Use a local SSH SOCKS tunnel
 
 Run the tunnel on the same computer as Sockfish:
+
 
 ```bash
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host

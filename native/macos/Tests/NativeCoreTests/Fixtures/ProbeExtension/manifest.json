@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Sockfish Native API Probe",
+  "version": "1.0.0",
+  "description": "A local fixture for testing WKWebExtensionController APIs.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Probe"
+  }
+}

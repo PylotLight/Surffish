@@ -14,4 +14,18 @@ jobs:
           bun-version: latest
       - run: bun install
       - run: bun run typecheck
+      - run: bun run test
       - run: bun run build
+
+  native-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Apple toolchain
+        run: swift --version
+      - name: Run native WebKit API tests
+        working-directory: native/macos
+        run: swift test
+      - name: Build native prototype
+        working-directory: native/macos
+        run: swift build
