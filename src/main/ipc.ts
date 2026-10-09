@@ -18,6 +18,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
+import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import {
   getBrowserSearchEngine,
   getBrowserTabSleepMinutes,
@@ -119,5 +120,23 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     const { refreshNetworkAdblock } = await import('./adblock')
     return refreshNetworkAdblock()
+  })
+  ipcMain.handle('browser:network:get', (event) => {
+    assertMainRenderer(event)
+    return getNetworkRequests()
+  })
+  ipcMain.handle('browser:network:details', async (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' ? getNetworkRequestDetails(id) : null
+  })
+  ipcMain.handle('browser:network:response-body', async (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string'
+      ? getNetworkResponseBody(id)
+      : { body: null, error: 'Invalid request identifier.' }
+  })
+  ipcMain.handle('browser:network:clear', (event) => {
+    assertMainRenderer(event)
+    clearNetworkRequests()
   })
 }

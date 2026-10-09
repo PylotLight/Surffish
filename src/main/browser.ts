@@ -7,6 +7,7 @@ import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
+import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 
 export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
 interface BrowserTab {
@@ -128,6 +129,7 @@ function disposeTabView(tab: BrowserTab): void {
   if (!view) return
   // Clear the reference first so its destroyed event cannot remove the logical tab.
   tab.view = null
+  detachNetworkInspector(view.webContents)
   if (browserWindow && !browserWindow.isDestroyed()) browserWindow.contentView.removeChildView(view)
   if (!view.webContents.isDestroyed()) view.webContents.close()
   applyTabBounds()
@@ -205,6 +207,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
+  attachNetworkInspector(tab.id, contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   if (process.platform === 'darwin') {
@@ -283,6 +286,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
   })
   contents.on('destroyed', () => {
+    detachNetworkInspector(contents)
     if (!isCurrentContents()) return
     const index = tabs.findIndex((candidate) => candidate.id === tab.id)
     if (index < 0) return
@@ -374,7 +378,10 @@ export function attachBrowserView(win: BrowserWindow): void {
       cancelSleepTimer(tab)
       const view = tab.view
       tab.view = null
-      if (view && !view.webContents.isDestroyed()) view.webContents.close()
+      if (view) {
+        detachNetworkInspector(view.webContents)
+        if (!view.webContents.isDestroyed()) view.webContents.close()
+      }
     }
   })
 }

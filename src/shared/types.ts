@@ -60,3 +60,50 @@ export interface AdblockDiagnostics {
   recentBlockedRequests: AdblockBlockedRequest[]
   lastError: string | null
 }
+
+export type NetworkRequestState = 'pending' | 'complete' | 'failed'
+
+export interface NetworkHeader {
+  name: string
+  value: string
+}
+
+/** Safe-to-render row data emitted frequently while a request is in flight. */
+export interface NetworkRequestSummary {
+  id: string
+  tabId: string
+  url: string
+  method: string
+  resourceType: string
+  status: number | null
+  statusText: string
+  mimeType: string
+  startedAt: number
+  durationMs: number | null
+  transferSize: number | null
+  responseBodyAvailable: boolean
+  state: NetworkRequestState
+  initiator: string
+  errorText: string
+  fromDiskCache: boolean
+  fromServiceWorker: boolean
+}
+
+/** Full request metadata is fetched only when the user opens a request. */
+export interface NetworkRequestDetails extends NetworkRequestSummary {
+  requestHeaders: NetworkHeader[]
+  responseHeaders: NetworkHeader[]
+  requestBody: string | null
+  requestBodyAvailable: boolean
+  requestBodyTruncated: boolean
+  remoteAddress: string
+  protocol: string
+  securityState: string
+  timing: Record<string, number> | null
+}
+
+export interface NetworkResponseBody {
+  text: string
+  base64Encoded: boolean
+  truncated: boolean
+}

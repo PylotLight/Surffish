@@ -7,6 +7,9 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  NetworkRequestDetails,
+  NetworkRequestSummary,
+  NetworkResponseBody,
   SearchEngineId,
   TabSleepMinutes
 } from '../shared/types'
@@ -68,6 +71,17 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, diagnostics: AdblockDiagnostics): void => callback(diagnostics)
         ipcRenderer.on('browser:adblock:changed', listener)
         return () => ipcRenderer.removeListener('browser:adblock:changed', listener)
+      }
+    },
+    network: {
+      get: (): Promise<NetworkRequestSummary[]> => ipcRenderer.invoke('browser:network:get'),
+      details: (id: string): Promise<NetworkRequestDetails | null> => ipcRenderer.invoke('browser:network:details', id),
+      responseBody: (id: string): Promise<{ body: NetworkResponseBody | null; error: string | null }> => ipcRenderer.invoke('browser:network:response-body', id),
+      clear: (): Promise<void> => ipcRenderer.invoke('browser:network:clear'),
+      onChange: (callback: (requests: NetworkRequestSummary[]) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, requests: NetworkRequestSummary[]): void => callback(requests)
+        ipcRenderer.on('browser:network:changed', listener)
+        return () => ipcRenderer.removeListener('browser:network:changed', listener)
       }
     }
   }
