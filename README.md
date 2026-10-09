@@ -1,6 +1,6 @@
-# Fish SOCKS Browser
+# Sockfish
 
-A compact Electron browser sample based on the PylotLight Bun/Electron fish-app template. It adds one isolated Chromium page view and a built-in SOCKS5 setting for a local SSH dynamic-forwarding tunnel; the original kitchen-sink, tray, glass, and agent demo tabs remain available.
+Sockfish is a compact Electron browser prototype based on the PylotLight Bun/Electron fish-app template. It adds one isolated Chromium page view and a built-in SOCKS5 setting for a local SSH dynamic-forwarding tunnel; the original kitchen-sink, tray, glass, and agent demo tabs remain available.
 
 ## Quick start
 
@@ -13,13 +13,13 @@ bun run build
 
 ## Use a local SSH SOCKS tunnel on macOS
 
-Run the tunnel **on the same Mac that runs Fish Browser**:
+Run the tunnel **on the same Mac that runs Sockfish**:
 
 ```bash
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host
 ```
 
-Replace `user@your-ssh-host` with your SSH account/host (or an SSH config alias). Keep that terminal session running. In Fish Browser, the Browser tab starts with SOCKS5 enabled at `127.0.0.1:1080`; choose **Test local port** and then **Save & apply** if you change settings. The proxy setting is saved for later launches. If the tunnel is down while proxying is enabled, page loads fail rather than silently falling back to a direct connection. Turn **Use proxy** off to browse directly.
+Replace `user@your-ssh-host` with your SSH account/host (or an SSH config alias). Keep that terminal session running. In Sockfish, the Browser tab starts with SOCKS5 enabled at `127.0.0.1:1080`; choose **Test local port** and then **Save & apply** if you change settings. The proxy setting is saved for later launches. If the tunnel is down while proxying is enabled, page loads fail rather than silently falling back to a direct connection. Turn **Use proxy** off to browse directly.
 
 The setting is restricted to loopback hosts (`localhost`, `127.0.0.1`, or `::1`) because this sample is intended for a local tunnel. A successful port test confirms only that something is listening; it does not authenticate or validate the SOCKS handshake or SSH destination.
 

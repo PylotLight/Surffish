@@ -5,7 +5,7 @@ import './Browser.css'
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const EMPTY_BROWSER: BrowserState = {
   url: 'https://example.com/',
-  title: 'Fish Browser',
+  title: 'Sockfish',
   loading: true,
   canGoBack: false,
   canGoForward: false,

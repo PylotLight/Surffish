@@ -2,7 +2,7 @@
 
 ## Request flow
 
-1. On app startup, `src/main/proxy.ts` reads the saved loopback-only settings and calls `session.fromPartition('persist:fish-browser').setProxy(...)` before the browser view is constructed.
+1. On app startup, `src/main/proxy.ts` reads the saved loopback-only settings and calls `session.fromPartition('persist:fish-browser').setProxy(...)` before the browser view is constructed. The internal partition name is intentionally retained across the Sockfish rename so existing browser-session data remains available.
 2. `src/main/browser.ts` creates the remote `WebContentsView` on that same persistent partition. The main-process IPC layer exposes a narrow set of address/history/reload/bounds/proxy operations to the trusted local React renderer.
 3. The renderer reports the page-area rectangle; the main process positions the native view below the toolbar. The embedded page does not receive the app preload bridge.
 4. A settings change updates the browser session, closes pooled connections, persists the choice, and reloads the current page. When enabled, the proxy rules use `socks5://<loopback-host>:<port>` and `<local>` bypasses local hostnames/IPs.

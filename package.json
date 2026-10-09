@@ -1,7 +1,7 @@
 {
-  "name": "fish-socks-browser",
+  "name": "sockfish",
   "version": "0.1.0",
-  "description": "A small Electron browser sample with a local SOCKS5 proxy toggle",
+  "description": "A compact Electron browser prototype with a local SOCKS5 proxy toggle",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",

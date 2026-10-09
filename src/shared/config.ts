@@ -1,7 +1,7 @@
 // Single source of truth for app identity and window defaults.
-export const APP_NAME = 'Fish Browser'
+export const APP_NAME = 'Sockfish'
 export const APP_TAGLINE = 'a small browser · local SOCKS5'
-export const APP_ID = 'com.pylotlight.fishbrowser'
+export const APP_ID = 'com.pylotlight.sockfish'
 export const WINDOW = {
   width: 1240,
   height: 820,
