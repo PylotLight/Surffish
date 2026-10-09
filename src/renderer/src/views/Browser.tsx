@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
+  AdblockDiagnostics,
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
@@ -20,7 +21,7 @@ const EMPTY_BROWSER: BrowserState = {
   error: null
 }
 
-type SidebarMode = 'tabs' | 'history' | 'settings'
+type SidebarMode = 'tabs' | 'history' | 'settings' | 'diagnostics'
 
 function historyHost(url: string): string {
   try {
@@ -63,6 +64,7 @@ export default function Browser(): React.JSX.Element {
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
+  const [adblockDiagnostics, setAdblockDiagnostics] = useState<AdblockDiagnostics | null>(null)
   const [busy, setBusy] = useState(false)
   const [proxyMessage, setProxyMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
@@ -100,10 +102,20 @@ export default function Browser(): React.JSX.Element {
     setHistory(await window.api.browser.history.get())
   }
 
+  async function refreshAdblock(): Promise<void> {
+    try {
+      setAdblockDiagnostics(await window.api.browser.adblock.refresh())
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setAdblockDiagnostics((current) => current ? { ...current, lastError: message } : current)
+    }
+  }
+
   useEffect(() => {
     const unsubscribeState = window.api.browser.onState(setBrowser)
     const unsubscribeTabs = window.api.browser.tabs.onChange(setTabs)
     const unsubscribeHistory = window.api.browser.history.onChange(() => { void refreshHistory() })
+    const unsubscribeAdblock = window.api.browser.adblock.onChange(setAdblockDiagnostics)
     const unsubscribeFocusAddress = window.api.browser.onFocusAddress(() => {
       addressRef.current?.focus()
       addressRef.current?.select()
@@ -121,6 +133,7 @@ export default function Browser(): React.JSX.Element {
     void window.api.browser.tabs.get().then(setTabs)
     void refreshHistory()
     void window.api.browser.getTabSleepMinutes().then(setTabSleepMinutes)
+    void window.api.browser.adblock.get().then(setAdblockDiagnostics)
     void window.api.browser.proxy.get().then((settings) => {
       setProxy(settings)
       setAppliedProxy(settings)
@@ -129,6 +142,7 @@ export default function Browser(): React.JSX.Element {
       unsubscribeState()
       unsubscribeTabs()
       unsubscribeHistory()
+      unsubscribeAdblock()
       unsubscribeFocusAddress()
     }
   }, [])
@@ -178,7 +192,7 @@ export default function Browser(): React.JSX.Element {
       const rect = element.getBoundingClientRect()
       const sidebarInset = sidebarVisible ? Math.min(sidebarRef.current?.offsetWidth ?? 0, Math.max(0, rect.width - 48)) : 0
       const contentWidth = rect.width - sidebarInset
-      const canShow = sidebarMode !== 'settings' && contentWidth > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left + sidebarInset, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -327,7 +341,7 @@ export default function Browser(): React.JSX.Element {
           ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
         </div>
         <div className="sidebar-heading">
-          <strong>{sidebarMode === 'history' ? 'History' : 'Tabs'}</strong>
+          <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'diagnostics' ? 'Diagnostics' : 'Tabs'}</strong>
           {sidebarMode !== 'history' ? (
             <div className="new-tab-control" ref={newTabControlRef}>
               <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
@@ -423,6 +437,9 @@ export default function Browser(): React.JSX.Element {
           <button className={`sidebar-mode-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="History" title="History" aria-current={sidebarMode === 'history' ? 'page' : undefined} onClick={() => { setSidebarMode('history'); void refreshHistory() }}>
             <span aria-hidden="true">◷</span><span>History</span>
           </button>
+          <button className={`sidebar-mode-button${sidebarMode === 'diagnostics' ? ' is-current' : ''}`} type="button" aria-label="Diagnostics" title="Diagnostics" aria-current={sidebarMode === 'diagnostics' ? 'page' : undefined} onClick={() => { setSidebarMode('diagnostics'); void window.api.browser.adblock.get().then(setAdblockDiagnostics) }}>
+            <span aria-hidden="true">▥</span><span>Diagnostics</span>
+          </button>
           <button className={`sidebar-mode-button${sidebarMode === 'settings' ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={sidebarMode === 'settings' ? 'page' : undefined} onClick={() => setSidebarMode('settings')}>
             <span aria-hidden="true">⚙</span><span>Settings</span>
           </button>
@@ -496,7 +513,7 @@ export default function Browser(): React.JSX.Element {
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : 'Web page area'}>
           {sidebarMode === 'settings' && (
             <div className="settings-view">
               <header className="settings-page-header">
@@ -569,7 +586,71 @@ export default function Browser(): React.JSX.Element {
               </div>
             </div>
           )}
-          {sidebarMode !== 'settings' && activeSleepingTab && (
+          {sidebarMode === 'diagnostics' && (
+            <div className="diagnostics-view">
+              <header className="settings-page-header">
+                <h1>Diagnostics</h1>
+                <p>Live ad-filter status and recent network decisions for this browser session.</p>
+              </header>
+              <div className="settings-content">
+                <section className="settings-section diagnostics-section" aria-label="Network ad blocking diagnostics">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong>Network ad blocking</strong>
+                      <span className={`settings-status${adblockDiagnostics?.blockingEnabled ? ' is-on' : ''}`}>
+                        {!adblockDiagnostics ? 'Reading status…' : adblockDiagnostics.status === 'updating'
+                          ? `Active · refreshing filters (${adblockDiagnostics.loadedListCount} lists)`
+                          : adblockDiagnostics.blockingEnabled
+                            ? adblockDiagnostics.status === 'degraded' ? 'Limited · filter engine unavailable or empty' : 'Active'
+                            : 'Unavailable'}
+                      </span>
+                    </div>
+                    <button className="settings-action secondary diagnostics-refresh" type="button" disabled={!adblockDiagnostics || adblockDiagnostics.status === 'updating'} onClick={() => {
+                      void refreshAdblock()
+                    }}>{adblockDiagnostics?.status === 'updating' ? 'Updating…' : 'Update filters'}</button>
+                  </div>
+                  <div className="diagnostics-stats" aria-live="polite">
+                    <div><strong>{adblockDiagnostics?.blockedRequests.toLocaleString() ?? '—'}</strong><span>Blocked requests</span></div>
+                    <div><strong>{adblockDiagnostics?.allowedRequests.toLocaleString() ?? '—'}</strong><span>Allowed requests</span></div>
+                    <div><strong>{adblockDiagnostics?.networkFilterCount.toLocaleString() ?? '—'}</strong><span>Network rules</span></div>
+                    <div><strong>{adblockDiagnostics?.loadedListCount ?? '—'}</strong><span>Loaded lists</span></div>
+                  </div>
+                  <p className="settings-help diagnostics-summary">
+                    {adblockDiagnostics
+                      ? `${adblockDiagnostics.source === 'updated' ? 'Latest lists downloaded' : adblockDiagnostics.source === 'cache' ? 'Using cached lists' : adblockDiagnostics.source === 'stale-cache' ? 'Using older cached lists' : adblockDiagnostics.source === 'empty' ? 'No filter lists loaded' : 'Filter lists not loaded'}${adblockDiagnostics.lastUpdatedAt ? ` · Updated ${formatVisitedAt(adblockDiagnostics.lastUpdatedAt)}` : ''}. Counts cover subresource requests since this launch (not top-level page navigations); only hostnames and resource types are kept for the 20 most recent blocks.`
+                      : 'Loading filter status…'}
+                  </p>
+                  {adblockDiagnostics?.lastError && <p className="settings-message is-error" role="status">{adblockDiagnostics.lastError}</p>}
+                  {adblockDiagnostics && adblockDiagnostics.loadedLists.length > 0 && (
+                    <div className="diagnostics-lists">
+                      <strong>Active lists</strong>
+                      <ul>{adblockDiagnostics.loadedLists.map((list, index) => <li key={`${list}-${index}`}>{list}</li>)}</ul>
+                    </div>
+                  )}
+                </section>
+                <section className="settings-section diagnostics-section" aria-label="Recent blocked requests">
+                  <div className="diagnostics-section-heading"><strong>Recent blocked requests</strong><span>Newest first · hostnames only</span></div>
+                  {adblockDiagnostics?.recentBlockedRequests.length ? (
+                    <ol className="diagnostics-block-list">
+                      {adblockDiagnostics.recentBlockedRequests.map((request, index) => (
+                        <li key={`${request.timestamp}-${request.requestHost}-${index}`}>
+                          <time dateTime={new Date(request.timestamp).toISOString()}>{new Date(request.timestamp).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</time>
+                          <span className="diagnostics-block-host" title={request.requestHost}>{request.requestHost}</span>
+                          <span className="diagnostics-block-page" title={`From ${request.pageHost}`}>{request.pageHost}</span>
+                          <span className="diagnostics-block-type">{request.resourceType}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : <p className="settings-help">No matching requests blocked yet. If ads remain, check whether the request is present above and refresh the maintained lists.</p>}
+                </section>
+                <section className="settings-section diagnostics-note">
+                  <strong>YouTube note</strong>
+                  <p>YouTube serves ads and wanted video chunks through shared delivery hosts. Sockfish allows requests to <code>googlevideo.com</code> delivery hosts so ad rules cannot interrupt video playback; ads delivered there may remain. Cosmetic hiding stays off, while matching ad requests on other hosts can still be blocked.</p>
+                </section>
+              </div>
+            </div>
+          )}
+          {sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && activeSleepingTab && (
             <div className="sleeping-tab-prompt">
               <span className="sleeping-tab-mark" aria-hidden="true">Z</span>
               <strong>Tab unloaded to prevent autoplay</strong>

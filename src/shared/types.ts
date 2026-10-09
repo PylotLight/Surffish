@@ -39,3 +39,24 @@ export interface BrowserBounds {
   width: number
   height: number
 }
+
+export interface AdblockBlockedRequest {
+  timestamp: number
+  requestHost: string
+  pageHost: string
+  resourceType: string
+}
+
+export interface AdblockDiagnostics {
+  status: 'starting' | 'active' | 'updating' | 'degraded'
+  blockingEnabled: boolean
+  source: 'none' | 'updated' | 'cache' | 'stale-cache' | 'empty'
+  lastUpdatedAt: number | null
+  blockedRequests: number
+  allowedRequests: number
+  networkFilterCount: number
+  loadedListCount: number
+  loadedLists: string[]
+  recentBlockedRequests: AdblockBlockedRequest[]
+  lastError: string | null
+}

@@ -38,7 +38,9 @@ A successful port test confirms only that something is listening; it does not au
 
 ## Network-only ad blocking
 
-Sockfish uses Ghostery's Electron adapter and its maintained ads-only filter lists to block matching subresource requests in the browser session. It does not inject cosmetic CSS or scripts, hide ad placeholders, or apply tracker/annoyance lists; some empty ad spaces may remain visible. Filter lists are refreshed at startup when the cached engine is older than 24 hours. Updates use the same browser session (and configured SOCKS proxy); if an update is unavailable, Sockfish uses the last cached engine, or starts without filtering on a first launch. This does not block requests made by Sockfish's app UI outside the browser session.
+Sockfish uses Ghostery's Electron adapter and its maintained ads-only filter lists to block matching subresource requests in the browser session. It does not inject cosmetic CSS or scripts, hide ad placeholders, or apply tracker/annoyance lists; some empty ad spaces may remain visible. Filter lists are refreshed at startup when the cached engine is older than 24 hours, and can be refreshed from **Diagnostics** in the sidebar. That view shows the active rule/list counts, blocked and allowed request totals, and the 20 most recent blocked request hostnames (not full URLs). Updates use the same browser session (and configured SOCKS proxy); if an update is unavailable, Sockfish uses the last cached engine, or starts without filtering on a first launch. This does not block requests made by Sockfish's app UI outside the browser session.
+
+YouTube serves ads and wanted video chunks through shared delivery hosts. Sockfish allows requests to `googlevideo.com` delivery hosts so ad rules cannot interrupt playback; ads delivered there may remain. Network filtering therefore cannot reliably remove every in-stream ad.
 
 ## Scope and security
 

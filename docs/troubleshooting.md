@@ -8,6 +8,10 @@ Make sure the SSH dynamic-forwarding command is still running on the same comput
 
 Press Enter after typing. Domain-like hosts are opened as URLs; ordinary text is sent to DuckDuckGo. Only HTTP(S) schemes are accepted. `localhost` and loopback IP addresses use HTTP automatically.
 
+## YouTube ads still appear
+
+Open **Diagnostics** in the sidebar to check whether network filtering is active, when its lists were last updated, and whether requests from `youtube.com` are being blocked. **Update filters** fetches the maintained ads-only lists through the browser's configured proxy. The latest 20 blocked entries show hostnames and resource types, not full URLs. Requests to `googlevideo.com` delivery hosts are intentionally allowed to preserve video playback, so ads delivered through those shared hosts may remain.
+
 ## Garbage characters after exiting development (`^[[?62;22c`, `^[[9;1R`, etc.)
 
 Electron probes terminal capabilities at startup. `bun run dev` runs through `scripts/dev.ts`, which drains leftover terminal reply bytes on shutdown. If the app is killed from another terminal, run `reset` in the affected terminal. `bun run dev:bare` skips the cleanup wrapper.

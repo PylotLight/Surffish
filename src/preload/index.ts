@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AdblockDiagnostics,
   BrowserBounds,
   BrowserProxySettings,
   BrowserProxyTestResult,
@@ -59,6 +60,15 @@ const api = {
       get: (): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:get'),
       set: (settings: BrowserProxySettings): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:set', settings),
       test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> => ipcRenderer.invoke('browser:proxy:test', settings)
+    },
+    adblock: {
+      get: (): Promise<AdblockDiagnostics> => ipcRenderer.invoke('browser:adblock:get'),
+      refresh: (): Promise<AdblockDiagnostics> => ipcRenderer.invoke('browser:adblock:refresh'),
+      onChange: (callback: (diagnostics: AdblockDiagnostics) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, diagnostics: AdblockDiagnostics): void => callback(diagnostics)
+        ipcRenderer.on('browser:adblock:changed', listener)
+        return () => ipcRenderer.removeListener('browser:adblock:changed', listener)
+      }
     }
   }
 }

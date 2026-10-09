@@ -110,4 +110,14 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return testLocalProxy(settings)
   })
+  ipcMain.handle('browser:adblock:get', async (event) => {
+    assertMainRenderer(event)
+    const { getAdblockDiagnostics } = await import('./adblock')
+    return getAdblockDiagnostics()
+  })
+  ipcMain.handle('browser:adblock:refresh', async (event) => {
+    assertMainRenderer(event)
+    const { refreshNetworkAdblock } = await import('./adblock')
+    return refreshNetworkAdblock()
+  })
 }
