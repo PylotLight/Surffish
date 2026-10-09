@@ -72,7 +72,6 @@ final class NativeAPITests: XCTestCase {
     func testPasskeyManagerStateCanBeReadWithoutRequestingAccess() {
         let browser = NativeBrowserHarness()
         XCTAssertFalse(browser.browserPasskeyAuthorizationStateDescription().isEmpty)
-        _ = ASAuthorizationWebBrowserPublicKeyCredentialManager.isDeviceConfiguredForPasskeys
         // Deliberately do not request passkey access: Apple restricts the browser entitlement.
     }
 
