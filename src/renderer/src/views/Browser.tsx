@@ -16,9 +16,10 @@ import type {
   SearchEngineId,
   TabSleepMinutes
 } from '../../../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES } from '../../../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SOCKFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { MAX_PINNED_SITES } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
@@ -128,6 +129,22 @@ function responseBodyText(body: NetworkResponseBody): string {
   }
 }
 
+function QuickLinkTile({ site, onOpen }: { site: QuickLinkSite; onOpen: () => void }): React.JSX.Element {
+  const [iconFailed, setIconFailed] = useState(false)
+  const hostname = new URL(site.origin).hostname.replace(/^www\./i, '')
+  const faviconUrl = `${site.origin}/favicon.ico`
+  return (
+    <button className="quick-link-tile" type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
+      <span className="quick-link-icon" aria-hidden="true">
+        {!iconFailed && <img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
+        {iconFailed && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
+      </span>
+      <strong>{site.title || hostname}</strong>
+      <small>{hostname}</small>
+    </button>
+  )
+}
+
 export default function Browser(): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
@@ -152,7 +169,7 @@ export default function Browser(): React.JSX.Element {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
-  const [newTabPage, setNewTabPage] = useState<NewTabPageId>('bonjourr')
+  const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
@@ -181,6 +198,9 @@ export default function Browser(): React.JSX.Element {
     () => buildAddressSuggestions(address, pinnedSites, tabs, history),
     [address, pinnedSites, tabs, history]
   )
+  const favoriteQuickLinks = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
+  const frequentQuickLinks = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
+  const isQuickLinksTab = browser.url === SOCKFISH_QUICK_LINKS_URL
   const activeOrigin = httpOrigin(browser.url)
   const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
@@ -227,6 +247,20 @@ export default function Browser(): React.JSX.Element {
     setSidebarMode('tabs')
     setSuggestionsOpen(false)
     void window.api.browser.tabs.create(undefined, searchEngine)
+  }
+
+  function toggleToolbarPanel(mode: 'tabs' | 'history'): void {
+    if (mode === 'history') {
+      setSidebarMode((current) => current === 'history' ? 'tabs' : 'history')
+      if (sidebarMode !== 'history') void refreshHistory()
+      return
+    }
+    if (sidebarMode === 'tabs' && sidebarPinned) {
+      setSidebarPinned(false)
+      return
+    }
+    setSidebarMode('tabs')
+    setSidebarPinned(true)
   }
 
   async function savePinnedSites(next: PinnedSite[]): Promise<void> {
@@ -468,7 +502,7 @@ export default function Browser(): React.JSX.Element {
       const edgeRevealWidth = sidebarVisible ? 0 : 14
       const contentWidth = rect.width - sidebarInset - edgeRevealWidth
       const suggestionsCoverPage = suggestionsOpen && addressSuggestions.length > 0
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !isQuickLinksTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left + sidebarInset + edgeRevealWidth, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -482,11 +516,11 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length])
+  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isQuickLinksTab])
 
   useEffect(() => {
-    if (document.activeElement !== addressRef.current) setAddress(browser.url)
-  }, [browser.url])
+    if (document.activeElement !== addressRef.current) setAddress(isQuickLinksTab ? '' : browser.url)
+  }, [browser.url, isQuickLinksTab])
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent): void => {
@@ -671,7 +705,7 @@ export default function Browser(): React.JSX.Element {
                     createNewTab()
                     setNewTabMenuOpen(false)
                   }}>
-                    <strong>New tab</strong><span>{newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
+                    <strong>New tab</strong><span>{newTabPage === 'quick-links' ? 'Sockfish Quick Links · local' : newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
                   </button>
                   <button type="button" role="menuitem" disabled={!tabs.some((tab) => tab.active)} onClick={() => {
                     const activeTab = tabs.find((tab) => tab.active)
@@ -764,13 +798,7 @@ export default function Browser(): React.JSX.Element {
         )}
 
         <div className="sidebar-footer">
-          <button className={`sidebar-mode-button${sidebarMode === 'tabs' ? ' is-current' : ''}`} type="button" aria-label="Tabs" title="Tabs" aria-current={sidebarMode === 'tabs' ? 'page' : undefined} onClick={() => setSidebarMode('tabs')}>
-            <span aria-hidden="true">▤</span><span>Tabs</span>
-          </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="History" title="History" aria-current={sidebarMode === 'history' ? 'page' : undefined} onClick={() => { setSidebarMode('history'); void refreshHistory() }}>
-            <span aria-hidden="true">◷</span><span>History</span>
-          </button>
-              <button className={`sidebar-mode-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
+          <button className={`sidebar-mode-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
             <span aria-hidden="true">⚙</span><span>Settings</span>
           </button>
           <div className="sidebar-footer-divider" />
@@ -817,7 +845,7 @@ export default function Browser(): React.JSX.Element {
               </button>
             </div>
             <div className="omnibox-wrap">
-              <label className="omnibox">
+              <div className="omnibox">
                 <input
                   ref={addressRef}
                   type="text"
@@ -843,7 +871,15 @@ export default function Browser(): React.JSX.Element {
                   autoCapitalize="none"
                   placeholder="Search or enter address"
                 />
-              </label>
+                <div className="omnibox-actions" role="group" aria-label="Browser panels">
+                  <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs and pinned sites" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs and pinned sites" onClick={() => toggleToolbarPanel('tabs')}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
+                  </button>
+                  <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
+                  </button>
+                </div>
+              </div>
               {suggestionsOpen && addressSuggestions.length > 0 && (
                 <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
                   {addressSuggestions.map((suggestion, index) => (
@@ -918,6 +954,30 @@ export default function Browser(): React.JSX.Element {
         </header>
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
+          {isQuickLinksTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
+            <section className="quick-links-page" aria-label="Sockfish Quick Links start page">
+              <div className="quick-links-content">
+                <div className="quick-links-eyebrow"><span className="quick-links-brand" aria-hidden="true">S</span><span>SOCKFISH · LOCAL START PAGE</span></div>
+                <header className="quick-links-header">
+                  <div><h1>Quick Links</h1><p>Favorites and familiar sites, ready when you are.</p></div>
+                  <button className="quick-links-manage" type="button" onClick={() => { setSidebarMode('tabs'); setSidebarPinned(true) }}>Manage favorites</button>
+                </header>
+                <section className="quick-links-section" aria-labelledby="quick-links-favorites-heading">
+                  <div className="quick-links-section-heading"><h2 id="quick-links-favorites-heading">Favorites</h2><span>your pinned sites</span></div>
+                  {favoriteQuickLinks.length > 0 ? (
+                    <div className="quick-link-grid">{favoriteQuickLinks.map((site) => <QuickLinkTile key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}</div>
+                  ) : <p className="quick-links-empty">Pin a site with ☆ in the address bar and it will appear here.</p>}
+                </section>
+                <section className="quick-links-section" aria-labelledby="quick-links-frequent-heading">
+                  <div className="quick-links-section-heading"><h2 id="quick-links-frequent-heading">Frequently visited</h2><span>calculated from local history</span></div>
+                  {frequentQuickLinks.length > 0 ? (
+                    <div className="quick-link-grid">{frequentQuickLinks.map((site) => <QuickLinkTile key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}</div>
+                  ) : <p className="quick-links-empty">Sites you visit often will appear here. This list stays on this device.</p>}
+                </section>
+                <p className="quick-links-privacy">Favorites reuse your pinned sites. Frequently visited tiles are computed from Sockfish’s local history; no history is sent to Bonjourr or a suggestion service.</p>
+              </div>
+            </section>
+          )}
           {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
               {SETTINGS_SECTIONS.map((section) => (
@@ -948,11 +1008,12 @@ export default function Browser(): React.JSX.Element {
                       const page = event.target.value as NewTabPageId
                       void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
                     }} aria-label="Default new tab page">
+                      <option value="quick-links">Sockfish Quick Links (local)</option>
                       <option value="bonjourr">Bonjourr (online)</option>
                       <option value="search">Search engine</option>
                     </select>
                   </label>
-                  <p className="settings-help">Bonjourr is the default start page and loads from its official online version; no third-party extension install is needed. The setting applies to tabs opened from now on.</p>
+                  <p className="settings-help">Quick Links is stored and rendered locally. Favorites reuse pinned sites; frequently visited sites are calculated from local browsing history. Favicon requests go directly to each tile’s own site origin without a referrer. Bonjourr and the selected search engine remain available. This setting applies to tabs opened from now on.</p>
                 </section>
                 <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
                   <div className="settings-section-heading">

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserRuntimeDiagnostics, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
@@ -27,7 +27,9 @@ let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
-  return getBrowserNewTabPage() === 'search' ? getSearchHomepage(engine) : START_PAGE
+  const page = getBrowserNewTabPage()
+  if (page === 'search') return getSearchHomepage(engine)
+  return page === 'bonjourr' ? START_PAGE : SOCKFISH_QUICK_LINKS_URL
 }
 
 function getTab(id: string | null = activeTabId): BrowserTab | undefined {
@@ -39,6 +41,7 @@ function currentUrl(tab: BrowserTab): string {
 }
 
 function pageTitle(tab: BrowserTab): string {
+  if (currentUrl(tab) === SOCKFISH_QUICK_LINKS_URL) return 'Quick Links'
   const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
   try {
@@ -142,6 +145,10 @@ function disposeTabView(tab: BrowserTab): void {
 function ensureTabLoaded(tab: BrowserTab): void {
   if (tab.view || !browserWindow || browserWindow.isDestroyed()) return
   const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
+  if (target === SOCKFISH_QUICK_LINKS_URL) {
+    tab.pendingUrl = ''
+    return
+  }
   tab.pendingUrl = target
   const view = createTabView(tab)
   if (!view) return
@@ -311,7 +318,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
 
 function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
+  const target = input === SOCKFISH_QUICK_LINKS_URL
+    ? SOCKFISH_QUICK_LINKS_URL
+    : input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const tab: BrowserTab = {
     id: randomUUID(),
     view: null,
@@ -541,6 +550,15 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   const url = resolveNavigationTarget(input, engine)
   const tab = getTab()
   if (!url || !tab) return false
+  if (tab.lastUrl === SOCKFISH_QUICK_LINKS_URL && !tab.view) {
+    tab.lastUrl = url
+    tab.pendingUrl = url
+    tab.error = null
+    ensureTabLoaded(tab)
+    if (!tab.view) return false
+    publishState()
+    return true
+  }
   tab.error = null
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents

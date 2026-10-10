@@ -1,11 +1,11 @@
-import { DEFAULT_SEARCH_ENGINE, isSearchEngineId } from './navigation.ts'
+import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from './types'
 
 export const MAX_RESTORED_TABS = 50
 export const MAX_PINNED_SITES = 12
 export const MAX_SAVED_SITE_SETTINGS = 200
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
-export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'bonjourr'
+export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'quick-links'
 export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
 const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080 }
@@ -100,7 +100,7 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
 
 export function normalizeBrowserSession(urls: readonly string[], activeIndex: number): SavedBrowserSession {
   const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({ url, index }))
-    .filter((entry) => isHttpUrl(entry.url))
+    .filter((entry) => entry.url === SOCKFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
   if (indexedUrls.length === 0) return { urls: [], activeIndex: 0 }
 
   const safeActiveIndex = Number.isInteger(activeIndex) ? activeIndex : 0
@@ -144,7 +144,7 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
   return {
     searchEngine: isSearchEngineId(value.searchEngine) ? value.searchEngine : defaults.searchEngine,
     tabSleepMinutes: isTabSleepMinutes(value.tabSleepMinutes) ? value.tabSleepMinutes : defaults.tabSleepMinutes,
-    newTabPage: value.newTabPage === 'search' || value.newTabPage === 'bonjourr' ? value.newTabPage : defaults.newTabPage,
+    newTabPage: value.newTabPage === 'search' || value.newTabPage === 'bonjourr' || value.newTabPage === 'quick-links' ? value.newTabPage : defaults.newTabPage,
     pinnedSites: normalizePinnedSites(value.pinnedSites),
     siteSettings
   }
