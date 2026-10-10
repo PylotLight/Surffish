@@ -39,7 +39,10 @@ final class NativeAPITests: XCTestCase {
 
     func testExtensionDirectoryLoadsAndUnloadsThroughController() async throws {
         let browser = NativeBrowserHarness()
-        let directory = try probeExtensionDirectory()
+        // Keep the directory outside Bundle.module: WebKit traps on this test-bundle path on macOS 26.6.2,
+        // while the same fixture loads through the POC UI and the ZIP initializer.
+        let directory = try temporaryProbeExtensionDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
         let extensionSummary = try await browser.installExtension(at: directory, askForImportApproval: false)
 
         XCTAssertEqual(extensionSummary.name, "Sockfish Native API Probe")
@@ -107,5 +110,13 @@ final class NativeAPITests: XCTestCase {
         let directory = root.appendingPathComponent("Fixtures/ProbeExtension", isDirectory: true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path))
         return directory
+    }
+
+    private func temporaryProbeExtensionDirectory() throws -> URL {
+        let source = try probeExtensionDirectory()
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sockfish-probe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.copyItem(at: source, to: destination)
+        return destination
     }
 }
