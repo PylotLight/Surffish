@@ -20,10 +20,45 @@ import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SOCKFISH_QUIC
 import { MAX_PINNED_SITES } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
+import {
+  getQuickLinkBackgroundIndex,
+  nextQuickLinkBackgroundIndex,
+  QUICK_LINK_BACKGROUND_ROTATION_MS
+} from '../../../shared/quick-links-backgrounds'
+import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
+import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-lake.webp'
+import waterfall from '../assets/quick-links-backgrounds/waterfall.webp'
+import lakeMountain from '../assets/quick-links-backgrounds/lake-mountain.webp'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
+const QUICK_LINK_BACKGROUNDS = [
+  {
+    src: forestLake,
+    title: 'Forest lake',
+    creator: 'Pixel.la Free Stock Photos',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg'
+  },
+  {
+    src: mountainLake,
+    title: 'Tranquil mountain lake',
+    creator: 'Andrew Spencer',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg'
+  },
+  {
+    src: waterfall,
+    title: 'Waterfall in Iceland',
+    creator: 'Robert Lukeman',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Idyllic_landscape_with_a_waterfall_(Unsplash).jpg'
+  },
+  {
+    src: lakeMountain,
+    title: 'Lake Mountain Landscape',
+    creator: 'Bonnie Moreland',
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Lake_Mountain_Landscape.jpg'
+  }
+] as const
 const EMPTY_BROWSER: BrowserState = {
   url: BONJOURR_START_PAGE,
   title: 'Bonjourr',
@@ -170,6 +205,9 @@ export default function Browser(): React.JSX.Element {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
   const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
+  const [quickLinksBackgroundIndex, setQuickLinksBackgroundIndex] = useState(
+    () => getQuickLinkBackgroundIndex(Date.now(), QUICK_LINK_BACKGROUNDS.length)
+  )
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
@@ -193,6 +231,12 @@ export default function Browser(): React.JSX.Element {
   const [proxyMessage, setProxyMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
+  useEffect(() => {
+    const rotationTimer = window.setInterval(() => {
+      setQuickLinksBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, QUICK_LINK_BACKGROUNDS.length))
+    }, QUICK_LINK_BACKGROUND_ROTATION_MS)
+    return () => window.clearInterval(rotationTimer)
+  }, [])
   const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
   const addressSuggestions = useMemo(
     () => buildAddressSuggestions(address, pinnedSites, tabs, history),
@@ -201,6 +245,7 @@ export default function Browser(): React.JSX.Element {
   const favoriteQuickLinks = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentQuickLinks = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
   const isQuickLinksTab = browser.url === SOCKFISH_QUICK_LINKS_URL
+  const quickLinksBackground = QUICK_LINK_BACKGROUNDS[quickLinksBackgroundIndex] ?? QUICK_LINK_BACKGROUNDS[0]!
   const activeOrigin = httpOrigin(browser.url)
   const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
@@ -956,6 +1001,12 @@ export default function Browser(): React.JSX.Element {
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isQuickLinksTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
             <section className="quick-links-page" aria-label="Sockfish Quick Links start page">
+              <div
+                key={quickLinksBackground.title}
+                className="quick-links-backdrop"
+                aria-hidden="true"
+                style={{ backgroundImage: `url("${quickLinksBackground.src}")` }}
+              />
               <div className="quick-links-content">
                 <div className="quick-links-eyebrow"><span className="quick-links-brand" aria-hidden="true">S</span><span>SOCKFISH · LOCAL START PAGE</span></div>
                 <header className="quick-links-header">
@@ -975,6 +1026,23 @@ export default function Browser(): React.JSX.Element {
                   ) : <p className="quick-links-empty">Sites you visit often will appear here. This list stays on this device.</p>}
                 </section>
                 <p className="quick-links-privacy">Favorites reuse your pinned sites. Frequently visited tiles are computed from Sockfish’s local history; no history is sent to Bonjourr or a suggestion service.</p>
+                <footer className="quick-links-background-footer">
+                  <a className="quick-links-photo-credit" href={quickLinksBackground.sourceUrl} target="_blank" rel="noreferrer">
+                    Photo: {quickLinksBackground.creator} · CC0 1.0
+                  </a>
+                  <button
+                    className="quick-links-next-background"
+                    type="button"
+                    title="Next background"
+                    aria-label="Show next background"
+                    onClick={() => setQuickLinksBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, QUICK_LINK_BACKGROUNDS.length))}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M20 7v5h-5" />
+                      <path d="M19 12a7 7 0 1 0 2 4.9" />
+                    </svg>
+                  </button>
+                </footer>
               </div>
             </section>
           )}

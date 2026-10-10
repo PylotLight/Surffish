@@ -2,6 +2,8 @@
 
 Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, network-only ad blocking, an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
 
+![Sockfish live app with a scenic Quick Links background, favorites, and frequently visited sites](docs/screenshots/quick-links-new-tab.png)
+
 ## Quick start
 
 ```bash
@@ -16,11 +18,9 @@ bun run build
 
 Enter a web address or search phrase in the slim address bar. Local suggestions come from pinned sites, open tabs, and history; queries are not sent to a remote suggestion service. Choose Brave Search (the default), DuckDuckGo, Google, or Bing from **Settings → General**. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Only HTTP(S) pages can be opened.
 
-Fresh profiles open Sockfish's **Quick Links** page in new tabs. Favorites are the same locally stored pinned sites shown in the sidebar; **Frequently visited** is calculated from local history (up to eight unpinned origins). History is not sent to a suggestion service or Bonjourr. Favicons are requested directly from each tile's own `/favicon.ico` with no referrer, and fall back to a letter if unavailable. Pin the current page with ☆; use the sidebar to remove a pin. In **Settings → General → New tab page**, switch future tabs to [Bonjourr's hosted start page](https://online.bonjourr.fr/) or the selected search engine. Bonjourr's extension-only bookmark/Most Visited import is not available in Sockfish's hosted-page integration.
+Fresh profiles open Sockfish's **Quick Links** page in new tabs. It rotates through four locally bundled CC0 nature photos every 15 minutes; use **Next background** to skip immediately. Photo credits link to their sources, and rotation makes no photo-service requests. Favorites are the same locally stored pinned sites shown in the sidebar; **Frequently visited** is calculated from local history (up to eight unpinned origins). History is not sent to a suggestion service or Bonjourr. Favicons are requested directly from each tile's own `/favicon.ico` with no referrer, and fall back to a letter if unavailable. Pin the current page with ☆; use the sidebar to remove a pin. In **Settings → General → New tab page**, switch future tabs to [Bonjourr's hosted start page](https://online.bonjourr.fr/) or the selected search engine. Bonjourr's extension-only bookmark/Most Visited import is not available in Sockfish's hosted-page integration. See the [background photo credits and source notes](docs/quick-links-backgrounds.md).
 
-The live app screenshots below use synthetic local demo sites and data; they are not mockups.
-
-![Sockfish Quick Links New Tab with local favorites and frequently visited tiles](docs/screenshots/quick-links-new-tab.png)
+Project screenshots use genuine live Linux Electron app windows with synthetic demo sites and data; they are not mockups. See the [browser UI guide](docs/browser-ui-overhaul.md) for Tabs and History screenshots and platform limitations.
 
 ## Tabs, sidebar, and history
 

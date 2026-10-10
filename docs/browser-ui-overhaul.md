@@ -7,6 +7,7 @@ Fresh profiles use a direct connection by default so the start page loads withou
 ## New tabs, pins, and address suggestions
 
 - Fresh profiles open the browser-owned **Sockfish Quick Links** page in new tabs. It is rendered in the app UI rather than loading history into a remote start page. **Settings → General → New tab page** also offers [Bonjourr's hosted start page](https://online.bonjourr.fr/) and the selected search engine.
+- Quick Links rotates among four locally bundled **CC0 nature-photo backgrounds** every 15 minutes; the accessible **Next background** button skips to the next scene. The visible photo credit links to its source. This rotation is offline and never contacts an image service; the background asset sources and license records are listed in [quick-links-backgrounds.md](quick-links-backgrounds.md).
 - Favorite (star) saves the current website's HTTP(S) origin as a local pinned site. Pins appear at the top of the sidebar, open in the current tab, and can be removed with a right-click; pins are also offered in the address suggestions.
 - Quick Links **Favorites** are the same pinned sites, not a second bookmark list. The **Frequently visited** tiles aggregate locally stored Sockfish history by origin, exclude pinned origins, and show up to eight sites. Clearing history removes the derived frequent list; pinning/unpinning controls the Favorites list.
 - Bonjourr's Quick Links extension can import browser bookmark groups and, where browser APIs permit, Most Visited links; its documented default favicon mode uses Bonjourr's favicon-fetcher service ([official Quick Links docs](https://bonjourr.fr/docs/widgets/quick-links/)). Sockfish does not install that extension or expose browser bookmark import APIs in its hosted-page integration. This local Quick Links page is a simpler native alternative: each visible tile requests only its own site's `/favicon.ico` with `no-referrer`, and uses an initial-letter fallback if unavailable. It does not send history to Bonjourr or a favicon service.
@@ -38,7 +39,8 @@ Native macOS Touch ID for arbitrary website passkeys depends on Apple's managed 
 
 Real app screenshots (Linux Electron build; synthetic local sites/history, not mockups):
 
-- ![Sockfish Quick Links New Tab](screenshots/quick-links-new-tab.png)
+- ![Sockfish Quick Links New Tab with a local scenic background](screenshots/quick-links-new-tab.png)
+- ![Sockfish Quick Links after rotating to another local scenic background](screenshots/quick-links-background-rotation.png)
 - ![Tabs sidebar with local pins and open tabs](screenshots/tabs-sidebar.png)
 - ![History sidebar with synthetic local history](screenshots/history-sidebar.png)
 
@@ -54,7 +56,7 @@ bun run build
 
 Manual smoke checklist:
 
-1. Launch with a clean profile and confirm a new tab opens local Quick Links; verify Favorites reuse pins, Frequent tiles are derived from local history, and favicons either load from the site origin or fall back to a letter. Switch to Bonjourr or Search engine and verify the next tab uses that choice.
+1. Launch with a clean profile and confirm a new tab opens local Quick Links; verify Favorites reuse pins, Frequent tiles are derived from local history, and favicons either load from the site origin or fall back to a letter. Click **Next background**, check the credit changes, and verify no image-service request is made. Switch to Bonjourr or Search engine and verify the next tab uses that choice.
 2. Open a foreground and background tab; verify both begin loading immediately. Restart with several tabs and verify the selected tab loads automatically while inactive restored tabs load when selected.
 3. Confirm an audible/background media tab continues playing and is not hibernated while audible.
 4. Use the address-field Tabs and History icons; verify their accessible names/tooltips, keyboard focus, sidebar contents, hover reveal, and pin/unpin behavior. Open Settings from the sidebar footer.
