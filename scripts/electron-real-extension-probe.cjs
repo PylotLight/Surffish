@@ -254,6 +254,7 @@ function extensionContextExpression() {
     hasRuntimeMessaging: typeof globalThis.chrome?.runtime?.sendMessage === 'function',
     hasStorageLocal: typeof globalThis.chrome?.storage?.local?.get === 'function',
     hasStorageOnChanged: typeof globalThis.chrome?.storage?.onChanged?.addListener === 'function',
+    browserNamespace: typeof globalThis.browser !== 'undefined',
     pageWorld: typeof globalThis.chrome === 'undefined' ? 'no-chrome-namespace' : 'chrome-namespace-present'
   }))()`
 }
@@ -304,6 +305,38 @@ async function inspectPageContentScript() {
     report.page.loaded = true
     await delay(1500)
     report.page.snapshot = await getPageSnapshot(pageWindow)
+    if (report.manifest?.name === 'Bramble') {
+      const probeId = `sockfish-webauthn-${Date.now()}`
+      const probeExpression = `(() => {
+        const credentials = navigator.credentials;
+        const isJavaScriptOverride = (method) => typeof method === 'function' && !Function.prototype.toString.call(method).includes('[native code]');
+        const state = {
+          credentialsAvailable: !!credentials,
+          createOverridden: isJavaScriptOverride(credentials?.create),
+          getOverridden: isJavaScriptOverride(credentials?.get),
+          relayResult: null
+        };
+        globalThis.__sockfishBrambleWebAuthnProbe = state;
+        const id = ${JSON.stringify(probeId)};
+        const listener = (event) => {
+          if (event.source !== window || event.data?.__bramble_pk !== 'res' || event.data?.id !== id) return;
+          state.relayResult = event.data.result ?? null;
+          window.removeEventListener('message', listener);
+        };
+        window.addEventListener('message', listener);
+        window.postMessage({ __bramble_pk: 'req', id, method: 'get', payload: {} }, location.origin);
+        return true;
+      })()`
+      await withTimeout(pageWindow.webContents.executeJavaScript(probeExpression, true), 5000, 'start Bramble WebAuthn bridge probe')
+      let bridgeProbe = null
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        bridgeProbe = await pageWindow.webContents.executeJavaScript('globalThis.__sockfishBrambleWebAuthnProbe ?? null', true)
+        if (bridgeProbe?.relayResult) break
+        await delay(50)
+      }
+      report.page.brambleWebAuthnBridge = bridgeProbe ?? { error: 'The page did not expose the bridge probe result.' }
+      if (!bridgeProbe?.relayResult) report.page.brambleWebAuthnBridge.relayTimeout = true
+    }
   } catch (error) {
     report.page.error = error instanceof Error ? error.message : String(error)
     return

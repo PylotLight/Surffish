@@ -40,6 +40,14 @@ export interface BrowserBounds {
   height: number
 }
 
+export interface BramblePocState {
+  installed: boolean
+  loading: boolean
+  version: string | null
+  popupOpen: boolean
+  error: string | null
+}
+
 export interface AdblockBlockedRequest {
   timestamp: number
   requestHost: string

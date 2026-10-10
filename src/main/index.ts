@@ -3,10 +3,11 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { APP_ID } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
-import { createWindow, showWindow } from './window'
+import { createWindow, setMainWindowCloseHandler, showWindow } from './window'
 import { setBrowserSearchEngine } from './browser'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
+import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(async () => {
@@ -42,7 +43,13 @@ app.whenReady().then(async () => {
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   registerIpc()
   setBrowserSearchEngine(getBrowserSearchEngine())
+  setMainWindowCloseHandler(disposeBramblePoc)
   createWindow()
+  try {
+    await initializeBramblePoc()
+  } catch (error) {
+    console.warn('Could not initialize the Bramble POC; continuing without it:', error)
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -54,3 +61,4 @@ app.on('second-instance', () => showWindow())
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+app.on('before-quit', disposeBramblePoc)

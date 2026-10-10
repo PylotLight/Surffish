@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   AdblockDiagnostics,
+  BramblePocState,
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
@@ -21,6 +22,13 @@ const EMPTY_BROWSER: BrowserState = {
   loading: true,
   canGoBack: false,
   canGoForward: false,
+  error: null
+}
+const EMPTY_BRAMBLE_POC: BramblePocState = {
+  installed: false,
+  loading: false,
+  version: null,
+  popupOpen: false,
   error: null
 }
 
@@ -101,6 +109,7 @@ export default function Browser(): React.JSX.Element {
   const newTabControlRef = useRef<HTMLDivElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
+  const [bramblePoc, setBramblePoc] = useState<BramblePocState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
   const [sidebarPinned, setSidebarPinned] = useState(false)
@@ -163,6 +172,28 @@ export default function Browser(): React.JSX.Element {
     setHistory(await window.api.browser.history.get())
   }
 
+  async function openBramblePoc(): Promise<void> {
+    try {
+      setBramblePoc(await window.api.browser.bramble.open())
+    } catch (error) {
+      setBramblePoc((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error)
+      }))
+    }
+  }
+
+  async function openBrambleSetupPage(): Promise<void> {
+    try {
+      setBramblePoc(await window.api.browser.bramble.setup())
+    } catch (error) {
+      setBramblePoc((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error)
+      }))
+    }
+  }
+
   async function refreshAdblock(): Promise<void> {
     try {
       setAdblockDiagnostics(await window.api.browser.adblock.refresh())
@@ -212,6 +243,12 @@ export default function Browser(): React.JSX.Element {
     const unsubscribeNetwork = window.api.browser.network.onChange(setNetworkRequests)
     void window.api.browser.network.get().then(setNetworkRequests)
     return unsubscribeNetwork
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc)
+    void window.api.browser.bramble.get().then(setBramblePoc)
+    return unsubscribe
   }, [])
 
   const selectedNetworkSummary = networkRequests.find((request) => request.id === selectedNetworkId) ?? null
@@ -618,10 +655,35 @@ export default function Browser(): React.JSX.Element {
                 placeholder="Search or enter address"
               />
             </label>
+            <button
+              className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
+              type="button"
+              aria-label={bramblePoc.installed ? 'Open Bramble vault (POC)' : 'Load Bramble Firefox build and open vault (POC)'}
+              aria-pressed={bramblePoc.popupOpen}
+              aria-busy={bramblePoc.loading}
+              title={bramblePoc.error ?? (bramblePoc.installed ? `Open Bramble vault (POC${bramblePoc.version ? `, ${bramblePoc.version}` : ''})` : 'Load Bramble Firefox build (POC)')}
+              disabled={bramblePoc.loading}
+              onClick={() => void openBramblePoc()}
+            >
+              <span className="bramble-toolbar-mark" aria-hidden="true">B</span>
+              <span className="bramble-toolbar-label">{bramblePoc.loading ? 'Loading' : 'Bramble'}</span>
+            </button>
+            <button
+              className="toolbar-button bramble-setup-toolbar-button"
+              type="button"
+              aria-label="Open Bramble setup or restore a vault"
+              title="Open Bramble setup / restore"
+              disabled={bramblePoc.loading}
+              onClick={() => void openBrambleSetupPage()}
+            >
+              <span className="bramble-setup-toolbar-label">Setup</span>
+            </button>
           </form>
-          {(browser.error || navigationError) && (
+          {(browser.error || navigationError || bramblePoc.error) && (
             <p className="browser-error" role="status">
-              {browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
+              {bramblePoc.error
+                ? `Bramble POC: ${bramblePoc.error}`
+                : browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
             </p>
           )}
         </header>
