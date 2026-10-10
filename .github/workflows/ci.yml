@@ -16,6 +16,8 @@ jobs:
       - run: bun run typecheck
       - run: bun run test
       - run: bun run build
+      - name: Probe Electron extension compatibility
+        run: xvfb-run -a bun run test:electron-extensions
 
   native-macos:
     runs-on: macos-26

@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Sockfish Extension Probe MV3",
+  "version": "1.0.0",
+  "description": "Local diagnostic fixture; no network access beyond loopback and no credential handling.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "idle",
+    "offscreen",
+    "identity",
+    "webAuthenticationProxy",
+    "clipboardWrite"
+  ],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Sockfish MV3 Probe",
+    "default_popup": "popup.html"
+  }
+}
