@@ -12,6 +12,7 @@ import {
   parseBrowserPreferences,
   parseBrowserSession
 } from './persistence.ts'
+import { SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
 
 test('normalizes a saved tab list and retains its selected tab', () => {
   assert.deepEqual(normalizeBrowserSession(['https://one.test/', 'https://two.test/'], 1), {
@@ -23,6 +24,13 @@ test('normalizes a saved tab list and retains its selected tab', () => {
 test('drops unsafe URLs and adjusts the selected index', () => {
   assert.deepEqual(normalizeBrowserSession(['file:///etc/passwd', 'https://safe.test/'], 1), {
     urls: ['https://safe.test/'],
+    activeIndex: 0
+  })
+})
+
+test('preserves the internal Quick Links tab while still rejecting other non-web URLs', () => {
+  assert.deepEqual(normalizeBrowserSession([SOCKFISH_QUICK_LINKS_URL, 'file:///etc/passwd', 'https://safe.test/'], 0), {
+    urls: [SOCKFISH_QUICK_LINKS_URL, 'https://safe.test/'],
     activeIndex: 0
   })
 })
@@ -56,7 +64,7 @@ test('uses a validated default tab-sleep interval for new and older preferences'
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 10 }).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
 })
 
-test('defaults older preference files to Bonjourr without losing existing settings', () => {
+test('defaults older preference files to Quick Links without losing existing settings', () => {
   const parsed = parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 15 })
   assert.equal(parsed.newTabPage, DEFAULT_NEW_TAB_PAGE)
   assert.equal(parsed.searchEngine, 'google')

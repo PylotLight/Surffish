@@ -1,7 +1,7 @@
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
-export type NewTabPageId = 'bonjourr' | 'search'
+export type NewTabPageId = 'quick-links' | 'bonjourr' | 'search'
 
 export interface PinnedSite {
   title: string
