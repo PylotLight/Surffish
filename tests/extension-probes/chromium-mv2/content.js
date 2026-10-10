@@ -44,12 +44,21 @@ function finishOne() {
   if (pending === 0) document.documentElement.dataset.sockfishExtensionProbe = JSON.stringify(result);
 }
 
-chrome.runtime.sendMessage({ type: 'sockfish-extension-probe' }, (response) => {
-  result.backgroundReply = Boolean(response);
-  result.backgroundError = chrome.runtime.lastError?.message || null;
-  result.background = response || null;
-  finishOne();
-});
+function requestBackgroundProbe(attempt = 1) {
+  chrome.runtime.sendMessage({ type: 'sockfish-extension-probe' }, (response) => {
+    const error = chrome.runtime.lastError?.message || null;
+    if (!response && error && attempt < 5) {
+      setTimeout(() => requestBackgroundProbe(attempt + 1), attempt * 100);
+      return;
+    }
+    result.backgroundReply = Boolean(response);
+    result.backgroundError = error;
+    result.background = response || null;
+    finishOne();
+  });
+}
+
+requestBackgroundProbe();
 
 chrome.storage.local.set({ sockfishContentProbe: 'stored' }, () => {
   const setError = chrome.runtime.lastError?.message;

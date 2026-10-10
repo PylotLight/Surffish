@@ -34,12 +34,13 @@ for (const name of caseNames) {
     signal: child.signal,
     timedOut: Boolean(child.error && child.error.code === 'ETIMEDOUT'),
     runnerError: child.error ? child.error.message : null,
+    probeOk: childReport?.ok === true,
     electronStderr: stderr.trim() || null,
     result: childReport?.cases?.[0] ?? null
   }
   results.push(record)
 
-  if (name === 'chromium-mv2' && (child.status !== 0 || !record.result)) {
+  if (name === 'chromium-mv2' && (child.status !== 0 || !record.result || childReport?.ok !== true)) {
     throw new Error(`The required Electron MV2 baseline failed.\n${JSON.stringify(record, null, 2)}\n${stdout}`)
   }
 }
