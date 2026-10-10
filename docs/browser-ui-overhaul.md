@@ -2,6 +2,8 @@
 
 This release gives Sockfish a more complete browser shell while keeping the existing Chromium profile, stored tabs/history, proxy, network blocker, and Bramble toolbar action intact.
 
+Fresh profiles use a direct connection by default so the start page loads without requiring a local SOCKS tunnel. An explicitly saved proxy choice remains authoritative; enable and save SOCKS5 in **Settings → General** when desired.
+
 ## New tabs, pins, and address suggestions
 
 - New tabs open [Bonjourr's online start page](https://online.bonjourr.fr/) by default. **Settings → General → New tab page** can switch future new tabs to the selected search engine instead. No Bonjourr extension is installed or required.

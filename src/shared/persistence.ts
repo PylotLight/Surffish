@@ -1,5 +1,5 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId } from './navigation.ts'
-import type { BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from './types'
+import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from './types'
 
 export const MAX_RESTORED_TABS = 50
 export const MAX_PINNED_SITES = 12
@@ -7,6 +7,8 @@ export const MAX_SAVED_SITE_SETTINGS = 200
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
 export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'bonjourr'
 export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
+const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080 }
 
 export interface SavedBrowserSession {
   urls: string[]
@@ -27,6 +29,16 @@ export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function parseBrowserProxySettings(value: unknown): BrowserProxySettings {
+  const record = isRecord(value) ? value : {}
+  const host = typeof record.host === 'string' ? record.host.trim().toLowerCase() : ''
+  const port = Number(record.port)
+  if (typeof record.enabled !== 'boolean' || !LOCAL_PROXY_HOSTS.has(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return { ...DEFAULT_BROWSER_PROXY_SETTINGS }
+  }
+  return { enabled: record.enabled, host, port }
 }
 
 function safeHttpUrl(value: unknown): string | null {

@@ -44,6 +44,8 @@ An isolated [native macOS WebKit proof of concept](native/macos/README.md) exerc
 
 ## Use a local SSH SOCKS tunnel
 
+Fresh profiles start with **Use proxy** off so the browser can load sites without a local tunnel. Enable SOCKS5 in **Settings → General** when you want to route browser traffic through your tunnel; the saved choice is retained across launches.
+
 Run the tunnel on the same computer as Sockfish:
 
 ```bash

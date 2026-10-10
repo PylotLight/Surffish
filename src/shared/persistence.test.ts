@@ -2,11 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_NEW_TAB_PAGE,
+  DEFAULT_BROWSER_PROXY_SETTINGS,
   MAX_PINNED_SITES,
   MAX_RESTORED_TABS,
   DEFAULT_TAB_SLEEP_MINUTES,
   normalizeBrowserSession,
   normalizePinnedSites,
+  parseBrowserProxySettings,
   parseBrowserPreferences,
   parseBrowserSession
 } from './persistence.ts'
@@ -36,6 +38,15 @@ test('rejects invalid session data and bounds restored tab count', () => {
 test('falls back to the default search engine for invalid preferences', () => {
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google' }).searchEngine, 'google')
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'unknown' }).searchEngine, 'brave')
+})
+
+test('defaults fresh profiles to direct browsing while preserving valid saved SOCKS choices', () => {
+  assert.deepEqual(DEFAULT_BROWSER_PROXY_SETTINGS, { enabled: false, host: '127.0.0.1', port: 1080 })
+  assert.deepEqual(parseBrowserProxySettings(null), DEFAULT_BROWSER_PROXY_SETTINGS)
+  assert.deepEqual(parseBrowserProxySettings({ enabled: true, host: 'localhost', port: 1080 }), {
+    enabled: true, host: 'localhost', port: 1080
+  })
+  assert.deepEqual(parseBrowserProxySettings({ enabled: true, host: 'proxy.example', port: 1080 }), DEFAULT_BROWSER_PROXY_SETTINGS)
 })
 
 test('uses a validated default tab-sleep interval for new and older preferences', () => {
