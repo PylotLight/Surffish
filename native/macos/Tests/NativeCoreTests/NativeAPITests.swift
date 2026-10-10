@@ -105,6 +105,15 @@ final class NativeAPITests: XCTestCase {
         XCTAssertNil(browser.webView.url)
     }
 
+    func testWebInspectorIsEnabledOnlyForDebugBuilds() {
+        let browser = NativeBrowserHarness()
+        #if DEBUG
+        XCTAssertTrue(browser.webView.isInspectable)
+        #else
+        XCTAssertFalse(browser.webView.isInspectable)
+        #endif
+    }
+
     private func probeExtensionDirectory() throws -> URL {
         let root = try XCTUnwrap(Bundle.module.resourceURL)
         let directory = root.appendingPathComponent("Fixtures/ProbeExtension", isDirectory: true)

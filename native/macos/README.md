@@ -22,6 +22,8 @@ swift run SockfishNative
 
 For a Launch Services `.app` bundle, optionally use `./Scripts/package-and-run.sh`. It ad-hoc signs the local build (no Developer ID, notarization, or paid account) and creates no special entitlements. Alternatively, `swift run` launches from the terminal without the bundle packaging step. The app requests regular foreground activation and focuses the address field after its window appears, including for SwiftPM launches. If macOS blocks a downloaded build, build it locally rather than removing Gatekeeper protections.
 
+Debug builds opt in the browser page and extension popup `WKWebView`s to Safari Web Inspector; release builds leave inspection disabled. To investigate a blank extension popup, open Safari Settings → Advanced, enable **Show features for web developers**, then in Sockfish open the popup and choose its view from Safari's **Develop** menu. Check the Console for JavaScript exceptions and failed resource requests. If Web Inspector lists the extension background page or service worker, inspect that too; a popup can render blank when its background script fails or uses an unsupported API. Save the first relevant exception and its source/line before changing extension permissions or trying another package.
+
 The repository's macOS CI job runs `swift test` and `swift build` on an Apple runner. The current development computer is Linux, so the WebKit runtime checks must run on that runner or your Mac; Linux cannot compile or execute Apple's WebKit frameworks.
 
 ## Try an extension

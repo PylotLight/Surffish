@@ -90,6 +90,7 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         self.webView = webView
         super.init()
 
+        enableWebInspectorIfDebugBuild(for: webView)
         extensionController.delegate = self
         webView.navigationDelegate = self
     }
@@ -249,6 +250,7 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
 
         popupAnchorView = anchor
         if action.presentsPopup, let popupWebView = action.popupWebView {
+            enableWebInspectorIfDebugBuild(for: popupWebView)
             popupWebView.navigationDelegate = self
             popupExtensionIDs[ObjectIdentifier(popupWebView)] = summary.id
         }
@@ -372,6 +374,7 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
     ) {
         if let popupWebView = action.popupWebView,
            let summary = loadedExtensions.first(where: { $0.context === context }) {
+            enableWebInspectorIfDebugBuild(for: popupWebView)
             popupWebView.navigationDelegate = self
             popupExtensionIDs[ObjectIdentifier(popupWebView)] = summary.id
         }
@@ -477,6 +480,12 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         if messages.last != message { messages.append(message) }
         hostDiagnosticsByExtensionID[summary.id] = Array(messages.suffix(50))
         refreshExtensionDiagnostics()
+    }
+
+    private func enableWebInspectorIfDebugBuild(for webView: WKWebView) {
+        #if DEBUG
+        webView.isInspectable = true
+        #endif
     }
 
     private func confirmImport(of webExtension: WKWebExtension) -> Bool {
