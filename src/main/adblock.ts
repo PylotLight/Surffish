@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { adsLists, ElectronBlocker, type Fetch } from '@ghostery/adblocker-electron'
+import { isNetworkOnlyConfig, isProtectedVideoDeliveryUrl, NETWORK_ONLY_CONFIG } from './adblock-policy'
 import { getBrowserSession } from './browser-session'
 import { getMainWindow } from './window'
 import type { AdblockDiagnostics, AdblockBlockedRequest } from '../shared/types'
@@ -9,15 +10,6 @@ import type { AdblockDiagnostics, AdblockBlockedRequest } from '../shared/types'
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
 const FILTER_FETCH_TIMEOUT_MS = 2500
 const MAX_RECENT_BLOCKS = 20
-const NETWORK_ONLY_CONFIG = {
-  loadNetworkFilters: true,
-  loadCosmeticFilters: false,
-  loadCSPFilters: false,
-  enableHtmlFiltering: false,
-  enableMutationObserver: false,
-  loadExtendedSelectors: false,
-  loadGenericCosmeticsFilters: false
-} as const
 
 let initialization: Promise<void> | null = null
 let refreshInProgress: Promise<void> | null = null
@@ -41,22 +33,12 @@ function cachePath(): string {
   return join(app.getPath('userData'), 'adblock-engine.bin')
 }
 
-function isNetworkOnly(blocker: ElectronBlocker): boolean {
-  return blocker.config.loadNetworkFilters &&
-    !blocker.config.loadCosmeticFilters &&
-    !blocker.config.loadCSPFilters &&
-    !blocker.config.enableHtmlFiltering &&
-    !blocker.config.enableMutationObserver &&
-    !blocker.config.loadExtendedSelectors &&
-    !blocker.config.loadGenericCosmeticsFilters
-}
-
 function readCache(): { blocker: ElectronBlocker; fresh: boolean; modifiedAt: number } | null {
   try {
     const file = cachePath()
     const modifiedAt = statSync(file).mtimeMs
     const blocker = ElectronBlocker.deserialize(readFileSync(file))
-    if (!isNetworkOnly(blocker)) return null
+    if (!isNetworkOnlyConfig(blocker.config)) return null
     return {
       blocker,
       modifiedAt,
@@ -105,11 +87,6 @@ function hostFromUrl(value: string | undefined): string {
   } catch {
     return 'unknown'
   }
-}
-
-function isProtectedVideoDelivery(details: Parameters<ElectronBlocker['onBeforeRequest']>[0]): boolean {
-  const host = hostFromUrl(details.url)
-  return host === 'googlevideo.com' || host.endsWith('.googlevideo.com')
 }
 
 function diagnosticsSnapshot(): AdblockDiagnostics {
@@ -165,7 +142,7 @@ function activateBlocker(next: ElectronBlocker): void {
 
   const originalOnBeforeRequest = next.onBeforeRequest.bind(next)
   next.onBeforeRequest = (details, callback) => {
-    if (isProtectedVideoDelivery(details)) {
+    if (isProtectedVideoDeliveryUrl(details.url)) {
       // YouTube serves both ads and wanted video chunks through these hosts.
       // Let them pass rather than risking interrupted playback.
       recordRequest(details, {})

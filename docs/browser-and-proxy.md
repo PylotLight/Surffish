@@ -29,3 +29,7 @@ This creates a local SOCKS endpoint on `127.0.0.1:1080` for the lifetime of the 
 - The local port check is a TCP connect test, not a SOCKS protocol handshake.
 - Web pages may navigate only over HTTP(S); popups and web permission requests are blocked.
 - This implementation is a prototype, not a system-wide VPN or audited browser. Proxy configuration alone does not guarantee that every browser-related traffic type is proxied or prevent DNS/WebRTC leaks.
+
+## Ad-blocker tests
+
+`npm test` includes offline regression tests for Ghostery's list parsing, request decisions, cache serialization, network-only settings, and the `googlevideo.com` playback exception. `npm run test:electron-adblock` launches an actual Electron/Chromium session against a loopback-only fixture to verify a matching request is cancelled while a non-matching request loads; on headless Linux, run it under `xvfb-run -a`. The smoke test uses an in-memory session and does not fetch live filter lists or contact YouTube.

@@ -13,7 +13,8 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/password-extension-compat.test.ts",
+    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/password-extension-compat.test.ts src/main/adblock.test.ts",
+    "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
     "check:password-extension": "node --experimental-strip-types scripts/check-password-extension.ts",
     "postinstall": "install-electron"
   },

@@ -25,3 +25,9 @@ Sockfish already renders pages with Chromium/Blink through Electron's `WebConten
 - **Prototype native WebKit on macOS:** Apple's `WKWebExtensionController` is available from macOS 15.4 and can host Safari-style extensions in a `WKWebView`; SOCKSv5 data-store proxy configuration is available from macOS 14. This requires a separate native browser-view/profile implementation, not a replacement Electron setting. [See the WebKit evaluation and extension candidates](native-webkit-evaluation.md).
 
 For the current prototype, keep Electron, measure the exact extensions that matter, and revisit the runtime only if those tests fail for a core use case.
+
+## Passkey support in Electron
+
+Sockfish currently depends on Electron 44.5.1, which exposes [`app.configureWebAuthn`](https://www.electronjs.org/docs/latest/api/app#appconfigurewebauthnoptions-macos) on macOS. Its `touchID` option enables the platform authenticator for web pages using `navigator.credentials.create()` and `navigator.credentials.get()`. Electron requires a matching `keychain-access-groups` code-signing entitlement; credentials are stored in the Mac's Secure Enclave and are device-bound rather than synced through iCloud Keychain.
+
+This is **app-level WebAuthn support**, not evidence that a password-manager extension can provide passkeys in Sockfish. It does not implement the extension APIs, popup UI, or host integration that Bitwarden or Bramble might need. Sockfish does not currently call `configureWebAuthn` or have the required macOS signing entitlement configured, so passkeys are not enabled or tested in this app. This could be a separate macOS browser feature, but it would not resolve extension compatibility on its own.
