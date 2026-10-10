@@ -12,9 +12,10 @@ Against Bramble **1.28.0**'s Firefox build, the automated app-level test now ver
 - Bramble's real consent card approves a passkey registration for a localhost relying party; a subsequent `navigator.credentials.get()` signs in with that stored passkey.
 - The returned signature verifies against the public key from registration. The test also checks the RP ID hash, origin, challenge, user-presence, and user-verification flags.
 - The **Join a device** form renders its pairing-code and master-password fields; the test does not create a code or connect another device.
+- Actual page-based password autofill works on a local-only login form: the test creates a synthetic login through Bramble's real editor, checks the content-script query, selects the visible matching suggestion, and verifies both username and password fields before a local submit handler accepts them. No form request leaves the localhost harness.
 - A full encrypted `.bramble` backup restores through Bramble's **Setup/Restore → Restore from backup** UI. When a vault already exists, the restore adds a second locked vault and the first vault's encrypted bytes remain unchanged.
 
-The automated test uses a temporary Sockfish profile, a random in-memory test password and user handle, and a local-only relying party. It blocks non-local DNS, writes no test credentials or private key to logs or fixtures, and removes the temporary profile after the run. The screenshot is `/workspace/bramble-poc-verification.png` by default.
+The automated test uses a temporary Sockfish profile, random in-memory vault and login credentials, a local-only autofill form, and a localhost relying party. It blocks non-local DNS, does not log or fixture the test credentials or private key, prevents any form POST from leaving the local harness, and removes the temporary profile after the run. The screenshot is `/workspace/bramble-poc-verification.png` by default.
 
 ## Bring an existing vault into Sockfish
 
@@ -40,7 +41,7 @@ This is a snapshot restore, not sync enrollment. If the Sockfish profile has no 
 ## What the POC adds
 
 - A **Bramble** toolbar launcher that opens a compact popup directly below its button, plus a separate **Setup/Restore** action. The popup dismisses on outside focus or Escape; its first-run **Create your vault** action opens the app-owned options window. First use selects an unpacked Bramble Firefox build, shows its broad `<all_urls>` host access, and requires an explicit in-app confirmation.
-- A document-sized, resizable Setup/Restore window with native window controls and scrolling when the Bramble options page exceeds the available display. The popup stays at Bramble's 500×550 CSS viewport and is scrollable on smaller displays.
+- A document-sized, resizable Setup/Restore window with native window controls and scrolling when the Bramble options page exceeds the available display. The Join route now fits at 680 CSS px when the display allows it, with scroll fallback on smaller displays. The popup stays at Bramble's 500×550 CSS viewport and is scrollable on smaller displays.
 - A narrow adapter for Bramble's known Firefox Manifest V3 package. It stages a private copy under Sockfish's user-data folder, adapts its module background entry and `browser` namespace, and does not modify the source build.
 - Bramble's real popup/options UI and an app-owned hidden `offscreen.html` host in the same browser session. The offscreen host is needed for Bramble's actual vault crypto path.
 - A remembered source-build path for opt-in reload at Sockfish startup. Rebuild Bramble and the staged copy is refreshed on app startup.
@@ -68,7 +69,7 @@ Select `packages/platform-extension/dist-firefox` in Sockfish. Bramble source, g
 5. In Bramble **Settings**, enable **Use Bramble for passkeys**. This is opt-in and off by default because it handles browser WebAuthn prompts.
 6. Run the automated smoke command below for a local passkey registration and assertion. It opens no external relying party and needs no existing vault or account.
 
-The app-level test covers a new local vault, lock/unlock, passkey registration/assertion, the Join form, and a full encrypted backup restore into the same disposable profile. It confirms that the restore creates a second locked vault and preserves the original encrypted bytes. It does not exercise live pairing/sync or the portable item-import pipeline. The POC leaves vault data in Bramble's extension-owned storage; Sockfish does not read or log the master password. OAuth backup is unsupported in this Electron adaptation because the Firefox build's `identity` permission is removed.
+The app-level test covers a new local vault, lock/unlock, selected password autofill into a conventional localhost username/current-password form, passkey registration/assertion, the Join form, and a full encrypted backup restore into the same disposable profile. It confirms that the restore creates a second locked vault and preserves the original encrypted bytes. It does not exercise live pairing/sync or the portable item-import pipeline. The POC leaves vault data in Bramble's extension-owned storage; Sockfish does not read or log the master password. OAuth backup is unsupported in this Electron adaptation because the Firefox build's `identity` permission is removed.
 
 ## Validation commands
 
@@ -83,7 +84,7 @@ xvfb-run -a npm run test:electron-extensions
 xvfb-run -a npm run test:electron-host-bridge
 ```
 
-`test:bramble-poc` stages the Firefox build with the production adapter and runs a network-isolated Electron extension/UI/bridge probe. `test:bramble-app-poc` launches the built Sockfish app with a temporary profile, verifies the Join form without sending a code, creates and unlocks a disposable vault, enables Bramble's provider in that test profile, performs and verifies the consented localhost create/get ceremony, then restores a full encrypted backup as a second locked vault and checks that the original encrypted bytes are unchanged. It cleans up its temporary profile. Both app probes use Xvfb automatically on headless Linux.
+`test:bramble-poc` stages the Firefox build with the production adapter and runs a network-isolated Electron extension/UI/bridge probe. `test:bramble-app-poc` launches the built Sockfish app with a temporary profile, verifies the Join form without sending a code, creates and unlocks a disposable vault, adds one synthetic login through Bramble's real editor, confirms the page content script receives the matching local-host query, selects the visible suggestion, and verifies a prevented local form submission with both fields populated. It then enables Bramble's provider in that test profile, performs and verifies the consented localhost create/get ceremony, restores a full encrypted backup as a second locked vault, and checks that the original encrypted bytes are unchanged. It cleans up its temporary profile. Both app probes use Xvfb automatically on headless Linux.
 
 The test-only variables `SOCKFISH_BRAMBLE_POC_DEV_AUTOLOAD=1` and `SOCKFISH_BRAMBLE_EXTENSION_DIR=...` bypass the folder picker/confirmation **only in an unpackaged development build**. Do not set them for normal use or packaging.
 
@@ -94,7 +95,7 @@ The test-only variables `SOCKFISH_BRAMBLE_POC_DEV_AUTOLOAD=1` and `SOCKFISH_BRAM
 - Full encrypted `.bramble` restore is verified only on a disposable vault copy, including the non-overwrite behavior when a vault already exists. Portable item import and third-party imports are not tested.
 - The Join form is verified, but actual device pairing and ongoing P2P sync have not been tested in Sockfish; no real pairing code or vault was used. Do not treat sync as verified until a separate two-disposable-profile pairing test passes. OAuth backup is unsupported here, and other cloud backup destinations are unvalidated.
 - The automated WebAuthn test covers an isolated `localhost` RP and ES256 create/get, not arbitrary public sites, every WebAuthn option, cross-origin iframe behavior, or production packaging/signing. The provider continues to use Bramble's Firefox MAIN-world bridge because Electron does not expose `webAuthenticationProxy`.
-- This POC does not change Bitwarden or other extension support and makes no claim of general password autofill compatibility.
+- Password autofill is verified for one conventional, local-only username/current-password form. This does not establish compatibility with all sites, complex forms, shadow DOM, cross-origin frames, or other password managers; the POC does not change Bitwarden or other extension support.
 - The extension's vault data remains in Sockfish's persistent browser profile even if the selected build directory moves or is removed. Use Bramble's own vault-management UI to remove a vault.
 - No Bramble source/build output, WASM, real vault credentials, recovery codes, or test vault fixtures are committed.
 
