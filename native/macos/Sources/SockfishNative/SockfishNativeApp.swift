@@ -252,6 +252,7 @@ private struct ExtensionActionButton: NSViewRepresentable {
         context.coordinator.update(button: button, browser: browser, extensionID: extensionID, name: name)
     }
 
+    @MainActor
     final class Coordinator: NSObject {
         private var browser: NativeBrowserHarness
         private var extensionID: UUID
