@@ -4,6 +4,17 @@ import Combine
 import Network
 import WebKit
 
+public enum NativeNavigationTarget: Equatable {
+    case website(URL)
+    case braveSearch(URL)
+
+    public var url: URL {
+        switch self {
+        case .website(let url), .braveSearch(let url): return url
+        }
+    }
+}
+
 public struct ExtensionInstallSummary: Identifiable {
     public let id: UUID
     public let name: String
@@ -16,11 +27,20 @@ public struct ExtensionInstallSummary: Identifiable {
     public var isLoaded: Bool { context.isLoaded }
 }
 
+public struct ExtensionDiagnostic: Identifiable, Equatable {
+    public let id: UUID
+    public let extensionName: String
+    public let isLoaded: Bool
+    public let messages: [String]
+}
+
 public enum NativePrototypeError: LocalizedError {
     case notAnAppExtensionBundle(URL)
     case invalidWebAuthnProbeResult
     case extensionWasDeclined
     case invalidAddress
+    case extensionActionUnavailable(String)
+    case popupPresentationUnavailable(String)
 
     public var errorDescription: String? {
         switch self {
@@ -31,21 +51,31 @@ public enum NativePrototypeError: LocalizedError {
         case .extensionWasDeclined:
             return "Extension installation was cancelled."
         case .invalidAddress:
-            return "Enter a valid HTTP or HTTPS URL."
+            return "Enter an HTTP or HTTPS address, or a search query."
+        case .extensionActionUnavailable(let name):
+            return "\(name) does not declare a browser action."
+        case .popupPresentationUnavailable(let name):
+            return "Could not present the popup for \(name): the popup view or toolbar anchor is unavailable."
         }
     }
 }
 
 @MainActor
 public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigationDelegate, WKWebExtensionControllerDelegate {
-    @Published public var address = "https://example.com"
+    @Published public var address = ""
     @Published public var status = "Ready — macOS 15.4 or later"
     @Published public private(set) var proxyEnabled = false
     @Published public private(set) var loadedExtensions: [ExtensionInstallSummary] = []
+    @Published public private(set) var extensionDiagnostics: [ExtensionDiagnostic] = []
+    @Published public private(set) var extensionActionRevision = 0
 
     public let dataStore: WKWebsiteDataStore
     public let extensionController: WKWebExtensionController
     public let webView: WKWebView
+
+    private weak var popupAnchorView: NSView?
+    private var popupExtensionIDs: [ObjectIdentifier: UUID] = [:]
+    private var hostDiagnosticsByExtensionID: [UUID: [String]] = [:]
 
     public override init() {
         let dataStore = WKWebsiteDataStore.default()
@@ -64,19 +94,57 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         webView.navigationDelegate = self
     }
 
-    public func navigate(_ rawAddress: String? = nil) {
-        let raw = (rawAddress ?? address).trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidate = raw.contains("://") ? raw : "https://\(raw)"
-        guard let url = URL(string: candidate),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              url.host != nil else {
-            status = NativePrototypeError.invalidAddress.localizedDescription
-            return
+    public static func destination(for rawAddress: String) throws -> NativeNavigationTarget {
+        let raw = rawAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { throw NativePrototypeError.invalidAddress }
+
+        if raw.contains("://") {
+            guard let url = URL(string: raw),
+                  let scheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme),
+                  url.host != nil else {
+                throw NativePrototypeError.invalidAddress
+            }
+            return .website(url)
         }
-        address = url.absoluteString
-        webView.load(URLRequest(url: url))
-        status = "Loading \(url.host ?? url.absoluteString)…"
+
+        let hasWhitespace = raw.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
+        let isHostWithPort = raw.range(of: #"^[^:/\s]+:\d+(?:/.*)?$"#, options: .regularExpression) != nil
+        let looksLikeHost = !hasWhitespace && (
+            raw.contains(".") || raw.lowercased() == "localhost" || raw.hasPrefix("[") || isHostWithPort
+        )
+
+        if looksLikeHost {
+            guard let url = URL(string: "https://\(raw)"),
+                  let scheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme),
+                  url.host != nil else {
+                throw NativePrototypeError.invalidAddress
+            }
+            return .website(url)
+        }
+
+        var components = URLComponents(string: "https://search.brave.com/search")
+        components?.queryItems = [URLQueryItem(name: "q", value: raw)]
+        guard let searchURL = components?.url else { throw NativePrototypeError.invalidAddress }
+        return .braveSearch(searchURL)
+    }
+
+    public func navigate(_ rawAddress: String? = nil) {
+        let raw = rawAddress ?? address
+        do {
+            let target = try Self.destination(for: raw)
+            address = target.url.absoluteString
+            webView.load(URLRequest(url: target.url))
+            switch target {
+            case .website:
+                status = "Loading \(target.url.host ?? target.url.absoluteString)…"
+            case .braveSearch:
+                status = "Searching Brave for \(raw.trimmingCharacters(in: .whitespacesAndNewlines))…"
+            }
+        } catch {
+            status = error.localizedDescription
+        }
     }
 
     public func goBack() {
@@ -140,7 +208,9 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
             context: context
         )
         loadedExtensions.append(summary)
-        status = "Loaded \(summary.name) (Manifest V\(summary.manifestVersion)); inspect runtime errors and permissions before relying on it."
+        extensionActionRevision += 1
+        refreshExtensionDiagnostics()
+        status = "Loaded \(summary.name). This confirms WebKit accepted it—not that its features work; use its toolbar icon and Diagnostics."
         return summary
     }
 
@@ -150,7 +220,76 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
             try extensionController.unload(summary.context)
         }
         loadedExtensions.remove(at: index)
+        hostDiagnosticsByExtensionID.removeValue(forKey: summary.id)
+        extensionActionRevision += 1
+        refreshExtensionDiagnostics()
         status = "Unloaded \(summary.name)."
+    }
+
+    public func hasExtensionAction(for id: UUID) -> Bool {
+        loadedExtensions.first(where: { $0.id == id })?.context.action(for: nil) != nil
+    }
+
+    public func extensionActionIcon(for id: UUID) -> NSImage? {
+        guard let summary = loadedExtensions.first(where: { $0.id == id }) else { return nil }
+        let size = CGSize(width: 24, height: 24)
+        return summary.context.action(for: nil)?.icon(for: size)
+            ?? summary.context.webExtension.actionIcon(for: size)
+            ?? summary.context.webExtension.icon(for: size)
+    }
+
+    public func performExtensionAction(for id: UUID, anchoredTo anchor: NSView) {
+        guard let summary = loadedExtensions.first(where: { $0.id == id }),
+              let action = summary.context.action(for: nil) else {
+            status = NativePrototypeError.extensionActionUnavailable(
+                loadedExtensions.first(where: { $0.id == id })?.name ?? "Extension"
+            ).localizedDescription
+            return
+        }
+
+        popupAnchorView = anchor
+        if action.presentsPopup, let popupWebView = action.popupWebView {
+            popupWebView.navigationDelegate = self
+            popupExtensionIDs[ObjectIdentifier(popupWebView)] = summary.id
+        }
+
+        if action.presentsPopup, action.popupPopover?.isShown == true {
+            action.closePopup()
+            popupAnchorView = nil
+            status = "Closed \(summary.name) popup."
+            return
+        }
+
+        summary.context.performAction(for: nil)
+        if !action.presentsPopup {
+            status = "Dispatched \(summary.name)'s extension action. No popup is declared; inspect Diagnostics for runtime errors."
+        } else {
+            status = "Opening \(summary.name) popup…"
+        }
+        refreshExtensionDiagnostics()
+    }
+
+    public func refreshExtensionDiagnostics() {
+        let refreshedDiagnostics = loadedExtensions.map { summary in
+            let webKitErrors = summary.context.errors.map { error -> String in
+                let nsError = error as NSError
+                return "WebKit \(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+            }
+            let hostErrors = hostDiagnosticsByExtensionID[summary.id] ?? []
+            return ExtensionDiagnostic(
+                id: summary.id,
+                extensionName: summary.name,
+                isLoaded: summary.isLoaded,
+                messages: webKitErrors + hostErrors
+            )
+        }
+        if extensionDiagnostics != refreshedDiagnostics {
+            extensionDiagnostics = refreshedDiagnostics
+        }
+    }
+
+    public var extensionDiagnosticCount: Int {
+        extensionDiagnostics.reduce(0) { $0 + $1.messages.count }
     }
 
     public func readWebAuthnFeatureProbe() async throws -> [String: Any] {
@@ -184,18 +323,24 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
     }
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if let url = webView.url {
-            address = url.absoluteString
-            status = "Loaded \(url.host ?? url.absoluteString)"
+        if webView === self.webView {
+            if let url = webView.url {
+                address = url.absoluteString
+                status = "Loaded \(url.host ?? url.absoluteString)"
+            }
+        } else if let extensionID = popupExtensionIDs[ObjectIdentifier(webView)],
+                  let summary = loadedExtensions.first(where: { $0.id == extensionID }) {
+            status = "Loaded \(summary.name) popup. Review Diagnostics if it does not behave correctly."
         }
+        refreshExtensionDiagnostics()
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        status = "Navigation failed: \(error.localizedDescription)"
+        recordNavigationFailure(in: webView, error: error)
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        status = "Navigation failed: \(error.localizedDescription)"
+        recordNavigationFailure(in: webView, error: error)
     }
 
     public func webView(
@@ -203,12 +348,64 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        guard webView === self.webView else {
+            // WebKit-managed extension pages use an internal extension URL scheme.
+            decisionHandler(.allow)
+            return
+        }
         guard let scheme = navigationAction.request.url?.scheme?.lowercased(),
               ["http", "https"].contains(scheme) else {
             decisionHandler(.cancel)
             return
         }
         decisionHandler(.allow)
+    }
+
+    public func webExtensionController(
+        _ controller: WKWebExtensionController,
+        presentActionPopup action: WKWebExtension.Action,
+        for context: WKWebExtensionContext,
+        completionHandler: @escaping ((any Error)?) -> Void
+    ) {
+        if let popupWebView = action.popupWebView,
+           let summary = loadedExtensions.first(where: { $0.context === context }) {
+            popupWebView.navigationDelegate = self
+            popupExtensionIDs[ObjectIdentifier(popupWebView)] = summary.id
+        }
+
+        let anchor: NSView?
+        if let popupAnchorView {
+            anchor = popupAnchorView
+        } else if webView.window != nil {
+            anchor = webView
+        } else {
+            anchor = nil
+        }
+
+        guard let popover = action.popupPopover, let anchor else {
+            let name = context.webExtension.displayName ?? "extension"
+            let error = NativePrototypeError.popupPresentationUnavailable(name)
+            status = error.localizedDescription
+            if let summary = loadedExtensions.first(where: { $0.context === context }) {
+                recordHostDiagnostic(error.localizedDescription, for: summary)
+            }
+            completionHandler(error)
+            return
+        }
+
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        status = "Opened \(context.webExtension.displayName ?? "extension") popup. WebKit runtime errors appear in Diagnostics."
+        refreshExtensionDiagnostics()
+        popupAnchorView = nil
+        completionHandler(nil)
+    }
+
+    public func webExtensionController(
+        _ controller: WKWebExtensionController,
+        didUpdate action: WKWebExtension.Action,
+        forExtensionContext context: WKWebExtensionContext
+    ) {
+        extensionActionRevision += 1
     }
 
     public func webExtensionController(
@@ -254,6 +451,29 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
             details: "This extension requests access to these URLs:\n\n\(description)"
         )
         completionHandler(allow ? urls : [], nil)
+    }
+
+    private func recordNavigationFailure(in webView: WKWebView, error: Error) {
+        let message = "Popup navigation failed: \(error.localizedDescription)"
+        if webView === self.webView {
+            status = "Navigation failed: \(error.localizedDescription)"
+            return
+        }
+
+        if let id = popupExtensionIDs[ObjectIdentifier(webView)],
+           let summary = loadedExtensions.first(where: { $0.id == id }) {
+            recordHostDiagnostic(message, for: summary)
+            status = "\(summary.name) popup failed: \(error.localizedDescription)"
+        } else {
+            status = message
+        }
+    }
+
+    private func recordHostDiagnostic(_ message: String, for summary: ExtensionInstallSummary) {
+        var messages = hostDiagnosticsByExtensionID[summary.id] ?? []
+        if messages.last != message { messages.append(message) }
+        hostDiagnosticsByExtensionID[summary.id] = Array(messages.suffix(50))
+        refreshExtensionDiagnostics()
     }
 
     private func confirmImport(of webExtension: WKWebExtension) -> Bool {

@@ -17,7 +17,8 @@ swift run SockfishNative
 - loading an extension from a directory and ZIP with `WKWebExtension(resourceBaseURL:)`, inspecting manifest metadata, and loading/unloading a `WKWebExtensionContext` through `WKWebExtensionController`;
 - creating and clearing a SOCKSv5 `ProxyConfiguration` on a `WKWebsiteDataStore`, with direct failover disabled;
 - executing WebAuthn capability detection JavaScript in `WKWebView` and reading the browser passkey-authorization state without opening an access prompt;
-- rejecting non-HTTP(S) navigation.
+- resolving hosts and multiword Brave Search queries from the address bar, and rejecting non-HTTP(S) page navigation;
+- discovering an extension's default toolbar action and popup metadata from a fixture with a real popup page.
 
 For a Launch Services `.app` bundle, optionally use `./Scripts/package-and-run.sh`. It ad-hoc signs the local build (no Developer ID, notarization, or paid account) and creates no special entitlements. Alternatively, `swift run` launches from the terminal without the bundle packaging step. If macOS blocks a downloaded build, build it locally rather than removing Gatekeeper protections.
 
@@ -25,9 +26,9 @@ The repository's macOS CI job runs `swift test` and `swift build` on an Apple ru
 
 ## Try an extension
 
-In the prototype, choose **Add extension…** and select an unpacked WebExtension directory, a ZIP whose root contains `manifest.json`, or a Safari Web Extension `.appex` bundle. WebKit presents the manifest's declared permissions and website patterns before loading; runtime permission requests get separate Allow/Deny prompts. Use a disposable profile and inspect errors. The import executes third-party extension code, so do not use a real password vault in this proof of concept.
+In the prototype, type a host (for example, `example.com`) or a query (for example, `Bramble extension`) into the editable address bar. Bare queries are sent to Brave Search; host-like inputs are opened over HTTPS. Choose **Add extension…** and select an unpacked WebExtension directory, a ZIP whose root contains `manifest.json`, or a Safari Web Extension `.appex` bundle. WebKit presents the manifest's declared permissions and website patterns before loading; runtime permission requests get separate Allow/Deny prompts. Each loaded extension with a manifest action gets a visible toolbar icon/button. Click it to dispatch the action or open its WebKit-managed popup popover. **Extension diagnostics** refreshes WebKit's per-context parse/runtime error list and host-observed popup navigation/presentation failures. Use a disposable profile and inspect errors. The import executes third-party extension code, so do not use a real password vault in this proof of concept.
 
-This host currently has one page view and no full browser extension tab/window/action/popup implementation. An extension may parse and load yet still fail end to end because a required WebExtension API, background mode, identity flow, popup host, or tab lifecycle event is missing. Loading an extension does not imply Chrome/Safari parity.
+This host currently has one page view and no multi-tab/window lifecycle. WebKit provides the popup host used here, but loading and opening a popup does not imply that all of an extension's required APIs, background mode, identity flow, tab events, or Chromium-specific behavior are supported. The diagnostics panel displays errors surfaced by WebKit, but a clean list is not proof of compatibility or full functionality.
 
 ## Extensions named in the project
 

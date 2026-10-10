@@ -21,6 +21,22 @@ final class NativeAPITests: XCTestCase {
         XCTAssertTrue(store.proxyConfigurations.isEmpty)
     }
 
+    func testAddressBarResolvesHostsAndSearchQueries() throws {
+        let website = try NativeBrowserHarness.destination(for: "example.com/path?q=1")
+        XCTAssertEqual(website, .website(URL(string: "https://example.com/path?q=1")!))
+
+        let localhost = try NativeBrowserHarness.destination(for: "localhost:8080")
+        XCTAssertEqual(localhost, .website(URL(string: "https://localhost:8080")!))
+
+        let search = try NativeBrowserHarness.destination(for: "Bramble browser extension")
+        guard case .braveSearch(let searchURL) = search else {
+            return XCTFail("A multiword input should be sent to Brave Search.")
+        }
+        let components = try XCTUnwrap(URLComponents(url: searchURL, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.host, "search.brave.com")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "q" })?.value, "Bramble browser extension")
+    }
+
     func testExtensionDirectoryLoadsAndUnloadsThroughController() async throws {
         let browser = NativeBrowserHarness()
         let directory = try probeExtensionDirectory()
@@ -33,6 +49,10 @@ final class NativeAPITests: XCTestCase {
         XCTAssertFalse(extensionSummary.requestedPermissions.isEmpty)
         XCTAssertFalse(extensionSummary.requestedHostPatterns.isEmpty)
         XCTAssertEqual(browser.extensionController.extensions.count, 1)
+        XCTAssertTrue(try XCTUnwrap(extensionSummary.context.action(for: nil)).presentsPopup)
+
+        browser.refreshExtensionDiagnostics()
+        XCTAssertEqual(browser.extensionDiagnostics.first?.extensionName, extensionSummary.name)
 
         try browser.uninstallExtension(extensionSummary)
         XCTAssertFalse(extensionSummary.isLoaded)
@@ -48,7 +68,7 @@ final class NativeAPITests: XCTestCase {
         let zip = Process()
         zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
         zip.currentDirectoryURL = sourceDirectory
-        zip.arguments = ["-q", "-r", archive.path, "manifest.json", "background.js", "content.js"]
+        zip.arguments = ["-q", "-r", archive.path, "manifest.json", "background.js", "content.js", "popup.html", "popup.js"]
         try zip.run()
         zip.waitUntilExit()
         XCTAssertEqual(zip.terminationStatus, 0, "The system zip utility should create the test archive.")
