@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AdblockDiagnostics,
+  BrowserRuntimeDiagnostics,
+  BrowserSiteSettings,
   BramblePopupAnchor,
   BrambleExtensionState,
   BrowserBounds,
@@ -9,6 +11,8 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  NewTabPageId,
+  PinnedSite,
   NetworkRequestDetails,
   NetworkRequestSummary,
   NetworkResponseBody,
@@ -26,6 +30,20 @@ const api = {
     getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),
     getTabSleepMinutes: (): Promise<TabSleepMinutes> => ipcRenderer.invoke('browser:tab-sleep:get'),
     setTabSleepMinutes: (minutes: TabSleepMinutes): Promise<TabSleepMinutes | null> => ipcRenderer.invoke('browser:tab-sleep:set', minutes),
+    newTabPage: {
+      get: (): Promise<NewTabPageId> => ipcRenderer.invoke('browser:new-tab-page:get'),
+      set: (page: NewTabPageId): Promise<NewTabPageId | null> => ipcRenderer.invoke('browser:new-tab-page:set', page)
+    },
+    pinnedSites: {
+      get: (): Promise<PinnedSite[]> => ipcRenderer.invoke('browser:pinned-sites:get'),
+      set: (sites: PinnedSite[]): Promise<PinnedSite[]> => ipcRenderer.invoke('browser:pinned-sites:set', sites)
+    },
+    siteSettings: {
+      get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
+      set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
+    },
+    runtime: (): Promise<BrowserRuntimeDiagnostics> => ipcRenderer.invoke('browser:runtime:get'),
+    pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),

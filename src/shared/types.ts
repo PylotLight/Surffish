@@ -1,6 +1,32 @@
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
+export type NewTabPageId = 'bonjourr' | 'search'
+
+export interface PinnedSite {
+  title: string
+  url: string
+}
+
+/** Effective per-origin privacy choices; permissions are denied unless explicitly allowed. */
+export interface BrowserSiteSettings {
+  origin: string
+  blockAds: boolean
+  openPopupsInTabs: boolean
+  allowMedia: boolean
+  allowGeolocation: boolean
+  allowNotifications: boolean
+}
+
+export interface BrowserRuntimeDiagnostics {
+  electronVersion: string
+  chromiumVersion: string
+  userAgent: string
+  pageUrl: string | null
+  pageSecureContext: boolean | null
+  pageHasCredentialsApi: boolean | null
+  pageHasWebAuthnApi: boolean | null
+}
 
 export interface BrowserProxySettings {
   enabled: boolean

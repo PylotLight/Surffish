@@ -5,6 +5,8 @@ import { adsLists, ElectronBlocker, type Fetch } from '@ghostery/adblocker-elect
 import { isNetworkOnlyConfig, isProtectedVideoDeliveryUrl, NETWORK_ONLY_CONFIG } from './adblock-policy'
 import { getBrowserSession } from './browser-session'
 import { getMainWindow } from './window'
+import { getBrowserSiteSettings } from './browser-persistence'
+import { getBrowserTabUrlByWebContentsId } from './browser'
 import type { AdblockDiagnostics, AdblockBlockedRequest } from '../shared/types'
 
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
@@ -89,6 +91,21 @@ function hostFromUrl(value: string | undefined): string {
   }
 }
 
+function requestingPageUrl(details: Parameters<ElectronBlocker['onBeforeRequest']>[0]): string {
+  const webContentsId = 'webContentsId' in details ? details.webContentsId : undefined
+  const tabUrl = typeof webContentsId === 'number' ? getBrowserTabUrlByWebContentsId(webContentsId) : null
+  const candidates = [tabUrl, details.referrer, 'initiatorOrigin' in details ? details.initiatorOrigin : undefined]
+  return candidates.find((value): value is string => {
+    if (!value) return false
+    try {
+      const url = new URL(value)
+      return url.protocol === 'https:' || url.protocol === 'http:'
+    } catch {
+      return false
+    }
+  }) ?? ''
+}
+
 function diagnosticsSnapshot(): AdblockDiagnostics {
   return {
     ...diagnostics,
@@ -117,7 +134,7 @@ function updateEngineMetadata(blocker: ElectronBlocker): void {
   diagnostics.loadedLists = loadedLists
 }
 
-function recordRequest(details: Parameters<ElectronBlocker['onBeforeRequest']>[0], response: Parameters<Parameters<ElectronBlocker['onBeforeRequest']>[1]>[0]): void {
+function recordRequest(details: Parameters<ElectronBlocker['onBeforeRequest']>[0], response: Parameters<Parameters<ElectronBlocker['onBeforeRequest']>[1]>[0], pageUrl = details.referrer): void {
   if (details.resourceType === 'mainFrame') return
 
   if (response.cancel || response.redirectURL) {
@@ -125,7 +142,7 @@ function recordRequest(details: Parameters<ElectronBlocker['onBeforeRequest']>[0
     const entry: AdblockBlockedRequest = {
       timestamp: Date.now(),
       requestHost: hostFromUrl(details.url),
-      pageHost: hostFromUrl(details.referrer),
+      pageHost: hostFromUrl(pageUrl),
       resourceType: details.resourceType
     }
     diagnostics.recentBlockedRequests = [entry, ...diagnostics.recentBlockedRequests].slice(0, MAX_RECENT_BLOCKS)
@@ -142,15 +159,21 @@ function activateBlocker(next: ElectronBlocker): void {
 
   const originalOnBeforeRequest = next.onBeforeRequest.bind(next)
   next.onBeforeRequest = (details, callback) => {
+    const pageUrl = requestingPageUrl(details)
+    if (pageUrl && getBrowserSiteSettings(pageUrl)?.blockAds === false) {
+      recordRequest(details, {}, pageUrl)
+      callback({})
+      return
+    }
     if (isProtectedVideoDeliveryUrl(details.url)) {
       // YouTube serves both ads and wanted video chunks through these hosts.
       // Let them pass rather than risking interrupted playback.
-      recordRequest(details, {})
+      recordRequest(details, {}, pageUrl)
       callback({})
       return
     }
     originalOnBeforeRequest(details, (response) => {
-      recordRequest(details, response)
+      recordRequest(details, response, pageUrl)
       callback(response)
     })
   }

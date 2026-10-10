@@ -1,9 +1,14 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId } from './navigation.ts'
-import type { SearchEngineId, TabSleepMinutes } from './types'
+import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from './types'
 
 export const MAX_RESTORED_TABS = 50
+export const MAX_PINNED_SITES = 12
+export const MAX_SAVED_SITE_SETTINGS = 200
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
+export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'bonjourr'
 export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
+const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080 }
 
 export interface SavedBrowserSession {
   urls: string[]
@@ -13,20 +18,84 @@ export interface SavedBrowserSession {
 export interface BrowserPreferences {
   searchEngine: SearchEngineId
   tabSleepMinutes: TabSleepMinutes
+  newTabPage: NewTabPageId
+  pinnedSites: PinnedSite[]
+  siteSettings: Record<string, BrowserSiteSettings>
 }
 
 export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
   return typeof value === 'number' && TAB_SLEEP_OPTIONS.includes(value as TabSleepMinutes)
 }
 
-export function isHttpUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false
-  try {
-    const url = new URL(value)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-  } catch {
-    return false
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function parseBrowserProxySettings(value: unknown): BrowserProxySettings {
+  const record = isRecord(value) ? value : {}
+  const host = typeof record.host === 'string' ? record.host.trim().toLowerCase() : ''
+  const port = Number(record.port)
+  if (typeof record.enabled !== 'boolean' || !LOCAL_PROXY_HOSTS.has(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return { ...DEFAULT_BROWSER_PROXY_SETTINGS }
   }
+  return { enabled: record.enabled, host, port }
+}
+
+function safeHttpUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value.trim())
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+export function isHttpUrl(value: unknown): value is string {
+  return safeHttpUrl(value) !== null
+}
+
+export function normalizeHttpOrigin(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const url = new URL(value.trim())
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password) return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
+export function parseBrowserSiteSettings(originInput: unknown, value: unknown): BrowserSiteSettings | null {
+  const origin = normalizeHttpOrigin(originInput)
+  if (!origin) return null
+  const record = isRecord(value) ? value : {}
+  return {
+    origin,
+    blockAds: typeof record.blockAds === 'boolean' ? record.blockAds : true,
+    openPopupsInTabs: record.openPopupsInTabs === true,
+    allowMedia: record.allowMedia === true,
+    allowGeolocation: record.allowGeolocation === true,
+    allowNotifications: record.allowNotifications === true
+  }
+}
+
+export function normalizePinnedSites(value: unknown): PinnedSite[] {
+  if (!Array.isArray(value)) return []
+  const pinned: PinnedSite[] = []
+  const seen = new Set<string>()
+  for (const entry of value.slice(0, MAX_PINNED_SITES * 4)) {
+    if (!isRecord(entry)) continue
+    const url = safeHttpUrl(entry.url)
+    if (!url || seen.has(url)) continue
+    const parsed = new URL(url)
+    const title = typeof entry.title === 'string' ? entry.title.trim().slice(0, 80) : ''
+    pinned.push({ title: title || parsed.hostname, url })
+    seen.add(url)
+    if (pinned.length >= MAX_PINNED_SITES) break
+  }
+  return pinned
 }
 
 export function normalizeBrowserSession(urls: readonly string[], activeIndex: number): SavedBrowserSession {
@@ -43,21 +112,40 @@ export function normalizeBrowserSession(urls: readonly string[], activeIndex: nu
 }
 
 export function parseBrowserSession(value: unknown): SavedBrowserSession {
-  if (typeof value !== 'object' || value === null) return { urls: [], activeIndex: 0 }
-  const record = value as { version?: unknown; tabs?: unknown; activeIndex?: unknown }
-  if (record.version !== 1 || !Array.isArray(record.tabs)) return { urls: [], activeIndex: 0 }
-  const activeIndex = typeof record.activeIndex === 'number' ? record.activeIndex : 0
-  const urls = record.tabs.slice(0, MAX_RESTORED_TABS).map((url) => typeof url === 'string' ? url : '')
+  if (!isRecord(value)) return { urls: [], activeIndex: 0 }
+  if (value.version !== 1 || !Array.isArray(value.tabs)) return { urls: [], activeIndex: 0 }
+  const activeIndex = typeof value.activeIndex === 'number' ? value.activeIndex : 0
+  const urls = value.tabs.slice(0, MAX_RESTORED_TABS).map((url) => typeof url === 'string' ? url : '')
   return normalizeBrowserSession(urls, activeIndex)
 }
 
+function defaultSiteSettings(origin: string): BrowserSiteSettings {
+  return { origin, blockAds: true, openPopupsInTabs: false, allowMedia: false, allowGeolocation: false, allowNotifications: false }
+}
+
 export function parseBrowserPreferences(value: unknown): BrowserPreferences {
-  const defaults: BrowserPreferences = { searchEngine: DEFAULT_SEARCH_ENGINE, tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES }
-  if (typeof value !== 'object' || value === null) return defaults
-  const record = value as { version?: unknown; searchEngine?: unknown; tabSleepMinutes?: unknown }
-  if (record.version !== 1) return defaults
+  const defaults: BrowserPreferences = {
+    searchEngine: DEFAULT_SEARCH_ENGINE,
+    tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES,
+    newTabPage: DEFAULT_NEW_TAB_PAGE,
+    pinnedSites: [],
+    siteSettings: {}
+  }
+  if (!isRecord(value) || value.version !== 1) return defaults
+
+  const siteSettings: Record<string, BrowserSiteSettings> = {}
+  if (isRecord(value.siteSettings)) {
+    for (const [key, settings] of Object.entries(value.siteSettings).slice(0, MAX_SAVED_SITE_SETTINGS)) {
+      const parsed = parseBrowserSiteSettings(key, settings)
+      if (parsed) siteSettings[parsed.origin] = parsed
+    }
+  }
+
   return {
-    searchEngine: isSearchEngineId(record.searchEngine) ? record.searchEngine : defaults.searchEngine,
-    tabSleepMinutes: isTabSleepMinutes(record.tabSleepMinutes) ? record.tabSleepMinutes : defaults.tabSleepMinutes
+    searchEngine: isSearchEngineId(value.searchEngine) ? value.searchEngine : defaults.searchEngine,
+    tabSleepMinutes: isTabSleepMinutes(value.tabSleepMinutes) ? value.tabSleepMinutes : defaults.tabSleepMinutes,
+    newTabPage: value.newTabPage === 'search' || value.newTabPage === 'bonjourr' ? value.newTabPage : defaults.newTabPage,
+    pinnedSites: normalizePinnedSites(value.pinnedSites),
+    siteSettings
   }
 }

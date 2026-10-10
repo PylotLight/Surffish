@@ -3,16 +3,23 @@ import { createConnection } from 'node:net'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { BrowserProxySettings, BrowserProxyTestResult } from '../shared/types'
+import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../shared/persistence'
 import { getBrowserSession } from './browser-session'
+import { getBrowserSiteSettings } from './browser-persistence'
 
-export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = {
-  enabled: true,
-  host: '127.0.0.1',
-  port: 1080
-}
+export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let currentSettings: BrowserProxySettings = { ...DEFAULT_PROXY_SETTINGS }
+
+function siteAllowsPermission(origin: string, permission: string): boolean {
+  const settings = getBrowserSiteSettings(origin)
+  if (!settings) return false
+  if (permission === 'media') return settings.allowMedia
+  if (permission === 'geolocation' || permission === 'geolocation-approximate') return settings.allowGeolocation
+  if (permission === 'notifications') return settings.allowNotifications
+  return false
+}
 
 function settingsPath(): string {
   return join(app.getPath('userData'), 'browser-proxy.json')
@@ -31,7 +38,7 @@ function validateSettings(input: unknown): BrowserProxySettings {
 
 function readSettings(): BrowserProxySettings {
   try {
-    return validateSettings(JSON.parse(readFileSync(settingsPath(), 'utf8')))
+    return parseBrowserProxySettings(JSON.parse(readFileSync(settingsPath(), 'utf8')))
   } catch {
     return { ...DEFAULT_PROXY_SETTINGS }
   }
@@ -60,7 +67,11 @@ async function configureSession(settings: BrowserProxySettings): Promise<void> {
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
   await configureSession(currentSettings)
-  getBrowserSession().setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  const session = getBrowserSession()
+  session.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
+  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(siteAllowsPermission(details.requestingUrl || webContents.getURL(), permission))
+  })
   return { ...currentSettings }
 }
 

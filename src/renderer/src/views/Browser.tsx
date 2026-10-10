@@ -1,24 +1,31 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   AdblockDiagnostics,
   BrambleExtensionState,
+  BrowserRuntimeDiagnostics,
   BrowserProxySettings,
+  BrowserSiteSettings,
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  NewTabPageId,
   NetworkRequestDetails,
   NetworkRequestSummary,
   NetworkResponseBody,
+  PinnedSite,
   SearchEngineId,
   TabSleepMinutes
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES } from '../../../shared/navigation'
+import { MAX_PINNED_SITES } from '../../../shared/persistence'
+import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
+const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
 const EMPTY_BROWSER: BrowserState = {
-  url: getSearchHomepage(DEFAULT_SEARCH_ENGINE),
-  title: 'Brave Search',
+  url: BONJOURR_START_PAGE,
+  title: 'Bonjourr',
   loading: true,
   canGoBack: false,
   canGoForward: false,
@@ -38,8 +45,24 @@ const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   iconDataUrl: null
 }
 
-type SidebarMode = 'tabs' | 'history' | 'settings' | 'diagnostics' | 'network'
+type SidebarMode = 'tabs' | 'history' | 'settings' | 'diagnostics' | 'network' | 'site'
 type NetworkDetailsTab = 'headers' | 'payload' | 'response' | 'timing'
+
+const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'diagnostics' | 'network'>; label: string }> = [
+  { mode: 'settings', label: 'General' },
+  { mode: 'site', label: 'This site' },
+  { mode: 'diagnostics', label: 'Ad blocking' },
+  { mode: 'network', label: 'Network' }
+]
+
+function httpOrigin(value: string): string | null {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : null
+  } catch {
+    return null
+  }
+}
 
 function historyHost(url: string): string {
   try {
@@ -118,6 +141,7 @@ export default function Browser(): React.JSX.Element {
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
+  const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
   const [sidebarPinned, setSidebarPinned] = useState(false)
   const [sidebarHovered, setSidebarHovered] = useState(false)
@@ -125,13 +149,19 @@ export default function Browser(): React.JSX.Element {
   const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 73 : 45)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
+  const [newTabPage, setNewTabPage] = useState<NewTabPageId>('bonjourr')
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [adblockDiagnostics, setAdblockDiagnostics] = useState<AdblockDiagnostics | null>(null)
+  const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<BrowserRuntimeDiagnostics | null>(null)
+  const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
+  const [siteSettingsLoading, setSiteSettingsLoading] = useState(false)
   const [networkRequests, setNetworkRequests] = useState<NetworkRequestSummary[]>([])
   const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null)
   const [networkDetails, setNetworkDetails] = useState<NetworkRequestDetails | null>(null)
@@ -146,7 +176,13 @@ export default function Browser(): React.JSX.Element {
   const [proxyMessage, setProxyMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
-  const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode === 'settings' || sidebarMode === 'network'
+  const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
+  const addressSuggestions = useMemo(
+    () => buildAddressSuggestions(address, pinnedSites, tabs, history),
+    [address, pinnedSites, tabs, history]
+  )
+  const activeOrigin = httpOrigin(browser.url)
+  const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
   function revealSidebar(): void {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -177,6 +213,64 @@ export default function Browser(): React.JSX.Element {
 
   async function refreshHistory(): Promise<void> {
     setHistory(await window.api.browser.history.get())
+  }
+
+  async function refreshRuntimeDiagnostics(): Promise<void> {
+    try {
+      setRuntimeDiagnostics(await window.api.browser.runtime())
+    } catch {
+      setRuntimeDiagnostics(null)
+    }
+  }
+
+  function createNewTab(): void {
+    setSidebarMode('tabs')
+    setSuggestionsOpen(false)
+    void window.api.browser.tabs.create(undefined, searchEngine)
+  }
+
+  async function savePinnedSites(next: PinnedSite[]): Promise<void> {
+    try {
+      setPinnedSites(await window.api.browser.pinnedSites.set(next))
+    } catch (error) {
+      setNavigationError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function toggleCurrentSitePin(): Promise<void> {
+    if (!activeOrigin) return
+    const pinned = pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin)
+    if (!pinned && pinnedSites.length >= MAX_PINNED_SITES) {
+      setNavigationError(`You can pin up to ${MAX_PINNED_SITES} sites. Remove one from the sidebar first.`)
+      return
+    }
+    const title = browser.title.trim().slice(0, 80) || new URL(activeOrigin).hostname
+    const next = pinned
+      ? pinnedSites.filter((site) => httpOrigin(site.url) !== activeOrigin)
+      : [...pinnedSites, { title, url: activeOrigin }]
+    await savePinnedSites(next)
+  }
+
+  async function openPinnedSite(site: PinnedSite): Promise<void> {
+    setSidebarMode('tabs')
+    setSuggestionsOpen(false)
+    await window.api.browser.navigate(site.url, searchEngine)
+  }
+
+  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'site' | 'diagnostics' | 'network'>): void {
+    setSidebarMode(mode)
+    if (mode === 'settings') void refreshRuntimeDiagnostics()
+    if (mode === 'diagnostics') void window.api.browser.adblock.get().then(setAdblockDiagnostics)
+  }
+
+  async function updateSiteSetting(key: Exclude<keyof BrowserSiteSettings, 'origin'>, value: boolean): Promise<void> {
+    if (!siteSettings || !activeOrigin) return
+    try {
+      const updated = await window.api.browser.siteSettings.set(activeOrigin, { ...siteSettings, [key]: value })
+      if (updated) setSiteSettings(updated)
+    } catch (error) {
+      setNavigationError(error instanceof Error ? error.message : String(error))
+    }
   }
 
   async function openBramblePoc(): Promise<void> {
@@ -235,6 +329,9 @@ export default function Browser(): React.JSX.Element {
     })
     void window.api.browser.tabs.get().then(setTabs)
     void refreshHistory()
+    void window.api.browser.newTabPage.get().then(setNewTabPage)
+    void window.api.browser.pinnedSites.get().then(setPinnedSites)
+    void refreshRuntimeDiagnostics()
     void window.api.browser.getTabSleepMinutes().then(setTabSleepMinutes)
     void window.api.browser.adblock.get().then(setAdblockDiagnostics)
     void window.api.browser.proxy.get().then((settings) => {
@@ -249,6 +346,26 @@ export default function Browser(): React.JSX.Element {
       unsubscribeFocusAddress()
     }
   }, [])
+
+  useEffect(() => {
+    if (sidebarMode !== 'site') return
+    let cancelled = false
+    if (!activeOrigin) {
+      setSiteSettings(null)
+      setSiteSettingsLoading(false)
+      return
+    }
+    setSiteSettings(null)
+    setSiteSettingsLoading(true)
+    void window.api.browser.siteSettings.get(activeOrigin).then((settings) => {
+      if (!cancelled) setSiteSettings(settings)
+    }).catch(() => {
+      if (!cancelled) setSiteSettings(null)
+    }).finally(() => {
+      if (!cancelled) setSiteSettingsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [sidebarMode, activeOrigin])
 
   useEffect(() => {
     const unsubscribeNetwork = window.api.browser.network.onChange(setNetworkRequests)
@@ -348,10 +465,12 @@ export default function Browser(): React.JSX.Element {
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
       const sidebarInset = sidebarVisible ? Math.min(sidebarRef.current?.offsetWidth ?? 0, Math.max(0, rect.width - 48)) : 0
-      const contentWidth = rect.width - sidebarInset
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && contentWidth > 0 && rect.height > 0
+      const edgeRevealWidth = sidebarVisible ? 0 : 14
+      const contentWidth = rect.width - sidebarInset - edgeRevealWidth
+      const suggestionsCoverPage = suggestionsOpen && addressSuggestions.length > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
-        ? { x: rect.left + sidebarInset, y: rect.top, width: contentWidth, height: rect.height }
+        ? { x: rect.left + sidebarInset + edgeRevealWidth, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
     }
     const observer = new ResizeObserver(updateBounds)
@@ -363,7 +482,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode, sidebarVisible])
+  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(browser.url)
@@ -375,8 +494,7 @@ export default function Browser(): React.JSX.Element {
       const key = event.key.toLowerCase()
       if (key === 't' && !event.shiftKey) {
         event.preventDefault()
-        void window.api.browser.tabs.create(undefined, searchEngine)
-        setSidebarMode('tabs')
+        createNewTab()
       } else if (key === 'w' && !event.shiftKey) {
         const activeTab = tabs.find((tab) => tab.active)
         if (!activeTab) return
@@ -395,10 +513,11 @@ export default function Browser(): React.JSX.Element {
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [tabs, searchEngine])
 
-  async function navigate(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
-    const value = address.trim()
+  async function navigateTo(valueInput: string): Promise<void> {
+    const value = valueInput.trim()
     if (!value) return
+    setSuggestionsOpen(false)
+    setActiveSuggestionIndex(-1)
     setSidebarMode('tabs')
     const ok = await window.api.browser.navigate(value, searchEngine)
     if (!ok) {
@@ -410,6 +529,33 @@ export default function Browser(): React.JSX.Element {
       setBrowser(current)
       setAddress(current.url)
       addressRef.current?.blur()
+    }
+  }
+
+  async function navigate(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    await navigateTo(address)
+  }
+
+  function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (event.key === 'Escape') {
+      setSuggestionsOpen(false)
+      setActiveSuggestionIndex(-1)
+      return
+    }
+    if (addressSuggestions.length === 0) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setActiveSuggestionIndex((index) => (index + 1) % addressSuggestions.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActiveSuggestionIndex((index) => (index <= 0 ? addressSuggestions.length - 1 : index - 1))
+    } else if (event.key === 'Enter' && activeSuggestionIndex >= 0) {
+      const suggestion = addressSuggestions[activeSuggestionIndex]
+      if (suggestion) {
+        event.preventDefault()
+        void navigateTo(suggestion.url)
+      }
     }
   }
 
@@ -471,7 +617,6 @@ export default function Browser(): React.JSX.Element {
     const query = historyQuery.trim().toLowerCase()
     return !query || entry.title.toLowerCase().includes(query) || entry.url.toLowerCase().includes(query)
   })
-  const activeSleepingTab = tabs.find((tab) => tab.active && tab.sleeping)
   const brambleInstallLabel = bramblePoc.loading
     ? 'Working…'
     : !bramblePoc.installed
@@ -481,7 +626,9 @@ export default function Browser(): React.JSX.Element {
         : bramblePoc.latestVersion ? 'Up to date' : 'Install / update'
 
   return (
-    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser">
+    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser" onMouseMove={(event) => {
+      if (!sidebarVisible && event.clientX <= 18) revealSidebar()
+    }}>
       <aside
         ref={sidebarRef}
         className="browser-sidebar"
@@ -505,7 +652,7 @@ export default function Browser(): React.JSX.Element {
           ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
         </div>
         <div className="sidebar-heading">
-          <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'network' ? 'Network' : 'Tabs'}</strong>
+                <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'diagnostics' ? 'Ad blocking' : sidebarMode === 'network' ? 'Network' : sidebarMode === 'site' ? 'This site' : 'Tabs'}</strong>
           {sidebarMode !== 'history' ? (
             <div className="new-tab-control" ref={newTabControlRef}>
               <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
@@ -514,17 +661,17 @@ export default function Browser(): React.JSX.Element {
                   return
                 }
                 setNewTabMenuOpen(false)
-                void window.api.browser.tabs.create(undefined, searchEngine)
+                createNewTab()
               }}>
                 <span aria-hidden="true">＋</span>
               </button>
               {newTabMenuOpen && (
                 <div className="new-tab-menu" role="menu" aria-label="New tab options">
                   <button type="button" role="menuitem" onClick={() => {
-                    void window.api.browser.tabs.create(undefined, searchEngine)
+                    createNewTab()
                     setNewTabMenuOpen(false)
                   }}>
-                    <strong>New tab</strong><span>{SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page</span>
+                    <strong>New tab</strong><span>{newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
                   </button>
                   <button type="button" role="menuitem" disabled={!tabs.some((tab) => tab.active)} onClick={() => {
                     const activeTab = tabs.find((tab) => tab.active)
@@ -542,6 +689,28 @@ export default function Browser(): React.JSX.Element {
             </button>
           ) : null}
         </div>
+
+        {sidebarMode === 'tabs' && (
+          <section className="sidebar-pinned-sites" aria-label="Pinned sites">
+            <div className="sidebar-pinned-heading">
+              <strong>Pinned</strong>
+              <button className="sidebar-icon-button" type="button" aria-label="Pin current site" title="Pin current site" disabled={!activeOrigin || currentOriginIsPinned} onClick={() => void toggleCurrentSitePin()}>＋</button>
+            </div>
+            {pinnedSites.length > 0 ? (
+              <div className="sidebar-pinned-list">
+                {pinnedSites.map((site) => (
+                  <button className="pinned-site-button" key={site.url} type="button" title={`${site.title} · ${site.url} (right-click to unpin)`} aria-label={`Open pinned site ${site.title}`} onClick={() => void openPinnedSite(site)} onContextMenu={(event) => {
+                    event.preventDefault()
+                    void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))
+                  }}>
+                    <span className="pinned-site-mark" aria-hidden="true">{site.title.slice(0, 1).toUpperCase()}</span>
+                    <span>{site.title}</span>
+                  </button>
+                ))}
+              </div>
+            ) : <p className="sidebar-pinned-empty">Pin sites with ☆ in the address bar.</p>}
+          </section>
+        )}
 
         {sidebarMode === 'history' ? (
           <div className="history-sidebar">
@@ -601,13 +770,7 @@ export default function Browser(): React.JSX.Element {
           <button className={`sidebar-mode-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="History" title="History" aria-current={sidebarMode === 'history' ? 'page' : undefined} onClick={() => { setSidebarMode('history'); void refreshHistory() }}>
             <span aria-hidden="true">◷</span><span>History</span>
           </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'diagnostics' ? ' is-current' : ''}`} type="button" aria-label="Diagnostics" title="Diagnostics" aria-current={sidebarMode === 'diagnostics' ? 'page' : undefined} onClick={() => { setSidebarMode('diagnostics'); void window.api.browser.adblock.get().then(setAdblockDiagnostics) }}>
-            <span aria-hidden="true">▥</span><span>Diagnostics</span>
-          </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'network' ? ' is-current' : ''}`} type="button" aria-label="Network" title="Network" aria-current={sidebarMode === 'network' ? 'page' : undefined} onClick={() => setSidebarMode('network')}>
-            <span aria-hidden="true">⌁</span><span>Network</span>
-          </button>
-          <button className={`sidebar-mode-button${sidebarMode === 'settings' ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={sidebarMode === 'settings' ? 'page' : undefined} onClick={() => setSidebarMode('settings')}>
+              <button className={`sidebar-mode-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
             <span aria-hidden="true">⚙</span><span>Settings</span>
           </button>
           <div className="sidebar-footer-divider" />
@@ -644,7 +807,7 @@ export default function Browser(): React.JSX.Element {
                 <span aria-hidden="true">›</span>
               </button>
               <button
-                className="toolbar-button"
+                className={`toolbar-button reload-button${browser.loading ? ' is-loading' : ''}`}
                 type="button"
                 aria-label={browser.loading ? 'Stop loading' : 'Reload page'}
                 title={browser.loading ? 'Stop' : 'Reload'}
@@ -653,23 +816,84 @@ export default function Browser(): React.JSX.Element {
                 <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
               </button>
             </div>
-            <label className="omnibox">
-              <input
-                ref={addressRef}
-                type="text"
-                value={address}
-                onChange={(event) => {
-                  setAddress(event.target.value)
-                  setNavigationError('')
-                }}
-                onFocus={(event) => event.currentTarget.select()}
-                aria-label="Search or enter address"
-                autoComplete="off"
-                spellCheck={false}
-                autoCapitalize="none"
-                placeholder="Search or enter address"
-              />
-            </label>
+            <div className="omnibox-wrap">
+              <label className="omnibox">
+                <input
+                  ref={addressRef}
+                  type="text"
+                  value={address}
+                  onChange={(event) => {
+                    setAddress(event.target.value)
+                    setNavigationError('')
+                    setSuggestionsOpen(true)
+                    setActiveSuggestionIndex(-1)
+                  }}
+                  onFocus={(event) => {
+                    event.currentTarget.select()
+                    setSuggestionsOpen(true)
+                  }}
+                  onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+                  onKeyDown={handleAddressKeyDown}
+                  aria-label="Search or enter address"
+                  aria-expanded={suggestionsOpen && addressSuggestions.length > 0}
+                  aria-controls="address-suggestions"
+                  role="combobox"
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  placeholder="Search or enter address"
+                />
+              </label>
+              {suggestionsOpen && addressSuggestions.length > 0 && (
+                <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
+                  {addressSuggestions.map((suggestion, index) => (
+                    <button
+                      className={`address-suggestion${index === activeSuggestionIndex ? ' is-selected' : ''}`}
+                      key={`${suggestion.source}-${suggestion.url}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSuggestionIndex}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => void navigateTo(suggestion.url)}
+                    >
+                      <span className="suggestion-mark" aria-hidden="true">{suggestion.source === 'Pinned site' ? '★' : suggestion.source === 'Open tab' ? '▤' : '◷'}</span>
+                      <span className="suggestion-main"><strong>{suggestion.title || suggestion.url}</strong><small>{suggestion.url}</small></span>
+                      <span className="suggestion-source">{suggestion.source}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              className={`toolbar-button favorite-button${currentOriginIsPinned ? ' is-favorite' : ''}`}
+              type="button"
+              aria-label={currentOriginIsPinned ? 'Unpin this site' : 'Pin this site'}
+              aria-pressed={currentOriginIsPinned}
+              title={currentOriginIsPinned ? 'Unpin this site' : 'Pin this site'}
+              disabled={!activeOrigin}
+              onClick={() => void toggleCurrentSitePin()}
+            ><span aria-hidden="true">{currentOriginIsPinned ? '★' : '☆'}</span></button>
+            <button
+              className="toolbar-button picture-in-picture-button"
+              type="button"
+              aria-label="Picture in Picture"
+              title="Picture in Picture (video opens in a floating window)"
+              onClick={() => {
+                void window.api.browser.pictureInPicture().then((started) => {
+                  if (!started) setNavigationError('No active video can open in Picture in Picture on this page.')
+                  else setNavigationError('')
+                })
+              }}
+            ><span aria-hidden="true">▣</span></button>
+            <button
+              className={`toolbar-button site-controls-button${sidebarMode === 'site' ? ' is-current' : ''}`}
+              type="button"
+              aria-label="Site settings"
+              aria-pressed={sidebarMode === 'site'}
+              title={activeOrigin ? `Site settings for ${activeOrigin}` : 'Site settings unavailable for this page'}
+              disabled={!activeOrigin}
+              onClick={() => selectSettingsSection('site')}
+            ><span aria-hidden="true">⛨</span></button>
             <button
               className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
               ref={brambleButtonRef}
@@ -679,7 +903,7 @@ export default function Browser(): React.JSX.Element {
               aria-busy={bramblePoc.loading}
               title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Bramble extension settings'}
               disabled={bramblePoc.loading}
-              onClick={() => bramblePoc.installed ? void openBramblePoc() : setSidebarMode('settings')}
+              onClick={() => bramblePoc.installed ? void openBramblePoc() : selectSettingsSection('settings')}
             >
               {bramblePoc.iconDataUrl
                 ? <img className="bramble-toolbar-icon" src={bramblePoc.iconDataUrl} alt="" />
@@ -692,12 +916,20 @@ export default function Browser(): React.JSX.Element {
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : sidebarMode === 'network' ? 'Network inspector' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+          {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
+          {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
+            <nav className="settings-subnav" aria-label="Browser settings sections">
+              {SETTINGS_SECTIONS.map((section) => (
+                <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}</button>
+              ))}
+            </nav>
+          )}
           {sidebarMode === 'settings' && (
             <div className="settings-view">
               <header className="settings-page-header">
                 <h1>Settings</h1>
-                <p>Choose your search engine and manage this browser’s connection.</p>
+                <p>Choose your start page, search engine, and browser behavior.</p>
               </header>
               <div className="settings-content">
                 <section className="settings-section">
@@ -708,6 +940,19 @@ export default function Browser(): React.JSX.Element {
                     </select>
                   </label>
                   <p className="settings-help">Used for searches typed into the address bar.</p>
+                </section>
+                <section className="settings-section">
+                  <label className="settings-field">
+                    <span>New tab page</span>
+                    <select className="settings-select" value={newTabPage} onChange={(event) => {
+                      const page = event.target.value as NewTabPageId
+                      void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
+                    }} aria-label="Default new tab page">
+                      <option value="bonjourr">Bonjourr (online)</option>
+                      <option value="search">Search engine</option>
+                    </select>
+                  </label>
+                  <p className="settings-help">Bonjourr is the default start page and loads from its official online version; no third-party extension install is needed. The setting applies to tabs opened from now on.</p>
                 </section>
                 <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
                   <div className="settings-section-heading">
@@ -734,6 +979,21 @@ export default function Browser(): React.JSX.Element {
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </section>
+                <section className="settings-section runtime-diagnostics-section" aria-label="Passkey runtime diagnostics">
+                  <div className="settings-section-heading">
+                    <div><strong>Passkey compatibility check</strong><span className={`settings-status${runtimeDiagnostics && Number.parseInt(runtimeDiagnostics.chromiumVersion, 10) >= 122 ? ' is-on' : ''}`}>{runtimeDiagnostics ? `Electron ${runtimeDiagnostics.electronVersion} · Chromium ${runtimeDiagnostics.chromiumVersion}` : 'Reading runtime…'}</span></div>
+                    <button className="settings-action secondary" type="button" onClick={() => void refreshRuntimeDiagnostics()}>Refresh check</button>
+                  </div>
+                  {runtimeDiagnostics && (
+                    <>
+                      <p className="settings-help">{Number.parseInt(runtimeDiagnostics.chromiumVersion, 10) >= 122 ? 'This Chromium build meets Bramble’s documented Chrome 122+ version floor for extension custom-RP-ID WebAuthn.' : 'This Chromium build is below Bramble’s documented Chrome 122+ version floor for extension custom-RP-ID WebAuthn.'}</p>
+                      <p className="settings-help">Active page: {runtimeDiagnostics.pageUrl ? httpOrigin(runtimeDiagnostics.pageUrl) ?? 'non-web page' : 'not available'} · secure context: {runtimeDiagnostics.pageSecureContext === null ? 'unknown' : runtimeDiagnostics.pageSecureContext ? 'yes' : 'no'} · Credentials API: {runtimeDiagnostics.pageHasCredentialsApi === null ? 'unknown' : runtimeDiagnostics.pageHasCredentialsApi ? 'available' : 'unavailable'} · WebAuthn create/get: {runtimeDiagnostics.pageHasWebAuthnApi === null ? 'unknown' : runtimeDiagnostics.pageHasWebAuthnApi ? 'available' : 'unavailable'}.</p>
+                      <code className="runtime-user-agent">{runtimeDiagnostics.userAgent || 'User-Agent is unavailable for this tab.'}</code>
+                    </>
+                  )}
+                  <p className="settings-help">The browser does not spoof its User-Agent. Bramble also maps a WebAuthn <code>SecurityError</code> to its “too old” message; a rejected custom RP ID or extension host-permission mismatch can look the same, even when the version is new enough. This page-level probe reports engine/API facts, not a guarantee that the extension host accepted its RP ID.</p>
+                  <p className="settings-help">Native macOS Touch ID for arbitrary site passkeys needs Apple’s managed browser public-key-credential entitlement and organization review/signing; this app does not claim that support or add an Apple Developer enrollment requirement. Bramble’s vault passkeys are a separate extension feature.</p>
+                </section>
                 <section className="settings-section" aria-label="Background tab sleep settings">
                   <label className="settings-field">
                     <span>Hibernate inactive tabs after</span>
@@ -755,7 +1015,7 @@ export default function Browser(): React.JSX.Element {
                       <option value={60}>1 hour</option>
                     </select>
                   </label>
-                  <p className="settings-help">New background tabs stay unloaded until selected; restored tabs stay unloaded until selected or resumed. Loaded tabs keep playing media when you switch away, and audible tabs stay awake while playing. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
+              <p className="settings-help">New tabs load immediately, including tabs opened in the background. Restored tabs may defer loading until selected. Loaded tabs keep playing media when you switch away, and audible tabs stay awake while playing. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
                 </section>
                 <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
                   <div className="settings-section-heading">
@@ -787,6 +1047,48 @@ export default function Browser(): React.JSX.Element {
                   <strong>Browser data stays local</strong>
                   <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
                 </section>
+              </div>
+            </div>
+          )}
+          {sidebarMode === 'site' && (
+            <div className="settings-view site-settings-view">
+              <header className="settings-page-header">
+                <h1>{activeOrigin ? new URL(activeOrigin).hostname : 'Site settings'}</h1>
+                <p>{activeOrigin ? `Privacy and permissions for ${activeOrigin}` : 'Site controls are available on HTTP or HTTPS pages.'}</p>
+              </header>
+              <div className="settings-content">
+                {siteSettingsLoading ? <section className="settings-section"><p className="settings-help">Loading this site’s controls…</p></section> : siteSettings ? (
+                  <>
+                    <section className="settings-section">
+                      <div className="settings-section-heading"><div><strong>Privacy</strong><span className="settings-status is-on">Applies to this origin only</span></div></div>
+                      <label className="site-setting-row">
+                        <span><strong>Block ads and trackers</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
+                        <input type="checkbox" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
+                      </label>
+                      <label className="site-setting-row">
+                        <span><strong>Open pop-ups in tabs</strong><small>Routes pop-up windows from this site into a regular browser tab.</small></span>
+                        <input type="checkbox" checked={siteSettings.openPopupsInTabs} onChange={(event) => void updateSiteSetting('openPopupsInTabs', event.target.checked)} aria-label="Open this site’s pop-ups in tabs" />
+                      </label>
+                    </section>
+                    <section className="settings-section">
+                      <div className="settings-section-heading"><div><strong>Permissions</strong><span className="settings-status">Denied unless allowed below</span></div></div>
+                      <label className="site-setting-row">
+                        <span><strong>Camera and microphone</strong><small>Allows media access requests for this origin; the operating system may still require approval.</small></span>
+                        <input type="checkbox" checked={siteSettings.allowMedia} onChange={(event) => void updateSiteSetting('allowMedia', event.target.checked)} aria-label="Allow camera and microphone on this site" />
+                      </label>
+                      <label className="site-setting-row">
+                        <span><strong>Location</strong><small>Allows location requests for this origin.</small></span>
+                        <input type="checkbox" checked={siteSettings.allowGeolocation} onChange={(event) => void updateSiteSetting('allowGeolocation', event.target.checked)} aria-label="Allow location on this site" />
+                      </label>
+                      <label className="site-setting-row">
+                        <span><strong>Notifications</strong><small>Allows notification requests for this origin.</small></span>
+                        <input type="checkbox" checked={siteSettings.allowNotifications} onChange={(event) => void updateSiteSetting('allowNotifications', event.target.checked)} aria-label="Allow notifications on this site" />
+                      </label>
+                      <p className="settings-help">All other web permissions stay denied. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
+                    </section>
+                    <div className="settings-actions"><button className="settings-action primary" type="button" onClick={() => void window.api.browser.reload()}>Reload page to apply</button></div>
+                  </>
+                ) : <section className="settings-section"><p className="settings-help">Select an HTTP or HTTPS page to manage its privacy controls.</p></section>}
               </div>
             </div>
           )}
@@ -973,14 +1275,6 @@ export default function Browser(): React.JSX.Element {
                   ) : <p className="network-empty-detail">Select a request to inspect its headers, payload, response and timing.</p>}
                 </section>
               </div>
-            </div>
-          )}
-          {sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && activeSleepingTab && (
-            <div className="sleeping-tab-prompt">
-              <span className="sleeping-tab-mark" aria-hidden="true">Z</span>
-              <strong>Tab unloaded to prevent autoplay</strong>
-              <p>This page stays unloaded until you choose to load or resume it.</p>
-              <button className="settings-action primary" type="button" onClick={() => void window.api.browser.tabs.activate(activeSleepingTab.id)}>Load page</button>
             </div>
           )}
         </div>
