@@ -16,6 +16,8 @@
     "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/password-extension-compat.test.ts src/main/adblock.test.ts",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
     "test:electron-extensions": "node scripts/run-electron-extension-probes.cjs",
+    "test:electron-host-bridge": "node scripts/run-electron-host-tab-frame-probe.cjs",
+    "probe:electron-extension-real": "electron scripts/electron-real-extension-probe.cjs",
     "check:password-extension": "node --experimental-strip-types scripts/check-password-extension.ts",
     "postinstall": "install-electron"
   },

@@ -51,11 +51,14 @@ const TARGET_DETAILS: Record<PasswordManagerTarget, {
       'clipboardWrite',
       'contextMenus',
       'idle',
+      'nativeMessaging',
       'notifications',
+      'privacy',
+      'sidePanel',
       'webNavigation',
       'commands'
     ],
-    actions: ['browser_action']
+    actions: ['browser_action', 'action']
   },
   bramble: {
     label: 'Bramble',
@@ -84,8 +87,12 @@ const UNDOCUMENTED_ELECTRON_API_PREFIXES = [
   'downloads',
   'identity',
   'idle',
+  'nativeMessaging',
   'offscreen',
   'notifications',
+  'permissions',
+  'privacy',
+  'sidePanel',
   'webAuthenticationProxy',
   'webNavigation',
   'storage.managed',
@@ -108,6 +115,17 @@ const MV2_RUNTIME_OBSERVED_API_PREFIXES = [
   'storage.onChanged'
 ] as const
 
+// This release-specific method list combines stock failures with missing methods
+// observed when a listener-only test shim let the original worker continue. The
+// host-bridge experiment supplies test-only replacements for tabs.getCurrent
+// and webNavigation APIs; those replacements are not product support.
+const BITWARDEN_MV3_RUNTIME_MISSING_METHODS = [
+  'chrome.permissions.contains',
+  'chrome.tabs.getCurrent',
+  'chrome.webNavigation.getAllFrames',
+  'chrome.webNavigation.onCommitted'
+] as const
+
 function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((entry): entry is string => typeof entry === 'string')
@@ -123,9 +141,9 @@ function hasPrefix(api: string, prefixes: readonly string[]): boolean {
   return prefixes.some((prefix) => api === prefix || api.startsWith(`${prefix}.`))
 }
 
-function isRuntimeObservedApi(target: PasswordManagerTarget, manifestVersion: number | null, api: string): boolean {
-  if (target === 'bramble' && manifestVersion === 3) return hasPrefix(api, MV3_RUNTIME_OBSERVED_API_PREFIXES)
-  if (target === 'bitwarden' && manifestVersion === 2) return hasPrefix(api, MV2_RUNTIME_OBSERVED_API_PREFIXES)
+function isRuntimeObservedApi(manifestVersion: number | null, api: string): boolean {
+  if (manifestVersion === 3) return hasPrefix(api, MV3_RUNTIME_OBSERVED_API_PREFIXES)
+  if (manifestVersion === 2) return hasPrefix(api, MV2_RUNTIME_OBSERVED_API_PREFIXES)
   return false
 }
 
@@ -172,7 +190,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'manifest',
       severity: 'warning',
-      message: `${details.label} declares a Manifest V3 service worker. Electron does not document this surface, but Sockfish's Electron 44.5.1 / Chromium 152 probe loaded the worker and completed extension messaging; the target extension still needs its own runtime test.`
+      message: `${details.label} declares a Manifest V3 service worker. Electron does not document this surface; Sockfish's Electron 44.5.1 / Chromium 152 fixture loaded an MV3 worker and completed messaging, but this static inspection does not prove this build's background behavior or API coverage.`
     })
   } else if (Array.isArray(background.scripts) && manifestVersion === 3) {
     addIssue({
@@ -196,7 +214,7 @@ export function inspectPasswordExtensionCompatibility(
     ...stringList(manifest.optional_permissions)
   ])
   const declaredGaps = details.documentedApiGaps.filter((permission) => declaredPermissions.has(permission))
-  const runtimeObservedPermissions = declaredGaps.filter((permission) => isRuntimeObservedApi(target, manifestVersion, permission))
+  const runtimeObservedPermissions = declaredGaps.filter((permission) => isRuntimeObservedApi(manifestVersion, permission))
   const declaredBlockers = declaredGaps.filter((permission) => !runtimeObservedPermissions.includes(permission))
   if (declaredBlockers.length > 0) {
     addIssue({
@@ -261,9 +279,9 @@ export function inspectPasswordExtensionCompatibility(
 
   const observedApis = findExtensionApiReferences(sourceFiles)
   const observedApiNames = observedApis.map((reference) => reference.replace(/^(chrome|browser)\./, ''))
-  const probedApiNames = observedApiNames.filter((api) => isRuntimeObservedApi(target, manifestVersion, api))
+  const probedApiNames = observedApiNames.filter((api) => isRuntimeObservedApi(manifestVersion, api))
   const undocumentedNames = [...new Set(observedApis
-    .filter((reference, index) => !reference.startsWith('browser.') && hasPrefix(observedApiNames[index] ?? '', UNDOCUMENTED_ELECTRON_API_PREFIXES) && !isRuntimeObservedApi(target, manifestVersion, observedApiNames[index] ?? ''))
+    .filter((reference, index) => !reference.startsWith('browser.') && hasPrefix(observedApiNames[index] ?? '', UNDOCUMENTED_ELECTRON_API_PREFIXES) && !isRuntimeObservedApi(manifestVersion, observedApiNames[index] ?? ''))
     .map((reference) => reference.replace(/^(chrome|browser)\./, '').split('.').slice(0, 2).join('.')))].sort()
   const unverifiedNamespaceUsed = observedApis.some((reference) => reference.startsWith('browser.'))
 
@@ -283,6 +301,17 @@ export function inspectPasswordExtensionCompatibility(
       kind: 'api-gap',
       severity: 'warning',
       message: `Static source references APIs outside Electron's documented surface that were exposed in Sockfish's Electron 44.5.1 runtime probe: ${names.join(', ')}. Presence is not a complete behavioral test.`
+    })
+  }
+
+  const measuredMissingMethods = target === 'bitwarden' && manifestVersion === 3
+    ? BITWARDEN_MV3_RUNTIME_MISSING_METHODS.filter((method) => observedApis.some((reference) => reference === method || reference.startsWith(`${method}.`)))
+    : []
+  if (measuredMissingMethods.length > 0) {
+    addIssue({
+      kind: 'api-gap',
+      severity: 'blocker',
+      message: `The official Bitwarden Chrome 2026.9.3 runtime probe on Electron 44.5.1 / Chromium 152 found these exact API methods missing in their required contexts: ${measuredMissingMethods.join(', ')}. The disposable host-bridge experiment supplied test-only replacements for tabs.getCurrent and webNavigation; those replacements are not product support.`
     })
   }
 
