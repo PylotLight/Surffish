@@ -1,4 +1,4 @@
-import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import {
   activateBrowserTab,
   browserBack,
@@ -18,8 +18,9 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
-import { getBramblePocState, openBramblePoc, openBrambleSetup } from './bramble-poc'
+import { getBramblePocState, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
+import type { BramblePopupAnchor } from '../shared/types'
 import {
   getBrowserSearchEngine,
   getBrowserTabSleepMinutes,
@@ -30,6 +31,19 @@ import {
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (event.sender !== getMainWindow()?.webContents) {
     throw new Error('This browser operation is available only to the app window.')
+  }
+}
+
+function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const anchor = value as Record<string, unknown>
+  if (![anchor.x, anchor.y, anchor.width, anchor.height].every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate))) return undefined
+  if ((anchor.width as number) <= 0 || (anchor.height as number) <= 0) return undefined
+  return {
+    x: anchor.x as number,
+    y: anchor.y as number,
+    width: anchor.width as number,
+    height: anchor.height as number
   }
 }
 
@@ -87,13 +101,20 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return getBramblePocState()
   })
-  ipcMain.handle('browser:bramble:open', async (event) => {
+  ipcMain.handle('browser:bramble:open', async (event, anchor: unknown) => {
     assertMainRenderer(event)
-    return openBramblePoc()
+    return openBramblePoc(parseBramblePopupAnchor(anchor))
   })
   ipcMain.handle('browser:bramble:setup', async (event) => {
     assertMainRenderer(event)
     return openBrambleSetup()
+  })
+  ipcMain.handle('browser:bramble:open-options-from-ui', async (event) => {
+    if (!isBrambleUiWindow(BrowserWindow.fromWebContents(event.sender))) {
+      throw new Error('Only a Bramble UI window can open Bramble Setup/Restore.')
+    }
+    await openBrambleSetup()
+    return true
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })

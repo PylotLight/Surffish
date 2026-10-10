@@ -1,5 +1,5 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 export const BRAMBLE_BROWSER_ALIAS_FILE = 'sockfish-bramble-browser-alias.js'
 export const BRAMBLE_BACKGROUND_WORKER_FILE = 'sockfish-bramble-background.js'
@@ -96,6 +96,16 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
       });
     } catch {}
   }
+  const brambleBridge = globalThis.sockfishBramble;
+  if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime &&
+      typeof brambleBridge?.openOptionsPage === 'function' && typeof extensionApi.runtime.openOptionsPage === 'function') {
+    try {
+      Object.defineProperty(extensionApi.runtime, 'openOptionsPage', {
+        configurable: true,
+        value: async () => brambleBridge.openOptionsPage()
+      });
+    } catch {}
+  }
 })();
 `
 
@@ -106,6 +116,16 @@ export function injectBrambleBrowserAlias(html: string): string {
   if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, `  ${script}\n</head>`)
   if (/<body\b[^>]*>/i.test(html)) return html.replace(/<body\b[^>]*>/i, (body) => `${body}\n  ${script}`)
   return `${script}\n${html}`
+}
+
+/** Keep the real popup usable on compact displays without changing the selected source build. */
+export function adaptBramblePopupViewport(html: string): string {
+  const marker = 'data-sockfish-bramble-viewport'
+  if (html.includes(marker)) return html
+  const style = `<style ${marker}>html, body { box-sizing: border-box; width: 100%; max-width: 500px; min-width: 0; height: 100%; min-height: 0; margin: 0; overflow: auto; } #root { min-height: 100%; }</style>`
+  if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, `  ${style}\n</head>`)
+  if (/<body\b[^>]*>/i.test(html)) return html.replace(/<body\b[^>]*>/i, (body) => `${body}\n  ${style}`)
+  return `${style}\n${html}`
 }
 
 export const BRAMBLE_BACKGROUND_WORKER_SOURCE = `import './${BRAMBLE_BROWSER_ALIAS_FILE}';
@@ -161,7 +181,8 @@ export function stageBrambleFirefoxBuild(sourceDirectory: string, targetDirector
   writeFileSync(join(stagedDirectory, BRAMBLE_BACKGROUND_WORKER_FILE), BRAMBLE_BACKGROUND_WORKER_SOURCE)
   for (const htmlPath of listHtmlFiles(stagedDirectory)) {
     const html = readFileSync(htmlPath, 'utf8')
-    const adapted = injectBrambleBrowserAlias(html)
+    let adapted = injectBrambleBrowserAlias(html)
+    if (basename(htmlPath) === 'popup.html') adapted = adaptBramblePopupViewport(adapted)
     if (adapted !== html) writeFileSync(htmlPath, adapted)
   }
   return { stagedDirectory, version }

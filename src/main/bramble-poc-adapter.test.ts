@@ -8,6 +8,7 @@ import {
   BRAMBLE_BACKGROUND_WORKER_SOURCE,
   BRAMBLE_BROWSER_ALIAS_FILE,
   BRAMBLE_BROWSER_ALIAS_SOURCE,
+  adaptBramblePopupViewport,
   adaptBrambleFirefoxManifest,
   injectBrambleBrowserAlias,
   stageBrambleFirefoxBuild
@@ -59,6 +60,8 @@ test('refuses non-Bramble and incompatible background builds', () => {
 test('provides extension-context browser alias and wraps the original worker after alias setup', () => {
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /globalThis\.browser/)
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /typeof globalThis\.document === 'undefined'/)
+  assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /sockfishBramble/)
+  assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /openOptionsPage/)
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /hasDocument: async \(\) => true/)
   assert.match(BRAMBLE_BACKGROUND_WORKER_SOURCE, /import '\.\/sockfish-bramble-browser-alias\.js'/)
   assert.match(BRAMBLE_BACKGROUND_WORKER_SOURCE, /import '\.\/background\.js'/)
@@ -70,6 +73,16 @@ test('injects the browser alias before Bramble extension-page module scripts, id
   const adapted = injectBrambleBrowserAlias(original)
   assert.ok(adapted.indexOf(BRAMBLE_BROWSER_ALIAS_FILE) < adapted.indexOf('type="module"'))
   assert.equal(injectBrambleBrowserAlias(adapted), adapted)
+})
+
+test('makes the staged Bramble popup scrollable and responsive without double-injecting styles', () => {
+  const original = '<html><head><style>html, body { width: 500px; height: 550px; overflow: hidden; }</style></head><body><div id="root"></div></body></html>'
+  const adapted = adaptBramblePopupViewport(original)
+  assert.match(adapted, /data-sockfish-bramble-viewport/)
+  assert.match(adapted, /max-width: 500px/)
+  assert.match(adapted, /overflow: auto/)
+  assert.equal(adaptBramblePopupViewport(adapted), adapted)
+  assert.equal(original.includes('data-sockfish-bramble-viewport'), false)
 })
 
 test('stages an adapted private copy and leaves the selected Firefox build unchanged', () => {
@@ -96,6 +109,7 @@ test('stages an adapted private copy and leaves the selected Firefox build uncha
     assert.ok(existsSync(join(target, BRAMBLE_BROWSER_ALIAS_FILE)))
     assert.match(readFileSync(join(target, BRAMBLE_BACKGROUND_WORKER_FILE), 'utf8'), /background\.js/)
     assert.match(readFileSync(join(target, 'popup.html'), 'utf8'), /sockfish-bramble-browser-alias\.js/)
+    assert.match(readFileSync(join(target, 'popup.html'), 'utf8'), /data-sockfish-bramble-viewport/)
     assert.equal(readFileSync(join(source, 'manifest.json'), 'utf8'), `${JSON.stringify(sourceManifest, null, 2)}\n`)
     assert.equal(readFileSync(join(source, 'popup.html'), 'utf8'), sourcePopup)
   } finally {

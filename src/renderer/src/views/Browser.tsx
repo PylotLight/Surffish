@@ -107,6 +107,7 @@ export default function Browser(): React.JSX.Element {
   const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const newTabControlRef = useRef<HTMLDivElement>(null)
+  const brambleButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [bramblePoc, setBramblePoc] = useState<BramblePocState>(EMPTY_BRAMBLE_POC)
@@ -174,7 +175,11 @@ export default function Browser(): React.JSX.Element {
 
   async function openBramblePoc(): Promise<void> {
     try {
-      setBramblePoc(await window.api.browser.bramble.open())
+      const bounds = brambleButtonRef.current?.getBoundingClientRect()
+      const anchor = bounds
+        ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
+        : undefined
+      setBramblePoc(await window.api.browser.bramble.open(anchor))
     } catch (error) {
       setBramblePoc((current) => ({
         ...current,
@@ -657,6 +662,7 @@ export default function Browser(): React.JSX.Element {
             </label>
             <button
               className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
+              ref={brambleButtonRef}
               type="button"
               aria-label={bramblePoc.installed ? 'Open Bramble vault (POC)' : 'Load Bramble Firefox build and open vault (POC)'}
               aria-pressed={bramblePoc.popupOpen}
