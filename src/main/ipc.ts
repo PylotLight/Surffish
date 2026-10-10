@@ -18,7 +18,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
-import { getBramblePocState, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
+import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import {
@@ -100,6 +100,14 @@ export function registerIpc(): void {
   ipcMain.handle('browser:bramble:get', (event) => {
     assertMainRenderer(event)
     return getBramblePocState()
+  })
+  ipcMain.handle('browser:bramble:check-for-updates', async (event) => {
+    assertMainRenderer(event)
+    return checkForBrambleUpdates()
+  })
+  ipcMain.handle('browser:bramble:install-latest', async (event) => {
+    assertMainRenderer(event)
+    return installLatestBramble()
   })
   ipcMain.handle('browser:bramble:open', async (event, anchor: unknown) => {
     assertMainRenderer(event)

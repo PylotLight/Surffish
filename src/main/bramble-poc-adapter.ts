@@ -30,7 +30,7 @@ export function adaptBrambleFirefoxManifest(input: unknown): JsonRecord {
   const background = record(input.background)
   const scripts = Array.isArray(background.scripts) ? background.scripts : []
   if (background.type !== 'module' || scripts.length !== 1 || scripts[0] !== 'background.js') {
-    throw new Error('This POC expects Bramble’s Firefox module background at background.js.')
+    throw new Error('Sockfish supports Bramble’s Firefox module background at background.js.')
   }
 
   const manifest = structuredClone(input) as JsonRecord
@@ -169,7 +169,7 @@ export function stageBrambleFirefoxBuild(sourceDirectory: string, targetDirector
   }
   const hostPatterns = Array.isArray(adaptedManifest.host_permissions) ? adaptedManifest.host_permissions : []
   if (!hostPatterns.includes('<all_urls>')) {
-    throw new Error('This POC expects Bramble’s declared <all_urls> host access to be visible before loading.')
+    throw new Error('Bramble’s declared <all_urls> site access must be visible before loading.')
   }
 
   const stagedDirectory = resolve(targetDirectory)

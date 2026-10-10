@@ -48,7 +48,7 @@ app.whenReady().then(async () => {
   try {
     await initializeBramblePoc()
   } catch (error) {
-    console.warn('Could not initialize the Bramble POC; continuing without it:', error)
+    console.warn('Could not initialize the Bramble extension; continuing without it:', error)
   }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

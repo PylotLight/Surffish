@@ -960,7 +960,9 @@ try {
     const targets = await getTargets(port)
     return !targets.some((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
   }, 10_000)
-  await clickElementBySelector(mainConnection, '.bramble-setup-toolbar-button')
+  await mainConnection.evaluate('document.querySelector(".sidebar-mode-button[aria-label=\\"Settings\\"]")?.click()')
+  await waitFor('Bramble management actions in Settings', async () => mainConnection.evaluate('Boolean(document.querySelector(".bramble-settings-actions .settings-action:last-child"))'))
+  await clickElementBySelector(mainConnection, '.bramble-settings-actions .settings-action:last-child')
   const restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))

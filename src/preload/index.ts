@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AdblockDiagnostics,
   BramblePopupAnchor,
-  BramblePocState,
+  BrambleExtensionState,
   BrowserBounds,
   BrowserProxySettings,
   BrowserProxyTestResult,
@@ -76,11 +76,13 @@ const api = {
       }
     },
     bramble: {
-      get: (): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:get'),
-      open: (anchor?: BramblePopupAnchor): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:open', anchor),
-      setup: (): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:setup'),
-      onChange: (callback: (state: BramblePocState) => void): (() => void) => {
-        const listener = (_event: Electron.IpcRendererEvent, state: BramblePocState): void => callback(state)
+      get: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:get'),
+      checkForUpdates: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:check-for-updates'),
+      installLatest: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:install-latest'),
+      open: (anchor?: BramblePopupAnchor): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:open', anchor),
+      setup: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:setup'),
+      onChange: (callback: (state: BrambleExtensionState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: BrambleExtensionState): void => callback(state)
         ipcRenderer.on('browser:bramble:changed', listener)
         return () => ipcRenderer.removeListener('browser:bramble:changed', listener)
       }

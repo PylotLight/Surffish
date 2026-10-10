@@ -1,18 +1,28 @@
 import { app, BrowserWindow, dialog, screen } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { BramblePopupAnchor, BramblePocState } from '../shared/types'
+import type { BrambleExtensionState, BramblePopupAnchor } from '../shared/types'
 import { getBrowserSession } from './browser-session'
 import {
   adaptBrambleFirefoxManifest,
   isRecord,
   stageBrambleFirefoxBuild
 } from './bramble-poc-adapter'
+import {
+  compareBrambleVersions,
+  downloadVerifiedBrambleFirefoxRelease,
+  extractBrambleFirefoxArchive,
+  fetchLatestBrambleFirefoxRelease,
+  sha256Hex
+} from './bramble-release'
 import { getMainWindow } from './window'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
+const BRAMBLE_DATA_DIRECTORY = 'bramble-firefox-poc'
 const STAGING_DIRECTORY = 'bramble-firefox-poc/extension'
+const RELEASE_DIRECTORY = 'bramble-firefox-poc/releases'
 const BRAMBLE_POPUP_WIDTH = 500
 const BRAMBLE_POPUP_HEIGHT = 550
 const BRAMBLE_OPTIONS_WIDTH = 860
@@ -26,12 +36,18 @@ interface LoadedBrambleExtension {
   url: string
 }
 
-const state: BramblePocState = {
+const state: BrambleExtensionState = {
   installed: false,
   loading: false,
   version: null,
+  latestVersion: null,
+  updateAvailable: false,
   popupOpen: false,
-  error: null
+  error: null,
+  notice: null,
+  permissions: [],
+  hostPermissions: [],
+  iconDataUrl: null
 }
 let loadedExtension: LoadedBrambleExtension | null = null
 let popupWindow: BrowserWindow | null = null
@@ -89,38 +105,111 @@ function mainWindow(): BrowserWindow | undefined {
 
 function publishState(): void {
   const win = mainWindow()
-  if (win) win.webContents.send('browser:bramble:changed', { ...state })
+  if (win) {
+    try {
+      win.webContents.send('browser:bramble:changed', { ...state })
+    } catch {
+      // A renderer closing during an extension update must not break the main process.
+    }
+  }
 }
 
-function updateState(patch: Partial<BramblePocState>): void {
+function updateState(patch: Partial<BrambleExtensionState>): void {
   Object.assign(state, patch)
   publishState()
 }
 
-export function getBramblePocState(): BramblePocState {
+export function getBramblePocState(): BrambleExtensionState {
   return { ...state }
+}
+
+interface SavedBrambleConfig {
+  sourceDirectory?: string
+  releaseVersion?: string
+  releaseSha256?: string
 }
 
 function configPath(): string {
   return join(app.getPath('userData'), CONFIG_FILENAME)
 }
 
-function readSavedSourceDirectory(): string | null {
+function readSavedBrambleConfig(): SavedBrambleConfig | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(configPath(), 'utf8'))
-    if (!isRecord(parsed) || typeof parsed.sourceDirectory !== 'string') return null
-    return resolve(parsed.sourceDirectory)
+    if (!isRecord(parsed)) return null
+    const config: SavedBrambleConfig = {}
+    if (typeof parsed.sourceDirectory === 'string') config.sourceDirectory = resolve(parsed.sourceDirectory)
+    if (typeof parsed.releaseVersion === 'string' && /^\d+\.\d+\.\d+$/.test(parsed.releaseVersion)) config.releaseVersion = parsed.releaseVersion
+    if (typeof parsed.releaseSha256 === 'string' && /^[a-f\d]{64}$/i.test(parsed.releaseSha256)) config.releaseSha256 = parsed.releaseSha256.toLowerCase()
+    return Object.keys(config).length > 0 ? config : null
   } catch {
     return null
   }
 }
 
-function saveSourceDirectory(sourceDirectory: string): void {
-  writeFileSync(configPath(), `${JSON.stringify({ sourceDirectory }, null, 2)}\n`, { mode: 0o600 })
+function saveBrambleConfig(config: SavedBrambleConfig): void {
+  mkdirSync(dirname(configPath()), { recursive: true })
+  const targetPath = configPath()
+  const temporaryPath = `${targetPath}.${randomUUID()}.tmp`
+  const backupPath = `${targetPath}.${randomUUID()}.backup`
+  writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+  let backedUp = false
+  try {
+    if (existsSync(targetPath)) {
+      renameSync(targetPath, backupPath)
+      backedUp = true
+    }
+    renameSync(temporaryPath, targetPath)
+  } catch (error) {
+    if (backedUp && !existsSync(targetPath) && existsSync(backupPath)) renameSync(backupPath, targetPath)
+    rmSync(temporaryPath, { force: true })
+    throw error
+  }
+  if (backedUp) {
+    try {
+      rmSync(backupPath, { force: true })
+    } catch {
+      // The verified new config is already active; a stale backup is harmless.
+    }
+  }
 }
 
-function stageBrambleBuild(sourceDirectory: string): { stagedDirectory: string; version: string } {
-  return stageBrambleFirefoxBuild(sourceDirectory, join(app.getPath('userData'), STAGING_DIRECTORY))
+function brambleDirectory(relativePath: string): string {
+  return join(app.getPath('userData'), relativePath)
+}
+
+function stageBrambleBuild(sourceDirectory: string, targetDirectory = brambleDirectory(STAGING_DIRECTORY)): { stagedDirectory: string; version: string } {
+  return stageBrambleFirefoxBuild(sourceDirectory, targetDirectory)
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+}
+
+function extensionDetails(directory: string): Pick<BrambleExtensionState, 'permissions' | 'hostPermissions' | 'iconDataUrl'> {
+  const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as unknown
+  if (!isRecord(manifest)) throw new Error('Bramble’s staged manifest is not valid.')
+  const optionalPermissions = stringList(manifest.optional_permissions).map((permission) => `Optional: ${permission}`)
+  const optionalHosts = stringList(manifest.optional_host_permissions).map((permission) => `Optional: ${permission}`)
+  const permissions = [...stringList(manifest.permissions), ...optionalPermissions]
+  const hostPermissions = [...stringList(manifest.host_permissions), ...optionalHosts]
+  const action = isRecord(manifest.action) ? manifest.action : {}
+  const actionIcons = isRecord(action.default_icon) ? action.default_icon : {}
+  const icons = isRecord(manifest.icons) ? manifest.icons : {}
+  const iconPath = [actionIcons['32'], actionIcons['16'], icons['32'], icons['48']].find((candidate) => typeof candidate === 'string')
+  let iconDataUrl: string | null = null
+  if (typeof iconPath === 'string') {
+    const root = resolve(directory)
+    const candidate = resolve(root, iconPath)
+    if (candidate.startsWith(`${root}${sep}`) && existsSync(candidate)) {
+      const extension = candidate.toLowerCase().split('.').at(-1)
+      const mime = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : null
+    if (mime && statSync(candidate).isFile() && statSync(candidate).size <= 65_536) {
+      iconDataUrl = `data:${mime};base64,${readFileSync(candidate).toString('base64')}`
+    }
+    }
+  }
+  return { permissions: [...new Set(permissions)], hostPermissions: [...new Set(hostPermissions)], iconDataUrl }
 }
 
 function disposePopup(): void {
@@ -150,7 +239,7 @@ async function ensureOffscreenDocument(): Promise<void> {
   disposeOffscreen()
 
   const host = new BrowserWindow({
-    title: 'Bramble offscreen host (POC)',
+    title: 'Bramble background services',
     width: 320,
     height: 480,
     show: false,
@@ -179,40 +268,108 @@ async function ensureOffscreenDocument(): Promise<void> {
   }
 }
 
-async function loadFromDirectory(sourceDirectory: string, persistPath: boolean): Promise<void> {
-  updateState({ loading: true, error: null })
+async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?: SavedBrambleConfig): Promise<void> {
+  const finalDirectory = brambleDirectory(STAGING_DIRECTORY)
+  const backupDirectory = `${finalDirectory}.backup-${randomUUID()}`
+  const previousExtension = loadedExtension
+  const previousState = { ...state }
+  let backedUp = false
+  let activated = false
+  const browserSession = getBrowserSession()
+
   disposePopup()
   disposeSetupWindow()
   disposeOffscreen()
   try {
-    const staged = stageBrambleBuild(sourceDirectory)
-    const browserSession = getBrowserSession()
-    if (loadedExtension) {
-      browserSession.extensions.removeExtension(loadedExtension.id)
+    if (previousExtension) {
+      browserSession.extensions.removeExtension(previousExtension.id)
       loadedExtension = null
     }
-    const extension = await browserSession.extensions.loadExtension(staged.stagedDirectory)
-    loadedExtension = {
-      id: extension.id,
-      name: extension.name,
-      version: extension.version,
-      url: extension.url
+    if (existsSync(finalDirectory)) {
+      renameSync(finalDirectory, backupDirectory)
+      backedUp = true
+    }
+    renameSync(stagedDirectory, finalDirectory)
+    activated = true
+    const extension = await browserSession.extensions.loadExtension(finalDirectory)
+    loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
+    if (previousExtension && extension.id !== previousExtension.id) {
+      throw new Error('The update would change Bramble’s extension identity. The existing vault copy was left in place.')
     }
     await ensureOffscreenDocument()
-    if (persistPath) saveSourceDirectory(resolve(sourceDirectory))
-    updateState({ installed: true, loading: false, version: extension.version, error: null })
+    const details = extensionDetails(finalDirectory)
+    if (configToSave) saveBrambleConfig(configToSave)
+    updateState({
+      installed: true,
+      loading: false,
+      version: extension.version,
+      updateAvailable: state.latestVersion ? compareBrambleVersions(state.latestVersion, extension.version) > 0 : false,
+      popupOpen: false,
+      error: null,
+      permissions: details.permissions,
+      hostPermissions: details.hostPermissions,
+      iconDataUrl: details.iconDataUrl
+    })
+    if (backedUp) {
+      try {
+        rmSync(backupDirectory, { recursive: true, force: true })
+      } catch {
+        // Keep the successful install; an unreferenced backup can be cleaned up later.
+      }
+    }
   } catch (error) {
+    const originalMessage = error instanceof Error ? error.message : String(error)
     disposePopup()
+    disposeSetupWindow()
     disposeOffscreen()
     if (loadedExtension) {
       try {
-        getBrowserSession().extensions.removeExtension(loadedExtension.id)
+        browserSession.extensions.removeExtension(loadedExtension.id)
       } catch {
-        // The extension may already have been removed by a failed load.
+        // The extension may already have been removed as part of a failed load.
       }
       loadedExtension = null
     }
-    updateState({ installed: false, loading: false, version: null, error: error instanceof Error ? error.message : String(error) })
+    if (activated && existsSync(finalDirectory)) rmSync(finalDirectory, { recursive: true, force: true })
+    if (backedUp && existsSync(backupDirectory)) renameSync(backupDirectory, finalDirectory)
+    let rollbackError = ''
+    if (previousExtension && existsSync(finalDirectory)) {
+      try {
+        const restored = await browserSession.extensions.loadExtension(finalDirectory)
+        if (restored.id !== previousExtension.id) throw new Error('the restored extension identity did not match')
+        loadedExtension = { id: restored.id, name: restored.name, version: restored.version, url: restored.url }
+        await ensureOffscreenDocument()
+      } catch (restoreError) {
+        rollbackError = ` Rollback could not reload the previous Bramble build: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}.`
+        loadedExtension = null
+      }
+    }
+    updateState({
+      ...previousState,
+      installed: loadedExtension !== null,
+      version: loadedExtension ? previousExtension?.version ?? previousState.version : null,
+      loading: false,
+      permissions: loadedExtension ? previousState.permissions : [],
+      hostPermissions: loadedExtension ? previousState.hostPermissions : [],
+      iconDataUrl: loadedExtension ? previousState.iconDataUrl : null,
+      error: `${originalMessage}${rollbackError}`
+    })
+    throw new Error(`${originalMessage}${rollbackError}`)
+  }
+}
+
+async function loadFromDirectory(sourceDirectory: string, persistPath: boolean): Promise<void> {
+  updateState({ loading: true, error: null, notice: null })
+  const dataDirectory = brambleDirectory(BRAMBLE_DATA_DIRECTORY)
+  mkdirSync(dataDirectory, { recursive: true })
+  const temporaryRoot = mkdtempSync(join(dataDirectory, 'stage-'))
+  try {
+    const staged = stageBrambleBuild(sourceDirectory, join(temporaryRoot, 'extension'))
+    await replaceStagedBrambleBuild(staged.stagedDirectory, persistPath ? { sourceDirectory: resolve(sourceDirectory) } : undefined)
+  } catch (error) {
+    updateState({ loading: false, error: error instanceof Error ? error.message : String(error) })
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
   }
 }
 
@@ -236,7 +393,7 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
   }
 
   const popup = new BrowserWindow({
-    title: 'Bramble vault (POC)',
+    title: 'Bramble',
     ...bounds,
     useContentSize: true,
     frame: false,
@@ -306,7 +463,7 @@ function showBrambleSetupWindow(): void {
   const width = Math.min(BRAMBLE_OPTIONS_WIDTH, Math.max(640, display.workArea.width - 48))
   const height = Math.min(BRAMBLE_OPTIONS_HEIGHT, Math.max(560, display.workArea.height - 72))
   const setup = new BrowserWindow({
-    title: 'Bramble Setup / Restore (POC)',
+    title: 'Bramble Setup / Restore',
     width,
     height,
     minWidth: Math.min(760, width),
@@ -357,50 +514,51 @@ function showBrambleSetupWindow(): void {
   })
 }
 
-async function chooseAndLoadBramble(): Promise<void> {
-  const owner = mainWindow()
-  const selectionOptions = {
-    title: 'Select Bramble’s unpacked Firefox build',
-    buttonLabel: 'Select build',
-    properties: ['openDirectory'] as Array<'openDirectory'>
-  }
-  const selection = owner
-    ? await dialog.showOpenDialog(owner, selectionOptions)
-    : await dialog.showOpenDialog(selectionOptions)
-  if (selection.canceled || !selection.filePaths[0]) return
+function releaseArchivePath(version: string, sha256: string): string {
+  return join(brambleDirectory(RELEASE_DIRECTORY), `bramble_firefox_${version}_${sha256}.zip`)
+}
 
-  const sourceDirectory = resolve(selection.filePaths[0])
-  let manifest: unknown
+async function loadExistingStagedBuild(directory: string): Promise<void> {
+  const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as unknown
+  const background = isRecord(manifest) && isRecord(manifest.background) ? manifest.background : {}
+  const worker = typeof background.service_worker === 'string' ? background.service_worker : ''
+  if (!isRecord(manifest) || manifest.name !== 'Bramble' || typeof manifest.version !== 'string' ||
+      worker !== 'sockfish-bramble-background.js' || !existsSync(join(directory, worker)) ||
+      !existsSync(join(directory, 'sockfish-bramble-browser-alias.js')) || !existsSync(join(directory, 'popup.html'))) {
+    throw new Error('The saved Bramble install is incomplete. Use Settings → Bramble to install a verified release.')
+  }
   try {
-    manifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8'))
-    adaptBrambleFirefoxManifest(manifest)
+    const extension = await getBrowserSession().extensions.loadExtension(directory)
+    loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
+    await ensureOffscreenDocument()
+    const details = extensionDetails(directory)
+    updateState({ installed: true, loading: false, version: extension.version, popupOpen: false, error: null, permissions: details.permissions, hostPermissions: details.hostPermissions, iconDataUrl: details.iconDataUrl })
   } catch (error) {
-    updateState({ error: error instanceof Error ? error.message : String(error) })
-    return
+    disposeOffscreen()
+    if (loadedExtension) {
+      try { getBrowserSession().extensions.removeExtension(loadedExtension.id) } catch {}
+      loadedExtension = null
+    }
+    throw error
   }
-  const hostPatterns = isRecord(manifest) && Array.isArray(manifest.host_permissions) ? manifest.host_permissions : []
-  const permissions = isRecord(manifest) && Array.isArray(manifest.permissions) ? manifest.permissions : []
-  const confirmationOptions = {
-    type: 'warning' as const,
-    title: 'Load Bramble Firefox build for this POC?',
-    message: 'Bramble will run as an experimental browser extension in Sockfish.',
-    detail: [
-      'This build requests host access to <all_urls> and installs content scripts on matching pages for autofill and its Firefox passkey bridge.',
-      `Declared extension permissions: ${permissions.filter((permission) => typeof permission === 'string').join(', ') || 'none'}.`,
-      `Host access: ${hostPatterns.filter((pattern) => typeof pattern === 'string').join(', ') || 'none'}.`,
-      'The POC adapts a private copy of the Firefox build. Local vault storage and unlock are the target; Bramble’s identity/OAuth backup flow is not supported by Electron. Sockfish does not read, log, or store your vault password.'
-    ].join('\n\n'),
-    buttons: ['Cancel', 'Load Bramble POC'],
-    defaultId: 1,
-    cancelId: 0,
-    noLink: true
-  }
-  const confirmation = owner
-    ? await dialog.showMessageBox(owner, confirmationOptions)
-    : await dialog.showMessageBox(confirmationOptions)
-  if (confirmation.response !== 1) return
+}
 
-  await loadFromDirectory(sourceDirectory, true)
+async function loadSavedRelease(config: SavedBrambleConfig): Promise<void> {
+  if (!config.releaseVersion || !config.releaseSha256) throw new Error('The saved Bramble release metadata is incomplete. Install a fresh verified release from Settings.')
+  const archivePath = releaseArchivePath(config.releaseVersion, config.releaseSha256)
+  const archive = readFileSync(archivePath)
+  if (sha256Hex(archive) !== config.releaseSha256) throw new Error('The saved Bramble release archive failed its SHA-256 integrity check. Reinstall Bramble from Settings.')
+  const temporaryRoot = mkdtempSync(join(brambleDirectory(BRAMBLE_DATA_DIRECTORY), 'load-'))
+  try {
+    const sourceDirectory = join(temporaryRoot, 'source')
+    extractBrambleFirefoxArchive(archive, sourceDirectory)
+    const manifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8')) as unknown
+    if (!isRecord(manifest) || manifest.version !== config.releaseVersion) throw new Error('The saved Bramble version did not match its release record.')
+    const staged = stageBrambleBuild(sourceDirectory, join(temporaryRoot, 'extension'))
+    await replaceStagedBrambleBuild(staged.stagedDirectory)
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true })
+  }
 }
 
 export async function initializeBramblePoc(): Promise<void> {
@@ -412,18 +570,132 @@ export async function initializeBramblePoc(): Promise<void> {
     return
   }
 
-  const sourceDirectory = readSavedSourceDirectory()
-  if (!sourceDirectory) return
-  if (!existsSync(sourceDirectory)) {
-    updateState({ error: 'The saved Bramble Firefox build folder is no longer available. Use the Bramble toolbar button to select it again.' })
+  const savedConfig = readSavedBrambleConfig()
+  if (!savedConfig) {
+    if (existsSync(configPath())) updateState({ error: 'Sockfish could not read the saved Bramble configuration. Reinstall Bramble from Settings.' })
     return
   }
-  await loadFromDirectory(sourceDirectory, false)
+  updateState({ loading: true, error: null })
+  try {
+    if (savedConfig.releaseVersion || savedConfig.releaseSha256) {
+      await loadSavedRelease(savedConfig)
+      return
+    }
+    const sourceDirectory = savedConfig.sourceDirectory
+    if (sourceDirectory && existsSync(sourceDirectory)) {
+      await loadFromDirectory(sourceDirectory, false)
+      return
+    }
+    const stagedDirectory = brambleDirectory(STAGING_DIRECTORY)
+    if (existsSync(stagedDirectory)) {
+      await loadExistingStagedBuild(stagedDirectory)
+      return
+    }
+    updateState({ loading: false, error: 'The saved Bramble build is unavailable. Open Settings → Bramble to install the latest verified release.' })
+  } catch (error) {
+    updateState({ loading: false, installed: false, version: null, error: error instanceof Error ? error.message : String(error) })
+  }
 }
 
-export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<BramblePocState> {
+export async function checkForBrambleUpdates(): Promise<BrambleExtensionState> {
   if (state.loading) return getBramblePocState()
-  if (!loadedExtension) await chooseAndLoadBramble()
+  updateState({ loading: true, error: null, notice: null })
+  try {
+    const release = await fetchLatestBrambleFirefoxRelease()
+    const updateAvailable = state.installed && state.version !== null && compareBrambleVersions(release.version, state.version) > 0
+    updateState({
+      loading: false,
+      latestVersion: release.version,
+      updateAvailable,
+      error: null,
+      notice: state.installed
+        ? updateAvailable ? `Bramble ${release.version} is available.` : `Bramble ${state.version} is up to date.`
+        : `Bramble ${release.version} is ready to install.`
+    })
+  } catch (error) {
+    updateState({ loading: false, error: error instanceof Error ? error.message : String(error) })
+  }
+  return getBramblePocState()
+}
+
+export async function installLatestBramble(): Promise<BrambleExtensionState> {
+  if (state.loading) return getBramblePocState()
+  updateState({ loading: true, error: null, notice: null })
+  let temporaryRoot: string | null = null
+  let writtenArchivePath: string | null = null
+  try {
+    const release = await fetchLatestBrambleFirefoxRelease()
+    const updateAvailable = state.installed && state.version !== null && compareBrambleVersions(release.version, state.version) > 0
+    updateState({ latestVersion: release.version, updateAvailable })
+    if (state.installed && state.version === release.version) {
+      updateState({ loading: false, updateAvailable: false, notice: `Bramble ${release.version} is already installed.` })
+      return getBramblePocState()
+    }
+
+    const verified = await downloadVerifiedBrambleFirefoxRelease(fetch, release)
+    const dataDirectory = brambleDirectory(BRAMBLE_DATA_DIRECTORY)
+    mkdirSync(dataDirectory, { recursive: true })
+    temporaryRoot = mkdtempSync(join(dataDirectory, 'install-'))
+    const sourceDirectory = join(temporaryRoot, 'source')
+    extractBrambleFirefoxArchive(verified.archive, sourceDirectory)
+    const sourceManifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8')) as unknown
+    const adaptedManifest = adaptBrambleFirefoxManifest(sourceManifest)
+    if (!isRecord(sourceManifest) || sourceManifest.version !== release.version || adaptedManifest.name !== 'Bramble') {
+      throw new Error('The downloaded Bramble manifest did not match the selected Firefox release.')
+    }
+    const requestedPermissions = [...stringList(sourceManifest.permissions), ...stringList(sourceManifest.optional_permissions).map((permission) => `Optional: ${permission}`)]
+    const requestedHosts = [...stringList(sourceManifest.host_permissions), ...stringList(sourceManifest.optional_host_permissions).map((permission) => `Optional: ${permission}`)]
+    const confirmationOptions = {
+      type: 'warning' as const,
+      title: `${state.installed ? 'Update' : 'Install'} Bramble ${release.version}?`,
+      message: 'Sockfish will load Bramble’s Firefox extension build from its GitHub release.',
+      detail: [
+        `Integrity: the ZIP matches the release’s SHA256SUMS file${release.githubDigest ? ' and GitHub’s asset SHA-256 digest' : ''}. This Firefox release does not publish a detached maintainer signature.`,
+        `Requested extension permissions: ${requestedPermissions.join(', ') || 'none'}.`,
+        `Requested site access: ${requestedHosts.join(', ') || 'none'}.`,
+        'Bramble requests access to all websites for autofill and its passkey bridge. The Firefox-only identity permission is removed by Sockfish; Bramble’s Google Drive/OAuth backup is unsupported here.',
+        'Bramble’s setup and customization stay in Bramble’s own window. Updating replaces extension files but keeps the existing browser profile and vault storage.'
+      ].join('\n\n'),
+      buttons: ['Cancel', `${state.installed ? 'Update' : 'Install'} Bramble`],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true
+    }
+    const owner = mainWindow()
+    const confirmation = owner
+      ? await dialog.showMessageBox(owner, confirmationOptions)
+      : await dialog.showMessageBox(confirmationOptions)
+    if (confirmation.response !== 1) {
+      updateState({ loading: false, notice: 'Bramble installation was cancelled.' })
+      return getBramblePocState()
+    }
+
+    const staged = stageBrambleBuild(sourceDirectory, join(temporaryRoot, 'extension'))
+    const archivePath = releaseArchivePath(release.version, verified.sha256)
+    mkdirSync(dirname(archivePath), { recursive: true })
+    if (!existsSync(archivePath)) {
+      writeFileSync(archivePath, verified.archive, { mode: 0o600, flag: 'wx' })
+      writtenArchivePath = archivePath
+    } else if (sha256Hex(readFileSync(archivePath)) !== verified.sha256) {
+      throw new Error('A different Bramble archive already occupies the verified release path.')
+    }
+    await replaceStagedBrambleBuild(staged.stagedDirectory, { releaseVersion: release.version, releaseSha256: verified.sha256 })
+    updateState({ latestVersion: release.version, updateAvailable: false, notice: `Bramble ${release.version} installed and verified.` })
+  } catch (error) {
+    if (writtenArchivePath) rmSync(writtenArchivePath, { force: true })
+    updateState({ loading: false, error: error instanceof Error ? error.message : String(error) })
+  } finally {
+    if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true })
+  }
+  return getBramblePocState()
+}
+
+export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<BrambleExtensionState> {
+  if (state.loading) return getBramblePocState()
+  if (!loadedExtension) {
+    updateState({ error: 'Install Bramble from Settings before opening its toolbar popup.' })
+    return getBramblePocState()
+  }
   if (loadedExtension) {
     try {
       await ensureOffscreenDocument()
@@ -435,9 +707,12 @@ export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<Bramb
   return getBramblePocState()
 }
 
-export async function openBrambleSetup(): Promise<BramblePocState> {
+export async function openBrambleSetup(): Promise<BrambleExtensionState> {
   if (state.loading) return getBramblePocState()
-  if (!loadedExtension) await chooseAndLoadBramble()
+  if (!loadedExtension) {
+    updateState({ error: 'Install Bramble from Settings before opening Bramble setup.' })
+    return getBramblePocState()
+  }
   if (loadedExtension) {
     try {
       await ensureOffscreenDocument()

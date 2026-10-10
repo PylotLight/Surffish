@@ -22,6 +22,7 @@ const report = {
   electronVersion: process.versions.electron,
   chromiumVersion: process.versions.chrome,
   fixtureOnly: true,
+  ok: false,
   cases: []
 }
 
@@ -201,8 +202,6 @@ async function run() {
   for (const item of report.cases) {
     item.apiPresence = item.contentScriptReply?.apis ?? null
   }
-  console.log(`SOCKFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
-
   if (baseline) {
     assert.ok(baseline.loaded, `Electron must load the documented MV2 fixture: ${baseline.loadError || 'no extension returned'}`)
     assert.equal(baseline.pageLoaded, true, 'MV2 test page should load on the persistent extension session')
@@ -215,6 +214,8 @@ async function run() {
     assert.equal(baseline.unloaded, true, 'the runtime should remove a test extension from its session')
   }
 
+  report.ok = true
+  console.log(`SOCKFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
   console.log(`Electron extension probe ${requestedCase || 'matrix'} completed. MV3 and Firefox-shape outcomes are observations, not support claims.`)
 }
 
@@ -231,7 +232,11 @@ async function cleanup() {
 }
 
 run().then(cleanup).catch(async (error) => {
+  report.ok = false
+  report.error = error instanceof Error ? error.message : String(error)
   console.error('Electron extension compatibility probe failed:', error)
+  console.log(`SOCKFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
+  process.exitCode = 1
   await cleanup()
   process.exitCode = 1
 })
