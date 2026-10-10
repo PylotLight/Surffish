@@ -114,7 +114,7 @@ async function connectCdp(webSocketUrl) {
         returnByValue: true,
         userGesture: true
       })
-      if (response.exceptionDetails) throw new Error(response.exceptionDetails.text ?? 'Renderer evaluation failed.')
+      if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text ?? 'Renderer evaluation failed.')
       return response.result?.value
     },
     close() {
@@ -281,6 +281,41 @@ try {
   const finalState = await mainConnection.evaluate('window.api.browser.bramble.get()')
   assert.equal(setup.title, 'Vault Setup')
   assert.equal(finalState.installed, true)
+
+  await setupConnection.evaluate(`(() => {
+    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Join a device');
+    if (!tab) throw new Error('Bramble Join a device setup tab was not found.');
+    tab.click();
+    return true;
+  })()`)
+  const joinFormReady = await waitFor("Bramble's real device-join form", async () => {
+    const value = await setupConnection.evaluate(`(() => ({
+      pairingCode: !!document.querySelector('#pairing-code'),
+      masterPassword: !!document.querySelector('form input[type="password"]'),
+      joinButton: [...document.querySelectorAll('form button[type="submit"]')].some((button) => button.innerText.trim() === 'Join vault')
+    }))()`)
+    return value?.pairingCode && value?.masterPassword && value?.joinButton ? value : null
+  }, 10_000)
+  assert.equal(joinFormReady.pairingCode, true)
+  assert.equal(joinFormReady.masterPassword, true)
+  assert.equal(joinFormReady.joinButton, true)
+  await setupConnection.evaluate(`(() => {
+    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Restore from backup');
+    if (!tab) throw new Error('Bramble Restore from backup setup tab was not found.');
+    tab.click();
+    return true;
+  })()`)
+  const restoreTabReady = await waitFor('Bramble embedded restore tab', async () =>
+    setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
+  assert.equal(restoreTabReady, true)
+  await setupConnection.evaluate(`(() => {
+    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Create new vault');
+    if (!tab) throw new Error('Bramble Create new vault setup tab was not found.');
+    tab.click();
+    return true;
+  })()`)
+  await waitFor('Bramble create-vault form after checking Join UI', async () =>
+    setupConnection.evaluate(`!!document.querySelector('form input[name="masterPassword"]') && !!document.querySelector('form input[name="confirmPassword"]')`), 10_000)
 
   const ephemeralPassword = randomBytes(32).toString('base64url')
   await setupConnection.evaluate(`((password) => {
@@ -598,8 +633,95 @@ try {
   }
   assert.equal(signatureVerified, true, 'The passkey assertion signature did not verify against the registration public key.')
 
-  const passkeyShot = await rpConnection.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
-  writeFileSync(screenshotPath, Buffer.from(passkeyShot.data, 'base64'))
+  const openBramblePages = (await getTargets(port)).filter((target) =>
+    target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
+  for (const target of openBramblePages) await browserConnection.send('Target.closeTarget', { targetId: target.id })
+  await waitFor('Bramble UI windows to close before reopening setup', async () => {
+    const targets = await getTargets(port)
+    return !targets.some((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
+  }, 10_000)
+  await mainConnection.evaluate('window.api.browser.bramble.setup()')
+  const restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
+    const targets = await getTargets(port)
+    return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
+  }, 20_000)
+  setupConnection = await connectCdp(restoreSetupTarget.webSocketDebuggerUrl)
+  await waitFor('Bramble setup tabs in the fresh options window', async () =>
+    setupConnection.evaluate(`document.body?.innerText.includes('Restore from backup') && document.body?.innerText.includes('Join a device')`), 20_000)
+  const backupInfo = await waitFor('the disposable vault encrypted backup bytes', async () => {
+    const value = await setupConnection.evaluate(`(async () => {
+      const stored = await browser.storage.local.get(null);
+      const vaults = stored['vault.registry']?.vaults;
+      const sourceVaultId = Array.isArray(vaults) ? vaults[0]?.id : undefined;
+      const base64 = typeof sourceVaultId === 'string' ? stored['vault-blob-b64:' + sourceVaultId] : undefined;
+      return { sourceVaultId, vaultCount: Array.isArray(vaults) ? vaults.length : 0, base64 };
+    })()`)
+    return value?.vaultCount === 1 && typeof value.sourceVaultId === 'string' && typeof value.base64 === 'string' ? value : null
+  }, 10_000)
+  const backupPath = join(temporaryRoot, 'disposable-existing-vault.bramble')
+  writeFileSync(backupPath, Buffer.from(backupInfo.base64, 'base64'))
+  await setupConnection.evaluate(`(() => {
+    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Restore from backup')
+    if (!tab) throw new Error('Bramble Restore from backup setup tab was not found.')
+    tab.click()
+    return true
+  })()`)
+  await waitFor('Bramble setup-flow encrypted backup restore page', async () =>
+    setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
+  await setupConnection.send('DOM.enable')
+  const { root } = await setupConnection.send('DOM.getDocument', { depth: -1, pierce: true })
+  const fileInput = findNode(root, (node) => node.nodeName === 'INPUT' && nodeAttribute(node, 'type') === 'file')
+  if (!fileInput?.nodeId) throw new Error('Bramble backup restore file input was not found.')
+  await setupConnection.send('DOM.setFileInputFiles', { files: [backupPath], nodeId: fileInput.nodeId })
+  const restoreForm = await waitFor('Bramble encrypted backup password form', async () => {
+    const value = await setupConnection.evaluate(`(() => ({
+      password: !!document.querySelector('form input[type="password"]'),
+      restoreButton: [...document.querySelectorAll('form button[type="submit"]')].some((button) => button.innerText.trim() === 'Restore vault'),
+      fileNameShown: document.body?.innerText.includes('disposable-existing-vault.bramble') ?? false
+    }))()`)
+    return value?.password && value?.restoreButton && value?.fileNameShown ? value : null
+  }, 15_000)
+  assert.equal(restoreForm.password, true)
+  assert.equal(restoreForm.restoreButton, true)
+  await setupConnection.evaluate(`((password) => {
+    const field = document.querySelector('form input[type="password"]')
+    const form = field?.closest('form')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    if (!field || !form || !setter) throw new Error('Bramble restore-password form was not ready.')
+    setter.call(field, password)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+    const submit = [...form.querySelectorAll('button[type="submit"]')].find((button) => button.innerText.trim() === 'Restore vault')
+    if (!submit || submit.disabled) throw new Error('Bramble did not enable its restore button.')
+    form.requestSubmit(submit)
+    return true
+  })(${JSON.stringify(ephemeralPassword)})`)
+  const restoreComplete = await waitFor('Bramble added-vault success screen after encrypted restore', async () => {
+    const text = await setupConnection.evaluate('document.body?.innerText ?? ""')
+    return text.includes('Vault added') ? text : null
+  }, 45_000)
+  const restoredVault = await setupConnection.evaluate(`(async () => {
+    const stored = await browser.storage.local.get(null)
+    const vaults = stored['vault.registry']?.vaults
+    const sourceVaultId = ${JSON.stringify(backupInfo.sourceVaultId)}
+    const sourceKey = 'vault-blob-b64:' + sourceVaultId
+    const restored = Array.isArray(vaults) ? vaults.find((vault) => vault.id !== sourceVaultId) : undefined
+    const session = await browser.storage.session.get(null)
+    return {
+      vaultCount: Array.isArray(vaults) ? vaults.length : 0,
+      originalUnchanged: stored[sourceKey] === ${JSON.stringify(backupInfo.base64)},
+      restoredBlobMatchesBackup: typeof restored?.id === 'string' && stored['vault-blob-b64:' + restored.id] === ${JSON.stringify(backupInfo.base64)},
+      restoredVaultLocked: typeof restored?.id === 'string' && !Object.hasOwn(session, 'vault.vek:' + restored.id)
+    }
+  })()`)
+  assert.equal(restoreComplete.includes('Vault added'), true)
+  assert.equal(restoredVault.vaultCount, 2)
+  assert.equal(restoredVault.originalUnchanged, true)
+  assert.equal(restoredVault.restoredBlobMatchesBackup, true)
+  assert.equal(restoredVault.restoredVaultLocked, true)
+
+  const restoreShot = await setupConnection.send('Page.captureScreenshot', { format: 'png', fromSurface: true })
+  writeFileSync(screenshotPath, Buffer.from(restoreShot.data, 'base64'))
 
   console.log(JSON.stringify({
     result: 'PASS',
@@ -609,6 +731,8 @@ try {
     firstRunPopupText: popup.bodyText.slice(0, 250),
     setupPageTitle: setup.title,
     createVaultFormReady: setup.createForm,
+    joinFormDisplayed: joinFormReady.pairingCode && joinFormReady.masterPassword && joinFormReady.joinButton,
+    restoreTabDisplayed: restoreTabReady,
     disposableVaultCreated: setupComplete.vaultReady,
     vaultRegistryCount: vaultView.vaultCount,
     lockScreenRendered: lockedScreen.passwordInput,
@@ -619,13 +743,17 @@ try {
     passkeyAssertionPassed: getResult.state === 'success',
     assertionSignatureVerified: signatureVerified,
     rpIdAndUserVerificationFlagsChecked: true,
+    encryptedBackupRestorePassed: true,
+    restoredVaultWasAddedLocked: restoredVault.restoredVaultLocked,
+    originalVaultBytesUnchanged: restoredVault.originalUnchanged,
+    liveDeviceSyncAttempted: false,
     profileWasTemporary: true,
     networkDnsBlocked: true,
     accountUsed: false,
     realVaultDataUsed: false,
     screenshotPath
   }, null, 2))
-  console.log('This app smoke test used a disposable profile, an in-memory random password, and a localhost-only relying party: it created/unlocked a throwaway vault, registered a test passkey after Bramble consent, then signed in and verified the assertion signature. The profile and passkey were deleted; no vault credential, recovery code, or passkey private key was logged or saved to the repository.')
+  console.log('This app smoke test used a temporary profile, random in-memory password, and a localhost-only relying party. It verified the Join UI, created/unlocked a throwaway vault, registered and asserted a local test passkey, then restored a disposable full-vault encrypted backup as a second locked vault and confirmed the original encrypted blob was unchanged. It did not initiate live device sync. The profile, passkey, and temporary backup were deleted; no vault credential, recovery code, or passkey private key was logged or saved to the repository.')
 } catch (error) {
   const logs = appOutput.join('').slice(-10_000)
   console.error(`Bramble app POC smoke test failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n${logs}`)
