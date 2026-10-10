@@ -273,7 +273,10 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         let refreshedDiagnostics = loadedExtensions.map { summary in
             let webKitErrors = summary.context.errors.map { error -> String in
                 let nsError = error as NSError
-                return "WebKit \(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+                let backgroundFailure = nsError.domain == "WKWebExtensionContextErrorDomain" && nsError.code == 6
+                    ? " The extension's background script or service worker did not start; this is separate from the browser page load. A script error or an unsupported WebExtension API may be the cause, and popup features that depend on it may remain blank."
+                    : ""
+                return "WebKit \(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)\(backgroundFailure)"
             }
             let hostErrors = hostDiagnosticsByExtensionID[summary.id] ?? []
             return ExtensionDiagnostic(

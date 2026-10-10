@@ -4,8 +4,20 @@ import SwiftUI
 import UniformTypeIdentifiers
 import WebKit
 
+@MainActor
+private final class SockfishNativeAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftPM-launched SwiftUI executables can have a visible window without
+        // becoming the active regular app. That leaves controls unable to accept
+        // keyboard input and macOS beeps when the user types.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
 @main
 struct SockfishNativeApp: App {
+    @NSApplicationDelegateAdaptor(SockfishNativeAppDelegate.self) private var appDelegate
     @StateObject private var browser = NativeBrowserHarness()
 
     var body: some Scene {
@@ -190,7 +202,18 @@ private struct NativeBrowserWindow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
         }
-        .onAppear { addressFieldFocused = true }
+        .onAppear {
+            // Wait until SwiftUI has attached the window before requesting focus.
+            // Setting FocusState earlier can be ignored when the app/window is not
+            // key yet, which looks like a disabled address field to the user.
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = NSApp.windows.first(where: \.isVisible) {
+                    window.makeKeyAndOrderFront(nil)
+                }
+                addressFieldFocused = true
+            }
+        }
         .task {
             while !Task.isCancelled {
                 browser.refreshExtensionDiagnostics()
