@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   AdblockDiagnostics,
-  BramblePocState,
+  BrambleExtensionState,
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
@@ -24,12 +24,18 @@ const EMPTY_BROWSER: BrowserState = {
   canGoForward: false,
   error: null
 }
-const EMPTY_BRAMBLE_POC: BramblePocState = {
+const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
   loading: false,
   version: null,
+  latestVersion: null,
+  updateAvailable: false,
   popupOpen: false,
-  error: null
+  error: null,
+  notice: null,
+  permissions: [],
+  hostPermissions: [],
+  iconDataUrl: null
 }
 
 type SidebarMode = 'tabs' | 'history' | 'settings' | 'diagnostics' | 'network'
@@ -110,7 +116,7 @@ export default function Browser(): React.JSX.Element {
   const brambleButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
-  const [bramblePoc, setBramblePoc] = useState<BramblePocState>(EMPTY_BRAMBLE_POC)
+  const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
   const [sidebarPinned, setSidebarPinned] = useState(false)
@@ -466,6 +472,13 @@ export default function Browser(): React.JSX.Element {
     return !query || entry.title.toLowerCase().includes(query) || entry.url.toLowerCase().includes(query)
   })
   const activeSleepingTab = tabs.find((tab) => tab.active && tab.sleeping)
+  const brambleInstallLabel = bramblePoc.loading
+    ? 'Working…'
+    : !bramblePoc.installed
+      ? `Install${bramblePoc.latestVersion ? ` ${bramblePoc.latestVersion}` : ' latest'}`
+      : bramblePoc.updateAvailable && bramblePoc.latestVersion
+        ? `Update to ${bramblePoc.latestVersion}`
+        : bramblePoc.latestVersion ? 'Up to date' : 'Install / update'
 
   return (
     <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser">
@@ -641,9 +654,6 @@ export default function Browser(): React.JSX.Element {
               </button>
             </div>
             <label className="omnibox">
-              <span className={`omnibox-mark${browser.url.startsWith('https://') ? ' secure' : ''}`} aria-hidden="true">
-                {browser.url.startsWith('https://') ? '●' : '⌕'}
-              </span>
               <input
                 ref={addressRef}
                 type="text"
@@ -664,32 +674,21 @@ export default function Browser(): React.JSX.Element {
               className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
               ref={brambleButtonRef}
               type="button"
-              aria-label={bramblePoc.installed ? 'Open Bramble vault (POC)' : 'Load Bramble Firefox build and open vault (POC)'}
+              aria-label={bramblePoc.installed ? 'Open Bramble' : 'Open Bramble extension settings'}
               aria-pressed={bramblePoc.popupOpen}
               aria-busy={bramblePoc.loading}
-              title={bramblePoc.error ?? (bramblePoc.installed ? `Open Bramble vault (POC${bramblePoc.version ? `, ${bramblePoc.version}` : ''})` : 'Load Bramble Firefox build (POC)')}
+              title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Bramble extension settings'}
               disabled={bramblePoc.loading}
-              onClick={() => void openBramblePoc()}
+              onClick={() => bramblePoc.installed ? void openBramblePoc() : setSidebarMode('settings')}
             >
-              <span className="bramble-toolbar-mark" aria-hidden="true">B</span>
-              <span className="bramble-toolbar-label">{bramblePoc.loading ? 'Loading' : 'Bramble'}</span>
-            </button>
-            <button
-              className="toolbar-button bramble-setup-toolbar-button"
-              type="button"
-              aria-label="Open Bramble setup or restore a vault"
-              title="Open Bramble setup / restore"
-              disabled={bramblePoc.loading}
-              onClick={() => void openBrambleSetupPage()}
-            >
-              <span className="bramble-setup-toolbar-label">Setup</span>
+              {bramblePoc.iconDataUrl
+                ? <img className="bramble-toolbar-icon" src={bramblePoc.iconDataUrl} alt="" />
+                : <span className="bramble-toolbar-fallback" aria-hidden="true">B</span>}
             </button>
           </form>
-          {(browser.error || navigationError || bramblePoc.error) && (
+          {(browser.error || navigationError) && (
             <p className="browser-error" role="status">
-              {bramblePoc.error
-                ? `Bramble POC: ${bramblePoc.error}`
-                : browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
+              {browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
             </p>
           )}
         </header>
@@ -709,6 +708,31 @@ export default function Browser(): React.JSX.Element {
                     </select>
                   </label>
                   <p className="settings-help">Used for searches typed into the address bar.</p>
+                </section>
+                <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong>Bramble password manager</strong>
+                      <span className={`settings-status${bramblePoc.installed ? ' is-on' : ''}`}>
+                        {bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}` : 'Not installed'}
+                      </span>
+                    </div>
+                    {bramblePoc.installed && bramblePoc.iconDataUrl && <img className="bramble-settings-icon" src={bramblePoc.iconDataUrl} alt="" />}
+                  </div>
+                  <p className="settings-help">Install or update the verified Firefox release here. Bramble’s vault setup and customization open in Bramble’s own window; the toolbar keeps only its popup icon.</p>
+                  <div className="settings-actions bramble-settings-actions">
+                    <button className="settings-action secondary" type="button" disabled={bramblePoc.loading} onClick={() => void window.api.browser.bramble.checkForUpdates()}>{bramblePoc.loading ? 'Checking…' : 'Check for updates'}</button>
+                    <button className="settings-action primary" type="button" disabled={bramblePoc.loading || (bramblePoc.installed && bramblePoc.latestVersion !== null && !bramblePoc.updateAvailable)} onClick={() => void window.api.browser.bramble.installLatest()}>
+                      {brambleInstallLabel}
+                    </button>
+                    <button className="settings-action secondary" type="button" disabled={!bramblePoc.installed || bramblePoc.loading} onClick={() => void openBrambleSetupPage()}>Setup / customize</button>
+                  </div>
+                  {bramblePoc.latestVersion && <p className="settings-help bramble-version-note">Latest Firefox release: <strong>{bramblePoc.latestVersion}</strong>{bramblePoc.installed && bramblePoc.updateAvailable ? ' · update available' : ''}</p>}
+                  {bramblePoc.permissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Extension permissions:</strong> {bramblePoc.permissions.join(', ')}</p>}
+                  {bramblePoc.hostPermissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Site access:</strong> {bramblePoc.hostPermissions.join(', ')}</p>}
+                  <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and GitHub asset digest when available. Installation and updates are always manual; every release shows its requested access before activation. Sockfish removes Firefox-only OAuth access, so Google Drive backup is unavailable.</p>
+                  {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
+                  {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </section>
                 <section className="settings-section" aria-label="Background tab sleep settings">
                   <label className="settings-field">

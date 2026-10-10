@@ -48,12 +48,18 @@ export interface BramblePopupAnchor {
   height: number
 }
 
-export interface BramblePocState {
+export interface BrambleExtensionState {
   installed: boolean
   loading: boolean
   version: string | null
+  latestVersion: string | null
+  updateAvailable: boolean
   popupOpen: boolean
   error: string | null
+  notice: string | null
+  permissions: string[]
+  hostPermissions: string[]
+  iconDataUrl: string | null
 }
 
 export interface AdblockBlockedRequest {
