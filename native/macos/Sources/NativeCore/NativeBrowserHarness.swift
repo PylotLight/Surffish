@@ -197,6 +197,9 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         }
 
         let context = WKWebExtensionContext(for: webExtension)
+        #if DEBUG
+        context.isInspectable = true
+        #endif
         try extensionController.load(context)
 
         let summary = ExtensionInstallSummary(
@@ -225,6 +228,46 @@ public final class NativeBrowserHarness: NSObject, ObservableObject, WKNavigatio
         extensionActionRevision += 1
         refreshExtensionDiagnostics()
         status = "Unloaded \(summary.name)."
+    }
+
+    @discardableResult
+    public func loadBackgroundContent(for summary: ExtensionInstallSummary) async -> Bool {
+        guard loadedExtensions.contains(where: { $0.id == summary.id }) else { return false }
+
+        do {
+            try await summary.context.loadBackgroundContent()
+            refreshExtensionDiagnostics()
+            status = "Loaded \(summary.name) background content. Select its target from Safari’s Develop menu to inspect it."
+            return true
+        } catch {
+            let message = "Could not load \(summary.name) background content: \(error.localizedDescription)"
+            recordHostDiagnostic(message, for: summary)
+            status = message
+            return false
+        }
+    }
+
+    public func reloadExtension(_ summary: ExtensionInstallSummary) throws {
+        guard loadedExtensions.contains(where: { $0.id == summary.id }) else { return }
+
+        if summary.context.isLoaded {
+            try extensionController.unload(summary.context)
+        }
+        #if DEBUG
+        summary.context.isInspectable = true
+        #endif
+        do {
+            try extensionController.load(summary.context)
+        } catch {
+            extensionActionRevision += 1
+            refreshExtensionDiagnostics()
+            throw error
+        }
+
+        hostDiagnosticsByExtensionID.removeValue(forKey: summary.id)
+        extensionActionRevision += 1
+        refreshExtensionDiagnostics()
+        status = "Reloaded \(summary.name). Reopen its popup and reselect its current target in Safari’s Develop menu if the inspector detached."
     }
 
     public func hasExtensionAction(for id: UUID) -> Bool {

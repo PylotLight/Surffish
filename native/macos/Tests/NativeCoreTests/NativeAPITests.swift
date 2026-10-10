@@ -54,6 +54,19 @@ final class NativeAPITests: XCTestCase {
         XCTAssertEqual(browser.extensionController.extensions.count, 1)
         XCTAssertTrue(try XCTUnwrap(extensionSummary.context.action(for: nil)).presentsPopup)
 
+        #if DEBUG
+        XCTAssertTrue(extensionSummary.context.isInspectable)
+        #else
+        XCTAssertFalse(extensionSummary.context.isInspectable)
+        #endif
+
+        let didLoadBackground = await browser.loadBackgroundContent(for: extensionSummary)
+        XCTAssertTrue(didLoadBackground, browser.status)
+
+        try browser.reloadExtension(extensionSummary)
+        XCTAssertTrue(extensionSummary.isLoaded)
+        XCTAssertEqual(browser.extensionController.extensions.count, 1)
+
         browser.refreshExtensionDiagnostics()
         XCTAssertEqual(browser.extensionDiagnostics.first?.extensionName, extensionSummary.name)
 

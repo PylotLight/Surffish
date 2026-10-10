@@ -123,6 +123,18 @@ private struct NativeBrowserWindow: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                         Spacer(minLength: 8)
+                                        Button("Load background") {
+                                            Task { await browser.loadBackgroundContent(for: item) }
+                                        }
+                                        .help("Ask WebKit to force-load this extension’s on-demand background content")
+                                        Button("Reload") {
+                                            do {
+                                                try browser.reloadExtension(item)
+                                            } catch {
+                                                browser.setStatus("Reload failed: \(error.localizedDescription)")
+                                            }
+                                        }
+                                        .help("Restart this extension context without closing the browser window")
                                         Button("Unload") {
                                             do {
                                                 try browser.uninstallExtension(item)
