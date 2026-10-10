@@ -24,6 +24,7 @@ const temporaryRoot = mkdtempSync(join(tmpdir(), 'sockfish-bramble-app-poc-'))
 const userData = join(temporaryRoot, 'profile')
 const screenshotPath = process.env.SOCKFISH_BRAMBLE_SCREENSHOT ?? '/workspace/bramble-poc-verification.png'
 const appOutput = []
+const secretsToRedact = []
 let child
 let mainConnection
 let popupConnection
@@ -31,12 +32,17 @@ let setupConnection
 let browserConnection
 let rpConnection
 let rpServer
+let autofillResults = null
 
 function capture(stream, label) {
   stream?.on('data', (chunk) => {
     appOutput.push(`${label}: ${String(chunk)}`)
     if (appOutput.join('').length > 40_000) appOutput.splice(0, appOutput.length - 20)
   })
+}
+
+function redactSecrets(text) {
+  return secretsToRedact.reduce((safe, secret) => secret ? safe.split(secret).join('[redacted]') : safe, text)
 }
 
 function getFreePort() {
@@ -77,6 +83,7 @@ async function waitFor(description, operation, timeoutMs = 30_000) {
 async function connectCdp(webSocketUrl) {
   const socket = new WebSocket(webSocketUrl)
   const pending = new Map()
+  const executionContexts = []
   let nextId = 1
   await new Promise((resolveOpen, rejectOpen) => {
     const timer = setTimeout(() => rejectOpen(new Error('CDP WebSocket connection timed out.')), 10_000)
@@ -86,6 +93,12 @@ async function connectCdp(webSocketUrl) {
   socket.addEventListener('message', (event) => {
     let packet
     try { packet = JSON.parse(String(event.data)) } catch { return }
+    if (packet.method === 'Runtime.executionContextCreated' && packet.params?.context) executionContexts.push(packet.params.context)
+    if (packet.method === 'Runtime.executionContextDestroyed') {
+      const destroyedId = packet.params?.executionContextId
+      const index = executionContexts.findIndex((context) => context.id === destroyedId)
+      if (index >= 0) executionContexts.splice(index, 1)
+    }
     if (packet.id && pending.has(packet.id)) {
       const entry = pending.get(packet.id)
       pending.delete(packet.id)
@@ -96,6 +109,7 @@ async function connectCdp(webSocketUrl) {
   })
   return {
     socket,
+    get executionContexts() { return [...executionContexts] },
     send(method, params = {}) {
       const id = nextId++
       return new Promise((resolveCommand, rejectCommand) => {
@@ -163,7 +177,10 @@ async function dispatchMouseClick(connection, point) {
 
 async function clickButtonByText(connection, text) {
   const point = await connection.evaluate(`(() => {
-    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.innerText.trim() === ${JSON.stringify(text)});
+    const button = [...document.querySelectorAll('button')].find((candidate) => {
+      const lines = candidate.innerText.trim().split(/\\r?\\n/);
+      return lines.length > 0 && lines[0] === ${JSON.stringify(text)};
+    });
     if (!button) return null;
     button.scrollIntoView({ block: 'center', inline: 'center' });
     const rect = button.getBoundingClientRect();
@@ -181,6 +198,31 @@ async function clickElementBySelector(connection, selector) {
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   })()`)
   await dispatchMouseClick(connection, point)
+}
+
+async function findVisibleLoginSuggestion(connection, name, username, password) {
+  await connection.send('DOM.enable')
+  const { root } = await connection.send('DOM.getDocument', { depth: -1, pierce: true })
+  const row = findNode(root, (node) => node.nodeName === 'DIV' && typeof nodeAttribute(node, 'data-entry-id') === 'string')
+  if (!row?.nodeId) return null
+  const resolved = await connection.send('DOM.resolveNode', { nodeId: row.nodeId })
+  const inspection = await connection.send('Runtime.callFunctionOn', {
+    objectId: resolved.object.objectId,
+    functionDeclaration: 'function (expectedName, expectedUsername, expectedPassword) { const text = this.innerText ?? this.textContent ?? ""; return { matches: text.includes(expectedName) && text.includes(expectedUsername), passwordHidden: !text.includes(expectedPassword) }; }',
+    arguments: [{ value: name }, { value: username }, { value: password }],
+    returnByValue: true
+  })
+  if (inspection.result?.value?.passwordHidden !== true) throw new Error('Bramble exposed the synthetic password in its visible suggestion row.')
+  if (inspection.result?.value?.matches !== true) return null
+  const box = await connection.send('DOM.getBoxModel', { nodeId: row.nodeId })
+  const border = box.model?.border
+  if (!Array.isArray(border) || border.length < 8 || box.model?.width <= 0 || box.model?.height <= 0) return null
+  return {
+    point: {
+      x: (border[0] + border[2] + border[4] + border[6]) / 4,
+      y: (border[1] + border[3] + border[5] + border[7]) / 4
+    }
+  }
 }
 
 async function inspectViewport(connection) {
@@ -253,9 +295,17 @@ async function stopChild() {
 try {
   const port = await getFreePort()
   const rpHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Sockfish Bramble local passkey RP</title></head><body><main><h1>Local Bramble passkey POC</h1><p id="status">Local-only test relying party; no account or external service.</p></main></body></html>'
-  rpServer = createHttpServer((_request, response) => {
+  const autofillHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Sockfish Bramble local autofill form</title></head><body><main><h1>Local Bramble autofill regression</h1><p id="status">Waiting for local form fill.</p><form id="login-form" method="post" action="/autofill-submit" autocomplete="on"><label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password"><button id="submit-login" type="submit">Submit local form</button></form><script>document.querySelector("#login-form").addEventListener("submit", (event) => { event.preventDefault(); const complete = Boolean(document.querySelector("#username").value && document.querySelector("#password").value); document.querySelector("#status").textContent = complete ? "Local form submission verified." : "Local form is missing credentials."; });</script></main></body></html>'
+  let unexpectedFormPosts = 0
+  rpServer = createHttpServer((request, response) => {
+    if (request.method === 'POST' && (request.url ?? '').startsWith('/autofill')) {
+      unexpectedFormPosts += 1
+      request.resume()
+      response.writeHead(204).end()
+      return
+    }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-    response.end(rpHtml)
+    response.end((request.url ?? '').startsWith('/autofill') ? autofillHtml : rpHtml)
   })
   await new Promise((resolveListen, rejectListen) => {
     rpServer.once('error', rejectListen)
@@ -264,6 +314,7 @@ try {
   const rpAddress = rpServer.address()
   if (!rpAddress || typeof rpAddress === 'string') throw new Error('Could not start the local WebAuthn relying-party test server.')
   const rpUrl = `http://localhost:${rpAddress.port}/`
+  const autofillUrl = `http://127.0.0.1:${rpAddress.port}/autofill`
   const electronArgs = [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userData}`,
@@ -418,6 +469,7 @@ try {
   assert.equal(joinFormReady.joinButton, true)
   const joinLayout = await inspectViewport(setupConnection)
   assertViewportFitsOrScrolls(joinLayout, 'Bramble Join form')
+  assert.equal(joinLayout.height >= 680, true, 'The Join route should fit the 680 px setup window on the test display.')
   await clickButtonByText(setupConnection, 'Restore from backup')
   const restoreTabReady = await waitFor('Bramble embedded restore tab', async () =>
     setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
@@ -429,6 +481,7 @@ try {
     setupConnection.evaluate(`!!document.querySelector('form input[name="masterPassword"]') && !!document.querySelector('form input[name="confirmPassword"]')`), 10_000)
 
   const ephemeralPassword = randomBytes(32).toString('base64url')
+  secretsToRedact.push(ephemeralPassword)
   await setupConnection.evaluate(`((password) => {
     const form = document.querySelector('form');
     const fields = [...(form?.querySelectorAll('input[type="password"]') ?? [])];
@@ -572,6 +625,164 @@ try {
   }, 30_000)
   assert.equal(unlockedAgain.unlocked, true)
 
+  const syntheticLoginName = 'Sockfish Local Autofill Regression'
+  const syntheticUsername = `sockfish-${randomBytes(10).toString('hex')}@example.test`
+  const syntheticPassword = randomBytes(32).toString('base64url')
+  secretsToRedact.push(syntheticUsername, syntheticPassword)
+  await clickElementBySelector(popupConnection, '[aria-label="Add New"]')
+  await waitFor('Bramble Add New login option', async () =>
+    popupConnection.evaluate(`([...document.querySelectorAll('button')].some((button) => button.innerText.trim().split(/\\r?\\n/)[0] === 'Login'))`), 10_000)
+  await clickButtonByText(popupConnection, 'Login')
+  await waitFor('Bramble synthetic login editor', async () =>
+    popupConnection.evaluate(`!!document.querySelector('form input[name="name"]') && !!document.querySelector('form input[name="username"]') && !!document.querySelector('form input[name="password"]')`), 10_000)
+  const hasUrlField = await popupConnection.evaluate(`!!document.querySelector('form input[type="url"]')`)
+  if (!hasUrlField) await clickButtonByText(popupConnection, 'Add URL')
+  await waitFor('Bramble login website field', async () => popupConnection.evaluate(`!!document.querySelector('form input[type="url"]')`), 10_000)
+  const syntheticEntryReady = await popupConnection.evaluate(`((entry) => {
+    const form = document.querySelector('form')
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    const fields = {
+      name: form?.querySelector('input[name="name"]'),
+      url: form?.querySelector('input[type="url"]'),
+      username: form?.querySelector('input[name="username"]'),
+      password: form?.querySelector('input[name="password"]')
+    }
+    if (!form || !setter || Object.values(fields).some((field) => !(field instanceof HTMLInputElement))) return false
+    for (const [key, field] of Object.entries(fields)) {
+      setter.call(field, entry[key])
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+      field.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    return [...form.querySelectorAll('button[type="submit"]')].some((button) => !button.disabled)
+  })(${JSON.stringify({ name: syntheticLoginName, url: autofillUrl, username: syntheticUsername, password: syntheticPassword })})`)
+  assert.equal(syntheticEntryReady, true, 'Bramble did not accept the synthetic login fields.')
+  await clickButtonByText(popupConnection, 'Save Login')
+  const syntheticEntrySaved = await waitFor('Bramble synthetic login saved through the real editor', async () =>
+    popupConnection.evaluate(`document.body?.innerText.includes(${JSON.stringify(syntheticLoginName)})`), 20_000)
+  assert.equal(syntheticEntrySaved, true)
+  const indexedLogin = await popupConnection.evaluate(`(async (expectedName, expectedUsername) => {
+    const response = await browser.runtime.sendMessage({ type: 'AUTOFILL_FIND', payload: { hostname: '127.0.0.1', hasLogin: true } })
+    const matches = Array.isArray(response?.data?.logins) ? response.data.logins : []
+    return { accepted: response?.ok === true, matchCount: matches.length, unlocked: response?.data?.locked === false, containsSyntheticLogin: matches.some((entry) => entry.name === expectedName && entry.secondary === expectedUsername) }
+  })(${JSON.stringify(syntheticLoginName)}, ${JSON.stringify(syntheticUsername)})`)
+  assert.equal(indexedLogin.accepted, true, 'Bramble rejected the disposable extension-page index query.')
+  assert.equal(indexedLogin.containsSyntheticLogin, true, 'Bramble did not index the login saved through its real editor for the test host.')
+  autofillResults = { indexedLogin: indexedLogin.containsSyntheticLogin }
+
+  await browserConnection.send('Target.closeTarget', { targetId: vaultPopupTarget.id })
+  popupConnection.close()
+  popupConnection = null
+  await waitFor('Bramble popup close before local password autofill', async () => {
+    const targets = await getTargets(port)
+    return !targets.some((target) => target.id === vaultPopupTarget.id)
+  }, 10_000)
+  const autofillNavigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(autofillUrl)})`)
+  assert.equal(autofillNavigated, true)
+  const autofillTarget = await waitFor('Sockfish browser tab loaded the local-only password form', async () => {
+    const targets = await getTargets(port)
+    return targets.find((target) => target.type === 'page' && target.url.startsWith(autofillUrl))
+  }, 20_000)
+  const autofillConnection = await connectCdp(autofillTarget.webSocketDebuggerUrl)
+  try {
+    const formReady = await waitFor('local-only username and password form', async () =>
+      autofillConnection.evaluate(`!!document.querySelector('#username') && !!document.querySelector('#password') && !!document.querySelector('#submit-login')`), 10_000)
+    assert.equal(formReady, true)
+    await autofillConnection.send('Runtime.enable')
+    const pageFrameTree = await autofillConnection.send('Page.getFrameTree')
+    const contentContext = await waitFor('Bramble isolated-world content script on the local form', async () =>
+      autofillConnection.executionContexts.find((context) => context.origin?.startsWith('chrome-extension://') && context.auxData?.frameId === pageFrameTree.frameTree.frame.id && context.auxData?.isDefault === false), 8_000)
+    await clickElementBySelector(autofillConnection, '#username')
+    const pageQueryPacket = await autofillConnection.send('Runtime.evaluate', {
+      expression: `(async () => {
+        const extensionApi = globalThis.browser ?? globalThis.chrome
+        if (!extensionApi?.runtime?.sendMessage) return { apiAvailable: false, accepted: false, unlocked: false, loginCount: 0 }
+        const response = await extensionApi.runtime.sendMessage({ type: 'AUTOFILL_QUERY', hasLogin: true, hasCard: false, hasOtp: false })
+        const result = response?.data
+        return { apiAvailable: true, accepted: response?.ok === true, unlocked: result?.locked === false, loginCount: Array.isArray(result?.logins) ? result.logins.length : 0 }
+      })()`,
+      contextId: contentContext.id,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true
+    })
+    const contentPageQuery = pageQueryPacket.result?.value
+    assert.equal(contentPageQuery?.apiAvailable, true, 'Bramble content script could not reach the host extension API.')
+    assert.equal(contentPageQuery?.accepted, true, `Bramble host rejected its content-script page query: ${JSON.stringify({ error: contentPageQuery?.error ?? null })}`)
+    assert.equal(contentPageQuery?.unlocked, true, 'Bramble content-script page query did not see the unlocked disposable vault.')
+    assert.equal(contentPageQuery?.loginCount, 1, 'Bramble content-script page query did not receive the one matching synthetic login.')
+    autofillResults.contentScriptQueryPassed = true
+    let suggestion = null
+    try {
+      suggestion = await waitFor("Bramble's matching login suggestion with no password exposed in the row", async () =>
+        findVisibleLoginSuggestion(autofillConnection, syntheticLoginName, syntheticUsername, syntheticPassword), 5_000)
+    } catch {}
+    if (!suggestion) {
+      const dom = await autofillConnection.send('DOM.getDocument', { depth: -1, pierce: true })
+      const host = findNode(dom.root, (node) => node.nodeName === 'DIV' && (nodeAttribute(node, 'id') ?? '').startsWith('tp-'))
+      const row = findNode(dom.root, (node) => node.nodeName === 'DIV' && typeof nodeAttribute(node, 'data-entry-id') === 'string')
+      const tree = await autofillConnection.send('Page.getFrameTree')
+      const frameUrls = []
+      const collectFrames = (frame) => {
+        if (frame?.frame?.url) frameUrls.push(frame.frame.url)
+        for (const child of frame?.childFrames ?? []) collectFrames(child)
+      }
+      collectFrames(tree.frameTree)
+      const pageState = await autofillConnection.evaluate(`(() => ({
+        pageHostnameIsTestHost: location.hostname === '127.0.0.1',
+        usernameFieldFocused: document.activeElement?.id === 'username',
+        documentHasFocus: document.hasFocus(),
+        autofillResourceSeen: performance.getEntriesByType('resource').some((entry) => entry.name.includes('autofill-ui.html'))
+      }))()`)
+      const hostBox = host?.nodeId ? await autofillConnection.send('DOM.getBoxModel', { nodeId: host.nodeId }).catch(() => null) : null
+      const border = hostBox?.model?.border
+      const visiblePicker = Boolean(Array.isArray(border) && border.length >= 8 && (hostBox.model?.width ?? 0) > 0 && (hostBox.model?.height ?? 0) > 0)
+      if (visiblePicker && indexedLogin.matchCount === 1 && indexedLogin.unlocked && pageState.usernameFieldFocused && pageState.documentHasFocus) {
+        suggestion = { point: { x: (border[0] + border[2] + border[4] + border[6]) / 4, y: (border[1] + border[3] + border[5] + border[7]) / 4 } }
+      } else {
+        throw new Error(`Bramble indexed the disposable login but no suggestion was selectable: ${JSON.stringify({ indexedLoginCount: indexedLogin.matchCount, vaultUnlocked: indexedLogin.unlocked, ...pageState, pickerHostPresent: Boolean(host), dropdownHasVisibleBounds: visiblePicker, suggestionRowPresent: Boolean(row), autofillUiFramePresent: frameUrls.some((url) => url.includes('autofill-ui.html')), frameCount: frameUrls.length })}`)
+      }
+    }
+    const untouchedForm = await autofillConnection.evaluate(`(() => ({
+      usernameEmpty: document.querySelector('#username').value === '',
+      passwordEmpty: document.querySelector('#password').value === ''
+    }))()`)
+    assert.equal(untouchedForm.usernameEmpty && untouchedForm.passwordEmpty, true, 'Bramble filled the local form before a user selected its suggestion.')
+    Object.assign(autofillResults, { suggestionShown: true, passwordHiddenUntilSelection: true, noFillBeforeSelection: true })
+    await dispatchMouseClick(autofillConnection, suggestion.point)
+    let selectedLoginFilled = { usernameMatches: false, passwordMatches: false }
+    try {
+      selectedLoginFilled = await waitFor('Bramble selected login to populate at least one local form field', async () => {
+        const result = await autofillConnection.evaluate(`(() => ({
+        usernameMatches: document.querySelector('#username').value === ${JSON.stringify(syntheticUsername)},
+        passwordMatches: document.querySelector('#password').value === ${JSON.stringify(syntheticPassword)}
+        }))()`)
+        return result.usernameMatches || result.passwordMatches ? result : null
+      }, 15_000)
+    } catch {}
+    assert.equal(selectedLoginFilled.usernameMatches && selectedLoginFilled.passwordMatches, true, `Bramble autofill field result: username=${selectedLoginFilled.usernameMatches}, password=${selectedLoginFilled.passwordMatches}.`)
+    autofillResults.usernamePopulated = selectedLoginFilled.usernameMatches
+    autofillResults.passwordPopulated = selectedLoginFilled.passwordMatches
+    await clickElementBySelector(autofillConnection, '#submit-login')
+    const localSubmitVerified = await waitFor('local form submit handler to confirm populated values', async () =>
+      autofillConnection.evaluate(`document.querySelector('#status')?.textContent === 'Local form submission verified.'`), 10_000)
+    assert.equal(localSubmitVerified, true)
+    await delay(300)
+    assert.equal(unexpectedFormPosts, 0, 'The local form unexpectedly sent a network POST.')
+    autofillResults.localSubmitVerified = localSubmitVerified
+    autofillResults.externalOrLocalPosts = unexpectedFormPosts
+  } finally {
+    autofillConnection.close()
+  }
+
+  await clickElementBySelector(mainConnection, '.bramble-toolbar-button')
+  const passkeyPopupTarget = await waitFor('Bramble popup reopened after the local autofill form test', async () => {
+    const targets = await getTargets(port)
+    return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/popup.html'))
+  }, 20_000)
+  popupConnection = await connectCdp(passkeyPopupTarget.webSocketDebuggerUrl)
+  await waitFor('Bramble popup ready for the disposable passkey preference', async () =>
+    popupConnection.evaluate(`document.readyState === 'complete' && !!document.querySelector('#root')`), 15_000)
+
   // Match Bramble's real Settings toggle: persist the opt-in preference and notify the
   // background to attach the Firefox MAIN-world provider in this disposable profile only.
   const providerPref = await popupConnection.evaluate(`(async () => {
@@ -583,12 +794,12 @@ try {
   assert.equal(providerPref.persisted, true)
   assert.equal(providerPref.accepted, true)
 
-  await browserConnection.send('Target.closeTarget', { targetId: vaultPopupTarget.id })
+  await browserConnection.send('Target.closeTarget', { targetId: passkeyPopupTarget.id })
   popupConnection.close()
   popupConnection = null
   await waitFor('Bramble popup close before the relying-party ceremony', async () => {
     const targets = await getTargets(port)
-    return !targets.some((target) => target.id === vaultPopupTarget.id)
+    return !targets.some((target) => target.id === passkeyPopupTarget.id)
   }, 10_000)
 
   const navigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(rpUrl)})`)
@@ -837,6 +1048,7 @@ try {
     setupPageTitle: setup.title,
     setupViewport: setupLayout,
     joinViewport: joinLayout,
+    joinContentFitsWindow: joinLayout.height >= joinLayout.scrollHeight,
     restoreViewport: restoreLayout,
     createVaultFormReady: setup.createForm,
     joinFormDisplayed: joinFormReady.pairingCode && joinFormReady.masterPassword && joinFormReady.joinButton,
@@ -845,6 +1057,12 @@ try {
     vaultRegistryCount: vaultView.vaultCount,
     lockScreenRendered: lockedScreen.passwordInput,
     passwordUnlockPassed: unlockedAgain.unlocked,
+    genuinePasswordAutofillPassed: autofillResults?.suggestionShown === true && autofillResults?.usernamePopulated === true && autofillResults?.passwordPopulated === true,
+    autofillContentScriptQueryPassed: autofillResults?.contentScriptQueryPassed === true,
+    autofillSuggestionDidNotExposePassword: autofillResults?.passwordHiddenUntilSelection === true,
+    autofillWaitedForUserSelection: autofillResults?.noFillBeforeSelection === true,
+    localFormSubmitPassed: autofillResults?.localSubmitVerified === true,
+    unexpectedFormPosts: autofillResults?.externalOrLocalPosts ?? null,
     passkeyProviderEnabledInDisposableProfile: providerPref.persisted,
     mainWorldWebAuthnOverride: rpReady.createOverridden && rpReady.getOverridden,
     passkeyRegistrationPassed: createResult.state === 'success',
@@ -861,10 +1079,11 @@ try {
     realVaultDataUsed: false,
     screenshotPath
   }, null, 2))
-  console.log('This app smoke test used a temporary profile, random in-memory password, and a localhost-only relying party. It verified the Join UI, created/unlocked a throwaway vault, registered and asserted a local test passkey, then restored a disposable full-vault encrypted backup as a second locked vault and confirmed the original encrypted blob was unchanged. It did not initiate live device sync. The profile, passkey, and temporary backup were deleted; no vault credential, recovery code, or passkey private key was logged or saved to the repository.')
+  console.log('This app smoke test used a temporary profile, random in-memory vault/login credentials, a local-only autofill form, and a localhost-only relying party. It verified the Join UI, created/unlocked a throwaway vault, selected a visible Bramble login suggestion to populate both local form fields, registered and asserted a local test passkey, then restored a disposable full-vault encrypted backup as a second locked vault and confirmed the original encrypted blob was unchanged. It did not initiate live device sync. The profile, passkey, test credentials, and temporary backup were deleted; no vault credential, recovery code, or passkey private key was logged or saved to the repository.')
 } catch (error) {
-  const logs = appOutput.join('').slice(-10_000)
-  console.error(`Bramble app POC smoke test failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n${logs}`)
+  const logs = redactSecrets(appOutput.join('').slice(-10_000))
+  const message = error instanceof Error ? error.stack ?? error.message : String(error)
+  console.error(`Bramble app POC smoke test failed: ${redactSecrets(message)}\n${logs}`)
   process.exitCode = 1
 } finally {
   popupConnection?.close()

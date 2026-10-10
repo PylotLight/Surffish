@@ -76,9 +76,9 @@ async function fitOptionsWindowToDocument(win: BrowserWindow): Promise<void> {
   })`) as { width?: number; height?: number }
   if (win.isDestroyed()) return
   const maxWidth = Math.max(640, workArea.width - 48)
-  const maxHeight = Math.max(560, workArea.height - 72)
+  const maxHeight = Math.max(560, workArea.height - 48)
   const width = Math.min(maxWidth, Math.max(760, bounds.width || BRAMBLE_OPTIONS_WIDTH))
-  const height = Math.min(maxHeight, Math.max(640, Math.min(bounds.height || BRAMBLE_OPTIONS_HEIGHT, 900)))
+  const height = Math.min(maxHeight, Math.max(680, Math.min(bounds.height || BRAMBLE_OPTIONS_HEIGHT, 900)))
   win.setContentSize(width, height)
 }
 
