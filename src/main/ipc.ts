@@ -18,6 +18,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
+import { getBramblePocState, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import {
   getBrowserSearchEngine,
@@ -81,6 +82,18 @@ export function registerIpc(): void {
   ipcMain.handle('app:quit', (event) => {
     assertMainRenderer(event)
     app.quit()
+  })
+  ipcMain.handle('browser:bramble:get', (event) => {
+    assertMainRenderer(event)
+    return getBramblePocState()
+  })
+  ipcMain.handle('browser:bramble:open', async (event) => {
+    assertMainRenderer(event)
+    return openBramblePoc()
+  })
+  ipcMain.handle('browser:bramble:setup', async (event) => {
+    assertMainRenderer(event)
+    return openBrambleSetup()
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })

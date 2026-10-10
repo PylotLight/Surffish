@@ -624,6 +624,46 @@
   opacity: 0.34;
   cursor: default;
 }
+.bramble-toolbar-button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 72px;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid rgba(177, 224, 190, 0.2);
+  color: #c9f0d3;
+}
+.bramble-toolbar-button:hover:not(:disabled),
+.bramble-toolbar-button.is-installed {
+  background: rgba(103, 179, 125, 0.13);
+}
+.bramble-toolbar-button .bramble-toolbar-mark {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+.bramble-toolbar-button .bramble-toolbar-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.bramble-setup-toolbar-button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 48px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(245, 247, 250, 0.7);
+}
+.bramble-setup-toolbar-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.bramble-setup-toolbar-button .bramble-setup-toolbar-label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
 .omnibox {
   -webkit-app-region: no-drag;
   display: flex;

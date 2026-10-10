@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AdblockDiagnostics,
+  BramblePocState,
   BrowserBounds,
   BrowserProxySettings,
   BrowserProxyTestResult,
@@ -71,6 +72,16 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, diagnostics: AdblockDiagnostics): void => callback(diagnostics)
         ipcRenderer.on('browser:adblock:changed', listener)
         return () => ipcRenderer.removeListener('browser:adblock:changed', listener)
+      }
+    },
+    bramble: {
+      get: (): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:get'),
+      open: (): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:open'),
+      setup: (): Promise<BramblePocState> => ipcRenderer.invoke('browser:bramble:setup'),
+      onChange: (callback: (state: BramblePocState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: BramblePocState): void => callback(state)
+        ipcRenderer.on('browser:bramble:changed', listener)
+        return () => ipcRenderer.removeListener('browser:bramble:changed', listener)
       }
     },
     network: {

@@ -1,18 +1,24 @@
 import { BrowserWindow, app, shell } from 'electron'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { attachBrowserView } from './browser'
 import { APP_NAME, WINDOW } from '../shared/config'
 
 const isMac = process.platform === 'darwin'
+const mainDirectory = dirname(fileURLToPath(import.meta.url))
 let mainWindow: BrowserWindow | null = null
+let onMainWindowClosed: () => void = () => {}
 
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
+export function setMainWindowCloseHandler(handler: () => void): void {
+  onMainWindowClosed = handler
+}
 function resolvePreload(): string {
-  const base = join(__dirname, '../preload/index')
+  const base = join(mainDirectory, '../preload/index')
   if (existsSync(`${base}.js`)) return `${base}.js`
   return `${base}.mjs`
 }
@@ -47,10 +53,13 @@ export function createWindow(): BrowserWindow {
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'))
+    void win.loadFile(join(mainDirectory, '../renderer/index.html'))
   }
   win.on('closed', () => {
-    if (mainWindow === win) mainWindow = null
+    if (mainWindow === win) {
+      mainWindow = null
+      onMainWindowClosed()
+    }
   })
   return win
 }
