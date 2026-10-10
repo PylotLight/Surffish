@@ -154,6 +154,69 @@ function findNode(node, predicate) {
   return null
 }
 
+async function dispatchMouseClick(connection, point) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error('Could not locate the requested visible button.')
+  await connection.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y })
+  await connection.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+  await connection.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', clickCount: 1 })
+}
+
+async function clickButtonByText(connection, text) {
+  const point = await connection.evaluate(`(() => {
+    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.innerText.trim() === ${JSON.stringify(text)});
+    if (!button) return null;
+    button.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = button.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`)
+  await dispatchMouseClick(connection, point)
+}
+
+async function clickElementBySelector(connection, selector) {
+  const point = await connection.evaluate(`(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!(element instanceof HTMLElement)) return null;
+    element.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  })()`)
+  await dispatchMouseClick(connection, point)
+}
+
+async function inspectViewport(connection) {
+  return connection.evaluate(`(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    const elements = [root, body, ...document.querySelectorAll('*')].filter(Boolean);
+    const rootStyle = getComputedStyle(root);
+    const bodyStyle = getComputedStyle(body);
+    const hasScrollableOverflow = (axis) => {
+      const scrollSize = axis === 'x' ? 'scrollWidth' : 'scrollHeight';
+      const clientSize = axis === 'x' ? 'clientWidth' : 'clientHeight';
+      const overflow = axis === 'x' ? 'overflowX' : 'overflowY';
+      return elements.some((element) => {
+        const style = getComputedStyle(element);
+        return element[scrollSize] > element[clientSize] + 1 && ['auto', 'scroll'].includes(style[overflow]);
+      });
+    };
+    return {
+      width: innerWidth,
+      height: innerHeight,
+      scrollWidth: Math.max(root.scrollWidth, body?.scrollWidth ?? 0),
+      scrollHeight: Math.max(root.scrollHeight, body?.scrollHeight ?? 0),
+      overflowX: [rootStyle.overflowX, bodyStyle.overflowX],
+      overflowY: [rootStyle.overflowY, bodyStyle.overflowY],
+      horizontalScrollable: ![rootStyle.overflowX, bodyStyle.overflowX].some((value) => ['hidden', 'clip'].includes(value)) || hasScrollableOverflow('x'),
+      verticalScrollable: ![rootStyle.overflowY, bodyStyle.overflowY].some((value) => ['hidden', 'clip'].includes(value)) || hasScrollableOverflow('y')
+    };
+  })()`)
+}
+
+function assertViewportFitsOrScrolls(viewport, name) {
+  assert.ok(viewport.scrollWidth <= viewport.width + 1 || viewport.horizontalScrollable, `${name} overflows horizontally without a scroll path: ${JSON.stringify(viewport)}.`)
+  assert.ok(viewport.scrollHeight <= viewport.height + 1 || viewport.verticalScrollable, `${name} overflows vertically without a scroll path: ${JSON.stringify(viewport)}.`)
+}
+
 async function clickPromptAction(connection, action) {
   await connection.send('DOM.enable')
   const { root } = await connection.send('DOM.getDocument', { depth: -1, pierce: true })
@@ -239,13 +302,22 @@ try {
     return targets.find((target) => target.type === 'page' && target.url.includes('/out/renderer/index.html'))
   }, 45_000)
   mainConnection = await connectCdp(mainTarget.webSocketDebuggerUrl)
+  const browserVersion = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json())
+  browserConnection = await connectCdp(browserVersion.webSocketDebuggerUrl)
   const initialState = await waitFor('Bramble extension installation in the Sockfish session', async () => {
     const value = await mainConnection.evaluate('window.api?.browser?.bramble?.get ? window.api.browser.bramble.get() : null')
     return value?.installed && !value.loading ? value : null
   }, 30_000)
   assert.equal(initialState.installed, true)
 
-  await mainConnection.evaluate('window.api.browser.bramble.open()')
+  const brambleAnchor = await waitFor('Bramble toolbar button to mount in the renderer', async () => mainConnection.evaluate(`(() => {
+    const button = document.querySelector('.bramble-toolbar-button');
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  })()`), 10_000)
+  assert.ok(brambleAnchor && brambleAnchor.width > 0 && brambleAnchor.height > 0)
+  await clickElementBySelector(mainConnection, '.bramble-toolbar-button')
   const popupTarget = await waitFor('Bramble popup window opened by Sockfish IPC', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/popup.html'))
@@ -261,14 +333,62 @@ try {
     return value?.readyState === 'complete' && value?.rootChildren > 0 && value?.bodyText.includes('Create your vault') ? value : null
   }, 20_000)
   assert.equal(popup.title, 'Vault')
+  const popupViewport = await popupConnection.evaluate('({ width: innerWidth, height: innerHeight })')
+  assert.equal(popupViewport.width, 500)
+  assert.equal(popupViewport.height, 550)
+  const popupLayout = await inspectViewport(popupConnection)
+  assertViewportFitsOrScrolls(popupLayout, 'Bramble launcher popup')
+  const launcherWindowInfo = await popupConnection.evaluate('({ x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })')
+  const mainWindowInfo = await mainConnection.evaluate('({ x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })')
+  assert.equal(launcherWindowInfo.width, 500)
+  assert.equal(launcherWindowInfo.height, 550)
+  assert.equal(launcherWindowInfo.viewportWidth, 500)
+  assert.equal(launcherWindowInfo.viewportHeight, 550)
+  assert.ok(launcherWindowInfo.y > mainWindowInfo.y + brambleAnchor.y + brambleAnchor.height)
+  assert.ok(launcherWindowInfo.y < mainWindowInfo.y + brambleAnchor.y + brambleAnchor.height + 120)
+  const popupBridge = await popupConnection.evaluate(`(() => {
+    const api = globalThis.browser ?? globalThis.chrome;
+    const openOptionsPage = api?.runtime?.openOptionsPage;
+    return {
+      preloadBridge: typeof globalThis.sockfishBramble?.openOptionsPage,
+      runtimeMethod: typeof openOptionsPage,
+      wrappedForSockfish: typeof openOptionsPage === 'function' && Function.prototype.toString.call(openOptionsPage).includes('brambleBridge'),
+      createButton: [...document.querySelectorAll('button')].map((button) => ({ text: button.innerText.trim(), disabled: button.disabled })).find((button) => button.text === 'Create your vault') ?? null
+    };
+  })()`)
+  assert.equal(popupBridge.preloadBridge, 'function')
+  assert.equal(popupBridge.runtimeMethod, 'function')
+  assert.equal(popupBridge.wrappedForSockfish, true)
+  await clickButtonByText(popupConnection, 'Create your vault')
+  let setupTarget
+  try {
+    setupTarget = await waitFor("Bramble's options/setup page to open after Create your vault", async () => {
+      const targets = await getTargets(port)
+      return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
+    }, 20_000)
+  } catch (error) {
+    const targets = (await getTargets(port)).filter((target) => target.type === 'page' && target.url.startsWith('chrome-extension://')).map(({ id, type, url }) => ({ id, type, url }))
+    let popupState = null
+    try {
+      popupState = await popupConnection.evaluate(`(() => ({
+        bodyText: document.body?.innerText.slice(0, 500) ?? '',
+        button: [...document.querySelectorAll('button')].map((button) => ({ text: button.innerText.trim(), disabled: button.disabled })).find((button) => button.text === 'Create your vault' || button.text === 'Opening…') ?? null
+      }))()`)
+    } catch (diagnosticError) {
+      popupState = { error: diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError) }
+    }
+    throw new Error(`Create your vault did not open Setup/Restore. Bridge: ${JSON.stringify(popupBridge)}; popup: ${JSON.stringify(popupState)}; extension targets: ${JSON.stringify(targets)}; ${error instanceof Error ? error.message : String(error)}`)
+  }
+  await waitFor('the launcher popup to close after opening Setup/Restore', async () => {
+    const targets = await getTargets(port)
+    return !targets.some((target) => target.id === popupTarget.id)
+  }, 10_000)
   popupConnection.close()
   popupConnection = null
-  await mainConnection.evaluate('window.api.browser.bramble.setup()')
-  const setupTarget = await waitFor("Bramble's options/setup page opened by Sockfish IPC", async () => {
-    const targets = await getTargets(port)
-    return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
-  }, 20_000)
   setupConnection = await connectCdp(setupTarget.webSocketDebuggerUrl)
+  const setupWindowInfo = await setupConnection.evaluate('({ x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })')
+  assert.ok(setupWindowInfo.viewportWidth >= 760 && setupWindowInfo.viewportWidth <= 1000)
+  assert.ok(setupWindowInfo.viewportHeight >= 640 && setupWindowInfo.viewportHeight <= 900)
   const setup = await waitFor("Bramble's real vault-setup form", async () => {
     const value = await setupConnection.evaluate(`(() => ({
       title: document.title,
@@ -278,16 +398,13 @@ try {
     }))()`)
     return value?.readyState === 'complete' && value?.createForm && value?.createButton ? value : null
   }, 20_000)
+  const setupLayout = await inspectViewport(setupConnection)
+  assertViewportFitsOrScrolls(setupLayout, 'Bramble Setup/Restore window')
   const finalState = await mainConnection.evaluate('window.api.browser.bramble.get()')
   assert.equal(setup.title, 'Vault Setup')
   assert.equal(finalState.installed, true)
 
-  await setupConnection.evaluate(`(() => {
-    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Join a device');
-    if (!tab) throw new Error('Bramble Join a device setup tab was not found.');
-    tab.click();
-    return true;
-  })()`)
+  await clickButtonByText(setupConnection, 'Join a device')
   const joinFormReady = await waitFor("Bramble's real device-join form", async () => {
     const value = await setupConnection.evaluate(`(() => ({
       pairingCode: !!document.querySelector('#pairing-code'),
@@ -299,21 +416,15 @@ try {
   assert.equal(joinFormReady.pairingCode, true)
   assert.equal(joinFormReady.masterPassword, true)
   assert.equal(joinFormReady.joinButton, true)
-  await setupConnection.evaluate(`(() => {
-    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Restore from backup');
-    if (!tab) throw new Error('Bramble Restore from backup setup tab was not found.');
-    tab.click();
-    return true;
-  })()`)
+  const joinLayout = await inspectViewport(setupConnection)
+  assertViewportFitsOrScrolls(joinLayout, 'Bramble Join form')
+  await clickButtonByText(setupConnection, 'Restore from backup')
   const restoreTabReady = await waitFor('Bramble embedded restore tab', async () =>
     setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
   assert.equal(restoreTabReady, true)
-  await setupConnection.evaluate(`(() => {
-    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Create new vault');
-    if (!tab) throw new Error('Bramble Create new vault setup tab was not found.');
-    tab.click();
-    return true;
-  })()`)
+  const restoreLayout = await inspectViewport(setupConnection)
+  assertViewportFitsOrScrolls(restoreLayout, 'Bramble Restore form')
+  await clickButtonByText(setupConnection, 'Create new vault')
   await waitFor('Bramble create-vault form after checking Join UI', async () =>
     setupConnection.evaluate(`!!document.querySelector('form input[name="masterPassword"]') && !!document.querySelector('form input[name="confirmPassword"]')`), 10_000)
 
@@ -331,9 +442,9 @@ try {
     }
     const submit = [...form.querySelectorAll('button[type="submit"]')].find((button) => button.innerText.trim() === 'Create vault');
     if (!submit || submit.disabled) throw new Error('Bramble did not enable its create-vault submit button.');
-    form.requestSubmit(submit);
     return true;
   })(${JSON.stringify(ephemeralPassword)})`)
+  await clickButtonByText(setupConnection, 'Create vault')
 
   let recoveryScreen
   try {
@@ -367,12 +478,7 @@ try {
     throw new Error(`${error instanceof Error ? error.message : String(error)} Safe diagnostics: ${JSON.stringify(diagnostic)}`)
   }
   assert.equal(recoveryScreen.recoveryScreen, true)
-  await setupConnection.evaluate(`(() => {
-    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.innerText.trim() === "I've saved it, continue");
-    if (!button) throw new Error('Bramble recovery-code continuation button was not found.');
-    button.click();
-    return true;
-  })()`)
+  await clickButtonByText(setupConnection, "I've saved it, continue")
   const setupComplete = await waitFor('Bramble vault creation completion', async () => {
     const value = await setupConnection.evaluate(`(() => ({
       readyState: document.readyState,
@@ -384,7 +490,12 @@ try {
 
   setupConnection.close()
   setupConnection = null
-  await mainConnection.evaluate('window.api.browser.bramble.open()')
+  await browserConnection.send('Target.closeTarget', { targetId: setupTarget.id })
+  await waitFor('Bramble Setup/Restore window to close before unlocking the popup', async () => {
+    const targets = await getTargets(port)
+    return !targets.some((target) => target.id === setupTarget.id)
+  }, 10_000)
+  await clickElementBySelector(mainConnection, '.bramble-toolbar-button')
   const vaultPopupTarget = await waitFor('Bramble popup after vault creation', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/popup.html'))
@@ -443,9 +554,9 @@ try {
     field.dispatchEvent(new Event('change', { bubbles: true }));
     const submit = form.querySelector('button[type="submit"]');
     if (!submit) throw new Error('Bramble unlock submit button was not found.');
-    form.requestSubmit(submit);
     return true;
   })(${JSON.stringify(ephemeralPassword)})`)
+  await clickElementBySelector(popupConnection, 'form button[type="submit"]')
   const unlockedAgain = await waitFor('successful Bramble password unlock and restored session key', async () => {
     const value = await popupConnection.evaluate(`(async () => {
       const stored = await browser.storage.local.get('vault.registry');
@@ -472,8 +583,6 @@ try {
   assert.equal(providerPref.persisted, true)
   assert.equal(providerPref.accepted, true)
 
-  const browserVersion = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json())
-  browserConnection = await connectCdp(browserVersion.webSocketDebuggerUrl)
   await browserConnection.send('Target.closeTarget', { targetId: vaultPopupTarget.id })
   popupConnection.close()
   popupConnection = null
@@ -640,7 +749,7 @@ try {
     const targets = await getTargets(port)
     return !targets.some((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
   }, 10_000)
-  await mainConnection.evaluate('window.api.browser.bramble.setup()')
+  await clickElementBySelector(mainConnection, '.bramble-setup-toolbar-button')
   const restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
@@ -660,12 +769,7 @@ try {
   }, 10_000)
   const backupPath = join(temporaryRoot, 'disposable-existing-vault.bramble')
   writeFileSync(backupPath, Buffer.from(backupInfo.base64, 'base64'))
-  await setupConnection.evaluate(`(() => {
-    const tab = [...document.querySelectorAll('button')].find((button) => button.innerText.trim() === 'Restore from backup')
-    if (!tab) throw new Error('Bramble Restore from backup setup tab was not found.')
-    tab.click()
-    return true
-  })()`)
+  await clickButtonByText(setupConnection, 'Restore from backup')
   await waitFor('Bramble setup-flow encrypted backup restore page', async () =>
     setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
   await setupConnection.send('DOM.enable')
@@ -693,9 +797,9 @@ try {
     field.dispatchEvent(new Event('change', { bubbles: true }))
     const submit = [...form.querySelectorAll('button[type="submit"]')].find((button) => button.innerText.trim() === 'Restore vault')
     if (!submit || submit.disabled) throw new Error('Bramble did not enable its restore button.')
-    form.requestSubmit(submit)
     return true
   })(${JSON.stringify(ephemeralPassword)})`)
+  await clickButtonByText(setupConnection, 'Restore vault')
   const restoreComplete = await waitFor('Bramble added-vault success screen after encrypted restore', async () => {
     const text = await setupConnection.evaluate('document.body?.innerText ?? ""')
     return text.includes('Vault added') ? text : null
@@ -728,8 +832,12 @@ try {
     appIntegration: true,
     brambleVersion: finalState.version,
     bramblePopupTitle: popup.title,
+    bramblePopupViewport: popupLayout,
     firstRunPopupText: popup.bodyText.slice(0, 250),
     setupPageTitle: setup.title,
+    setupViewport: setupLayout,
+    joinViewport: joinLayout,
+    restoreViewport: restoreLayout,
     createVaultFormReady: setup.createForm,
     joinFormDisplayed: joinFormReady.pairingCode && joinFormReady.masterPassword && joinFormReady.joinButton,
     restoreTabDisplayed: restoreTabReady,

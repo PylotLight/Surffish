@@ -40,6 +40,14 @@ export interface BrowserBounds {
   height: number
 }
 
+/** Browser-renderer coordinates for anchoring the Bramble launcher window. */
+export interface BramblePopupAnchor {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface BramblePocState {
   installed: boolean
   loading: boolean

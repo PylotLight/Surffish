@@ -1,7 +1,8 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, screen } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import type { BramblePocState } from '../shared/types'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { BramblePopupAnchor, BramblePocState } from '../shared/types'
 import { getBrowserSession } from './browser-session'
 import {
   adaptBrambleFirefoxManifest,
@@ -12,8 +13,11 @@ import { getMainWindow } from './window'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
 const STAGING_DIRECTORY = 'bramble-firefox-poc/extension'
-const BRAMBLE_WINDOW_WIDTH = 720
-const BRAMBLE_WINDOW_HEIGHT = 780
+const BRAMBLE_POPUP_WIDTH = 500
+const BRAMBLE_POPUP_HEIGHT = 550
+const BRAMBLE_OPTIONS_WIDTH = 860
+const BRAMBLE_OPTIONS_HEIGHT = 720
+const mainDirectory = dirname(fileURLToPath(import.meta.url))
 
 interface LoadedBrambleExtension {
   id: string
@@ -31,7 +35,52 @@ const state: BramblePocState = {
 }
 let loadedExtension: LoadedBrambleExtension | null = null
 let popupWindow: BrowserWindow | null = null
+let setupWindow: BrowserWindow | null = null
 let offscreenWindow: BrowserWindow | null = null
+
+function resolveBramblePreload(): string {
+  const base = join(mainDirectory, '../preload/bramble-poc')
+  if (existsSync(`${base}.cjs`)) return `${base}.cjs`
+  if (existsSync(`${base}.js`)) return `${base}.js`
+  return `${base}.mjs`
+}
+
+function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BrowserWindow | undefined): { x: number; y: number; width: number; height: number } {
+  const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
+  const area = display.workArea
+  const content = owner?.getContentBounds() ?? area
+  const width = Math.min(BRAMBLE_POPUP_WIDTH, Math.max(1, area.width - 16))
+  const height = Math.min(BRAMBLE_POPUP_HEIGHT, Math.max(1, area.height - 16))
+  const cursor = screen.getCursorScreenPoint()
+  const left = content.x + (anchor?.x ?? cursor.x - content.x)
+  const top = content.y + (anchor?.y ?? cursor.y - content.y)
+  const x = Math.max(area.x, Math.min(left, area.x + area.width - width))
+  let y = top + (anchor?.height ?? 0) + 6
+  if (y + height > area.y + area.height) y = top - height - 6
+  y = Math.max(area.y, Math.min(y, area.y + area.height - height))
+  return { x, y, width, height }
+}
+
+async function fitOptionsWindowToDocument(win: BrowserWindow): Promise<void> {
+  if (win.isDestroyed()) return
+  const workArea = screen.getDisplayMatching(win.getBounds()).workArea
+  const bounds = await win.webContents.executeJavaScript(`new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const root = document.querySelector('#root');
+      const documentElement = document.documentElement;
+      resolve({
+        width: Math.max(documentElement.scrollWidth, root?.scrollWidth ?? 0),
+        height: Math.max(documentElement.scrollHeight, root?.scrollHeight ?? 0)
+      });
+    }));
+  })`) as { width?: number; height?: number }
+  if (win.isDestroyed()) return
+  const maxWidth = Math.max(640, workArea.width - 48)
+  const maxHeight = Math.max(560, workArea.height - 72)
+  const width = Math.min(maxWidth, Math.max(760, bounds.width || BRAMBLE_OPTIONS_WIDTH))
+  const height = Math.min(maxHeight, Math.max(640, Math.min(bounds.height || BRAMBLE_OPTIONS_HEIGHT, 900)))
+  win.setContentSize(width, height)
+}
 
 function mainWindow(): BrowserWindow | undefined {
   const win = getMainWindow()
@@ -81,6 +130,12 @@ function disposePopup(): void {
   updateState({ popupOpen: false })
 }
 
+function disposeSetupWindow(): void {
+  const current = setupWindow
+  setupWindow = null
+  if (current && !current.isDestroyed()) current.close()
+}
+
 function disposeOffscreen(): void {
   const current = offscreenWindow
   offscreenWindow = null
@@ -127,6 +182,7 @@ async function ensureOffscreenDocument(): Promise<void> {
 async function loadFromDirectory(sourceDirectory: string, persistPath: boolean): Promise<void> {
   updateState({ loading: true, error: null })
   disposePopup()
+  disposeSetupWindow()
   disposeOffscreen()
   try {
     const staged = stageBrambleBuild(sourceDirectory)
@@ -160,15 +216,18 @@ async function loadFromDirectory(sourceDirectory: string, persistPath: boolean):
   }
 }
 
-function showBramblePage(page: 'popup.html' | 'options.html'): void {
+function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
   if (!loadedExtension) throw new Error('Bramble has not been loaded yet.')
-  const pageUrl = `${loadedExtension.url}${page}`
+  const pageUrl = `${loadedExtension.url}popup.html`
+  const owner = mainWindow()
+  const bounds = launcherBounds(anchor, owner)
   if (popupWindow && !popupWindow.isDestroyed()) {
     if (popupWindow.webContents.getURL() !== pageUrl) {
       void popupWindow.loadURL(pageUrl).catch((error: unknown) => {
         updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
       })
     }
+    popupWindow.setBounds(bounds)
     if (popupWindow.isMinimized()) popupWindow.restore()
     popupWindow.show()
     popupWindow.focus()
@@ -178,15 +237,18 @@ function showBramblePage(page: 'popup.html' | 'options.html'): void {
 
   const popup = new BrowserWindow({
     title: 'Bramble vault (POC)',
-    width: BRAMBLE_WINDOW_WIDTH,
-    height: BRAMBLE_WINDOW_HEIGHT,
-    minWidth: 520,
-    minHeight: 560,
+    ...bounds,
+    useContentSize: true,
+    frame: false,
+    resizable: false,
+    movable: false,
+    fullscreenable: false,
     show: false,
     autoHideMenuBar: true,
-    parent: mainWindow(),
+    parent: owner,
     webPreferences: {
       session: getBrowserSession(),
+      preload: resolveBramblePreload(),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -207,9 +269,91 @@ function showBramblePage(page: 'popup.html' | 'options.html'): void {
     if (!popup.isDestroyed()) popup.show()
     updateState({ popupOpen: true })
   })
+  popup.on('blur', () => {
+    if (!popup.isDestroyed() && popup.isVisible()) popup.close()
+  })
+  popup.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') {
+      event.preventDefault()
+      if (!popup.isDestroyed()) popup.close()
+    }
+  })
   void popup.loadURL(pageUrl).catch((error: unknown) => {
     updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
     if (!popup.isDestroyed()) popup.close()
+  })
+}
+
+function showBrambleSetupWindow(): void {
+  if (!loadedExtension) throw new Error('Bramble has not been loaded yet.')
+  const pageUrl = `${loadedExtension.url}options.html`
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    if (setupWindow.webContents.getURL() !== pageUrl) {
+      void setupWindow.loadURL(pageUrl).catch((error: unknown) => {
+        updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
+      })
+    }
+    if (setupWindow.isMinimized()) setupWindow.restore()
+    setupWindow.show()
+    setupWindow.focus()
+    disposePopup()
+    updateState({ popupOpen: false, error: null })
+    return
+  }
+
+  const owner = mainWindow()
+  const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
+  const width = Math.min(BRAMBLE_OPTIONS_WIDTH, Math.max(640, display.workArea.width - 48))
+  const height = Math.min(BRAMBLE_OPTIONS_HEIGHT, Math.max(560, display.workArea.height - 72))
+  const setup = new BrowserWindow({
+    title: 'Bramble Setup / Restore (POC)',
+    width,
+    height,
+    minWidth: Math.min(760, width),
+    minHeight: Math.min(640, height),
+    useContentSize: true,
+    show: false,
+    resizable: true,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    parent: owner,
+    webPreferences: {
+      session: getBrowserSession(),
+      preload: resolveBramblePreload(),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true
+    }
+  })
+  setupWindow = setup
+  setup.on('closed', () => {
+    if (setupWindow === setup) setupWindow = null
+  })
+  setup.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(loadedExtension!.url)) return { action: 'allow' }
+    return { action: 'deny' }
+  })
+  setup.once('ready-to-show', () => {
+    void fitOptionsWindowToDocument(setup).then(() => {
+      if (!setup.isDestroyed()) {
+        setup.show()
+        setup.focus()
+        disposePopup()
+      }
+    }).catch((error: unknown) => {
+      updateState({ error: `Could not size Bramble’s setup window: ${error instanceof Error ? error.message : String(error)}` })
+      if (!setup.isDestroyed()) {
+        setup.show()
+        setup.focus()
+        disposePopup()
+      }
+    })
+    updateState({ popupOpen: false, error: null })
+  })
+  void setup.loadURL(pageUrl).catch((error: unknown) => {
+    updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
+    if (!setup.isDestroyed()) setup.close()
   })
 }
 
@@ -277,13 +421,13 @@ export async function initializeBramblePoc(): Promise<void> {
   await loadFromDirectory(sourceDirectory, false)
 }
 
-export async function openBramblePoc(): Promise<BramblePocState> {
+export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<BramblePocState> {
   if (state.loading) return getBramblePocState()
   if (!loadedExtension) await chooseAndLoadBramble()
   if (loadedExtension) {
     try {
       await ensureOffscreenDocument()
-      showBramblePage('popup.html')
+      showBrambleLauncher(anchor)
     } catch (error) {
       updateState({ error: error instanceof Error ? error.message : String(error) })
     }
@@ -297,7 +441,7 @@ export async function openBrambleSetup(): Promise<BramblePocState> {
   if (loadedExtension) {
     try {
       await ensureOffscreenDocument()
-      showBramblePage('options.html')
+      showBrambleSetupWindow()
     } catch (error) {
       updateState({ error: error instanceof Error ? error.message : String(error) })
     }
@@ -305,7 +449,12 @@ export async function openBrambleSetup(): Promise<BramblePocState> {
   return getBramblePocState()
 }
 
+export function isBrambleUiWindow(win: BrowserWindow | null): boolean {
+  return !!win && (win === popupWindow || win === setupWindow)
+}
+
 export function disposeBramblePoc(): void {
   disposePopup()
+  disposeSetupWindow()
   disposeOffscreen()
 }
