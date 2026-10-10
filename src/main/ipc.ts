@@ -5,9 +5,11 @@ import {
   browserForward,
   browserReload,
   browserStop,
+  browserPictureInPicture,
   closeBrowserTab,
   getBrowserState,
   getBrowserTabs,
+  getBrowserRuntimeDiagnostics,
   navigateBrowser,
   newBrowserTab,
   setBrowserTabSleepMinutes,
@@ -22,8 +24,14 @@ import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBra
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import {
+  getBrowserNewTabPage,
+  getBrowserPinnedSites,
+  getBrowserSiteSettings,
   getBrowserSearchEngine,
   getBrowserTabSleepMinutes,
+  saveBrowserNewTabPage,
+  saveBrowserPinnedSites,
+  saveBrowserSiteSettings,
   saveBrowserSearchEngine,
   saveBrowserTabSleepMinutes
 } from './browser-persistence'
@@ -93,6 +101,34 @@ export function registerIpc(): void {
     if (saved !== null) saveBrowserTabSleepMinutes(saved)
     return saved
   })
+  ipcMain.handle('browser:new-tab-page:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserNewTabPage()
+  })
+  ipcMain.handle('browser:new-tab-page:set', (event, value: unknown) => {
+    assertMainRenderer(event)
+    return saveBrowserNewTabPage(value)
+  })
+  ipcMain.handle('browser:pinned-sites:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserPinnedSites()
+  })
+  ipcMain.handle('browser:pinned-sites:set', (event, value: unknown) => {
+    assertMainRenderer(event)
+    return saveBrowserPinnedSites(value)
+  })
+  ipcMain.handle('browser:site-settings:get', (event, origin: unknown) => {
+    assertMainRenderer(event)
+    return getBrowserSiteSettings(origin)
+  })
+  ipcMain.handle('browser:site-settings:set', (event, origin: unknown, settings: unknown) => {
+    assertMainRenderer(event)
+    return saveBrowserSiteSettings(origin, settings)
+  })
+  ipcMain.handle('browser:runtime:get', async (event) => {
+    assertMainRenderer(event)
+    return getBrowserRuntimeDiagnostics()
+  })
   ipcMain.handle('app:quit', (event) => {
     assertMainRenderer(event)
     app.quit()
@@ -128,6 +164,7 @@ export function registerIpc(): void {
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })
   ipcMain.handle('browser:reload', (event) => { assertMainRenderer(event); browserReload() })
   ipcMain.handle('browser:stop', (event) => { assertMainRenderer(event); browserStop() })
+  ipcMain.handle('browser:picture-in-picture', (event) => { assertMainRenderer(event); return browserPictureInPicture() })
   ipcMain.handle('browser:set-bounds', (event, bounds: unknown) => {
     assertMainRenderer(event)
     setBrowserBounds(bounds)

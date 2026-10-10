@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
-import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserBounds, BrowserRuntimeDiagnostics, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
-import { getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
+import { getBrowserNewTabPage, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 
-export const START_PAGE = getSearchHomepage(DEFAULT_SEARCH_ENGINE)
+export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
   id: string
   view: WebContentsView | null
@@ -26,12 +26,16 @@ let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 
+function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
+  return getBrowserNewTabPage() === 'search' ? getSearchHomepage(engine) : START_PAGE
+}
+
 function getTab(id: string | null = activeTabId): BrowserTab | undefined {
   return tabs.find((tab) => tab.id === id)
 }
 
 function currentUrl(tab: BrowserTab): string {
-  return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || START_PAGE
+  return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
 }
 
 function pageTitle(tab: BrowserTab): string {
@@ -48,7 +52,7 @@ function getState(): BrowserState {
   const tab = getTab()
   const contents = tab?.view?.webContents
   return {
-    url: tab ? currentUrl(tab) : START_PAGE,
+    url: tab ? currentUrl(tab) : configuredStartPage(),
     title: tab ? pageTitle(tab) : 'New tab',
     loading: contents?.isLoading() ?? false,
     canGoBack: contents?.navigationHistory.canGoBack() ?? false,
@@ -137,12 +141,12 @@ function disposeTabView(tab: BrowserTab): void {
 
 function ensureTabLoaded(tab: BrowserTab): void {
   if (tab.view || !browserWindow || browserWindow.isDestroyed()) return
-  const target = tab.pendingUrl || tab.lastUrl || START_PAGE
+  const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
   tab.pendingUrl = target
   const view = createTabView(tab)
   if (!view) return
   tab.pendingUrl = ''
-  tab.inactiveSince = null
+  if (tab.id === activeTabId) tab.inactiveSince = null
   applyTabBounds()
   const contents = view.webContents
   void contents.loadURL(target).catch((error: unknown) => {
@@ -215,11 +219,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   }
   contents.setWindowOpenHandler((details) => {
-    if (details.disposition === 'background-tab') {
-      const target = resolveNavigationTarget(details.url, selectedSearchEngine)
-      if (target && /^https?:\/\//i.test(target)) {
+    const target = resolveNavigationTarget(details.url, selectedSearchEngine)
+    if (target && /^https?:\/\//i.test(target)) {
+      if (details.disposition === 'background-tab') {
         const backgroundTabId = createTab(target, selectedSearchEngine, false)
         if (backgroundTabId) persistOpenTabs()
+      } else if (getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
+        const popupTabId = createTab(target, selectedSearchEngine)
+        if (popupTabId) persistOpenTabs()
       }
     }
     return { action: 'deny' }
@@ -304,7 +311,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
 
 function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = input ? resolveNavigationTarget(input, engine) ?? getSearchHomepage(engine) : getSearchHomepage(engine)
+  const target = input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const tab: BrowserTab = {
     id: randomUUID(),
     view: null,
@@ -324,7 +331,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   } else {
     tab.inactiveSince = Date.now()
   }
-  if (shouldActivate && !deferLoad) ensureTabLoaded(tab)
+  if (!deferLoad) ensureTabLoaded(tab)
   applyTabBounds()
   if (!shouldActivate) scheduleTabSleep(tab)
   else tab.view?.webContents.focus()
@@ -353,8 +360,12 @@ export function attachBrowserView(win: BrowserWindow): void {
   }
   const saved = loadBrowserSession()
   for (const url of saved.urls) createTab(url, selectedSearchEngine, false, true)
-  if (tabs.length === 0) createTab(START_PAGE)
+  if (tabs.length === 0) createTab()
   activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
+  if (activeTabId) {
+    const activeTab = getTab(activeTabId)
+    if (activeTab) ensureTabLoaded(activeTab)
+  }
   const now = Date.now()
   for (const tab of tabs) {
     if (tab.id !== activeTabId) {
@@ -392,6 +403,41 @@ export function getBrowserState(): BrowserState {
 
 export function getBrowserTabs(): BrowserTabSummary[] {
   return getTabSummaries()
+}
+
+export function getBrowserTabUrlByWebContentsId(webContentsId: number): string | null {
+  const tab = tabs.find((candidate) => candidate.view?.webContents.id === webContentsId)
+  const contents = tab?.view?.webContents
+  return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null
+}
+
+export async function getBrowserRuntimeDiagnostics(): Promise<BrowserRuntimeDiagnostics> {
+  const contents = getTab()?.view?.webContents
+  let page: Pick<BrowserRuntimeDiagnostics, 'pageUrl' | 'pageSecureContext' | 'pageHasCredentialsApi' | 'pageHasWebAuthnApi'> = {
+    pageUrl: null,
+    pageSecureContext: null,
+    pageHasCredentialsApi: null,
+    pageHasWebAuthnApi: null
+  }
+  if (contents && !contents.isDestroyed()) {
+    try {
+      const probe = await contents.executeJavaScript(`(() => ({
+        pageUrl: location.href,
+        pageSecureContext: isSecureContext,
+        pageHasCredentialsApi: typeof navigator.credentials !== 'undefined',
+        pageHasWebAuthnApi: typeof PublicKeyCredential !== 'undefined' && typeof navigator.credentials?.create === 'function' && typeof navigator.credentials?.get === 'function'
+      }))()`)
+      if (probe && typeof probe === 'object') page = { ...page, ...probe }
+    } catch {
+      // Navigating or an unresponsive page can make this read-only probe unavailable.
+    }
+  }
+  return {
+    electronVersion: process.versions.electron ?? 'unknown',
+    chromiumVersion: process.versions.chrome ?? 'unknown',
+    userAgent: contents && !contents.isDestroyed() ? contents.getUserAgent() : '',
+    ...page
+  }
 }
 
 export interface ExperimentalExtensionFrameDetails {
@@ -477,7 +523,7 @@ export function closeBrowserTab(id: string): void {
   disposeTabView(tab)
   if (tabs.length === 0) {
     activeTabId = null
-    createTab(START_PAGE)
+    createTab()
     persistOpenTabs()
     return
   }
@@ -540,4 +586,26 @@ export function browserReload(): void {
 
 export function browserStop(): void {
   getTab()?.view?.webContents.stop()
+}
+
+export async function browserPictureInPicture(): Promise<boolean> {
+  const contents = getTab()?.view?.webContents
+  if (!contents || contents.isDestroyed()) return false
+  try {
+    const result = await contents.executeJavaScript(`(async () => {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+        return true
+      }
+      const videos = [...document.querySelectorAll('video')]
+      const video = videos.find((item) => !item.disablePictureInPicture && !item.paused && item.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)
+        || videos.find((item) => !item.disablePictureInPicture && item.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA)
+      if (!video || typeof video.requestPictureInPicture !== 'function') return false
+      await video.requestPictureInPicture()
+      return document.pictureInPictureElement === video
+    })()`, true)
+    return result === true
+  } catch {
+    return false
+  }
 }

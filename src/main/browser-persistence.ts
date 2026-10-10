@@ -1,21 +1,22 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_SEARCH_ENGINE } from '../shared/navigation'
 import {
-  DEFAULT_TAB_SLEEP_MINUTES,
+  normalizeHttpOrigin,
+  normalizePinnedSites,
+  parseBrowserSiteSettings,
   normalizeBrowserSession,
   parseBrowserPreferences,
   parseBrowserSession,
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
-import type { SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
 let preferencesLoaded = false
-let preferences: BrowserPreferences = { searchEngine: DEFAULT_SEARCH_ENGINE, tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES }
+let preferences: BrowserPreferences = parseBrowserPreferences(null)
 
 function readJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
@@ -73,6 +74,47 @@ export function saveBrowserTabSleepMinutes(tabSleepMinutes: TabSleepMinutes): vo
   loadPreferencesIfNeeded()
   preferences = { ...preferences, tabSleepMinutes }
   savePreferences()
+}
+
+export function getBrowserNewTabPage(): NewTabPageId {
+  loadPreferencesIfNeeded()
+  return preferences.newTabPage
+}
+
+export function saveBrowserNewTabPage(value: unknown): NewTabPageId | null {
+  if (value !== 'bonjourr' && value !== 'search') return null
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, newTabPage: value }
+  savePreferences()
+  return preferences.newTabPage
+}
+
+export function getBrowserPinnedSites(): PinnedSite[] {
+  loadPreferencesIfNeeded()
+  return preferences.pinnedSites.map((site) => ({ ...site }))
+}
+
+export function saveBrowserPinnedSites(value: unknown): PinnedSite[] {
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, pinnedSites: normalizePinnedSites(value) }
+  savePreferences()
+  return getBrowserPinnedSites()
+}
+
+export function getBrowserSiteSettings(value: unknown): BrowserSiteSettings | null {
+  const origin = normalizeHttpOrigin(value)
+  if (!origin) return null
+  loadPreferencesIfNeeded()
+  return { ...(preferences.siteSettings[origin] ?? parseBrowserSiteSettings(origin, {})!) }
+}
+
+export function saveBrowserSiteSettings(origin: unknown, value: unknown): BrowserSiteSettings | null {
+  const settings = parseBrowserSiteSettings(origin, value)
+  if (!settings) return null
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, siteSettings: { ...preferences.siteSettings, [settings.origin]: settings } }
+  savePreferences()
+  return { ...settings }
 }
 
 function loadPreferencesIfNeeded(): void {

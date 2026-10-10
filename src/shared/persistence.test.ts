@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  DEFAULT_NEW_TAB_PAGE,
+  MAX_PINNED_SITES,
   MAX_RESTORED_TABS,
   DEFAULT_TAB_SLEEP_MINUTES,
   normalizeBrowserSession,
+  normalizePinnedSites,
   parseBrowserPreferences,
   parseBrowserSession
 } from './persistence.ts'
@@ -40,4 +43,46 @@ test('uses a validated default tab-sleep interval for new and older preferences'
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google' }).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 15 }).tabSleepMinutes, 15)
   assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 10 }).tabSleepMinutes, DEFAULT_TAB_SLEEP_MINUTES)
+})
+
+test('defaults older preference files to Bonjourr without losing existing settings', () => {
+  const parsed = parseBrowserPreferences({ version: 1, searchEngine: 'google', tabSleepMinutes: 15 })
+  assert.equal(parsed.newTabPage, DEFAULT_NEW_TAB_PAGE)
+  assert.equal(parsed.searchEngine, 'google')
+  assert.equal(parsed.tabSleepMinutes, 15)
+  assert.deepEqual(parsed.pinnedSites, [])
+  assert.deepEqual(parsed.siteSettings, {})
+})
+
+test('normalizes pins and rejects unsafe, credential-bearing, duplicate, or excessive URLs', () => {
+  const pins = normalizePinnedSites([
+    { title: '  GitHub  ', url: 'https://github.com' },
+    { title: 'duplicate', url: 'https://github.com/' },
+    { title: 'javascript', url: 'javascript:alert(1)' },
+    { title: 'credentials', url: 'https://user:pass@example.test/' },
+    ...Array.from({ length: MAX_PINNED_SITES + 2 }, (_, index) => ({ title: `Site ${index}`, url: `https://site${index}.test/` }))
+  ])
+  assert.equal(pins.length, MAX_PINNED_SITES)
+  assert.deepEqual(pins[0], { title: 'GitHub', url: 'https://github.com/' })
+  assert.ok(pins.every((pin) => pin.url.startsWith('https://')))
+})
+
+test('accepts only HTTP(S) site settings and defaults each site to blocking and denying permissions', () => {
+  const parsed = parseBrowserPreferences({
+    version: 1,
+    newTabPage: 'search',
+    pinnedSites: [{ title: '', url: 'https://example.test/path' }],
+    siteSettings: {
+      'https://example.test/path': { blockAds: false, allowMedia: true, allowNotifications: true },
+      'file:///private': { blockAds: false },
+      'https://credential:secret@invalid.test/': { allowGeolocation: true }
+    }
+  })
+  assert.equal(parsed.newTabPage, 'search')
+  assert.deepEqual(parsed.pinnedSites, [{ title: 'example.test', url: 'https://example.test/path' }])
+  assert.deepEqual(parsed.siteSettings['https://example.test'], {
+    origin: 'https://example.test', blockAds: false, openPopupsInTabs: false,
+    allowMedia: true, allowGeolocation: false, allowNotifications: true
+  })
+  assert.equal(Object.keys(parsed.siteSettings).length, 1)
 })
