@@ -13,11 +13,20 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install
+      - name: Configure Electron SUID sandbox helper
+        run: |
+          helper="$(node -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          test -f "$helper"
+          sudo chown root:root "$helper"
+          sudo chmod 4755 "$helper"
+          test "$(stat -c '%U:%a' "$helper")" = "root:4755"
       - run: bun run typecheck
       - run: bun run test
       - run: bun run build
       - name: Probe Electron extension compatibility
         run: xvfb-run -a bun run test:electron-extensions
+      - name: Probe experimental host/frame bridge against inert loopback pages
+        run: xvfb-run -a bun run test:electron-host-bridge
 
   native-macos:
     runs-on: macos-26

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents } from 'electron'
+import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
@@ -392,6 +392,43 @@ export function getBrowserState(): BrowserState {
 
 export function getBrowserTabs(): BrowserTabSummary[] {
   return getTabSummaries()
+}
+
+export interface ExperimentalExtensionFrameDetails {
+  frameId: number
+  parentFrameId: number
+  processId: number
+  url: string
+}
+
+/**
+ * Read-only frame mapping for the explicitly enabled extension-host experiment.
+ * This function is not connected to a renderer or called by the normal app path.
+ */
+export function getExperimentalExtensionFrames(electronTabId: number): ExperimentalExtensionFrameDetails[] | null {
+  if (process.env.SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') return null
+  if (!Number.isSafeInteger(electronTabId) || electronTabId < 0) return null
+
+  const tab = tabs.find((candidate) => candidate.view?.webContents.id === electronTabId)
+  const contents = tab?.view?.webContents
+  if (!contents || contents.isDestroyed()) return null
+
+  const mainFrame = contents.mainFrame
+  const frames = mainFrame.framesInSubtree.filter((frame) => !frame.detached)
+  const frameNodeIds = new Set(frames.map((frame) => frame.frameTreeNodeId))
+  if (!frames.some((frame) => frame.frameTreeNodeId === mainFrame.frameTreeNodeId)) return null
+  if (frames.some((frame) => frame.parent && !frameNodeIds.has(frame.parent.frameTreeNodeId))) return null
+
+  const extensionFrameId = (frame: WebFrameMain): number =>
+    frame.frameTreeNodeId === mainFrame.frameTreeNodeId ? 0 : frame.frameTreeNodeId
+
+  if (frames.some((frame) => frame.parent && extensionFrameId(frame) <= 0)) return null
+  return frames.map((frame) => ({
+    frameId: extensionFrameId(frame),
+    parentFrameId: frame.parent ? extensionFrameId(frame.parent) : -1,
+    processId: frame.processId,
+    url: frame.url
+  }))
 }
 
 export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {

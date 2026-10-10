@@ -55,7 +55,8 @@ test('identifies Bramble MV3 worker, missing runtime APIs, action UI, and broad 
   assert.match(issueText(result), /action declared/)
   assert.match(issueText(result), /keyboard commands/)
   assert.match(issueText(result), /<all_urls>/)
-  assert.match(issueText(result), /storage.session/)
+  assert.match(issueText(result), /storage\.session/)
+  assert.match(issueText(result), /identity/)
   assert.match(issueText(result), /webAuthenticationProxy/)
 })
 
@@ -150,4 +151,45 @@ test('MV3 service-worker APIs measured in the current Electron runtime are warni
   assert.ok(result.issues.every((issue) => issue.severity === 'warning'))
   assert.match(issueText(result), /runtime probe exposed/)
   assert.match(issueText(result), /storage\.session/)
+})
+
+test('official Bitwarden MV3 shape reports exact measured API gaps without overclaiming support', () => {
+  const result = inspectPasswordExtensionCompatibility('bitwarden', {
+    manifest_version: 3,
+    name: 'Bitwarden Password Manager',
+    background: { service_worker: 'background.js' },
+    action: { default_popup: 'popup/index.html' },
+    permissions: ['alarms', 'contextMenus', 'notifications', 'sidePanel', 'storage', 'tabs', 'webNavigation']
+  }, [
+    { path: 'background.js', content: 'chrome.alarms.create("sync"); chrome.permissions.contains({ permissions: ["privacy"] }); chrome.webNavigation.onCommitted.addListener(() => {}); chrome.webNavigation.getAllFrames({ tabId: 1 });' },
+    { path: 'popup.js', content: 'chrome.tabs.getCurrent((tab) => tab);' }
+  ])
+
+  assert.equal(result.manifestVersion, 3)
+  assert.equal(result.noDeclaredBlockers, false)
+  assert.match(issueText(result), /contextMenus, notifications, sidePanel, webNavigation/)
+  assert.match(issueText(result), /alarms/)
+  assert.match(issueText(result), /official Bitwarden Chrome 2026\.9\.3 runtime probe/)
+  assert.match(issueText(result), /chrome\.permissions\.contains/)
+  assert.match(issueText(result), /chrome\.tabs\.getCurrent/)
+  assert.match(issueText(result), /chrome\.webNavigation\.getAllFrames/)
+  assert.match(issueText(result), /chrome\.webNavigation\.onCommitted/)
+  assert.match(issueText(result), /action declared by this extension needs a browser-action toolbar\/popup host/)
+  assert.ok(result.staticOnly)
+})
+
+test('Bramble passkey APIs remain blockers even when measured MV3 APIs are present', () => {
+  const result = inspectPasswordExtensionCompatibility('bramble', {
+    manifest_version: 3,
+    name: 'Bramble passkey API probe',
+    background: { service_worker: 'background.js' },
+    permissions: ['alarms', 'identity', 'idle', 'offscreen', 'webAuthenticationProxy']
+  }, [
+    { path: 'background.js', content: 'chrome.alarms.create("sync"); chrome.identity.getAuthToken({}); chrome.webAuthenticationProxy.onRequest.addListener(() => {});' }
+  ])
+
+  assert.equal(result.noDeclaredBlockers, false)
+  assert.match(issueText(result), /identity/)
+  assert.match(issueText(result), /alarms/)
+  assert.match(issueText(result), /webAuthenticationProxy/)
 })
