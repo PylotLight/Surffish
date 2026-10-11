@@ -33,7 +33,7 @@ npm test
 xvfb-run -a npm run test:electron-sidebar-overlay
 ```
 
-Hosted CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture the overlay states locally, set `SOCKFISH_SCREENSHOT_DIR` when running the Xvfb smoke; the optional captures use a 1280×800 X server and are generated from this synthetic page only.
+The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Hosted Ubuntu CI installs and verifies it before running the Electron tests; local reproduction requires it in addition to `xvfb-run`. CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture overlay states locally, set `SOCKFISH_SCREENSHOT_DIR` when running the Xvfb smoke; optional captures use a 1280×800 X server and only show this synthetic page.
 
 ## Previous baseline
 
