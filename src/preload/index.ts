@@ -15,6 +15,8 @@ import type {
   NewTabBackground,
   NewTabBackgroundRefreshResult,
   NewTabPageId,
+  NewTabPreferences,
+  NewTabWeatherSnapshot,
   PinnedSite,
   NetworkRequestDetails,
   NetworkRequestSummary,
@@ -28,6 +30,7 @@ const api = {
   platform: process.platform,
   browser: {
     quit: (): Promise<void> => ipcRenderer.invoke('app:quit'),
+    windowControl: (action: 'close' | 'minimize' | 'toggle-zoom'): Promise<boolean> => ipcRenderer.invoke('app:window-control', action),
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
     preferences: {
       get: (): Promise<BrowserPreferencesSnapshot> => ipcRenderer.invoke('browser:preferences:get'),
@@ -55,6 +58,12 @@ const api = {
     newTabPage: {
       get: (): Promise<NewTabPageId> => ipcRenderer.invoke('browser:new-tab-page:get'),
       set: (page: NewTabPageId): Promise<NewTabPageId | null> => ipcRenderer.invoke('browser:new-tab-page:set', page)
+    },
+    newTabPreferences: {
+      set: (preferences: NewTabPreferences): Promise<NewTabPreferences | null> => ipcRenderer.invoke('browser:new-tab-preferences:set', preferences)
+    },
+    newTabWeather: {
+      get: (location: string): Promise<NewTabWeatherSnapshot> => ipcRenderer.invoke('browser:new-tab-weather:get', location)
     },
     newTabBackgrounds: {
       get: (): Promise<NewTabBackground[]> => ipcRenderer.invoke('browser:new-tab-backgrounds:get'),

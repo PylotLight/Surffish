@@ -10,16 +10,19 @@ import type {
   BrowserTabSummary,
   BrowsingHistoryEntry,
   NewTabBackground,
+  NewTabPreferences,
   NewTabPageId,
+  NewTabWeatherSnapshot,
   NetworkRequestDetails,
   NetworkRequestSummary,
   NetworkResponseBody,
   PinnedSite,
   SearchEngineId,
-  TabSleepMinutes
+  TabSleepMinutes,
+  WorldClockPreference
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SOCKFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
-import { MAX_PINNED_SITES } from '../../../shared/persistence'
+import { DEFAULT_NEW_TAB_PREFERENCES, MAX_PINNED_SITES, MAX_WORLD_CLOCKS } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
 import {
@@ -36,6 +39,11 @@ import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
+const COMMON_TIME_ZONES = [
+  'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'Asia/Kolkata', 'Asia/Tokyo', 'Asia/Singapore',
+  'Europe/London', 'Europe/Paris', 'Europe/Bratislava', 'America/New_York', 'America/Chicago', 'America/Denver',
+  'America/Los_Angeles', 'UTC'
+]
 const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = [
   {
     id: 'fallback-forest-lake',
@@ -128,6 +136,25 @@ function formatVisitedAt(timestamp: number): string {
   })
 }
 
+function formatNewTabTime(date: Date, timeZone: string, preferences: NewTabPreferences): string {
+  return new Intl.DateTimeFormat(undefined, {
+    ...(timeZone === 'local' ? {} : { timeZone }),
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(preferences.showSeconds ? { second: '2-digit' as const } : {}),
+    hour12: !preferences.use24HourTime
+  }).format(date)
+}
+
+function formatNewTabDate(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    ...(timeZone === 'local' ? {} : { timeZone }),
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric'
+  }).format(date)
+}
+
 function formatNetworkTime(durationMs: number | null): string {
   if (durationMs === null) return '—'
   if (durationMs < 1) return '<1 ms'
@@ -175,17 +202,30 @@ function responseBodyText(body: NetworkResponseBody): string {
   }
 }
 
-function NewTabSiteIcon({ site, onOpen }: { site: QuickLinkSite; onOpen: () => void }): React.JSX.Element {
+function NewTabSiteIcon({ site, faviconUrl, showLabel, iconSize, onOpen }: { site: QuickLinkSite; faviconUrl?: string | null; showLabel: boolean; iconSize: number; onOpen: () => void }): React.JSX.Element {
   const [iconFailed, setIconFailed] = useState(false)
+  useEffect(() => setIconFailed(false), [faviconUrl])
   const hostname = new URL(site.origin).hostname.replace(/^www\./i, '')
-  const faviconUrl = `${site.origin}/favicon.ico`
   return (
-    <button className="new-tab-icon-tile" type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
+    <button className={`new-tab-icon-tile${showLabel ? ' has-label' : ''}`} style={{ width: iconSize, minHeight: iconSize }} type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
       <span className="new-tab-site-icon" aria-hidden="true">
-        {!iconFailed && <img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
+        {!iconFailed && <img src={faviconUrl || `${site.origin}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
         {iconFailed && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
       </span>
+      {showLabel && <span className="new-tab-link-label">{site.title}</span>}
     </button>
+  )
+}
+
+function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
+  const [iconFailed, setIconFailed] = useState(false)
+  useEffect(() => setIconFailed(false), [tab.faviconUrl])
+  return (
+    <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}${tab.sleeping ? ' is-sleeping' : ''}`} aria-hidden="true">
+      {tab.loading ? '' : tab.sleeping ? 'Z' : tab.faviconUrl && !iconFailed
+        ? <img src={tab.faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
+        : tab.title.slice(0, 1).toUpperCase()}
+    </span>
   )
 }
 
@@ -224,19 +264,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused } = chromeState
-  const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 73 : 45)
+  const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 50 : 45)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
   const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
+  const [newTabPreferences, setNewTabPreferences] = useState<NewTabPreferences>(() => ({ ...DEFAULT_NEW_TAB_PREFERENCES, worldClocks: [] }))
   const [newTabBackgrounds, setNewTabBackgrounds] = useState<NewTabBackground[]>(FALLBACK_NEW_TAB_BACKGROUNDS)
   const [newTabBackgroundIndex, setNewTabBackgroundIndex] = useState(
     () => getQuickLinkBackgroundIndex(Date.now(), FALLBACK_NEW_TAB_BACKGROUNDS.length)
   )
   const [photoRefreshBusy, setPhotoRefreshBusy] = useState(false)
   const [photoRefreshStatus, setPhotoRefreshStatus] = useState('')
+  const [clockNow, setClockNow] = useState(() => new Date())
+  const [newTabWeather, setNewTabWeather] = useState<NewTabWeatherSnapshot | null>(null)
+  const [newTabWeatherError, setNewTabWeatherError] = useState('')
+  const [newTabWeatherLoading, setNewTabWeatherLoading] = useState(false)
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
@@ -262,6 +307,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   function updateChromeState(patch: Partial<BrowserChromeState>): void {
     setChromeState((current) => ({ ...current, ...patch }))
     void window.api.browser.chrome.set(patch).catch(() => undefined)
+  }
+
+  function saveNewTabPreferences(next: NewTabPreferences): void {
+    setNewTabPreferences(next)
+    void window.api.browser.newTabPreferences.set(next).catch(() => undefined)
+  }
+
+  function patchNewTabPreferences(patch: Partial<NewTabPreferences>): void {
+    saveNewTabPreferences({ ...newTabPreferences, ...patch })
   }
 
   function setSidebarMode(next: SidebarMode | ((current: SidebarMode) => SidebarMode)): void {
@@ -323,6 +377,45 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.clearInterval(refreshTimer)
     }
   }, [surface, isLocalNewTab])
+  useEffect(() => {
+    if (surface !== 'content' || !isLocalNewTab || (!newTabPreferences.showClock && newTabPreferences.worldClocks.length === 0)) return
+    setClockNow(new Date())
+    const timer = window.setInterval(() => setClockNow(new Date()), newTabPreferences.showSeconds ? 1_000 : 30_000)
+    return () => window.clearInterval(timer)
+  }, [surface, isLocalNewTab, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length])
+
+  useEffect(() => {
+    if (surface !== 'content' || !isLocalNewTab || !newTabPreferences.weatherEnabled || !newTabPreferences.weatherLocation.trim()) {
+      setNewTabWeather(null)
+      setNewTabWeatherError('')
+      setNewTabWeatherLoading(false)
+      return
+    }
+    let mounted = true
+    setNewTabWeather(null)
+    setNewTabWeatherError('')
+    const refresh = (): void => {
+      setNewTabWeatherLoading(true)
+      void window.api.browser.newTabWeather.get(newTabPreferences.weatherLocation).then((weather) => {
+        if (mounted) {
+          setNewTabWeather(weather)
+          setNewTabWeatherError('')
+        }
+      }).catch((error: unknown) => {
+        if (mounted) setNewTabWeatherError(error instanceof Error ? error.message : String(error))
+      }).finally(() => {
+        if (mounted) setNewTabWeatherLoading(false)
+      })
+    }
+    const initialTimer = window.setTimeout(refresh, 450)
+    const refreshTimer = window.setInterval(refresh, 15 * 60 * 1_000)
+    return () => {
+      mounted = false
+      window.clearTimeout(initialTimer)
+      window.clearInterval(refreshTimer)
+    }
+  }, [surface, isLocalNewTab, newTabPreferences.weatherEnabled, newTabPreferences.weatherLocation])
+
   const activeOrigin = httpOrigin(browser.url)
   const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
@@ -471,6 +564,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       setSearchEngine(preferences.searchEngine)
       setSearchEngineLoaded(true)
       setNewTabPage(preferences.newTabPage)
+      setNewTabPreferences(preferences.newTabPreferences)
       setPinnedSites(preferences.pinnedSites)
       setTabSleepMinutes(preferences.tabSleepMinutes)
     }
@@ -811,13 +905,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       <aside
         ref={sidebarRef}
         className="browser-sidebar"
-        style={{ top: surface === 'sidebar' ? '0px' : `${browserChromeHeight}px` }}
         aria-label="Browser sidebar"
         onMouseEnter={revealSidebar}
         onMouseLeave={scheduleSidebarHide}
         onFocusCapture={keepSidebarVisibleForFocus}
         onBlurCapture={releaseSidebarFocus}
       >
+        {window.api.platform === 'darwin' && (
+          <div className="sidebar-window-controls" aria-label="Window controls">
+            <button className="sidebar-window-control is-close" type="button" aria-label="Close window" title="Close window" onClick={() => void window.api.browser.windowControl('close')} />
+            <button className="sidebar-window-control is-minimize" type="button" aria-label="Minimize window" title="Minimize window" onClick={() => void window.api.browser.windowControl('minimize')} />
+            <button className="sidebar-window-control is-zoom" type="button" aria-label="Toggle window zoom" title="Toggle window zoom" onClick={() => void window.api.browser.windowControl('toggle-zoom')} />
+          </div>
+        )}
         <div className="sidebar-brand">
           <span className="sidebar-brand-mark" aria-hidden="true">S</span>
           <strong>Sockfish</strong>
@@ -919,7 +1019,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
                 onKeyDown={(event) => selectTabOnKeyboard(event, tab.id)}
               >
-                <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}${tab.sleeping ? ' is-sleeping' : ''}`} aria-hidden="true">{tab.loading ? '' : tab.sleeping ? 'Z' : tab.title.slice(0, 1).toUpperCase()}</span>
+                <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
                 <button
                   className="tab-close"
@@ -947,7 +1047,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
-          <div className="window-drag-region" aria-hidden="true" />
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
             <button
               ref={sidebarToggleRef}
@@ -1112,7 +1211,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
-            <section className="new-tab-page" aria-label="New Tab">
+            <section className="new-tab-page" aria-label="New Tab" style={{
+              '--new-tab-dim': (newTabPreferences.backgroundDim / 100).toFixed(2),
+              '--new-tab-dim-soft': (newTabPreferences.backgroundDim / 350).toFixed(2),
+              '--new-tab-dim-mid': (newTabPreferences.backgroundDim / 165).toFixed(2),
+              '--new-tab-background-blur': `${newTabPreferences.backgroundBlur}px`
+            } as React.CSSProperties}>
               <div
                 key={newTabBackground.title}
                 className="new-tab-backdrop"
@@ -1121,9 +1225,50 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               />
               <div className="new-tab-content">
                 <h1 className="new-tab-sr-only">New Tab</h1>
+                {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled) && (
+                  <div className="new-tab-widgets" aria-label="Time and weather">
+                    {newTabPreferences.showClock && (
+                      <div className="new-tab-clock">
+                        <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatNewTabTime(clockNow, newTabPreferences.timeZone, newTabPreferences)}</time>
+                        <span className="new-tab-clock-label">{newTabPreferences.timeZone === 'local' ? 'Local time' : newTabPreferences.timeZone.replaceAll('_', ' ')}</span>
+                        {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatNewTabDate(clockNow, newTabPreferences.timeZone)}</time>}
+                      </div>
+                    )}
+                    {newTabPreferences.worldClocks.map((clock) => (
+                      <div className="new-tab-clock" key={clock.id}>
+                        <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatNewTabTime(clockNow, clock.timeZone, newTabPreferences)}</time>
+                        <span className="new-tab-clock-label">{clock.label}</span>
+                        {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatNewTabDate(clockNow, clock.timeZone)}</time>}
+                      </div>
+                    ))}
+                    {newTabPreferences.weatherEnabled && newTabPreferences.weatherLocation.trim() && (
+                      <div className="new-tab-weather-widget" role="status" aria-live="polite">
+                        {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
+                          : newTabWeatherError ? <span>{newTabWeatherError}</span>
+                            : newTabWeather ? <><strong>{Math.round(newTabPreferences.temperatureUnit === 'fahrenheit' ? newTabWeather.temperatureCelsius * 9 / 5 + 32 : newTabWeather.temperatureCelsius)}°{newTabPreferences.temperatureUnit === 'fahrenheit' ? 'F' : 'C'} · {newTabWeather.description}</strong><small>Open-Meteo · {newTabWeather.location}</small></>
+                              : <span>Weather unavailable</span>}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {newTabSites.length > 0 ? (
-                  <div className="new-tab-icon-grid" role="group" aria-label="Favorite and frequently visited sites">
-                    {newTabSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}
+                  <div className="new-tab-link-groups" style={{
+                    '--new-tab-icon-size': `${newTabPreferences.iconSize}px`,
+                    '--new-tab-links-per-row': newTabPreferences.linksPerRow,
+                    '--new-tab-icon-offset': `${newTabPreferences.iconVerticalOffset}px`
+                  } as React.CSSProperties}>
+                    {frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
+                      <div className="new-tab-icon-grid" role="group" aria-label="Most visited sites">
+                        {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                      </div>
+                      <span className="new-tab-group-label">Most visited</span>
+                    </section>}
+                    {favoriteSites.length > 0 && <section className="new-tab-link-group" aria-label="Favourite sites">
+                      <div className="new-tab-icon-grid" role="group" aria-label="Favourite sites">
+                        {favoriteSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                      </div>
+                      <span className="new-tab-group-label">Favourites</span>
+                    </section>}
                   </div>
                 ) : <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
                 <span className="new-tab-sr-only" role="status" aria-live="polite">{photoRefreshStatus}</span>
@@ -1202,6 +1347,56 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </label>
                   <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Each favicon is requested from its site's own origin. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
+                </section>
+                <section className="settings-section new-tab-settings-section" aria-label="New Tab clocks">
+                  <div className="settings-section-heading"><div><strong>New Tab · time and clocks</strong><span className="settings-status">Local and world clocks use your device’s timezone database.</span></div></div>
+                  <label className="new-tab-setting-toggle"><span>Show local clock</span><input type="checkbox" checked={newTabPreferences.showClock} onChange={(event) => patchNewTabPreferences({ showClock: event.target.checked })} /></label>
+                  <label className="new-tab-setting-toggle"><span>Show date</span><input type="checkbox" checked={newTabPreferences.showDate} onChange={(event) => patchNewTabPreferences({ showDate: event.target.checked })} /></label>
+                  <label className="new-tab-setting-toggle"><span>Use 24-hour time</span><input type="checkbox" checked={newTabPreferences.use24HourTime} onChange={(event) => patchNewTabPreferences({ use24HourTime: event.target.checked })} /></label>
+                  <label className="new-tab-setting-toggle"><span>Show seconds</span><input type="checkbox" checked={newTabPreferences.showSeconds} onChange={(event) => patchNewTabPreferences({ showSeconds: event.target.checked })} /></label>
+                  <label className="settings-field">
+                    <span>Primary time zone</span>
+                    <select className="settings-select" value={newTabPreferences.timeZone} onChange={(event) => patchNewTabPreferences({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
+                      <option value="local">Automatic · device time</option>
+                      {Array.from(new Set([...COMMON_TIME_ZONES, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{zone.replaceAll('_', ' ')}</option>)}
+                    </select>
+                  </label>
+                  <div className="new-tab-world-clocks">
+                    <div className="new-tab-world-clocks-heading"><strong>World clocks</strong><button className="settings-action secondary" type="button" disabled={newTabPreferences.worldClocks.length >= MAX_WORLD_CLOCKS} onClick={() => {
+                      const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: 'City', timeZone: 'Australia/Sydney' }
+                      patchNewTabPreferences({ worldClocks: [...newTabPreferences.worldClocks, clock] })
+                    }}>Add clock</button></div>
+                    {newTabPreferences.worldClocks.map((clock, index) => (
+                      <div className="new-tab-world-clock-editor" key={clock.id}>
+                        <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
+                        <select className="settings-select" value={clock.timeZone} aria-label={`World clock ${index + 1} timezone`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, timeZone: event.target.value } : item) })}>
+                          {Array.from(new Set([...COMMON_TIME_ZONES, clock.timeZone])).map((zone) => <option key={zone} value={zone}>{zone.replaceAll('_', ' ')}</option>)}
+                        </select>
+                        <button className="settings-action secondary" type="button" aria-label={`Remove ${clock.label} world clock`} onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <section className="settings-section new-tab-settings-section" aria-label="New Tab weather">
+                  <div className="settings-section-heading"><div><strong>New Tab · weather</strong><span className="settings-status">Optional current conditions, loaded only when enabled.</span></div></div>
+                  <label className="new-tab-setting-toggle"><span>Show weather</span><input type="checkbox" checked={newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherEnabled: event.target.checked })} /></label>
+                  <label className="settings-field"><span>City or town</span><input type="text" maxLength={100} value={newTabPreferences.weatherLocation} placeholder="e.g. Melbourne" onChange={(event) => patchNewTabPreferences({ weatherLocation: event.target.value })} aria-label="Weather city or town" /></label>
+                  <label className="settings-field">
+                    <span>Temperature unit</span>
+                    <select className="settings-select" value={newTabPreferences.temperatureUnit} onChange={(event) => patchNewTabPreferences({ temperatureUnit: event.target.value as NewTabPreferences['temperatureUnit'] })} aria-label="Weather temperature unit">
+                      <option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option>
+                    </select>
+                  </label>
+                  <p className="settings-help">Weather is off by default. When enabled, the app sends only the city name you enter to Open-Meteo to retrieve current conditions; it does not use device geolocation or browsing history.</p>
+                </section>
+                <section className="settings-section new-tab-settings-section" aria-label="New Tab display options">
+                  <div className="settings-section-heading"><div><strong>New Tab · display</strong><span className="settings-status">Adjust icon density and background treatment.</span></div></div>
+                  <label className="new-tab-setting-toggle"><span>Show site names under icons</span><input type="checkbox" checked={newTabPreferences.showLinkLabels} onChange={(event) => patchNewTabPreferences({ showLinkLabels: event.target.checked })} /></label>
+                  <label className="settings-field"><span>Icon size · {newTabPreferences.iconSize}px</span><input className="settings-range" type="range" min={20} max={52} value={newTabPreferences.iconSize} onChange={(event) => patchNewTabPreferences({ iconSize: Number(event.target.value) })} aria-label="New Tab icon size" /></label>
+                  <label className="settings-field"><span>Links per row · {newTabPreferences.linksPerRow}</span><input className="settings-range" type="range" min={3} max={12} value={newTabPreferences.linksPerRow} onChange={(event) => patchNewTabPreferences({ linksPerRow: Number(event.target.value) })} aria-label="New Tab links per row" /></label>
+                  <label className="settings-field"><span>Icon vertical position · {newTabPreferences.iconVerticalOffset}px</span><input className="settings-range" type="range" min={0} max={240} step={5} value={newTabPreferences.iconVerticalOffset} onChange={(event) => patchNewTabPreferences({ iconVerticalOffset: Number(event.target.value) })} aria-label="New Tab icon vertical position" /></label>
+                  <label className="settings-field"><span>Background dim · {newTabPreferences.backgroundDim}%</span><input className="settings-range" type="range" min={0} max={70} value={newTabPreferences.backgroundDim} onChange={(event) => patchNewTabPreferences({ backgroundDim: Number(event.target.value) })} aria-label="New Tab background dim" /></label>
+                  <label className="settings-field"><span>Background blur · {newTabPreferences.backgroundBlur}px</span><input className="settings-range" type="range" min={0} max={12} value={newTabPreferences.backgroundBlur} onChange={(event) => patchNewTabPreferences({ backgroundBlur: Number(event.target.value) })} aria-label="New Tab background blur" /></label>
                 </section>
                 <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
                   <div className="settings-section-heading">
