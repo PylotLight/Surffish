@@ -11,8 +11,10 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ensureDependencies } from './ensure-dependencies.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+if (!ensureDependencies(root)) process.exit(1)
 const nativeBuild = spawnSync(process.execPath, [join(root, 'scripts/build-mac-trackpad-swipe.ts'), '--dev'], {
   cwd: root,
   stdio: 'inherit',
