@@ -1,49 +1,40 @@
-# Sidebar overlay follow-up: native layering result
+# Live-page glass sidebar overlay
 
-**Status: not restored.** The app has not been changed to claim or simulate a live-page overlay. A bounds-only change would cover the sidebar and break the existing shell controls, so this follow-up records the production-app measurement and a safe implementation path instead.
+**Status: implemented on `feat/sidebar-overlay-basewindow`; local production-build, typecheck, unit, and Electron integration checks pass. Do not merge until hosted CI is green for the exact pushed commit.**
 
-## Production measurement
+## Architecture
 
-The production Electron build was run in a disposable profile against a synthetic HTTP page served on loopback. No user profile, browsing data, or external website was used. The app window was set to 1280 × 800 pixels; the measured renderer viewport was 1279 × 751 at `(0, 48)`.
+The production app now uses a `BaseWindow` with the live page, full local React app, toolbar, and sidebar as distinct native `WebContentsView`s. Site tabs are inserted at the bottom of the native child-view order. The local toolbar and sidebar remain above them, while the full-window React renderer is hidden during live-site browsing so its transparent pixels cannot intercept page input.
 
-| State | Native `WebContentsView` bounds (x, y, width, height) | Measured outcome |
-|---|---:|---|
-| Site open, sidebar hidden | `(14, 48, 1265, 751)` | The 14-pixel reveal strip is kept clear, so the page is 14 pixels narrower than the viewport. |
-| Site open, 320-pixel sidebar visible | `(320, 48, 959, 751)` | The page begins beside the sidebar; the glass panel is not over live page pixels. |
-| Deliberate full-viewport trial with sidebar visible | `(0, 48, 1279, 751)` | The native page layer paints over the sidebar and obscures it. |
-| App-rendered New Tab | No native site view child | The scenic background and sidebar are both in the shell renderer, so New Tab can show the glass over its image. |
+The toolbar is measured and bounded to its actual height (plus any open toolbar popover). The sidebar is bounded to 320 px while pinned or hovered and to zero native width while hidden. Its existing backdrop blur and translucent glass styling are retained. The full-width site page receives the mouse-move events used for a 180 ms left-edge hover reveal, so a quick click at x=5 still reaches the page while hidden. The original React surface remains the active UI for the local New Tab and full settings, Network, site, and Downloads panels.
 
-`BrowserWindow.contentView.children` contained one native `WebContentsView` for the live site (index 0). Electron's `View.addChildView` controls the order of explicit native child views; it does not expose the BrowserWindow's own renderer as a sibling that can be brought above the site view. The screenshots below show the New Tab overlay, current side-by-side layout, and full-width trial where the native page covers the sidebar.
+The host migration preserves the existing live-tab `persist:fish-browser` session and its cookies/storage, the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Sockfish bridge.
 
-### Full-window production screenshots
+## Production Electron integration results
 
-These are 1280 × 800 captures from the real Linux Electron app, not mockups. The synthetic site uses a large red heading and green diagonal pattern so coverage is obvious.
+The integration test launches the production Electron build using a fresh temporary profile and a local synthetic HTTP server. It does not access a user's profile, vault, or external website. Persisted pins and search-engine preferences are also sent to all three app renderers so UI state remains coherent after a native surface switch.
 
-- **New Tab:** app-rendered scenic image with the glass sidebar pinned open; the background remains visible because no separate site view is attached. ![Production Electron New Tab screenshot](screenshots/sidebar-overlay-new-tab.png)
-- **Current live-site bounds:** sidebar remains usable at the left, while the site starts at its right edge. ![Production Electron synthetic-site screenshot with current bounds](screenshots/sidebar-overlay-site-current-bounds.png)
-- **Full-width trial:** page pixels cover the entire sidebar; a CSS z-index change in the shell cannot put that DOM panel above this native view. ![Production Electron full-width trial showing native page occluding the sidebar](screenshots/sidebar-overlay-site-full-width-trial.png)
+| State | Native page bounds (x, y, width) | Native shell state | Verified result |
+|---|---:|---|---|
+| Local New Tab active | No visible site page | Full React renderer visible; toolbar/sidebar overlay surfaces hidden | Original local start page remains usable. |
+| Live page, sidebar hidden | `(0, toolbarHeight, full native content width, …)` | Toolbar visible; sidebar has zero native width | Page spans the full native content width, and a real click at x=5 still reaches the site. |
+| Live page, sidebar visible | `(0, toolbarHeight, full native content width, …)` | Sidebar view overlays the page at 320 px | Page bounds do not move or shrink; synthetic site click, text entry, and mouse-wheel scroll work while the glass panel is open. |
+| Hover at the live-page left edge | Same full-width page bounds | Sidebar expands above the page after a short delay | Physical pointer hover reveals the panel; moving away hides it after focus is released. |
+| Switch live tab → New Tab → live tab | Existing live page view remains alive | Correct local/overlay renderer surfaces become visible at each state | The live tab, cookie, and full-width page state persist across tab switching. |
 
-## Why a bounds-only fix is unsafe
-
-The existing sidebar, tabs, pin controls, reveal behavior, and glass are rendered in `BrowserWindow.webContents`. The active website is a separate native `WebContentsView` added to the window's content view. Extending that native view to the full viewport makes the website the visible/clickable surface across the sidebar; it does not become a translucent background layer. Conversely, keeping the native view below the shell would require handling input explicitly so page clicks, keyboard input, wheel/scroll, context menus, and focus still reach the active site. A full-width page also covers the current 14-pixel hover-reveal strip unless that interaction is moved or forwarded.
-
-## Concrete implementation option
-
-For a real overlay, make the native layer order explicit rather than changing CSS or only widening bounds:
-
-1. Host the app with an explicit `BaseWindow`/native view tree, with the active site `WebContentsView` at the bottom and a local, topmost chrome/overlay view above it.
-2. Keep the overlay view's hit-test surface limited to the visible toolbar/sidebar controls. Use an IPC bridge for tabs, pins, history, pinning, and panel navigation; keep the existing settings, Downloads, Bramble, and Network Inspector flows in the shell as appropriate.
-3. Make the hidden reveal edge forward pointer input to the active page (or use an equivalent native hit-test mechanism), and route keyboard focus/shortcuts deliberately. Do not allow a transparent full-window shell view to silently swallow website clicks or scrolling.
-4. Add production Electron checks for page click, keyboard, wheel/scroll, sidebar hover/pin, tabs, downloads, Bramble, and Network Inspector before switching the default.
-
-This is a UI-layer and input-routing change, not a safe one-line CSS or `setBounds` patch. The current follow-up deliberately leaves runtime behavior unchanged.
+The native content width may measure 1279–1280 px inside a 1280 px Xvfb window depending on the window-frame allowance; the live page width is asserted against Electron's measured content width each run and begins at `x=0`. The test also verifies that the site view uses the existing `persist:fish-browser` Electron session.
 
 ## Reproduction
 
-After building, run the production Electron probe under Xvfb:
-
 ```bash
-xvfb-run -a bun run test:electron-sidebar-overlay
+npm run typecheck
+npm run build
+npm test
+xvfb-run -a npm run test:electron-sidebar-overlay
 ```
 
-The smoke test uses a disposable temporary profile and a loopback-only synthetic site. To capture new full-window screenshots instead of relying on the committed evidence, set `SOCKFISH_SCREENSHOT_DIR` and use a 1280 × 800 Xvfb display; `ffmpeg` is only needed when that optional capture variable is set.
+The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Hosted Ubuntu CI installs and verifies it before running the Electron tests; local reproduction requires it in addition to `xvfb-run`. CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture overlay states locally, set `SOCKFISH_SCREENSHOT_DIR` when running the Xvfb smoke; optional captures use a 1280×800 X server and only show this synthetic page.
+
+## Previous baseline
+
+Before the migration, commit `66d28c7` used the app renderer as a single `BrowserWindow` surface. A 14 px reveal strip reduced hidden-state page bounds, the visible sidebar reserved 320 px beside the page, and a trial full-width site view painted over the sidebar. Those measurements explain why a bounds-only fix was insufficient; the `BaseWindow` view tree and input checks above supersede that baseline.

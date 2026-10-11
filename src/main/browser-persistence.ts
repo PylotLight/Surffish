@@ -11,7 +11,7 @@ import {
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
-import type { BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
@@ -92,6 +92,15 @@ export function saveBrowserNewTabPage(value: unknown): NewTabPageId | null {
 export function getBrowserPinnedSites(): PinnedSite[] {
   loadPreferencesIfNeeded()
   return preferences.pinnedSites.map((site) => ({ ...site }))
+}
+
+export function getBrowserPreferencesSnapshot(): BrowserPreferencesSnapshot {
+  return {
+    searchEngine: getBrowserSearchEngine(),
+    tabSleepMinutes: getBrowserTabSleepMinutes(),
+    newTabPage: getBrowserNewTabPage(),
+    pinnedSites: getBrowserPinnedSites()
+  }
 }
 
 export function saveBrowserPinnedSites(value: unknown): PinnedSite[] {

@@ -21,7 +21,7 @@
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-left: 0;
   border-radius: 0 13px 13px 0;
-  background: linear-gradient(150deg, rgba(240, 247, 255, 0.16), rgba(39, 46, 55, 0.78) 42%, rgba(16, 20, 25, 0.86));
+  background: linear-gradient(150deg, rgba(240, 247, 255, 0.24), rgba(39, 46, 55, 0.48) 42%, rgba(16, 20, 25, 0.6));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.1), 12px 0 34px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(34px) saturate(185%);
   -webkit-backdrop-filter: blur(34px) saturate(185%);
@@ -2203,4 +2203,49 @@
   .new-tab-background-action.is-refreshing svg {
     animation-duration: 2s;
   }
+}
+
+/* Native overlay surfaces: the active-site toolbar and sidebar are separate transparent layers. */
+.app-shell[data-surface='toolbar'],
+.app-shell[data-surface='sidebar'] {
+  background: transparent;
+}
+.app-shell[data-surface='toolbar'] .browser-layout {
+  display: block;
+  overflow: visible;
+  background: transparent;
+}
+.app-shell[data-surface='toolbar'] .browser-main {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  background: transparent;
+}
+.app-shell[data-surface='toolbar'] .browser-sidebar,
+.app-shell[data-surface='toolbar'] .browser-viewport,
+.app-shell[data-surface='toolbar'] .sidebar-reveal-edge {
+  display: none !important;
+}
+.app-shell[data-surface='sidebar'] .browser-layout {
+  display: block;
+  overflow: hidden;
+  background: transparent;
+}
+.app-shell[data-surface='sidebar'] .browser-main {
+  display: none !important;
+}
+.app-shell[data-surface='sidebar'] .browser-sidebar {
+  top: 0 !important;
+  right: auto;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  max-height: 100%;
+  border-radius: 0 13px 13px 0;
+}
+.app-shell[data-surface='sidebar'] .sidebar-reveal-edge {
+  display: none !important;
 }

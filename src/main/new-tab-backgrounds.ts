@@ -13,7 +13,7 @@ import {
   type WikimediaPhotoCandidate
 } from '../shared/new-tab-photo-feed'
 import { getBrowserSession } from './browser-session'
-import { getMainWindow } from './window'
+import { sendToMainWindowRenderers } from './browser-shell'
 
 const CACHE_FILENAME = 'new-tab-photo-cache.json'
 const USER_AGENT = 'Sockfish New Tab background photos/0.1 (+https://github.com/PylotLight/Sockfish)'
@@ -185,8 +185,7 @@ function shuffled<T>(values: readonly T[]): T[] {
 }
 
 function notifyRenderer(): void {
-  const contents = getMainWindow()?.webContents
-  if (contents && !contents.isDestroyed()) contents.send('browser:new-tab-backgrounds:changed', snapshot())
+  sendToMainWindowRenderers('browser:new-tab-backgrounds:changed', snapshot())
 }
 
 function result(updated: boolean, error: string | null): NewTabBackgroundRefreshResult {

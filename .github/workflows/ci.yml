@@ -21,6 +21,11 @@ jobs:
           sudo chmod 4755 "$helper"
           test "$(stat -c '%U:%a' "$helper")" = "root:4755"
       - run: bun run typecheck
+      - name: Install X11 input helper for native Electron tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xdotool
+          command -v xdotool
       - run: bun run test
       - run: bun run build
       - name: Smoke-test the Electron Downloads manager with synthetic transfers

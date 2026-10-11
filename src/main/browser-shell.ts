@@ -1,0 +1,228 @@
+import type { BaseWindow, WebContents, WebContentsView } from 'electron'
+import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
+
+const REVEAL_WIDTH = 14
+const SIDEBAR_WIDTH = 320
+const REVEAL_DELAY_MS = 180
+const PAGE_EXIT_DELAY_MS = 160
+const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'network', 'site', 'downloads'])
+
+const DEFAULT_CHROME_STATE: BrowserChromeState = {
+  sidebarMode: 'tabs',
+  sidebarPinned: false,
+  sidebarHovered: false,
+  sidebarFocused: false
+}
+
+export interface BrowserShellViews {
+  content: WebContentsView
+  toolbar: WebContentsView
+  sidebar: WebContentsView
+}
+
+let mainWindow: BaseWindow | null = null
+let shellViews: BrowserShellViews | null = null
+let shellRenderers = new Set<WebContents>()
+let chromeState: BrowserChromeState = { ...DEFAULT_CHROME_STATE }
+let toolbarMetrics: BrowserChromeMetrics = { toolbarHeight: 45, toolbarExtent: 45 }
+let activePageIsLocalNewTab = true
+let revealTimer: ReturnType<typeof setTimeout> | null = null
+let pageExitTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearRevealTimer(): void {
+  if (revealTimer) clearTimeout(revealTimer)
+  revealTimer = null
+}
+
+function clearPageExitTimer(): void {
+  if (pageExitTimer) clearTimeout(pageExitTimer)
+  pageExitTimer = null
+}
+
+function clearPointerTimers(): void {
+  clearRevealTimer()
+  clearPageExitTimer()
+}
+
+function isSidebarVisible(): boolean {
+  return chromeState.sidebarPinned || chromeState.sidebarHovered || chromeState.sidebarFocused || chromeState.sidebarMode !== 'tabs'
+}
+
+function isFullPanelMode(): boolean {
+  return chromeState.sidebarMode !== 'tabs' && chromeState.sidebarMode !== 'history'
+}
+
+function shouldUseNativeOverlays(): boolean {
+  return Boolean(mainWindow && !mainWindow.isDestroyed() && !activePageIsLocalNewTab && !isFullPanelMode())
+}
+
+function currentContentSize(): { width: number; height: number } {
+  if (!mainWindow || mainWindow.isDestroyed()) return { width: 0, height: 0 }
+  const [width = 0, height = 0] = mainWindow.getContentSize()
+  return { width: Math.max(0, width), height: Math.max(0, height) }
+}
+
+function applyShellLayout(): void {
+  if (!mainWindow || mainWindow.isDestroyed() || !shellViews) return
+  const { width, height } = currentContentSize()
+  const overlayMode = shouldUseNativeOverlays()
+  const sidebarVisible = isSidebarVisible()
+  const toolbarHeight = Math.min(toolbarMetrics.toolbarHeight, height)
+  const toolbarExtent = Math.min(Math.max(toolbarMetrics.toolbarExtent, toolbarHeight), height)
+
+  // Keep the full React renderer alive and correctly sized for New Tab and local panels.
+  // When native overlays are active it is hidden, so its full-window bounds cannot steal page input.
+  shellViews.content.setBounds({ x: 0, y: 0, width, height })
+  shellViews.content.setVisible(!overlayMode)
+
+  shellViews.toolbar.setBounds({ x: 0, y: 0, width, height: toolbarExtent })
+  shellViews.toolbar.setVisible(overlayMode)
+
+  shellViews.sidebar.setBounds({
+    x: 0,
+    y: toolbarHeight,
+    // The hidden edge is hit-tested by the live page; a zero-width sidebar leaves every page pixel interactive.
+    width: sidebarVisible ? Math.min(SIDEBAR_WIDTH, width) : 0,
+    height: Math.max(0, height - toolbarHeight)
+  })
+  shellViews.sidebar.setVisible(overlayMode)
+}
+
+export function attachBrowserShell(window: BaseWindow, views: BrowserShellViews): void {
+  mainWindow = window
+  shellViews = views
+  shellRenderers = new Set([views.content.webContents, views.toolbar.webContents, views.sidebar.webContents])
+  toolbarMetrics = {
+    toolbarHeight: process.platform === 'darwin' ? 73 : 45,
+    toolbarExtent: process.platform === 'darwin' ? 73 : 45
+  }
+  window.on('resize', applyShellLayout)
+  window.on('closed', detachBrowserShell)
+  applyShellLayout()
+}
+
+export function detachBrowserShell(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.removeListener('resize', applyShellLayout)
+  clearPointerTimers()
+  mainWindow = null
+  shellViews = null
+  shellRenderers.clear()
+  activePageIsLocalNewTab = true
+  chromeState = { ...DEFAULT_CHROME_STATE }
+}
+
+export function getMainWindowRenderers(): WebContents[] {
+  return [...shellRenderers].filter((contents) => !contents.isDestroyed())
+}
+
+export function isMainWindowRenderer(contents: WebContents): boolean {
+  return shellRenderers.has(contents) && !contents.isDestroyed()
+}
+
+export function isToolbarRenderer(contents: WebContents): boolean {
+  return Boolean(shellViews && shellViews.toolbar.webContents === contents && !contents.isDestroyed())
+}
+
+export function sendToMainWindowRenderers(channel: string, ...args: unknown[]): void {
+  for (const contents of getMainWindowRenderers()) contents.send(channel, ...args)
+}
+
+export function getBrowserChromeState(): BrowserChromeState {
+  return { ...chromeState }
+}
+
+export function setBrowserChromeState(input: unknown): BrowserChromeState {
+  if (typeof input !== 'object' || input === null) return getBrowserChromeState()
+  const patch = input as Record<string, unknown>
+  const next = { ...chromeState }
+  if (typeof patch.sidebarMode === 'string' && SIDEBAR_MODES.has(patch.sidebarMode as BrowserSidebarMode)) {
+    next.sidebarMode = patch.sidebarMode as BrowserSidebarMode
+  }
+  if (typeof patch.sidebarPinned === 'boolean') next.sidebarPinned = patch.sidebarPinned
+  if (typeof patch.sidebarHovered === 'boolean') next.sidebarHovered = patch.sidebarHovered
+  if (typeof patch.sidebarFocused === 'boolean') next.sidebarFocused = patch.sidebarFocused
+  chromeState = next
+  if (chromeState.sidebarPinned || chromeState.sidebarHovered || chromeState.sidebarFocused || chromeState.sidebarMode !== 'tabs') clearPointerTimers()
+  applyShellLayout()
+  sendToMainWindowRenderers('browser:chrome-state', getBrowserChromeState())
+  return getBrowserChromeState()
+}
+
+/** Track mouse input delivered to the full-width live page without placing a hit-test view above it. */
+export function handleBrowserPageMouseEvent(input: { type: string; x: number }): void {
+  if (!shouldUseNativeOverlays() || chromeState.sidebarMode !== 'tabs') {
+    clearPointerTimers()
+    return
+  }
+
+  if (input.type === 'mouseDown') {
+    clearRevealTimer()
+    return
+  }
+  if (input.type !== 'mouseMove') return
+
+  if (!isSidebarVisible()) {
+    clearPageExitTimer()
+    if (input.x <= REVEAL_WIDTH) {
+      if (!revealTimer) {
+        revealTimer = setTimeout(() => {
+          revealTimer = null
+          if (shouldUseNativeOverlays() && chromeState.sidebarMode === 'tabs' && !isSidebarVisible()) {
+            setBrowserChromeState({ sidebarHovered: true })
+          }
+        }, REVEAL_DELAY_MS)
+      }
+    } else {
+      clearRevealTimer()
+    }
+    return
+  }
+
+  clearRevealTimer()
+  if (!chromeState.sidebarPinned && !chromeState.sidebarFocused && input.x >= Math.min(SIDEBAR_WIDTH, currentContentSize().width)) {
+    if (!pageExitTimer) {
+      pageExitTimer = setTimeout(() => {
+        pageExitTimer = null
+        if (shouldUseNativeOverlays() && chromeState.sidebarMode === 'tabs' && chromeState.sidebarHovered && !chromeState.sidebarPinned && !chromeState.sidebarFocused) {
+          setBrowserChromeState({ sidebarHovered: false })
+        }
+      }, PAGE_EXIT_DELAY_MS)
+    }
+  } else {
+    clearPageExitTimer()
+  }
+}
+
+export function setBrowserChromeMetrics(input: unknown): BrowserChromeMetrics {
+  if (typeof input === 'object' && input !== null) {
+    const candidate = input as Record<string, unknown>
+    if (typeof candidate.toolbarHeight === 'number' && Number.isFinite(candidate.toolbarHeight)) {
+      toolbarMetrics.toolbarHeight = Math.max(32, Math.min(180, Math.round(candidate.toolbarHeight)))
+    }
+    if (typeof candidate.toolbarExtent === 'number' && Number.isFinite(candidate.toolbarExtent)) {
+      toolbarMetrics.toolbarExtent = Math.max(toolbarMetrics.toolbarHeight, Math.min(800, Math.round(candidate.toolbarExtent)))
+    }
+  }
+  applyShellLayout()
+  return { ...toolbarMetrics }
+}
+
+export function setBrowserPageIsLocalNewTab(isLocalNewTab: boolean): void {
+  if (activePageIsLocalNewTab === isLocalNewTab) return
+  activePageIsLocalNewTab = isLocalNewTab
+  if (isLocalNewTab) clearPointerTimers()
+  applyShellLayout()
+}
+
+export function getMainRendererOrigin(contents: WebContents): { x: number; y: number } | null {
+  if (!shellViews) return null
+  if (contents === shellViews.sidebar.webContents) return { x: 0, y: toolbarMetrics.toolbarHeight }
+  if (contents === shellViews.content.webContents || contents === shellViews.toolbar.webContents) return { x: 0, y: 0 }
+  return null
+}
+
+export function sendFocusAddressToVisibleRenderer(): void {
+  if (!shellViews) return
+  const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
+  if (!target.isDestroyed()) target.send('browser:focus-address')
+}

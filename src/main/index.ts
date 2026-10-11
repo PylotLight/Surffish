@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BaseWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { APP_ID } from '../shared/config'
 import { registerIpc } from './ipc'
@@ -53,7 +53,7 @@ app.whenReady().then(async () => {
     console.warn('Could not initialize the Bramble extension; continuing without it:', error)
   }
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BaseWindow.getAllWindows().length === 0) createWindow()
   })
 }).catch((error: unknown) => {
   console.error('App startup failed:', error)

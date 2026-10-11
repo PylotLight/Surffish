@@ -18,7 +18,14 @@ import {
 import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
-import { getMainWindow } from './window'
+import {
+  getBrowserChromeState,
+  isMainWindowRenderer,
+  isToolbarRenderer,
+  sendToMainWindowRenderers,
+  setBrowserChromeMetrics,
+  setBrowserChromeState
+} from './browser-shell'
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
@@ -29,6 +36,7 @@ import {
   getBrowserPinnedSites,
   getBrowserSiteSettings,
   getBrowserSearchEngine,
+  getBrowserPreferencesSnapshot,
   getBrowserTabSleepMinutes,
   saveBrowserNewTabPage,
   saveBrowserPinnedSites,
@@ -38,7 +46,7 @@ import {
 } from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
-  if (event.sender !== getMainWindow()?.webContents) {
+  if (!isMainWindowRenderer(event.sender)) {
     throw new Error('This browser operation is available only to the app window.')
   }
 }
@@ -57,6 +65,23 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 }
 
 export function registerIpc(): void {
+  ipcMain.handle('browser:preferences:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserPreferencesSnapshot()
+  })
+  ipcMain.handle('browser:chrome:get', (event) => {
+    assertMainRenderer(event)
+    return getBrowserChromeState()
+  })
+  ipcMain.handle('browser:chrome:set', (event, state: unknown) => {
+    assertMainRenderer(event)
+    return setBrowserChromeState(state)
+  })
+  ipcMain.handle('browser:chrome:metrics', (event, metrics: unknown) => {
+    assertMainRenderer(event)
+    if (!isToolbarRenderer(event.sender)) throw new Error('Only the toolbar surface can report native toolbar metrics.')
+    return setBrowserChromeMetrics(metrics)
+  })
   ipcMain.handle('browser:state', (event) => {
     assertMainRenderer(event)
     return getBrowserState()
@@ -86,6 +111,7 @@ export function registerIpc(): void {
     if (isSearchEngineId(engine)) {
       setBrowserSearchEngine(engine)
       saveBrowserSearchEngine(engine)
+      sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
     }
   })
   ipcMain.handle('browser:search-engine:get', (event) => {
@@ -99,7 +125,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:tab-sleep:set', (event, value: unknown) => {
     assertMainRenderer(event)
     const saved = setBrowserTabSleepMinutes(value)
-    if (saved !== null) saveBrowserTabSleepMinutes(saved)
+    if (saved !== null) {
+      saveBrowserTabSleepMinutes(saved)
+      sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    }
     return saved
   })
   ipcMain.handle('browser:new-tab-page:get', (event) => {
@@ -108,7 +137,9 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:new-tab-page:set', (event, value: unknown) => {
     assertMainRenderer(event)
-    return saveBrowserNewTabPage(value)
+    const saved = saveBrowserNewTabPage(value)
+    if (saved) sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    return saved
   })
   ipcMain.handle('browser:new-tab-backgrounds:get', (event) => {
     assertMainRenderer(event)
@@ -124,7 +155,9 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:pinned-sites:set', (event, value: unknown) => {
     assertMainRenderer(event)
-    return saveBrowserPinnedSites(value)
+    const saved = saveBrowserPinnedSites(value)
+    sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    return saved
   })
   ipcMain.handle('browser:site-settings:get', (event, origin: unknown) => {
     assertMainRenderer(event)
@@ -209,7 +242,7 @@ export function registerIpc(): void {
   ipcMain.handle('browser:history:clear', (event) => {
     assertMainRenderer(event)
     clearBrowsingHistory()
-    getMainWindow()?.webContents.send('browser:history-changed')
+    sendToMainWindowRenderers('browser:history-changed')
   })
   ipcMain.handle('browser:proxy:get', (event) => {
     assertMainRenderer(event)

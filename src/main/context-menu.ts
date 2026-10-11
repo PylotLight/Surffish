@@ -1,4 +1,4 @@
-import { clipboard, dialog, Menu, type BrowserWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { clipboard, dialog, Menu, type BaseWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import { SEARCH_ENGINES, resolveNavigationTarget } from '../shared/navigation'
 import type { SearchEngineId } from '../shared/types'
 
@@ -7,7 +7,7 @@ interface ContextMenuEvent {
 }
 
 export interface BrowserContextMenuOptions {
-  window: BrowserWindow
+  window: BaseWindow
   pageActions: boolean
   offsetX?: number
   offsetY?: number
@@ -38,7 +38,7 @@ function runMenuTask(task: Promise<void>): void {
   void task.catch((error: unknown) => console.warn('Could not complete browser menu action:', error))
 }
 
-async function savePage(contents: WebContents, window: BrowserWindow, pageTitle: string): Promise<void> {
+async function savePage(contents: WebContents, window: BaseWindow, pageTitle: string): Promise<void> {
   const defaultName = safeFilename(pageTitle, 'page').replace(/\.(?:html?|mhtml)$/i, '')
   const result = await dialog.showSaveDialog(window, {
     title: 'Save page',
@@ -53,7 +53,7 @@ async function savePage(contents: WebContents, window: BrowserWindow, pageTitle:
   await contents.savePage(result.filePath, saveType)
 }
 
-async function saveUrl(contents: WebContents, window: BrowserWindow, url: string, suggestedFilename: string): Promise<void> {
+async function saveUrl(contents: WebContents, window: BaseWindow, url: string, suggestedFilename: string): Promise<void> {
   const safeUrl = safeHttpUrl(url)
   if (!safeUrl) return
   let fallback = 'download'
