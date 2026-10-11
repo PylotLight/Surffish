@@ -3,20 +3,29 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BrowsingHistoryEntry } from '../shared/types'
+import { normalizeFaviconUrl } from '../shared/persistence'
 
 const MAX_HISTORY_ENTRIES = 5000
 let loaded = false
 let entries: BrowsingHistoryEntry[] = []
 
-function isHistoryEntry(value: unknown): value is BrowsingHistoryEntry {
-  if (typeof value !== 'object' || value === null) return false
+function normalizeHistoryEntry(value: unknown): BrowsingHistoryEntry | null {
+  if (typeof value !== 'object' || value === null) return null
   const entry = value as Partial<BrowsingHistoryEntry>
-  return typeof entry.id === 'string'
-    && typeof entry.url === 'string'
-    && /^https?:\/\//i.test(entry.url)
-    && typeof entry.title === 'string'
-    && typeof entry.visitedAt === 'number'
-    && Number.isFinite(entry.visitedAt)
+  if (typeof entry.id !== 'string'
+    || typeof entry.url !== 'string'
+    || !/^https?:\/\//i.test(entry.url)
+    || typeof entry.title !== 'string'
+    || typeof entry.visitedAt !== 'number'
+    || !Number.isFinite(entry.visitedAt)) return null
+  const faviconUrl = normalizeFaviconUrl(entry.faviconUrl)
+  return {
+    id: entry.id,
+    url: entry.url,
+    title: entry.title,
+    visitedAt: entry.visitedAt,
+    ...(faviconUrl ? { faviconUrl } : {})
+  }
 }
 
 function historyPath(): string {
@@ -31,7 +40,7 @@ function loadHistory(): void {
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
     if (Array.isArray(parsed)) {
-      entries = parsed.filter(isHistoryEntry).slice(0, MAX_HISTORY_ENTRIES)
+      entries = parsed.map(normalizeHistoryEntry).filter((entry): entry is BrowsingHistoryEntry => entry !== null).slice(0, MAX_HISTORY_ENTRIES)
     }
   } catch (error) {
     console.warn('Could not read browsing history:', error)
@@ -76,6 +85,17 @@ export function updateLatestVisitTitle(url: string, title: string): void {
   const entry = entries.find((candidate) => candidate.url === url)
   if (!entry || entry.title === title) return
   entry.title = title
+  persistHistory()
+}
+
+export function updateLatestVisitFavicon(url: string, faviconUrl: string): void {
+  if (!url) return
+  const normalizedFaviconUrl = normalizeFaviconUrl(faviconUrl)
+  if (!normalizedFaviconUrl) return
+  loadHistory()
+  const entry = entries.find((candidate) => candidate.url === url)
+  if (!entry || entry.faviconUrl === normalizedFaviconUrl) return
+  entry.faviconUrl = normalizedFaviconUrl
   persistHistory()
 }
 

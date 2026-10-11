@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
-import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
-import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
+import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
+import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
-import { getBrowserNewTabPage, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
+import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
@@ -80,6 +80,27 @@ function getTabSummaries(): BrowserTabSummary[] {
   }))
 }
 
+function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
+  if (!faviconUrl) return
+  const safeFaviconUrl = normalizeFaviconUrl(faviconUrl)
+  const origin = normalizeHttpOrigin(pageUrl)
+  if (!safeFaviconUrl || !origin) return
+  updateLatestVisitFavicon(pageUrl, safeFaviconUrl)
+
+  const pinnedSites = getBrowserPinnedSites()
+  let pinnedSitesChanged = false
+  const nextPinnedSites = pinnedSites.map((site) => {
+    if (normalizeHttpOrigin(site.url) !== origin || site.faviconUrl === safeFaviconUrl) return site
+    pinnedSitesChanged = true
+    return { ...site, faviconUrl: safeFaviconUrl }
+  })
+  if (pinnedSitesChanged) {
+    saveBrowserPinnedSites(nextPinnedSites)
+    sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+  }
+  sendToMainWindowRenderers('browser:history-changed')
+}
+
 function refreshTabFavicon(tab: BrowserTab): void {
   const contents = tab.view?.webContents
   if (!contents || contents.isDestroyed()) return
@@ -112,6 +133,7 @@ function refreshTabFavicon(tab: BrowserTab): void {
         faviconUrl = null
       }
     }
+    persistPageFavicon(pageUrl, faviconUrl)
     if (tab.faviconUrl === faviconUrl) return
     tab.faviconUrl = faviconUrl
     publishTabs()

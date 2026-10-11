@@ -139,6 +139,18 @@ export function normalizeHttpOrigin(value: unknown): string | null {
   }
 }
 
+/** Persist only bounded, credential-free web image URLs; data URLs stay transient. */
+export function normalizeFaviconUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.trim().length > 4_096) return null
+  try {
+    const url = new URL(value.trim())
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || url.href.length > 4_096) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
 export function parseBrowserSiteSettings(originInput: unknown, value: unknown): BrowserSiteSettings | null {
   const origin = normalizeHttpOrigin(originInput)
   if (!origin) return null
@@ -163,7 +175,8 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
     if (!url || seen.has(url)) continue
     const parsed = new URL(url)
     const title = typeof entry.title === 'string' ? entry.title.trim().slice(0, 80) : ''
-    pinned.push({ title: title || parsed.hostname, url })
+    const faviconUrl = normalizeFaviconUrl(entry.faviconUrl)
+    pinned.push({ title: title || parsed.hostname, url, ...(faviconUrl ? { faviconUrl } : {}) })
     seen.add(url)
     if (pinned.length >= MAX_PINNED_SITES) break
   }

@@ -41,3 +41,17 @@ test('normalizes favorite tiles by origin and rejects unsafe or credential-beari
   assert.equal(toQuickLinkSite({ title: 'Unsafe', url: 'javascript:alert(1)' }), null)
   assert.equal(toQuickLinkSite({ title: 'Credentials', url: 'https://user:pass@example.test/' }), null)
 })
+
+test('carries a saved favicon to favorite and most-visited site tiles', () => {
+  const faviconUrl = 'https://assets.example.test/favicon.svg'
+  assert.deepEqual(toQuickLinkSite({ title: 'Favorite', url: 'https://favorite.test/', faviconUrl }), {
+    title: 'Favorite', url: 'https://favorite.test', origin: 'https://favorite.test', faviconUrl
+  })
+  const sites = buildFrequentSites([
+    visit('newest', 'https://frequent.test/new', 'Frequent latest', 30),
+    { ...visit('older', 'https://frequent.test/old', 'Frequent older', 20), faviconUrl }
+  ], [])
+  assert.deepEqual(sites, [{
+    title: 'Frequent latest', url: 'https://frequent.test', origin: 'https://frequent.test', faviconUrl
+  }])
+})

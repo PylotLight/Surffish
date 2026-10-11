@@ -203,13 +203,22 @@ function responseBodyText(body: NetworkResponseBody): string {
 }
 
 function NewTabSiteIcon({ site, faviconUrl, showLabel, iconSize, onOpen }: { site: QuickLinkSite; faviconUrl?: string | null; showLabel: boolean; iconSize: number; onOpen: () => void }): React.JSX.Element {
+  const fallbackFaviconUrl = `${site.origin}/favicon.ico`
+  const preferredFaviconUrl = faviconUrl ?? site.faviconUrl ?? fallbackFaviconUrl
   const [iconFailed, setIconFailed] = useState(false)
-  useEffect(() => setIconFailed(false), [faviconUrl])
+  const [iconSource, setIconSource] = useState(preferredFaviconUrl)
+  useEffect(() => {
+    setIconFailed(false)
+    setIconSource(preferredFaviconUrl)
+  }, [preferredFaviconUrl])
   const hostname = new URL(site.origin).hostname.replace(/^www\./i, '')
   return (
     <button className={`new-tab-icon-tile${showLabel ? ' has-label' : ''}`} style={{ width: iconSize, minHeight: iconSize }} type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
       <span className="new-tab-site-icon" aria-hidden="true">
-        {!iconFailed && <img src={faviconUrl || `${site.origin}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
+        {!iconFailed && <img src={iconSource} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => {
+          if (iconSource !== fallbackFaviconUrl) setIconSource(fallbackFaviconUrl)
+          else setIconFailed(true)
+        }} />}
         {iconFailed && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
       </span>
       {showLabel && <span className="new-tab-link-label">{site.title}</span>}
@@ -230,8 +239,15 @@ function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
 }
 
 function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: () => void; onUnpin: () => void }): React.JSX.Element {
-  const [iconFailed, setIconFailed] = useState(false)
   const quickLink = toQuickLinkSite(site)
+  const fallbackFaviconUrl = quickLink ? `${quickLink.origin}/favicon.ico` : null
+  const preferredFaviconUrl = quickLink ? site.faviconUrl ?? fallbackFaviconUrl : null
+  const [iconFailed, setIconFailed] = useState(false)
+  const [iconSource, setIconSource] = useState(preferredFaviconUrl)
+  useEffect(() => {
+    setIconFailed(false)
+    setIconSource(preferredFaviconUrl)
+  }, [preferredFaviconUrl])
   const hostname = quickLink ? new URL(quickLink.origin).hostname.replace(/^www\./i, '') : historyHost(site.url)
   return (
     <button className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to unpin)`} aria-label={`Open pinned site ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
@@ -239,7 +255,10 @@ function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: (
       onUnpin()
     }}>
       <span className="pinned-site-mark" aria-hidden="true">
-        {quickLink && !iconFailed && <img src={`${quickLink.origin}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
+        {quickLink && iconSource && !iconFailed && <img src={iconSource} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => {
+          if (fallbackFaviconUrl && iconSource !== fallbackFaviconUrl) setIconSource(fallbackFaviconUrl)
+          else setIconFailed(true)
+        }} />}
         {(!quickLink || iconFailed) && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
       </span>
     </button>
@@ -504,9 +523,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       return
     }
     const title = browser.title.trim().slice(0, 80) || new URL(activeOrigin).hostname
+    const faviconUrl = tabs.find((tab) => httpOrigin(tab.url) === activeOrigin)?.faviconUrl
     const next = pinned
       ? pinnedSites.filter((site) => httpOrigin(site.url) !== activeOrigin)
-      : [...pinnedSites, { title, url: activeOrigin }]
+      : [...pinnedSites, { title, url: activeOrigin, ...(faviconUrl ? { faviconUrl } : {}) }]
     await savePinnedSites(next)
   }
 
