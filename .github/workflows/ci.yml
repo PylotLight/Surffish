@@ -32,6 +32,8 @@ jobs:
         run: xvfb-run -a bun run test:electron-downloads
       - name: Probe native sidebar overlay bounds in the production Electron app
         run: xvfb-run -a bun run test:electron-sidebar-overlay
+      - name: Smoke-test the full ad-filter engine (network, cosmetics, early scriptlets, iframes)
+        run: xvfb-run -a bun run test:electron-adblock
       - name: Probe Electron extension compatibility
         run: xvfb-run -a bun run test:electron-extensions
       - name: Probe experimental host/frame bridge against inert loopback pages
