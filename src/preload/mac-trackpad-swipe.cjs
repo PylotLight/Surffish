@@ -347,14 +347,151 @@ function startPreload(ipcRenderer, win, doc, isMainFrame = true) {
   if (isMainFrame) startSwipePresentation(ipcRenderer, win, doc)
 }
 
+const BACKGROUND_AUTOPLAY_POLICY_CHANNEL = 'browser:background-youtube-autoplay:policy'
+const BACKGROUND_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
+const BACKGROUND_AUTOPLAY_RELEASE_KEY = '__sockfishAllowBackgroundYouTubeAutoplay'
+
+function isYouTubePageUrl(input) {
+  try {
+    const url = new URL(input)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+    const hostname = url.hostname.toLowerCase().replace(/\.$/, '')
+    return hostname === 'youtu.be'
+      || hostname === 'youtube.com'
+      || hostname.endsWith('.youtube.com')
+      || hostname === 'youtube-nocookie.com'
+      || hostname.endsWith('.youtube-nocookie.com')
+  } catch {
+    return false
+  }
+}
+
+function backgroundAutoplayBlockScript() {
+  return `(() => {
+    const mediaPrototype = HTMLMediaElement.prototype
+    const playDescriptor = Object.getOwnPropertyDescriptor(mediaPrototype, 'play')
+    if (!playDescriptor || typeof playDescriptor.value !== 'function') return
+    const autoplayDescriptor = Object.getOwnPropertyDescriptor(mediaPrototype, 'autoplay')
+    let blocked = true
+
+    const guardedPlay = function (...args) {
+      if (blocked) return Promise.reject(new DOMException('Playback is blocked until this background tab is activated.', 'NotAllowedError'))
+      return Reflect.apply(playDescriptor.value, this, args)
+    }
+    Object.defineProperty(mediaPrototype, 'play', { ...playDescriptor, value: guardedPlay })
+
+    let guardedAutoplaySetter = null
+    if (autoplayDescriptor && typeof autoplayDescriptor.set === 'function') {
+      guardedAutoplaySetter = function (value) {
+        if (blocked && value) {
+          autoplayDescriptor.set.call(this, false)
+          this.removeAttribute('autoplay')
+          return
+        }
+        autoplayDescriptor.set.call(this, value)
+      }
+      Object.defineProperty(mediaPrototype, 'autoplay', { ...autoplayDescriptor, set: guardedAutoplaySetter })
+    }
+
+    const disableAutoplay = (media) => {
+      if (!(media instanceof HTMLMediaElement)) return
+      if (media.hasAttribute('autoplay')) media.removeAttribute('autoplay')
+      if (media.autoplay) media.autoplay = false
+      if (!media.paused && !media.ended) media.pause()
+    }
+    const inspectNode = (node) => {
+      if (!node || node.nodeType !== 1) return
+      disableAutoplay(node)
+      for (const media of node.querySelectorAll('audio, video')) disableAutoplay(media)
+    }
+    const stopPlayEvent = (event) => {
+      if (blocked && event.target instanceof HTMLMediaElement) event.target.pause()
+    }
+    document.addEventListener('play', stopPlayEvent, true)
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes') disableAutoplay(mutation.target)
+        else for (const node of mutation.addedNodes) inspectNode(node)
+      }
+    })
+    observer.observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['autoplay'] })
+    inspectNode(document.documentElement)
+
+    const release = () => {
+      if (!blocked) return
+      blocked = false
+      observer.disconnect()
+      document.removeEventListener('play', stopPlayEvent, true)
+      if (mediaPrototype.play === guardedPlay) Object.defineProperty(mediaPrototype, 'play', playDescriptor)
+      if (guardedAutoplaySetter && Object.getOwnPropertyDescriptor(mediaPrototype, 'autoplay')?.set === guardedAutoplaySetter) {
+        Object.defineProperty(mediaPrototype, 'autoplay', autoplayDescriptor)
+      }
+      delete window[${JSON.stringify(BACKGROUND_AUTOPLAY_RELEASE_KEY)}]
+    }
+    Object.defineProperty(window, ${JSON.stringify(BACKGROUND_AUTOPLAY_RELEASE_KEY)}, { value: release, configurable: true })
+  })()`
+}
+
+function backgroundAutoplayReleaseScript() {
+  return `window[${JSON.stringify(BACKGROUND_AUTOPLAY_RELEASE_KEY)}]?.()`
+}
+
+function startBackgroundAutoplayGuard(ipcRenderer, webFrame, isMainFrame = true, pageUrl = typeof window === 'undefined' ? '' : window.location.href) {
+  if (!isMainFrame || !isYouTubePageUrl(pageUrl)) return
+
+  let installed = false
+  let allowRequested = false
+  const release = () => {
+    allowRequested = true
+    if (!installed) return
+    installed = false
+    try {
+      const result = webFrame.executeJavaScript(backgroundAutoplayReleaseScript())
+      if (result && typeof result.catch === 'function') result.catch(() => {})
+    } catch {
+      // The page may be navigating away.
+    }
+  }
+  ipcRenderer.on(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL, release)
+
+  let shouldBlock = false
+  try {
+    shouldBlock = ipcRenderer.sendSync(BACKGROUND_AUTOPLAY_POLICY_CHANNEL) === true
+  } catch {
+    // A failed policy lookup must not prevent normal page loading.
+  }
+  if (!shouldBlock) {
+    ipcRenderer.removeListener(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL, release)
+    return
+  }
+
+  try {
+    const installation = webFrame.executeJavaScript(backgroundAutoplayBlockScript())
+    Promise.resolve(installation).then(() => {
+      installed = true
+      if (allowRequested) release()
+    }).catch(() => {
+      ipcRenderer.removeListener(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL, release)
+    })
+  } catch {
+    ipcRenderer.removeListener(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL, release)
+  }
+}
+
 module.exports = {
   clampProgress,
   resolveScrollEdges,
   scrollEdgesAt,
-  shouldYieldToPage
+  shouldYieldToPage,
+  startBackgroundAutoplayGuard,
+  isYouTubePageUrl,
+  BACKGROUND_AUTOPLAY_POLICY_CHANNEL,
+  BACKGROUND_AUTOPLAY_ALLOW_CHANNEL
 }
 
-if (process.versions.electron && process.platform === 'darwin') {
-  const { ipcRenderer } = require('electron')
-  startPreload(ipcRenderer, window, document, process.isMainFrame !== false)
+if (process.versions.electron) {
+  const { ipcRenderer, webFrame } = require('electron')
+  const isMainFrame = process.isMainFrame !== false
+  if (process.platform === 'darwin') startPreload(ipcRenderer, window, document, isMainFrame)
+  startBackgroundAutoplayGuard(ipcRenderer, webFrame, isMainFrame)
 }

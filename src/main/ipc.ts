@@ -14,7 +14,8 @@ import {
   newBrowserTab,
   setBrowserTabSleepMinutes,
   setBrowserSearchEngine,
-  setBrowserBounds
+  setBrowserBounds,
+  shouldPauseBackgroundYouTubeAutoplay
 } from './browser'
 import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
@@ -69,6 +70,9 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 }
 
 export function registerIpc(): void {
+  ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
+    event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
+  })
   ipcMain.on('browser:mac-trackpad-swipe:scroll-edge', (event, edges: unknown) => {
     if (process.platform === 'darwin' && event.senderFrame === event.sender.mainFrame) {
       updateBrowserTrackpadScrollEdges(event.sender, edges)

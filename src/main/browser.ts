@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
+import { app, clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
@@ -45,6 +45,7 @@ const MAC_SWIPE_BEGIN_CHANNEL = 'browser:mac-trackpad-swipe:begin'
 const MAC_SWIPE_PROGRESS_CHANNEL = 'browser:mac-trackpad-swipe:progress'
 const MAC_SWIPE_END_CHANNEL = 'browser:mac-trackpad-swipe:end'
 const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
+export const BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
 const MAC_SWIPE_SETTLE_MS = 180
 const MAC_SWIPE_DEBUG = process.env.SOCKFISH_SWIPE_DEBUG === '1'
 const tabs: BrowserTab[] = []
@@ -69,7 +70,11 @@ function getTab(id: string | null = activeTabId): BrowserTab | undefined {
 function currentUrl(tab: BrowserTab): string {
   return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
 }
-
+export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
+  if (contents.isDestroyed()) return false
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  return Boolean(tab?.pauseAutoplayUntilVisited && tab.id !== activeTabId)
+}
 function pageTitle(tab: BrowserTab): string {
   if (currentUrl(tab) === SOCKFISH_QUICK_LINKS_URL) return 'New Tab'
   const title = tab.view?.webContents.getTitle().trim()
@@ -309,6 +314,7 @@ function activateTabInternal(id: string): boolean {
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
+    contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
     contents.focus()
   }
   applyTabBounds()
@@ -357,14 +363,26 @@ function showBrowserTabContextMenu(id: string): void {
   Menu.buildFromTemplate(items).popup({ window: browserWindow })
 }
 
+function resolveBrowserViewPreload(): string | null {
+  const preload = 'mac-trackpad-swipe.cjs'
+  const mainDirectory = dirname(fileURLToPath(import.meta.url))
+  const appPath = app.getAppPath()
+  const candidates = [
+    join(mainDirectory, '../preload', preload),
+    join(mainDirectory, '../../preload', preload),
+    join(appPath, 'out/preload', preload),
+    join(appPath, 'src/preload', preload)
+  ]
+  return candidates.find((candidate) => existsSync(candidate)) ?? null
+}
+
 function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const swipePreload = process.platform === 'darwin'
-    ? join(dirname(fileURLToPath(import.meta.url)), '../preload/mac-trackpad-swipe.cjs')
-    : null
+  const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
+  const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
   const view = new WebContentsView({
     webPreferences: {
-      ...(swipePreload && existsSync(swipePreload) ? { preload: swipePreload } : {}),
+      ...(browserViewPreload ? { preload: browserViewPreload } : {}),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,

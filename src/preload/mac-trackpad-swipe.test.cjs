@@ -2,12 +2,134 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
+const vm = require('node:vm')
 const {
+  BACKGROUND_AUTOPLAY_ALLOW_CHANNEL,
+  BACKGROUND_AUTOPLAY_POLICY_CHANNEL,
   clampProgress,
+  isYouTubePageUrl,
   resolveScrollEdges,
   scrollEdgesAt,
-  shouldYieldToPage
+  shouldYieldToPage,
+  startBackgroundAutoplayGuard
 } = require('./mac-trackpad-swipe.cjs')
+
+test('background YouTube autoplay is blocked at document start and released when activated', async () => {
+  const listeners = new Map()
+  const scripts = []
+  const ipcRenderer = {
+    sendSync: (channel) => {
+      assert.equal(channel, BACKGROUND_AUTOPLAY_POLICY_CHANNEL)
+      return true
+    },
+    on: (channel, listener) => listeners.set(channel, listener),
+    removeListener: (channel, listener) => {
+      if (listeners.get(channel) === listener) listeners.delete(channel)
+    }
+  }
+  const webFrame = {
+    executeJavaScript: (script) => {
+      scripts.push(script)
+      return Promise.resolve()
+    }
+  }
+
+  startBackgroundAutoplayGuard(ipcRenderer, webFrame, true, 'https://www.youtube.com/watch?v=test')
+  assert.match(scripts[0], /HTMLMediaElement\.prototype/)
+  assert.equal(listeners.has(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL), true)
+
+  class FakeMedia {
+    constructor() {
+      this.paused = true
+      this.ended = false
+      this._autoplay = false
+      this.attributes = new Set()
+      this.playCount = 0
+      this.nodeType = 1
+    }
+    get autoplay() { return this._autoplay }
+    set autoplay(value) {
+      this._autoplay = Boolean(value)
+      if (this._autoplay) this.attributes.add('autoplay')
+      else this.attributes.delete('autoplay')
+    }
+    play() {
+      this.playCount += 1
+      this.paused = false
+      return Promise.resolve()
+    }
+    pause() { this.paused = true }
+    hasAttribute(name) { return this.attributes.has(name) }
+    removeAttribute(name) {
+      this.attributes.delete(name)
+      if (name === 'autoplay') this._autoplay = false
+    }
+    querySelectorAll() { return [] }
+  }
+  const documentListeners = new Map()
+  const document = {
+    documentElement: { nodeType: 1, querySelectorAll: () => [] },
+    addEventListener: (type, listener) => documentListeners.set(type, listener),
+    removeEventListener: (type, listener) => {
+      if (documentListeners.get(type) === listener) documentListeners.delete(type)
+    },
+    querySelectorAll: () => []
+  }
+  const window = {}
+  class FakeMutationObserver {
+    observe() {}
+    disconnect() {}
+  }
+  vm.runInNewContext(scripts[0], {
+    window,
+    document,
+    HTMLMediaElement: FakeMedia,
+    MutationObserver: FakeMutationObserver,
+    Promise,
+    DOMException
+  })
+
+  const media = new FakeMedia()
+  media.autoplay = true
+  assert.equal(media.autoplay, false)
+  await assert.rejects(media.play(), { name: 'NotAllowedError' })
+  assert.equal(media.playCount, 0)
+
+  listeners.get(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL)()
+  await Promise.resolve()
+  assert.match(scripts[1], /__sockfishAllowBackgroundYouTubeAutoplay/)
+  vm.runInNewContext(scripts[1], { window })
+  await media.play()
+  assert.equal(media.playCount, 1)
+})
+
+test('background autoplay policy is not queried from child frames', () => {
+  let queried = false
+  const ipcRenderer = {
+    sendSync: () => { queried = true; return true },
+    on() {},
+    removeListener() {}
+  }
+  startBackgroundAutoplayGuard(ipcRenderer, { executeJavaScript() {} }, false, 'https://www.youtube.com/watch?v=test')
+  assert.equal(queried, false)
+})
+
+test('background autoplay guard recognizes YouTube hosts and skips lookalikes', () => {
+  assert.equal(isYouTubePageUrl('https://music.youtube.com/watch?v=test'), true)
+  assert.equal(isYouTubePageUrl('https://www.youtube-nocookie.com/embed/test'), true)
+  assert.equal(isYouTubePageUrl('https://youtu.be/test'), true)
+  assert.equal(isYouTubePageUrl('https://youtube.com.attacker.example/watch'), false)
+  assert.equal(isYouTubePageUrl('https://notyoutube.com/watch'), false)
+
+  let queried = false
+  const ipcRenderer = {
+    sendSync: () => { queried = true; return true },
+    on() {},
+    removeListener() {}
+  }
+  startBackgroundAutoplayGuard(ipcRenderer, { executeJavaScript() {} }, true, 'https://example.com/')
+  assert.equal(queried, false)
+})
 
 test('AppKit progress is clamped and invalid values never move the page', () => {
   assert.equal(clampProgress(-0.2), 0)
