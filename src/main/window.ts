@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { is } from '@electron-toolkit/utils'
-import { attachBrowserView } from './browser'
+import { attachBrowserView, handleBrowserShortcut, syncBrowserBoundsToWindow } from './browser'
 import { attachBrowserShell, detachBrowserShell } from './browser-shell'
 import { APP_NAME, WINDOW } from '../shared/config'
 
@@ -43,6 +43,10 @@ function createRendererView(): WebContentsView {
     if (details.url.startsWith('https://')) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
+  view.webContents.on('before-input-event', (event, inputEvent) => {
+    if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
+    if (handleBrowserShortcut(inputEvent.key.toLowerCase(), inputEvent.shift)) event.preventDefault()
+  })
   return view
 }
 
@@ -81,7 +85,7 @@ export function createWindow(): BaseWindow {
   win.contentView.addChildView(contentView)
   win.contentView.addChildView(toolbarView)
   win.contentView.addChildView(sidebarView)
-  attachBrowserShell(win, { content: contentView, toolbar: toolbarView, sidebar: sidebarView })
+  attachBrowserShell(win, { content: contentView, toolbar: toolbarView, sidebar: sidebarView }, syncBrowserBoundsToWindow)
   attachBrowserView(win)
 
   const close = (): void => {

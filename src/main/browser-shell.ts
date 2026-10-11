@@ -28,6 +28,18 @@ let toolbarMetrics: BrowserChromeMetrics = { toolbarHeight: 45, toolbarExtent: 4
 let activePageIsLocalNewTab = true
 let revealTimer: ReturnType<typeof setTimeout> | null = null
 let pageExitTimer: ReturnType<typeof setTimeout> | null = null
+type BrowserShellLayoutSync = (width: number, height: number, overlayMode: boolean) => void
+let syncBrowserPageBounds: BrowserShellLayoutSync | null = null
+let shellLayoutScheduled = false
+
+function scheduleShellLayout(): void {
+  if (shellLayoutScheduled) return
+  shellLayoutScheduled = true
+  setImmediate(() => {
+    shellLayoutScheduled = false
+    applyShellLayout()
+  })
+}
 
 function clearRevealTimer(): void {
   if (revealTimer) clearTimeout(revealTimer)
@@ -86,26 +98,41 @@ function applyShellLayout(): void {
     height
   })
   shellViews.sidebar.setVisible(overlayMode)
+  syncBrowserPageBounds?.(width, height, overlayMode)
 }
 
-export function attachBrowserShell(window: BaseWindow, views: BrowserShellViews): void {
+export function attachBrowserShell(window: BaseWindow, views: BrowserShellViews, syncPageBounds?: BrowserShellLayoutSync): void {
   mainWindow = window
   shellViews = views
+  syncBrowserPageBounds = syncPageBounds ?? null
   shellRenderers = new Set([views.content.webContents, views.toolbar.webContents, views.sidebar.webContents])
   toolbarMetrics = {
     toolbarHeight: process.platform === 'darwin' ? 50 : 45,
     toolbarExtent: process.platform === 'darwin' ? 50 : 45
   }
-  window.on('resize', applyShellLayout)
+  window.on('resize', scheduleShellLayout)
+  window.on('maximize', scheduleShellLayout)
+  window.on('unmaximize', scheduleShellLayout)
+  window.on('restore', scheduleShellLayout)
+  window.on('enter-full-screen', scheduleShellLayout)
+  window.on('leave-full-screen', scheduleShellLayout)
   window.on('closed', detachBrowserShell)
   applyShellLayout()
 }
 
 export function detachBrowserShell(): void {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.removeListener('resize', applyShellLayout)
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.removeListener('resize', scheduleShellLayout)
+    mainWindow.removeListener('maximize', scheduleShellLayout)
+    mainWindow.removeListener('unmaximize', scheduleShellLayout)
+    mainWindow.removeListener('restore', scheduleShellLayout)
+    mainWindow.removeListener('enter-full-screen', scheduleShellLayout)
+    mainWindow.removeListener('leave-full-screen', scheduleShellLayout)
+  }
   clearPointerTimers()
   mainWindow = null
   shellViews = null
+  syncBrowserPageBounds = null
   shellRenderers.clear()
   activePageIsLocalNewTab = true
   chromeState = { ...DEFAULT_CHROME_STATE }
@@ -224,5 +251,8 @@ export function getMainRendererOrigin(contents: WebContents): { x: number; y: nu
 export function sendFocusAddressToVisibleRenderer(): void {
   if (!shellViews) return
   const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
-  if (!target.isDestroyed()) target.send('browser:focus-address')
+  if (!target.isDestroyed()) {
+    target.focus()
+    target.send('browser:focus-address')
+  }
 }

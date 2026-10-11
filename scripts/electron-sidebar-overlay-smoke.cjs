@@ -148,7 +148,7 @@ async function run() {
     const candidate = BaseWindow.getAllWindows().find((window) => !window.isDestroyed())
     return candidate && candidate.isVisible() ? candidate : null
   }, 'the production Sockfish BaseWindow', 45000)
-  mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 800 })
+  mainWindow.setBounds({ x: 0, y: 0, width: 900, height: 620 })
   mainWindow.focus()
 
   await waitFor(() => {
@@ -164,6 +164,33 @@ async function run() {
   assert.equal(rendererViews.toolbar.getVisible(), false)
   assert.equal(rendererViews.sidebar.getVisible(), false)
 
+  const firstTab = (await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')).find((tab) => tab.active)
+  assert.ok(firstTab, 'the initial New Tab should be active')
+  mainWindow.focus()
+  rendererViews.content.webContents.focus()
+  execFileSync('xdotool', ['key', 'ctrl+w'])
+  await waitFor(async () => {
+    if (mainWindow.isDestroyed() || !mainWindow.isVisible()) return false
+    const tabs = await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')
+    return tabs.length === 1 && tabs[0]?.id !== firstTab.id
+  }, 'closing the only New Tab leaves the window open with a replacement tab')
+
+  const replacementTab = (await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')).find((tab) => tab.active)
+  assert.ok(replacementTab)
+  rendererViews.content.webContents.focus()
+  execFileSync('xdotool', ['key', 'ctrl+t'])
+  await waitFor(async () => {
+    const tabs = await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')
+    return tabs.length === 2 && tabs.some((tab) => tab.active && tab.id !== replacementTab.id)
+  }, 'Command-T creates and activates a new tab')
+  await waitFor(() => evaluate(rendererViews.content, 'document.activeElement === document.querySelector(".omnibox input")'), 'the address field receives focus on the new tab')
+  rendererViews.content.webContents.focus()
+  execFileSync('xdotool', ['key', 'ctrl+w'])
+  await waitFor(async () => {
+    const tabs = await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')
+    return tabs.length === 1 && tabs[0]?.id === replacementTab.id
+  }, 'Command-W closes the active tab without closing the window')
+
   assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`), true, 'the app should open a synthetic loopback page')
   await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'the synthetic page navigation')
   await waitFor(async () => {
@@ -178,6 +205,19 @@ async function run() {
   assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:fish-browser'), 'live pages retain Sockfish’s persistent site session and cookies')
   await fixturePageView.webContents.executeJavaScript("document.cookie = 'sockfish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
 
+  const contentSizeBeforeMaximize = mainWindow.getContentSize()
+  mainWindow.maximize()
+  await waitFor(() => {
+    if (!mainWindow.isMaximized()) return false
+    const [width, height] = mainWindow.getContentSize()
+    const siteBounds = fixturePageView.getBounds()
+    return width > contentSizeBeforeMaximize[0]
+      && rendererViews.content.getBounds().width === width
+      && rendererViews.toolbar.getBounds().width === width
+      && rendererViews.sidebar.getBounds().height === height
+      && siteBounds.width === width
+      && siteBounds.height === Math.max(0, height - siteBounds.y)
+  }, 'all native shell layers and the live page resize to the maximized window')
   const contentSize = mainWindow.getContentSize()
   pointerMove(mainWindow.getContentBounds().x + Math.floor(contentSize[0] / 2), mainWindow.getContentBounds().y + Math.floor(contentSize[1] / 2))
   await waitFor(() => nativeViewState().find((view) => view.surface === 'sidebar').bounds.width === 0, 'the full-height sidebar to hide after the pointer leaves the left reveal edge')
@@ -271,7 +311,7 @@ async function run() {
 
   assert.equal(fixturePageView.getBounds().x, 0)
   assert.equal(fixturePageView.getBounds().width, contentSize[0])
-  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; visible sidebar width=${sidebarView.width}; x=5 click-through, overlay page clicks/typing/wheel, delayed hover reveal, and tab/New Tab lifecycle verified.`)
+  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; maximized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; visible sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and x=5 click-through, overlay page input/wheel, delayed hover reveal, and tab/New Tab lifecycle verified.`)
 }
 
 async function cleanup() {
