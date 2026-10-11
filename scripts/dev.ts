@@ -8,11 +8,21 @@
 // pending stdin bytes before returning the terminal to the shell.
 //
 // Run with: bun scripts/dev.ts [-- ...electron-vite args]
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const nativeBuild = spawnSync(process.execPath, [join(root, 'scripts/build-mac-trackpad-swipe.ts'), '--dev'], {
+  cwd: root,
+  stdio: 'inherit',
+  env: process.env
+})
+if (nativeBuild.error || nativeBuild.status !== 0) {
+  console.error(`[dev] failed to prepare the macOS gesture module: ${nativeBuild.error?.message ?? nativeBuild.status}`)
+  process.exit(1)
+}
+
 const bin =
   process.platform === 'win32'
     ? join(root, 'node_modules', '.bin', 'electron-vite.cmd')

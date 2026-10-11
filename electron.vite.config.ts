@@ -20,6 +20,10 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/adblock-frame.cjs'),
       join(outputDirectory, 'adblock-frame.cjs')
     )
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/mac-trackpad-swipe.cjs'),
+      join(outputDirectory, 'mac-trackpad-swipe.cjs')
+    )
   }
 }
 

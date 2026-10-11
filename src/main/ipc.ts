@@ -6,6 +6,7 @@ import {
   browserReload,
   browserStop,
   browserPictureInPicture,
+  updateBrowserTrackpadScrollEdges,
   closeBrowserTab,
   getBrowserState,
   getBrowserTabs,
@@ -68,6 +69,11 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 }
 
 export function registerIpc(): void {
+  ipcMain.on('browser:mac-trackpad-swipe:scroll-edge', (event, edges: unknown) => {
+    if (process.platform === 'darwin' && event.senderFrame === event.sender.mainFrame) {
+      updateBrowserTrackpadScrollEdges(event.sender, edges)
+    }
+  })
   ipcMain.handle('browser:preferences:get', (event) => {
     assertMainRenderer(event)
     return getBrowserPreferencesSnapshot()

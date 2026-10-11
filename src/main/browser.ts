@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
@@ -9,6 +12,7 @@ import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSi
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -23,13 +27,32 @@ interface BrowserTab {
   pendingUrl: string
   inactiveSince: number | null
   sleepTimer: ReturnType<typeof setTimeout> | null
+  pageScrollEdges: BrowserPageScrollEdges
 }
+interface BrowserPageScrollEdges {
+  canScrollLeft: boolean
+  canScrollRight: boolean
+}
+interface ActiveMacTrackpadSwipe {
+  contents: WebContents
+  tabId: string
+  direction: MacTrackpadSwipeDirection
+  token: number
+}
+const UNKNOWN_PAGE_SCROLL_EDGES: BrowserPageScrollEdges = { canScrollLeft: true, canScrollRight: true }
+const MAC_SWIPE_BEGIN_CHANNEL = 'browser:mac-trackpad-swipe:begin'
+const MAC_SWIPE_PROGRESS_CHANNEL = 'browser:mac-trackpad-swipe:progress'
+const MAC_SWIPE_END_CHANNEL = 'browser:mac-trackpad-swipe:end'
+const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
+const MAC_SWIPE_SETTLE_MS = 180
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
 let browserWindow: BaseWindow | null = null
 let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
+let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
+let nextMacTrackpadSwipeToken = 0
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
   const page = getBrowserNewTabPage()
@@ -253,6 +276,7 @@ function ensureTabLoaded(tab: BrowserTab): void {
 function activateTabInternal(id: string): boolean {
   const tab = getTab(id)
   if (!tab) return false
+  if (activeTabId !== id) cancelActiveMacTrackpadSwipe()
   const previous = getTab()
   if (previous && previous.id !== id) markTabInactive(previous)
   cancelSleepTimer(tab)
@@ -289,8 +313,12 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
 
 function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
+  const swipePreload = process.platform === 'darwin'
+    ? join(dirname(fileURLToPath(import.meta.url)), '../preload/mac-trackpad-swipe.cjs')
+    : null
   const view = new WebContentsView({
     webPreferences: {
+      ...(swipePreload && existsSync(swipePreload) ? { preload: swipePreload } : {}),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -379,6 +407,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame) return
+    resetMacTrackpadSwipeFor(contents)
     tab.lastUrl = url
     recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
@@ -393,7 +422,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     sendToMainWindowRenderers('browser:history-changed')
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
+    if (!isCurrentContents() || !isMainFrame) return
+    resetMacTrackpadSwipeFor(contents)
+    if (errorCode === -3) return
     if (tab.downloadStartedForCurrentLoad) {
       tab.error = null
       publishState()
@@ -403,6 +434,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
   })
   contents.on('destroyed', () => {
+    if (activeMacTrackpadSwipe?.contents === contents) {
+      activeMacTrackpadSwipe = null
+      nextMacTrackpadSwipeToken += 1
+    }
     detachNetworkInspector(contents)
     if (!isCurrentContents()) return
     const index = tabs.findIndex((candidate) => candidate.id === tab.id)
@@ -437,7 +472,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     lastUrl: target,
     pendingUrl: target,
     inactiveSince: null,
-    sleepTimer: null
+    sleepTimer: null,
+    pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES }
   }
   tabs.push(tab)
   if (shouldActivate) {
@@ -496,9 +532,18 @@ export function attachBrowserView(win: BaseWindow): void {
   applyTabBounds()
   publishState()
   persistOpenTabs()
+  if (process.platform === 'darwin') {
+    startMacTrackpadSwipe(win, {
+      onBegin: beginMacTrackpadSwipe,
+      onProgress: reportMacTrackpadSwipeProgress,
+      onEnd: finishMacTrackpadSwipe
+    })
+  }
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
     if (browserWindow !== win) return
+    cancelActiveMacTrackpadSwipe()
+    stopMacTrackpadSwipe()
     const closingTabs = [...tabs]
     tabs.length = 0
     activeTabId = null
@@ -639,6 +684,7 @@ export function closeBrowserTab(id: string): void {
   const tab = tabs[index]
   if (!tab) return
   const wasActive = activeTabId === id
+  if (wasActive) cancelActiveMacTrackpadSwipe()
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
   if (wasActive) activeTabId = null
@@ -724,6 +770,147 @@ export function syncBrowserBoundsToWindow(width: number, height: number, overlay
     && nextBounds.width === browserBounds.width && nextBounds.height === browserBounds.height) return
   browserBounds = nextBounds
   applyTabBounds()
+}
+
+function cancelActiveMacTrackpadSwipe(): void {
+  const swipe = activeMacTrackpadSwipe
+  activeMacTrackpadSwipe = null
+  nextMacTrackpadSwipeToken += 1
+  if (!swipe || swipe.contents.isDestroyed()) return
+  try {
+    swipe.contents.send(MAC_SWIPE_RESET_CHANNEL)
+  } catch {
+    // The renderer may be closing while the trackpad gesture is settling.
+  }
+}
+
+function resetMacTrackpadSwipeFor(contents: WebContents): void {
+  if (activeMacTrackpadSwipe?.contents === contents) {
+    activeMacTrackpadSwipe = null
+    nextMacTrackpadSwipeToken += 1
+  }
+  if (process.platform !== 'darwin' || contents.isDestroyed()) return
+  try {
+    contents.send(MAC_SWIPE_RESET_CHANNEL)
+  } catch {
+    // Ignore a renderer that is already navigating away.
+  }
+}
+
+function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | undefined {
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return undefined
+  if (!Buffer.isBuffer(request.windowHandle) || !browserWindow.getNativeWindowHandle().equals(request.windowHandle)) return undefined
+  if ((request.direction !== 'back' && request.direction !== 'forward')
+    || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return undefined
+  if (browserBounds.width <= 0 || browserBounds.height <= 0
+    || request.x < browserBounds.x || request.y < browserBounds.y
+    || request.x >= browserBounds.x + browserBounds.width
+    || request.y >= browserBounds.y + browserBounds.height) return undefined
+
+  const tab = getTab()
+  const contents = tab?.view?.webContents
+  if (!tab || !contents || contents.isDestroyed()) return undefined
+  const canPageConsume = request.direction === 'back'
+    ? tab.pageScrollEdges.canScrollLeft
+    : tab.pageScrollEdges.canScrollRight
+  if (canPageConsume) return undefined
+
+  try {
+    const canNavigate = request.direction === 'back'
+      ? contents.navigationHistory.canGoBack()
+      : contents.navigationHistory.canGoForward()
+    if (!canNavigate) return undefined
+
+    cancelActiveMacTrackpadSwipe()
+    const swipe: ActiveMacTrackpadSwipe = {
+      contents,
+      tabId: tab.id,
+      direction: request.direction,
+      token: ++nextMacTrackpadSwipeToken
+    }
+    activeMacTrackpadSwipe = swipe
+    contents.send(MAC_SWIPE_BEGIN_CHANNEL, { direction: swipe.direction })
+    return contents.id
+  } catch (error) {
+    console.warn('[trackpad swipe] Could not start page navigation:', error)
+    return undefined
+  }
+}
+
+function reportMacTrackpadSwipeProgress(contentsId: number, progress: number): void {
+  const swipe = activeMacTrackpadSwipe
+  if (!swipe || swipe.contents.id !== contentsId || swipe.contents.isDestroyed()) return
+  try {
+    swipe.contents.send(MAC_SWIPE_PROGRESS_CHANNEL, {
+      progress: Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0
+    })
+  } catch {
+    cancelActiveMacTrackpadSwipe()
+  }
+}
+
+function finishMacTrackpadSwipe(
+  contentsId: number,
+  direction: MacTrackpadSwipeDirection,
+  committed: boolean,
+  _maxProgress: number
+): void {
+  const swipe = activeMacTrackpadSwipe
+  if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
+  if (swipe.contents.isDestroyed()) {
+    activeMacTrackpadSwipe = null
+    nextMacTrackpadSwipeToken += 1
+    return
+  }
+
+  try {
+    swipe.contents.send(MAC_SWIPE_END_CHANNEL, { committed })
+  } catch {
+    cancelActiveMacTrackpadSwipe()
+    return
+  }
+
+  if (!committed) {
+    activeMacTrackpadSwipe = null
+    nextMacTrackpadSwipeToken += 1
+    return
+  }
+
+  setTimeout(() => {
+    if (activeMacTrackpadSwipe !== swipe || swipe.token !== nextMacTrackpadSwipeToken) return
+    activeMacTrackpadSwipe = null
+    nextMacTrackpadSwipeToken += 1
+    const currentTab = getTab(swipe.tabId)
+    if (!currentTab || currentTab.id !== activeTabId || currentTab.view?.webContents !== swipe.contents
+      || swipe.contents.isDestroyed() || !browserWindow || browserWindow.isDestroyed()) {
+      resetMacTrackpadSwipeFor(swipe.contents)
+      return
+    }
+
+    try {
+      const canNavigate = direction === 'back'
+        ? swipe.contents.navigationHistory.canGoBack()
+        : swipe.contents.navigationHistory.canGoForward()
+      if (!canNavigate) {
+        resetMacTrackpadSwipeFor(swipe.contents)
+      } else if (direction === 'back') {
+        swipe.contents.navigationHistory.goBack()
+      } else {
+        swipe.contents.navigationHistory.goForward()
+      }
+    } catch (error) {
+      console.warn('[trackpad swipe] Could not commit page navigation:', error)
+      resetMacTrackpadSwipeFor(swipe.contents)
+    }
+  }, MAC_SWIPE_SETTLE_MS + 20)
+}
+
+export function updateBrowserTrackpadScrollEdges(contents: WebContents, input: unknown): void {
+  if (process.platform !== 'darwin' || contents.isDestroyed() || typeof input !== 'object' || input === null) return
+  const edges = input as Partial<BrowserPageScrollEdges>
+  if (typeof edges.canScrollLeft !== 'boolean' || typeof edges.canScrollRight !== 'boolean') return
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  if (tab) tab.pageScrollEdges = { canScrollLeft: edges.canScrollLeft, canScrollRight: edges.canScrollRight }
 }
 
 export function browserBack(): void {
