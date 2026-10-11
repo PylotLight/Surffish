@@ -224,8 +224,8 @@ async function seedNewTabDemo(siteBases) {
       const state = await evaluate('window.api.browser.state()')
       return state.url === url ? state : null
     }, `synthetic page ${new URL(url).host} to navigate`)
-    await waitFor(async () => evaluateIn(rendererViews.sidebar, 'Boolean(document.querySelector("[aria-label=\\\"Pin current site\\\"]") && !document.querySelector("[aria-label=\\\"Pin current site\\\"]").disabled)'), 'the Pin current site control in the sidebar renderer')
-    assert.equal(await evaluateIn(rendererViews.sidebar, '(() => { const button = document.querySelector("[aria-label=\\\"Pin current site\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()'), true, 'the current synthetic site should be pinnable')
+    await waitFor(async () => evaluateIn(rendererViews.toolbar, 'Boolean(document.querySelector("[aria-label=\\\"Bookmark this site\\\"]") && !document.querySelector("[aria-label=\\\"Bookmark this site\\\"]").disabled)'), 'the Bookmark this site control in the toolbar renderer')
+    assert.equal(await evaluateIn(rendererViews.toolbar, '(() => { const button = document.querySelector("[aria-label=\\\"Bookmark this site\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()'), true, 'the current synthetic site should be bookmarkable')
     await waitFor(async () => evaluateIn(rendererViews.sidebar, `document.querySelectorAll(".sidebar-pinned-list .pinned-site-icon-button").length >= ${index + 1}`), `synthetic pin ${index + 1}`)
   }
   for (const url of [`${siteBases[2]}/`, `${siteBases[3]}/`]) {
