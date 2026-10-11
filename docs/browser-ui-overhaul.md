@@ -14,7 +14,7 @@ Fresh profiles use a direct connection by default so the start page loads withou
 
 ## Sidebar and tabs
 
-- The left sidebar is a full-height frosted-glass panel with a low-opacity tinted fill, soft blur and saturation, and a fine bright edge, so the page beneath remains visibly present while tab rows stay readable. Its smooth slide, close controls, and pinned-site favicons are unchanged. It opens with the toolbar button or by hovering the narrow reveal strip at the left edge of the page area; pinning the panel keeps it open.
+- The left sidebar is a full-height frosted-glass panel with a low-opacity tinted fill, soft blur and saturation, and a fine bright edge. On the renderer-owned New Tab, the scenic image is visible through the glass. Live websites are separate native Electron `WebContentsView`s positioned beside the sidebar, so their pixels do not appear under it; see the [measured overlay limitation and implementation option](sidebar-overlay-limitation.md). The smooth slide, close controls, reveal strip, pinning, and pinned-site favicons remain in place.
 - Tabs and History navigation are compact, labeled, keyboard-focusable icons inside the address field; the sidebar footer keeps Settings and Quit. General, This site, and Network live in the settings workspace so configuration is not mixed into the tab list. The separate Network inspector is preserved; the native Electron Web inspector remains available for deeper Chromium inspection. The Bramble toolbar button still runs its existing popup/password-fill flow.
 - An explicitly opened tab loads immediately, including a background tab. The previously active restored tab automatically resumes at launch; other restored tabs may remain deferred until selected. The active-tab “Load page” sleep screen has been removed.
 - The existing hibernation policy remains for inactive loaded tabs. Ordinary background media keeps playing, and audible tabs are kept awake. Hibernated tabs reload their last URL on activation; this cannot preserve unsaved form contents or in-page state.
@@ -43,6 +43,9 @@ Real app screenshots (Linux Electron build; complete Sockfish window bounds; syn
 - ![History sidebar with synthetic local history](screenshots/history-sidebar.png)
 - ![Recent downloads popup with synthetic records](screenshots/downloads-popover.png)
 - ![Full Downloads history page with synthetic records](screenshots/downloads-page.png)
+- ![Full-window New Tab overlay check from the production Electron app](screenshots/sidebar-overlay-new-tab.png)
+- ![Synthetic live page with the current side-by-side sidebar bounds](screenshots/sidebar-overlay-site-current-bounds.png)
+- ![Synthetic live page in the full-width trial, covering the sidebar](screenshots/sidebar-overlay-site-full-width-trial.png)
 
 The screenshots verify the Linux-rendered app UI. They do not verify macOS-native titlebar or traffic-light integration.
 
@@ -53,6 +56,7 @@ bun run typecheck
 bun run test
 bun run build
 xvfb-run -a bun run test:electron-downloads
+xvfb-run -a bun run test:electron-sidebar-overlay
 ```
 
 Manual smoke checklist:
