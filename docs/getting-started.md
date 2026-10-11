@@ -24,7 +24,7 @@ bun run start
 
 - `dev` — development server and Electron app with terminal cleanup on exit.
 - `dev:bare` — raw `electron-vite dev`.
-- `typecheck` — TypeScript check across application and scripts.
+- `typecheck` — `bun check` (Bun 1.4.3+, TypeScript 7 checker) across application and scripts, using `tsconfig.json`. The `typescript` devDependency is only there so editors use the same TS version (`bun -p process.versions.typescript`).
 - `test` — focused address-bar routing tests.
 - `build` — production build into `out/`.
 - `start` — launch the built app.
