@@ -27,7 +27,7 @@ export interface TabOverviewHost {
   /** Hand keyboard focus back to the page once the overview is gone. */
   focusPage(): void
   /** Run a Cmd/Ctrl shortcut the browser normally handles (new tab, close tab, ...). */
-  handleShortcut(key: string, shift: boolean): boolean
+  handleShortcut(input: Electron.Input): boolean
 }
 
 /** closed → opening (pinch or animation in flight) → open (grid settled) → closing → closed */
@@ -188,7 +188,7 @@ function ensureView(): WebContentsView | null {
       closeTabOverview()
       return
     }
-    if (host?.handleShortcut(key, input.shift) || key === 'w') event.preventDefault()
+    if (host?.handleShortcut(input) || key === 'w') event.preventDefault()
   })
   view.webContents.on('render-process-gone', () => {
     if (state !== 'closed') hideNow()
