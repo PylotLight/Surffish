@@ -155,18 +155,10 @@ bool MonitorScrollWheel(NSEvent* event) {
   if (g_tracking) {
     const bool timedOut = CACurrentMediaTime() - g_startedAt > kLostGestureSeconds;
     if (!began && !timedOut) {
-      if (HasPhase(event.phase, NSEventPhaseChanged) &&
-          event.momentumPhase == NSEventPhaseNone && event.hasPreciseScrollingDeltas) {
-        g_pendingDelta.width += event.scrollingDeltaX;
-        g_pendingDelta.height += event.scrollingDeltaY;
-        const double horizontal = std::abs(g_pendingDelta.width);
-        const double vertical = std::abs(g_pendingDelta.height);
-        if (vertical > kMaxVerticalPoints || horizontal <= vertical * kHorizontalToVerticalRatio) {
-          ClearTracking(true);
-          g_pendingRefused = true;
-          return false;
-        }
-      }
+      // Once AppKit owns the swipe, don't second-guess it. trackSwipeEventWithOptions was started
+      // with NSEventSwipeTrackingLockDirection, so AppKit already ignores vertical drift. Re-running
+      // the start-of-gesture drift check here cancelled the swipe as soon as the accumulated vertical
+      // movement passed 18pt, which happens on most real swipes, so the page jumped back mid-gesture.
       return true;
     }
     ClearTracking(true);
