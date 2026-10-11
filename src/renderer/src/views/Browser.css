@@ -120,57 +120,6 @@
   opacity: 0.35;
   cursor: default;
 }
-.new-tab-control {
-  position: relative;
-  display: flex;
-  flex: 0 0 auto;
-}
-.new-tab-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 7px);
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  width: 204px;
-  padding: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.17);
-  border-radius: 12px;
-  background: rgba(30, 35, 42, 0.88);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38), inset 0 1px rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-}
-.new-tab-menu button {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(248, 250, 252, 0.94);
-  text-align: left;
-  cursor: pointer;
-}
-.new-tab-menu button:hover:not(:disabled),
-.new-tab-menu button:focus-visible {
-  background: rgba(255, 255, 255, 0.1);
-  outline: 0;
-}
-.new-tab-menu button:disabled {
-  opacity: 0.42;
-  cursor: default;
-}
-.new-tab-menu button strong {
-  font-size: 11px;
-  font-weight: 600;
-}
-.new-tab-menu button span {
-  color: rgba(245, 247, 250, 0.48);
-  font-size: 10px;
-}
 .tab-list,
 .history-list {
   display: flex;
@@ -1358,6 +1307,33 @@
 .history-list {
   padding: 5px 10px 11px;
 }
+.sidebar-new-tab-button {
+  display: flex;
+  flex: 0 0 52px;
+  align-items: center;
+  justify-content: center;
+  margin: 0 12px 10px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px;
+  background: rgba(225, 232, 242, 0.14);
+  color: rgba(247, 249, 252, 0.68);
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+  -webkit-app-region: no-drag;
+}
+.sidebar-new-tab-button span {
+  font-size: 27px;
+  font-weight: 300;
+  line-height: 1;
+}
+.sidebar-new-tab-button:hover,
+.sidebar-new-tab-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.13);
+  background: rgba(225, 232, 242, 0.2);
+  color: rgba(255, 255, 255, 0.92);
+  outline: 0;
+}
 .tab-item {
   min-height: 41px;
   gap: 10px;
@@ -1428,8 +1404,23 @@
   background: rgba(126, 226, 168, 0.07);
 }
 .browser-toolbar {
+  position: relative;
   gap: 5px;
   padding: 6px 12px;
+}
+.browser-toolbar-leading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+}
+.browser-toolbar-trailing {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
 }
 .toolbar-button {
   width: 31px;
@@ -1447,11 +1438,15 @@
   font-size: 21px;
 }
 .omnibox-wrap {
-  position: relative;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: flex;
-  flex: 1 1 480px;
+  width: min(38vw, 560px);
+  flex: 0 0 auto;
   min-width: 120px;
-  max-width: min(42vw, 560px);
+  max-width: calc(100% - 300px);
+  transform: translate(-50%, -50%);
   -webkit-app-region: no-drag;
 }
 .omnibox-wrap .omnibox {
@@ -1462,6 +1457,17 @@
 }
 .omnibox-wrap .omnibox input {
   font-size: 12px;
+}
+@media (max-width: 1000px) {
+  .omnibox-wrap {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    flex: 1 1 auto;
+    max-width: none;
+    transform: none;
+  }
 }
 .favorite-button {
   flex: 0 0 auto;
@@ -1673,16 +1679,25 @@
     padding-right: 7px;
     padding-left: 7px;
   }
+  .browser-toolbar-leading {
+    gap: 2px;
+  }
+  .browser-toolbar-trailing {
+    gap: 1px;
+  }
   .toolbar-button {
     width: 28px;
     height: 29px;
   }
   .omnibox-wrap {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: auto;
+    flex: 1 1 auto;
     min-width: 100px;
-  }
-  .toolbar-drag-space {
-    flex-basis: 28px;
-    min-width: 28px;
+    max-width: none;
+    transform: none;
   }
   .settings-view {
     padding: 18px 14px 22px;
@@ -2299,11 +2314,14 @@
 
 /* Keep toolbar controls beside the native macOS titlebar controls in one row. */
 .app-shell[data-platform='darwin'] .browser-toolbar {
-  padding-left: 82px;
+  padding-left: 12px;
+}
+.app-shell[data-platform='darwin'] .browser-toolbar-leading {
+  margin-left: 70px;
 }
 .sidebar-window-controls {
   position: relative;
-  top: -12px;
+  top: -15px;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -2312,14 +2330,6 @@
   margin-top: 28px;
   padding: 0 17px;
   -webkit-app-region: no-drag;
-}
-.toolbar-drag-space {
-  display: block;
-  flex: 1 1 160px;
-  align-self: stretch;
-  min-width: 48px;
-  min-height: 32px;
-  -webkit-app-region: drag;
 }
 .sidebar-window-control {
   display: grid;

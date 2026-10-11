@@ -181,8 +181,7 @@ bool MonitorScrollWheel(NSEvent* event) {
   }
 
   if (g_pendingRefused || !HasPhase(event.phase, NSEventPhaseChanged) ||
-      event.momentumPhase != NSEventPhaseNone || !event.hasPreciseScrollingDeltas ||
-      !NSEvent.swipeTrackingFromScrollEventsEnabled) {
+      event.momentumPhase != NSEventPhaseNone || !event.hasPreciseScrollingDeltas) {
     return false;
   }
 
