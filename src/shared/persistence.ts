@@ -29,6 +29,12 @@ export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
 }
 export const MAX_WORLD_CLOCKS = 8
 const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+const SESSION_SECRET_QUERY_KEYS = new Set([
+  'access_token', 'refresh_token', 'id_token', 'token', 'auth', 'authorization', 'code', 'code_verifier', 'code_challenge',
+  'client_secret', 'secret', 'api_key', 'key', 'password', 'passwd', 'passphrase', 'pwd', 'pin', 'otp', 'one_time_code',
+  'session', 'session_id', 'sid', 'ticket', 'assertion', 'jwt', 'samlresponse', 'state', 'signature', 'sig',
+  'x_amz_credential', 'x_amz_signature', 'x_amz_security_token'
+].map((key) => key.replaceAll('_', '')))
 export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080 }
 
 export interface SavedBrowserSession {
@@ -137,6 +143,18 @@ export function isHttpUrl(value: unknown): value is string {
   return safeHttpUrl(value) !== null
 }
 
+/** Preserve ordinary URL behavior in restored tabs while dropping common secrets from plaintext session storage. */
+export function normalizeSessionUrl(value: unknown): string | null {
+  const safe = safeHttpUrl(value)
+  if (!safe) return null
+  const url = new URL(safe)
+  url.hash = ''
+  for (const key of [...url.searchParams.keys()]) {
+    if (SESSION_SECRET_QUERY_KEYS.has(key.toLowerCase().replaceAll(/[-_]/g, ''))) url.searchParams.delete(key)
+  }
+  return url.toString()
+}
+
 export function normalizeHttpOrigin(value: unknown): string | null {
   if (typeof value !== 'string') return null
   try {
@@ -193,11 +211,11 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
 }
 
 export function normalizeBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): SavedBrowserSession {
-  const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({
-    url,
-    index
-  }))
-    .filter((entry) => entry.url === SURFFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
+  const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).flatMap((url, index) => {
+    if (url === SURFFISH_QUICK_LINKS_URL) return [{ url, index }]
+    const safeUrl = normalizeSessionUrl(url)
+    return safeUrl ? [{ url: safeUrl, index }] : []
+  })
   if (indexedUrls.length === 0) return { urls: [], activeIndex: 0, pinnedIndexes: [] }
 
   const safeActiveIndex = Number.isInteger(activeIndex) ? activeIndex : 0

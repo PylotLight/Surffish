@@ -12,6 +12,7 @@ import {
   DEFAULT_NEW_TAB_PREFERENCES,
   MAX_WORLD_CLOCKS,
   normalizeBrowserSession,
+  normalizeSessionUrl,
   normalizeFaviconUrl,
   normalizePinnedSites,
   parseBrowserProxySettings,
@@ -27,6 +28,18 @@ test('normalizes a saved tab list and retains its selected tab', () => {
     activeIndex: 1,
     pinnedIndexes: []
   })
+})
+
+test('redacts credential-like session URL parts while preserving ordinary query parameters', () => {
+  const input = 'https://example.test/search?q=blue+fish&page=2&access_token=one&ACCESS-TOKEN=two&code=oauth-code&state=csrf#private-fragment'
+  assert.equal(normalizeSessionUrl(input), 'https://example.test/search?q=blue+fish&page=2')
+  assert.deepEqual(normalizeBrowserSession([input], 0), {
+    urls: ['https://example.test/search?q=blue+fish&page=2'],
+    activeIndex: 0,
+    pinnedIndexes: []
+  })
+  assert.equal(normalizeSessionUrl('https://example.test/?filter=recent&sort=title#anchor'), 'https://example.test/?filter=recent&sort=title')
+  assert.equal(normalizeSessionUrl('https://example.test/?apiKey=a&api_key=b&sessionId=c'), 'https://example.test/')
 })
 
 test('drops unsafe URLs and adjusts the selected index', () => {
