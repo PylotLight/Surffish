@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
 
 test('keeps explicit HTTP and HTTPS URLs as URLs', () => {
   assert.equal(resolveNavigationTarget('https://example.org/path'), 'https://example.org/path')
@@ -38,4 +38,15 @@ test('does not mark the renderer-owned New Tab as sleeping when it has no Browse
   assert.equal(isBrowserTabSleeping(false, SOCKFISH_QUICK_LINKS_URL), false)
   assert.equal(isBrowserTabSleeping(false, 'https://example.org/'), true)
   assert.equal(isBrowserTabSleeping(true, 'https://example.org/'), false)
+})
+
+test('recognizes YouTube destinations without matching lookalike hosts or schemes', () => {
+  assert.equal(isYouTubeUrl('https://www.youtube.com/watch?v=abc'), true)
+  assert.equal(isYouTubeUrl('https://music.youtube.com/watch?v=abc'), true)
+  assert.equal(isYouTubeUrl('https://youtu.be/abc'), true)
+  assert.equal(isYouTubeUrl('https://www.youtube-nocookie.com/embed/abc'), true)
+  assert.equal(isYouTubeUrl('https://youtube.com.attacker.example/watch?v=abc'), false)
+  assert.equal(isYouTubeUrl('https://notyoutube.com/watch?v=abc'), false)
+  assert.equal(isYouTubeUrl('javascript:https://youtube.com/'), false)
+  assert.equal(isYouTubeUrl('not a URL'), false)
 })
