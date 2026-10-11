@@ -1,7 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
-  AdblockDiagnostics,
-  BrowserRuntimeDiagnostics,
   BrowserSiteSettings,
   BramblePopupAnchor,
   BrambleExtensionState,
@@ -21,6 +19,7 @@ import type {
   SearchEngineId,
   TabSleepMinutes
 } from '../shared/types'
+import type { DownloadEntry } from '../shared/downloads'
 
 const api = {
   platform: process.platform,
@@ -53,7 +52,6 @@ const api = {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
     },
-    runtime: (): Promise<BrowserRuntimeDiagnostics> => ipcRenderer.invoke('browser:runtime:get'),
     pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
@@ -95,13 +93,18 @@ const api = {
       set: (settings: BrowserProxySettings): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:set', settings),
       test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> => ipcRenderer.invoke('browser:proxy:test', settings)
     },
-    adblock: {
-      get: (): Promise<AdblockDiagnostics> => ipcRenderer.invoke('browser:adblock:get'),
-      refresh: (): Promise<AdblockDiagnostics> => ipcRenderer.invoke('browser:adblock:refresh'),
-      onChange: (callback: (diagnostics: AdblockDiagnostics) => void): (() => void) => {
-        const listener = (_event: Electron.IpcRendererEvent, diagnostics: AdblockDiagnostics): void => callback(diagnostics)
-        ipcRenderer.on('browser:adblock:changed', listener)
-        return () => ipcRenderer.removeListener('browser:adblock:changed', listener)
+    downloads: {
+      get: (): Promise<DownloadEntry[]> => ipcRenderer.invoke('browser:downloads:get'),
+      pause: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:pause', id),
+      resume: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:resume', id),
+      cancel: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:cancel', id),
+      remove: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:remove', id),
+      open: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:open', id),
+      reveal: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:reveal', id),
+      onChange: (callback: (downloads: DownloadEntry[]) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, downloads: DownloadEntry[]): void => callback(downloads)
+        ipcRenderer.on('browser:downloads:changed', listener)
+        return () => ipcRenderer.removeListener('browser:downloads:changed', listener)
       }
     },
     bramble: {

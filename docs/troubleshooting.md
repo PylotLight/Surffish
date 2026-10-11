@@ -6,11 +6,19 @@ Make sure the SSH dynamic-forwarding command is still running on the same comput
 
 ## Address bar does not open the expected page
 
-Press Enter after typing. Domain-like hosts are opened as URLs; ordinary text is sent to DuckDuckGo. Only HTTP(S) schemes are accepted. `localhost` and loopback IP addresses use HTTP automatically.
+Press Enter after typing. Domain-like hosts are opened as URLs; ordinary text is sent to the selected search engine. Only HTTP(S) schemes are accepted. `localhost` and loopback IP addresses use HTTP automatically.
 
-## YouTube ads still appear
+## Ads still appear or a page request fails
 
-Open **Diagnostics** in the sidebar to check whether network filtering is active, when its lists were last updated, and whether requests from `youtube.com` are being blocked. **Update filters** fetches the maintained ads-only lists through the browser's configured proxy. The latest 20 blocked entries show hostnames and resource types, not full URLs. Requests to `googlevideo.com` delivery hosts are intentionally allowed to preserve video playback, so ads delivered through those shared hosts may remain.
+Network filtering blocks matching subresource requests, not cosmetic page elements. Sockfish allows `googlevideo.com` delivery hosts so YouTube playback is not interrupted; ads delivered through those shared hosts may remain. Use the **Network** inspector to review requests and Electron's native Web inspector for Chromium page/runtime investigation. The separate Diagnostics page has been removed; the filtering engine refreshes its lists at startup when the cache is stale.
+
+## A download is interrupted, canceled, or missing
+
+Open **Downloads** from the toolbar. A resumable interrupted item offers **Resume**; an item that cannot be resumed after a browser restart remains in history as failed and must be downloaded again from its source. **Open** acts only after you click it, and **Show in folder** reveals an available file. **Remove** clears history metadata only and never deletes the saved file. If a completed file has been moved or deleted outside Sockfish, its history entry can remain but Open/Show in folder are unavailable.
+
+## A pinned-site icon is blank
+
+Sockfish requests the site's own `/favicon.ico` directly without a referrer. Some sites do not provide that conventional favicon path; in that case the icon intentionally falls back to the site's initial. Pinning and navigation still work.
 
 ## Garbage characters after exiting development (`^[[?62;22c`, `^[[9;1R`, etc.)
 

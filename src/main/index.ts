@@ -8,6 +8,7 @@ import { setBrowserSearchEngine } from './browser'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
+import { initializeDownloads } from './downloads'
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(async () => {
@@ -16,6 +17,7 @@ app.whenReady().then(async () => {
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()
     await initializeSessionCookiePersistence()
+    initializeDownloads()
   } catch (error) {
     console.error('Could not initialize the browser profile:', error)
     app.quit()

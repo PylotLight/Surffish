@@ -1,8 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
-  AdblockDiagnostics,
   BrambleExtensionState,
-  BrowserRuntimeDiagnostics,
   BrowserProxySettings,
   BrowserSiteSettings,
   BrowserState,
@@ -29,6 +27,8 @@ import {
 import { NEW_TAB_PHOTO_REFRESH_INTERVAL_MS } from '../../../shared/new-tab-photo-feed'
 import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
 import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-lake.webp'
+import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
+import DownloadsPanel from './DownloadsPanel'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
@@ -82,13 +82,12 @@ const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   iconDataUrl: null
 }
 
-type SidebarMode = 'tabs' | 'history' | 'settings' | 'diagnostics' | 'network' | 'site'
+type SidebarMode = 'tabs' | 'history' | 'settings' | 'network' | 'site' | 'downloads'
 type NetworkDetailsTab = 'headers' | 'payload' | 'response' | 'timing'
 
-const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'diagnostics' | 'network'>; label: string }> = [
+const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>; label: string }> = [
   { mode: 'settings', label: 'General' },
   { mode: 'site', label: 'This site' },
-  { mode: 'diagnostics', label: 'Ad blocking' },
   { mode: 'network', label: 'Network' }
 ]
 
@@ -179,6 +178,23 @@ function NewTabSiteIcon({ site, onOpen }: { site: QuickLinkSite; onOpen: () => v
   )
 }
 
+function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: () => void; onUnpin: () => void }): React.JSX.Element {
+  const [iconFailed, setIconFailed] = useState(false)
+  const quickLink = toQuickLinkSite(site)
+  const hostname = quickLink ? new URL(quickLink.origin).hostname.replace(/^www\./i, '') : historyHost(site.url)
+  return (
+    <button className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to unpin)`} aria-label={`Open pinned site ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
+      event.preventDefault()
+      onUnpin()
+    }}>
+      <span className="pinned-site-mark" aria-hidden="true">
+        {quickLink && !iconFailed && <img src={`${quickLink.origin}/favicon.ico`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
+        {(!quickLink || iconFailed) && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
+      </span>
+    </button>
+  )
+}
+
 export default function Browser(): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
@@ -188,6 +204,8 @@ export default function Browser(): React.JSX.Element {
   const addressRef = useRef<HTMLInputElement>(null)
   const newTabControlRef = useRef<HTMLDivElement>(null)
   const brambleButtonRef = useRef<HTMLButtonElement>(null)
+  const downloadsControlRef = useRef<HTMLDivElement>(null)
+  const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
@@ -213,10 +231,9 @@ export default function Browser(): React.JSX.Element {
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
+  const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
-  const [adblockDiagnostics, setAdblockDiagnostics] = useState<AdblockDiagnostics | null>(null)
-  const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<BrowserRuntimeDiagnostics | null>(null)
   const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
   const [siteSettingsLoading, setSiteSettingsLoading] = useState(false)
   const [networkRequests, setNetworkRequests] = useState<NetworkRequestSummary[]>([])
@@ -321,14 +338,6 @@ export default function Browser(): React.JSX.Element {
     }
   }
 
-  async function refreshRuntimeDiagnostics(): Promise<void> {
-    try {
-      setRuntimeDiagnostics(await window.api.browser.runtime())
-    } catch {
-      setRuntimeDiagnostics(null)
-    }
-  }
-
   function createNewTab(): void {
     setSidebarMode('tabs')
     setSuggestionsOpen(false)
@@ -377,10 +386,8 @@ export default function Browser(): React.JSX.Element {
     await window.api.browser.navigate(site.url, searchEngine)
   }
 
-  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'site' | 'diagnostics' | 'network'>): void {
+  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>): void {
     setSidebarMode(mode)
-    if (mode === 'settings') void refreshRuntimeDiagnostics()
-    if (mode === 'diagnostics') void window.api.browser.adblock.get().then(setAdblockDiagnostics)
   }
 
   async function updateSiteSetting(key: Exclude<keyof BrowserSiteSettings, 'origin'>, value: boolean): Promise<void> {
@@ -419,20 +426,10 @@ export default function Browser(): React.JSX.Element {
     }
   }
 
-  async function refreshAdblock(): Promise<void> {
-    try {
-      setAdblockDiagnostics(await window.api.browser.adblock.refresh())
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setAdblockDiagnostics((current) => current ? { ...current, lastError: message } : current)
-    }
-  }
-
   useEffect(() => {
     const unsubscribeState = window.api.browser.onState(setBrowser)
     const unsubscribeTabs = window.api.browser.tabs.onChange(setTabs)
     const unsubscribeHistory = window.api.browser.history.onChange(() => { void refreshHistory() })
-    const unsubscribeAdblock = window.api.browser.adblock.onChange(setAdblockDiagnostics)
     const unsubscribeFocusAddress = window.api.browser.onFocusAddress(() => {
       addressRef.current?.focus()
       addressRef.current?.select()
@@ -451,9 +448,7 @@ export default function Browser(): React.JSX.Element {
     void refreshHistory()
     void window.api.browser.newTabPage.get().then(setNewTabPage)
     void window.api.browser.pinnedSites.get().then(setPinnedSites)
-    void refreshRuntimeDiagnostics()
     void window.api.browser.getTabSleepMinutes().then(setTabSleepMinutes)
-    void window.api.browser.adblock.get().then(setAdblockDiagnostics)
     void window.api.browser.proxy.get().then((settings) => {
       setProxy(settings)
       setAppliedProxy(settings)
@@ -462,7 +457,6 @@ export default function Browser(): React.JSX.Element {
       unsubscribeState()
       unsubscribeTabs()
       unsubscribeHistory()
-      unsubscribeAdblock()
       unsubscribeFocusAddress()
     }
   }, [])
@@ -562,6 +556,25 @@ export default function Browser(): React.JSX.Element {
   }, [newTabMenuOpen])
 
   useEffect(() => {
+    if (!downloadsPopupOpen) return
+    const closeOnOutsideClick = (event: PointerEvent): void => {
+      if (!downloadsControlRef.current?.contains(event.target as Node)) setDownloadsPopupOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setDownloadsPopupOpen(false)
+        downloadsButtonRef.current?.focus()
+      }
+    }
+    window.addEventListener('pointerdown', closeOnOutsideClick)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsideClick)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [downloadsPopupOpen])
+
+  useEffect(() => {
     const element = browserChromeRef.current
     if (!element) return
     const updateChromeHeight = (): void => setBrowserChromeHeight(element.getBoundingClientRect().height)
@@ -588,7 +601,7 @@ export default function Browser(): React.JSX.Element {
       const edgeRevealWidth = sidebarVisible ? 0 : 14
       const contentWidth = rect.width - sidebarInset - edgeRevealWidth
       const suggestionsCoverPage = suggestionsOpen && addressSuggestions.length > 0
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !isLocalNewTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'network' && sidebarMode !== 'site' && sidebarMode !== 'downloads' && !downloadsPopupOpen && !isLocalNewTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left + sidebarInset + edgeRevealWidth, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -602,7 +615,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isLocalNewTab])
+  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isLocalNewTab, downloadsPopupOpen])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
@@ -772,7 +785,7 @@ export default function Browser(): React.JSX.Element {
           ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
         </div>
         <div className="sidebar-heading">
-                <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'diagnostics' ? 'Ad blocking' : sidebarMode === 'network' ? 'Network' : sidebarMode === 'site' ? 'This site' : 'Tabs'}</strong>
+                <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : sidebarMode === 'site' ? 'This site' : 'Tabs'}</strong>
           {sidebarMode !== 'history' ? (
             <div className="new-tab-control" ref={newTabControlRef}>
               <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
@@ -818,15 +831,7 @@ export default function Browser(): React.JSX.Element {
             </div>
             {pinnedSites.length > 0 ? (
               <div className="sidebar-pinned-list">
-                {pinnedSites.map((site) => (
-                  <button className="pinned-site-button" key={site.url} type="button" title={`${site.title} · ${site.url} (right-click to unpin)`} aria-label={`Open pinned site ${site.title}`} onClick={() => void openPinnedSite(site)} onContextMenu={(event) => {
-                    event.preventDefault()
-                    void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))
-                  }}>
-                    <span className="pinned-site-mark" aria-hidden="true">{site.title.slice(0, 1).toUpperCase()}</span>
-                    <span>{site.title}</span>
-                  </button>
-                ))}
+                {pinnedSites.map((site) => <PinnedSiteIcon key={site.url} site={site} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
               </div>
             ) : <p className="sidebar-pinned-empty">Pin sites with ☆ in the address bar.</p>}
           </section>
@@ -1027,10 +1032,30 @@ export default function Browser(): React.JSX.Element {
               disabled={bramblePoc.loading}
               onClick={() => bramblePoc.installed ? void openBramblePoc() : selectSettingsSection('settings')}
             >
-              {bramblePoc.iconDataUrl
-                ? <img className="bramble-toolbar-icon" src={bramblePoc.iconDataUrl} alt="" />
-                : <span className="bramble-toolbar-fallback" aria-hidden="true">B</span>}
+              <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
             </button>
+            <div className="downloads-toolbar-control" ref={downloadsControlRef}>
+              <button
+                className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
+                ref={downloadsButtonRef}
+                type="button"
+                aria-label="Downloads"
+                aria-haspopup="dialog"
+                aria-expanded={downloadsPopupOpen}
+                aria-controls="downloads-popup"
+                title="Downloads"
+                onClick={() => setDownloadsPopupOpen((open) => !open)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5v11" /><path d="m7.5 10 4.5 4.5 4.5-4.5" /><path d="M5 16.5v3h14v-3" /></svg>
+              </button>
+              {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
+                setDownloadsPopupOpen(false)
+                setSidebarMode('downloads')
+              }} onClose={() => {
+                setDownloadsPopupOpen(false)
+                downloadsButtonRef.current?.focus()
+              }} />}
+            </div>
           </form>
           {(browser.error || navigationError) && (
             <p className="browser-error" role="status">
@@ -1038,9 +1063,9 @@ export default function Browser(): React.JSX.Element {
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
-          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
+          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
             <section className="new-tab-page" aria-label="New Tab">
               <div
                 key={newTabBackground.title}
@@ -1101,6 +1126,7 @@ export default function Browser(): React.JSX.Element {
               ))}
             </nav>
           )}
+          {sidebarMode === 'downloads' && <DownloadsPanel mode="page" />}
           {sidebarMode === 'settings' && (
             <div className="settings-view">
               <header className="settings-page-header">
@@ -1155,21 +1181,6 @@ export default function Browser(): React.JSX.Element {
                   <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and GitHub asset digest when available. Installation and updates are always manual; every release shows its requested access before activation. Sockfish removes Firefox-only OAuth access, so Google Drive backup is unavailable.</p>
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
-                </section>
-                <section className="settings-section runtime-diagnostics-section" aria-label="Passkey runtime diagnostics">
-                  <div className="settings-section-heading">
-                    <div><strong>Passkey compatibility check</strong><span className={`settings-status${runtimeDiagnostics && Number.parseInt(runtimeDiagnostics.chromiumVersion, 10) >= 122 ? ' is-on' : ''}`}>{runtimeDiagnostics ? `Electron ${runtimeDiagnostics.electronVersion} · Chromium ${runtimeDiagnostics.chromiumVersion}` : 'Reading runtime…'}</span></div>
-                    <button className="settings-action secondary" type="button" onClick={() => void refreshRuntimeDiagnostics()}>Refresh check</button>
-                  </div>
-                  {runtimeDiagnostics && (
-                    <>
-                      <p className="settings-help">{Number.parseInt(runtimeDiagnostics.chromiumVersion, 10) >= 122 ? 'This Chromium build meets Bramble’s documented Chrome 122+ version floor for extension custom-RP-ID WebAuthn.' : 'This Chromium build is below Bramble’s documented Chrome 122+ version floor for extension custom-RP-ID WebAuthn.'}</p>
-                      <p className="settings-help">Active page: {runtimeDiagnostics.pageUrl ? httpOrigin(runtimeDiagnostics.pageUrl) ?? 'non-web page' : 'not available'} · secure context: {runtimeDiagnostics.pageSecureContext === null ? 'unknown' : runtimeDiagnostics.pageSecureContext ? 'yes' : 'no'} · Credentials API: {runtimeDiagnostics.pageHasCredentialsApi === null ? 'unknown' : runtimeDiagnostics.pageHasCredentialsApi ? 'available' : 'unavailable'} · WebAuthn create/get: {runtimeDiagnostics.pageHasWebAuthnApi === null ? 'unknown' : runtimeDiagnostics.pageHasWebAuthnApi ? 'available' : 'unavailable'}.</p>
-                      <code className="runtime-user-agent">{runtimeDiagnostics.userAgent || 'User-Agent is unavailable for this tab.'}</code>
-                    </>
-                  )}
-                  <p className="settings-help">The browser does not spoof its User-Agent. Bramble also maps a WebAuthn <code>SecurityError</code> to its “too old” message; a rejected custom RP ID or extension host-permission mismatch can look the same, even when the version is new enough. This page-level probe reports engine/API facts, not a guarantee that the extension host accepted its RP ID.</p>
-                  <p className="settings-help">Native macOS Touch ID for arbitrary site passkeys needs Apple’s managed browser public-key-credential entitlement and organization review/signing; this app does not claim that support or add an Apple Developer enrollment requirement. Bramble’s vault passkeys are a separate extension feature.</p>
                 </section>
                 <section className="settings-section" aria-label="Background tab sleep settings">
                   <label className="settings-field">
@@ -1266,70 +1277,6 @@ export default function Browser(): React.JSX.Element {
                     <div className="settings-actions"><button className="settings-action primary" type="button" onClick={() => void window.api.browser.reload()}>Reload page to apply</button></div>
                   </>
                 ) : <section className="settings-section"><p className="settings-help">Select an HTTP or HTTPS page to manage its privacy controls.</p></section>}
-              </div>
-            </div>
-          )}
-          {sidebarMode === 'diagnostics' && (
-            <div className="diagnostics-view">
-              <header className="settings-page-header">
-                <h1>Diagnostics</h1>
-                <p>Live ad-filter status and recent network decisions for this browser session.</p>
-              </header>
-              <div className="settings-content">
-                <section className="settings-section diagnostics-section" aria-label="Network ad blocking diagnostics">
-                  <div className="settings-section-heading">
-                    <div>
-                      <strong>Network ad blocking</strong>
-                      <span className={`settings-status${adblockDiagnostics?.blockingEnabled ? ' is-on' : ''}`}>
-                        {!adblockDiagnostics ? 'Reading status…' : adblockDiagnostics.status === 'updating'
-                          ? `Active · refreshing filters (${adblockDiagnostics.loadedListCount} lists)`
-                          : adblockDiagnostics.blockingEnabled
-                            ? adblockDiagnostics.status === 'degraded' ? 'Limited · filter engine unavailable or empty' : 'Active'
-                            : 'Unavailable'}
-                      </span>
-                    </div>
-                    <button className="settings-action secondary diagnostics-refresh" type="button" disabled={!adblockDiagnostics || adblockDiagnostics.status === 'updating'} onClick={() => {
-                      void refreshAdblock()
-                    }}>{adblockDiagnostics?.status === 'updating' ? 'Updating…' : 'Update filters'}</button>
-                  </div>
-                  <div className="diagnostics-stats" aria-live="polite">
-                    <div><strong>{adblockDiagnostics?.blockedRequests.toLocaleString() ?? '—'}</strong><span>Blocked requests</span></div>
-                    <div><strong>{adblockDiagnostics?.allowedRequests.toLocaleString() ?? '—'}</strong><span>Allowed requests</span></div>
-                    <div><strong>{adblockDiagnostics?.networkFilterCount.toLocaleString() ?? '—'}</strong><span>Network rules</span></div>
-                    <div><strong>{adblockDiagnostics?.loadedListCount ?? '—'}</strong><span>Loaded lists</span></div>
-                  </div>
-                  <p className="settings-help diagnostics-summary">
-                    {adblockDiagnostics
-                      ? `${adblockDiagnostics.source === 'updated' ? 'Latest lists downloaded' : adblockDiagnostics.source === 'cache' ? 'Using cached lists' : adblockDiagnostics.source === 'stale-cache' ? 'Using older cached lists' : adblockDiagnostics.source === 'empty' ? 'No filter lists loaded' : 'Filter lists not loaded'}${adblockDiagnostics.lastUpdatedAt ? ` · Updated ${formatVisitedAt(adblockDiagnostics.lastUpdatedAt)}` : ''}. Counts cover subresource requests since this launch (not top-level page navigations); only hostnames and resource types are kept for the 20 most recent blocks.`
-                      : 'Loading filter status…'}
-                  </p>
-                  {adblockDiagnostics?.lastError && <p className="settings-message is-error" role="status">{adblockDiagnostics.lastError}</p>}
-                  {adblockDiagnostics && adblockDiagnostics.loadedLists.length > 0 && (
-                    <div className="diagnostics-lists">
-                      <strong>Active lists</strong>
-                      <ul>{adblockDiagnostics.loadedLists.map((list, index) => <li key={`${list}-${index}`}>{list}</li>)}</ul>
-                    </div>
-                  )}
-                </section>
-                <section className="settings-section diagnostics-section" aria-label="Recent blocked requests">
-                  <div className="diagnostics-section-heading"><strong>Recent blocked requests</strong><span>Newest first · hostnames only</span></div>
-                  {adblockDiagnostics?.recentBlockedRequests.length ? (
-                    <ol className="diagnostics-block-list">
-                      {adblockDiagnostics.recentBlockedRequests.map((request, index) => (
-                        <li key={`${request.timestamp}-${request.requestHost}-${index}`}>
-                          <time dateTime={new Date(request.timestamp).toISOString()}>{new Date(request.timestamp).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</time>
-                          <span className="diagnostics-block-host" title={request.requestHost}>{request.requestHost}</span>
-                          <span className="diagnostics-block-page" title={`From ${request.pageHost}`}>{request.pageHost}</span>
-                          <span className="diagnostics-block-type">{request.resourceType}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  ) : <p className="settings-help">No matching requests blocked yet. If ads remain, check whether the request is present above and refresh the maintained lists.</p>}
-                </section>
-                <section className="settings-section diagnostics-note">
-                  <strong>YouTube note</strong>
-                  <p>YouTube serves ads and wanted video chunks through shared delivery hosts. Sockfish allows requests to <code>googlevideo.com</code> delivery hosts so ad rules cannot interrupt video playback; ads delivered there may remain. Cosmetic hiding stays off, while matching ad requests on other hosts can still be blocked.</p>
-                </section>
               </div>
             </div>
           )}
