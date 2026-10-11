@@ -2,7 +2,7 @@
 
 Surffish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, a downloads manager, uBlock Origin-style ad blocking (network, cosmetic, and scriptlet filters), an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
 
-![Surffish running with a local synthetic page and the glass sidebar](docs/screenshots/surffish-current-app.png)
+![Surffish New Tab showing Field Notes, Studio Board, and Daily Brief sample tabs in the glass sidebar](docs/screenshots/surffish-cover-new-tab.png)
 
 ## Quick start
 
