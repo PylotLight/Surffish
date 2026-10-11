@@ -1,6 +1,6 @@
 # Live-page glass sidebar overlay
 
-**Status: implemented on `feat/sidebar-overlay-basewindow`; local production-build, typecheck, unit, and Electron integration checks pass. Do not merge until hosted CI is green for the exact pushed commit.**
+**Status: implemented on `feat/sidebar-overlay-basewindow`; local production-build, typecheck, unit, and Electron integration checks pass.**
 
 ## Architecture
 
@@ -8,7 +8,7 @@ The production app now uses a `BaseWindow` with the live page, full local React 
 
 The toolbar is measured and bounded to its actual height (plus any open toolbar popover). The sidebar is bounded to 320 px while pinned or hovered and to zero native width while hidden. Its existing backdrop blur and translucent glass styling are retained. The full-width site page receives the mouse-move events used for a 180 ms left-edge hover reveal, so a quick click at x=5 still reaches the page while hidden. The original React surface remains the active UI for the local New Tab and full settings, Network, site, and Downloads panels.
 
-The host migration preserves the existing live-tab `persist:fish-browser` session and its cookies/storage, the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Surffish bridge.
+The host uses Surffish's persistent live-tab `persist:surffish-browser` session for cookies and storage, along with the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Surffish bridge.
 
 ## Production Electron integration results
 
@@ -22,7 +22,7 @@ The integration test launches the production Electron build using a fresh tempor
 | Hover at the live-page left edge | Same full-width page bounds | Sidebar expands above the page after a short delay | Physical pointer hover reveals the panel; moving away hides it after focus is released. |
 | Switch live tab → New Tab → live tab | Existing live page view remains alive | Correct local/overlay renderer surfaces become visible at each state | The live tab, cookie, and full-width page state persist across tab switching. |
 
-The native content width may measure 1279–1280 px inside a 1280 px Xvfb window depending on the window-frame allowance; the live page width is asserted against Electron's measured content width each run and begins at `x=0`. The test also verifies that the site view uses the existing `persist:fish-browser` Electron session.
+The native content width may measure 1279–1280 px inside a 1280 px Xvfb window depending on the window-frame allowance; the live page width is asserted against Electron's measured content width each run and begins at `x=0`. The test also verifies that the site view uses the `persist:surffish-browser` Electron session.
 
 ## Reproduction
 

@@ -30,7 +30,7 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 ## Security and input boundaries
 
 1. Remote content is never loaded into the React renderers. Site `WebContentsView`s use `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`; they receive no Surffish preload bridge.
-2. Remote tabs continue to use the existing persistent `persist:fish-browser` session, so site cookies/storage, protected session-cookie restoration, and the configured SOCKS5 proxy remain on the same session.
+2. Remote tabs use Surffish's persistent `persist:surffish-browser` session, which stores site cookies/storage and uses the configured SOCKS5 proxy.
 3. Local UI IPC is accepted only from the content, toolbar, or sidebar WebContentsViews created by `window.ts`. Remote site pages cannot call those handlers.
 4. Native stacking places the live page below the transparent local surfaces. The full React content surface is made invisible while a web page is active, so its full-window hit-test rectangle cannot intercept site clicks or scrolling. The toolbar and sidebar remain bounded overlays; while hidden, the sidebar has zero native width and the page's own mouse-move events reveal it after a short hover delay without reserving or blocking a pixel.
 5. Non-HTTP(S) navigations, unapproved popups, and web permission requests retain their existing blocking policy. SOCKS settings accept loopback hosts only.

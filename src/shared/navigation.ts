@@ -2,7 +2,6 @@ import type { SearchEngineId } from './types'
 
 export const DEFAULT_SEARCH_ENGINE: SearchEngineId = 'brave'
 export const SURFFISH_QUICK_LINKS_URL = 'surffish://quick-links'
-export const LEGACY_QUICK_LINKS_URL = 'sockfish://quick-links'
 export const SEARCH_ENGINES = [
   { id: 'brave', label: 'Brave Search', searchUrl: 'https://search.brave.com/search', homeUrl: 'https://search.brave.com/' },
   { id: 'duckduckgo', label: 'DuckDuckGo', searchUrl: 'https://duckduckgo.com/', homeUrl: 'https://duckduckgo.com/' },

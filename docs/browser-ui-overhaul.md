@@ -1,6 +1,6 @@
 # Browser UI overhaul
 
-This release gives Surffish a more complete browser shell while keeping the existing Chromium profile, stored tabs/history, proxy, network blocker, Network inspector, Bramble toolbar shortcut, and extension behavior intact. It adds an Electron-backed Downloads popup and history page. The Diagnostics page and renderer runtime-compatibility card are removed; Electron's native Web inspector remains available.
+This release gives Surffish a more complete browser shell with persistent tabs/history, proxy, network blocker, Network inspector, Bramble toolbar shortcut, and extension behavior. It adds an Electron-backed Downloads popup and history page. The Diagnostics page and renderer runtime-compatibility card are removed; Electron's native Web inspector remains available.
 
 Fresh profiles use a direct connection by default so the start page loads without requiring a local SOCKS tunnel. An explicitly saved proxy choice remains authoritative; enable and save SOCKS5 in **Settings → General** when desired.
 

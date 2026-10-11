@@ -1,7 +1,7 @@
 import { session } from 'electron'
 import { chromeUserAgent } from './adblock-policy.ts'
 
-export const BROWSER_SESSION_PARTITION = 'persist:fish-browser'
+export const BROWSER_SESSION_PARTITION = 'persist:surffish-browser'
 
 let userAgentApplied = false
 
