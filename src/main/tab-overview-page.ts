@@ -119,13 +119,24 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
     grid.appendChild(add)
   }
 
+  function reportSelected() {
+    api.selected(items[selected] ? items[selected].id : null)
+  }
+
+  // Card a pinch out should fly home: the selected tab, else the active one.
+  function homeIndex() {
+    if (items[selected]) return selected
+    return items.findIndex((item) => item.active)
+  }
+
   function moving() { return document.body.classList.contains('moving') }
 
   function setSelected(index, scroll = true) {
     const all = cards()
     selected = clamp(index, 0, all.length - 1)
     all.forEach((card, i) => card.classList.toggle('selected', i === selected))
-    if (scroll) all[selected]?.scrollIntoView({ block: 'nearest' })
+    if (scroll) all[selected]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    reportSelected()
   }
 
   function columns() {
@@ -233,6 +244,7 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
     }
     measureFocus(activeIndex)
     apply(payload.progress || 0)
+    reportSelected()
     shown = true
     // Reveal only once the first frame at this progress is painted, so the page never flickers.
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -249,7 +261,7 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
       // Pinching back out of a settled grid: fly the active tab home.
       document.body.classList.add('moving')
       clearInline()
-      measureFocus(items.findIndex((item) => item.active))
+      measureFocus(homeIndex())
     }
     apply(p)
   }
@@ -261,7 +273,7 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
     if (!payload.open) {
       document.body.classList.add('moving')
       let index = payload.targetId ? items.findIndex((item) => item.id === payload.targetId) : -1
-      if (index < 0) index = focusIndex >= 0 ? focusIndex : items.findIndex((item) => item.active)
+      if (index < 0) index = homeIndex()
       // Re-measure every time: the grid may have scrolled or reflowed since the last flight.
       clearInline()
       measureFocus(index)
@@ -279,11 +291,18 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
   api.onShow(show)
   api.onProgress(setProgress)
   api.onSettle(settle)
+  // A committed two-finger swipe while the grid is up steps the selection one card.
+  api.onMove((delta) => {
+    if (!shown || moving() || !items.length) return
+    const from = items[selected] ? selected : Math.max(0, items.findIndex((item) => item.active))
+    setSelected(clamp(from + (delta > 0 ? 1 : -1), 0, items.length - 1))
+  })
   api.onItems((payload) => {
     if (!shown) return
     items = payload.items || []
     if (payload.pageBounds) pageBounds = payload.pageBounds
     selected = Math.min(selected, items.length)
+    reportSelected()
     const top = scroller.scrollTop
     render()
     scroller.scrollTop = top
