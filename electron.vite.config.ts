@@ -15,12 +15,29 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/bramble-poc.cjs'),
       join(outputDirectory, 'bramble-poc.cjs')
     )
+    // Sandboxed ad-filter frame preload (plain CommonJS, registered on the browser session).
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/adblock-frame.cjs'),
+      join(outputDirectory, 'adblock-frame.cjs')
+    )
   }
 }
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // Custom inputs drop electron-vite's implicit externals; keep runtime
+        // deps as real imports exactly like the single-entry build.
+        external: ['electron', /^@ghostery\//, 'tldts-experimental'],
+        input: {
+          index: resolve(projectDirectory, 'src/main/index.ts'),
+          // Standalone entry so Electron harnesses reuse the production engine wiring.
+          'adblock-engine': resolve(projectDirectory, 'src/main/adblock-engine.ts')
+        }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin(), bramblePreloadPlugin],
