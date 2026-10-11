@@ -970,6 +970,7 @@ function finishMacTrackpadSwipe(
   committed: boolean,
   _maxProgress: number
 ): void {
+  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
   if (swipe.contents.isDestroyed()) {
