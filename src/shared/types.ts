@@ -93,6 +93,7 @@ export interface BrowserTabSummary {
   faviconUrl: string | null
   loading: boolean
   active: boolean
+  pinned: boolean
   sleeping: boolean
 }
 export interface BrowsingHistoryEntry {
