@@ -781,31 +781,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
   }, [browser.url, isLocalNewTab])
 
-  useEffect(() => {
-    const handleShortcut = (event: globalThis.KeyboardEvent): void => {
-      if (!(event.metaKey || event.ctrlKey)) return
-      const key = event.key.toLowerCase()
-      if (key === 't' && !event.shiftKey) {
-        event.preventDefault()
-        createNewTab()
-      } else if (key === 'w' && !event.shiftKey) {
-        const activeTab = tabs.find((tab) => tab.active)
-        if (!activeTab) return
-        event.preventDefault()
-        void window.api.browser.tabs.close(activeTab.id)
-      } else if (key === 'tab' && tabs.length > 1) {
-        event.preventDefault()
-        const activeIndex = tabs.findIndex((tab) => tab.active)
-        const offset = event.shiftKey ? -1 : 1
-        const nextIndex = (activeIndex + offset + tabs.length) % tabs.length
-        const nextTab = tabs[nextIndex]
-        if (nextTab) void window.api.browser.tabs.activate(nextTab.id)
-      }
-    }
-    window.addEventListener('keydown', handleShortcut)
-    return () => window.removeEventListener('keydown', handleShortcut)
-  }, [tabs, searchEngine])
-
   async function navigateTo(valueInput: string): Promise<void> {
     const value = valueInput.trim()
     if (!value) return
@@ -1067,6 +1042,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
+          <div className="window-drag-region" aria-hidden="true" />
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
             <button
               ref={sidebarToggleRef}

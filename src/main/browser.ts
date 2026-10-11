@@ -342,19 +342,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
     const key = inputEvent.key.toLowerCase()
-    if (key === 'l' && !inputEvent.shift) {
-      event.preventDefault()
-      sendFocusAddressToVisibleRenderer()
-    } else if (key === 't' && !inputEvent.shift) {
-      event.preventDefault()
-      newBrowserTab()
-    } else if (key === 'w' && !inputEvent.shift) {
-      event.preventDefault()
-      closeBrowserTab(tab.id)
-    } else if (key === 'tab') {
-      event.preventDefault()
-      cycleBrowserTab(inputEvent.shift ? -1 : 1)
-    }
+    if (handleBrowserShortcut(key, inputEvent.shift, tab.id)) event.preventDefault()
   })
   contents.on('will-navigate', (event, url) => {
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
@@ -590,8 +578,31 @@ export function getExperimentalExtensionFrames(electronTabId: number): Experimen
 
 export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {
   const id = createTab(input, engine ?? selectedSearchEngine)
-  if (id) persistOpenTabs()
+  if (id) {
+    persistOpenTabs()
+    setImmediate(sendFocusAddressToVisibleRenderer)
+  }
   return id
+}
+
+export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId): boolean {
+  if (key === 'l' && !shift) {
+    sendFocusAddressToVisibleRenderer()
+    return true
+  }
+  if (key === 't' && !shift) {
+    newBrowserTab()
+    return true
+  }
+  if (key === 'w' && !shift) {
+    if (tabId) closeBrowserTab(tabId)
+    return true
+  }
+  if (key === 'tab' && tabs.length > 1) {
+    cycleBrowserTab(shift ? -1 : 1)
+    return true
+  }
+  return false
 }
 
 export function setBrowserSearchEngine(engine: SearchEngineId): void {
@@ -696,6 +707,22 @@ export function setBrowserBounds(input: unknown): void {
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!))
   }
+  applyTabBounds()
+}
+
+export function syncBrowserBoundsToWindow(width: number, height: number, overlayMode: boolean): void {
+  if (!browserWindow || browserWindow.isDestroyed() || !overlayMode || width <= 0 || height <= 0) return
+  if (browserBounds.width <= 0 || browserBounds.height <= 0) return
+  const y = Math.min(browserBounds.y, height)
+  const nextBounds: BrowserBounds = {
+    x: 0,
+    y,
+    width,
+    height: Math.max(0, height - y)
+  }
+  if (nextBounds.x === browserBounds.x && nextBounds.y === browserBounds.y
+    && nextBounds.width === browserBounds.width && nextBounds.height === browserBounds.height) return
+  browserBounds = nextBounds
   applyTabBounds()
 }
 
