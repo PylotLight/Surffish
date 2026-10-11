@@ -13,10 +13,12 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/main/adblock.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
+    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/main/adblock.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
+    "test:electron-youtube": "electron scripts/electron-adblock-youtube.cjs",
+    "test:electron-adblock-sites": "electron scripts/electron-adblock-youtube.cjs --sites",
     "test:electron-extensions": "node scripts/run-electron-extension-probes.cjs",
     "test:electron-host-bridge": "node scripts/run-electron-host-tab-frame-probe.cjs",
     "test:bramble-poc": "node --experimental-strip-types scripts/check-bramble-poc.ts",
@@ -38,8 +40,9 @@
     "vite": "^8.3.2"
   },
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.18.2",
+    "@ghostery/adblocker-electron": "^2.20.1",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "tldts-experimental": "^7.4.10"
   }
 }
