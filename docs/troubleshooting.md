@@ -18,7 +18,7 @@ Open **Downloads** from the toolbar. A resumable interrupted item offers **Resum
 
 ## A pinned-site icon is blank
 
-Surffish requests the site's own `/favicon.ico` directly without a referrer. Some sites do not provide that conventional favicon path; in that case the icon intentionally falls back to the site's initial. Pinning and navigation still work.
+Surffish first uses the site's declared favicon as reported by Chromium, then tries the site's own `/favicon.ico` without a referrer. Some sites use a different icon URL or provide no loadable icon; in that case the icon falls back to the site's initial. Pinning and navigation still work.
 
 ## Garbage characters after exiting development (`^[[?62;22c`, `^[[9;1R`, etc.)
 

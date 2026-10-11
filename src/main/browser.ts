@@ -456,6 +456,20 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     persistOpenTabs()
     publishTabs()
   })
+  contents.on('page-favicon-updated', (_event, favicons) => {
+    if (!isCurrentContents()) return
+    const pageUrl = contents.getURL()
+    if (!/^https?:\/\//i.test(pageUrl)) return
+    const faviconUrl = favicons
+      .map(normalizeFaviconUrl)
+      .find((candidate): candidate is string => candidate !== null)
+    if (!faviconUrl) return
+    tab.faviconRevision += 1
+    persistPageFavicon(pageUrl, faviconUrl)
+    if (tab.faviconUrl === faviconUrl) return
+    tab.faviconUrl = faviconUrl
+    publishTabs()
+  })
   contents.on('did-stop-loading', () => {
     if (!isCurrentContents()) return
     publishState()

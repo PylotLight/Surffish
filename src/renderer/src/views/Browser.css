@@ -49,10 +49,10 @@
 }
 .sidebar-brand-mark {
   display: block;
-  width: 26px;
-  height: 26px;
+  width: 42px;
+  height: 42px;
   flex: 0 0 auto;
-  border-radius: 7px;
+  border-radius: 11px;
   object-fit: contain;
 }
 .sidebar-collapse-button {
@@ -1160,10 +1160,11 @@
   transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s;
 }
 .sidebar-brand {
-  min-height: 52px;
+  min-height: 66px;
+  gap: 12px;
   padding-right: 17px;
   padding-left: 17px;
-  font-size: 14px;
+  font-size: 16px;
 }
 .sidebar-heading {
   min-height: 42px;
