@@ -1,11 +1,81 @@
-import { BaseWindow, WebContentsView, app, shell } from 'electron'
-import { existsSync } from 'node:fs'
+import { BaseWindow, WebContentsView, app, screen, shell } from 'electron'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { attachBrowserView, handleBrowserShortcut, syncBrowserBoundsToWindow } from './browser'
 import { attachBrowserShell, detachBrowserShell } from './browser-shell'
 import { APP_NAME, WINDOW } from '../shared/config'
+import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
+
+const WINDOW_STATE_FILE = 'window-state.json'
+const SAVE_DELAY_MS = 400
+
+function windowStatePath(): string {
+  return join(app.getPath('userData'), WINDOW_STATE_FILE)
+}
+
+function readWindowState(): SavedWindowState | null {
+  try {
+    const path = windowStatePath()
+    if (!existsSync(path)) return null
+    return parseSavedWindowState(JSON.parse(readFileSync(path, 'utf8')))
+  } catch (error) {
+    console.warn('Could not read window state:', error)
+    return null
+  }
+}
+
+function writeWindowState(state: SavedWindowState): void {
+  try {
+    const path = windowStatePath()
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(`${path}.tmp`, JSON.stringify(state), 'utf8')
+    renameSync(`${path}.tmp`, path)
+  } catch (error) {
+    console.warn('Could not save window state:', error)
+  }
+}
+
+function restoredBounds(saved: SavedWindowState | null): Partial<Rect> {
+  if (!saved) return { width: WINDOW.width, height: WINDOW.height }
+  const fitted = fitBoundsToDisplays(saved.bounds, screen.getAllDisplays().map((display) => display.workArea), {
+    width: WINDOW.minWidth,
+    height: WINDOW.minHeight
+  })
+  return fitted ?? { width: saved.bounds.width, height: saved.bounds.height }
+}
+
+/** Remember size, position, maximized and full screen across launches. */
+function trackWindowState(win: BaseWindow, initial: SavedWindowState | null): void {
+  // getNormalBounds keeps the pre-maximize size, so un-maximizing after a relaunch still lands somewhere sensible.
+  let last: SavedWindowState | null = initial
+  let timer: NodeJS.Timeout | null = null
+  const capture = (): void => {
+    if (win.isDestroyed() || win.isMinimized()) return
+    last = { bounds: win.getNormalBounds(), maximized: win.isMaximized(), fullScreen: win.isFullScreen() }
+  }
+  const schedule = (): void => {
+    capture()
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      timer = null
+      if (last) writeWindowState(last)
+    }, SAVE_DELAY_MS)
+  }
+  win.on('resize', schedule)
+  win.on('move', schedule)
+  win.on('maximize', schedule)
+  win.on('unmaximize', schedule)
+  win.on('enter-full-screen', schedule)
+  win.on('leave-full-screen', schedule)
+  win.on('close', () => {
+    capture()
+    if (timer) clearTimeout(timer)
+    timer = null
+    if (last) writeWindowState(last)
+  })
+}
 
 const isMac = process.platform === 'darwin'
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
@@ -61,10 +131,10 @@ async function loadRenderer(view: WebContentsView, surface: 'content' | 'toolbar
 }
 
 export function createWindow(): BaseWindow {
+  const savedState = readWindowState()
   const win = new BaseWindow({
     title: APP_NAME,
-    width: WINDOW.width,
-    height: WINDOW.height,
+    ...restoredBounds(savedState),
     minWidth: WINDOW.minWidth,
     minHeight: WINDOW.minHeight,
     show: false,
@@ -77,6 +147,8 @@ export function createWindow(): BaseWindow {
     backgroundColor: isMac ? '#00000000' : '#101418'
   })
   mainWindow = win
+  if (savedState?.maximized) win.maximize()
+  trackWindowState(win, savedState)
 
   const contentView = createRendererView()
   const toolbarView = createRendererView()
@@ -101,13 +173,19 @@ export function createWindow(): BaseWindow {
     loadRenderer(toolbarView, 'toolbar'),
     loadRenderer(sidebarView, 'sidebar')
   ]).then(() => {
-    if (!win.isDestroyed()) win.show()
+    showRestored(win, savedState)
   }).catch((error: unknown) => {
     console.error('Could not load Sockfish browser surfaces:', error)
-    if (!win.isDestroyed()) win.show()
+    showRestored(win, savedState)
   })
 
   return win
+}
+
+function showRestored(win: BaseWindow, saved: SavedWindowState | null): void {
+  if (win.isDestroyed()) return
+  win.show()
+  if (saved?.fullScreen) win.setFullScreen(true)
 }
 
 export function showWindow(): void {
