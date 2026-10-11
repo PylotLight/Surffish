@@ -68,7 +68,7 @@ function openWindow(options) {
 
 async function runCase(probeCase) {
   const extensionDirectory = join(fixtureRoot, probeCase.name)
-  const partition = `persist:sockfish-extension-probe-${probeCase.name}-${Date.now()}`
+  const partition = `persist:surffish-extension-probe-${probeCase.name}-${Date.now()}`
   const browserSession = session.fromPartition(partition)
   const readyExtensionIds = new Set()
   browserSession.extensions.on('extension-ready', (_event, readyExtension) => {
@@ -109,11 +109,11 @@ async function runCase(probeCase) {
     if (probeCase.name === 'firefox-mv3') {
       const firefoxProbe = await waitForPageValue(
         pageWindow.webContents,
-        'document.documentElement.dataset.sockfishFirefoxProbe || null'
+        'document.documentElement.dataset.surffishFirefoxProbe || null'
       )
       result.mainWorldMarker = await waitForPageValue(
         pageWindow.webContents,
-        'document.documentElement.dataset.sockfishFirefoxMainWorld || null'
+        'document.documentElement.dataset.surffishFirefoxMainWorld || null'
       )
       if (firefoxProbe) {
         try {
@@ -126,7 +126,7 @@ async function runCase(probeCase) {
     } else {
       const serialized = await waitForPageValue(
         pageWindow.webContents,
-        'document.documentElement.dataset.sockfishExtensionProbe || null'
+        'document.documentElement.dataset.surffishExtensionProbe || null'
       )
       if (serialized) {
         try {
@@ -147,7 +147,7 @@ async function runCase(probeCase) {
         await popupWindow.loadURL(`${extensionBaseURL}${popupPath}`)
         result.popupLoaded = await waitForPageValue(
           popupWindow.webContents,
-          'document.documentElement.dataset.sockfishPopupLoaded || null',
+          'document.documentElement.dataset.surffishPopupLoaded || null',
           3000
         ) === 'true'
       } catch (error) {
@@ -174,7 +174,7 @@ async function runCase(probeCase) {
 }
 
 async function run() {
-  userDataDirectory = mkdtempSync(join(tmpdir(), 'sockfish-extension-probe-'))
+  userDataDirectory = mkdtempSync(join(tmpdir(), 'surffish-extension-probe-'))
   app.setPath('userData', userDataDirectory)
   app.disableHardwareAcceleration()
   await app.whenReady()
@@ -215,7 +215,7 @@ async function run() {
   }
 
   report.ok = true
-  console.log(`SOCKFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
+  console.log(`SURFFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
   console.log(`Electron extension probe ${requestedCase || 'matrix'} completed. MV3 and Firefox-shape outcomes are observations, not support claims.`)
 }
 
@@ -235,7 +235,7 @@ run().then(cleanup).catch(async (error) => {
   report.ok = false
   report.error = error instanceof Error ? error.message : String(error)
   console.error('Electron extension compatibility probe failed:', error)
-  console.log(`SOCKFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
+  console.log(`SURFFISH_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
   process.exitCode = 1
   await cleanup()
   process.exitCode = 1

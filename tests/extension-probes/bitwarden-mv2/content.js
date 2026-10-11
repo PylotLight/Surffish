@@ -33,7 +33,7 @@ if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local') {
       result.storageOnChangedKeys.push(...Object.keys(changes));
-      if (changes.sockfishContentProbe) result.storageOnChangedEvent = true;
+      if (changes.surffishContentProbe) result.storageOnChangedEvent = true;
     }
   });
 }
@@ -41,21 +41,21 @@ if (chrome.storage?.onChanged) {
 let pending = 2;
 function finishOne() {
   pending -= 1;
-  if (pending === 0) document.documentElement.dataset.sockfishExtensionProbe = JSON.stringify(result);
+  if (pending === 0) document.documentElement.dataset.surffishExtensionProbe = JSON.stringify(result);
 }
 
-chrome.runtime.sendMessage({ type: 'sockfish-extension-probe' }, (response) => {
+chrome.runtime.sendMessage({ type: 'surffish-extension-probe' }, (response) => {
   result.backgroundReply = Boolean(response);
   result.backgroundError = chrome.runtime.lastError?.message || null;
   result.background = response || null;
   finishOne();
 });
 
-chrome.storage.local.set({ sockfishContentProbe: 'stored' }, () => {
+chrome.storage.local.set({ surffishContentProbe: 'stored' }, () => {
   const setError = chrome.runtime.lastError?.message;
-  chrome.storage.local.get('sockfishContentProbe', (values) => {
+  chrome.storage.local.get('surffishContentProbe', (values) => {
     const getError = chrome.runtime.lastError?.message;
-    result.storageLocalRoundTrip = values?.sockfishContentProbe === 'stored';
+    result.storageLocalRoundTrip = values?.surffishContentProbe === 'stored';
     result.storageError = setError || getError || null;
     setTimeout(finishOne, 150);
   });

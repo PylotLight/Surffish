@@ -1,6 +1,6 @@
 # Native macOS WebKit evaluation
 
-Sockfish's current app remains Electron/Chromium. The native experiment is isolated under [`native/macos`](../native/macos/README.md); it does not modify the Electron runtime, profile, or UI.
+Surffish's current app remains Electron/Chromium. The native experiment is isolated under [`native/macos`](../native/macos/README.md); it does not modify the Electron runtime, profile, or UI.
 
 ## What the proof of concept exercises
 
@@ -20,7 +20,7 @@ Run the automated checks on macOS from the repository root:
 ```sh
 cd native/macos
 ./Scripts/test-macos.sh
-swift run SockfishNative
+swift run SurffishNative
 ```
 
 The project also has a `macos-15` GitHub Actions job. A locally packaged `.app` is optional: `./Scripts/package-and-run.sh` applies an **ad-hoc** signature only. Neither SwiftPM development nor local ad-hoc signing requires a paid Apple Developer membership. This is distinct from Developer ID distribution, notarization, Mac App Store publication, and Apple-managed entitlements. Linux cannot compile or run WebKit; the native CI job and the user's Mac provide the Apple runtime.

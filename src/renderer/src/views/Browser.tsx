@@ -21,7 +21,7 @@ import type {
   TabSleepMinutes,
   WorldClockPreference
 } from '../../../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SOCKFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, MAX_PINNED_SITES, MAX_WORLD_CLOCKS } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
@@ -399,7 +399,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
   const newTabSites = useMemo(() => [...favoriteSites, ...frequentlyVisitedSites], [favoriteSites, frequentlyVisitedSites])
-  const isLocalNewTab = browser.url === SOCKFISH_QUICK_LINKS_URL
+  const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   useEffect(() => {
     if (surface !== 'content' || !isLocalNewTab) return
@@ -873,7 +873,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }
 
   async function clearHistory(): Promise<void> {
-    if (!window.confirm('Clear all browsing history saved by Sockfish? Open tabs will stay open.')) return
+    if (!window.confirm('Clear all browsing history saved by Surffish? Open tabs will stay open.')) return
     await window.api.browser.history.clear()
     setHistory([])
   }
@@ -903,7 +903,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         : bramblePoc.latestVersion ? 'Up to date' : 'Install / update'
 
   return (
-    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser" onMouseMove={(event) => {
+    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Surffish browser" onMouseMove={(event) => {
       if (!sidebarVisible && event.clientX <= 18) revealSidebar()
     }} onMouseLeave={surface === 'sidebar' ? scheduleSidebarHide : undefined}>
       <aside
@@ -923,8 +923,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         )}
         <div className="sidebar-brand">
-          <span className="sidebar-brand-mark" aria-hidden="true">S</span>
-          <strong>Sockfish</strong>
+          <img className="sidebar-brand-mark" src="./surffish-brand-icon.png" alt="" aria-hidden="true" draggable={false} />
+          <strong>Surffish</strong>
           <button
             className="sidebar-collapse-button"
             type="button"
@@ -1016,8 +1016,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             <span aria-hidden="true">⚙</span><span>Settings</span>
           </button>
           <div className="sidebar-footer-divider" />
-          <button className="sidebar-mode-button sidebar-quit-button" type="button" aria-label="Quit Sockfish" title="Quit Sockfish" onClick={() => void window.api.browser.quit()}>
-            <span aria-hidden="true">⏻</span><span>Quit Sockfish</span>
+          <button className="sidebar-mode-button sidebar-quit-button" type="button" aria-label="Quit Surffish" title="Quit Surffish" onClick={() => void window.api.browser.quit()}>
+            <span aria-hidden="true">⏻</span><span>Quit Surffish</span>
           </button>
         </div>
       </aside>
@@ -1322,7 +1322,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       const page = event.target.value as NewTabPageId
                       void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
                     }} aria-label="Default new tab page">
-                      <option value="quick-links">Sockfish New Tab (local)</option>
+                      <option value="quick-links">Surffish New Tab (local)</option>
                       <option value="bonjourr">Bonjourr (online)</option>
                       <option value="search">Search engine</option>
                     </select>
@@ -1406,7 +1406,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {bramblePoc.latestVersion && <p className="settings-help bramble-version-note">Latest Firefox release: <strong>{bramblePoc.latestVersion}</strong>{bramblePoc.installed && bramblePoc.updateAvailable ? ' · update available' : ''}</p>}
                   {bramblePoc.permissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Extension permissions:</strong> {bramblePoc.permissions.join(', ')}</p>}
                   {bramblePoc.hostPermissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Site access:</strong> {bramblePoc.hostPermissions.join(', ')}</p>}
-                  <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and GitHub asset digest when available. Installation and updates are always manual; every release shows its requested access before activation. Sockfish removes Firefox-only OAuth access, so Google Drive backup is unavailable.</p>
+                  <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and GitHub asset digest when available. Installation and updates are always manual; every release shows its requested access before activation. Surffish removes Firefox-only OAuth access, so Google Drive backup is unavailable.</p>
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </section>

@@ -104,7 +104,7 @@ export async function buildFilterEngine(fetch: ListFetch, sources: readonly Filt
   if (texts.length === 0) throw new Error('No filter lists could be downloaded')
 
   const engine = ElectronBlocker.parse(texts.join('\n'), FULL_FILTER_CONFIG)
-  engine.updateResources(resources, `sockfish-${resources.length}`)
+  engine.updateResources(resources, `surffish-${resources.length}`)
   applyFilterEnvironment(engine)
   return { engine, loadedLists, failedLists }
 }

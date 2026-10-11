@@ -134,7 +134,7 @@ test('downloads a release only when SHA256SUMS and GitHub asset digests agree', 
 })
 
 test('extracts a valid release ZIP and rejects path traversal entries', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'sockfish-bramble-zip-test-'))
+  const directory = mkdtempSync(join(tmpdir(), 'surffish-bramble-zip-test-'))
   try {
     const archive = storedZip({ 'manifest.json': '{"name":"Bramble","version":"1.28.0"}', 'nested/popup.html': '<main>vault</main>' })
     extractBrambleFirefoxArchive(archive, join(directory, 'valid'))

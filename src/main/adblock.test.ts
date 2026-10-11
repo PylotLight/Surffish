@@ -143,6 +143,6 @@ test('isWebPageUrl accepts only http(s)', () => {
 })
 
 test('browser user agent drops Electron and app tokens but keeps Chrome', () => {
-  const raw = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) sockfish/0.1.0 Chrome/152.0.7977.130 Electron/44.7.0 Safari/537.36'
+  const raw = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) surffish/0.1.0 Chrome/152.0.7977.130 Electron/44.7.0 Safari/537.36'
   assert.equal(chromeUserAgent(raw), 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Safari/537.36')
 })

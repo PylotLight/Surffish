@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
@@ -47,7 +47,7 @@ const MAC_SWIPE_END_CHANNEL = 'browser:mac-trackpad-swipe:end'
 const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
 export const BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
 const MAC_SWIPE_SETTLE_MS = 180
-const MAC_SWIPE_DEBUG = process.env.SOCKFISH_SWIPE_DEBUG === '1'
+const MAC_SWIPE_DEBUG = process.env.SURFFISH_SWIPE_DEBUG === '1'
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
 let browserWindow: BaseWindow | null = null
@@ -60,7 +60,7 @@ let nextMacTrackpadSwipeToken = 0
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
   const page = getBrowserNewTabPage()
   if (page === 'search') return getSearchHomepage(engine)
-  return page === 'bonjourr' ? START_PAGE : SOCKFISH_QUICK_LINKS_URL
+  return page === 'bonjourr' ? START_PAGE : SURFFISH_QUICK_LINKS_URL
 }
 
 function getTab(id: string | null = activeTabId): BrowserTab | undefined {
@@ -76,7 +76,7 @@ export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boo
   return Boolean(tab?.pauseAutoplayUntilVisited && tab.id !== activeTabId)
 }
 function pageTitle(tab: BrowserTab): string {
-  if (currentUrl(tab) === SOCKFISH_QUICK_LINKS_URL) return 'New Tab'
+  if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return 'New Tab'
   const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
   try {
@@ -180,7 +180,7 @@ function publishTabs(): void {
 function publishState(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
   const state = getState()
-  setBrowserPageIsLocalNewTab(state.url === SOCKFISH_QUICK_LINKS_URL)
+  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL)
   sendToMainWindowRenderers('browser:state', state)
   publishTabs()
 }
@@ -269,7 +269,7 @@ function disposeTabView(tab: BrowserTab): void {
 function ensureTabLoaded(tab: BrowserTab): void {
   if (tab.view || !browserWindow || browserWindow.isDestroyed()) return
   const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
-  if (target === SOCKFISH_QUICK_LINKS_URL) {
+  if (target === SURFFISH_QUICK_LINKS_URL) {
     tab.pendingUrl = ''
     return
   }
@@ -520,8 +520,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
 
 function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = input === SOCKFISH_QUICK_LINKS_URL
-    ? SOCKFISH_QUICK_LINKS_URL
+  const target = input === SURFFISH_QUICK_LINKS_URL
+    ? SURFFISH_QUICK_LINKS_URL
     : input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const previous = getTab()
   const shouldActivate = activate || activeTabId === null
@@ -670,7 +670,7 @@ export interface ExperimentalExtensionFrameDetails {
  * This function is not connected to a renderer or called by the normal app path.
  */
 export function getExperimentalExtensionFrames(electronTabId: number): ExperimentalExtensionFrameDetails[] | null {
-  if (process.env.SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') return null
+  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') return null
   if (!Number.isSafeInteger(electronTabId) || electronTabId < 0) return null
 
   const tab = tabs.find((candidate) => candidate.view?.webContents.id === electronTabId)
@@ -831,7 +831,7 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   const url = resolveNavigationTarget(input, engine)
   const tab = getTab()
   if (!url || !tab) return false
-  if (tab.lastUrl === SOCKFISH_QUICK_LINKS_URL && !tab.view) {
+  if (tab.lastUrl === SURFFISH_QUICK_LINKS_URL && !tab.view) {
     tab.lastUrl = url
     tab.pendingUrl = url
     tab.error = null
@@ -925,7 +925,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     return undefined
   }
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
-  // The handle only tells us which NSWindow the gesture landed in. Sockfish drives one browser
+  // The handle only tells us which NSWindow the gesture landed in. Surffish drives one browser
   // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
   // reject every swipe).
   if (MAC_SWIPE_DEBUG && Buffer.isBuffer(request.windowHandle)

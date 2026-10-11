@@ -45,7 +45,7 @@ final class NativeAPITests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let extensionSummary = try await browser.installExtension(at: directory, askForImportApproval: false)
 
-        XCTAssertEqual(extensionSummary.name, "Sockfish Native API Probe")
+        XCTAssertEqual(extensionSummary.name, "Surffish Native API Probe")
         XCTAssertEqual(extensionSummary.version, "1.0.0")
         XCTAssertEqual(extensionSummary.manifestVersion, 3)
         XCTAssertTrue(extensionSummary.isLoaded)
@@ -78,7 +78,7 @@ final class NativeAPITests: XCTestCase {
     func testExtensionZipLoadsThroughResourceBaseURLInitializer() async throws {
         let sourceDirectory = try probeExtensionDirectory()
         let archive = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sockfish-probe-\(UUID().uuidString).zip")
+            .appendingPathComponent("surffish-probe-\(UUID().uuidString).zip")
         defer { try? FileManager.default.removeItem(at: archive) }
 
         let zip = Process()
@@ -90,7 +90,7 @@ final class NativeAPITests: XCTestCase {
         XCTAssertEqual(zip.terminationStatus, 0, "The system zip utility should create the test archive.")
 
         let webExtension = try await WKWebExtension(resourceBaseURL: archive)
-        XCTAssertEqual(webExtension.displayName, "Sockfish Native API Probe")
+        XCTAssertEqual(webExtension.displayName, "Surffish Native API Probe")
         XCTAssertTrue(webExtension.supportsManifestVersion(3))
         XCTAssertTrue(webExtension.hasInjectedContent)
     }
@@ -137,7 +137,7 @@ final class NativeAPITests: XCTestCase {
     private func temporaryProbeExtensionDirectory() throws -> URL {
         let source = try probeExtensionDirectory()
         let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sockfish-probe-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("surffish-probe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.copyItem(at: source, to: destination)
         return destination
     }

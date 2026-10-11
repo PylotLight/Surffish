@@ -8,7 +8,7 @@ The production app now uses a `BaseWindow` with the live page, full local React 
 
 The toolbar is measured and bounded to its actual height (plus any open toolbar popover). The sidebar is bounded to 320 px while pinned or hovered and to zero native width while hidden. Its existing backdrop blur and translucent glass styling are retained. The full-width site page receives the mouse-move events used for a 180 ms left-edge hover reveal, so a quick click at x=5 still reaches the page while hidden. The original React surface remains the active UI for the local New Tab and full settings, Network, site, and Downloads panels.
 
-The host migration preserves the existing live-tab `persist:fish-browser` session and its cookies/storage, the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Sockfish bridge.
+The host migration preserves the existing live-tab `persist:fish-browser` session and its cookies/storage, the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Surffish bridge.
 
 ## Production Electron integration results
 
@@ -33,7 +33,7 @@ npm test
 xvfb-run -a npm run test:electron-sidebar-overlay
 ```
 
-The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Hosted Ubuntu CI installs and verifies it before running the Electron tests; local reproduction requires it in addition to `xvfb-run`. CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture overlay states locally, set `SOCKFISH_SCREENSHOT_DIR` when running the Xvfb smoke; optional captures use a 1280×800 X server and only show this synthetic page.
+The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Hosted Ubuntu CI installs and verifies it before running the Electron tests; local reproduction requires it in addition to `xvfb-run`. CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture overlay states locally, set `SURFFISH_SCREENSHOT_DIR` when running the Xvfb smoke; captures are cropped to the complete app window and show only this loopback-only synthetic page.
 
 ## Previous baseline
 

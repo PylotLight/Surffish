@@ -1,5 +1,5 @@
 browser.runtime.onMessage.addListener((message) => {
-  if (message?.type === 'sockfish-firefox-probe') {
+  if (message?.type === 'surffish-firefox-probe') {
     return Promise.resolve({
       backgroundKind: 'firefox-background-script',
       browserNamespace: typeof browser !== 'undefined',

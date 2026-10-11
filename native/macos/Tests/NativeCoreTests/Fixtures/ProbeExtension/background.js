@@ -1,3 +1,3 @@
 browser.runtime.onInstalled.addListener(() => {
-  browser.storage.local.set({ sockfishNativeProbe: true });
+  browser.storage.local.set({ surffishNativeProbe: true });
 });

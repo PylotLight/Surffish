@@ -1,4 +1,4 @@
-// Offline Electron smoke test for Sockfish's full ad-filter engine.
+// Offline Electron smoke test for Surffish's full ad-filter engine.
 // Uses the production wiring (out/main/adblock-engine.js) and the real sandboxed
 // frame preload, against a loopback server. Run `bun run build` first.
 //
@@ -21,21 +21,21 @@ const preloadPath = join(root, 'out/preload/adblock-frame.cjs')
 const RESOURCES = JSON.stringify({
   redirects: [],
   scriptlets: [{
-    name: 'sockfish-record.js',
+    name: 'surffish-record.js',
     aliases: [],
-    body: 'function sockfishRecord(name, value) { window[name] = value === undefined ? true : value }',
+    body: 'function surffishRecord(name, value) { window[name] = value === undefined ? true : value }',
     dependencies: []
   }, {
     // Like uBO's JSONPath helper: a top-level class shared by several scriptlets.
-    name: 'sockfish-helper.fn',
+    name: 'surffish-helper.fn',
     aliases: [],
-    body: 'class SockfishHelper { static mark(name) { window[name] = true } }',
+    body: 'class SurffishHelper { static mark(name) { window[name] = true } }',
     dependencies: []
   }, {
-    name: 'sockfish-class.js',
+    name: 'surffish-class.js',
     aliases: [],
-    body: 'function sockfishClass(name) { SockfishHelper.mark(name) }',
-    dependencies: ['sockfish-helper.fn']
+    body: 'function surffishClass(name) { SurffishHelper.mark(name) }',
+    dependencies: ['surffish-helper.fn']
   }]
 })
 
@@ -45,14 +45,14 @@ let window
 let detach
 
 function page(body, head = '') {
-  return `<!doctype html><html><head><script>window.__flagBeforePageScripts = window.sockfishEarly === 'yes'</script>${head}</head><body>${body}</body></html>`
+  return `<!doctype html><html><head><script>window.__flagBeforePageScripts = window.surffishEarly === 'yes'</script>${head}</head><body>${body}</body></html>`
 }
 
 async function run() {
   for (const file of [enginePath, preloadPath]) {
     if (!existsSync(file)) throw new Error(`Missing ${file}; run \`bun run build\` first.`)
   }
-  app.setPath('userData', mkdtempSync(join(tmpdir(), 'sockfish-adblock-smoke-')))
+  app.setPath('userData', mkdtempSync(join(tmpdir(), 'surffish-adblock-smoke-')))
   await app.whenReady()
 
   server = createServer((request, response) => {
@@ -91,11 +91,11 @@ async function run() {
       'localhost##.ad-banner',
       '##.generic-ad',
       '##.late-generic-ad',
-      '127.0.0.1##+js(sockfish-record, sockfishEarly, yes)',
-      'localhost##+js(sockfish-record, sockfishEarly, yes)',
-      '127.0.0.1##+js(sockfish-record, sockfishPercent, 50%)',
-      '127.0.0.1##+js(sockfish-class, sockfishClassOne)',
-      '127.0.0.1##+js(sockfish-class, sockfishClassTwo)'
+      '127.0.0.1##+js(surffish-record, surffishEarly, yes)',
+      'localhost##+js(surffish-record, surffishEarly, yes)',
+      '127.0.0.1##+js(surffish-record, surffishPercent, 50%)',
+      '127.0.0.1##+js(surffish-class, surffishClassOne)',
+      '127.0.0.1##+js(surffish-class, surffishClassTwo)'
     ].join('\n'),
     'https://fixture.invalid/quick.txt': '! quick fixes',
     'https://fixture.invalid/easylist.txt': '! easylist'
@@ -111,7 +111,7 @@ async function run() {
     { id: 'easylist', url: 'https://fixture.invalid/easylist.txt' }
   ])
 
-  const browserSession = session.fromPartition('sockfish-adblock-smoke')
+  const browserSession = session.fromPartition('surffish-adblock-smoke')
   let frameStarts = 0
   detach = engineModule.attachAdblockToSession(browserSession, {
     getEngine: () => engine,
@@ -130,8 +130,8 @@ async function run() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegrationInSubFrames: true,
-      // Headless Linux without a display server: SOCKFISH_OFFSCREEN=1 with --ozone-platform=headless.
-      offscreen: process.env.SOCKFISH_OFFSCREEN === '1'
+      // Headless Linux without a display server: SURFFISH_OFFSCREEN=1 with --ozone-platform=headless.
+      offscreen: process.env.SURFFISH_OFFSCREEN === '1'
     }
   })
 
@@ -156,8 +156,8 @@ async function run() {
     allowed: window.allowedLoaded === true,
     blocked: window.blockedLoaded === true,
     early: window.__flagBeforePageScripts === true,
-    percent: window.sockfishPercent,
-    sharedHelpers: window.sockfishClassOne === true && window.sockfishClassTwo === true,
+    percent: window.surffishPercent,
+    sharedHelpers: window.surffishClassOne === true && window.surffishClassTwo === true,
     siteAdHidden: getComputedStyle(document.getElementById('site-ad')).display === 'none',
     genericAdHidden: getComputedStyle(document.querySelector('.generic-ad')).display === 'none',
     lateAdHidden: getComputedStyle(document.getElementById('late')).display === 'none',

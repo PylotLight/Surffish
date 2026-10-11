@@ -5,7 +5,7 @@
 The Downloads toolbar button opens an anchored, keyboard-accessible popup with up to six recent transfers and a **Show all** action. The full Downloads page lists local history. Both views show each filename, sanitized source host, date, received/total size, status and progress where known. The implementation follows Electron's official [`DownloadItem` API](https://www.electronjs.org/docs/latest/api/download-item) for transfer events and supported controls.
 
 - Active transfers can be paused and resumed when Electron supports it, or canceled. Interrupted transfers offer Resume only while the live Electron `DownloadItem` reports that it can resume.
-- Completed rows offer **Open** and **Show in folder** only when the saved file is still available. Opening is always an explicit user action; Sockfish never automatically launches a downloaded file.
+- Completed rows offer **Open** and **Show in folder** only when the saved file is still available. Opening is always an explicit user action; Surffish never automatically launches a downloaded file.
 - Failed, canceled and completed entries can be removed from history. Removing a row never deletes its file.
 - Empty and loading states appear while history is being read. Store-read errors offer Retry; interrupted/failed items include a plain-language status.
 - Tab/Shift+Tab operate the native buttons, focus indicators are visible, labels identify file actions, and Escape closes the popup.
@@ -14,7 +14,7 @@ The Downloads toolbar button opens an anchored, keyboard-accessible popup with u
 
 `src/main/downloads.ts` listens for `will-download` on the browser's existing persistent Electron session. It persists only file metadata needed for history: filename, source **host** (not the complete URL), start/end times, byte counts, state, and a private local save path used for Open/Reveal. The renderer receives no local path or full source URL. No file contents or credentials are copied into download history or logged. The metadata file is in the app's user-data directory with owner-only permissions where supported.
 
-Electron `DownloadItem` objects exist only during the current app session. When Sockfish restarts, any transfer that was still progressing, paused or interrupted is recorded as failed with a message that it cannot be resumed from the old process. Completed history persists across restarts. If the file is moved/deleted externally, its history remains but file actions become unavailable.
+Electron `DownloadItem` objects exist only during the current app session. When Surffish restarts, any transfer that was still progressing, paused or interrupted is recorded as failed with a message that it cannot be resumed from the old process. Completed history persists across restarts. If the file is moved/deleted externally, its history remains but file actions become unavailable.
 
 ## Tests and screenshots
 

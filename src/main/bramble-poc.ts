@@ -515,8 +515,8 @@ async function loadExistingStagedBuild(directory: string): Promise<void> {
   const background = isRecord(manifest) && isRecord(manifest.background) ? manifest.background : {}
   const worker = typeof background.service_worker === 'string' ? background.service_worker : ''
   if (!isRecord(manifest) || manifest.name !== 'Bramble' || typeof manifest.version !== 'string' ||
-      worker !== 'sockfish-bramble-background.js' || !existsSync(join(directory, worker)) ||
-      !existsSync(join(directory, 'sockfish-bramble-browser-alias.js')) || !existsSync(join(directory, 'popup.html'))) {
+      worker !== 'surffish-bramble-background.js' || !existsSync(join(directory, worker)) ||
+      !existsSync(join(directory, 'surffish-bramble-browser-alias.js')) || !existsSync(join(directory, 'popup.html'))) {
     throw new Error('The saved Bramble install is incomplete. Use Settings → Bramble to install a verified release.')
   }
   try {
@@ -554,8 +554,8 @@ async function loadSavedRelease(config: SavedBrambleConfig): Promise<void> {
 }
 
 export async function initializeBramblePoc(): Promise<void> {
-  const developmentSource = process.env.SOCKFISH_BRAMBLE_POC_DEV_AUTOLOAD === '1'
-    ? process.env.SOCKFISH_BRAMBLE_EXTENSION_DIR
+  const developmentSource = process.env.SURFFISH_BRAMBLE_POC_DEV_AUTOLOAD === '1'
+    ? process.env.SURFFISH_BRAMBLE_EXTENSION_DIR
     : undefined
   if (!app.isPackaged && developmentSource) {
     await loadFromDirectory(developmentSource, false)
@@ -564,7 +564,7 @@ export async function initializeBramblePoc(): Promise<void> {
 
   const savedConfig = readSavedBrambleConfig()
   if (!savedConfig) {
-    if (existsSync(configPath())) updateState({ error: 'Sockfish could not read the saved Bramble configuration. Reinstall Bramble from Settings.' })
+    if (existsSync(configPath())) updateState({ error: 'Surffish could not read the saved Bramble configuration. Reinstall Bramble from Settings.' })
     return
   }
   updateState({ loading: true, error: null })
@@ -640,12 +640,12 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
     const confirmationOptions = {
       type: 'warning' as const,
       title: `${state.installed ? 'Update' : 'Install'} Bramble ${release.version}?`,
-      message: 'Sockfish will load Bramble’s Firefox extension build from its GitHub release.',
+      message: 'Surffish will load Bramble’s Firefox extension build from its GitHub release.',
       detail: [
         `Integrity: the ZIP matches the release’s SHA256SUMS file${release.githubDigest ? ' and GitHub’s asset SHA-256 digest' : ''}. This Firefox release does not publish a detached maintainer signature.`,
         `Requested extension permissions: ${requestedPermissions.join(', ') || 'none'}.`,
         `Requested site access: ${requestedHosts.join(', ') || 'none'}.`,
-        'Bramble requests access to all websites for autofill and its passkey bridge. The Firefox-only identity permission is removed by Sockfish; Bramble’s Google Drive/OAuth backup is unsupported here.',
+        'Bramble requests access to all websites for autofill and its passkey bridge. The Firefox-only identity permission is removed by Surffish; Bramble’s Google Drive/OAuth backup is unsupported here.',
         'Bramble’s setup and customization stay in Bramble’s own window. Updating replaces extension files but keeps the existing browser profile and vault storage.'
       ].join('\n\n'),
       buttons: ['Cancel', `${state.installed ? 'Update' : 'Install'} Bramble`],

@@ -1,6 +1,8 @@
 import { app, BaseWindow } from 'electron'
+import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { APP_ID } from '../shared/config'
+import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
 import { createWindow, setMainWindowCloseHandler, showWindow } from './window'
@@ -10,9 +12,19 @@ import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
 import { initializeDownloads } from './downloads'
 
+app.setName(APP_NAME)
+// Keep the established profile directory when it exists; leave explicit test/custom profile paths untouched.
+const appDataPath = app.getPath('appData')
+const legacyUserDataPath = join(appDataPath, 'sockfish')
+const currentUserDataPath = resolve(app.getPath('userData')).toLowerCase()
+const newUserDataPath = resolve(appDataPath, APP_NAME).toLowerCase()
+if (currentUserDataPath === newUserDataPath && existsSync(legacyUserDataPath)) {
+  app.setPath('userData', legacyUserDataPath)
+}
+
 if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(async () => {
-  if (!app.isPackaged) console.info('Sockfish browser profile:', app.getPath('userData'))
+  if (!app.isPackaged) console.info('Surffish browser profile:', app.getPath('userData'))
   try {
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()

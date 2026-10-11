@@ -27,6 +27,6 @@ run('build isolated Electron entry', process.execPath, [viteCli, 'build', '--con
 
 const probeEnvironment = {
   ...process.env,
-  SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE: '1'
+  SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE: '1'
 }
 run('run loopback-only disposable profile', electronBinary, [probeEntry], probeEnvironment)

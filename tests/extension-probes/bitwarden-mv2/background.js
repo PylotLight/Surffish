@@ -4,7 +4,7 @@ function alarmsCreateGet() {
       resolve({ available: false, createGet: false, error: 'alarms API unavailable' });
       return;
     }
-    const name = 'sockfish-bitwarden-probe-once';
+    const name = 'surffish-bitwarden-probe-once';
     try {
       chrome.alarms.create(name, { when: Date.now() + 60_000 });
       const timeout = setTimeout(() => resolve({ available: true, createGet: false, error: 'alarm get timed out' }), 3000);
@@ -22,12 +22,12 @@ function alarmsCreateGet() {
 
 function storageLocalRoundTrip() {
   return new Promise((resolve) => {
-    chrome.storage.local.set({ sockfishExtensionProbe: 'stored' }, () => {
+    chrome.storage.local.set({ surffishExtensionProbe: 'stored' }, () => {
       const setError = chrome.runtime.lastError?.message;
-      chrome.storage.local.get('sockfishExtensionProbe', (values) => {
+      chrome.storage.local.get('surffishExtensionProbe', (values) => {
         const getError = chrome.runtime.lastError?.message;
         resolve({
-          roundTrip: values?.sockfishExtensionProbe === 'stored',
+          roundTrip: values?.surffishExtensionProbe === 'stored',
           error: setError || getError || null
         });
       });
@@ -36,7 +36,7 @@ function storageLocalRoundTrip() {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== 'sockfish-extension-probe') return false;
+  if (message?.type !== 'surffish-extension-probe') return false;
 
   const apis = {
     runtime: typeof chrome.runtime?.getManifest === 'function',

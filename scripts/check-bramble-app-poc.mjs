@@ -20,9 +20,9 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const mainEntry = join(repoRoot, 'out', 'main', 'index.js')
 const require = createRequire(import.meta.url)
 const electronExecutable = require('electron')
-const temporaryRoot = mkdtempSync(join(tmpdir(), 'sockfish-bramble-app-poc-'))
+const temporaryRoot = mkdtempSync(join(tmpdir(), 'surffish-bramble-app-poc-'))
 const userData = join(temporaryRoot, 'profile')
-const screenshotPath = process.env.SOCKFISH_BRAMBLE_SCREENSHOT ?? '/workspace/bramble-poc-verification.png'
+const screenshotPath = process.env.SURFFISH_BRAMBLE_SCREENSHOT ?? '/workspace/bramble-poc-verification.png'
 const appOutput = []
 const secretsToRedact = []
 let child
@@ -67,7 +67,7 @@ async function waitFor(description, operation, timeoutMs = 30_000) {
   let lastError
   while (Date.now() < end) {
     if (child?.exitCode !== null && child?.exitCode !== undefined) {
-      throw new Error(`Sockfish exited with ${child.exitCode} while waiting for ${description}.`)
+      throw new Error(`Surffish exited with ${child.exitCode} while waiting for ${description}.`)
     }
     try {
       const value = await operation()
@@ -294,8 +294,8 @@ async function stopChild() {
 
 try {
   const port = await getFreePort()
-  const rpHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Sockfish Bramble local passkey RP</title></head><body><main><h1>Local Bramble passkey POC</h1><p id="status">Local-only test relying party; no account or external service.</p></main></body></html>'
-  const autofillHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Sockfish Bramble local autofill form</title></head><body><main><h1>Local Bramble autofill regression</h1><p id="status">Waiting for local form fill.</p><form id="login-form" method="post" action="/autofill-submit" autocomplete="on"><label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password"><button id="submit-login" type="submit">Submit local form</button></form><script>document.querySelector("#login-form").addEventListener("submit", (event) => { event.preventDefault(); const complete = Boolean(document.querySelector("#username").value && document.querySelector("#password").value); document.querySelector("#status").textContent = complete ? "Local form submission verified." : "Local form is missing credentials."; });</script></main></body></html>'
+  const rpHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Surffish Bramble local passkey RP</title></head><body><main><h1>Local Bramble passkey POC</h1><p id="status">Local-only test relying party; no account or external service.</p></main></body></html>'
+  const autofillHtml = '<!doctype html><html><head><meta charset="utf-8"><title>Surffish Bramble local autofill form</title></head><body><main><h1>Local Bramble autofill regression</h1><p id="status">Waiting for local form fill.</p><form id="login-form" method="post" action="/autofill-submit" autocomplete="on"><label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password"><button id="submit-login" type="submit">Submit local form</button></form><script>document.querySelector("#login-form").addEventListener("submit", (event) => { event.preventDefault(); const complete = Boolean(document.querySelector("#username").value && document.querySelector("#password").value); document.querySelector("#status").textContent = complete ? "Local form submission verified." : "Local form is missing credentials."; });</script></main></body></html>'
   let unexpectedFormPosts = 0
   rpServer = createHttpServer((request, response) => {
     if (request.method === 'POST' && (request.url ?? '').startsWith('/autofill')) {
@@ -335,8 +335,8 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      SOCKFISH_BRAMBLE_POC_DEV_AUTOLOAD: '1',
-      SOCKFISH_BRAMBLE_EXTENSION_DIR: resolve(sourceDirectory),
+      SURFFISH_BRAMBLE_POC_DEV_AUTOLOAD: '1',
+      SURFFISH_BRAMBLE_EXTENSION_DIR: resolve(sourceDirectory),
       ELECTRON_DISABLE_SECURITY_WARNINGS: '1'
     }
   })
@@ -344,18 +344,18 @@ try {
   capture(child.stderr, 'stderr')
   child.once('error', (error) => appOutput.push(`spawn: ${error.message}`))
 
-  await waitFor('Sockfish DevTools endpoint', async () => {
+  await waitFor('Surffish DevTools endpoint', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/json/version`)
     return response.ok
   }, 45_000)
-  const mainTarget = await waitFor('Sockfish renderer target', async () => {
+  const mainTarget = await waitFor('Surffish renderer target', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.includes('/out/renderer/index.html'))
   }, 45_000)
   mainConnection = await connectCdp(mainTarget.webSocketDebuggerUrl)
   const browserVersion = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json())
   browserConnection = await connectCdp(browserVersion.webSocketDebuggerUrl)
-  const initialState = await waitFor('Bramble extension installation in the Sockfish session', async () => {
+  const initialState = await waitFor('Bramble extension installation in the Surffish session', async () => {
     const value = await mainConnection.evaluate('window.api?.browser?.bramble?.get ? window.api.browser.bramble.get() : null')
     return value?.installed && !value.loading ? value : null
   }, 30_000)
@@ -369,7 +369,7 @@ try {
   })()`), 10_000)
   assert.ok(brambleAnchor && brambleAnchor.width > 0 && brambleAnchor.height > 0)
   await clickElementBySelector(mainConnection, '.bramble-toolbar-button')
-  const popupTarget = await waitFor('Bramble popup window opened by Sockfish IPC', async () => {
+  const popupTarget = await waitFor('Bramble popup window opened by Surffish IPC', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.endsWith('/popup.html'))
   }, 30_000)
@@ -401,15 +401,15 @@ try {
     const api = globalThis.browser ?? globalThis.chrome;
     const openOptionsPage = api?.runtime?.openOptionsPage;
     return {
-      preloadBridge: typeof globalThis.sockfishBramble?.openOptionsPage,
+      preloadBridge: typeof globalThis.surffishBramble?.openOptionsPage,
       runtimeMethod: typeof openOptionsPage,
-      wrappedForSockfish: typeof openOptionsPage === 'function' && Function.prototype.toString.call(openOptionsPage).includes('brambleBridge'),
+      wrappedForSurffish: typeof openOptionsPage === 'function' && Function.prototype.toString.call(openOptionsPage).includes('brambleBridge'),
       createButton: [...document.querySelectorAll('button')].map((button) => ({ text: button.innerText.trim(), disabled: button.disabled })).find((button) => button.text === 'Create your vault') ?? null
     };
   })()`)
   assert.equal(popupBridge.preloadBridge, 'function')
   assert.equal(popupBridge.runtimeMethod, 'function')
-  assert.equal(popupBridge.wrappedForSockfish, true)
+  assert.equal(popupBridge.wrappedForSurffish, true)
   await clickButtonByText(popupConnection, 'Create your vault')
   let setupTarget
   try {
@@ -625,8 +625,8 @@ try {
   }, 30_000)
   assert.equal(unlockedAgain.unlocked, true)
 
-  const syntheticLoginName = 'Sockfish Local Autofill Regression'
-  const syntheticUsername = `sockfish-${randomBytes(10).toString('hex')}@example.test`
+  const syntheticLoginName = 'Surffish Local Autofill Regression'
+  const syntheticUsername = `surffish-${randomBytes(10).toString('hex')}@example.test`
   const syntheticPassword = randomBytes(32).toString('base64url')
   secretsToRedact.push(syntheticUsername, syntheticPassword)
   await clickElementBySelector(popupConnection, '[aria-label="Add New"]')
@@ -678,7 +678,7 @@ try {
   }, 10_000)
   const autofillNavigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(autofillUrl)})`)
   assert.equal(autofillNavigated, true)
-  const autofillTarget = await waitFor('Sockfish browser tab loaded the local-only password form', async () => {
+  const autofillTarget = await waitFor('Surffish browser tab loaded the local-only password form', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith(autofillUrl))
   }, 20_000)
@@ -804,7 +804,7 @@ try {
 
   const navigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(rpUrl)})`)
   assert.equal(navigated, true)
-  const rpTarget = await waitFor('Sockfish browser tab loaded the local WebAuthn relying party', async () => {
+  const rpTarget = await waitFor('Surffish browser tab loaded the local WebAuthn relying party', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith(rpUrl))
   }, 20_000)
@@ -826,8 +826,8 @@ try {
     return value?.readyState === 'complete' ? value : null
   }, 20_000)
   assert.equal(rpReady.secure, true)
-  assert.equal(rpReady.createOverridden, true, `Bramble's create() override is missing on the Sockfish tab: ${JSON.stringify(rpReady)}`)
-  assert.equal(rpReady.getOverridden, true, `Bramble's get() override is missing on the Sockfish tab: ${JSON.stringify(rpReady)}`)
+  assert.equal(rpReady.createOverridden, true, `Bramble's create() override is missing on the Surffish tab: ${JSON.stringify(rpReady)}`)
+  assert.equal(rpReady.getOverridden, true, `Bramble's get() override is missing on the Surffish tab: ${JSON.stringify(rpReady)}`)
 
   await rpConnection.evaluate(`(() => {
     const toB64Url = (value) => {
@@ -844,8 +844,8 @@ try {
       try {
         const credential = await navigator.credentials.create({ publicKey: {
           challenge,
-          rp: { id: 'localhost', name: 'Sockfish Bramble POC' },
-          user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'sockfish-poc@example.test', displayName: 'Sockfish POC' },
+          rp: { id: 'localhost', name: 'Surffish Bramble POC' },
+          user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'surffish-poc@example.test', displayName: 'Surffish POC' },
           pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
           authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
           attestation: 'none',

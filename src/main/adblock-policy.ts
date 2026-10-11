@@ -87,7 +87,7 @@ export const FILTER_REFRESH_INTERVAL_MS = 8 * 60 * 60 * 1000
 export const MAX_INCLUDE_DEPTH = 2
 
 /**
- * `!#if` environment for uBO lists. Sockfish is Chromium, MV2-style (blocking
+ * `!#if` environment for uBO lists. Surffish is Chromium, MV2-style (blocking
  * webRequest), desktop, and has no HTML filtering.
  */
 export const FILTER_ENVIRONMENT: ReadonlyArray<readonly [string, boolean]> = [
@@ -175,7 +175,7 @@ export function isWebPageUrl(value: string | undefined | null): value is string 
 /** Drop Electron's `Electron/x` and app-name tokens so sites see plain Chrome. */
 export function chromeUserAgent(value: string): string {
   return value
-    .replace(/\s(?:Electron|sockfish)\/\S+/gi, '')
+    .replace(/\s(?:Electron|surffish)\/\S+/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
 }

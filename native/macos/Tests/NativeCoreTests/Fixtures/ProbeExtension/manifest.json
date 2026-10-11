@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Sockfish Native API Probe",
+  "name": "Surffish Native API Probe",
   "version": "1.0.0",
   "description": "A local fixture for testing WKWebExtensionController APIs.",
   "permissions": ["storage"],

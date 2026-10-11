@@ -15,12 +15,12 @@ for (const name of caseNames) {
   })
   const stdout = child.stdout || ''
   const stderr = child.stderr || ''
-  const reportLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SOCKFISH_EXTENSION_PROBE_REPORT='))
+  const reportLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SURFFISH_EXTENSION_PROBE_REPORT='))
   let childReport = null
 
   if (reportLine) {
     try {
-      childReport = JSON.parse(reportLine.slice('SOCKFISH_EXTENSION_PROBE_REPORT='.length))
+      childReport = JSON.parse(reportLine.slice('SURFFISH_EXTENSION_PROBE_REPORT='.length))
     } catch (error) {
       if (name === 'chromium-mv2') {
         throw new Error(`The required MV2 probe emitted malformed JSON: ${String(error)}\n${stdout}\n${stderr}`)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 
 test('keeps explicit HTTP and HTTPS URLs as URLs', () => {
   assert.equal(resolveNavigationTarget('https://example.org/path'), 'https://example.org/path')
@@ -35,7 +35,7 @@ test('rejects unsafe schemes and empty input', () => {
 })
 
 test('does not mark the renderer-owned New Tab as sleeping when it has no BrowserView', () => {
-  assert.equal(isBrowserTabSleeping(false, SOCKFISH_QUICK_LINKS_URL), false)
+  assert.equal(isBrowserTabSleeping(false, SURFFISH_QUICK_LINKS_URL), false)
   assert.equal(isBrowserTabSleeping(false, 'https://example.org/'), true)
   assert.equal(isBrowserTabSleeping(true, 'https://example.org/'), false)
 })

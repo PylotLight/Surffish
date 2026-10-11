@@ -6,7 +6,7 @@ import react from '@vitejs/plugin-react'
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url))
 const bramblePreloadPlugin = {
-  name: 'sockfish-bramble-commonjs-preload',
+  name: 'surffish-bramble-commonjs-preload',
   closeBundle() {
     const outputDirectory = resolve(projectDirectory, 'out/preload')
     mkdirSync(outputDirectory, { recursive: true })
