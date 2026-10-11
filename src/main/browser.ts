@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
+import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
@@ -746,7 +746,7 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     return true
   }
   if (key === 'w' && !shift) {
-    if (tabId) closeBrowserTab(tabId)
+    closeBrowserTabFromShortcut(tabId ?? undefined)
     return true
   }
   if ((key === '\\' || key === '|') && shift) {
@@ -814,6 +814,34 @@ export function closeBrowserTab(id: string): void {
   }
   persistOpenTabs()
   publishState()
+}
+
+let confirmingWindowClose = false
+
+/**
+ * Cmd+W: close the tab. On the last tab, ask before closing the whole window instead of
+ * silently swapping in a fresh New Tab or letting the menu close the window.
+ */
+export function closeBrowserTabFromShortcut(tabId = activeTabId ?? undefined): void {
+  if (tabs.length > 1) {
+    if (tabId) closeBrowserTab(tabId)
+    return
+  }
+  const win = browserWindow
+  if (!win || win.isDestroyed() || confirmingWindowClose) return
+  confirmingWindowClose = true
+  void dialog.showMessageBox(win, {
+    type: 'question',
+    buttons: ['Close Window', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'Close the window?',
+    detail: 'This is your last tab.'
+  }).then(({ response }) => {
+    if (response === 0 && !win.isDestroyed()) win.close()
+  }).finally(() => {
+    confirmingWindowClose = false
+  })
 }
 
 export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
