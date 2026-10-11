@@ -11,7 +11,7 @@ import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { captureLocalNewTabPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -638,7 +638,9 @@ export function attachBrowserView(win: BaseWindow): void {
     focusPage: () => {
       const contents = getTab()?.view?.webContents
       if (contents && !contents.isDestroyed()) contents.focus()
-    }
+      else focusVisibleShellPage()
+    },
+    handleShortcut: (key, shift) => handleBrowserShortcut(key, shift)
   })
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
