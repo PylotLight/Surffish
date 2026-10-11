@@ -327,8 +327,25 @@ async function run() {
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
   await clickElement(rendererViews.toolbar, '.sidebar-toggle-button')
   await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'the sidebar to open for its bottom New Tab action')
+  await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
+    const layout = document.querySelector('.browser-layout')
+    const sidebar = document.querySelector('.browser-sidebar')
+    const button = document.querySelector('.sidebar-new-tab-button')
+    if (!layout?.classList.contains('is-sidebar-visible') || !sidebar || !button) return false
+    const sidebarRect = sidebar.getBoundingClientRect()
+    const buttonRect = button.getBoundingClientRect()
+    if (Math.abs(sidebarRect.left) > 0.5 || buttonRect.top < 0 || buttonRect.bottom > innerHeight) return false
+    const hitTarget = document.elementFromPoint(buttonRect.left + buttonRect.width / 2, buttonRect.top + buttonRect.height / 2)
+    return hitTarget?.closest('.sidebar-new-tab-button') === button
+  })()`), 'the sidebar slide-in to finish with the bottom New Tab button hit-testable')
   const priorTabIds = new Set((await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')).map((tab) => tab.id))
+  await evaluate(rendererViews.sidebar, `(() => {
+    const button = document.querySelector('.sidebar-new-tab-button')
+    window.__bottomNewTabClickCount = 0
+    button?.addEventListener('click', () => { window.__bottomNewTabClickCount += 1 }, { once: true })
+  })()`)
   await clickElement(rendererViews.sidebar, '.sidebar-new-tab-button')
+  await waitFor(() => evaluate(rendererViews.sidebar, 'window.__bottomNewTabClickCount === 1'), 'the native pointer click to reach the bottom New Tab button')
   const newTabId = await waitFor(async () => {
     const tabs = await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')
     const active = tabs.find((tab) => tab.active)
