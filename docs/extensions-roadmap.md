@@ -34,7 +34,7 @@ To reproduce the fixture, run `npm run test:electron-host-bridge` (under Xvfb on
 
 ## Other compatibility checks
 
-Network ad blocking is already prototyped with Ghostery's maintained ads-only filter set through the browser session; cosmetic filtering is disabled and list updates use the configured proxy. Clear update status and per-site controls remain future work. Real uBlock builds are a separate compatibility experiment: verify background execution, request blocking, cosmetic filters, list updates, and persistence against Sockfish's exact Electron/Chromium version. Do not assume that full uBlock Origin or uBlock Origin Lite works just because Electron can load an unpacked extension ([uBlock Origin's browser capability notes](https://github.com/gorhill/uBlock/wiki/uBlock-Origin-works-best-on-Firefox)).
+Ad blocking runs uBO's own lists (network, cosmetic and scriptlet filters, early injection via a frame preload) on Ghostery's matcher; list updates use the configured proxy and per-site switches apply to all three. Real uBlock builds are a separate compatibility experiment: verify background execution, request blocking, cosmetic filters, list updates, and persistence against Sockfish's exact Electron/Chromium version. Do not assume that full uBlock Origin or uBlock Origin Lite works just because Electron can load an unpacked extension ([uBlock Origin's browser capability notes](https://github.com/gorhill/uBlock/wiki/uBlock-Origin-works-best-on-Firefox)).
 
 ## Engine choices
 

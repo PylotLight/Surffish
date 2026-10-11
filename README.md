@@ -1,6 +1,6 @@
 # Sockfish
 
-Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, a downloads manager, network-only ad blocking, an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
+Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, a downloads manager, uBlock Origin-style ad blocking (network, cosmetic, and scriptlet filters), an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
 
 ![Sockfish New Tab with a compact site-icon grid over a rotating nature photo](docs/screenshots/new-tab-page.png)
 
@@ -64,11 +64,15 @@ Replace `user@your-ssh-host` with your SSH account/host or an SSH config alias, 
 
 A successful port test confirms only that something is listening; it does not authenticate or validate the SOCKS handshake or SSH destination.
 
-## Network-only ad blocking
+## Ad blocking
 
-Sockfish uses Ghostery's Electron adapter and its maintained ads-only filter lists to block matching subresource requests in the browser session. It does not inject cosmetic CSS or scripts, hide ad placeholders, or apply tracker/annoyance lists; some empty ad spaces may remain visible. Filter lists are refreshed at startup when the cached engine is older than 24 hours. Updates use the same browser session (and configured SOCKS proxy); if an update is unavailable, Sockfish uses the last cached engine, or starts without filtering on a first launch. The Diagnostics UI was removed; the filtering engine and per-site ad-blocking choices remain. This does not block requests made by Sockfish's app UI outside the browser session.
+Sockfish runs uBlock Origin's own filter lists on Ghostery's matcher (`@ghostery/adblocker-electron`): uBlock filters (with every `!#include`d yearly file), badware, privacy, unbreak, quick-fixes and resource-abuse, plus EasyList, EasyPrivacy, Peter Lowe and URLhaus, fetched straight from uBO's uAssets rather than Ghostery's mirror. All three filter kinds are on:
 
-YouTube serves ads and wanted video chunks through shared delivery hosts. Sockfish allows requests to `googlevideo.com` delivery hosts so ad rules cannot interrupt playback; ads delivered there may remain. Network filtering therefore cannot reliably remove every in-stream ad.
+- **Network** rules block subresources; `googlevideo.com` is always allowed so YouTube playback never breaks.
+- **Cosmetic** rules hide ad slots, including generic rules matched against classes/ids/links the page adds later.
+- **Scriptlets** (`##+js(...)`) run uBO page fixes; this is what removes YouTube video and feed ads. A sandboxed frame preload (`src/preload/adblock-frame.cjs`) fetches them synchronously and runs them in the page's main world *before* the page's own scripts, in iframes too.
+
+uBO `!#if` blocks are evaluated for desktop Chromium. Lists refresh every 8 hours (uBO's quick-fixes expiry) through the browser session, so the SOCKS proxy applies; the last good engine keeps blocking if a refresh fails. Per-site "block ads" off disables all three kinds for that site. Test with `bun run test:electron-adblock` (offline) and `bun run test:electron-youtube` / `bun run test:electron-adblock-sites` (live; see [browser and proxy notes](docs/browser-and-proxy.md)).
 
 ## Scope and security
 
