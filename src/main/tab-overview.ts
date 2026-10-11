@@ -46,6 +46,7 @@ let refocusOnClose = true
 let fallbackTimer: ReturnType<typeof setTimeout> | null = null
 let ipcRegistered = false
 let lastItems: TabOverviewItem[] = []
+let selectedId: string | null = null
 
 function preloadPath(): string | null {
   const path = join(dirname(fileURLToPath(import.meta.url)), '../preload/tab-overview.cjs')
@@ -110,6 +111,10 @@ function registerIpc(): void {
     } else if (state === 'closing') {
       hideNow()
     }
+  })
+  ipcMain.on('tab-overview:selected', (event, id: unknown) => {
+    if (!fromOverview(event)) return
+    selectedId = typeof id === 'string' && lastItems.some((item) => item.id === id) ? id : null
   })
   ipcMain.on('tab-overview:activate', (event, id: unknown) => {
     if (!fromOverview(event) || typeof id !== 'string' || !host || state !== 'open') return
@@ -222,6 +227,7 @@ export async function openTabOverview(options: { interactive?: boolean } = {}): 
   const [items] = await Promise.all([host.getItems(), ready])
   if ((state as TabOverviewState) === 'closed' || overview.webContents.isDestroyed() || !host) return
   lastItems = items
+  selectedId = activeItemId() ?? null
   overview.setBounds(fullBounds())
   overview.setVisible(true)
   overview.webContents.send('tab-overview:show', {
@@ -269,6 +275,21 @@ export function settleTabOverview(open: boolean, targetId?: string, refocus = tr
 export function closeTabOverview(targetId?: string, refocusPage = true): void {
   if (state === 'closed' || state === 'closing') return
   settleTabOverview(false, targetId ?? activeItemId(), refocusPage)
+}
+
+/** The overview's webContents id, so the swipe tracker can route gestures to it. */
+export function getTabOverviewContentsId(): number | null {
+  return liveView()?.webContents.id ?? null
+}
+
+/** Tab the grid has selected (swiped to or hovered); a pinch out lands on it. */
+export function getTabOverviewSelectedId(): string | null {
+  return state === 'closed' ? null : selectedId
+}
+
+export function moveTabOverviewSelection(delta: number): void {
+  if (state !== 'open') return
+  liveView()?.webContents.send('tab-overview:move', delta)
 }
 
 export function toggleTabOverview(): void {
