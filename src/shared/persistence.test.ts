@@ -9,6 +9,7 @@ import {
   DEFAULT_NEW_TAB_PREFERENCES,
   MAX_WORLD_CLOCKS,
   normalizeBrowserSession,
+  normalizeFaviconUrl,
   normalizePinnedSites,
   parseBrowserProxySettings,
   parseBrowserPreferences,
@@ -87,6 +88,23 @@ test('normalizes pins and rejects unsafe, credential-bearing, duplicate, or exce
   assert.equal(pins.length, MAX_PINNED_SITES)
   assert.deepEqual(pins[0], { title: 'GitHub', url: 'https://github.com/' })
   assert.ok(pins.every((pin) => pin.url.startsWith('https://')))
+})
+
+test('persists only bounded, credential-free HTTP(S) favicon URLs on pins', () => {
+  const pins = normalizePinnedSites([
+    { title: 'Example', url: 'https://example.test/', faviconUrl: 'https://assets.example.test/icon.svg' },
+    { title: 'Unsafe icon', url: 'https://unsafe.test/', faviconUrl: 'javascript:alert(1)' },
+    { title: 'Credential icon', url: 'https://credentials.test/', faviconUrl: 'https://user:pass@assets.example.test/icon.svg' },
+    { title: 'Data icon', url: 'https://data.test/', faviconUrl: 'data:image/png;base64,AAAA' }
+  ])
+  assert.deepEqual(pins, [
+    { title: 'Example', url: 'https://example.test/', faviconUrl: 'https://assets.example.test/icon.svg' },
+    { title: 'Unsafe icon', url: 'https://unsafe.test/' },
+    { title: 'Credential icon', url: 'https://credentials.test/' },
+    { title: 'Data icon', url: 'https://data.test/' }
+  ])
+  assert.equal(normalizeFaviconUrl(`https://${'a'.repeat(4_100)}.test/icon.png`), null)
+  assert.equal(normalizeFaviconUrl('http://assets.example.test/icon.ico'), 'http://assets.example.test/icon.ico')
 })
 
 test('accepts only HTTP(S) site settings and defaults each site to blocking and denying permissions', () => {

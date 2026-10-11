@@ -56,6 +56,7 @@ export interface NewTabWeatherSnapshot {
 export interface PinnedSite {
   title: string
   url: string
+  faviconUrl?: string
 }
 
 /** Effective per-origin privacy choices; permissions are denied unless explicitly allowed. */
@@ -99,6 +100,7 @@ export interface BrowsingHistoryEntry {
   url: string
   title: string
   visitedAt: number
+  faviconUrl?: string
 }
 export interface BrowserBounds {
   x: number
