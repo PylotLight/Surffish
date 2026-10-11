@@ -34,16 +34,6 @@ export interface BrowserSiteSettings {
   allowNotifications: boolean
 }
 
-export interface BrowserRuntimeDiagnostics {
-  electronVersion: string
-  chromiumVersion: string
-  userAgent: string
-  pageUrl: string | null
-  pageSecureContext: boolean | null
-  pageHasCredentialsApi: boolean | null
-  pageHasWebAuthnApi: boolean | null
-}
-
 export interface BrowserProxySettings {
   enabled: boolean
   host: string

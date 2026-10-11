@@ -9,7 +9,6 @@ import {
   closeBrowserTab,
   getBrowserState,
   getBrowserTabs,
-  getBrowserRuntimeDiagnostics,
   navigateBrowser,
   newBrowserTab,
   setBrowserTabSleepMinutes,
@@ -20,6 +19,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
+import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
@@ -134,9 +134,33 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return saveBrowserSiteSettings(origin, settings)
   })
-  ipcMain.handle('browser:runtime:get', async (event) => {
+  ipcMain.handle('browser:downloads:get', (event) => {
     assertMainRenderer(event)
-    return getBrowserRuntimeDiagnostics()
+    return getDownloadHistory()
+  })
+  ipcMain.handle('browser:downloads:pause', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && pauseDownload(id)
+  })
+  ipcMain.handle('browser:downloads:resume', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && resumeDownload(id)
+  })
+  ipcMain.handle('browser:downloads:cancel', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && cancelDownload(id)
+  })
+  ipcMain.handle('browser:downloads:remove', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && removeDownload(id)
+  })
+  ipcMain.handle('browser:downloads:open', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' ? openDownload(id) : false
+  })
+  ipcMain.handle('browser:downloads:reveal', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && revealDownload(id)
   })
   ipcMain.handle('app:quit', (event) => {
     assertMainRenderer(event)
@@ -198,16 +222,6 @@ export function registerIpc(): void {
   ipcMain.handle('browser:proxy:test', (event, settings: unknown) => {
     assertMainRenderer(event)
     return testLocalProxy(settings)
-  })
-  ipcMain.handle('browser:adblock:get', async (event) => {
-    assertMainRenderer(event)
-    const { getAdblockDiagnostics } = await import('./adblock')
-    return getAdblockDiagnostics()
-  })
-  ipcMain.handle('browser:adblock:refresh', async (event) => {
-    assertMainRenderer(event)
-    const { refreshNetworkAdblock } = await import('./adblock')
-    return refreshNetworkAdblock()
   })
   ipcMain.handle('browser:network:get', (event) => {
     assertMainRenderer(event)

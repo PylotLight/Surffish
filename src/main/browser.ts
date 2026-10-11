@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
-import type { BrowserBounds, BrowserRuntimeDiagnostics, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
@@ -14,6 +14,7 @@ interface BrowserTab {
   id: string
   view: WebContentsView | null
   error: string | null
+  downloadStartedForCurrentLoad: boolean
   lastUrl: string
   pendingUrl: string
   inactiveSince: number | null
@@ -158,7 +159,21 @@ function ensureTabLoaded(tab: BrowserTab): void {
   const contents = view.webContents
   void contents.loadURL(target).catch((error: unknown) => {
     if (tab.view?.webContents !== contents) return
-    tab.error = error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.message : String(error)
+    if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
+      return new Promise<void>((resolve) => setTimeout(resolve, 100)).then(() => {
+        if (tab.view?.webContents !== contents) return
+        if (tab.downloadStartedForCurrentLoad) tab.error = null
+        else tab.error = message
+        publishState()
+      })
+    }
+    if (tab.downloadStartedForCurrentLoad) {
+      tab.error = null
+      publishState()
+      return
+    }
+    tab.error = message
     publishState()
   })
 }
@@ -268,6 +283,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame || !/^https?:\/\//i.test(url)) return
+    tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
     persistOpenTabs()
   })
@@ -296,6 +312,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
+    if (tab.downloadStartedForCurrentLoad) {
+      tab.error = null
+      publishState()
+      return
+    }
     tab.error = `${errorDescription} (${errorCode})`
     publishState()
   })
@@ -325,6 +346,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     id: randomUUID(),
     view: null,
     error: null,
+    downloadStartedForCurrentLoad: false,
     lastUrl: target,
     pendingUrl: target,
     inactiveSince: null,
@@ -420,32 +442,13 @@ export function getBrowserTabUrlByWebContentsId(webContentsId: number): string |
   return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null
 }
 
-export async function getBrowserRuntimeDiagnostics(): Promise<BrowserRuntimeDiagnostics> {
-  const contents = getTab()?.view?.webContents
-  let page: Pick<BrowserRuntimeDiagnostics, 'pageUrl' | 'pageSecureContext' | 'pageHasCredentialsApi' | 'pageHasWebAuthnApi'> = {
-    pageUrl: null,
-    pageSecureContext: null,
-    pageHasCredentialsApi: null,
-    pageHasWebAuthnApi: null
-  }
-  if (contents && !contents.isDestroyed()) {
-    try {
-      const probe = await contents.executeJavaScript(`(() => ({
-        pageUrl: location.href,
-        pageSecureContext: isSecureContext,
-        pageHasCredentialsApi: typeof navigator.credentials !== 'undefined',
-        pageHasWebAuthnApi: typeof PublicKeyCredential !== 'undefined' && typeof navigator.credentials?.create === 'function' && typeof navigator.credentials?.get === 'function'
-      }))()`)
-      if (probe && typeof probe === 'object') page = { ...page, ...probe }
-    } catch {
-      // Navigating or an unresponsive page can make this read-only probe unavailable.
-    }
-  }
-  return {
-    electronVersion: process.versions.electron ?? 'unknown',
-    chromiumVersion: process.versions.chrome ?? 'unknown',
-    userAgent: contents && !contents.isDestroyed() ? contents.getUserAgent() : '',
-    ...page
+export function markBrowserDownloadStarted(webContentsId: number): void {
+  const tab = tabs.find((candidate) => candidate.view?.webContents.id === webContentsId)
+  if (!tab) return
+  tab.downloadStartedForCurrentLoad = true
+  if (tab.error !== null) {
+    tab.error = null
+    publishState()
   }
 }
 
@@ -568,7 +571,16 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     await contents.loadURL(url)
     return true
   } catch (error) {
-    tab.error = error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.message : String(error)
+    if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (tab.downloadStartedForCurrentLoad) {
+      tab.error = null
+      publishState()
+      return true
+    }
+    tab.error = message
     publishState()
     return false
   }
