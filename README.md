@@ -7,12 +7,13 @@ Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical g
 ## Quick start
 
 ```bash
-bun install
 bun run dev
 bun run typecheck
 bun run test
 bun run build
 ```
+
+`bun run dev` runs `bun install` on the first start and whenever `package.json`, `bun.lock`, or `.bun-version` changes. Run `bun install` manually when you want to refresh dependencies without starting the app.
 
 ## Address bar and new tabs
 

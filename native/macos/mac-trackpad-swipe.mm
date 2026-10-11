@@ -355,7 +355,7 @@ napi_value Start(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
-napi_value Stop(napi_env env, napi_callback_info info) {
+napi_value Stop(napi_env env, napi_callback_info) {
   if (g_cleanupHook) {
     napi_remove_env_cleanup_hook(env, CleanupEnvironment, nullptr);
     g_cleanupHook = false;
@@ -365,7 +365,7 @@ napi_value Stop(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
-napi_value IsSwipeTrackingEnabled(napi_env env, napi_callback_info info) {
+napi_value IsSwipeTrackingEnabled(napi_env env, napi_callback_info) {
   napi_value result = nullptr;
   napi_get_boolean(env, NSEvent.swipeTrackingFromScrollEventsEnabled, &result);
   return result;
