@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('tabOverview', {
   onProgress: (callback) => subscribe('tab-overview:progress', callback),
   onSettle: (callback) => subscribe('tab-overview:settle', callback),
   onItems: (callback) => subscribe('tab-overview:items', callback),
+  onMove: (callback) => subscribe('tab-overview:move', callback),
+  selected: (id) => ipcRenderer.send('tab-overview:selected', id ? String(id) : null),
   ready: () => ipcRenderer.send('tab-overview:ready'),
   settled: (open) => ipcRenderer.send('tab-overview:settled', Boolean(open)),
   activate: (id) => ipcRenderer.send('tab-overview:activate', String(id)),
