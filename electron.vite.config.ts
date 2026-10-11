@@ -10,6 +10,7 @@ const bramblePreloadPlugin = {
   closeBundle() {
     const outputDirectory = resolve(projectDirectory, 'out/preload')
     mkdirSync(outputDirectory, { recursive: true })
+    rmSync(join(outputDirectory, 'index.js'), { force: true })
     rmSync(join(outputDirectory, 'bramble-poc.js'), { force: true })
     copyFileSync(
       resolve(projectDirectory, 'src/preload/bramble-poc.cjs'),
@@ -52,6 +53,7 @@ export default defineConfig({
     build: {
       rollupOptions: {
         external: ['electron'],
+        output: { format: 'cjs', entryFileNames: '[name].cjs' },
         input: {
           index: 'src/preload/index.ts'
         }

@@ -102,6 +102,9 @@ const api = {
         return () => ipcRenderer.removeListener('browser:tabs', listener)
       }
     },
+    session: {
+      clear: (): Promise<boolean> => ipcRenderer.invoke('browser:session:clear')
+    },
     history: {
       get: (): Promise<BrowsingHistoryEntry[]> => ipcRenderer.invoke('browser:history:get'),
       clear: (): Promise<void> => ipcRenderer.invoke('browser:history:clear'),

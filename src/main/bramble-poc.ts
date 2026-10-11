@@ -56,6 +56,10 @@ let popupWindow: BrowserWindow | null = null
 let setupWindow: BrowserWindow | null = null
 let offscreenWindow: BrowserWindow | null = null
 
+function fetchBrambleRelease(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  return getBrowserSession().fetch(input instanceof URL ? input.toString() : input, init)
+}
+
 function resolveBramblePreload(): string {
   const base = join(mainDirectory, '../preload/bramble-poc')
   if (existsSync(`${base}.cjs`)) return `${base}.cjs`
@@ -593,7 +597,7 @@ export async function checkForBrambleUpdates(): Promise<BrambleExtensionState> {
   if (state.loading) return getBramblePocState()
   updateState({ loading: true, error: null, notice: null })
   try {
-    const release = await fetchLatestBrambleFirefoxRelease()
+    const release = await fetchLatestBrambleFirefoxRelease(fetchBrambleRelease)
     const updateAvailable = state.installed && state.version !== null && compareBrambleVersions(release.version, state.version) > 0
     updateState({
       loading: false,
@@ -616,7 +620,7 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
   let temporaryRoot: string | null = null
   let writtenArchivePath: string | null = null
   try {
-    const release = await fetchLatestBrambleFirefoxRelease()
+    const release = await fetchLatestBrambleFirefoxRelease(fetchBrambleRelease)
     const updateAvailable = state.installed && state.version !== null && compareBrambleVersions(release.version, state.version) > 0
     updateState({ latestVersion: release.version, updateAvailable })
     if (state.installed && state.version === release.version) {
@@ -624,7 +628,7 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
       return getBramblePocState()
     }
 
-    const verified = await downloadVerifiedBrambleFirefoxRelease(fetch, release)
+    const verified = await downloadVerifiedBrambleFirefoxRelease(fetchBrambleRelease, release)
     const dataDirectory = brambleDirectory(BRAMBLE_DATA_DIRECTORY)
     mkdirSync(dataDirectory, { recursive: true })
     temporaryRoot = mkdtempSync(join(dataDirectory, 'install-'))

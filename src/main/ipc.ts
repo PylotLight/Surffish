@@ -37,6 +37,7 @@ import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, get
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
 import {
+  clearSavedBrowserSession,
   getBrowserNewTabPage,
   getBrowserPinnedSites,
   getBrowserSiteSettings,
@@ -53,7 +54,7 @@ import {
 } from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
-  if (!isMainWindowRenderer(event.sender)) {
+  if (!isMainWindowRenderer(event.sender, event.senderFrame)) {
     throw new Error('This browser operation is available only to the app window.')
   }
 }
@@ -112,6 +113,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:state', (event) => {
     assertMainRenderer(event)
     return getBrowserState()
+  })
+  ipcMain.handle('browser:session:clear', (event) => {
+    assertMainRenderer(event)
+    return clearSavedBrowserSession()
   })
   ipcMain.handle('browser:tabs:get', (event) => {
     assertMainRenderer(event)

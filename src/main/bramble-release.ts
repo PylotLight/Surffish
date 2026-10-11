@@ -50,6 +50,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+type ReleaseFetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+
 export function compareBrambleVersions(left: string, right: string): number {
   const a = left.split('.').map(BigInt)
   const b = right.split('.').map(BigInt)
@@ -127,7 +129,7 @@ export function selectLatestBrambleFirefoxRelease(input: unknown): BrambleFirefo
   }
 }
 
-async function fetchJson(fetcher: typeof fetch): Promise<unknown> {
+async function fetchJson(fetcher: ReleaseFetcher): Promise<unknown> {
   const response = await fetcher(RELEASES_API, {
     headers: { Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' },
     redirect: 'error',
@@ -137,7 +139,7 @@ async function fetchJson(fetcher: typeof fetch): Promise<unknown> {
   return response.json() as Promise<unknown>
 }
 
-export async function fetchLatestBrambleFirefoxRelease(fetcher: typeof fetch = fetch): Promise<BrambleFirefoxRelease> {
+export async function fetchLatestBrambleFirefoxRelease(fetcher: ReleaseFetcher = fetch): Promise<BrambleFirefoxRelease> {
   return selectLatestBrambleFirefoxRelease(await fetchJson(fetcher))
 }
 
@@ -167,7 +169,7 @@ async function readBoundedResponse(response: Response, limit: number, expectedSi
   return Buffer.concat(chunks, total)
 }
 
-async function downloadReleaseAsset(url: string, limit: number, expectedSize: number, label: string, fetcher: typeof fetch): Promise<Buffer> {
+async function downloadReleaseAsset(url: string, limit: number, expectedSize: number, label: string, fetcher: ReleaseFetcher): Promise<Buffer> {
   let current = new URL(url)
   for (let hop = 0; hop < 4; hop += 1) {
     if (current.protocol !== 'https:' || !ALLOWED_ASSET_HOSTS.has(current.hostname) || current.port || current.username || current.password) {
@@ -198,7 +200,7 @@ function parseChecksumFile(contents: Buffer, filename: string): string {
 }
 
 export async function downloadVerifiedBrambleFirefoxRelease(
-  fetcher: typeof fetch = fetch,
+  fetcher: ReleaseFetcher = fetch,
   selectedRelease?: BrambleFirefoxRelease
 ): Promise<VerifiedBrambleFirefoxRelease> {
   const release = selectedRelease ?? await fetchLatestBrambleFirefoxRelease(fetcher)

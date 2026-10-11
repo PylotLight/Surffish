@@ -348,6 +348,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [networkBodyLoading, setNetworkBodyLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [proxyMessage, setProxyMessage] = useState('')
+  const [sessionMessage, setSessionMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
   function updateChromeState(patch: Partial<BrowserChromeState>): void {
@@ -906,6 +907,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }
 
+  async function clearSavedSession(): Promise<void> {
+    if (!window.confirm('Clear saved tabs for the next launch? Current tabs will remain open, but will not be saved again until Surffish restarts.')) return
+    try {
+      const cleared = await window.api.browser.session.clear()
+      if (!cleared) throw new Error('Could not clear the saved session file. Check profile permissions and try again.')
+      setSessionMessage('Saved tabs cleared. Current tabs remain open; session saving resumes after the next restart.')
+    } catch (error) {
+      setSessionMessage(error instanceof Error ? error.message : 'Could not clear saved tabs.')
+    }
+  }
   async function testProxy(): Promise<void> {
     setBusy(true)
     setProxyMessage('Checking the local SOCKS5 port…')
@@ -1474,6 +1485,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </label>
               <p className="settings-help">New tabs load immediately, including tabs opened in the background. Restored tabs may defer loading until selected. Loaded tabs keep playing media when you switch away, and audible tabs stay awake while playing. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
+                </section>
+                <section className="settings-section" aria-label="Saved session privacy">
+                  <div className="settings-section-heading"><div><strong>Saved tabs</strong><span className="settings-status">Restore on next launch</span></div></div>
+                  <p className="settings-help">Saved tab URLs are stored locally in your Surffish profile and are not separately encrypted. URL fragments and common credential-like query parameters (such as tokens, codes, passwords, and keys) are removed before saving; ordinary query parameters, such as searches and filters, are preserved.</p>
+                  <div className="settings-actions">
+                    <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear saved session</button>
+                  </div>
+                  {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </section>
                 <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
                   <div className="settings-section-heading">

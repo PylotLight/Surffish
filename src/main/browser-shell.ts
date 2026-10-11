@@ -1,6 +1,7 @@
-import type { BaseWindow, WebContents, WebContentsView } from 'electron'
+import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'electron'
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
+import { isAuthorizedShellIpcSender } from './renderer-security'
 
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
@@ -24,7 +25,7 @@ export interface BrowserShellViews {
 
 let mainWindow: BaseWindow | null = null
 let shellViews: BrowserShellViews | null = null
-let shellRenderers = new Set<WebContents>()
+let shellRenderers = new Map<WebContents, string>()
 let chromeState: BrowserChromeState = { ...DEFAULT_CHROME_STATE }
 let toolbarMetrics: BrowserChromeMetrics = { toolbarHeight: 45, toolbarExtent: 45 }
 let activePageIsLocalNewTab = true
@@ -105,11 +106,20 @@ function applyShellLayout(): void {
   syncBrowserPageBounds?.(width, height, overlayMode)
 }
 
-export function attachBrowserShell(window: BaseWindow, views: BrowserShellViews, syncPageBounds?: BrowserShellLayoutSync): void {
+export function attachBrowserShell(
+  window: BaseWindow,
+  views: BrowserShellViews,
+  expectedRendererUrls: Record<'content' | 'toolbar' | 'sidebar', string>,
+  syncPageBounds?: BrowserShellLayoutSync
+): void {
   mainWindow = window
   shellViews = views
   syncBrowserPageBounds = syncPageBounds ?? null
-  shellRenderers = new Set([views.content.webContents, views.toolbar.webContents, views.sidebar.webContents])
+  shellRenderers = new Map([
+    [views.content.webContents, expectedRendererUrls.content],
+    [views.toolbar.webContents, expectedRendererUrls.toolbar],
+    [views.sidebar.webContents, expectedRendererUrls.sidebar]
+  ])
   toolbarMetrics = {
     toolbarHeight: process.platform === 'darwin' ? 50 : 45,
     toolbarExtent: process.platform === 'darwin' ? 50 : 45
@@ -143,11 +153,18 @@ export function detachBrowserShell(): void {
 }
 
 export function getMainWindowRenderers(): WebContents[] {
-  return [...shellRenderers].filter((contents) => !contents.isDestroyed())
+  return [...shellRenderers.keys()].filter((contents) => !contents.isDestroyed())
 }
 
-export function isMainWindowRenderer(contents: WebContents): boolean {
-  return shellRenderers.has(contents) && !contents.isDestroyed()
+export function isMainWindowRenderer(contents: WebContents, senderFrame: WebFrameMain | null): boolean {
+  const expectedDocumentUrl = shellRenderers.get(contents)
+  if (!expectedDocumentUrl || contents.isDestroyed()) return false
+  return isAuthorizedShellIpcSender({
+    registered: true,
+    senderIsMainFrame: senderFrame === contents.mainFrame,
+    currentDocumentUrl: contents.getURL(),
+    expectedDocumentUrl
+  })
 }
 
 export function isToolbarRenderer(contents: WebContents): boolean {
