@@ -13,6 +13,8 @@ export interface TabOverviewItem {
   active: boolean
   pinned: boolean
   sleeping: boolean
+  /** The local New Tab page rather than a site. */
+  newTab: boolean
   thumbnail: string | null
 }
 
