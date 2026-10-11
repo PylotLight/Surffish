@@ -4,6 +4,9 @@ import type {
   BramblePopupAnchor,
   BrambleExtensionState,
   BrowserBounds,
+  BrowserChromeMetrics,
+  BrowserChromeState,
+  BrowserPreferencesSnapshot,
   BrowserProxySettings,
   BrowserProxyTestResult,
   BrowserState,
@@ -26,6 +29,24 @@ const api = {
   browser: {
     quit: (): Promise<void> => ipcRenderer.invoke('app:quit'),
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
+    preferences: {
+      get: (): Promise<BrowserPreferencesSnapshot> => ipcRenderer.invoke('browser:preferences:get'),
+      onChange: (callback: (preferences: BrowserPreferencesSnapshot) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, preferences: BrowserPreferencesSnapshot): void => callback(preferences)
+        ipcRenderer.on('browser:preferences-changed', listener)
+        return () => ipcRenderer.removeListener('browser:preferences-changed', listener)
+      }
+    },
+    chrome: {
+      get: (): Promise<BrowserChromeState> => ipcRenderer.invoke('browser:chrome:get'),
+      set: (state: Partial<BrowserChromeState>): Promise<BrowserChromeState> => ipcRenderer.invoke('browser:chrome:set', state),
+      reportMetrics: (metrics: BrowserChromeMetrics): Promise<BrowserChromeMetrics> => ipcRenderer.invoke('browser:chrome:metrics', metrics),
+      onChange: (callback: (state: BrowserChromeState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: BrowserChromeState): void => callback(state)
+        ipcRenderer.on('browser:chrome-state', listener)
+        return () => ipcRenderer.removeListener('browser:chrome-state', listener)
+      }
+    },
     navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
     setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
     getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),

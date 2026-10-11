@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
+import { WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
@@ -8,6 +8,7 @@ import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserNewTabPage, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
+import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -22,7 +23,7 @@ interface BrowserTab {
 }
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
-let browserWindow: BrowserWindow | null = null
+let browserWindow: BaseWindow | null = null
 let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
@@ -78,12 +79,14 @@ function getTabSummaries(): BrowserTabSummary[] {
 
 function publishTabs(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
-  browserWindow.webContents.send('browser:tabs', getTabSummaries())
+  sendToMainWindowRenderers('browser:tabs', getTabSummaries())
 }
 
 function publishState(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
-  browserWindow.webContents.send('browser:state', getState())
+  const state = getState()
+  setBrowserPageIsLocalNewTab(state.url === SOCKFISH_QUICK_LINKS_URL)
+  sendToMainWindowRenderers('browser:state', state)
   publishTabs()
 }
 
@@ -199,11 +202,12 @@ function activateTabInternal(id: string): boolean {
 function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
   const isBrowserPage = tabs.some((tab) => tab.view?.webContents === contents)
+  const origin = isBrowserPage ? { x: browserBounds.x, y: browserBounds.y } : getMainRendererOrigin(contents) ?? { x: 0, y: 0 }
   showBrowserContextMenu(event, contents, params, {
     window: browserWindow,
     pageActions: isBrowserPage,
-    offsetX: isBrowserPage ? browserBounds.x : 0,
-    offsetY: isBrowserPage ? browserBounds.y : 0,
+    offsetX: origin.x,
+    offsetY: origin.y,
     searchEngine: selectedSearchEngine,
     openInNewTab: (url) => {
       const id = createTab(url, selectedSearchEngine)
@@ -229,12 +233,16 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     }
   })
   tab.view = view
-  browserWindow.contentView.addChildView(view)
+  // Site tabs are always below the local toolbar, sidebar, and full-app surfaces.
+  browserWindow.contentView.addChildView(view, 0)
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
   attachNetworkInspector(tab.id, contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
+  contents.on('before-mouse-event', (_event, mouseEvent) => {
+    if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
+  })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   if (process.platform === 'darwin') {
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
@@ -258,7 +266,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     const key = inputEvent.key.toLowerCase()
     if (key === 'l' && !inputEvent.shift) {
       event.preventDefault()
-      browserWindow?.webContents.send('browser:focus-address')
+      sendFocusAddressToVisibleRenderer()
     } else if (key === 't' && !inputEvent.shift) {
       event.preventDefault()
       newBrowserTab()
@@ -294,7 +302,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
     publishState()
-    browserWindow?.webContents.send('browser:history-changed')
+    sendToMainWindowRenderers('browser:history-changed')
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame) return
@@ -302,13 +310,13 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
     publishState()
-    browserWindow?.webContents.send('browser:history-changed')
+    sendToMainWindowRenderers('browser:history-changed')
   })
   contents.on('page-title-updated', (_event, title) => {
     if (!isCurrentContents()) return
     updateLatestVisitTitle(contents.getURL(), title)
     publishState()
-    browserWindow?.webContents.send('browser:history-changed')
+    sendToMainWindowRenderers('browser:history-changed')
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
@@ -370,7 +378,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   return tab.id
 }
 
-export function attachBrowserView(win: BrowserWindow): void {
+export function attachBrowserView(win: BaseWindow): void {
   for (const tab of [...tabs]) {
     cancelSleepTimer(tab)
     disposeTabView(tab)
@@ -380,7 +388,9 @@ export function attachBrowserView(win: BrowserWindow): void {
   browserWindow = win
   browserBounds = { x: 0, y: 0, width: 0, height: 0 }
   tabSleepMinutes = getBrowserTabSleepMinutes()
-  win.webContents.on('context-menu', (event, params) => showTabContextMenu(win.webContents, event, params))
+  for (const contents of getMainWindowRenderers()) {
+    contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  }
   if (process.platform === 'darwin') {
     win.on('swipe', (_event, direction) => {
       const contents = getTab()?.view?.webContents

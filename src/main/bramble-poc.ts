@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, screen } from 'electron'
+import { app, BrowserWindow, dialog, screen, type BaseWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -18,6 +18,7 @@ import {
   sha256Hex
 } from './bramble-release'
 import { getMainWindow } from './window'
+import { sendToMainWindowRenderers } from './browser-shell'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
 const BRAMBLE_DATA_DIRECTORY = 'bramble-firefox-poc'
@@ -61,7 +62,7 @@ function resolveBramblePreload(): string {
   return `${base}.mjs`
 }
 
-function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BrowserWindow | undefined): { x: number; y: number; width: number; height: number } {
+function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BaseWindow | undefined): { x: number; y: number; width: number; height: number } {
   const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
   const area = display.workArea
   const content = owner?.getContentBounds() ?? area
@@ -98,19 +99,16 @@ async function fitOptionsWindowToDocument(win: BrowserWindow): Promise<void> {
   win.setContentSize(width, height)
 }
 
-function mainWindow(): BrowserWindow | undefined {
+function mainWindow(): BaseWindow | undefined {
   const win = getMainWindow()
   return win && !win.isDestroyed() ? win : undefined
 }
 
 function publishState(): void {
-  const win = mainWindow()
-  if (win) {
-    try {
-      win.webContents.send('browser:bramble:changed', { ...state })
-    } catch {
-      // A renderer closing during an extension update must not break the main process.
-    }
+  try {
+    sendToMainWindowRenderers('browser:bramble:changed', { ...state })
+  } catch {
+    // A renderer closing during an extension update must not break the main process.
   }
 }
 

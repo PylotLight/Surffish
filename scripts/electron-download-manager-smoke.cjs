@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
+const { execFileSync } = require('node:child_process')
 const { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { basename, join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BrowserWindow, session } = require('electron')
+const { app, BaseWindow, session } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const NETWORK_ONLY_CONFIG = {
@@ -22,6 +23,7 @@ const screenshotDirectory = process.env.SOCKFISH_SCREENSHOT_DIR
 const totalBytes = 2 * 1024 * 1024
 const servers = []
 let mainWindow
+let rendererViews = {}
 let evaluationId = 0
 
 function delay(milliseconds) {
@@ -112,11 +114,24 @@ async function listen(server) {
   return `http://127.0.0.1:${address.port}`
 }
 
-async function evaluate(expression) {
+function surfaceFor(view) {
+  if (!view?.webContents || view.webContents.isDestroyed()) return null
+  try { return new URL(view.webContents.getURL()).searchParams.get('surface') } catch { return null }
+}
+
+function activeUiView() {
   assert.ok(mainWindow && !mainWindow.isDestroyed(), 'Sockfish window must be ready')
+  for (const view of [rendererViews.toolbar, rendererViews.content, rendererViews.sidebar]) {
+    if (view?.getVisible() && !view.webContents.isDestroyed()) return view
+  }
+  throw new Error('No trusted Sockfish renderer surface is visible.')
+}
+
+async function evaluateIn(view, expression) {
+  assert.ok(view?.webContents && !view.webContents.isDestroyed(), 'Sockfish renderer surface must be ready')
   const key = `__sockfishSmokeResult${++evaluationId}`
   const keyLiteral = JSON.stringify(key)
-  await mainWindow.webContents.executeJavaScript(`(() => {
+  await view.webContents.executeJavaScript(`(() => {
     window[${keyLiteral}] = { ready: false }
     Promise.resolve().then(() => (${expression})).then(
       (value) => { window[${keyLiteral}] = { ready: true, json: JSON.stringify(value) } },
@@ -125,13 +140,17 @@ async function evaluate(expression) {
     return true
   })()`)
   const resultText = await waitFor(
-    () => mainWindow.webContents.executeJavaScript(`window[${keyLiteral}]?.ready ? JSON.stringify(window[${keyLiteral}]) : null`),
+    () => view.webContents.executeJavaScript(`window[${keyLiteral}]?.ready ? JSON.stringify(window[${keyLiteral}]) : null`),
     'the renderer-side IPC result',
     12000
   )
   const result = JSON.parse(resultText)
   if (result.error) throw new Error(result.error)
   return result.json === undefined ? undefined : JSON.parse(result.json)
+}
+
+async function evaluate(expression) {
+  return evaluateIn(activeUiView(), expression)
 }
 
 async function getHistory() {
@@ -166,14 +185,23 @@ async function navigate(url) {
 }
 
 async function clickSelector(selector) {
-  return evaluate(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!element) return false; element.click(); return true; })()`)
+  const selectorLiteral = JSON.stringify(selector)
+  for (const view of [rendererViews.sidebar, rendererViews.toolbar, rendererViews.content]) {
+    if (!view?.getVisible() || view.webContents.isDestroyed()) continue
+    const visible = await view.webContents.executeJavaScript(`(() => { const element = document.querySelector(${selectorLiteral}); if (!element) return false; const rect = element.getBoundingClientRect(); const style = getComputedStyle(element); return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'; })()`)
+    if (visible) return evaluateIn(view, `(() => { const element = document.querySelector(${selectorLiteral}); if (!element) return false; element.click(); return true; })()`)
+  }
+  return false
 }
 
 async function captureScreenshot(name) {
   if (!screenshotDirectory) return
   mkdirSync(screenshotDirectory, { recursive: true })
-  const image = await mainWindow.webContents.capturePage()
-  writeFileSync(join(screenshotDirectory, name), image.toPNG())
+  assert.ok(process.env.DISPLAY, 'DISPLAY is required to capture the composed BaseWindow surfaces')
+  execFileSync('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', '1280x800',
+    '-i', `${process.env.DISPLAY}.0`, '-frames:v', '1', '-y', join(screenshotDirectory, name)
+  ])
 }
 
 async function waitForHistory(predicate, description) {
@@ -196,9 +224,9 @@ async function seedNewTabDemo(siteBases) {
       const state = await evaluate('window.api.browser.state()')
       return state.url === url ? state : null
     }, `synthetic page ${new URL(url).host} to navigate`)
-    await waitFor(async () => evaluate('Boolean(document.querySelector("[aria-label=\\\"Pin current site\\\"]") && !document.querySelector("[aria-label=\\\"Pin current site\\\"]").disabled)'), 'the Pin current site control')
-    assert.equal(await clickSelector('[aria-label="Pin current site"]'), true, 'the current synthetic site should be pinnable')
-    await waitFor(async () => evaluate(`(document.querySelector(".sidebar-pinned-list")?.children.length ?? 0) >= ${index + 1}`), `synthetic pin ${index + 1}`)
+    await waitFor(async () => evaluateIn(rendererViews.sidebar, 'Boolean(document.querySelector("[aria-label=\\\"Pin current site\\\"]") && !document.querySelector("[aria-label=\\\"Pin current site\\\"]").disabled)'), 'the Pin current site control in the sidebar renderer')
+    assert.equal(await evaluateIn(rendererViews.sidebar, '(() => { const button = document.querySelector("[aria-label=\\\"Pin current site\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()'), true, 'the current synthetic site should be pinnable')
+    await waitFor(async () => evaluateIn(rendererViews.sidebar, `document.querySelectorAll(".sidebar-pinned-list .pinned-site-icon-button").length >= ${index + 1}`), `synthetic pin ${index + 1}`)
   }
   for (const url of [`${siteBases[2]}/`, `${siteBases[3]}/`]) {
     await navigate(url)
@@ -214,10 +242,16 @@ async function seedNewTabDemo(siteBases) {
   const newTabId = await evaluate('window.api.browser.tabs.create()')
   await delay(300)
   const fixtureStatus = await evaluate('Promise.all([window.api.browser.state(), window.api.browser.tabs.get(), window.api.browser.pinnedSites.get()]).then(([state, tabs, pins]) => ({ page: state.url, error: state.error, activeTabs: tabs.filter((tab) => tab.active).map((tab) => tab.url), pins: pins.map((pin) => ({ title: pin.title, origin: new URL(pin.url).origin })), localNewTab: Boolean(document.querySelector(".new-tab-page")), iconGrid: Boolean(document.querySelector(".new-tab-icon-grid")), emptyMessage: document.querySelector(".new-tab-empty")?.textContent ?? null }))')
+  const newTabTileLabels = await waitFor(async () => {
+    const labels = await evaluateIn(rendererViews.content, 'Array.from(document.querySelectorAll(".new-tab-icon-grid .new-tab-icon-tile")).map((tile) => tile.getAttribute("aria-label"))')
+    return labels.some((label) => label?.startsWith('Open Alpha synthetic site')) && labels.some((label) => label?.startsWith('Open Beta synthetic site')) ? labels : null
+  }, 'pinned sites to synchronize into the separate New Tab renderer')
   assert.ok(newTabId, 'the app should create a synthetic Quick Links tab')
   assert.equal(fixtureStatus.localNewTab, true)
   assert.equal(fixtureStatus.iconGrid, true)
   assert.equal(fixtureStatus.pins.length, 2)
+  assert.ok(newTabTileLabels.some((label) => label?.startsWith('Open Alpha synthetic site')))
+  assert.ok(newTabTileLabels.some((label) => label?.startsWith('Open Beta synthetic site')))
   await waitFor(async () => evaluate('Boolean(document.querySelector(".new-tab-page"))'), 'the local New Tab page')
   await waitFor(async () => evaluate('Boolean(document.querySelector(".new-tab-icon-grid"))'), 'the local New Tab grid')
   await delay(350)
@@ -270,9 +304,15 @@ async function run() {
   })
 
   mainWindow = await waitFor(() => {
-    const window = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed())
-    return window && window.isVisible() && !window.webContents.isLoadingMainFrame() ? window : null
-  }, 'the production Sockfish window', 45000)
+    const window = BaseWindow.getAllWindows().find((candidate) => !candidate.isDestroyed() && candidate.isVisible())
+    if (!window) return null
+    rendererViews = Object.fromEntries(window.contentView.children
+      .filter((view) => view.webContents && !view.webContents.isDestroyed())
+      .map((view) => [surfaceFor(view), view]).filter(([surface]) => surface))
+    if (!rendererViews.content || !rendererViews.toolbar || !rendererViews.sidebar) return null
+    if (Object.values(rendererViews).some((view) => view.webContents.isLoadingMainFrame())) return null
+    return window
+  }, 'the production Sockfish BaseWindow and its renderer surfaces', 45000)
   await evaluate('window.api.browser.downloads.get()')
   assert.equal(await clickSelector('.downloads-toolbar-button'), true, 'Downloads should open from its toolbar button')
   await waitFor(async () => evaluate('document.querySelector("#downloads-popup .downloads-empty")?.textContent.includes("No downloads yet")'), 'the empty Downloads state')
@@ -345,6 +385,6 @@ async function cleanup() {
 
 run().then(cleanup).catch(async (error) => {
   console.error('Electron Downloads smoke failed:', error instanceof Error ? error.stack : error)
-  process.exitCode = 1
   await cleanup()
+  app.exit(1)
 })

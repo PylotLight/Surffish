@@ -72,6 +72,28 @@ export interface BrowserBounds {
   height: number
 }
 
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'network' | 'site' | 'downloads'
+
+/** UI state shared by the independent local renderer surfaces in the native browser window. */
+export interface BrowserChromeState {
+  sidebarMode: BrowserSidebarMode
+  sidebarPinned: boolean
+  sidebarHovered: boolean
+  sidebarFocused: boolean
+}
+
+export interface BrowserChromeMetrics {
+  toolbarHeight: number
+  toolbarExtent: number
+}
+
+export interface BrowserPreferencesSnapshot {
+  searchEngine: SearchEngineId
+  tabSleepMinutes: TabSleepMinutes
+  newTabPage: NewTabPageId
+  pinnedSites: PinnedSite[]
+}
+
 /** Browser-renderer coordinates for anchoring the Bramble launcher window. */
 export interface BramblePopupAnchor {
   x: number

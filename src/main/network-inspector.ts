@@ -5,7 +5,7 @@ import type {
   NetworkRequestSummary,
   NetworkResponseBody
 } from '../shared/types'
-import { getMainWindow } from './window'
+import { sendToMainWindowRenderers } from './browser-shell'
 
 const MAX_RETAINED_REQUESTS = 1000
 const MAX_BODY_CHARACTERS = 1_000_000
@@ -113,8 +113,7 @@ function publish(): void {
   if (broadcastTimer) return
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null
-    const contents = getMainWindow()?.webContents
-    if (contents && !contents.isDestroyed()) contents.send('browser:network:changed', getNetworkRequests())
+    sendToMainWindowRenderers('browser:network:changed', getNetworkRequests())
   }, BROADCAST_INTERVAL_MS)
 }
 

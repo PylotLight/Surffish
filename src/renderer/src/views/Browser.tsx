@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type {
   BrambleExtensionState,
+  BrowserChromeState,
+  BrowserPreferencesSnapshot,
+  BrowserSidebarMode,
   BrowserProxySettings,
   BrowserSiteSettings,
   BrowserState,
@@ -82,8 +85,16 @@ const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   iconDataUrl: null
 }
 
-type SidebarMode = 'tabs' | 'history' | 'settings' | 'network' | 'site' | 'downloads'
+type SidebarMode = BrowserSidebarMode
 type NetworkDetailsTab = 'headers' | 'payload' | 'response' | 'timing'
+type BrowserSurface = 'content' | 'toolbar' | 'sidebar'
+
+const DEFAULT_CHROME_STATE: BrowserChromeState = {
+  sidebarMode: 'tabs',
+  sidebarPinned: false,
+  sidebarHovered: false,
+  sidebarFocused: false
+}
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>; label: string }> = [
   { mode: 'settings', label: 'General' },
@@ -195,7 +206,7 @@ function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: (
   )
 }
 
-export default function Browser(): React.JSX.Element {
+export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
@@ -211,10 +222,8 @@ export default function Browser(): React.JSX.Element {
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('tabs')
-  const [sidebarPinned, setSidebarPinned] = useState(false)
-  const [sidebarHovered, setSidebarHovered] = useState(false)
-  const [sidebarFocused, setSidebarFocused] = useState(false)
+  const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
+  const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused } = chromeState
   const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 73 : 45)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
@@ -250,12 +259,40 @@ export default function Browser(): React.JSX.Element {
   const [proxyMessage, setProxyMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
+  function updateChromeState(patch: Partial<BrowserChromeState>): void {
+    setChromeState((current) => ({ ...current, ...patch }))
+    void window.api.browser.chrome.set(patch).catch(() => undefined)
+  }
+
+  function setSidebarMode(next: SidebarMode | ((current: SidebarMode) => SidebarMode)): void {
+    updateChromeState({ sidebarMode: typeof next === 'function' ? next(chromeState.sidebarMode) : next })
+  }
+
+  function setSidebarPinned(next: boolean | ((current: boolean) => boolean)): void {
+    updateChromeState({ sidebarPinned: typeof next === 'function' ? next(chromeState.sidebarPinned) : next })
+  }
+
+  function setSidebarHovered(next: boolean): void {
+    updateChromeState({ sidebarHovered: next })
+  }
+
+  function setSidebarFocused(next: boolean): void {
+    updateChromeState({ sidebarFocused: next })
+  }
+
   useEffect(() => {
+    const unsubscribe = window.api.browser.chrome.onChange(setChromeState)
+    void window.api.browser.chrome.get().then(setChromeState).catch(() => undefined)
+    return unsubscribe
+  }, [])
+
+  useEffect(() => {
+    if (surface !== 'content') return
     const rotationTimer = window.setInterval(() => {
       setNewTabBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, FALLBACK_NEW_TAB_BACKGROUNDS.length))
     }, QUICK_LINK_BACKGROUND_ROTATION_MS)
     return () => window.clearInterval(rotationTimer)
-  }, [])
+  }, [surface])
   const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
   const addressSuggestions = useMemo(
     () => buildAddressSuggestions(address, pinnedSites, tabs, history),
@@ -267,7 +304,7 @@ export default function Browser(): React.JSX.Element {
   const isLocalNewTab = browser.url === SOCKFISH_QUICK_LINKS_URL
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   useEffect(() => {
-    if (!isLocalNewTab) return
+    if (surface !== 'content' || !isLocalNewTab) return
     let mounted = true
     const applyRemotePhotos = (photos: NewTabBackground[]): void => {
       if (!mounted || photos.length === 0) return
@@ -285,7 +322,7 @@ export default function Browser(): React.JSX.Element {
       unsubscribe()
       window.clearInterval(refreshTimer)
     }
-  }, [isLocalNewTab])
+  }, [surface, isLocalNewTab])
   const activeOrigin = httpOrigin(browser.url)
   const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
@@ -430,25 +467,29 @@ export default function Browser(): React.JSX.Element {
     const unsubscribeState = window.api.browser.onState(setBrowser)
     const unsubscribeTabs = window.api.browser.tabs.onChange(setTabs)
     const unsubscribeHistory = window.api.browser.history.onChange(() => { void refreshHistory() })
-    const unsubscribeFocusAddress = window.api.browser.onFocusAddress(() => {
+    const applyPreferences = (preferences: BrowserPreferencesSnapshot): void => {
+      setSearchEngine(preferences.searchEngine)
+      setSearchEngineLoaded(true)
+      setNewTabPage(preferences.newTabPage)
+      setPinnedSites(preferences.pinnedSites)
+      setTabSleepMinutes(preferences.tabSleepMinutes)
+    }
+    const unsubscribePreferences = window.api.browser.preferences.onChange(applyPreferences)
+    const unsubscribeFocusAddress = surface === 'sidebar' ? () => {} : window.api.browser.onFocusAddress(() => {
       addressRef.current?.focus()
       addressRef.current?.select()
     })
-    void Promise.all([window.api.browser.state(), window.api.browser.getSearchEngine()]).then(([current, savedEngine]) => {
+    void Promise.all([window.api.browser.state(), window.api.browser.preferences.get()]).then(([current, preferences]) => {
       setBrowser(current)
       setAddress(current.url)
-      setSearchEngine(savedEngine)
-      setSearchEngineLoaded(true)
-      void window.api.browser.setSearchEngine(savedEngine)
-      if (savedEngine !== DEFAULT_SEARCH_ENGINE && current.url === getSearchHomepage(DEFAULT_SEARCH_ENGINE)) {
-        void window.api.browser.navigate(getSearchHomepage(savedEngine), savedEngine)
+      applyPreferences(preferences)
+      if (surface === 'content') void window.api.browser.setSearchEngine(preferences.searchEngine)
+      if (surface === 'content' && preferences.searchEngine !== DEFAULT_SEARCH_ENGINE && current.url === getSearchHomepage(DEFAULT_SEARCH_ENGINE)) {
+        void window.api.browser.navigate(getSearchHomepage(preferences.searchEngine), preferences.searchEngine)
       }
     })
     void window.api.browser.tabs.get().then(setTabs)
     void refreshHistory()
-    void window.api.browser.newTabPage.get().then(setNewTabPage)
-    void window.api.browser.pinnedSites.get().then(setPinnedSites)
-    void window.api.browser.getTabSleepMinutes().then(setTabSleepMinutes)
     void window.api.browser.proxy.get().then((settings) => {
       setProxy(settings)
       setAppliedProxy(settings)
@@ -457,9 +498,10 @@ export default function Browser(): React.JSX.Element {
       unsubscribeState()
       unsubscribeTabs()
       unsubscribeHistory()
+      unsubscribePreferences()
       unsubscribeFocusAddress()
     }
-  }, [])
+  }, [surface])
 
   useEffect(() => {
     if (sidebarMode !== 'site') return
@@ -536,8 +578,8 @@ export default function Browser(): React.JSX.Element {
   }, [networkDetailsTab, selectedNetworkId, selectedNetworkSummary?.responseBodyAvailable, selectedNetworkSummary?.state])
 
   useEffect(() => {
-    if (searchEngineLoaded) void window.api.browser.setSearchEngine(searchEngine)
-  }, [searchEngine, searchEngineLoaded])
+    if (surface === 'content' && searchEngineLoaded) void window.api.browser.setSearchEngine(searchEngine)
+  }, [searchEngine, searchEngineLoaded, surface])
 
   useEffect(() => {
     if (!newTabMenuOpen) return
@@ -577,7 +619,14 @@ export default function Browser(): React.JSX.Element {
   useEffect(() => {
     const element = browserChromeRef.current
     if (!element) return
-    const updateChromeHeight = (): void => setBrowserChromeHeight(element.getBoundingClientRect().height)
+    const updateChromeHeight = (): void => {
+      const toolbarHeight = element.getBoundingClientRect().height
+      setBrowserChromeHeight(toolbarHeight)
+      if (surface !== 'toolbar') return
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup'))
+        .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
+      void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
+    }
     const observer = new ResizeObserver(updateChromeHeight)
     observer.observe(element)
     window.addEventListener('resize', updateChromeHeight)
@@ -586,24 +635,21 @@ export default function Browser(): React.JSX.Element {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
   }, [])
 
   useLayoutEffect(() => {
+    if (surface !== 'content') return
     const element = viewportRef.current
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const sidebarInset = sidebarVisible ? Math.min(sidebarRef.current?.offsetWidth ?? 0, Math.max(0, rect.width - 48)) : 0
-      const edgeRevealWidth = sidebarVisible ? 0 : 14
-      const contentWidth = rect.width - sidebarInset - edgeRevealWidth
-      const suggestionsCoverPage = suggestionsOpen && addressSuggestions.length > 0
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'network' && sidebarMode !== 'site' && sidebarMode !== 'downloads' && !downloadsPopupOpen && !isLocalNewTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'network' && sidebarMode !== 'site' && sidebarMode !== 'downloads' && !isLocalNewTab && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
-        ? { x: rect.left + sidebarInset + edgeRevealWidth, y: rect.top, width: contentWidth, height: rect.height }
+        ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
     }
     const observer = new ResizeObserver(updateBounds)
@@ -615,7 +661,7 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isLocalNewTab, downloadsPopupOpen])
+  }, [surface, sidebarMode, isLocalNewTab])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
@@ -761,11 +807,11 @@ export default function Browser(): React.JSX.Element {
   return (
     <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Sockfish browser" onMouseMove={(event) => {
       if (!sidebarVisible && event.clientX <= 18) revealSidebar()
-    }}>
+    }} onMouseLeave={surface === 'sidebar' ? scheduleSidebarHide : undefined}>
       <aside
         ref={sidebarRef}
         className="browser-sidebar"
-        style={{ top: `${browserChromeHeight}px` }}
+        style={{ top: surface === 'sidebar' ? '0px' : `${browserChromeHeight}px` }}
         aria-label="Browser sidebar"
         onMouseEnter={revealSidebar}
         onMouseLeave={scheduleSidebarHide}

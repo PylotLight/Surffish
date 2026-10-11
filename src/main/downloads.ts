@@ -6,7 +6,7 @@ import type { DownloadEntry, DownloadState } from '../shared/downloads'
 import { safeDownloadFilename, safeDownloadSource, safeStoredDownloadSource } from '../shared/downloads'
 import { markBrowserDownloadStarted } from './browser'
 import { getBrowserSession } from './browser-session'
-import { getMainWindow } from './window'
+import { sendToMainWindowRenderers } from './browser-shell'
 
 const HISTORY_FILENAME = 'downloads-history.json'
 const MAX_DOWNLOAD_HISTORY = 300
@@ -97,10 +97,8 @@ function publicEntries(): DownloadEntry[] {
 }
 
 function publishDownloads(): void {
-  const window = getMainWindow()
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return
   try {
-    window.webContents.send('browser:downloads:changed', publicEntries())
+    sendToMainWindowRenderers('browser:downloads:changed', publicEntries())
   } catch {
     // A renderer closing while a transfer updates must not interrupt the download.
   }

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { adsLists, ElectronBlocker, type Fetch } from '@ghostery/adblocker-electron'
 import { isNetworkOnlyConfig, isProtectedVideoDeliveryUrl, NETWORK_ONLY_CONFIG } from './adblock-policy'
 import { getBrowserSession } from './browser-session'
-import { getMainWindow } from './window'
+import { sendToMainWindowRenderers } from './browser-shell'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
 import type { AdblockDiagnostics, AdblockBlockedRequest } from '../shared/types'
@@ -115,8 +115,7 @@ function diagnosticsSnapshot(): AdblockDiagnostics {
 }
 
 function broadcastDiagnostics(): void {
-  const contents = getMainWindow()?.webContents
-  if (contents && !contents.isDestroyed()) contents.send('browser:adblock:changed', diagnosticsSnapshot())
+  sendToMainWindowRenderers('browser:adblock:changed', diagnosticsSnapshot())
 }
 
 function scheduleDiagnosticsBroadcast(): void {
