@@ -6,6 +6,9 @@ export const MAX_PINNED_SITES = 12
 export const MAX_SAVED_SITE_SETTINGS = 200
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
 export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'quick-links'
+export const DEFAULT_SIDEBAR_WIDTH = 320
+export const MIN_SIDEBAR_WIDTH = 220
+export const MAX_SIDEBAR_WIDTH = 520
 export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
 export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   showClock: true,
@@ -40,6 +43,7 @@ export interface BrowserPreferences {
   newTabPage: NewTabPageId
   newTabPreferences: NewTabPreferences
   pinnedSites: PinnedSite[]
+  sidebarWidth: number
   siteSettings: Record<string, BrowserSiteSettings>
 }
 
@@ -65,6 +69,10 @@ function boundedNumber(value: unknown, fallback: number, minimum: number, maximu
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.round(Math.min(maximum, Math.max(minimum, value)))
     : fallback
+}
+
+export function normalizeSidebarWidth(value: unknown): number {
+  return boundedNumber(value, DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH)
 }
 
 function normalizeWorldClocks(value: unknown): WorldClockPreference[] {
@@ -225,6 +233,7 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     newTabPage: DEFAULT_NEW_TAB_PAGE,
     newTabPreferences: { ...DEFAULT_NEW_TAB_PREFERENCES, worldClocks: [] },
     pinnedSites: [],
+    sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
     siteSettings: {}
   }
   if (!isRecord(value) || value.version !== 1) return defaults
@@ -243,6 +252,7 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     newTabPage: value.newTabPage === 'search' || value.newTabPage === 'bonjourr' || value.newTabPage === 'quick-links' ? value.newTabPage : defaults.newTabPage,
     newTabPreferences: parseNewTabPreferences(value.newTabPreferences),
     pinnedSites: normalizePinnedSites(value.pinnedSites),
+    sidebarWidth: normalizeSidebarWidth(value.sidebarWidth),
     siteSettings
   }
 }

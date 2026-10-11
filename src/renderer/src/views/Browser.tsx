@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   BrambleExtensionState,
   BrowserChromeState,
@@ -22,7 +22,7 @@ import type {
   WorldClockPreference
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
-import { DEFAULT_NEW_TAB_PREFERENCES, MAX_PINNED_SITES, MAX_WORLD_CLOCKS } from '../../../shared/persistence'
+import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
 import {
@@ -112,7 +112,9 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: 'tabs',
   sidebarPinned: false,
   sidebarHovered: false,
-  sidebarFocused: false
+  sidebarFocused: false,
+  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+  sidebarResizing: false
 }
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>; label: string }> = [
@@ -296,7 +298,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
-  const sidebarToggleRef = useRef<HTMLButtonElement>(null)
+  const sidebarResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null)
   const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const brambleButtonRef = useRef<HTMLButtonElement>(null)
@@ -308,7 +310,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
-  const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused } = chromeState
+  const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
   const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 50 : 45)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
@@ -351,6 +353,51 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   function updateChromeState(patch: Partial<BrowserChromeState>): void {
     setChromeState((current) => ({ ...current, ...patch }))
     void window.api.browser.chrome.set(patch).catch(() => undefined)
+  }
+
+  function persistSidebarWidth(value: number): void {
+    const width = normalizeSidebarWidth(value)
+    updateChromeState({ sidebarWidth: width, sidebarResizing: false })
+    void window.api.browser.sidebarWidth.set(width).then((savedWidth) => {
+      setChromeState((current) => ({ ...current, sidebarWidth: savedWidth, sidebarResizing: false }))
+    }).catch(() => undefined)
+  }
+
+  function beginSidebarResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0) return
+    event.preventDefault()
+    sidebarResizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarWidth, width: sidebarWidth }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    updateChromeState({ sidebarResizing: true })
+  }
+
+  function moveSidebarResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    const resize = sidebarResizeRef.current
+    if (!resize || resize.pointerId !== event.pointerId) return
+    event.preventDefault()
+    const width = normalizeSidebarWidth(resize.startWidth + event.clientX - resize.startX)
+    if (width === resize.width) return
+    resize.width = width
+    updateChromeState({ sidebarWidth: width, sidebarResizing: true })
+  }
+
+  function finishSidebarResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    const resize = sidebarResizeRef.current
+    if (!resize || resize.pointerId !== event.pointerId) return
+    sidebarResizeRef.current = null
+    persistSidebarWidth(resize.width)
+    if (!sidebarPinned && event.clientX >= resize.width) scheduleSidebarHide()
+  }
+
+  function handleSidebarResizeKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+    let nextWidth: number | null = null
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextWidth = sidebarWidth - 10
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextWidth = sidebarWidth + 10
+    else if (event.key === 'Home') nextWidth = MIN_SIDEBAR_WIDTH
+    else if (event.key === 'End') nextWidth = MAX_SIDEBAR_WIDTH
+    if (nextWidth === null) return
+    event.preventDefault()
+    persistSidebarWidth(nextWidth)
   }
 
   function saveNewTabPreferences(next: NewTabPreferences): void {
@@ -470,6 +517,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }
 
   function scheduleSidebarHide(): void {
+    if (sidebarResizeRef.current) return
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
     sidebarHideTimerRef.current = setTimeout(() => {
       sidebarHideTimerRef.current = null
@@ -485,7 +533,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   function releaseSidebarFocus(event: React.FocusEvent<HTMLElement>): void {
     const nextTarget = event.relatedTarget as Node | null
-    if (nextTarget && (sidebarRef.current?.contains(nextTarget) || sidebarToggleRef.current?.contains(nextTarget))) return
+    if (nextTarget && sidebarRef.current?.contains(nextTarget)) return
     setSidebarFocused(false)
     scheduleSidebarHide()
   }
@@ -612,6 +660,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       setNewTabPreferences(preferences.newTabPreferences)
       setPinnedSites(preferences.pinnedSites)
       setTabSleepMinutes(preferences.tabSleepMinutes)
+      setChromeState((current) => ({ ...current, sidebarWidth: preferences.sidebarWidth }))
+      void window.api.browser.chrome.set({ sidebarWidth: preferences.sidebarWidth }).catch(() => undefined)
     }
     const unsubscribePreferences = window.api.browser.preferences.onChange(applyPreferences)
     const unsubscribeFocusAddress = surface === 'sidebar' ? () => {} : window.api.browser.onFocusAddress(() => {
@@ -903,7 +953,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         : bramblePoc.latestVersion ? 'Up to date' : 'Install / update'
 
   return (
-    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}`} aria-label="Surffish browser" onMouseMove={(event) => {
+    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}${sidebarResizing ? ' is-sidebar-resizing' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} aria-label="Surffish browser" onMouseMove={(event) => {
       if (!sidebarVisible && event.clientX <= 18) revealSidebar()
     }} onMouseLeave={surface === 'sidebar' ? scheduleSidebarHide : undefined}>
       <aside
@@ -922,26 +972,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             <button className="sidebar-window-control is-zoom" type="button" aria-label="Toggle window zoom" title="Toggle window zoom" onClick={() => void window.api.browser.windowControl('toggle-zoom')} />
           </div>
         )}
-        <div className="sidebar-brand">
-          <img className="sidebar-brand-mark" src="./surffish-brand-icon.png" alt="" aria-hidden="true" draggable={false} />
-          <strong>Surffish</strong>
-          <button
-            className="sidebar-collapse-button"
-            type="button"
-            aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-            aria-pressed={sidebarPinned}
-            title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-            onClick={() => setSidebarPinned((pinned) => !pinned)}
-          ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
-        </div>
-        <div className="sidebar-heading">
-          {sidebarMode !== 'tabs' && <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>}
+        {sidebarMode !== 'tabs' && <div className="sidebar-heading">
+          <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>
           {sidebarMode === 'history' && (
             <button className="sidebar-icon-button" type="button" aria-label="Clear browsing history" title="Clear history" disabled={history.length === 0} onClick={() => void clearHistory()}>
               <span aria-hidden="true">⌫</span>
             </button>
           )}
-        </div>
+        </div>}
 
         {sidebarMode === 'tabs' && (
           <section className="sidebar-pinned-sites" aria-label="Pinned tabs and bookmarks">
@@ -1012,35 +1050,35 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         )}
 
         <div className="sidebar-footer">
-          <button className={`sidebar-mode-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
-            <span aria-hidden="true">⚙</span><span>Settings</span>
+          <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
+            <span aria-hidden="true">⚙</span>
           </button>
-          <div className="sidebar-footer-divider" />
-          <button className="sidebar-mode-button sidebar-quit-button" type="button" aria-label="Quit Surffish" title="Quit Surffish" onClick={() => void window.api.browser.quit()}>
-            <span aria-hidden="true">⏻</span><span>Quit Surffish</span>
+          <button className="sidebar-footer-icon-button sidebar-quit-button" type="button" aria-label="Quit Surffish" title="Quit Surffish" onClick={() => void window.api.browser.quit()}>
+            <span aria-hidden="true">⏻</span>
           </button>
         </div>
+        <div
+          className="sidebar-resize-handle"
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={MAX_SIDEBAR_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onPointerDown={beginSidebarResize}
+          onPointerMove={moveSidebarResize}
+          onPointerUp={finishSidebarResize}
+          onPointerCancel={finishSidebarResize}
+          onLostPointerCapture={finishSidebarResize}
+          onKeyDown={handleSidebarResizeKeyDown}
+        />
       </aside>
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
             <div className="browser-toolbar-leading">
-              <button
-                ref={sidebarToggleRef}
-                className="toolbar-button sidebar-toggle-button"
-                type="button"
-                aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-                aria-pressed={sidebarPinned}
-                title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-                onMouseEnter={revealSidebar}
-                onMouseLeave={scheduleSidebarHide}
-                onFocus={revealSidebar}
-                onBlurCapture={releaseSidebarFocus}
-                onClick={() => setSidebarPinned((pinned) => !pinned)}
-              >
-                <span aria-hidden="true">▤</span>
-              </button>
               <div className="browser-nav-buttons">
                 <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
                   <span aria-hidden="true">‹</span>
@@ -1109,7 +1147,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
             <div className="browser-toolbar-trailing">
               <div className="omnibox-actions" role="group" aria-label="Browser panels">
-                <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs, pinned tabs, and bookmarks" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs, pinned tabs, and bookmarks" onClick={() => toggleToolbarPanel('tabs')}>
+                <button className={`omnibox-action-button tabs-sidebar-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label={sidebarMode === 'tabs' && sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'} aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title={sidebarMode === 'tabs' && sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'} onClick={() => toggleToolbarPanel('tabs')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
                 </button>
                 <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
@@ -1180,6 +1218,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   setDownloadsPopupOpen(false)
                   downloadsButtonRef.current?.focus()
                 }} />}
+              </div>
+              <div className="toolbar-brand" aria-label="Surffish" title="Surffish">
+                <img className="toolbar-brand-icon" src="./surffish-brand-icon.png" alt="" aria-hidden="true" draggable={false} />
+                <strong>Surffish</strong>
               </div>
             </div>
           </form>

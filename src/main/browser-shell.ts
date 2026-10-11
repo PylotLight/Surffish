@@ -1,8 +1,8 @@
 import type { BaseWindow, WebContents, WebContentsView } from 'electron'
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
+import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 
 const REVEAL_WIDTH = 14
-const SIDEBAR_WIDTH = 320
 const REVEAL_DELAY_MS = 180
 const PAGE_EXIT_DELAY_MS = 160
 const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'network', 'site', 'downloads'])
@@ -11,7 +11,9 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: 'tabs',
   sidebarPinned: false,
   sidebarHovered: false,
-  sidebarFocused: false
+  sidebarFocused: false,
+  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+  sidebarResizing: false
 }
 
 export interface BrowserShellViews {
@@ -94,7 +96,9 @@ function applyShellLayout(): void {
     x: 0,
     y: 0,
     // The visible sidebar covers the complete window; a zero-width hidden layer leaves page pixels interactive.
-    width: sidebarVisible ? Math.min(SIDEBAR_WIDTH, width) : 0,
+    width: sidebarVisible
+      ? Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, width)
+      : 0,
     height
   })
   shellViews.sidebar.setVisible(overlayMode)
@@ -168,8 +172,10 @@ export function setBrowserChromeState(input: unknown): BrowserChromeState {
   if (typeof patch.sidebarPinned === 'boolean') next.sidebarPinned = patch.sidebarPinned
   if (typeof patch.sidebarHovered === 'boolean') next.sidebarHovered = patch.sidebarHovered
   if (typeof patch.sidebarFocused === 'boolean') next.sidebarFocused = patch.sidebarFocused
+  if (typeof patch.sidebarWidth === 'number' && Number.isFinite(patch.sidebarWidth)) next.sidebarWidth = normalizeSidebarWidth(patch.sidebarWidth)
+  if (typeof patch.sidebarResizing === 'boolean') next.sidebarResizing = patch.sidebarResizing
   chromeState = next
-  if (chromeState.sidebarPinned || chromeState.sidebarHovered || chromeState.sidebarFocused || chromeState.sidebarMode !== 'tabs') clearPointerTimers()
+  if (chromeState.sidebarPinned || chromeState.sidebarHovered || chromeState.sidebarFocused || chromeState.sidebarResizing || chromeState.sidebarMode !== 'tabs') clearPointerTimers()
   applyShellLayout()
   sendToMainWindowRenderers('browser:chrome-state', getBrowserChromeState())
   return getBrowserChromeState()
@@ -206,7 +212,7 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }):
   }
 
   clearRevealTimer()
-  if (!chromeState.sidebarPinned && !chromeState.sidebarFocused && input.x >= Math.min(SIDEBAR_WIDTH, currentContentSize().width)) {
+  if (!chromeState.sidebarPinned && !chromeState.sidebarFocused && input.x >= Math.min(chromeState.sidebarWidth, currentContentSize().width)) {
     if (!pageExitTimer) {
       pageExitTimer = setTimeout(() => {
         pageExitTimer = null

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'node:path'
 import {
   normalizeHttpOrigin,
+  normalizeSidebarWidth,
   normalizePinnedSites,
   parseBrowserSiteSettings,
   normalizeBrowserSession,
@@ -108,13 +109,26 @@ export function getBrowserPinnedSites(): PinnedSite[] {
   return preferences.pinnedSites.map((site) => ({ ...site }))
 }
 
+export function getBrowserSidebarWidth(): number {
+  loadPreferencesIfNeeded()
+  return preferences.sidebarWidth
+}
+
+export function saveBrowserSidebarWidth(value: unknown): number {
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, sidebarWidth: normalizeSidebarWidth(value) }
+  savePreferences()
+  return preferences.sidebarWidth
+}
+
 export function getBrowserPreferencesSnapshot(): BrowserPreferencesSnapshot {
   return {
     searchEngine: getBrowserSearchEngine(),
     tabSleepMinutes: getBrowserTabSleepMinutes(),
     newTabPage: getBrowserNewTabPage(),
     newTabPreferences: getBrowserNewTabPreferences(),
-    pinnedSites: getBrowserPinnedSites()
+    pinnedSites: getBrowserPinnedSites(),
+    sidebarWidth: getBrowserSidebarWidth()
   }
 }
 

@@ -6,6 +6,9 @@ import {
   MAX_PINNED_SITES,
   MAX_RESTORED_TABS,
   DEFAULT_TAB_SLEEP_MINUTES,
+  DEFAULT_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
   DEFAULT_NEW_TAB_PREFERENCES,
   MAX_WORLD_CLOCKS,
   normalizeBrowserSession,
@@ -91,7 +94,15 @@ test('defaults older preference files to Quick Links without losing existing set
   assert.equal(parsed.searchEngine, 'google')
   assert.equal(parsed.tabSleepMinutes, 15)
   assert.deepEqual(parsed.pinnedSites, [])
+  assert.equal(parsed.sidebarWidth, DEFAULT_SIDEBAR_WIDTH)
   assert.deepEqual(parsed.siteSettings, {})
+})
+
+test('normalizes sidebar width to a rounded, usable range', () => {
+  assert.equal(parseBrowserPreferences({ version: 1, sidebarWidth: 347.6 }).sidebarWidth, 348)
+  assert.equal(parseBrowserPreferences({ version: 1, sidebarWidth: 80 }).sidebarWidth, MIN_SIDEBAR_WIDTH)
+  assert.equal(parseBrowserPreferences({ version: 1, sidebarWidth: 900 }).sidebarWidth, MAX_SIDEBAR_WIDTH)
+  assert.equal(parseBrowserPreferences({ version: 1, sidebarWidth: 'wide' }).sidebarWidth, DEFAULT_SIDEBAR_WIDTH)
 })
 
 test('normalizes pins and rejects unsafe, credential-bearing, duplicate, or excessive URLs', () => {

@@ -260,7 +260,7 @@ async function seedNewTabDemo(siteBases) {
   await clickSelector('[aria-label="Show next background"]')
   await delay(900)
   await captureScreenshot('new-tab-photo-rotation.png')
-  await clickSelector('.sidebar-toggle-button')
+  assert.equal(await clickSelector('.tabs-sidebar-button'), true, 'the toolbar Tabs button should open the sidebar')
   await waitFor(async () => evaluate('document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the tabs sidebar')
   await delay(300)
   await captureScreenshot('tabs-sidebar.png')
@@ -381,7 +381,10 @@ async function run() {
 }
 
 async function cleanup() {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    await delay(300)
+    if (!mainWindow.isDestroyed()) mainWindow.destroy()
+  }
   for (const server of servers) {
     server.closeAllConnections?.()
     await new Promise((resolvePromise) => server.close(() => resolvePromise()))

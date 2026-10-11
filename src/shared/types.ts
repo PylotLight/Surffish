@@ -118,6 +118,8 @@ export interface BrowserChromeState {
   sidebarPinned: boolean
   sidebarHovered: boolean
   sidebarFocused: boolean
+  sidebarWidth: number
+  sidebarResizing: boolean
 }
 
 export interface BrowserChromeMetrics {
@@ -131,6 +133,7 @@ export interface BrowserPreferencesSnapshot {
   newTabPage: NewTabPageId
   newTabPreferences: NewTabPreferences
   pinnedSites: PinnedSite[]
+  sidebarWidth: number
 }
 
 /** Browser-renderer coordinates for anchoring the Bramble launcher window. */

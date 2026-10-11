@@ -40,6 +40,9 @@ const api = {
         return () => ipcRenderer.removeListener('browser:preferences-changed', listener)
       }
     },
+    sidebarWidth: {
+      set: (width: number): Promise<number> => ipcRenderer.invoke('browser:sidebar-width:set', width)
+    },
     chrome: {
       get: (): Promise<BrowserChromeState> => ipcRenderer.invoke('browser:chrome:get'),
       set: (state: Partial<BrowserChromeState>): Promise<BrowserChromeState> => ipcRenderer.invoke('browser:chrome:set', state),

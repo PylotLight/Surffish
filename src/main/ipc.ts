@@ -48,7 +48,8 @@ import {
   saveBrowserSiteSettings,
   saveBrowserSearchEngine,
   saveBrowserTabSleepMinutes,
-  saveBrowserNewTabPreferences
+  saveBrowserNewTabPreferences,
+  saveBrowserSidebarWidth
 } from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
@@ -100,6 +101,13 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     if (!isToolbarRenderer(event.sender)) throw new Error('Only the toolbar surface can report native toolbar metrics.')
     return setBrowserChromeMetrics(metrics)
+  })
+  ipcMain.handle('browser:sidebar-width:set', (event, value: unknown) => {
+    assertMainRenderer(event)
+    const width = saveBrowserSidebarWidth(value)
+    setBrowserChromeState({ sidebarWidth: width })
+    sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    return width
   })
   ipcMain.handle('browser:state', (event) => {
     assertMainRenderer(event)

@@ -1,12 +1,12 @@
 # Live-page glass sidebar overlay
 
-**Status: implemented on `feat/sidebar-overlay-basewindow`; local production-build, typecheck, unit, and Electron integration checks pass.**
+**Status: implemented. Production build, typecheck, unit tests, and the local Electron integration smoke pass, including pointer resizing and width persistence.**
 
 ## Architecture
 
 The production app now uses a `BaseWindow` with the live page, full local React app, toolbar, and sidebar as distinct native `WebContentsView`s. Site tabs are inserted at the bottom of the native child-view order. The local toolbar and sidebar remain above them, while the full-window React renderer is hidden during live-site browsing so its transparent pixels cannot intercept page input.
 
-The toolbar is measured and bounded to its actual height (plus any open toolbar popover). The sidebar is bounded to 320 px while pinned or hovered and to zero native width while hidden. Its existing backdrop blur and translucent glass styling are retained. The full-width site page receives the mouse-move events used for a 180 ms left-edge hover reveal, so a quick click at x=5 still reaches the page while hidden. The original React surface remains the active UI for the local New Tab and full settings, Network, site, and Downloads panels.
+The toolbar is measured and bounded to its actual height (plus any open toolbar popover). The sidebar uses its saved, user-adjustable width while pinned or hovered, and zero native width while hidden. During a drag, the native hit-test view temporarily expands so pointer input remains captured as the visible edge moves; after release it returns to the persisted width. Its existing backdrop blur and translucent glass styling are retained. The full-width site page receives the mouse-move events used for a 180 ms left-edge hover reveal, so a quick click at x=5 still reaches the page while hidden. The original React surface remains the active UI for the local New Tab and full settings, Network, site, and Downloads panels.
 
 The host uses Surffish's persistent live-tab `persist:surffish-browser` session for cookies and storage, along with the configured SOCKS5 proxy, lazy/restored tab lifecycle, preload boundaries, context menus/dialog parentage, downloads, Bramble windows, Network Inspector, and platform titlebar options. Shared chrome state and app notifications are synchronized only among the three trusted local renderers; remote sites do not receive the Surffish bridge.
 
@@ -18,7 +18,7 @@ The integration test launches the production Electron build using a fresh tempor
 |---|---:|---|---|
 | Local New Tab active | No visible site page | Full React renderer visible; toolbar/sidebar overlay surfaces hidden | Original local start page remains usable. |
 | Live page, sidebar hidden | `(0, toolbarHeight, full native content width, …)` | Toolbar visible; sidebar has zero native width | Page spans the full native content width, and a real click at x=5 still reaches the site. |
-| Live page, sidebar visible | `(0, toolbarHeight, full native content width, …)` | Sidebar view overlays the page at 320 px | Page bounds do not move or shrink; synthetic site click, text entry, and mouse-wheel scroll work while the glass panel is open. |
+| Live page, sidebar visible | `(0, toolbarHeight, full native content width, …)` | Sidebar view overlays the page at the saved user-selected width | Page bounds do not move or shrink; synthetic site click, text entry, and mouse-wheel scroll work while the glass panel is open. |
 | Hover at the live-page left edge | Same full-width page bounds | Sidebar expands above the page after a short delay | Physical pointer hover reveals the panel; moving away hides it after focus is released. |
 | Switch live tab → New Tab → live tab | Existing live page view remains alive | Correct local/overlay renderer surfaces become visible at each state | The live tab, cookie, and full-width page state persist across tab switching. |
 
@@ -33,7 +33,7 @@ npm test
 xvfb-run -a npm run test:electron-sidebar-overlay
 ```
 
-The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Hosted Ubuntu CI installs and verifies it before running the Electron tests; local reproduction requires it in addition to `xvfb-run`. CI also runs the Electron Downloads manager smoke, extension probes, and host/frame bridge probe. To capture overlay states locally, set `SURFFISH_SCREENSHOT_DIR` when running the Xvfb smoke; captures are cropped to the complete app window and show only this loopback-only synthetic page.
+The overlay smoke uses `xdotool` to send real X11 pointer and keyboard input. Local reproduction requires it in addition to `xvfb-run`. GitHub Actions are disabled under the current repository policy, so this work is validated locally rather than by a remote CI result. To capture overlay states locally, set `SURFFISH_SCREENSHOT_DIR` when running the Xvfb smoke; captures are cropped to the complete app window and show only this loopback-only synthetic page.
 
 ## Previous baseline
 

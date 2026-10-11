@@ -5,7 +5,7 @@ const { mkdirSync, rmSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { basename, join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, session } = require('electron')
+const { app, BaseWindow, dialog, session } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const userData = join(tmpdir(), `surffish-basewindow-overlay-smoke-${process.pid}`)
@@ -33,6 +33,16 @@ let mainWindow
 let fixtureUrl
 let rendererViews = {}
 let fixturePageView
+let closeWindowConfirmationOptions = null
+const showMessageBox = dialog.showMessageBox.bind(dialog)
+dialog.showMessageBox = async (...args) => {
+  const options = args.at(-1)
+  if (options?.message === 'Close the window?') {
+    closeWindowConfirmationOptions = options
+    return { response: options.cancelId ?? 1, checkboxChecked: false }
+  }
+  return showMessageBox(...args)
+}
 
 function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
@@ -105,6 +115,12 @@ function pointerMove(x, y) {
 function pointerClick(x, y) {
   execFileSync('xdotool', ['mousemove', String(Math.round(x)), String(Math.round(y)), 'click', '1'])
 }
+function pointerDown(x, y) {
+  execFileSync('xdotool', ['mousemove', String(Math.round(x)), String(Math.round(y)), 'mousedown', '1'])
+}
+function pointerUp() {
+  execFileSync('xdotool', ['mouseup', '1'])
+}
 
 function pointerType(value) {
   execFileSync('xdotool', ['type', '--clearmodifiers', '--delay', '4', value])
@@ -141,6 +157,15 @@ async function run() {
   const address = server.address()
   assert.ok(address && typeof address === 'object')
   fixtureUrl = `http://127.0.0.1:${address.port}/fixture`
+  writeFileSync(join(userData, 'browser-preferences.json'), `${JSON.stringify({
+    version: 1,
+    pinnedSites: [
+      { title: 'YouTube', url: 'https://www.youtube.com/', faviconUrl: 'https://www.youtube.com/favicon.ico' },
+      { title: 'Google', url: 'https://www.google.com/', faviconUrl: 'https://www.google.com/favicon.ico' },
+      { title: 'Gmail', url: 'https://mail.google.com/', faviconUrl: 'https://mail.google.com/favicon.ico' },
+      { title: 'Maps', url: 'https://maps.google.com/', faviconUrl: 'https://maps.google.com/favicon.ico' }
+    ]
+  })}\n`, { mode: 0o600 })
 
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
@@ -160,6 +185,11 @@ async function run() {
   await waitFor(() => evaluate(rendererViews.content, 'Boolean(document.querySelector(".new-tab-page"))'), 'the renderer-owned New Tab page')
   assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-heading .sidebar-icon-button")'), null, 'the header New Tab plus button is removed')
   assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-new-tab-button")?.getAttribute("aria-label")'), 'New tab', 'the bottom New Tab action is available in the sidebar')
+  assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-collapse-button")'), null, 'the duplicate sidebar-header pin control is removed')
+  assert.ok(await evaluate(rendererViews.content, 'document.querySelector(".toolbar-brand-icon")?.getBoundingClientRect().width >= 32'), 'the app brand mark is prominent in the top toolbar')
+  const footerControls = await evaluate(rendererViews.content, `(() => [...document.querySelectorAll('.sidebar-footer-icon-button')].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })))()`)
+  assert.deepEqual(footerControls.map(({ label }) => label), ['Settings', 'Quit Surffish'], 'Settings and Quit are compact footer actions')
+  assert.ok(footerControls.every(({ width, height }) => width <= 36 && height <= 36), 'the footer controls do not consume full-width rows')
   assert.ok(await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing")'), 'toolbar controls use distinct left and right groups')
   const initialShell = nativeViewState()
   assert.equal(mainWindow.contentView.children.length, 3, 'the initial New Tab has three app surfaces and no remote page view')
@@ -167,16 +197,34 @@ async function run() {
   assert.equal(rendererViews.toolbar.getVisible(), false)
   assert.equal(rendererViews.sidebar.getVisible(), false)
 
+  if (screenshotDirectory) {
+    mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 712 })
+    await delay(250)
+    await evaluate(rendererViews.content, 'window.api.browser.chrome.set({ sidebarMode: "tabs", sidebarPinned: true, sidebarHovered: false, sidebarFocused: false })')
+    await waitFor(() => evaluate(rendererViews.content, 'document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the New Tab sidebar for the product screenshot')
+    await delay(350)
+    pointerMove(mainWindow.getContentBounds().x + 1260, mainWindow.getContentBounds().y + 780)
+    await delay(200)
+    captureFullWindow('surffish-cover-new-tab.png')
+    await evaluate(rendererViews.content, 'window.api.browser.chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })')
+    await waitFor(() => evaluate(rendererViews.content, '!document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the New Tab sidebar to close after the screenshot')
+    mainWindow.setBounds({ x: 0, y: 0, width: 900, height: 620 })
+    await delay(250)
+  }
+
   const firstTab = (await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')).find((tab) => tab.active)
   assert.ok(firstTab, 'the initial New Tab should be active')
   mainWindow.focus()
   rendererViews.content.webContents.focus()
   execFileSync('xdotool', ['key', 'ctrl+w'])
+  await waitFor(() => closeWindowConfirmationOptions, 'the last-tab close confirmation prompt')
+  assert.deepEqual(closeWindowConfirmationOptions.buttons, ['Close Window', 'Cancel'], 'the prompt offers an explicit cancel choice')
+  assert.equal(closeWindowConfirmationOptions.cancelId, 1, 'cancel is the safe default for the smoke test')
   await waitFor(async () => {
     if (mainWindow.isDestroyed() || !mainWindow.isVisible()) return false
     const tabs = await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')
-    return tabs.length === 1 && tabs[0]?.id !== firstTab.id
-  }, 'closing the only New Tab leaves the window open with a replacement tab')
+    return tabs.length === 1 && tabs[0]?.id === firstTab.id
+  }, 'canceling the last-tab prompt keeps the original New Tab and window open')
 
   const replacementTab = (await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')).find((tab) => tab.active)
   assert.ok(replacementTab)
@@ -260,6 +308,14 @@ async function run() {
   assert.ok(sidebarHiddenState.find((view) => view.surface === 'sidebar').index > sidebarHiddenState.find((view) => view.url === fixtureUrl).index, 'the sidebar is layered above the live page')
   captureFullWindow('sidebar-overlay-live-page-hidden.png')
 
+  for (const selector of ['.tabs-sidebar-button', '.toolbar-brand']) {
+    const hoverRect = await evaluate(rendererViews.toolbar, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
+    const hoverPoint = screenPointForElement(rendererViews.toolbar, hoverRect)
+    pointerMove(hoverPoint.x, hoverPoint.y)
+    await delay(350)
+    assert.equal(rendererViews.sidebar.getBounds().width, 0, `hovering ${selector} must not open or reset the sidebar`)
+  }
+
   // A click inside the former 14px reveal strip must still reach the full-width live page.
   const edgePoint = { x: mainWindow.getContentBounds().x + 5, y: mainWindow.getContentBounds().y + pageHiddenSidebar.y + 245 }
   pointerClick(edgePoint.x, edgePoint.y)
@@ -268,16 +324,31 @@ async function run() {
   assert.equal(await fixturePageView.webContents.executeJavaScript('window.edgeClickCount'), 1, 'the hidden sidebar must not intercept a click at x=5')
   assert.equal(rendererViews.sidebar.getBounds().width, 0, 'a click cancels the delayed hover reveal and leaves the page unobstructed')
 
-  // Exercise the existing toolbar control using native mouse input, then confirm the glass sidebar opens above a full-width page.
-  await clickElement(rendererViews.toolbar, '.sidebar-toggle-button')
-  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'the pinned sidebar overlay to expand')
+  // The single top-toolbar Tabs control opens and pins the glass sidebar with native mouse input.
+  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
+  await waitFor(() => rendererViews.sidebar.getBounds().width === Math.min(320, contentSize[0]), 'the pinned sidebar overlay to expand')
   await waitFor(() => evaluate(rendererViews.toolbar, 'document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'shared visible sidebar state on the toolbar')
   await delay(300)
+
+  // Keep the native view temporarily wide enough to capture pointer motion after the panel edge moves.
+  const resizeRect = await evaluate(rendererViews.sidebar, `(() => { const r = document.querySelector('.sidebar-resize-handle').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
+  const resizeStart = screenPointForElement(rendererViews.sidebar, resizeRect)
+  const widthBeforeResize = rendererViews.sidebar.getBounds().width
+  const widthAfterResize = Math.min(392, contentSize[0])
+  pointerMove(resizeStart.x, resizeStart.y + 100)
+  pointerDown(resizeStart.x, resizeStart.y + 100)
+  await waitFor(() => rendererViews.sidebar.getBounds().width === Math.min(520, contentSize[0]), 'the native overlay to provide a temporary drag hit-test surface')
+  pointerMove(resizeStart.x + widthAfterResize - widthBeforeResize, resizeStart.y + 100)
+  await waitFor(() => evaluate(rendererViews.sidebar, `document.querySelector('.sidebar-resize-handle')?.getAttribute('aria-valuenow') === ${JSON.stringify(String(widthAfterResize))}`), 'the sidebar width to follow the captured drag')
+  pointerUp()
+  await waitFor(() => rendererViews.sidebar.getBounds().width === widthAfterResize, 'the native overlay bounds to match the resized panel')
+  await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.preferences.get()')).sidebarWidth === widthAfterResize, 'the resized sidebar width to persist')
+
   const pageVisibleSidebar = fixturePageView.getBounds()
   const sidebarView = rendererViews.sidebar.getBounds()
   assert.equal(pageVisibleSidebar.x, 0, 'opening the sidebar must not inset the page')
   assert.equal(pageVisibleSidebar.width, contentSize[0], 'opening the sidebar must not narrow the page')
-  assert.equal(sidebarView.width, Math.min(320, contentSize[0]))
+  assert.equal(sidebarView.width, widthAfterResize)
   assert.equal(sidebarView.y, 0, 'the sidebar starts at the top edge of the window')
   assert.equal(sidebarView.height, contentSize[1], 'the sidebar covers the full window height')
   captureFullWindow('sidebar-overlay-live-page-visible.png')
@@ -306,10 +377,9 @@ async function run() {
   await fixturePageView.webContents.executeJavaScript('window.scrollTo(0, 0)')
   await waitFor(() => fixturePageView.webContents.executeJavaScript('window.scrollY === 0'), 'returning the synthetic page to its top before the remaining pointer checks')
 
-  // Click the sidebar's collapse/pin control with a real pointer to confirm that this top layer is interactive.
-  const collapsePoint = await clickElement(rendererViews.sidebar, '.sidebar-collapse-button')
-  await waitFor(() => evaluate(rendererViews.sidebar, 'document.querySelector(".sidebar-collapse-button")?.getAttribute("aria-pressed") === "false"'), 'the sidebar pin control to toggle off')
-  assert.ok(collapsePoint.x < mainWindow.getContentBounds().x + 340, 'the sidebar control is inside the glass panel')
+  // The toolbar Tabs button is the only pin toggle; it remains outside the panel and does not depend on sidebar hover.
+  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
+  await waitFor(() => evaluate(rendererViews.toolbar, 'document.querySelector(".tabs-sidebar-button")?.getAttribute("aria-pressed") === "false"'), 'the toolbar pin control to toggle off')
   pointerMove(mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350)
   const resetTargetRect = await fixturePageView.webContents.executeJavaScript(`(() => { const r = document.querySelector('#target').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
   const resetTargetPoint = screenPointForElement(fixturePageView, resetTargetRect)
@@ -327,8 +397,8 @@ async function run() {
   await waitFor(() => rendererViews.sidebar.getBounds().width === 0, 'the hover-only sidebar to hide again')
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
-  await clickElement(rendererViews.toolbar, '.sidebar-toggle-button')
-  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'the sidebar to open for its bottom New Tab action')
+  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
+  await waitFor(() => rendererViews.sidebar.getBounds().width === widthAfterResize, 'the sidebar to open for its bottom New Tab action')
   await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
     const layout = document.querySelector('.browser-layout')
     const sidebar = document.querySelector('.browser-sidebar')
@@ -365,11 +435,14 @@ async function run() {
 
   assert.equal(fixturePageView.getBounds().x, 0)
   assert.equal(fixturePageView.getBounds().width, contentSize[0])
-  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; visible sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and x=5 click-through, overlay page input/wheel, delayed hover reveal, and tab/New Tab lifecycle verified.`)
+  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; persisted sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and hover stability, pointer resize/persistence, x=5 click-through, overlay page input/wheel, delayed edge reveal, and tab/New Tab lifecycle verified.`)
 }
 
 async function cleanup() {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    await delay(300)
+    if (!mainWindow.isDestroyed()) mainWindow.destroy()
+  }
   if (server.listening) await new Promise((resolvePromise) => {
     server.closeAllConnections?.()
     server.close(() => resolvePromise())
