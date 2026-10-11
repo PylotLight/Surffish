@@ -248,6 +248,22 @@ export function getMainRendererOrigin(contents: WebContents): { x: number; y: nu
   return null
 }
 
+/**
+ * Snapshot of the local New Tab page (drawn by the full content renderer, not a site view),
+ * cropped to the page area. Null when it isn't on screen.
+ */
+export async function captureLocalNewTabPage(rect: { x: number; y: number; width: number; height: number }): Promise<Electron.NativeImage | null> {
+  if (!shellViews || !activePageIsLocalNewTab || rect.width <= 0 || rect.height <= 0) return null
+  const contents = shellViews.content.webContents
+  if (contents.isDestroyed() || !shellViews.content.getVisible()) return null
+  try {
+    const image = await contents.capturePage(rect)
+    return image.isEmpty() ? null : image
+  } catch {
+    return null
+  }
+}
+
 export function sendFocusAddressToVisibleRenderer(): void {
   if (!shellViews) return
   const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
