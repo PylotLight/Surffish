@@ -8,10 +8,11 @@ import {
   normalizeBrowserSession,
   parseBrowserPreferences,
   parseBrowserSession,
+  parseNewTabPreferences,
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
-import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
@@ -89,6 +90,19 @@ export function saveBrowserNewTabPage(value: unknown): NewTabPageId | null {
   return preferences.newTabPage
 }
 
+export function getBrowserNewTabPreferences(): NewTabPreferences {
+  loadPreferencesIfNeeded()
+  return { ...preferences.newTabPreferences, worldClocks: preferences.newTabPreferences.worldClocks.map((clock) => ({ ...clock })) }
+}
+
+export function saveBrowserNewTabPreferences(value: unknown): NewTabPreferences | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, newTabPreferences: parseNewTabPreferences(value) }
+  savePreferences()
+  return getBrowserNewTabPreferences()
+}
+
 export function getBrowserPinnedSites(): PinnedSite[] {
   loadPreferencesIfNeeded()
   return preferences.pinnedSites.map((site) => ({ ...site }))
@@ -99,6 +113,7 @@ export function getBrowserPreferencesSnapshot(): BrowserPreferencesSnapshot {
     searchEngine: getBrowserSearchEngine(),
     tabSleepMinutes: getBrowserTabSleepMinutes(),
     newTabPage: getBrowserNewTabPage(),
+    newTabPreferences: getBrowserNewTabPreferences(),
     pinnedSites: getBrowserPinnedSites()
   }
 }

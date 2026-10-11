@@ -14,6 +14,8 @@ export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
   id: string
   view: WebContentsView | null
+  faviconUrl: string | null
+  faviconRevision: number
   error: string | null
   downloadStartedForCurrentLoad: boolean
   lastUrl: string
@@ -71,10 +73,49 @@ function getTabSummaries(): BrowserTabSummary[] {
     id: tab.id,
     url: currentUrl(tab),
     title: pageTitle(tab),
+    faviconUrl: tab.faviconUrl,
     loading: tab.view?.webContents.isLoading() ?? false,
     active: tab.id === activeTabId,
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab))
   }))
+}
+
+function refreshTabFavicon(tab: BrowserTab): void {
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed()) return
+  const pageUrl = contents.getURL()
+  if (!/^https?:\/\//i.test(pageUrl)) return
+  const revision = ++tab.faviconRevision
+  const script = `(() => {
+    const links = Array.from(document.querySelectorAll('link[rel~="icon"], link[rel~="apple-touch-icon"]'));
+    links.sort((a, b) => (b.sizes?.toString().length ?? 0) - (a.sizes?.toString().length ?? 0));
+    return links.find((link) => link.href)?.href ?? null;
+  })()`
+  void contents.executeJavaScript(script, true).then((value: unknown) => {
+    if (tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
+    let faviconUrl = typeof value === 'string' ? value : null
+    if (faviconUrl) {
+      try {
+        const parsed = new URL(faviconUrl)
+        const allowedDataImage = parsed.protocol === 'data:' && parsed.href.startsWith('data:image/') && parsed.href.length <= 500_000
+        const allowedWebImage = (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+          && parsed.username.length === 0 && parsed.password.length === 0 && parsed.href.length <= 4_096
+        if (!allowedDataImage && !allowedWebImage) faviconUrl = null
+      } catch {
+        faviconUrl = null
+      }
+    }
+    if (!faviconUrl) {
+      try {
+        faviconUrl = `${new URL(pageUrl).origin}/favicon.ico`
+      } catch {
+        faviconUrl = null
+      }
+    }
+    if (tab.faviconUrl === faviconUrl) return
+    tab.faviconUrl = faviconUrl
+    publishTabs()
+  }).catch(() => undefined)
 }
 
 function publishTabs(): void {
@@ -297,9 +338,16 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (!isCurrentContents() || !isMainFrame || !/^https?:\/\//i.test(url)) return
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
+    tab.faviconUrl = null
+    tab.faviconRevision += 1
     persistOpenTabs()
+    publishTabs()
   })
-  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState() })
+  contents.on('did-stop-loading', () => {
+    if (!isCurrentContents()) return
+    publishState()
+    refreshTabFavicon(tab)
+  })
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
     tab.lastUrl = url
@@ -320,6 +368,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (!isCurrentContents()) return
     updateLatestVisitTitle(contents.getURL(), title)
     publishState()
+    refreshTabFavicon(tab)
     sendToMainWindowRenderers('browser:history-changed')
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
@@ -357,6 +406,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   const tab: BrowserTab = {
     id: randomUUID(),
     view: null,
+    faviconUrl: null,
+    faviconRevision: 0,
     error: null,
     downloadStartedForCurrentLoad: false,
     lastUrl: target,

@@ -80,10 +80,10 @@ function applyShellLayout(): void {
 
   shellViews.sidebar.setBounds({
     x: 0,
-    y: toolbarHeight,
-    // The hidden edge is hit-tested by the live page; a zero-width sidebar leaves every page pixel interactive.
+    y: 0,
+    // The visible sidebar covers the complete window; a zero-width hidden layer leaves page pixels interactive.
     width: sidebarVisible ? Math.min(SIDEBAR_WIDTH, width) : 0,
-    height: Math.max(0, height - toolbarHeight)
+    height
   })
   shellViews.sidebar.setVisible(overlayMode)
 }
@@ -93,8 +93,8 @@ export function attachBrowserShell(window: BaseWindow, views: BrowserShellViews)
   shellViews = views
   shellRenderers = new Set([views.content.webContents, views.toolbar.webContents, views.sidebar.webContents])
   toolbarMetrics = {
-    toolbarHeight: process.platform === 'darwin' ? 73 : 45,
-    toolbarExtent: process.platform === 'darwin' ? 73 : 45
+    toolbarHeight: process.platform === 'darwin' ? 50 : 45,
+    toolbarExtent: process.platform === 'darwin' ? 50 : 45
   }
   window.on('resize', applyShellLayout)
   window.on('closed', detachBrowserShell)

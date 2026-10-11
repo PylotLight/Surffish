@@ -19,6 +19,40 @@ export interface NewTabBackgroundRefreshResult {
   error: string | null
 }
 
+export interface WorldClockPreference {
+  id: string
+  label: string
+  timeZone: string
+}
+
+export type TemperatureUnit = 'celsius' | 'fahrenheit'
+
+export interface NewTabPreferences {
+  showClock: boolean
+  showDate: boolean
+  use24HourTime: boolean
+  showSeconds: boolean
+  timeZone: string
+  worldClocks: WorldClockPreference[]
+  weatherEnabled: boolean
+  weatherLocation: string
+  temperatureUnit: TemperatureUnit
+  iconSize: number
+  linksPerRow: number
+  showLinkLabels: boolean
+  backgroundDim: number
+  backgroundBlur: number
+  iconVerticalOffset: number
+}
+
+export interface NewTabWeatherSnapshot {
+  location: string
+  temperatureCelsius: number
+  weatherCode: number
+  description: string
+  fetchedAt: number
+}
+
 export interface PinnedSite {
   title: string
   url: string
@@ -55,6 +89,7 @@ export interface BrowserTabSummary {
   id: string
   url: string
   title: string
+  faviconUrl: string | null
   loading: boolean
   active: boolean
   sleeping: boolean
@@ -91,6 +126,7 @@ export interface BrowserPreferencesSnapshot {
   searchEngine: SearchEngineId
   tabSleepMinutes: TabSleepMinutes
   newTabPage: NewTabPageId
+  newTabPreferences: NewTabPreferences
   pinnedSites: PinnedSite[]
 }
 

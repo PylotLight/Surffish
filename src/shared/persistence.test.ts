@@ -6,10 +6,13 @@ import {
   MAX_PINNED_SITES,
   MAX_RESTORED_TABS,
   DEFAULT_TAB_SLEEP_MINUTES,
+  DEFAULT_NEW_TAB_PREFERENCES,
+  MAX_WORLD_CLOCKS,
   normalizeBrowserSession,
   normalizePinnedSites,
   parseBrowserProxySettings,
   parseBrowserPreferences,
+  parseNewTabPreferences,
   parseBrowserSession
 } from './persistence.ts'
 import { SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
@@ -104,4 +107,52 @@ test('accepts only HTTP(S) site settings and defaults each site to blocking and 
     allowMedia: true, allowGeolocation: false, allowNotifications: true
   })
   assert.equal(Object.keys(parsed.siteSettings).length, 1)
+})
+
+test('defaults New Tab clocks, weather, and icon display preferences safely', () => {
+  const preferences = parseNewTabPreferences(null)
+  assert.deepEqual(preferences, DEFAULT_NEW_TAB_PREFERENCES)
+  assert.equal(preferences.showClock, true)
+  assert.equal(preferences.weatherEnabled, false)
+  assert.equal(preferences.timeZone, 'local')
+})
+
+test('normalizes clock time zones, removes invalid world clocks, and bounds display settings', () => {
+  const preferences = parseNewTabPreferences({
+    showClock: false,
+    timeZone: 'Not/A_Timezone',
+    weatherEnabled: true,
+    weatherLocation: ` ${'A'.repeat(140)} `,
+    temperatureUnit: 'fahrenheit',
+    iconSize: 999,
+    linksPerRow: 1,
+    backgroundDim: -12,
+    backgroundBlur: 6.4,
+    iconVerticalOffset: 300,
+    worldClocks: [
+      { id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' },
+      { id: 'two', label: 'Bad zone', timeZone: 'Mars/Phobos' },
+      { id: 'one', label: 'Duplicate id', timeZone: 'UTC' },
+      { id: 'empty', label: '  ', timeZone: 'UTC' }
+    ]
+  })
+  assert.equal(preferences.showClock, false)
+  assert.equal(preferences.timeZone, 'local')
+  assert.equal(preferences.weatherLocation.length, 100)
+  assert.equal(preferences.temperatureUnit, 'fahrenheit')
+  assert.equal(preferences.iconSize, 52)
+  assert.equal(preferences.linksPerRow, 3)
+  assert.equal(preferences.backgroundDim, 0)
+  assert.equal(preferences.backgroundBlur, 6)
+  assert.equal(preferences.iconVerticalOffset, 240)
+  assert.deepEqual(preferences.worldClocks, [{ id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' }])
+})
+
+test('caps saved world clocks to a small, bounded list', () => {
+  const clocks = Array.from({ length: MAX_WORLD_CLOCKS + 3 }, (_, index) => ({
+    id: `clock-${index}`,
+    label: `City ${index}`,
+    timeZone: 'UTC'
+  }))
+  assert.equal(parseNewTabPreferences({ worldClocks: clocks }).worldClocks.length, MAX_WORLD_CLOCKS)
 })

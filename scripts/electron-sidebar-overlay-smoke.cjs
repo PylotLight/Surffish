@@ -20,9 +20,14 @@ const NETWORK_ONLY_CONFIG = {
   loadExtendedSelectors: false,
   loadGenericCosmeticsFilters: false
 }
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
+  if (request.url === '/favicon.svg') {
+    response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' })
+    response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#45b37c"/></svg>')
+    return
+  }
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-  response.end(`<!doctype html><meta charset="utf-8"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:0;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`)
+  response.end(`<!doctype html><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:0;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`)
 })
 let mainWindow
 let fixtureUrl
@@ -161,6 +166,10 @@ async function run() {
 
   assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`), true, 'the app should open a synthetic loopback page')
   await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'the synthetic page navigation')
+  await waitFor(async () => {
+    const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')
+    return tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl === `${new URL(fixtureUrl).origin}/favicon.svg`
+  }, 'the page-declared favicon to appear in the active tab summary')
   await waitFor(() => {
     fixturePageView = mainWindow.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL() === fixtureUrl)
     return fixturePageView && fixturePageView.getBounds().width > 0
@@ -170,6 +179,8 @@ async function run() {
   await fixturePageView.webContents.executeJavaScript("document.cookie = 'sockfish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
 
   const contentSize = mainWindow.getContentSize()
+  pointerMove(mainWindow.getContentBounds().x + Math.floor(contentSize[0] / 2), mainWindow.getContentBounds().y + Math.floor(contentSize[1] / 2))
+  await waitFor(() => nativeViewState().find((view) => view.surface === 'sidebar').bounds.width === 0, 'the full-height sidebar to hide after the pointer leaves the left reveal edge')
   const pageHiddenSidebar = fixturePageView.getBounds()
   const sidebarHiddenState = nativeViewState()
   assert.equal(pageHiddenSidebar.x, 0, 'a live page starts at the left edge without a reveal-strip inset')
@@ -200,7 +211,8 @@ async function run() {
   assert.equal(pageVisibleSidebar.x, 0, 'opening the sidebar must not inset the page')
   assert.equal(pageVisibleSidebar.width, contentSize[0], 'opening the sidebar must not narrow the page')
   assert.equal(sidebarView.width, Math.min(320, contentSize[0]))
-  assert.equal(sidebarView.y, Math.round((await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-chrome").getBoundingClientRect().height'))), 'the sidebar starts below the measured native toolbar')
+  assert.equal(sidebarView.y, 0, 'the sidebar starts at the top edge of the window')
+  assert.equal(sidebarView.height, contentSize[1], 'the sidebar covers the full window height')
   captureFullWindow('sidebar-overlay-live-page-visible.png')
 
   // A physical click on the live page outside the glass panel must reach the page while the sidebar is open.

@@ -28,9 +28,11 @@ import {
 } from './browser-shell'
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
+import { getNewTabWeather } from './new-tab-weather'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
+import { getMainWindow } from './window'
 import {
   getBrowserNewTabPage,
   getBrowserPinnedSites,
@@ -42,7 +44,8 @@ import {
   saveBrowserPinnedSites,
   saveBrowserSiteSettings,
   saveBrowserSearchEngine,
-  saveBrowserTabSleepMinutes
+  saveBrowserTabSleepMinutes,
+  saveBrowserNewTabPreferences
 } from './browser-persistence'
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
@@ -141,6 +144,17 @@ export function registerIpc(): void {
     if (saved) sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
     return saved
   })
+  ipcMain.handle('browser:new-tab-preferences:set', (event, value: unknown) => {
+    assertMainRenderer(event)
+    const saved = saveBrowserNewTabPreferences(value)
+    if (saved) sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    return saved
+  })
+  ipcMain.handle('browser:new-tab-weather:get', async (event, location: unknown) => {
+    assertMainRenderer(event)
+    if (typeof location !== 'string') throw new Error('Enter a city or town to load weather.')
+    return getNewTabWeather(location)
+  })
   ipcMain.handle('browser:new-tab-backgrounds:get', (event) => {
     assertMainRenderer(event)
     return getNewTabBackgrounds()
@@ -198,6 +212,18 @@ export function registerIpc(): void {
   ipcMain.handle('app:quit', (event) => {
     assertMainRenderer(event)
     app.quit()
+  })
+  ipcMain.handle('app:window-control', (event, action: unknown) => {
+    assertMainRenderer(event)
+    const window = getMainWindow()
+    if (!window || window.isDestroyed()) return false
+    if (action === 'close') window.close()
+    else if (action === 'minimize') window.minimize()
+    else if (action === 'toggle-zoom') {
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    } else return false
+    return true
   })
   ipcMain.handle('browser:bramble:get', (event) => {
     assertMainRenderer(event)
