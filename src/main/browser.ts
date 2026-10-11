@@ -46,6 +46,7 @@ const MAC_SWIPE_PROGRESS_CHANNEL = 'browser:mac-trackpad-swipe:progress'
 const MAC_SWIPE_END_CHANNEL = 'browser:mac-trackpad-swipe:end'
 const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
 const MAC_SWIPE_SETTLE_MS = 180
+const MAC_SWIPE_DEBUG = process.env.SOCKFISH_SWIPE_DEBUG === '1'
 const tabs: BrowserTab[] = []
 let activeTabId: string | null = null
 let browserWindow: BaseWindow | null = null
@@ -901,28 +902,39 @@ function resetMacTrackpadSwipeFor(contents: WebContents): void {
 }
 
 function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | undefined {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return undefined
-  if (!Buffer.isBuffer(request.windowHandle) || !browserWindow.getNativeWindowHandle().equals(request.windowHandle)) return undefined
+  const refuse = (reason: string): undefined => {
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] refused:', reason, { direction: request.direction, x: request.x, y: request.y, bounds: browserBounds })
+    return undefined
+  }
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
+  // The handle only tells us which NSWindow the gesture landed in. Sockfish drives one browser
+  // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
+  // reject every swipe).
+  if (MAC_SWIPE_DEBUG && Buffer.isBuffer(request.windowHandle)
+    && !browserWindow.getNativeWindowHandle().equals(request.windowHandle)) {
+    console.info('[trackpad swipe] window handle differs from getNativeWindowHandle(); continuing')
+  }
   if ((request.direction !== 'back' && request.direction !== 'forward')
-    || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return undefined
+    || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return refuse('bad request')
   if (browserBounds.width <= 0 || browserBounds.height <= 0
     || request.x < browserBounds.x || request.y < browserBounds.y
     || request.x >= browserBounds.x + browserBounds.width
-    || request.y >= browserBounds.y + browserBounds.height) return undefined
+    || request.y >= browserBounds.y + browserBounds.height) return refuse('outside page bounds')
 
   const tab = getTab()
   const contents = tab?.view?.webContents
-  if (!tab || !contents || contents.isDestroyed()) return undefined
+  if (!tab || !contents || contents.isDestroyed()) return refuse('no active tab')
   const canPageConsume = request.direction === 'back'
     ? tab.pageScrollEdges.canScrollLeft
     : tab.pageScrollEdges.canScrollRight
-  if (canPageConsume) return undefined
+  if (canPageConsume) return refuse(`page can still scroll ${JSON.stringify(tab.pageScrollEdges)}`)
 
   try {
     const canNavigate = request.direction === 'back'
       ? contents.navigationHistory.canGoBack()
       : contents.navigationHistory.canGoForward()
-    if (!canNavigate) return undefined
+    if (!canNavigate) return refuse('no history in that direction')
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking', request.direction)
 
     cancelActiveMacTrackpadSwipe()
     const swipe: ActiveMacTrackpadSwipe = {
@@ -958,6 +970,7 @@ function finishMacTrackpadSwipe(
   committed: boolean,
   _maxProgress: number
 ): void {
+  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
   if (swipe.contents.isDestroyed()) {

@@ -126,9 +126,9 @@ function startScrollEdgeReporter(ipcRenderer, win, doc, isMainFrame) {
 
   function publish(target = lastTarget) {
     lastTarget = target || null
-    const edges = lastTarget
-      ? scrollEdgesAt(lastTarget, win, doc)
-      : { canScrollLeft: true, canScrollRight: true }
+    // With no pointer target yet (fresh page, pointer hasn't moved) measure the viewport
+    // instead of reporting "can scroll both ways", which refused every swipe after a navigation.
+    const edges = scrollEdgesAt(lastTarget || doc.documentElement, win, doc)
     if (previous && previous.canScrollLeft === edges.canScrollLeft
       && previous.canScrollRight === edges.canScrollRight) return
     previous = edges
@@ -146,7 +146,7 @@ function startScrollEdgeReporter(ipcRenderer, win, doc, isMainFrame) {
 
   win.addEventListener('pointermove', updateFromEvent, { capture: true, passive: true })
   win.addEventListener('pointerover', updateFromEvent, { capture: true, passive: true })
-  win.addEventListener('wheel', () => publish(), { capture: true, passive: true })
+  win.addEventListener('wheel', updateFromEvent, { capture: true, passive: true })
   doc.addEventListener('scroll', () => publish(), { capture: true, passive: true })
   doc.addEventListener('DOMContentLoaded', () => publish(), { once: true })
   win.requestAnimationFrame(() => publish())
