@@ -131,6 +131,10 @@ export interface AdblockDiagnostics {
   blockedRequests: number
   allowedRequests: number
   networkFilterCount: number
+  /** Element-hiding and scriptlet rules loaded in the engine. */
+  cosmeticFilterCount: number
+  /** Scriptlets (uBO `+js` page fixes, e.g. YouTube ad removal) injected since launch. */
+  pageFixInjections: number
   loadedListCount: number
   loadedLists: string[]
   recentBlockedRequests: AdblockBlockedRequest[]
