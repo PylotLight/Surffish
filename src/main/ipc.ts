@@ -7,6 +7,7 @@ import {
   browserStop,
   browserPictureInPicture,
   updateBrowserTrackpadScrollEdges,
+  updateBrowserPageScale,
   closeBrowserTab,
   getBrowserState,
   getBrowserTabs,
@@ -76,6 +77,11 @@ export function registerIpc(): void {
   ipcMain.on('browser:mac-trackpad-swipe:scroll-edge', (event, edges: unknown) => {
     if (process.platform === 'darwin' && event.senderFrame === event.sender.mainFrame) {
       updateBrowserTrackpadScrollEdges(event.sender, edges)
+    }
+  })
+  ipcMain.on('browser:mac-trackpad-swipe:page-scale', (event, scale: unknown) => {
+    if (process.platform === 'darwin' && event.senderFrame === event.sender.mainFrame) {
+      updateBrowserPageScale(event.sender, scale)
     }
   })
   ipcMain.handle('browser:preferences:get', (event) => {
