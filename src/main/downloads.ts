@@ -81,7 +81,7 @@ function loadHistory(): void {
       record.state = 'failed'
       record.canResume = false
       record.completedAt = now
-      record.message = 'This download stopped when Sockfish closed and cannot be resumed here.'
+      record.message = 'This download stopped when Surffish closed and cannot be resumed here.'
       changed = true
     }
   }

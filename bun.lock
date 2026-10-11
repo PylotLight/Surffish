@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "sockfish",
+      "name": "surffish",
       "dependencies": {
         "@ghostery/adblocker-electron": "^2.20.1",
         "react": "^19.3.0",

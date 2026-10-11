@@ -1,7 +1,8 @@
 import type { SearchEngineId } from './types'
 
 export const DEFAULT_SEARCH_ENGINE: SearchEngineId = 'brave'
-export const SOCKFISH_QUICK_LINKS_URL = 'sockfish://quick-links'
+export const SURFFISH_QUICK_LINKS_URL = 'surffish://quick-links'
+export const LEGACY_QUICK_LINKS_URL = 'sockfish://quick-links'
 export const SEARCH_ENGINES = [
   { id: 'brave', label: 'Brave Search', searchUrl: 'https://search.brave.com/search', homeUrl: 'https://search.brave.com/' },
   { id: 'duckduckgo', label: 'DuckDuckGo', searchUrl: 'https://duckduckgo.com/', homeUrl: 'https://duckduckgo.com/' },
@@ -19,7 +20,7 @@ export function getSearchHomepage(engineId: SearchEngineId): string {
 
 /** Local New Tab content is rendered by the app, so the absence of a BrowserView does not mean it is sleeping. */
 export function isBrowserTabSleeping(hasBrowserView: boolean, url: string): boolean {
-  return !hasBrowserView && url !== SOCKFISH_QUICK_LINKS_URL
+  return !hasBrowserView && url !== SURFFISH_QUICK_LINKS_URL
 }
 
 /** Match direct YouTube destinations without accepting lookalike hostnames. */

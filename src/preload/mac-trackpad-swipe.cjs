@@ -349,7 +349,7 @@ function startPreload(ipcRenderer, win, doc, isMainFrame = true) {
 
 const BACKGROUND_AUTOPLAY_POLICY_CHANNEL = 'browser:background-youtube-autoplay:policy'
 const BACKGROUND_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
-const BACKGROUND_AUTOPLAY_RELEASE_KEY = '__sockfishAllowBackgroundYouTubeAutoplay'
+const BACKGROUND_AUTOPLAY_RELEASE_KEY = '__surffishAllowBackgroundYouTubeAutoplay'
 
 function isYouTubePageUrl(input) {
   try {

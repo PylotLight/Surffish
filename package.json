@@ -1,5 +1,5 @@
 {
-  "name": "sockfish",
+  "name": "surffish",
   "version": "0.1.0",
   "description": "A compact Electron browser with a local SOCKS5 proxy toggle",
   "private": true,

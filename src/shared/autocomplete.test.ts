@@ -5,7 +5,7 @@ import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './type
 
 const pins: PinnedSite[] = [{ title: 'GitHub', url: 'https://github.com/' }]
 const tabs: BrowserTabSummary[] = [
-  { id: 'tab-1', title: 'GitHub · Sockfish', url: 'https://github.com/PylotLight/Sockfish', faviconUrl: null, active: true, pinned: false, loading: false, sleeping: false },
+  { id: 'tab-1', title: 'GitHub · Surffish', url: 'https://github.com/PylotLight/Surffish', faviconUrl: null, active: true, pinned: false, loading: false, sleeping: false },
   { id: 'tab-2', title: 'Example', url: 'https://example.org/', faviconUrl: null, active: false, pinned: false, loading: false, sleeping: false }
 ]
 const history: BrowsingHistoryEntry[] = [
@@ -18,20 +18,20 @@ test('ranks pinned sites before open tabs and history without remote suggestions
   assert.deepEqual(results.map((result) => result.source), ['Pinned site', 'Open tab', 'History'])
   assert.deepEqual(results.map((result) => result.url), [
     'https://github.com/',
-    'https://github.com/PylotLight/Sockfish',
+    'https://github.com/PylotLight/Surffish',
     'https://docs.github.com/'
   ])
 })
 
 test('matches hostnames and titles case-insensitively and removes duplicate URLs', () => {
   const duplicateHistory: BrowsingHistoryEntry[] = [
-    { id: 'history-duplicate', title: 'Duplicate GitHub tab', url: 'https://github.com/PylotLight/Sockfish', visitedAt: 4 },
+    { id: 'history-duplicate', title: 'Duplicate GitHub tab', url: 'https://github.com/PylotLight/Surffish', visitedAt: 4 },
     ...history
   ]
   const results = buildAddressSuggestions('  GITHUB.COM  ', pins, tabs, duplicateHistory)
   assert.equal(results.length, 3)
   assert.equal(results[0]?.source, 'Pinned site')
-  assert.equal(results.filter((result) => result.url === 'https://github.com/PylotLight/Sockfish').length, 1)
+  assert.equal(results.filter((result) => result.url === 'https://github.com/PylotLight/Surffish').length, 1)
 })
 
 test('returns no suggestions for a blank query or unsafe local data', () => {

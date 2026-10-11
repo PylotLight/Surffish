@@ -3,7 +3,7 @@ function hasPath(root, path) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== 'sockfish-extension-probe') return false;
+  if (message?.type !== 'surffish-extension-probe') return false;
 
   const result = {
     backgroundKind: typeof ServiceWorkerGlobalScope === 'function' && self instanceof ServiceWorkerGlobalScope
@@ -27,13 +27,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
   };
 
-  chrome.storage.local.set({ sockfishExtensionProbe: 'stored' }, () => {
+  chrome.storage.local.set({ surffishExtensionProbe: 'stored' }, () => {
     const setError = chrome.runtime.lastError?.message;
-    chrome.storage.local.get('sockfishExtensionProbe', (values) => {
+    chrome.storage.local.get('surffishExtensionProbe', (values) => {
       const getError = chrome.runtime.lastError?.message;
       sendResponse({
         ...result,
-        storageLocalRoundTrip: values?.sockfishExtensionProbe === 'stored',
+        storageLocalRoundTrip: values?.surffishExtensionProbe === 'stored',
         storageError: setError || getError || null
       });
     });

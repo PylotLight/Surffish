@@ -10,13 +10,13 @@ const RESOURCES = JSON.stringify({
     {
       name: 'set-constant.js',
       aliases: ['set.js'],
-      body: 'function setConstant(a, b) { window.__sockfishSet = [a, b] }',
+      body: 'function setConstant(a, b) { window.__surffishSet = [a, b] }',
       dependencies: []
     },
     {
       name: 'json-prune.js',
       aliases: [],
-      body: 'function jsonPrune(a) { window.__sockfishPrune = a }',
+      body: 'function jsonPrune(a) { window.__surffishPrune = a }',
       dependencies: []
     }
   ]
@@ -94,9 +94,9 @@ test('frame start payload carries YouTube scriptlets and site CSS, honoring !#if
   assert.equal(youtube.active, true)
   assert.equal(youtube.observe, true)
   const youtubeScripts = youtube.scripts.join('\n')
-  assert.match(youtubeScripts, /__sockfishPrune/)
+  assert.match(youtubeScripts, /__surffishPrune/)
   assert.match(youtubeScripts, /playerResponse\\?\.adPlacements/)
-  assert.match(youtubeScripts, /__sockfishSet/)
+  assert.match(youtubeScripts, /__surffishSet/)
 
   const example = frameStartPayload(engine, 'https://example.com/')
   assert.match(example.styles, /\.banner-ad/)

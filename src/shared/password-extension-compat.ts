@@ -190,7 +190,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'manifest',
       severity: 'warning',
-      message: `${details.label} declares a Manifest V3 service worker. Electron does not document this surface; Sockfish's Electron 44.5.1 / Chromium 152 fixture loaded an MV3 worker and completed messaging, but this static inspection does not prove this build's background behavior or API coverage.`
+      message: `${details.label} declares a Manifest V3 service worker. Electron does not document this surface; Surffish's Electron 44.5.1 / Chromium 152 fixture loaded an MV3 worker and completed messaging, but this static inspection does not prove this build's background behavior or API coverage.`
     })
   } else if (Array.isArray(background.scripts) && manifestVersion === 3) {
     addIssue({
@@ -227,7 +227,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'api-gap',
       severity: 'warning',
-      message: `Sockfish's runtime probe exposed these undocumented APIs for this manifest version: ${runtimeObservedPermissions.join(', ')}. API presence is not a full behavioral or target compatibility test.`
+      message: `Surffish's runtime probe exposed these undocumented APIs for this manifest version: ${runtimeObservedPermissions.join(', ')}. API presence is not a full behavioral or target compatibility test.`
     })
   }
 
@@ -244,7 +244,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'browser-ui',
       severity: 'blocker',
-      message: `The ${actionKey} declared by this extension needs a browser-action toolbar/popup host; Sockfish's Electron browser does not currently provide one.`
+      message: `The ${actionKey} declared by this extension needs a browser-action toolbar/popup host; Surffish's Electron browser does not currently provide one.`
     })
   }
 
@@ -252,7 +252,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'browser-ui',
       severity: 'blocker',
-      message: 'Extension keyboard commands are declared, but Sockfish does not yet register extension commands.'
+      message: 'Extension keyboard commands are declared, but Surffish does not yet register extension commands.'
     })
   }
 
@@ -300,7 +300,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'api-gap',
       severity: 'warning',
-      message: `Static source references APIs outside Electron's documented surface that were exposed in Sockfish's Electron 44.5.1 runtime probe: ${names.join(', ')}. Presence is not a complete behavioral test.`
+      message: `Static source references APIs outside Electron's documented surface that were exposed in Surffish's Electron 44.5.1 runtime probe: ${names.join(', ')}. Presence is not a complete behavioral test.`
     })
   }
 
@@ -319,7 +319,7 @@ export function inspectPasswordExtensionCompatibility(
     addIssue({
       kind: 'api-gap',
       severity: 'warning',
-      message: 'The extension uses webRequest, which Electron documents, but its session-level handler can conflict with Sockfish\'s existing Ghostery request blocker.'
+      message: 'The extension uses webRequest, which Electron documents, but its session-level handler can conflict with Surffish\'s existing Ghostery request blocker.'
     })
   }
 

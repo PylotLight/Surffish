@@ -1,8 +1,8 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 
-export const BRAMBLE_BROWSER_ALIAS_FILE = 'sockfish-bramble-browser-alias.js'
-export const BRAMBLE_BACKGROUND_WORKER_FILE = 'sockfish-bramble-background.js'
+export const BRAMBLE_BROWSER_ALIAS_FILE = 'surffish-bramble-browser-alias.js'
+export const BRAMBLE_BACKGROUND_WORKER_FILE = 'surffish-bramble-background.js'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -30,7 +30,7 @@ export function adaptBrambleFirefoxManifest(input: unknown): JsonRecord {
   const background = record(input.background)
   const scripts = Array.isArray(background.scripts) ? background.scripts : []
   if (background.type !== 'module' || scripts.length !== 1 || scripts[0] !== 'background.js') {
-    throw new Error('Sockfish supports Bramble’s Firefox module background at background.js.')
+    throw new Error('Surffish supports Bramble’s Firefox module background at background.js.')
   }
 
   const manifest = structuredClone(input) as JsonRecord
@@ -96,7 +96,7 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
       });
     } catch {}
   }
-  const brambleBridge = globalThis.sockfishBramble;
+  const brambleBridge = globalThis.surffishBramble;
   if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime &&
       typeof brambleBridge?.openOptionsPage === 'function' && typeof extensionApi.runtime.openOptionsPage === 'function') {
     try {
@@ -120,7 +120,7 @@ export function injectBrambleBrowserAlias(html: string): string {
 
 /** Keep the real popup usable on compact displays without changing the selected source build. */
 export function adaptBramblePopupViewport(html: string): string {
-  const marker = 'data-sockfish-bramble-viewport'
+  const marker = 'data-surffish-bramble-viewport'
   if (html.includes(marker)) return html
   const style = `<style ${marker}>html, body { box-sizing: border-box; width: 100%; max-width: 500px; min-width: 0; height: 100%; min-height: 0; margin: 0; overflow: auto; } #root { min-height: 100%; }</style>`
   if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, `  ${style}\n</head>`)

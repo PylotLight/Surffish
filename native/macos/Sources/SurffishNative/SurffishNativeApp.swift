@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 @MainActor
-private final class SockfishNativeAppDelegate: NSObject, NSApplicationDelegate {
+private final class SurffishNativeAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // SwiftPM-launched SwiftUI executables can have a visible window without
         // becoming the active regular app. That leaves controls unable to accept
@@ -16,8 +16,8 @@ private final class SockfishNativeAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct SockfishNativeApp: App {
-    @NSApplicationDelegateAdaptor(SockfishNativeAppDelegate.self) private var appDelegate
+struct SurffishNativeApp: App {
+    @NSApplicationDelegateAdaptor(SurffishNativeAppDelegate.self) private var appDelegate
     @StateObject private var browser = NativeBrowserHarness()
 
     var body: some Scene {

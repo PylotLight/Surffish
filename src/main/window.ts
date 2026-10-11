@@ -1,4 +1,4 @@
-import { BaseWindow, WebContentsView, app, screen, shell } from 'electron'
+import { BaseWindow, WebContentsView, app, nativeImage, screen, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -80,6 +80,7 @@ function trackWindowState(win: BaseWindow, initial: SavedWindowState | null): vo
 const isMac = process.platform === 'darwin'
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 const rendererFile = join(mainDirectory, '../renderer/index.html')
+const appIconPath = join(mainDirectory, '../../resources/icons/surffish-512.png')
 let mainWindow: BaseWindow | null = null
 let onMainWindowClosed: () => void = () => {}
 
@@ -134,6 +135,7 @@ export function createWindow(): BaseWindow {
   const savedState = readWindowState()
   const win = new BaseWindow({
     title: APP_NAME,
+    icon: appIconPath,
     ...restoredBounds(savedState),
     minWidth: WINDOW.minWidth,
     minHeight: WINDOW.minHeight,
@@ -146,6 +148,7 @@ export function createWindow(): BaseWindow {
     visualEffectState: isMac ? 'active' : undefined,
     backgroundColor: isMac ? '#00000000' : '#101418'
   })
+  if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath))
   mainWindow = win
   if (savedState?.maximized) win.maximize()
   trackWindowState(win, savedState)
@@ -175,7 +178,7 @@ export function createWindow(): BaseWindow {
   ]).then(() => {
     showRestored(win, savedState)
   }).catch((error: unknown) => {
-    console.error('Could not load Sockfish browser surfaces:', error)
+    console.error('Could not load Surffish browser surfaces:', error)
     showRestored(win, savedState)
   })
 

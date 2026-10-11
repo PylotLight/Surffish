@@ -23,7 +23,7 @@ const scriptDirectory = fileURLToPath(new URL('.', import.meta.url))
 const probeScript = join(scriptDirectory, 'electron-real-extension-probe.cjs')
 const require = createRequire(import.meta.url)
 const electronExecutable = require('electron') as string
-const temporaryRoot = mkdtempSync(join(tmpdir(), 'sockfish-bramble-real-extension-'))
+const temporaryRoot = mkdtempSync(join(tmpdir(), 'surffish-bramble-real-extension-'))
 
 try {
   const staged = stageBrambleFirefoxBuild(resolve(sourceDirectory), join(temporaryRoot, 'adapted-extension'))
@@ -42,9 +42,9 @@ try {
   })
   const stdout = child.stdout ?? ''
   const stderr = child.stderr ?? ''
-  const reportLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SOCKFISH_REAL_EXTENSION_PROBE_REPORT='))
+  const reportLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SURFFISH_REAL_EXTENSION_PROBE_REPORT='))
   assert.ok(reportLine, `Electron probe emitted no report.\n${stderr}\n${stdout}`)
-  const report = JSON.parse(reportLine.slice('SOCKFISH_REAL_EXTENSION_PROBE_REPORT='.length)) as Record<string, unknown>
+  const report = JSON.parse(reportLine.slice('SURFFISH_REAL_EXTENSION_PROBE_REPORT='.length)) as Record<string, unknown>
   const extension = record(report.extension)
   const options = record(report.options)
   const optionsSnapshot = record(options.snapshot)

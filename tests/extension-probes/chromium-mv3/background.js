@@ -8,13 +8,13 @@ if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName === 'local') {
       observedLocalStorageChangeKeys.push(...Object.keys(changes));
-      if (changes.sockfishMV3StorageProbe || changes.sockfishContentProbe) observedLocalStorageChange = true;
+      if (changes.surffishMV3StorageProbe || changes.surffishContentProbe) observedLocalStorageChange = true;
     }
   });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.info('SOCKFISH_EXTENSION_PROBE_BACKGROUND_STARTED');
+  console.info('SURFFISH_EXTENSION_PROBE_BACKGROUND_STARTED');
 });
 
 function storageRoundTrip(area, key) {
@@ -47,7 +47,7 @@ function alarmCreateGet() {
       resolve({ available: false, createGet: false, error: 'alarms API unavailable' });
       return;
     }
-    const name = 'sockfish-extension-probe-once';
+    const name = 'surffish-extension-probe-once';
     try {
       chrome.alarms.create(name, { when: Date.now() + 60_000 });
       chrome.alarms.get(name, (alarm) => {
@@ -103,7 +103,7 @@ async function offscreenCreateClose() {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== 'sockfish-extension-probe') return false;
+  if (message?.type !== 'surffish-extension-probe') return false;
 
   const result = {
     backgroundKind: typeof ServiceWorkerGlobalScope === 'function' && self instanceof ServiceWorkerGlobalScope
@@ -129,11 +129,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   };
 
   Promise.all([
-    storageRoundTrip(chrome.storage?.local, 'sockfishMV3StorageProbe').then(async (storageLocal) => {
+    storageRoundTrip(chrome.storage?.local, 'surffishMV3StorageProbe').then(async (storageLocal) => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       return { storageLocal, storageOnChangedEvent: observedLocalStorageChange };
     }),
-    storageRoundTrip(chrome.storage?.session, 'sockfishMV3SessionProbe'),
+    storageRoundTrip(chrome.storage?.session, 'surffishMV3SessionProbe'),
     alarmCreateGet(),
     idleQuery(),
     offscreenCreateClose()

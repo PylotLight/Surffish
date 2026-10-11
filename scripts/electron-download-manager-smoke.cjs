@@ -17,9 +17,9 @@ const NETWORK_ONLY_CONFIG = {
   loadExtendedSelectors: false,
   loadGenericCosmeticsFilters: false
 }
-const userData = join(tmpdir(), `sockfish-download-smoke-${process.pid}`)
+const userData = join(tmpdir(), `surffish-download-smoke-${process.pid}`)
 const downloadDirectory = join(userData, 'synthetic-downloads')
-const screenshotDirectory = process.env.SOCKFISH_SCREENSHOT_DIR
+const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR
 const totalBytes = 2 * 1024 * 1024
 const servers = []
 let mainWindow
@@ -120,16 +120,16 @@ function surfaceFor(view) {
 }
 
 function activeUiView() {
-  assert.ok(mainWindow && !mainWindow.isDestroyed(), 'Sockfish window must be ready')
+  assert.ok(mainWindow && !mainWindow.isDestroyed(), 'Surffish window must be ready')
   for (const view of [rendererViews.toolbar, rendererViews.content, rendererViews.sidebar]) {
     if (view?.getVisible() && !view.webContents.isDestroyed()) return view
   }
-  throw new Error('No trusted Sockfish renderer surface is visible.')
+  throw new Error('No trusted Surffish renderer surface is visible.')
 }
 
 async function evaluateIn(view, expression) {
-  assert.ok(view?.webContents && !view.webContents.isDestroyed(), 'Sockfish renderer surface must be ready')
-  const key = `__sockfishSmokeResult${++evaluationId}`
+  assert.ok(view?.webContents && !view.webContents.isDestroyed(), 'Surffish renderer surface must be ready')
+  const key = `__surffishSmokeResult${++evaluationId}`
   const keyLiteral = JSON.stringify(key)
   await view.webContents.executeJavaScript(`(() => {
     window[${keyLiteral}] = { ready: false }
@@ -180,7 +180,7 @@ async function navigate(url) {
       error: state.current?.error,
       tabs: state.tabs?.map((tab) => ({ active: tab.active, sleeping: tab.sleeping, url: `${new URL(tab.url).origin}${new URL(tab.url).pathname}` }))
     }
-    throw new Error(`Sockfish rejected synthetic local navigation ${new URL(url).pathname}: ${JSON.stringify(safeState)}`)
+    throw new Error(`Surffish rejected synthetic local navigation ${new URL(url).pathname}: ${JSON.stringify(safeState)}`)
   }
 }
 
@@ -198,9 +198,10 @@ async function captureScreenshot(name) {
   if (!screenshotDirectory) return
   mkdirSync(screenshotDirectory, { recursive: true })
   assert.ok(process.env.DISPLAY, 'DISPLAY is required to capture the composed BaseWindow surfaces')
+  const { x, y, width, height } = mainWindow.getBounds()
   execFileSync('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', '1280x800',
-    '-i', `${process.env.DISPLAY}.0`, '-frames:v', '1', '-y', join(screenshotDirectory, name)
+    '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', `${width}x${height}`,
+    '-i', `${process.env.DISPLAY}.0+${x},${y}`, '-frames:v', '1', '-y', join(screenshotDirectory, name)
   ])
 }
 
@@ -211,7 +212,7 @@ async function waitForHistory(predicate, description) {
 function seedOfflineProfile() {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
   mkdirSync(downloadDirectory, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||sockfish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
   writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`, { mode: 0o600 })
@@ -263,6 +264,12 @@ async function seedNewTabDemo(siteBases) {
   await waitFor(async () => evaluate('document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the tabs sidebar')
   await delay(300)
   await captureScreenshot('tabs-sidebar.png')
+  if (screenshotDirectory) {
+    assert.equal(await clickSelector('[aria-label="Browsing history"]'), true, 'the browsing-history control should be available')
+    await waitFor(async () => evaluateIn(rendererViews.sidebar, 'document.querySelectorAll(".history-list .history-item").length >= 2'), 'synthetic records in the History sidebar')
+    await delay(300)
+    await captureScreenshot('history-sidebar.png')
+  }
 }
 
 async function captureDownloadViews() {
@@ -312,7 +319,7 @@ async function run() {
     if (!rendererViews.content || !rendererViews.toolbar || !rendererViews.sidebar) return null
     if (Object.values(rendererViews).some((view) => view.webContents.isLoadingMainFrame())) return null
     return window
-  }, 'the production Sockfish BaseWindow and its renderer surfaces', 45000)
+  }, 'the production Surffish BaseWindow and its renderer surfaces', 45000)
   await evaluate('window.api.browser.downloads.get()')
   assert.equal(await clickSelector('.downloads-toolbar-button'), true, 'Downloads should open from its toolbar button')
   await waitFor(async () => evaluate('document.querySelector("#downloads-popup .downloads-empty")?.textContent.includes("No downloads yet")'), 'the empty Downloads state')

@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import { ensureDependencies } from './ensure-dependencies.ts'
 
 function makeProject(): string {
-  const root = mkdtempSync(join(tmpdir(), 'sockfish-dependency-check-'))
+  const root = mkdtempSync(join(tmpdir(), 'surffish-dependency-check-'))
   writeFileSync(join(root, '.bun-version'), '1.4.3\n')
   writeFileSync(join(root, 'package.json'), JSON.stringify({ dependencies: { react: '^19.0.0' } }))
   writeFileSync(join(root, 'bun.lock'), 'initial lockfile\n')
@@ -38,7 +38,7 @@ test('installs only when dependency inputs change', (t) => {
   writeFileSync(join(root, 'bun.lock'), 'updated lockfile\n')
   assert.equal(ensureDependencies(root, install, quiet), true)
   assert.equal(installs, 3)
-  assert.match(readFileSync(join(root, 'node_modules', '.sockfish-dependency-state'), 'utf8'), /^[a-f0-9]{64}\n$/)
+  assert.match(readFileSync(join(root, 'node_modules', '.surffish-dependency-state'), 'utf8'), /^[a-f0-9]{64}\n$/)
 })
 
 test('does not cache a failed install, so the next dev run retries', (t) => {

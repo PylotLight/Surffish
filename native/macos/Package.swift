@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "SockfishNativePOC",
+    name: "SurffishNativePOC",
     platforms: [.macOS("15.4")],
     products: [
         .library(name: "NativeCore", targets: ["NativeCore"]),
-        .executable(name: "SockfishNative", targets: ["SockfishNative"])
+        .executable(name: "SurffishNative", targets: ["SurffishNative"])
     ],
     targets: [
         .target(name: "NativeCore"),
-        .executableTarget(name: "SockfishNative", dependencies: ["NativeCore"]),
+        .executableTarget(name: "SurffishNative", dependencies: ["NativeCore"]),
         .testTarget(
             name: "NativeCoreTests",
             dependencies: ["NativeCore"],

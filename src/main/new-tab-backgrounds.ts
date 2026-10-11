@@ -16,7 +16,7 @@ import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 
 const CACHE_FILENAME = 'new-tab-photo-cache.json'
-const USER_AGENT = 'Sockfish New Tab background photos/0.1 (+https://github.com/PylotLight/Sockfish)'
+const USER_AGENT = 'Surffish New Tab background photos/0.1 (+https://github.com/PylotLight/Surffish)'
 const REQUEST_TIMEOUT_MS = 12_000
 const RESULTS_PER_SEARCH = 12
 const MAX_DOWNLOAD_ATTEMPTS_PER_SEARCH = 4

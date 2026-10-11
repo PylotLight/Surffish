@@ -21,8 +21,8 @@ export { applyFilterEnvironment, buildFilterEngine, frameStartPayload, frameUpda
 export type { BuiltFilterEngine, FrameDomFeatures, FrameStartPayload, ListFetch } from './adblock-filters.ts'
 export { FILTER_LIST_SOURCES, FULL_FILTER_CONFIG } from './adblock-policy.ts'
 
-export const FRAME_START_CHANNEL = 'sockfish:adblock:frame-start'
-export const FRAME_UPDATE_CHANNEL = 'sockfish:adblock:frame-update'
+export const FRAME_START_CHANNEL = 'surffish:adblock:frame-start'
+export const FRAME_UPDATE_CHANNEL = 'surffish:adblock:frame-update'
 
 export type BeforeRequestDetails = Parameters<ElectronBlocker['onBeforeRequest']>[0]
 export type BeforeRequestResponse = Parameters<Parameters<ElectronBlocker['onBeforeRequest']>[1]>[0]

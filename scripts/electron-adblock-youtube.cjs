@@ -5,10 +5,10 @@
 //   bun run test:electron-youtube -- --baseline   same pages with no blocking, for comparison
 //   bun run test:electron-adblock-sites        public adblock test pages, with screenshots
 //
-// Env: SOCKFISH_HARNESS_PROXY=socks5://127.0.0.1:1080 to test through the SOCKS proxy,
-//      SOCKFISH_HARNESS_SECONDS=45 to watch each video longer,
-//      SOCKFISH_HARNESS_VIDEOS=id1,id2 to pick videos,
-//      SOCKFISH_OFFSCREEN=1 for headless Linux (with --ozone-platform=headless --disable-gpu).
+// Env: SURFFISH_HARNESS_PROXY=socks5://127.0.0.1:1080 to test through the SOCKS proxy,
+//      SURFFISH_HARNESS_SECONDS=45 to watch each video longer,
+//      SURFFISH_HARNESS_VIDEOS=id1,id2 to pick videos,
+//      SURFFISH_OFFSCREEN=1 for headless Linux (with --ozone-platform=headless --disable-gpu).
 // Screenshots and a JSON report land in ./adblock-harness-output/.
 const { existsSync, mkdirSync, mkdtempSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
@@ -23,8 +23,8 @@ const outputDirectory = join(root, 'adblock-harness-output')
 const argv = new Set(process.argv.slice(2))
 const baseline = argv.has('--baseline')
 const sitesMode = argv.has('--sites')
-const watchSeconds = Number(process.env.SOCKFISH_HARNESS_SECONDS || 30)
-const VIDEOS = (process.env.SOCKFISH_HARNESS_VIDEOS || 'dQw4w9WgXcQ,kJQP7kiw5Fk,JGwWNGJdvx8,9bZkp7q19f0').split(',').map((id) => id.trim()).filter(Boolean)
+const watchSeconds = Number(process.env.SURFFISH_HARNESS_SECONDS || 30)
+const VIDEOS = (process.env.SURFFISH_HARNESS_VIDEOS || 'dQw4w9WgXcQ,kJQP7kiw5Fk,JGwWNGJdvx8,9bZkp7q19f0').split(',').map((id) => id.trim()).filter(Boolean)
 const TEST_SITES = [
   { id: 'd3ward-toolz', url: 'https://d3ward.github.io/toolz/adblock.html', waitMs: 20000 },
   { id: 'adblock-tester', url: 'https://adblock-tester.com/', waitMs: 25000 },
@@ -176,11 +176,11 @@ async function run() {
     if (!existsSync(file)) throw new Error(`Missing ${file}; run \`bun run build\` first.`)
   }
   mkdirSync(outputDirectory, { recursive: true })
-  app.setPath('userData', mkdtempSync(join(tmpdir(), 'sockfish-adblock-harness-')))
+  app.setPath('userData', mkdtempSync(join(tmpdir(), 'surffish-adblock-harness-')))
   await app.whenReady()
 
-  const browserSession = session.fromPartition('sockfish-adblock-harness')
-  if (process.env.SOCKFISH_HARNESS_PROXY) await browserSession.setProxy({ proxyRules: process.env.SOCKFISH_HARNESS_PROXY })
+  const browserSession = session.fromPartition('surffish-adblock-harness')
+  if (process.env.SURFFISH_HARNESS_PROXY) await browserSession.setProxy({ proxyRules: process.env.SURFFISH_HARNESS_PROXY })
 
   const counters = { blocked: 0, pageFixes: 0 }
   let listInfo = { loadedLists: [], failedLists: [], networkFilters: 0, cosmeticFilters: 0 }
@@ -207,7 +207,7 @@ async function run() {
   }
 
   window = new BrowserWindow({
-    show: process.env.SOCKFISH_OFFSCREEN !== '1' && process.env.SOCKFISH_HARNESS_SHOW === '1',
+    show: process.env.SURFFISH_OFFSCREEN !== '1' && process.env.SURFFISH_HARNESS_SHOW === '1',
     width: 1280,
     height: 860,
     webPreferences: {
@@ -216,11 +216,11 @@ async function run() {
       sandbox: true,
       nodeIntegrationInSubFrames: true,
       autoplayPolicy: 'no-user-gesture-required',
-      offscreen: process.env.SOCKFISH_OFFSCREEN === '1'
+      offscreen: process.env.SURFFISH_OFFSCREEN === '1'
     }
   })
   window.webContents.setAudioMuted(true)
-  if (process.env.SOCKFISH_OFFSCREEN === '1') {
+  if (process.env.SURFFISH_OFFSCREEN === '1') {
     window.webContents.setFrameRate(5)
     window.webContents.on('paint', (_event, _dirty, image) => { latestOffscreenFrame = image })
   }

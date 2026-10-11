@@ -97,7 +97,7 @@ test('background YouTube autoplay is blocked at document start and released when
 
   listeners.get(BACKGROUND_AUTOPLAY_ALLOW_CHANNEL)()
   await Promise.resolve()
-  assert.match(scripts[1], /__sockfishAllowBackgroundYouTubeAutoplay/)
+  assert.match(scripts[1], /__surffishAllowBackgroundYouTubeAutoplay/)
   vm.runInNewContext(scripts[1], { window })
   await media.play()
   assert.equal(media.playCount, 1)

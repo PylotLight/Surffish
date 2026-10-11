@@ -23,16 +23,16 @@ interface ProbeTab {
   index?: number
 }
 
-const root = mkdtempSync(join(tmpdir(), 'sockfish-host-tab-frame-probe-'))
-const sourceExtensionDirectory = process.env.SOCKFISH_PROBE_EXTENSION_DIR ? resolve(process.env.SOCKFISH_PROBE_EXTENSION_DIR) : null
+const root = mkdtempSync(join(tmpdir(), 'surffish-host-tab-frame-probe-'))
+const sourceExtensionDirectory = process.env.SURFFISH_PROBE_EXTENSION_DIR ? resolve(process.env.SURFFISH_PROBE_EXTENSION_DIR) : null
 const officialExtensionMode = sourceExtensionDirectory !== null
 const profileDirectory = join(root, 'profile')
 mkdirSync(profileDirectory, { recursive: true })
 app.setPath('userData', profileDirectory)
 
 const report: Record<string, unknown> = {
-  probe: 'sockfish-webcontentsview-tab-frame-mapping',
-  experimentalFlag: 'SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1',
+  probe: 'surffish-webcontentsview-tab-frame-mapping',
+  experimentalFlag: 'SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1',
   fixtureOnly: !officialExtensionMode,
   officialExtensionMode,
   userDataProfile: 'temporary',
@@ -55,7 +55,7 @@ let browserSession: Electron.Session | null = null
 let loadedExtensionId: string | null = null
 let hostTabId: string | null = null
 let probePageUrl = ''
-const bridgeIpcChannel = 'sockfish-experimental-extension-get-frames'
+const bridgeIpcChannel = 'surffish-experimental-extension-get-frames'
 let exitCode = 0
 
 function delay(ms: number): Promise<void> {
@@ -113,7 +113,7 @@ function createLocalFixtures(): { main: Server; child: Server; setChildOrigin: (
     const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
     if (path === '/login') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(`<!doctype html><html><head><title>Sockfish inert login</title></head><body><main><h1>Inert compatibility login</h1><form id="login"><label>Username <input name="username" autocomplete="username"></label><label>Password <input name="password" type="password" autocomplete="current-password"></label><button type="button">No-op sign-in</button></form><iframe name="child" src="${childOrigin}/frame.html"></iframe></main></body></html>`)
+      response.end(`<!doctype html><html><head><title>Surffish inert login</title></head><body><main><h1>Inert compatibility login</h1><form id="login"><label>Username <input name="username" autocomplete="username"></label><label>Password <input name="password" type="password" autocomplete="current-password"></label><button type="button">No-op sign-in</button></form><iframe name="child" src="${childOrigin}/frame.html"></iframe></main></body></html>`)
     } else {
       response.writeHead(404)
       response.end('not found')
@@ -126,13 +126,13 @@ function writeProbeExtension(directory: string): void {
   mkdirSync(directory, { recursive: true })
   writeFileSync(join(directory, 'manifest.json'), `${JSON.stringify({
     manifest_version: 3,
-    name: 'Sockfish Local Tab and Frame Probe',
+    name: 'Surffish Local Tab and Frame Probe',
     version: '1.0.0',
     permissions: ['tabs', 'scripting', 'webNavigation'],
     host_permissions: ['http://127.0.0.1/*'],
     background: { service_worker: 'background.js' }
   }, null, 2)}\n`)
-  writeFileSync(join(directory, 'get-current-shim.js'), `function installSockfishGetCurrent() {
+  writeFileSync(join(directory, 'get-current-shim.js'), `function installSurffishGetCurrent() {
   if (typeof chrome.tabs.getCurrent === 'function') return;
   Object.defineProperty(chrome.tabs, 'getCurrent', {
     configurable: true,
@@ -148,22 +148,22 @@ function writeProbeExtension(directory: string): void {
     }
   });
 }
-installSockfishGetCurrent();\n`)
+installSurffishGetCurrent();\n`)
   writeFileSync(join(directory, 'background.js'), `importScripts('get-current-shim.js');
-function installSockfishGetAllFrames() {
+function installSurffishGetAllFrames() {
   if (chrome.webNavigation?.getAllFrames) return;
   const getAllFrames = (details, callback) => {
-    const result = chrome.runtime.sendMessage({ command: 'sockfish-experimental-get-all-frames', tabId: details?.tabId })
+    const result = chrome.runtime.sendMessage({ command: 'surffish-experimental-get-all-frames', tabId: details?.tabId })
       .then((reply) => reply?.ok && Array.isArray(reply.frames) ? reply.frames : undefined);
     if (typeof callback === 'function') { result.then(callback, () => callback(undefined)); return undefined; }
     return result;
   };
   Object.defineProperty(chrome, 'webNavigation', { configurable: true, value: { getAllFrames } });
 }
-installSockfishGetAllFrames();
+installSurffishGetAllFrames();
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.command === 'sockfish-experimental-get-all-frames') return;
-  if (message?.command !== 'sockfish-probe-tabs-and-frames') return;
+  if (message?.command === 'surffish-experimental-get-all-frames') return;
+  if (message?.command !== 'surffish-probe-tabs-and-frames') return;
   (async () => {
     const tabs = await chrome.tabs.query({});
     const target = tabs.find((tab) => typeof tab.url === 'string' && tab.url.startsWith(message.pageUrl));
@@ -191,21 +191,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });\n`)
   writeFileSync(join(directory, 'host-bridge.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Experimental host bridge</title></head><body><script src="get-current-shim.js"></script><script src="host-bridge.js"></script></body></html>\n')
   writeFileSync(join(directory, 'host-bridge.js'), `chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.command !== 'sockfish-experimental-get-all-frames' || sender.id !== chrome.runtime.id) return;
-  globalThis.sockfishExperimentalHost.getAllFrames(message.tabId)
+  if (message?.command !== 'surffish-experimental-get-all-frames' || sender.id !== chrome.runtime.id) return;
+  globalThis.surffishExperimentalHost.getAllFrames(message.tabId)
     .then((frames) => sendResponse({ ok: Array.isArray(frames), frames }))
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
 });
-globalThis.__sockfishHostBridgeReady = true;\n`)
+globalThis.__surffishHostBridgeReady = true;\n`)
   writeFileSync(join(directory, 'probe.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Local extension probe</title></head><body>Local extension API probe<script src="get-current-shim.js"></script><script src="probe.js"></script></body></html>\n')
   writeFileSync(join(directory, 'probe.js'), `const pageUrl = new URL(location.href).searchParams.get('target');
 Promise.all([
   chrome.tabs.getCurrent(),
   new Promise((resolve) => chrome.tabs.getCurrent((tab) => resolve(tab)))
-]).then(([promiseCurrentTab, callbackCurrentTab]) => chrome.runtime.sendMessage({ command: 'sockfish-probe-tabs-and-frames', pageUrl })
+]).then(([promiseCurrentTab, callbackCurrentTab]) => chrome.runtime.sendMessage({ command: 'surffish-probe-tabs-and-frames', pageUrl })
   .then((result) => {
-    globalThis.__sockfishProbeResult = {
+    globalThis.__surffishProbeResult = {
       ...result,
       pageGetCurrentMethodPresent: typeof chrome.tabs.getCurrent === 'function',
       pageGetCurrent: promiseCurrentTab ?? null,
@@ -213,9 +213,9 @@ Promise.all([
     };
     document.body.dataset.probeReady = 'true';
   }))
-  .catch((error) => { globalThis.__sockfishProbeResult = { error: String(error) }; document.body.dataset.probeReady = 'true'; });\n`)
+  .catch((error) => { globalThis.__surffishProbeResult = { error: String(error) }; document.body.dataset.probeReady = 'true'; });\n`)
   writeFileSync(join(directory, 'host-preload.cjs'), `const { contextBridge, ipcRenderer } = require('electron');
-contextBridge.exposeInMainWorld('sockfishExperimentalHost', {
+contextBridge.exposeInMainWorld('surffishExperimentalHost', {
   getAllFrames: (tabId) => ipcRenderer.invoke('${bridgeIpcChannel}', tabId)
 });\n`)
 }
@@ -234,7 +234,7 @@ function prepareOfficialExtensionCopy(sourceDirectory: string, directory: string
   const originalWorker = manifest.background.service_worker as string
   const originalWorkerPath = join(directory, originalWorker)
   if (!existsSync(originalWorkerPath)) throw new Error(`Background worker file not found: ${originalWorker}`)
-  copyFileSync(originalWorkerPath, join(directory, 'sockfish-original-background.js'))
+  copyFileSync(originalWorkerPath, join(directory, 'surffish-original-background.js'))
 
   const assetsDirectory = join(root, 'probe-assets')
   writeProbeExtension(assetsDirectory)
@@ -260,15 +260,15 @@ for (const name of eventNames) {
   };
 }
 webNavigation.getAllFrames = (details, callback) => {
-  const result = chrome.runtime.sendMessage({ command: 'sockfish-experimental-get-all-frames', tabId: details?.tabId })
+  const result = chrome.runtime.sendMessage({ command: 'surffish-experimental-get-all-frames', tabId: details?.tabId })
     .then((reply) => reply?.ok && Array.isArray(reply.frames) ? reply.frames : undefined);
   if (typeof callback === 'function') { result.then(callback, () => callback(undefined)); return undefined; }
   return result;
 };
 Object.defineProperty(chrome, 'webNavigation', { configurable: true, enumerable: true, value: webNavigation });
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.command === 'sockfish-experimental-get-all-frames') return;
-  if (message?.command !== 'sockfish-probe-tabs-and-frames') return;
+  if (message?.command === 'surffish-experimental-get-all-frames') return;
+  if (message?.command !== 'surffish-probe-tabs-and-frames') return;
   (async () => {
     const tabs = await chrome.tabs.query({});
     const target = tabs.find((tab) => typeof tab.url === 'string' && tab.url.startsWith(message.pageUrl));
@@ -292,9 +292,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   })().then(sendResponse, (error) => sendResponse({ error: String(error) }));
   return true;
 });
-importScripts('sockfish-original-background.js');\n`
-  writeFileSync(join(directory, 'sockfish-test-worker.js'), workerWrapper)
-  manifest.background.service_worker = 'sockfish-test-worker.js'
+importScripts('surffish-original-background.js');\n`
+  writeFileSync(join(directory, 'surffish-test-worker.js'), workerWrapper)
+  manifest.background.service_worker = 'surffish-test-worker.js'
 
   const actionPopup = manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? null
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -375,8 +375,8 @@ async function inspectExtensionWorlds(contents: Electron.WebContents, extensionI
 }
 
 async function run(): Promise<void> {
-  if (process.env.SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') {
-    throw new Error('This partial bridge is disabled by default. Set SOCKFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1 to run the disposable probe.')
+  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') {
+    throw new Error('This partial bridge is disabled by default. Set SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1 to run the disposable probe.')
   }
   const fixtures = createLocalFixtures()
   childServer = fixtures.child
@@ -447,12 +447,12 @@ async function run(): Promise<void> {
   setBrowserBounds({ x: 0, y: 0, width: 1000, height: 700 })
   const registryTab = getBrowserTabs()[0]
   hostTabId = registryTab?.id ?? null
-  if (!hostTabId || !activateBrowserTab(hostTabId)) throw new Error('Sockfish could not activate its local WebContentsView tab.')
+  if (!hostTabId || !activateBrowserTab(hostTabId)) throw new Error('Surffish could not activate its local WebContentsView tab.')
 
   const pageContents = await waitFor(
     () => webContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL().startsWith(probePageUrl)) ?? null,
     10000,
-    'Sockfish WebContentsView'
+    'Surffish WebContentsView'
   )
   await waitFor(
     () => !pageContents.isLoading() && pageContents.mainFrame.framesInSubtree.filter((frame) => !frame.detached).length >= 3 ? true : null,
@@ -477,7 +477,7 @@ async function run(): Promise<void> {
   })
   await withTimeout(bridgeWindow.loadURL(`chrome-extension://${extension.id}/host-bridge.html`), 10000, 'load isolated extension host bridge')
   await waitFor(
-    () => bridgeWindow?.webContents.executeJavaScript('globalThis.__sockfishHostBridgeReady === true', true),
+    () => bridgeWindow?.webContents.executeJavaScript('globalThis.__surffishHostBridgeReady === true', true),
     10000,
     'extension host bridge listener'
   )
@@ -496,7 +496,7 @@ async function run(): Promise<void> {
   const probeUrl = `chrome-extension://${extension.id}/probe.html?target=${encodeURIComponent(probePageUrl)}`
   await withTimeout(popupWindow.loadURL(probeUrl), 10000, 'load extension API probe page')
   const extensionProbe = await waitFor(
-    () => popupWindow?.webContents.executeJavaScript('globalThis.__sockfishProbeResult ?? null', true) as Promise<Record<string, unknown> | null>,
+    () => popupWindow?.webContents.executeJavaScript('globalThis.__surffishProbeResult ?? null', true) as Promise<Record<string, unknown> | null>,
     15000,
     'extension tab/frame query'
   )
@@ -536,7 +536,7 @@ async function run(): Promise<void> {
             }
           });
         }
-        globalThis.__sockfishExperimentalPopupGetCurrentInstalled = typeof tabs.getCurrent === 'function';
+        globalThis.__surffishExperimentalPopupGetCurrentInstalled = typeof tabs.getCurrent === 'function';
       })();`
       await withTimeout(popupDebugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: popupShimSource }), 5000, 'install pre-document popup API instrumentation')
       await withTimeout(officialPopupWindow.loadURL(`chrome-extension://${extension.id}/${actionPopup}`), 10000, 'load official action popup')
@@ -555,7 +555,7 @@ async function run(): Promise<void> {
         return {
           getCurrentPresent: present,
           actionPopupReturnsUndefined: current === undefined,
-          experimentalShimApplied: globalThis.__sockfishExperimentalPopupGetCurrentInstalled === true
+          experimentalShimApplied: globalThis.__surffishExperimentalPopupGetCurrentInstalled === true
         };
       })()`, true), 8000, 'check action-popup tabs.getCurrent semantics')
     } catch (error) {
@@ -628,7 +628,7 @@ async function run(): Promise<void> {
     callbackGetCurrentMatchesExtensionTab: typeof pageGetCurrentCallback?.id === 'number' && pageGetCurrentCallback.id === popupWindow.webContents.id,
     workerGetCurrentReturnsUndefined: workerGetCurrent === null || workerGetCurrent === undefined,
     bridgeFramesMatchHostApi,
-    tabAppearsInSockfishRegistry: Boolean(currentRegistryTab && currentRegistryTab.url.startsWith(probePageUrl)),
+    tabAppearsInSurffishRegistry: Boolean(currentRegistryTab && currentRegistryTab.url.startsWith(probePageUrl)),
     hostFrames: hostFrameDetails,
     frameIdComparisons,
     allInjectedFramesMatchedHostTree: frameIdComparisons.length === hostFrameDetails.length && frameIdComparisons.every((item) => item.extensionIdMatchesMappedFrameTreeNode),
@@ -636,8 +636,8 @@ async function run(): Promise<void> {
   }
   Object.assign(report, reportResult)
   const assertions = report.assertions as string[]
-  if (!currentRegistryTab || !currentRegistryTab.url.startsWith(probePageUrl)) assertions.push('FAILED: the local page was not present in Sockfish’s own BrowserTab registry')
-  if (!targetTab) assertions.push('FAILED: Electron chrome.tabs.query did not expose the real Sockfish WebContentsView tab')
+  if (!currentRegistryTab || !currentRegistryTab.url.startsWith(probePageUrl)) assertions.push('FAILED: the local page was not present in Surffish’s own BrowserTab registry')
+  if (!targetTab) assertions.push('FAILED: Electron chrome.tabs.query did not expose the real Surffish WebContentsView tab')
   if (!injectedFrames.length) assertions.push('FAILED: chrome.scripting.executeScript(allFrames) returned no frame results')
   if (targetTab && targetTab.id !== pageContents.id) assertions.push('OBSERVED: extension tab.id differs from Electron webContents.id; host needs an explicit mapping')
   if (frameIdComparisons.some((item) => !item.extensionIdMatchesMappedFrameTreeNode)) assertions.push('OBSERVED: extension frameId does not directly match the proposed WebFrameMain frameTreeNodeId mapping')
@@ -692,7 +692,7 @@ async function main(): Promise<void> {
       exitCode = 1
     }
     report.exitCode = exitCode
-    console.log(`SOCKFISH_HOST_TAB_FRAME_PROBE_REPORT=${JSON.stringify(report)}`)
+    console.log(`SURFFISH_HOST_TAB_FRAME_PROBE_REPORT=${JSON.stringify(report)}`)
     process.exitCode = exitCode
     if (app.isReady()) app.exit(exitCode)
   }

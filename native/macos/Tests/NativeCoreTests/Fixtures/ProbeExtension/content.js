@@ -1,1 +1,1 @@
-document.documentElement.dataset.sockfishNativeProbe = "loaded";
+document.documentElement.dataset.surffishNativeProbe = "loaded";

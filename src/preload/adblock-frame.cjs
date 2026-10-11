@@ -1,13 +1,13 @@
 'use strict'
-// Sockfish ad-filter frame preload. Registered on the browser session for every
+// Surffish ad-filter frame preload. Registered on the browser session for every
 // frame (sandboxed, context-isolated). It asks the main process for this
 // frame's scriptlets and cosmetic CSS *synchronously* so uBO scriptlets such as
 // json-prune / set-constant run before the page's own scripts, then watches
 // the DOM to add generic hiding rules for classes/ids/links the page uses.
 const { ipcRenderer, webFrame } = require('electron')
 
-const FRAME_START_CHANNEL = 'sockfish:adblock:frame-start'
-const FRAME_UPDATE_CHANNEL = 'sockfish:adblock:frame-update'
+const FRAME_START_CHANNEL = 'surffish:adblock:frame-start'
+const FRAME_UPDATE_CHANNEL = 'surffish:adblock:frame-update'
 const IGNORED_TAGS = new Set(['br', 'head', 'link', 'meta', 'script', 'style', 's'])
 
 function insertStyles(styles) {

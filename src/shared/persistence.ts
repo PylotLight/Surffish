@@ -1,4 +1,4 @@
-import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, LEGACY_QUICK_LINKS_URL, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -185,8 +185,11 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
 }
 
 export function normalizeBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): SavedBrowserSession {
-  const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({ url, index }))
-    .filter((entry) => entry.url === SOCKFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
+  const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({
+    url: url === LEGACY_QUICK_LINKS_URL ? SURFFISH_QUICK_LINKS_URL : url,
+    index
+  }))
+    .filter((entry) => entry.url === SURFFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
   if (indexedUrls.length === 0) return { urls: [], activeIndex: 0, pinnedIndexes: [] }
 
   const safeActiveIndex = Number.isInteger(activeIndex) ? activeIndex : 0

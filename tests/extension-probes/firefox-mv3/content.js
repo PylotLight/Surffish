@@ -6,12 +6,12 @@ const result = {
 };
 
 if (result.browserNamespace) {
-  browser.runtime.sendMessage({ type: 'sockfish-firefox-probe' }, (response) => {
+  browser.runtime.sendMessage({ type: 'surffish-firefox-probe' }, (response) => {
     result.backgroundReply = Boolean(response);
     result.backgroundError = browser.runtime.lastError?.message || null;
     result.backgroundResponse = response || null;
-    document.documentElement.dataset.sockfishFirefoxProbe = JSON.stringify(result);
+    document.documentElement.dataset.surffishFirefoxProbe = JSON.stringify(result);
   });
 } else {
-  document.documentElement.dataset.sockfishFirefoxProbe = JSON.stringify(result);
+  document.documentElement.dataset.surffishFirefoxProbe = JSON.stringify(result);
 }

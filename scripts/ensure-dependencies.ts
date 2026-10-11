@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 
 const dependencyInputs = ['package.json', 'bun.lock', '.bun-version']
-const installStateFilename = '.sockfish-dependency-state'
+const installStateFilename = '.surffish-dependency-state'
 
 type Install = (projectRoot: string) => boolean
 

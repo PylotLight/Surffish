@@ -8,9 +8,9 @@ const { pathToFileURL } = require('node:url')
 const { app, BaseWindow, session } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
-const userData = join(tmpdir(), `sockfish-basewindow-overlay-smoke-${process.pid}`)
-const screenshotDirectory = process.env.SOCKFISH_SCREENSHOT_DIR
-const fixtureTitle = 'Sockfish BaseWindow overlay fixture'
+const userData = join(tmpdir(), `surffish-basewindow-overlay-smoke-${process.pid}`)
+const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR
+const fixtureTitle = 'Surffish BaseWindow overlay fixture'
 const NETWORK_ONLY_CONFIG = {
   loadNetworkFilters: true,
   loadCosmeticFilters: false,
@@ -82,17 +82,17 @@ function captureFullWindow(name) {
   if (!screenshotDirectory) return
   mkdirSync(screenshotDirectory, { recursive: true })
   const display = process.env.DISPLAY
-  assert.ok(display, 'DISPLAY is required when SOCKFISH_SCREENSHOT_DIR is set')
-  const size = process.env.SOCKFISH_SCREENSHOT_SIZE || '1280x800'
+  assert.ok(display, 'DISPLAY is required when SURFFISH_SCREENSHOT_DIR is set')
+  const { x, y, width, height } = mainWindow.getBounds()
   execFileSync('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', size,
-    '-i', `${display}.0`, '-frames:v', '1', '-y', join(screenshotDirectory, basename(name))
+    '-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-video_size', `${width}x${height}`,
+    '-i', `${display}.0+${x},${y}`, '-frames:v', '1', '-y', join(screenshotDirectory, basename(name))
   ])
 }
 
 function seedIsolatedProfile() {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||sockfish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
   writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`, { mode: 0o600 })
@@ -147,7 +147,7 @@ async function run() {
   mainWindow = await waitFor(() => {
     const candidate = BaseWindow.getAllWindows().find((window) => !window.isDestroyed())
     return candidate && candidate.isVisible() ? candidate : null
-  }, 'the production Sockfish BaseWindow', 45000)
+  }, 'the production Surffish BaseWindow', 45000)
   mainWindow.setBounds({ x: 0, y: 0, width: 900, height: 620 })
   mainWindow.focus()
 
@@ -205,8 +205,8 @@ async function run() {
     return fixturePageView && fixturePageView.getBounds().width > 0
   }, 'the native page view with full-width bounds', 45000)
   await delay(250)
-  assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:fish-browser'), 'live pages retain Sockfish’s persistent site session and cookies')
-  await fixturePageView.webContents.executeJavaScript("document.cookie = 'sockfish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
+  assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:fish-browser'), 'live pages retain Surffish’s persistent site session and cookies')
+  await fixturePageView.webContents.executeJavaScript("document.cookie = 'surffish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
 
   const contentSizeBeforeResize = mainWindow.getContentSize()
   mainWindow.setBounds({ x: 0, y: 0, width: 1100, height: 760 })
@@ -281,6 +281,8 @@ async function run() {
   assert.equal(sidebarView.y, 0, 'the sidebar starts at the top edge of the window')
   assert.equal(sidebarView.height, contentSize[1], 'the sidebar covers the full window height')
   captureFullWindow('sidebar-overlay-live-page-visible.png')
+  // This is an authentic app-window capture over the harness's loopback-only synthetic page.
+  captureFullWindow('surffish-current-app.png')
 
   // A physical click on the live page outside the glass panel must reach the page while the sidebar is open.
   mainWindow.focus()
@@ -352,13 +354,13 @@ async function run() {
     return active && !priorTabIds.has(active.id) ? active.id : null
   }, 'the bottom New Tab action to create and activate a tab')
   assert.ok(newTabId, 'the bottom New Tab control activates its new tab')
-  await waitFor(async () => (await evaluate(rendererViews.content, 'window.api.browser.state()')).url.includes('sockfish://quick-links'), 'the local New Tab')
+  await waitFor(async () => (await evaluate(rendererViews.content, 'window.api.browser.state()')).url.includes('surffish://quick-links'), 'the local New Tab')
   await waitFor(() => rendererViews.content.getVisible() && !rendererViews.toolbar.getVisible() && !rendererViews.sidebar.getVisible(), 'the original full-app surface when the active tab is New Tab')
   assert.ok(mainWindow.contentView.children.some((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL() === fixtureUrl), 'the original live page tab remains alive')
   assert.equal(await evaluate(rendererViews.content, `(async () => { const tab = (await window.api.browser.tabs.get()).find((candidate) => candidate.url === ${JSON.stringify(fixtureUrl)}); return tab ? window.api.browser.tabs.activate(tab.id) : false })()`), true)
   await waitFor(() => rendererViews.toolbar.getVisible() && rendererViews.sidebar.getVisible() && !rendererViews.content.getVisible(), 'return to the full-width live page overlay')
   await waitFor(() => fixturePageView.getBounds().width === contentSize[0], 'the full-width page after tab activation')
-  assert.match(await fixturePageView.webContents.executeJavaScript('document.cookie'), /sockfish-overlay-smoke=cookie-preserved/, 'site cookies remain intact through the New Tab/tab lifecycle')
+  assert.match(await fixturePageView.webContents.executeJavaScript('document.cookie'), /surffish-overlay-smoke=cookie-preserved/, 'site cookies remain intact through the New Tab/tab lifecycle')
   captureFullWindow('sidebar-overlay-live-page-restored.png')
 
   assert.equal(fixturePageView.getBounds().x, 0)

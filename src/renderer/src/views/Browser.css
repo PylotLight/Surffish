@@ -48,17 +48,12 @@
   -webkit-app-region: drag;
 }
 .sidebar-brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 23px;
-  height: 23px;
-  border: 1px solid rgba(126, 226, 168, 0.42);
-  border-radius: 8px;
-  background: rgba(126, 226, 168, 0.1);
-  color: #a4edbd;
-  font-size: 12px;
-  font-weight: 700;
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  object-fit: contain;
 }
 .sidebar-collapse-button {
   display: inline-flex;

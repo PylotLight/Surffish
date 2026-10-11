@@ -319,7 +319,7 @@ napi_value Start(napi_env env, napi_callback_info info) {
   napi_value resource = nullptr;
   napi_value resourceName = nullptr;
   if (napi_create_object(env, &resource) != napi_ok ||
-      napi_create_string_utf8(env, "sockfish.macTrackpadSwipe", NAPI_AUTO_LENGTH, &resourceName) != napi_ok ||
+      napi_create_string_utf8(env, "surffish.macTrackpadSwipe", NAPI_AUTO_LENGTH, &resourceName) != napi_ok ||
       napi_async_init(env, resource, resourceName, &g_async) != napi_ok ||
       napi_create_reference(env, resource, 1, &g_resource) != napi_ok) {
     ReleaseCallbacks();

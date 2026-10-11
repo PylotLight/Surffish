@@ -28,7 +28,7 @@ try {
   process.exit(2)
 }
 
-const userDataDirectory = mkdtempSync(join(tmpdir(), 'sockfish-real-extension-probe-'))
+const userDataDirectory = mkdtempSync(join(tmpdir(), 'surffish-real-extension-probe-'))
 app.setPath('userData', userDataDirectory)
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-background-networking')
@@ -100,7 +100,7 @@ function delay(milliseconds) {
 
 function progress(phase) {
   report.phase = phase
-  if (process.env.SOCKFISH_PROBE_VERBOSE === '1') console.error(`[extension-probe] ${phase}`)
+  if (process.env.SURFFISH_PROBE_VERBOSE === '1') console.error(`[extension-probe] ${phase}`)
 }
 
 async function withTimeout(promise, timeoutMs, label) {
@@ -132,7 +132,7 @@ function prepareTestOnlyWebNavigationShim() {
   const copiedManifestPath = join(copyDirectory, 'manifest.json')
   const copiedManifest = JSON.parse(readFileSync(copiedManifestPath, 'utf8'))
   const originalServiceWorker = copiedManifest.background.service_worker
-  const wrapperPath = 'sockfish-test-web-navigation-worker.js'
+  const wrapperPath = 'surffish-test-web-navigation-worker.js'
   copiedManifest.background.service_worker = wrapperPath
   writeFileSync(copiedManifestPath, `${JSON.stringify(copiedManifest, null, 2)}\n`)
 
@@ -156,14 +156,14 @@ function prepareTestOnlyWebNavigationShim() {
       configurable: true, enumerable: true, value: api
     });
   } catch (error) {
-    globalThis.__sockfishWebNavigationShimError = String(error);
+    globalThis.__surffishWebNavigationShimError = String(error);
   }
-  globalThis.__sockfishWebNavigationShim = { names, eventState };
+  globalThis.__surffishWebNavigationShim = { names, eventState };
   globalThis.chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.__sockfishProbe !== 'webNavigationListenerShim') return;
+    if (message?.__surffishProbe !== 'webNavigationListenerShim') return;
     sendResponse({
       defined: typeof globalThis.chrome.webNavigation === 'object',
-      defineError: globalThis.__sockfishWebNavigationShimError ?? null,
+      defineError: globalThis.__surffishWebNavigationShimError ?? null,
       listenerCounts: Object.fromEntries(names.map((name) => [name, eventState[name].size]))
     });
     return true;
@@ -306,7 +306,7 @@ async function inspectPageContentScript() {
     await delay(1500)
     report.page.snapshot = await getPageSnapshot(pageWindow)
     if (report.manifest?.name === 'Bramble') {
-      const probeId = `sockfish-webauthn-${Date.now()}`
+      const probeId = `surffish-webauthn-${Date.now()}`
       const probeExpression = `(() => {
         const credentials = navigator.credentials;
         const isJavaScriptOverride = (method) => typeof method === 'function' && !Function.prototype.toString.call(method).includes('[native code]');
@@ -316,7 +316,7 @@ async function inspectPageContentScript() {
           getOverridden: isJavaScriptOverride(credentials?.get),
           relayResult: null
         };
-        globalThis.__sockfishBrambleWebAuthnProbe = state;
+        globalThis.__surffishBrambleWebAuthnProbe = state;
         const id = ${JSON.stringify(probeId)};
         const listener = (event) => {
           if (event.source !== window || event.data?.__bramble_pk !== 'res' || event.data?.id !== id) return;
@@ -330,7 +330,7 @@ async function inspectPageContentScript() {
       await withTimeout(pageWindow.webContents.executeJavaScript(probeExpression, true), 5000, 'start Bramble WebAuthn bridge probe')
       let bridgeProbe = null
       for (let attempt = 0; attempt < 60; attempt += 1) {
-        bridgeProbe = await pageWindow.webContents.executeJavaScript('globalThis.__sockfishBrambleWebAuthnProbe ?? null', true)
+        bridgeProbe = await pageWindow.webContents.executeJavaScript('globalThis.__surffishBrambleWebAuthnProbe ?? null', true)
         if (bridgeProbe?.relayResult) break
         await delay(50)
       }
@@ -478,7 +478,7 @@ async function inspectBackgroundTargets() {
     await withTimeout(debuggerSession.sendCommand('Runtime.enable', {}, attachedSessionId), 5000, 'enable service-worker Runtime domain')
     const apiPresence = await evaluateInDebugger(debuggerSession, apiPresenceExpression(), undefined, attachedSessionId)
     const storageProbeExpression = `(() => new Promise(async (resolve) => {
-      const key = '__sockfish_runtime_probe_${Date.now()}';
+      const key = '__surffish_runtime_probe_${Date.now()}';
       const result = { storageLocalRoundTrip: null, storageOnChangedEvent: null, storageSessionRoundTrip: null, errors: [] };
       const local = globalThis.chrome?.storage?.local;
       if (local && typeof local.set === 'function' && typeof local.get === 'function') {
@@ -561,7 +561,7 @@ async function inspectExtensionPage(path, pageKind) {
     result.runtimeApis = await withTimeout(window.webContents.executeJavaScript(apiPresenceExpression(), true), 8000, `read ${pageKind} API presence`).catch((error) => ({ error: String(error) }))
     if (testOnlyWebNavigationShim && pageKind === 'popup') {
       result.testShimStatus = await withTimeout(window.webContents.executeJavaScript(
-        `globalThis.chrome.runtime.sendMessage({ __sockfishProbe: 'webNavigationListenerShim' })`, true
+        `globalThis.chrome.runtime.sendMessage({ __surffishProbe: 'webNavigationListenerShim' })`, true
       ), 8000, 'query test-only webNavigation shim').catch((error) => ({ error: String(error) }))
     }
   } catch (error) {
@@ -584,7 +584,7 @@ async function run() {
   prepareTestOnlyWebNavigationShim()
   progress('Electron app ready')
   const readyExtensionIds = new Set()
-  browserSession = session.fromPartition(`persist:sockfish-real-extension-${Date.now()}`)
+  browserSession = session.fromPartition(`persist:surffish-real-extension-${Date.now()}`)
   browserSession.serviceWorkers.on('registration-completed', (_event, details) => {
     if (report.serviceWorkerLifecycle.registrations.length < 50) {
       report.serviceWorkerLifecycle.registrations.push({ scope: details.scope })
@@ -616,7 +616,7 @@ async function run() {
 
   server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-    response.end(`<!doctype html><html><head><meta charset="utf-8"><title>Sockfish Inert Login Form</title></head><body>
+    response.end(`<!doctype html><html><head><meta charset="utf-8"><title>Surffish Inert Login Form</title></head><body>
       <main><h1>Inert compatibility test page</h1><form autocomplete="on">
         <label>Username <input type="text" name="username" autocomplete="username"></label>
         <label>Password <input type="password" name="password" autocomplete="current-password"></label>
@@ -729,7 +729,7 @@ run().catch((error) => {
   process.exitCode = 1
 }).finally(async () => {
   await cleanup()
-  console.log(`SOCKFISH_REAL_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
+  console.log(`SURFFISH_REAL_EXTENSION_PROBE_REPORT=${JSON.stringify(report)}`)
   console.log('This is a compatibility observation only. It did not sign in, import a vault, or fill any credentials.')
   if (app.isReady()) app.quit()
 })
