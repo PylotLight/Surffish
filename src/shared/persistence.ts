@@ -31,6 +31,7 @@ export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: f
 export interface SavedBrowserSession {
   urls: string[]
   activeIndex: number
+  pinnedIndexes: number[]
 }
 
 export interface BrowserPreferences {
@@ -183,25 +184,31 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
   return pinned
 }
 
-export function normalizeBrowserSession(urls: readonly string[], activeIndex: number): SavedBrowserSession {
+export function normalizeBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): SavedBrowserSession {
   const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({ url, index }))
     .filter((entry) => entry.url === SOCKFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
-  if (indexedUrls.length === 0) return { urls: [], activeIndex: 0 }
+  if (indexedUrls.length === 0) return { urls: [], activeIndex: 0, pinnedIndexes: [] }
 
   const safeActiveIndex = Number.isInteger(activeIndex) ? activeIndex : 0
   const normalizedActiveIndex = indexedUrls.findIndex((entry) => entry.index === safeActiveIndex)
+  const pinnedIndexSet = new Set(pinnedIndexes.filter((index) => Number.isInteger(index) && index >= 0 && index < urls.length))
+  const normalizedPinnedIndexes = indexedUrls.flatMap((entry, index) => pinnedIndexSet.has(entry.index) ? [index] : [])
   return {
     urls: indexedUrls.map((entry) => entry.url),
-    activeIndex: normalizedActiveIndex < 0 ? 0 : normalizedActiveIndex
+    activeIndex: normalizedActiveIndex < 0 ? 0 : normalizedActiveIndex,
+    pinnedIndexes: normalizedPinnedIndexes
   }
 }
 
 export function parseBrowserSession(value: unknown): SavedBrowserSession {
-  if (!isRecord(value)) return { urls: [], activeIndex: 0 }
-  if (value.version !== 1 || !Array.isArray(value.tabs)) return { urls: [], activeIndex: 0 }
+  if (!isRecord(value)) return { urls: [], activeIndex: 0, pinnedIndexes: [] }
+  if (value.version !== 1 || !Array.isArray(value.tabs)) return { urls: [], activeIndex: 0, pinnedIndexes: [] }
   const activeIndex = typeof value.activeIndex === 'number' ? value.activeIndex : 0
   const urls = value.tabs.slice(0, MAX_RESTORED_TABS).map((url) => typeof url === 'string' ? url : '')
-  return normalizeBrowserSession(urls, activeIndex)
+  const pinnedIndexes = Array.isArray(value.pinnedTabs)
+    ? value.pinnedTabs.slice(0, MAX_RESTORED_TABS * 4).filter((index): index is number => typeof index === 'number' && Number.isInteger(index))
+    : []
+  return normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
 }
 
 function defaultSiteSettings(origin: string): BrowserSiteSettings {

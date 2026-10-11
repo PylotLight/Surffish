@@ -21,22 +21,39 @@ import { SOCKFISH_QUICK_LINKS_URL } from './navigation.ts'
 test('normalizes a saved tab list and retains its selected tab', () => {
   assert.deepEqual(normalizeBrowserSession(['https://one.test/', 'https://two.test/'], 1), {
     urls: ['https://one.test/', 'https://two.test/'],
-    activeIndex: 1
+    activeIndex: 1,
+    pinnedIndexes: []
   })
 })
 
 test('drops unsafe URLs and adjusts the selected index', () => {
   assert.deepEqual(normalizeBrowserSession(['file:///etc/passwd', 'https://safe.test/'], 1), {
     urls: ['https://safe.test/'],
-    activeIndex: 0
+    activeIndex: 0,
+    pinnedIndexes: []
   })
 })
 
 test('preserves the internal Quick Links tab while still rejecting other non-web URLs', () => {
   assert.deepEqual(normalizeBrowserSession([SOCKFISH_QUICK_LINKS_URL, 'file:///etc/passwd', 'https://safe.test/'], 0), {
     urls: [SOCKFISH_QUICK_LINKS_URL, 'https://safe.test/'],
-    activeIndex: 0
+    activeIndex: 0,
+    pinnedIndexes: []
   })
+})
+
+test('restores pinned tabs by normalized session position and accepts older sessions without pins', () => {
+  assert.deepEqual(normalizeBrowserSession(['file:///ignored', 'https://one.test/', 'https://two.test/'], 2, [0, 2, -1]), {
+    urls: ['https://one.test/', 'https://two.test/'],
+    activeIndex: 1,
+    pinnedIndexes: [1]
+  })
+  assert.deepEqual(parseBrowserSession({ version: 1, tabs: ['https://one.test/'], activeIndex: 0 }), {
+    urls: ['https://one.test/'],
+    activeIndex: 0,
+    pinnedIndexes: []
+  })
+  assert.deepEqual(parseBrowserSession({ version: 1, tabs: ['https://one.test/', 'https://two.test/'], activeIndex: 0, pinnedTabs: [1, '0', -1] }).pinnedIndexes, [1])
 })
 
 test('rejects invalid session data and bounds restored tab count', () => {
@@ -44,7 +61,7 @@ test('rejects invalid session data and bounds restored tab count', () => {
   const parsed = parseBrowserSession({ version: 1, tabs: urls, activeIndex: MAX_RESTORED_TABS + 3 })
   assert.equal(parsed.urls.length, MAX_RESTORED_TABS)
   assert.equal(parsed.activeIndex, 0)
-  assert.deepEqual(parseBrowserSession({ version: 2, tabs: ['https://ignored.test/'] }), { urls: [], activeIndex: 0 })
+  assert.deepEqual(parseBrowserSession({ version: 2, tabs: ['https://ignored.test/'] }), { urls: [], activeIndex: 0, pinnedIndexes: [] })
 })
 
 test('falls back to the default search engine for invalid preferences', () => {

@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
+import { clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
-import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
+import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
@@ -25,6 +25,7 @@ interface BrowserTab {
   pauseAutoplayUntilVisited: boolean
   lastUrl: string
   pendingUrl: string
+  pinned: boolean
   inactiveSince: number | null
   sleepTimer: ReturnType<typeof setTimeout> | null
   pageScrollEdges: BrowserPageScrollEdges
@@ -100,6 +101,7 @@ function getTabSummaries(): BrowserTabSummary[] {
     faviconUrl: tab.faviconUrl,
     loading: tab.view?.webContents.isLoading() ?? false,
     active: tab.id === activeTabId,
+    pinned: tab.pinned,
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab))
   }))
 }
@@ -179,7 +181,27 @@ function publishState(): void {
 
 function persistOpenTabs(): void {
   const urls = tabs.map(currentUrl)
-  saveBrowserSession(urls, tabs.findIndex((tab) => tab.id === activeTabId))
+  const pinnedIndexes = tabs.flatMap((tab, index) => tab.pinned ? [index] : [])
+  saveBrowserSession(urls, tabs.findIndex((tab) => tab.id === activeTabId), pinnedIndexes)
+}
+
+function toggleTabBookmark(id: string): void {
+  const tab = getTab(id)
+  if (!tab) return
+  const origin = normalizeHttpOrigin(currentUrl(tab))
+  if (!origin) return
+  const bookmarks = getBrowserPinnedSites()
+  const isBookmarked = bookmarks.some((site) => normalizeHttpOrigin(site.url) === origin)
+  if (!isBookmarked && bookmarks.length >= MAX_PINNED_SITES) return
+  const next = isBookmarked
+    ? bookmarks.filter((site) => normalizeHttpOrigin(site.url) !== origin)
+    : [...bookmarks, {
+        title: pageTitle(tab).trim().slice(0, 80) || new URL(origin).hostname,
+        url: origin,
+        ...(tab.faviconUrl ? { faviconUrl: tab.faviconUrl } : {})
+      }]
+  saveBrowserPinnedSites(next)
+  sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
 }
 
 function applyTabBounds(): void {
@@ -309,6 +331,29 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     },
     openInBackgroundTab: openBackgroundTab
   })
+}
+
+function showBrowserTabContextMenu(id: string): void {
+  const tab = getTab(id)
+  if (!tab || !browserWindow || browserWindow.isDestroyed()) return
+  const origin = normalizeHttpOrigin(currentUrl(tab))
+  const bookmarked = Boolean(origin && getBrowserPinnedSites().some((site) => normalizeHttpOrigin(site.url) === origin))
+  const items: MenuItemConstructorOptions[] = [
+    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
+    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => setBrowserTabPinned(id, !tab.pinned) },
+    { label: 'Duplicate Tab', click: () => { void duplicateBrowserTab(id) } },
+    { label: 'Copy Link', enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
+    { type: 'separator' },
+    { label: 'Reload Tab', click: () => reloadBrowserTab(id) },
+    { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
+    { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
+    { type: 'separator' },
+    { label: 'Close Tab', click: () => closeBrowserTab(id) },
+    { label: 'Close Tabs Above', enabled: tabs.some((candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
+    { label: 'Close Tabs Below', enabled: tabs.some((candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
+    { label: 'Close Other Tabs', enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
+  ]
+  Menu.buildFromTemplate(items).popup({ window: browserWindow })
 }
 
 function createTabView(tab: BrowserTab): WebContentsView | null {
@@ -454,7 +499,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = input === SOCKFISH_QUICK_LINKS_URL
     ? SOCKFISH_QUICK_LINKS_URL
@@ -471,6 +516,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pauseAutoplayUntilVisited: !shouldActivate && pauseAutoplayUntilVisited && isYouTubeUrl(target),
     lastUrl: target,
     pendingUrl: target,
+    pinned,
     inactiveSince: null,
     sleepTimer: null,
     pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES }
@@ -502,7 +548,16 @@ export function attachBrowserView(win: BaseWindow): void {
   browserBounds = { x: 0, y: 0, width: 0, height: 0 }
   tabSleepMinutes = getBrowserTabSleepMinutes()
   for (const contents of getMainWindowRenderers()) {
-    contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+    contents.on('context-menu', (event, params) => {
+      event.preventDefault()
+      const x = Number.isFinite(params.x) ? Math.round(params.x) : 0
+      const y = Number.isFinite(params.y) ? Math.round(params.y) : 0
+      const script = `(() => document.elementFromPoint(${x}, ${y})?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null)()`
+      void contents.executeJavaScript(script, true).then((id: unknown) => {
+        if (typeof id === 'string' && getTab(id)) showBrowserTabContextMenu(id)
+        else showTabContextMenu(contents, event, params)
+      }).catch(() => showTabContextMenu(contents, event, params))
+    })
   }
   if (process.platform === 'darwin') {
     win.on('swipe', (_event, direction) => {
@@ -513,7 +568,7 @@ export function attachBrowserView(win: BaseWindow): void {
     })
   }
   const saved = loadBrowserSession()
-  for (const url of saved.urls) createTab(url, selectedSearchEngine, false, true)
+  saved.urls.forEach((url, index) => createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index)))
   if (tabs.length === 0) createTab()
   activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
   if (activeTabId) {
@@ -703,6 +758,54 @@ export function closeBrowserTab(id: string): void {
   }
   persistOpenTabs()
   publishState()
+}
+
+export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
+  const tab = getTab(id)
+  if (!tab) return false
+  if (tab.pinned === pinned) return true
+  tab.pinned = pinned
+  persistOpenTabs()
+  publishTabs()
+  return true
+}
+
+export function duplicateBrowserTab(id: string): string | null {
+  const tab = getTab(id)
+  if (!tab) return null
+  const duplicateId = createTab(currentUrl(tab), selectedSearchEngine)
+  if (duplicateId) persistOpenTabs()
+  return duplicateId
+}
+
+function reloadBrowserTab(id: string): void {
+  const tab = getTab(id)
+  if (!tab) return
+  if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.reload()
+  else activateTabInternal(id)
+}
+
+function suspendBrowserTab(id: string): void {
+  const tab = getTab(id)
+  if (tab && tab.id !== activeTabId) hibernateTab(tab)
+}
+
+function suspendOtherBrowserTabs(keepId: string): void {
+  for (const tab of [...tabs]) {
+    if (tab.id !== keepId && tab.id !== activeTabId) hibernateTab(tab)
+  }
+}
+
+function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'others'): void {
+  const targetIndex = tabs.findIndex((tab) => tab.id === id)
+  if (targetIndex < 0) return
+  const idsToClose = tabs.flatMap((tab, index) => {
+    const shouldClose = relation === 'above' ? index < targetIndex
+      : relation === 'below' ? index > targetIndex
+        : tab.id !== id
+    return shouldClose ? [tab.id] : []
+  })
+  for (const tabId of idsToClose) closeBrowserTab(tabId)
 }
 
 export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<boolean> {

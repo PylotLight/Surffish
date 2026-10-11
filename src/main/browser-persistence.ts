@@ -47,9 +47,9 @@ export function loadBrowserSession(): SavedBrowserSession {
   return parseBrowserSession(readJson(SESSION_FILE))
 }
 
-export function saveBrowserSession(urls: readonly string[], activeIndex: number): void {
-  const saved = normalizeBrowserSession(urls, activeIndex)
-  writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex })
+export function saveBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): void {
+  const saved = normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
+  writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
 }
 
 export function getBrowserSearchEngine(): SearchEngineId {

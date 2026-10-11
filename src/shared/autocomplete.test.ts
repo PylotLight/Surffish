@@ -5,8 +5,8 @@ import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './type
 
 const pins: PinnedSite[] = [{ title: 'GitHub', url: 'https://github.com/' }]
 const tabs: BrowserTabSummary[] = [
-  { id: 'tab-1', title: 'GitHub · Sockfish', url: 'https://github.com/PylotLight/Sockfish', faviconUrl: null, active: true, loading: false, sleeping: false },
-  { id: 'tab-2', title: 'Example', url: 'https://example.org/', faviconUrl: null, active: false, loading: false, sleeping: false }
+  { id: 'tab-1', title: 'GitHub · Sockfish', url: 'https://github.com/PylotLight/Sockfish', faviconUrl: null, active: true, pinned: false, loading: false, sleeping: false },
+  { id: 'tab-2', title: 'Example', url: 'https://example.org/', faviconUrl: null, active: false, pinned: false, loading: false, sleeping: false }
 ]
 const history: BrowsingHistoryEntry[] = [
   { id: 'history-1', title: 'GitHub docs', url: 'https://docs.github.com/', visitedAt: 3 },

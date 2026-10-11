@@ -248,6 +248,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tab-sleep-indicator {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: rgba(192, 213, 241, 0.72);
+  font-size: 14px;
+  line-height: 1;
+}
 .tab-close {
   display: inline-flex;
   align-items: center;
@@ -583,20 +590,10 @@
   backdrop-filter: blur(20px) saturate(150%);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
-.window-drag-region {
-  display: none;
-  height: 28px;
-  flex: 0 0 28px;
-  -webkit-app-region: drag;
-}
-.app-shell[data-platform='darwin'] .window-drag-region {
-  display: block;
-  width: calc(100% - 82px);
-  margin-left: 82px;
-}
 .browser-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 7px;
   min-width: 0;
   padding: 7px 14px;
@@ -1255,7 +1252,7 @@
 }
 .sidebar-pinned-list {
   display: flex;
-  min-height: 38px;
+  min-height: 0;
   max-height: 42px;
   flex-direction: row;
   gap: 6px;
@@ -1286,6 +1283,49 @@
   background: rgba(255, 255, 255, 0.075);
   outline: 2px solid rgba(180, 243, 202, 0.5);
   outline-offset: 1px;
+}
+.pinned-tab-icon-button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.pinned-tab-icon-button:hover,
+.pinned-tab-icon-button:focus-visible,
+.pinned-tab-icon-button.is-active {
+  border-color: rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.085);
+  outline: 2px solid rgba(180, 243, 202, 0.45);
+  outline-offset: 1px;
+}
+.pinned-tab-icon-button .tab-favicon {
+  width: 23px;
+  height: 23px;
+  border-radius: 8px;
+}
+.pinned-tab-sleep-indicator {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  place-items: center;
+  border: 1px solid rgba(35, 43, 55, 0.85);
+  border-radius: 50%;
+  background: rgba(34, 42, 54, 0.95);
+  color: rgba(202, 220, 245, 0.85);
+  font-size: 9px;
+  line-height: 1;
 }
 .pinned-site-mark {
   display: grid;
@@ -1409,8 +1449,10 @@
 .omnibox-wrap {
   position: relative;
   display: flex;
-  flex: 1 1 auto;
-  min-width: 72px;
+  flex: 1 1 480px;
+  min-width: 120px;
+  max-width: min(42vw, 560px);
+  -webkit-app-region: no-drag;
 }
 .omnibox-wrap .omnibox {
   width: 100%;
@@ -1636,7 +1678,11 @@
     height: 29px;
   }
   .omnibox-wrap {
-    min-width: 50px;
+    min-width: 100px;
+  }
+  .toolbar-drag-space {
+    flex-basis: 28px;
+    min-width: 28px;
   }
   .settings-view {
     padding: 18px 14px 22px;
@@ -1672,6 +1718,7 @@
   align-items: center;
   gap: 1px;
   flex: 0 0 auto;
+  -webkit-app-region: no-drag;
 }
 .omnibox-action-button {
   display: inline-flex;
@@ -2250,13 +2297,13 @@
   display: none !important;
 }
 
-/* One compact toolbar row; native macOS traffic lights occupy the reserved left edge. */
+/* Keep toolbar controls beside the native macOS titlebar controls in one row. */
 .app-shell[data-platform='darwin'] .browser-toolbar {
   padding-left: 82px;
 }
 .sidebar-window-controls {
   position: relative;
-  top: 17px;
+  top: -12px;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -2265,6 +2312,14 @@
   margin-top: 28px;
   padding: 0 17px;
   -webkit-app-region: no-drag;
+}
+.toolbar-drag-space {
+  display: block;
+  flex: 1 1 160px;
+  align-self: stretch;
+  min-width: 48px;
+  min-height: 32px;
+  -webkit-app-region: drag;
 }
 .sidebar-window-control {
   display: grid;

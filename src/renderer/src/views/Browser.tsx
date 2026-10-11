@@ -241,11 +241,27 @@ function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
   const [iconFailed, setIconFailed] = useState(false)
   useEffect(() => setIconFailed(false), [tab.faviconUrl])
   return (
-    <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}${tab.sleeping ? ' is-sleeping' : ''}`} aria-hidden="true">
-      {tab.loading ? '' : tab.sleeping ? 'Z' : tab.faviconUrl && !iconFailed
+    <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}`} aria-hidden="true">
+      {tab.loading ? '' : tab.faviconUrl && !iconFailed
         ? <img src={tab.faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
         : tab.title.slice(0, 1).toUpperCase()}
     </span>
+  )
+}
+
+function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
+  return (
+    <button
+      className={`pinned-tab-icon-button${tab.active ? ' is-active' : ''}`}
+      type="button"
+      data-browser-tab-id={tab.id}
+      aria-label={`Open pinned tab ${tab.title}`}
+      title={`${tab.title}${tab.sleeping ? ' · sleeping' : ''}`}
+      onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
+    >
+      <TabFavicon tab={tab} />
+      {tab.sleeping && <span className="pinned-tab-sleep-indicator" aria-hidden="true">☾</span>}
+    </button>
   )
 }
 
@@ -261,7 +277,7 @@ function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: (
   }, [preferredFaviconUrl])
   const hostname = quickLink ? new URL(quickLink.origin).hostname.replace(/^www\./i, '') : historyHost(site.url)
   return (
-    <button className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to unpin)`} aria-label={`Open pinned site ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
+    <button className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to remove bookmark)`} aria-label={`Open bookmark ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
       event.preventDefault()
       onUnpin()
     }}>
@@ -447,7 +463,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface, isLocalNewTab, newTabPreferences.weatherEnabled, newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
-  const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
+  const currentOriginIsBookmarked = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
   function revealSidebar(): void {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -526,16 +542,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }
 
-  async function toggleCurrentSitePin(): Promise<void> {
+  async function toggleCurrentSiteBookmark(): Promise<void> {
     if (!activeOrigin) return
-    const pinned = pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin)
-    if (!pinned && pinnedSites.length >= MAX_PINNED_SITES) {
-      setNavigationError(`You can pin up to ${MAX_PINNED_SITES} sites. Remove one from the sidebar first.`)
+    const bookmarked = pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin)
+    if (!bookmarked && pinnedSites.length >= MAX_PINNED_SITES) {
+      setNavigationError(`You can save up to ${MAX_PINNED_SITES} favorite sites. Remove one from the sidebar first.`)
       return
     }
     const title = browser.title.trim().slice(0, 80) || new URL(activeOrigin).hostname
     const faviconUrl = tabs.find((tab) => httpOrigin(tab.url) === activeOrigin)?.faviconUrl
-    const next = pinned
+    const next = bookmarked
       ? pinnedSites.filter((site) => httpOrigin(site.url) !== activeOrigin)
       : [...pinnedSites, { title, url: activeOrigin, ...(faviconUrl ? { faviconUrl } : {}) }]
     await savePinnedSites(next)
@@ -937,7 +953,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           ><span aria-hidden="true">{sidebarPinned ? '●' : '○'}</span></button>
         </div>
         <div className="sidebar-heading">
-                <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : sidebarMode === 'site' ? 'This site' : 'Tabs'}</strong>
+          {sidebarMode !== 'tabs' && <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>}
           {sidebarMode !== 'history' ? (
             <div className="new-tab-control" ref={newTabControlRef}>
               <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
@@ -976,16 +992,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         </div>
 
         {sidebarMode === 'tabs' && (
-          <section className="sidebar-pinned-sites" aria-label="Pinned sites">
-            <div className="sidebar-pinned-heading">
-              <strong>Pinned</strong>
-              <button className="sidebar-icon-button" type="button" aria-label="Pin current site" title="Pin current site" disabled={!activeOrigin || currentOriginIsPinned} onClick={() => void toggleCurrentSitePin()}>＋</button>
+          <section className="sidebar-pinned-sites" aria-label="Pinned tabs and bookmarks">
+            <div className="sidebar-pinned-list">
+              {tabs.filter((tab) => tab.pinned).map((tab) => <PinnedTabIcon key={`tab:${tab.id}`} tab={tab} />)}
+              {pinnedSites.map((site) => <PinnedSiteIcon key={`bookmark:${site.url}`} site={site} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
             </div>
-            {pinnedSites.length > 0 ? (
-              <div className="sidebar-pinned-list">
-                {pinnedSites.map((site) => <PinnedSiteIcon key={site.url} site={site} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
-              </div>
-            ) : <p className="sidebar-pinned-empty">Pin sites with ☆ in the address bar.</p>}
           </section>
         )}
 
@@ -1014,10 +1025,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         ) : (
           <div className="tab-list" role="tablist" aria-label="Open tabs">
-            {tabs.map((tab) => (
+            {tabs.filter((tab) => !tab.pinned).map((tab) => (
               <div
                 className={`tab-item${tab.active ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}`}
                 key={tab.id}
+                data-browser-tab-id={tab.id}
                 role="tab"
                 aria-selected={tab.active}
                 tabIndex={0}
@@ -1027,6 +1039,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               >
                 <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
+                {tab.sleeping && <span className="tab-sleep-indicator" title="Sleeping tab" aria-label="Sleeping tab">☾</span>}
                 <button
                   className="tab-close"
                   type="button"
@@ -1053,7 +1066,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
-          <div className="window-drag-region" aria-hidden="true" />
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
             <button
               ref={sidebarToggleRef}
@@ -1114,14 +1126,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   autoCapitalize="none"
                   placeholder="Search or enter address"
                 />
-                <div className="omnibox-actions" role="group" aria-label="Browser panels">
-                  <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs and pinned sites" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs and pinned sites" onClick={() => toggleToolbarPanel('tabs')}>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
-                  </button>
-                  <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
-                  </button>
-                </div>
               </div>
               {suggestionsOpen && addressSuggestions.length > 0 && (
                 <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
@@ -1143,15 +1147,23 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </div>
               )}
             </div>
+            <div className="omnibox-actions" role="group" aria-label="Browser panels">
+              <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs, pinned tabs, and bookmarks" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs, pinned tabs, and bookmarks" onClick={() => toggleToolbarPanel('tabs')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
+              </button>
+              <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
+              </button>
+            </div>
             <button
-              className={`toolbar-button favorite-button${currentOriginIsPinned ? ' is-favorite' : ''}`}
+              className={`toolbar-button favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
               type="button"
-              aria-label={currentOriginIsPinned ? 'Unpin this site' : 'Pin this site'}
-              aria-pressed={currentOriginIsPinned}
-              title={currentOriginIsPinned ? 'Unpin this site' : 'Pin this site'}
+              aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
+              aria-pressed={currentOriginIsBookmarked}
+              title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
               disabled={!activeOrigin}
-              onClick={() => void toggleCurrentSitePin()}
-            ><span aria-hidden="true">{currentOriginIsPinned ? '★' : '☆'}</span></button>
+              onClick={() => void toggleCurrentSiteBookmark()}
+            ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
             <button
               className="toolbar-button picture-in-picture-button"
               type="button"
@@ -1208,6 +1220,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 downloadsButtonRef.current?.focus()
               }} />}
             </div>
+            <div className="toolbar-drag-space" aria-hidden="true" />
           </form>
           {(browser.error || navigationError) && (
             <p className="browser-error" role="status">
