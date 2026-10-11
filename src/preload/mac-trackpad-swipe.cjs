@@ -12,6 +12,7 @@ const BEGIN_CHANNEL = 'browser:mac-trackpad-swipe:begin'
 const PROGRESS_CHANNEL = 'browser:mac-trackpad-swipe:progress'
 const END_CHANNEL = 'browser:mac-trackpad-swipe:end'
 const RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
+const PAGE_SCALE_CHANNEL = 'browser:mac-trackpad-swipe:page-scale'
 
 function resolveScrollEdges(candidates) {
   let canScrollLeft = false
@@ -150,6 +151,25 @@ function startScrollEdgeReporter(ipcRenderer, win, doc, isMainFrame) {
   doc.addEventListener('scroll', () => publish(), { capture: true, passive: true })
   doc.addEventListener('DOMContentLoaded', () => publish(), { once: true })
   win.requestAnimationFrame(() => publish())
+}
+
+// Lets main tell a pinch-zoomed page (zoom back out) from a page at 1x (open the tab overview).
+function startPageScaleReporter(ipcRenderer, win) {
+  const viewport = win.visualViewport
+  if (!viewport) return
+  let last = null
+  const publish = () => {
+    const scale = Math.round(viewport.scale * 100) / 100
+    if (scale === last) return
+    last = scale
+    try {
+      ipcRenderer.send(PAGE_SCALE_CHANNEL, scale)
+    } catch {
+      // The frame may be going away.
+    }
+  }
+  viewport.addEventListener('resize', publish, { passive: true })
+  publish()
 }
 
 function startSwipePresentation(ipcRenderer, win, doc) {
@@ -344,7 +364,10 @@ function startSwipePresentation(ipcRenderer, win, doc) {
 
 function startPreload(ipcRenderer, win, doc, isMainFrame = true) {
   startScrollEdgeReporter(ipcRenderer, win, doc, isMainFrame)
-  if (isMainFrame) startSwipePresentation(ipcRenderer, win, doc)
+  if (isMainFrame) {
+    startSwipePresentation(ipcRenderer, win, doc)
+    startPageScaleReporter(ipcRenderer, win)
+  }
 }
 
 const BACKGROUND_AUTOPLAY_POLICY_CHANNEL = 'browser:background-youtube-autoplay:policy'
