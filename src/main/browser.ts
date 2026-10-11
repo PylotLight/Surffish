@@ -13,7 +13,7 @@ import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
-import { attachTabOverview, detachTabOverview, getTabOverviewState, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
+import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -957,7 +957,15 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     return undefined
   }
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
-  if (isTabOverviewOpen()) return refuse('tab overview open')
+  if (isTabOverviewOpen()) {
+    // In the grid, horizontal swipes step the selection instead of navigating history.
+    const overviewId = getTabOverviewContentsId()
+    if (getTabOverviewState() !== 'open' || overviewId === null) return refuse('tab overview animating')
+    if (request.direction !== 'back' && request.direction !== 'forward') return refuse('bad request')
+    cancelActiveMacTrackpadSwipe()
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking overview selection', request.direction)
+    return overviewId
+  }
   // The handle only tells us which NSWindow the gesture landed in. Surffish drives one browser
   // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
   // reject every swipe).
@@ -1004,6 +1012,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
 }
 
 function reportMacTrackpadSwipeProgress(contentsId: number, progress: number): void {
+  if (contentsId === getTabOverviewContentsId()) return
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.contents.isDestroyed()) return
   try {
@@ -1022,6 +1031,11 @@ function finishMacTrackpadSwipe(
   _maxProgress: number
 ): void {
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
+  if (contentsId === getTabOverviewContentsId()) {
+    // Fingers moving left (forward) reveal the card to the right.
+    if (committed) moveTabOverviewSelection(direction === 'forward' ? 1 : -1)
+    return
+  }
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
   if (swipe.contents.isDestroyed()) {
@@ -1163,7 +1177,12 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
     }
     if (overview === 'open') {
       pinchMode = magnification > 0 ? 'close' : 'swallow'
-      if (pinchMode === 'close') trackPinchProgress(magnification)
+      if (pinchMode === 'close') {
+        // Swap the page underneath now so it is already there as the selected card grows into it.
+        const selected = getTabOverviewSelectedId()
+        if (selected && selected !== activeTabId) activateBrowserTab(selected)
+        trackPinchProgress(magnification)
+      }
       return true
     }
     if (magnification > 0) return false
