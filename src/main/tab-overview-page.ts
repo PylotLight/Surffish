@@ -91,15 +91,15 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
         const shot = el('img', 'shot'); shot.src = item.thumbnail; shot.draggable = false; thumb.appendChild(shot)
       } else {
         const ph = el('div', 'placeholder')
-        const glyph = () => el('div', 'glyph', (host(item.url)[0] || '•').toUpperCase())
-        if (item.faviconUrl) { const f = el('img'); f.src = item.faviconUrl; f.onerror = () => f.replaceWith(glyph()); ph.appendChild(f) }
+        const glyph = () => el('div', 'glyph', item.newTab ? '+' : (host(item.url)[0] || '•').toUpperCase())
+        if (item.faviconUrl && !item.newTab) { const f = el('img'); f.src = item.faviconUrl; f.onerror = () => f.replaceWith(glyph()); ph.appendChild(f) }
         else ph.appendChild(glyph())
-        ph.appendChild(el('div', '', host(item.url) || 'New Tab'))
+        ph.appendChild(el('div', '', item.newTab ? 'New Tab' : host(item.url) || 'New Tab'))
         thumb.appendChild(ph)
       }
       const meta = el('div', 'meta')
       if (item.faviconUrl) { const f = el('img'); f.src = item.faviconUrl; f.onerror = () => f.remove(); meta.appendChild(f) }
-      meta.appendChild(el('span', 'title', item.title || host(item.url) || 'New Tab'))
+      meta.appendChild(el('span', 'title', item.newTab ? 'New Tab' : item.title || host(item.url) || 'New Tab'))
       if (item.sleeping) meta.appendChild(el('span', 'badge', '☾'))
       if (item.pinned) meta.appendChild(el('span', 'badge', '★'))
       const close = el('button', 'close', '×')
