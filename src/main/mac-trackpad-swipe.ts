@@ -65,7 +65,7 @@ export function startMacTrackpadSwipe(_window: BaseWindow, callbacks: MacTrackpa
       }
     })
     addon = nativeAddon
-    console.info('[trackpad swipe] AppKit gesture capture ready; macOS page-swipe setting:', nativeAddon.isSwipeTrackingEnabled())
+    console.info('[trackpad swipe] AppKit phased-scroll navigation ready; legacy macOS page-swipe setting:', nativeAddon.isSwipeTrackingEnabled())
     return true
   } catch (error) {
     console.error('[trackpad swipe] Native module could not be loaded:', error)

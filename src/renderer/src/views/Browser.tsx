@@ -299,7 +299,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const sidebarToggleRef = useRef<HTMLButtonElement>(null)
   const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
-  const newTabControlRef = useRef<HTMLDivElement>(null)
   const brambleButtonRef = useRef<HTMLButtonElement>(null)
   const downloadsControlRef = useRef<HTMLDivElement>(null)
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
@@ -330,7 +329,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [newTabWeatherLoading, setNewTabWeatherLoading] = useState(false)
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
-  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -723,22 +721,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [searchEngine, searchEngineLoaded, surface])
 
   useEffect(() => {
-    if (!newTabMenuOpen) return
-    const closeOnOutsideClick = (event: PointerEvent): void => {
-      if (!newTabControlRef.current?.contains(event.target as Node)) setNewTabMenuOpen(false)
-    }
-    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') setNewTabMenuOpen(false)
-    }
-    window.addEventListener('pointerdown', closeOnOutsideClick)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      window.removeEventListener('pointerdown', closeOnOutsideClick)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [newTabMenuOpen])
-
-  useEffect(() => {
     if (!downloadsPopupOpen) return
     const closeOnOutsideClick = (event: PointerEvent): void => {
       if (!downloadsControlRef.current?.contains(event.target as Node)) setDownloadsPopupOpen(false)
@@ -954,41 +936,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         </div>
         <div className="sidebar-heading">
           {sidebarMode !== 'tabs' && <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>}
-          {sidebarMode !== 'history' ? (
-            <div className="new-tab-control" ref={newTabControlRef}>
-              <button className="sidebar-icon-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T); Alt-click for options" onClick={(event) => {
-                if (event.altKey) {
-                  setNewTabMenuOpen((open) => !open)
-                  return
-                }
-                setNewTabMenuOpen(false)
-                createNewTab()
-              }}>
-                <span aria-hidden="true">＋</span>
-              </button>
-              {newTabMenuOpen && (
-                <div className="new-tab-menu" role="menu" aria-label="New tab options">
-                  <button type="button" role="menuitem" onClick={() => {
-                    createNewTab()
-                    setNewTabMenuOpen(false)
-                  }}>
-                    <strong>New tab</strong><span>{newTabPage === 'quick-links' ? 'Sockfish New Tab · local' : newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
-                  </button>
-                  <button type="button" role="menuitem" disabled={!tabs.some((tab) => tab.active)} onClick={() => {
-                    const activeTab = tabs.find((tab) => tab.active)
-                    if (activeTab) void window.api.browser.tabs.create(activeTab.url, searchEngine)
-                    setNewTabMenuOpen(false)
-                  }}>
-                    <strong>Duplicate active tab</strong><span>Open the same address in a new tab</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : sidebarMode === 'history' ? (
+          {sidebarMode === 'history' && (
             <button className="sidebar-icon-button" type="button" aria-label="Clear browsing history" title="Clear history" disabled={history.length === 0} onClick={() => void clearHistory()}>
               <span aria-hidden="true">⌫</span>
             </button>
-          ) : null}
+          )}
         </div>
 
         {sidebarMode === 'tabs' && (
@@ -1053,6 +1005,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         )}
 
+        {sidebarMode === 'tabs' && (
+          <button className="sidebar-new-tab-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>
+            <span aria-hidden="true">＋</span>
+          </button>
+        )}
+
         <div className="sidebar-footer">
           <button className={`sidebar-mode-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
             <span aria-hidden="true">⚙</span><span>Settings</span>
@@ -1067,37 +1025,39 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
-            <button
-              ref={sidebarToggleRef}
-              className="toolbar-button sidebar-toggle-button"
-              type="button"
-              aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-              aria-pressed={sidebarPinned}
-              title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
-              onMouseEnter={revealSidebar}
-              onMouseLeave={scheduleSidebarHide}
-              onFocus={revealSidebar}
-              onBlurCapture={releaseSidebarFocus}
-              onClick={() => setSidebarPinned((pinned) => !pinned)}
-            >
-              <span aria-hidden="true">▤</span>
-            </button>
-            <div className="browser-nav-buttons">
-              <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
-                <span aria-hidden="true">‹</span>
-              </button>
-              <button className="toolbar-button" type="button" aria-label="Forward" title="Forward" disabled={!browser.canGoForward} onClick={() => void window.api.browser.forward()}>
-                <span aria-hidden="true">›</span>
-              </button>
+            <div className="browser-toolbar-leading">
               <button
-                className={`toolbar-button reload-button${browser.loading ? ' is-loading' : ''}`}
+                ref={sidebarToggleRef}
+                className="toolbar-button sidebar-toggle-button"
                 type="button"
-                aria-label={browser.loading ? 'Stop loading' : 'Reload page'}
-                title={browser.loading ? 'Stop' : 'Reload'}
-                onClick={() => void (browser.loading ? window.api.browser.stop() : window.api.browser.reload())}
+                aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+                aria-pressed={sidebarPinned}
+                title={sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'}
+                onMouseEnter={revealSidebar}
+                onMouseLeave={scheduleSidebarHide}
+                onFocus={revealSidebar}
+                onBlurCapture={releaseSidebarFocus}
+                onClick={() => setSidebarPinned((pinned) => !pinned)}
               >
-                <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
+                <span aria-hidden="true">▤</span>
               </button>
+              <div className="browser-nav-buttons">
+                <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
+                  <span aria-hidden="true">‹</span>
+                </button>
+                <button className="toolbar-button" type="button" aria-label="Forward" title="Forward" disabled={!browser.canGoForward} onClick={() => void window.api.browser.forward()}>
+                  <span aria-hidden="true">›</span>
+                </button>
+                <button
+                  className={`toolbar-button reload-button${browser.loading ? ' is-loading' : ''}`}
+                  type="button"
+                  aria-label={browser.loading ? 'Stop loading' : 'Reload page'}
+                  title={browser.loading ? 'Stop' : 'Reload'}
+                  onClick={() => void (browser.loading ? window.api.browser.stop() : window.api.browser.reload())}
+                >
+                  <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
+                </button>
+              </div>
             </div>
             <div className="omnibox-wrap">
               <div className="omnibox">
@@ -1147,80 +1107,81 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </div>
               )}
             </div>
-            <div className="omnibox-actions" role="group" aria-label="Browser panels">
-              <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs, pinned tabs, and bookmarks" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs, pinned tabs, and bookmarks" onClick={() => toggleToolbarPanel('tabs')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
-              </button>
-              <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
-              </button>
-            </div>
-            <button
-              className={`toolbar-button favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
-              type="button"
-              aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-              aria-pressed={currentOriginIsBookmarked}
-              title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-              disabled={!activeOrigin}
-              onClick={() => void toggleCurrentSiteBookmark()}
-            ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
-            <button
-              className="toolbar-button picture-in-picture-button"
-              type="button"
-              aria-label="Picture in Picture"
-              title="Picture in Picture (video opens in a floating window)"
-              onClick={() => {
-                void window.api.browser.pictureInPicture().then((started) => {
-                  if (!started) setNavigationError('No active video can open in Picture in Picture on this page.')
-                  else setNavigationError('')
-                })
-              }}
-            ><span aria-hidden="true">▣</span></button>
-            <button
-              className={`toolbar-button site-controls-button${sidebarMode === 'site' ? ' is-current' : ''}`}
-              type="button"
-              aria-label="Site settings"
-              aria-pressed={sidebarMode === 'site'}
-              title={activeOrigin ? `Site settings for ${activeOrigin}` : 'Site settings unavailable for this page'}
-              disabled={!activeOrigin}
-              onClick={() => selectSettingsSection('site')}
-            ><span aria-hidden="true">⛨</span></button>
-            <button
-              className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
-              ref={brambleButtonRef}
-              type="button"
-              aria-label={bramblePoc.installed ? 'Open Bramble' : 'Open Bramble extension settings'}
-              aria-pressed={bramblePoc.popupOpen}
-              aria-busy={bramblePoc.loading}
-              title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Bramble extension settings'}
-              disabled={bramblePoc.loading}
-              onClick={() => bramblePoc.installed ? void openBramblePoc() : selectSettingsSection('settings')}
-            >
-              <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
-            </button>
-            <div className="downloads-toolbar-control" ref={downloadsControlRef}>
+            <div className="browser-toolbar-trailing">
+              <div className="omnibox-actions" role="group" aria-label="Browser panels">
+                <button className={`omnibox-action-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label="Tabs, pinned tabs, and bookmarks" aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title="Tabs, pinned tabs, and bookmarks" onClick={() => toggleToolbarPanel('tabs')}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
+                </button>
+                <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
+                </button>
+              </div>
               <button
-                className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
-                ref={downloadsButtonRef}
+                className={`toolbar-button favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
                 type="button"
-                aria-label="Downloads"
-                aria-haspopup="dialog"
-                aria-expanded={downloadsPopupOpen}
-                aria-controls="downloads-popup"
-                title="Downloads"
-                onClick={() => setDownloadsPopupOpen((open) => !open)}
+                aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
+                aria-pressed={currentOriginIsBookmarked}
+                title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
+                disabled={!activeOrigin}
+                onClick={() => void toggleCurrentSiteBookmark()}
+              ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
+              <button
+                className="toolbar-button picture-in-picture-button"
+                type="button"
+                aria-label="Picture in Picture"
+                title="Picture in Picture (video opens in a floating window)"
+                onClick={() => {
+                  void window.api.browser.pictureInPicture().then((started) => {
+                    if (!started) setNavigationError('No active video can open in Picture in Picture on this page.')
+                    else setNavigationError('')
+                  })
+                }}
+              ><span aria-hidden="true">▣</span></button>
+              <button
+                className={`toolbar-button site-controls-button${sidebarMode === 'site' ? ' is-current' : ''}`}
+                type="button"
+                aria-label="Site settings"
+                aria-pressed={sidebarMode === 'site'}
+                title={activeOrigin ? `Site settings for ${activeOrigin}` : 'Site settings unavailable for this page'}
+                disabled={!activeOrigin}
+                onClick={() => selectSettingsSection('site')}
+              ><span aria-hidden="true">⛨</span></button>
+              <button
+                className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
+                ref={brambleButtonRef}
+                type="button"
+                aria-label={bramblePoc.installed ? 'Open Bramble' : 'Open Bramble extension settings'}
+                aria-pressed={bramblePoc.popupOpen}
+                aria-busy={bramblePoc.loading}
+                title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Bramble extension settings'}
+                disabled={bramblePoc.loading}
+                onClick={() => bramblePoc.installed ? void openBramblePoc() : selectSettingsSection('settings')}
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5v11" /><path d="m7.5 10 4.5 4.5 4.5-4.5" /><path d="M5 16.5v3h14v-3" /></svg>
+                <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
               </button>
-              {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
-                setDownloadsPopupOpen(false)
-                setSidebarMode('downloads')
-              }} onClose={() => {
-                setDownloadsPopupOpen(false)
-                downloadsButtonRef.current?.focus()
-              }} />}
+              <div className="downloads-toolbar-control" ref={downloadsControlRef}>
+                <button
+                  className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
+                  ref={downloadsButtonRef}
+                  type="button"
+                  aria-label="Downloads"
+                  aria-haspopup="dialog"
+                  aria-expanded={downloadsPopupOpen}
+                  aria-controls="downloads-popup"
+                  title="Downloads"
+                  onClick={() => setDownloadsPopupOpen((open) => !open)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5v11" /><path d="m7.5 10 4.5 4.5 4.5-4.5" /><path d="M5 16.5v3h14v-3" /></svg>
+                </button>
+                {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
+                  setDownloadsPopupOpen(false)
+                  setSidebarMode('downloads')
+                }} onClose={() => {
+                  setDownloadsPopupOpen(false)
+                  downloadsButtonRef.current?.focus()
+                }} />}
+              </div>
             </div>
-            <div className="toolbar-drag-space" aria-hidden="true" />
           </form>
           {(browser.error || navigationError) && (
             <p className="browser-error" role="status">

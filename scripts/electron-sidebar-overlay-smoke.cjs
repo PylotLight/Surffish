@@ -158,6 +158,9 @@ async function run() {
     return rendererViews.content && rendererViews.toolbar && rendererViews.sidebar
   }, 'all three trusted renderer surfaces', 45000)
   await waitFor(() => evaluate(rendererViews.content, 'Boolean(document.querySelector(".new-tab-page"))'), 'the renderer-owned New Tab page')
+  assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-heading .sidebar-icon-button")'), null, 'the header New Tab plus button is removed')
+  assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-new-tab-button")?.getAttribute("aria-label")'), 'New tab', 'the bottom New Tab action is available in the sidebar')
+  assert.ok(await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing")'), 'toolbar controls use distinct left and right groups')
   const initialShell = nativeViewState()
   assert.equal(mainWindow.contentView.children.length, 3, 'the initial New Tab has three app surfaces and no remote page view')
   assert.equal(rendererViews.content.getVisible(), true, 'the full React content surface remains visible for New Tab')
@@ -218,6 +221,17 @@ async function run() {
       && siteBounds.width === width
       && siteBounds.height === Math.max(0, height - siteBounds.y)
   }, 'all native shell layers and the live page resize with the window')
+  const toolbarLayout = await evaluate(rendererViews.toolbar, `(() => {
+    const toolbar = document.querySelector('.browser-toolbar').getBoundingClientRect()
+    const address = document.querySelector('.omnibox-wrap').getBoundingClientRect()
+    const actions = document.querySelector('.browser-toolbar-trailing').getBoundingClientRect()
+    return { toolbar: { left: toolbar.left, right: toolbar.right }, address: { left: address.left, right: address.right }, actions: { left: actions.left, right: actions.right } }
+  })()`)
+  const toolbarCenter = (toolbarLayout.toolbar.left + toolbarLayout.toolbar.right) / 2
+  const addressCenter = (toolbarLayout.address.left + toolbarLayout.address.right) / 2
+  assert.ok(Math.abs(toolbarCenter - addressCenter) <= 1, 'the address bar is centered in the toolbar')
+  assert.ok(toolbarLayout.actions.right <= toolbarLayout.toolbar.right, 'toolbar icons stay within the right edge')
+  assert.ok(toolbarLayout.address.right < toolbarLayout.actions.left, 'a gap separates the address bar from the right-aligned icons')
 
   mainWindow.maximize()
   await delay(250)
@@ -310,9 +324,34 @@ async function run() {
   pointerMove(mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350)
   await waitFor(() => rendererViews.sidebar.getBounds().width === 0, 'the hover-only sidebar to hide again')
 
-  // Create and return from New Tab to verify the local React surface/tab lifecycle still works.
-  const newTabId = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.create()')
-  assert.ok(newTabId, 'the app should create a new tab')
+  // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
+  await clickElement(rendererViews.toolbar, '.sidebar-toggle-button')
+  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'the sidebar to open for its bottom New Tab action')
+  await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
+    const layout = document.querySelector('.browser-layout')
+    const sidebar = document.querySelector('.browser-sidebar')
+    const button = document.querySelector('.sidebar-new-tab-button')
+    if (!layout?.classList.contains('is-sidebar-visible') || !sidebar || !button) return false
+    const sidebarRect = sidebar.getBoundingClientRect()
+    const buttonRect = button.getBoundingClientRect()
+    if (Math.abs(sidebarRect.left) > 0.5 || buttonRect.top < 0 || buttonRect.bottom > innerHeight) return false
+    const hitTarget = document.elementFromPoint(buttonRect.left + buttonRect.width / 2, buttonRect.top + buttonRect.height / 2)
+    return hitTarget?.closest('.sidebar-new-tab-button') === button
+  })()`), 'the sidebar slide-in to finish with the bottom New Tab button hit-testable')
+  const priorTabIds = new Set((await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')).map((tab) => tab.id))
+  await evaluate(rendererViews.sidebar, `(() => {
+    const button = document.querySelector('.sidebar-new-tab-button')
+    window.__bottomNewTabClickCount = 0
+    button?.addEventListener('click', () => { window.__bottomNewTabClickCount += 1 }, { once: true })
+  })()`)
+  await clickElement(rendererViews.sidebar, '.sidebar-new-tab-button')
+  await waitFor(() => evaluate(rendererViews.sidebar, 'window.__bottomNewTabClickCount === 1'), 'the native pointer click to reach the bottom New Tab button')
+  const newTabId = await waitFor(async () => {
+    const tabs = await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')
+    const active = tabs.find((tab) => tab.active)
+    return active && !priorTabIds.has(active.id) ? active.id : null
+  }, 'the bottom New Tab action to create and activate a tab')
+  assert.ok(newTabId, 'the bottom New Tab control activates its new tab')
   await waitFor(async () => (await evaluate(rendererViews.content, 'window.api.browser.state()')).url.includes('sockfish://quick-links'), 'the local New Tab')
   await waitFor(() => rendererViews.content.getVisible() && !rendererViews.toolbar.getVisible() && !rendererViews.sidebar.getVisible(), 'the original full-app surface when the active tab is New Tab')
   assert.ok(mainWindow.contentView.children.some((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL() === fixtureUrl), 'the original live page tab remains alive')
