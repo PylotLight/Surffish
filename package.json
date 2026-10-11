@@ -12,7 +12,7 @@
     "start": "electron ./out/main/index.js",
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check",
     "test": "node --experimental-strip-types --test scripts/ensure-dependencies.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/main/adblock.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
@@ -37,7 +37,7 @@
     "electron": "^44.5.1",
     "electron-vite": "^5.0.0",
     "node-api-headers": "^1.9.0",
-    "typescript": "~5.9.2",
+    "typescript": "7.0.2",
     "vite": "^8.3.2"
   },
   "dependencies": {
