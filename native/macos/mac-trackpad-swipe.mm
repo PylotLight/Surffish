@@ -110,11 +110,12 @@ bool AskJavaScript(NSWindow* window, NSPoint point, Direction direction, int32_t
 
   napi_value request = nullptr;
   napi_create_object(g_env, &request);
-  // Electron's getNativeWindowHandle() exposes the NSWindow pointer, not its content view.
-  const void* nativeWindowHandle = (__bridge const void*)window;
+  // Electron's getNativeWindowHandle() is the window's content NSView* on macOS, packed as the
+  // raw pointer value. Copy the pointer itself (&handle), not the bytes of the object it points at.
+  const void* nativeViewHandle = (__bridge const void*)window.contentView;
   void* copiedHandle = nullptr;
   napi_value handleBuffer = nullptr;
-  napi_create_buffer_copy(g_env, sizeof(nativeWindowHandle), nativeWindowHandle, &copiedHandle, &handleBuffer);
+  napi_create_buffer_copy(g_env, sizeof(nativeViewHandle), &nativeViewHandle, &copiedHandle, &handleBuffer);
   napi_set_named_property(g_env, request, "windowHandle", handleBuffer);
   napi_set_named_property(g_env, request, "x", Number(point.x));
   napi_set_named_property(g_env, request, "y", Number(point.y));
