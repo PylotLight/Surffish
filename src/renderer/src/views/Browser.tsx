@@ -44,6 +44,17 @@ const COMMON_TIME_ZONES = [
   'Europe/London', 'Europe/Paris', 'Europe/Bratislava', 'America/New_York', 'America/Chicago', 'America/Denver',
   'America/Los_Angeles', 'UTC'
 ]
+const SYSTEM_TIME_ZONES = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
+const TIME_ZONE_OPTIONS = Array.from(new Set([...COMMON_TIME_ZONES, ...SYSTEM_TIME_ZONES, 'UTC']))
+
+function timeZoneCityName(timeZone: string): string {
+  return timeZone.split('/').at(-1)?.replaceAll('_', ' ') || timeZone
+}
+
+function timeZoneOptionLabel(timeZone: string): string {
+  return timeZone.replaceAll('_', ' ')
+}
+
 const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = [
   {
     id: 'fallback-forest-lake',
@@ -1345,7 +1356,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Each favicon is requested from its site's own origin. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
                 </section>
                 <section className="settings-section new-tab-settings-section" aria-label="New Tab clocks">
-                  <div className="settings-section-heading"><div><strong>New Tab · time and clocks</strong><span className="settings-status">Local and world clocks use your device’s timezone database.</span></div></div>
+                  <div className="settings-section-heading"><div><strong>New Tab · time and clocks</strong><span className="settings-status">Choose any supported time zone and give each of up to {MAX_WORLD_CLOCKS} world clocks its own label.</span></div></div>
                   <label className="new-tab-setting-toggle"><span>Show local clock</span><input type="checkbox" checked={newTabPreferences.showClock} onChange={(event) => patchNewTabPreferences({ showClock: event.target.checked })} /></label>
                   <label className="new-tab-setting-toggle"><span>Show date</span><input type="checkbox" checked={newTabPreferences.showDate} onChange={(event) => patchNewTabPreferences({ showDate: event.target.checked })} /></label>
                   <label className="new-tab-setting-toggle"><span>Use 24-hour time</span><input type="checkbox" checked={newTabPreferences.use24HourTime} onChange={(event) => patchNewTabPreferences({ use24HourTime: event.target.checked })} /></label>
@@ -1354,19 +1365,25 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <span>Primary time zone</span>
                     <select className="settings-select" value={newTabPreferences.timeZone} onChange={(event) => patchNewTabPreferences({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
                       <option value="local">Automatic · device time</option>
-                      {Array.from(new Set([...COMMON_TIME_ZONES, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{zone.replaceAll('_', ' ')}</option>)}
+                      {Array.from(new Set([...TIME_ZONE_OPTIONS, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
                     </select>
                   </label>
                   <div className="new-tab-world-clocks">
                     <div className="new-tab-world-clocks-heading"><strong>World clocks</strong><button className="settings-action secondary" type="button" disabled={newTabPreferences.worldClocks.length >= MAX_WORLD_CLOCKS} onClick={() => {
-                      const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: 'City', timeZone: 'Australia/Sydney' }
+                      const usedTimeZones = new Set([
+                        Intl.DateTimeFormat().resolvedOptions().timeZone,
+                        ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone]),
+                        ...newTabPreferences.worldClocks.map((item) => item.timeZone)
+                      ])
+                      const timeZone = TIME_ZONE_OPTIONS.find((zone) => !usedTimeZones.has(zone)) ?? 'UTC'
+                      const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: timeZoneCityName(timeZone), timeZone }
                       patchNewTabPreferences({ worldClocks: [...newTabPreferences.worldClocks, clock] })
                     }}>Add clock</button></div>
                     {newTabPreferences.worldClocks.map((clock, index) => (
                       <div className="new-tab-world-clock-editor" key={clock.id}>
                         <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
                         <select className="settings-select" value={clock.timeZone} aria-label={`World clock ${index + 1} timezone`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, timeZone: event.target.value } : item) })}>
-                          {Array.from(new Set([...COMMON_TIME_ZONES, clock.timeZone])).map((zone) => <option key={zone} value={zone}>{zone.replaceAll('_', ' ')}</option>)}
+                          {Array.from(new Set([...TIME_ZONE_OPTIONS, clock.timeZone])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
                         </select>
                         <button className="settings-action secondary" type="button" aria-label={`Remove ${clock.label} world clock`} onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>Remove</button>
                       </div>
@@ -1390,7 +1407,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <label className="new-tab-setting-toggle"><span>Show site names under icons</span><input type="checkbox" checked={newTabPreferences.showLinkLabels} onChange={(event) => patchNewTabPreferences({ showLinkLabels: event.target.checked })} /></label>
                   <label className="settings-field"><span>Icon size · {newTabPreferences.iconSize}px</span><input className="settings-range" type="range" min={20} max={52} value={newTabPreferences.iconSize} onChange={(event) => patchNewTabPreferences({ iconSize: Number(event.target.value) })} aria-label="New Tab icon size" /></label>
                   <label className="settings-field"><span>Links per row · {newTabPreferences.linksPerRow}</span><input className="settings-range" type="range" min={3} max={12} value={newTabPreferences.linksPerRow} onChange={(event) => patchNewTabPreferences({ linksPerRow: Number(event.target.value) })} aria-label="New Tab links per row" /></label>
-                  <label className="settings-field"><span>Icon vertical position · {newTabPreferences.iconVerticalOffset}px</span><input className="settings-range" type="range" min={0} max={240} step={5} value={newTabPreferences.iconVerticalOffset} onChange={(event) => patchNewTabPreferences({ iconVerticalOffset: Number(event.target.value) })} aria-label="New Tab icon vertical position" /></label>
+                  <label className="settings-field"><span>Icon vertical position · {newTabPreferences.iconVerticalOffset}px</span><input className="settings-range" type="range" min={0} max={480} step={10} value={newTabPreferences.iconVerticalOffset} onChange={(event) => patchNewTabPreferences({ iconVerticalOffset: Number(event.target.value) })} aria-label="New Tab icon vertical position" /></label>
                   <label className="settings-field"><span>Background dim · {newTabPreferences.backgroundDim}%</span><input className="settings-range" type="range" min={0} max={70} value={newTabPreferences.backgroundDim} onChange={(event) => patchNewTabPreferences({ backgroundDim: Number(event.target.value) })} aria-label="New Tab background dim" /></label>
                   <label className="settings-field"><span>Background blur · {newTabPreferences.backgroundBlur}px</span><input className="settings-range" type="range" min={0} max={12} value={newTabPreferences.backgroundBlur} onChange={(event) => patchNewTabPreferences({ backgroundBlur: Number(event.target.value) })} aria-label="New Tab background blur" /></label>
                 </section>

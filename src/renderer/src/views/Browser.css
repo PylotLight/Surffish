@@ -2255,6 +2255,8 @@
   padding-left: 82px;
 }
 .sidebar-window-controls {
+  position: relative;
+  top: 17px;
   display: flex;
   flex: 0 0 auto;
   align-items: center;

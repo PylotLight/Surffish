@@ -133,6 +133,7 @@ test('defaults New Tab clocks, weather, and icon display preferences safely', ()
   assert.equal(preferences.showClock, true)
   assert.equal(preferences.weatherEnabled, false)
   assert.equal(preferences.timeZone, 'local')
+  assert.equal(preferences.iconVerticalOffset, 340)
 })
 
 test('normalizes clock time zones, removes invalid world clocks, and bounds display settings', () => {
@@ -146,7 +147,7 @@ test('normalizes clock time zones, removes invalid world clocks, and bounds disp
     linksPerRow: 1,
     backgroundDim: -12,
     backgroundBlur: 6.4,
-    iconVerticalOffset: 300,
+    iconVerticalOffset: 999,
     worldClocks: [
       { id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' },
       { id: 'two', label: 'Bad zone', timeZone: 'Mars/Phobos' },
@@ -162,7 +163,7 @@ test('normalizes clock time zones, removes invalid world clocks, and bounds disp
   assert.equal(preferences.linksPerRow, 3)
   assert.equal(preferences.backgroundDim, 0)
   assert.equal(preferences.backgroundBlur, 6)
-  assert.equal(preferences.iconVerticalOffset, 240)
+  assert.equal(preferences.iconVerticalOffset, 480)
   assert.deepEqual(preferences.worldClocks, [{ id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' }])
 })
 
