@@ -12,7 +12,8 @@ import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSi
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
-import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
+import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
+import { attachTabOverview, detachTabOverview, getTabOverviewState, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -29,6 +30,8 @@ interface BrowserTab {
   inactiveSince: number | null
   sleepTimer: ReturnType<typeof setTimeout> | null
   pageScrollEdges: BrowserPageScrollEdges
+  /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
+  pageScale: number
 }
 interface BrowserPageScrollEdges {
   canScrollLeft: boolean
@@ -56,6 +59,8 @@ let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
 let nextMacTrackpadSwipeToken = 0
+const tabThumbnails = new Map<string, string>()
+const THUMBNAIL_WIDTH = 640
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
   const page = getBrowserNewTabPage()
@@ -306,6 +311,8 @@ function activateTabInternal(id: string): boolean {
   if (!tab) return false
   if (activeTabId !== id) cancelActiveMacTrackpadSwipe()
   const previous = getTab()
+  // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
+  if (previous && previous.id !== id) void captureTabThumbnail(previous)
   if (previous && previous.id !== id) markTabInactive(previous)
   cancelSleepTimer(tab)
   tab.inactiveSince = null
@@ -497,6 +504,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     tab.error = `${errorDescription} (${errorCode})`
     publishState()
   })
+  contents.on('did-stop-loading', () => {
+    setTimeout(() => {
+      if (isCurrentContents() && tab.id === activeTabId && !isTabOverviewOpen()) void captureTabThumbnail(tab)
+    }, 700)
+  })
   contents.on('destroyed', () => {
     if (activeMacTrackpadSwipe?.contents === contents) {
       activeMacTrackpadSwipe = null
@@ -538,7 +550,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pinned,
     inactiveSince: null,
     sleepTimer: null,
-    pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES }
+    pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES },
+    pageScale: 1
   }
   tabs.push(tab)
   if (shouldActivate) {
@@ -610,14 +623,28 @@ export function attachBrowserView(win: BaseWindow): void {
     startMacTrackpadSwipe(win, {
       onBegin: beginMacTrackpadSwipe,
       onProgress: reportMacTrackpadSwipeProgress,
-      onEnd: finishMacTrackpadSwipe
+      onEnd: finishMacTrackpadSwipe,
+      onPinch: handleMacTrackpadPinch
     })
   }
+  attachTabOverview(win, {
+    getItems: getTabOverviewItems,
+    getPageBounds: () => ({ ...browserBounds }),
+    activate: (id) => { activateBrowserTab(id) },
+    closeTab: (id) => { closeBrowserTab(id) },
+    newTab: () => { newBrowserTab() },
+    focusPage: () => {
+      const contents = getTab()?.view?.webContents
+      if (contents && !contents.isDestroyed()) contents.focus()
+    }
+  })
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
     if (browserWindow !== win) return
     cancelActiveMacTrackpadSwipe()
     stopMacTrackpadSwipe()
+    detachTabOverview()
+    tabThumbnails.clear()
     const closingTabs = [...tabs]
     tabs.length = 0
     activeTabId = null
@@ -717,6 +744,10 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     if (tabId) closeBrowserTab(tabId)
     return true
   }
+  if ((key === '\\' || key === '|') && shift) {
+    toggleTabOverview()
+    return true
+  }
   if (key === 'tab' && tabs.length > 1) {
     cycleBrowserTab(shift ? -1 : 1)
     return true
@@ -757,6 +788,7 @@ export function closeBrowserTab(id: string): void {
   if (index < 0) return
   const tab = tabs[index]
   if (!tab) return
+  tabThumbnails.delete(id)
   const wasActive = activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   tabs.splice(index, 1)
@@ -925,6 +957,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     return undefined
   }
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
+  if (isTabOverviewOpen()) return refuse('tab overview open')
   // The handle only tells us which NSWindow the gesture landed in. Surffish drives one browser
   // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
   // reject every swipe).
@@ -1045,6 +1078,130 @@ export function updateBrowserTrackpadScrollEdges(contents: WebContents, input: u
   if (typeof edges.canScrollLeft !== 'boolean' || typeof edges.canScrollRight !== 'boolean') return
   const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
   if (tab) tab.pageScrollEdges = { canScrollLeft: edges.canScrollLeft, canScrollRight: edges.canScrollRight }
+}
+
+export function updateBrowserPageScale(contents: WebContents, input: unknown): void {
+  if (contents.isDestroyed() || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) return
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  if (tab) tab.pageScale = input
+}
+
+async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed() || tab.id !== activeTabId) return
+  if (browserBounds.width <= 0 || browserBounds.height <= 0) return
+  try {
+    const image = await contents.capturePage()
+    if (image.isEmpty() || contents.isDestroyed() || !tabs.includes(tab)) return
+    const size = image.getSize()
+    const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
+    tabThumbnails.set(tab.id, `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`)
+  } catch {
+    // A page that is navigating or crashing just keeps its previous thumbnail.
+  }
+}
+
+async function getTabOverviewItems(): Promise<TabOverviewItem[]> {
+  const active = getTab()
+  if (active) {
+    // Fresh shot of what is on screen right now; don't hold the gesture up for a slow page.
+    await Promise.race([captureTabThumbnail(active), new Promise((resolve) => setTimeout(resolve, 120))])
+  }
+  return getTabSummaries().map((summary) => ({
+    id: summary.id,
+    url: summary.url,
+    title: summary.title,
+    faviconUrl: summary.faviconUrl,
+    active: summary.active,
+    pinned: summary.pinned,
+    sleeping: summary.sleeping,
+    thumbnail: tabThumbnails.get(summary.id) ?? null
+  }))
+}
+
+// How much pinch (summed NSEvent magnification) carries the overview the whole way in or out.
+const PINCH_FULL_TRAVEL = 0.55
+// Progress per second at release that counts as a flick, whatever the distance travelled.
+const PINCH_FLICK_SPEED = 1.6
+let pinchMode: 'none' | 'open' | 'close' | 'swallow' = 'none'
+let pinchSamples: { at: number; progress: number }[] = []
+
+function pinchProgress(magnification: number): number {
+  const travel = magnification / PINCH_FULL_TRAVEL
+  const progress = pinchMode === 'open' ? -travel : 1 - travel
+  return Math.min(1.25, Math.max(-0.05, progress))
+}
+
+function trackPinchProgress(magnification: number): number {
+  const progress = pinchProgress(magnification)
+  const now = Date.now()
+  pinchSamples.push({ at: now, progress })
+  while (pinchSamples.length > 2 && now - pinchSamples[0]!.at > 120) pinchSamples.shift()
+  setTabOverviewProgress(progress)
+  return progress
+}
+
+function pinchVelocity(): number {
+  const first = pinchSamples[0]
+  const last = pinchSamples[pinchSamples.length - 1]
+  if (!first || !last || last.at - first.at < 8) return 0
+  return (last.progress - first.progress) / ((last.at - first.at) / 1000)
+}
+
+function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: number): boolean {
+  if (MAC_SWIPE_DEBUG && phase !== 'change') {
+    console.info('[trackpad swipe] pinch', phase, { magnification, mode: pinchMode, overview: getTabOverviewState(), pageScale: getTab()?.pageScale })
+  }
+  if (phase === 'begin') {
+    pinchSamples = []
+    pinchMode = 'none'
+    const overview = getTabOverviewState()
+    if (overview === 'opening' || overview === 'closing') {
+      // Mid-animation: eat the pinch so the page underneath doesn't zoom.
+      pinchMode = 'swallow'
+      return true
+    }
+    if (overview === 'open') {
+      pinchMode = magnification > 0 ? 'close' : 'swallow'
+      if (pinchMode === 'close') trackPinchProgress(magnification)
+      return true
+    }
+    if (magnification > 0) return false
+    if (!browserWindow || browserWindow.isDestroyed() || !browserWindow.isFocused()) return false
+    const tab = getTab()
+    // Pinching in on a zoomed-in page should zoom it back out, not open the overview.
+    if (!tab || tab.pageScale > 1.01) return false
+    pinchMode = 'open'
+    void openTabOverview({ interactive: true })
+    trackPinchProgress(magnification)
+    return true
+  }
+
+  const mode = pinchMode
+  if (mode === 'none' || mode === 'swallow') {
+    if (phase !== 'change') pinchMode = 'none'
+    return mode === 'swallow'
+  }
+  if (phase === 'change') {
+    trackPinchProgress(magnification)
+    return true
+  }
+
+  const progress = pinchSamples[pinchSamples.length - 1]?.progress ?? (mode === 'open' ? 0 : 1)
+  const velocity = pinchVelocity()
+  pinchMode = 'none'
+  pinchSamples = []
+  if (phase === 'cancel') {
+    settleTabOverview(mode === 'close')
+    return true
+  }
+  // Released: a flick wins, otherwise go wherever it is closer to.
+  const open = velocity > PINCH_FLICK_SPEED ? true
+    : velocity < -PINCH_FLICK_SPEED ? false
+      : mode === 'open' ? progress > 0.4 : progress > 0.6
+  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] pinch released', { mode, progress, velocity, open })
+  settleTabOverview(open, open ? undefined : activeTabId ?? undefined)
+  return true
 }
 
 export function browserBack(): void {
