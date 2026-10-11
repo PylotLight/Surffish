@@ -355,19 +355,19 @@ function showBrowserTabContextMenu(id: string): void {
   const origin = normalizeHttpOrigin(currentUrl(tab))
   const bookmarked = Boolean(origin && getBrowserPinnedSites().some((site) => normalizeHttpOrigin(site.url) === origin))
   const items: MenuItemConstructorOptions[] = [
-    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
-    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => setBrowserTabPinned(id, !tab.pinned) },
-    { label: 'Duplicate Tab', click: () => { void duplicateBrowserTab(id) } },
-    { label: 'Copy Link', enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
+    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
+    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
+    { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
+    { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
     { type: 'separator' },
-    { label: 'Reload Tab', click: () => reloadBrowserTab(id) },
+    { label: 'Reload Tab', ...tabMenuAccelerator('reload'), click: () => reloadBrowserTab(id) },
     { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
     { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
     { type: 'separator' },
-    { label: 'Close Tab', click: () => closeBrowserTab(id) },
+    { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
     { label: 'Close Tabs Above', enabled: tabs.some((candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
     { label: 'Close Tabs Below', enabled: tabs.some((candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
-    { label: 'Close Other Tabs', enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
+    { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
   ]
   Menu.buildFromTemplate(items).popup({ window: browserWindow })
 }
@@ -442,8 +442,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
-    const key = inputEvent.key.toLowerCase()
-    if (handleBrowserShortcut(key, inputEvent.shift, tab.id)) event.preventDefault()
+    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
   })
   contents.on('will-navigate', (event, url) => {
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
@@ -640,7 +639,7 @@ export function attachBrowserView(win: BaseWindow): void {
       if (contents && !contents.isDestroyed()) contents.focus()
       else focusVisibleShellPage()
     },
-    handleShortcut: (key, shift) => handleBrowserShortcut(key, shift)
+    handleShortcut: (input) => handleBrowserShortcutInput(input)
   })
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
@@ -736,17 +735,74 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId): string |
   return id
 }
 
-export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId): boolean {
+export type TabCommand = 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'reload' | 'close' | 'closeOthers'
+
+// One table for tab shortcuts: the key handler, the app menu and the tab context menu all read it.
+export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, { key: string, shift?: boolean, alt?: boolean, accelerator: string }> = {
+  bookmark: { key: 'd', accelerator: 'CmdOrCtrl+D' },
+  pin: { key: 'p', shift: true, accelerator: 'CmdOrCtrl+Shift+P' },
+  duplicate: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
+  copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
+  reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
+  close: { key: 'w', accelerator: 'CmdOrCtrl+W' },
+  closeOthers: { key: 'w', alt: true, accelerator: 'CmdOrCtrl+Alt+W' }
+}
+
+function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
+  // Shown as a hint only; the app menu and before-input-event do the real handling.
+  return { accelerator: TAB_COMMAND_SHORTCUTS[command].accelerator, registerAccelerator: false }
+}
+
+export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefined): void {
+  if (command === 'close') {
+    closeBrowserTabFromShortcut(tabId)
+    return
+  }
+  const tab = tabId ? getTab(tabId) : undefined
+  if (!tab) return
+  switch (command) {
+    case 'bookmark':
+      if (normalizeHttpOrigin(currentUrl(tab))) toggleTabBookmark(tab.id)
+      break
+    case 'pin':
+      setBrowserTabPinned(tab.id, !tab.pinned)
+      break
+    case 'duplicate':
+      duplicateBrowserTab(tab.id)
+      break
+    case 'copyLink':
+      if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(currentUrl(tab))
+      break
+    case 'reload':
+      reloadBrowserTab(tab.id)
+      break
+    case 'closeOthers':
+      closeBrowserTabsRelative(tab.id, 'others')
+      break
+  }
+}
+
+/** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
+export function handleBrowserShortcutInput(input: Electron.Input, tabId = activeTabId): boolean {
+  if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
+  const key = input.alt && /^Key[A-Z]$/.test(input.code) ? input.code.slice(3).toLowerCase() : input.key.toLowerCase()
+  return handleBrowserShortcut(key, input.shift, tabId, input.alt)
+}
+
+export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId, alt = false): boolean {
+  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, typeof TAB_COMMAND_SHORTCUTS[TabCommand]][]) {
+    if (shortcut.key === key && Boolean(shortcut.shift) === shift && Boolean(shortcut.alt) === alt) {
+      runTabCommand(command, tabId ?? undefined)
+      return true
+    }
+  }
+  if (alt) return false
   if (key === 'l' && !shift) {
     sendFocusAddressToVisibleRenderer()
     return true
   }
   if (key === 't' && !shift) {
     newBrowserTab()
-    return true
-  }
-  if (key === 'w' && !shift) {
-    closeBrowserTabFromShortcut(tabId ?? undefined)
     return true
   }
   if ((key === '\\' || key === '|') && shift) {
