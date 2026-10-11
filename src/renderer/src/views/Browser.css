@@ -1305,7 +1305,7 @@
 }
 .sidebar-new-tab-button {
   display: flex;
-  flex: 0 0 52px;
+  flex: 0 0 26px;
   align-items: center;
   justify-content: center;
   margin: 0 12px 10px;
@@ -1319,7 +1319,7 @@
   -webkit-app-region: no-drag;
 }
 .sidebar-new-tab-button span {
-  font-size: 27px;
+  font-size: 20px;
   font-weight: 300;
   line-height: 1;
 }
@@ -2455,6 +2455,9 @@
   align-items: center;
   gap: 23px;
   margin-top: var(--new-tab-icon-offset, 115px);
+}
+.browser-layout.is-sidebar-visible .new-tab-link-groups {
+  transform: translateX(calc(min(320px, calc(100vw - 48px)) / 2));
 }
 .new-tab-link-group {
   display: flex;

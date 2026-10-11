@@ -2,7 +2,7 @@
 
 Surffish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, a downloads manager, uBlock Origin-style ad blocking (network, cosmetic, and scriptlet filters), an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
 
-![Surffish New Tab showing real YouTube, Gmail, and Google Maps tabs with loaded favicons in the glass sidebar and quick links](docs/screenshots/surffish-cover-new-tab.png)
+![Surffish New Tab with centered YouTube, Gmail, and Google Maps quick links beside the open glass sidebar](docs/screenshots/surffish-cover-new-tab.png)
 
 ## Quick start
 
@@ -21,7 +21,7 @@ Enter a web address or search phrase in the slim address bar. Local suggestions 
 
 Fresh profiles open Surffish's **New Tab** page: a full-window nature photograph with a small, low-set frosted-glass favicon grid in the compact Quick Links style, not large tiles. Pinned sites appear first, followed by up to eight unpinned origins computed from local history. Surffish uses each site's declared favicon when Chromium reports it, then falls back to that site's own `/favicon.ico`; requests omit referrers, and an initial is shown if neither icon loads. Loaded favicons flow through tabs, pinned sites, history, and New Tab quick links. The two active backgrounds rotate locally every 15 minutes; **Next background** skips and **Refresh nature photos** requests another set. When the local New Tab is in use, Surffish normally refreshes at most once per 24 hours from two fixed, generic Wikimedia Commons searches for mountain-lake and forest-lake photos. Requests use the browser session and its saved proxy choice, omit cookies and referrers, and contain no browsing history, pins, current page, typed address, or visited URLs. Only CC0 or attribution-only CC BY images are accepted; at most two remote thumbnails and their title, creator, source, and license metadata are cached. The two bundled CC0 fallback images keep rotation available offline. In **Settings → General → New tab page**, switch future tabs to [Bonjourr's hosted start page](https://online.bonjourr.fr/) or the selected search engine. Surffish's local icon grid covers pinned favorites and local frequent sites; Bonjourr's extension-only bookmark import is not included in its hosted-page integration. See the [photo source, license, and cache notes](docs/new-tab-photo-sources.md).
 
-Project screenshots use genuine live Linux Electron app windows; the refreshed cover shows public YouTube, Gmail, and Google Maps tabs with their loaded favicons in a clean profile, while the other example screens use synthetic demo data. See the [browser UI guide](docs/browser-ui-overhaul.md) for New Tab, Tabs, History, and Downloads screenshots and platform limitations.
+Project screenshots use genuine live Linux Electron app windows. The refreshed cover shows the New Tab favorites centered in the area to the right of the open glass sidebar, along with the compact New Tab control; the other example screens use synthetic demo data. See the [browser UI guide](docs/browser-ui-overhaul.md) for New Tab, Tabs, History, and Downloads screenshots and platform limitations.
 
 ## Tabs, sidebar, and history
 
