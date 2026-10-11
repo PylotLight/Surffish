@@ -26,6 +26,8 @@ export interface TabOverviewHost {
   newTab(): void
   /** Hand keyboard focus back to the page once the overview is gone. */
   focusPage(): void
+  /** Run a Cmd/Ctrl shortcut the browser normally handles (new tab, close tab, ...). */
+  handleShortcut(key: string, shift: boolean): boolean
 }
 
 /** closed → opening (pinch or animation in flight) → open (grid settled) → closing → closed */
@@ -168,6 +170,26 @@ function ensureView(): WebContentsView | null {
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
   view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   view.webContents.on('will-navigate', (event) => event.preventDefault())
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta)) return
+    const key = input.key.toLowerCase()
+    // Never let Cmd+W fall through to the default menu's Close Window, even if this view still
+    // holds focus after the overview closed.
+    if (state === 'open' && key === 'w') {
+      event.preventDefault()
+      if (selectedId && host) {
+        host.closeTab(selectedId)
+        void refreshTabOverview()
+      }
+      return
+    }
+    if (state === 'open' && input.shift && (key === '\\' || key === '|')) {
+      event.preventDefault()
+      closeTabOverview()
+      return
+    }
+    if (host?.handleShortcut(key, input.shift) || key === 'w') event.preventDefault()
+  })
   view.webContents.on('render-process-gone', () => {
     if (state !== 'closed') hideNow()
     view = null
