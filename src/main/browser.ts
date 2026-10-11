@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserRuntimeDiagnostics, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
@@ -41,7 +41,7 @@ function currentUrl(tab: BrowserTab): string {
 }
 
 function pageTitle(tab: BrowserTab): string {
-  if (currentUrl(tab) === SOCKFISH_QUICK_LINKS_URL) return 'Quick Links'
+  if (currentUrl(tab) === SOCKFISH_QUICK_LINKS_URL) return 'New Tab'
   const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
   try {
@@ -71,7 +71,7 @@ function getTabSummaries(): BrowserTabSummary[] {
     title: pageTitle(tab),
     loading: tab.view?.webContents.isLoading() ?? false,
     active: tab.id === activeTabId,
-    sleeping: tab.view === null
+    sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab))
   }))
 }
 

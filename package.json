@@ -13,7 +13,7 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/password-extension-compat.test.ts src/main/adblock.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
+    "test": "node --experimental-strip-types --test src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/main/adblock.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
     "test:electron-extensions": "node scripts/run-electron-extension-probes.cjs",
     "test:electron-host-bridge": "node scripts/run-electron-host-tab-frame-probe.cjs",

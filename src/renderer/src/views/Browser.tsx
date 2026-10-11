@@ -8,6 +8,7 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  NewTabBackground,
   NewTabPageId,
   NetworkRequestDetails,
   NetworkRequestSummary,
@@ -25,40 +26,40 @@ import {
   nextQuickLinkBackgroundIndex,
   QUICK_LINK_BACKGROUND_ROTATION_MS
 } from '../../../shared/quick-links-backgrounds'
+import { NEW_TAB_PHOTO_REFRESH_INTERVAL_MS } from '../../../shared/new-tab-photo-feed'
 import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
 import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-lake.webp'
-import waterfall from '../assets/quick-links-backgrounds/waterfall.webp'
-import lakeMountain from '../assets/quick-links-backgrounds/lake-mountain.webp'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
-const QUICK_LINK_BACKGROUNDS = [
+const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = [
   {
+    id: 'fallback-forest-lake',
     src: forestLake,
     title: 'Forest lake',
     creator: 'Pixel.la Free Stock Photos',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg'
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg',
+    licenseName: 'CC0 1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/'
   },
   {
+    id: 'fallback-mountain-lake',
     src: mountainLake,
     title: 'Tranquil mountain lake',
     creator: 'Andrew Spencer',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg'
-  },
-  {
-    src: waterfall,
-    title: 'Waterfall in Iceland',
-    creator: 'Robert Lukeman',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Idyllic_landscape_with_a_waterfall_(Unsplash).jpg'
-  },
-  {
-    src: lakeMountain,
-    title: 'Lake Mountain Landscape',
-    creator: 'Bonnie Moreland',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Lake_Mountain_Landscape.jpg'
+    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg',
+    licenseName: 'CC0 1.0',
+    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/'
   }
-] as const
+]
+function withOfflinePhotoFallbacks(photos: readonly NewTabBackground[]): NewTabBackground[] {
+  const combined = [
+    ...photos,
+    ...FALLBACK_NEW_TAB_BACKGROUNDS.filter((fallback) => !photos.some((photo) => photo.id === fallback.id))
+  ].slice(0, 2)
+  return combined.length > 0 ? combined : [...FALLBACK_NEW_TAB_BACKGROUNDS]
+}
 const EMPTY_BROWSER: BrowserState = {
   url: BONJOURR_START_PAGE,
   title: 'Bonjourr',
@@ -164,18 +165,16 @@ function responseBodyText(body: NetworkResponseBody): string {
   }
 }
 
-function QuickLinkTile({ site, onOpen }: { site: QuickLinkSite; onOpen: () => void }): React.JSX.Element {
+function NewTabSiteIcon({ site, onOpen }: { site: QuickLinkSite; onOpen: () => void }): React.JSX.Element {
   const [iconFailed, setIconFailed] = useState(false)
   const hostname = new URL(site.origin).hostname.replace(/^www\./i, '')
   const faviconUrl = `${site.origin}/favicon.ico`
   return (
-    <button className="quick-link-tile" type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
-      <span className="quick-link-icon" aria-hidden="true">
+    <button className="new-tab-icon-tile" type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
+      <span className="new-tab-site-icon" aria-hidden="true">
         {!iconFailed && <img src={faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />}
         {iconFailed && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
       </span>
-      <strong>{site.title || hostname}</strong>
-      <small>{hostname}</small>
     </button>
   )
 }
@@ -205,9 +204,12 @@ export default function Browser(): React.JSX.Element {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
   const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
-  const [quickLinksBackgroundIndex, setQuickLinksBackgroundIndex] = useState(
-    () => getQuickLinkBackgroundIndex(Date.now(), QUICK_LINK_BACKGROUNDS.length)
+  const [newTabBackgrounds, setNewTabBackgrounds] = useState<NewTabBackground[]>(FALLBACK_NEW_TAB_BACKGROUNDS)
+  const [newTabBackgroundIndex, setNewTabBackgroundIndex] = useState(
+    () => getQuickLinkBackgroundIndex(Date.now(), FALLBACK_NEW_TAB_BACKGROUNDS.length)
   )
+  const [photoRefreshBusy, setPhotoRefreshBusy] = useState(false)
+  const [photoRefreshStatus, setPhotoRefreshStatus] = useState('')
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false)
@@ -233,7 +235,7 @@ export default function Browser(): React.JSX.Element {
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
   useEffect(() => {
     const rotationTimer = window.setInterval(() => {
-      setQuickLinksBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, QUICK_LINK_BACKGROUNDS.length))
+      setNewTabBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, FALLBACK_NEW_TAB_BACKGROUNDS.length))
     }, QUICK_LINK_BACKGROUND_ROTATION_MS)
     return () => window.clearInterval(rotationTimer)
   }, [])
@@ -242,10 +244,31 @@ export default function Browser(): React.JSX.Element {
     () => buildAddressSuggestions(address, pinnedSites, tabs, history),
     [address, pinnedSites, tabs, history]
   )
-  const favoriteQuickLinks = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
-  const frequentQuickLinks = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
-  const isQuickLinksTab = browser.url === SOCKFISH_QUICK_LINKS_URL
-  const quickLinksBackground = QUICK_LINK_BACKGROUNDS[quickLinksBackgroundIndex] ?? QUICK_LINK_BACKGROUNDS[0]!
+  const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
+  const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
+  const newTabSites = useMemo(() => [...favoriteSites, ...frequentlyVisitedSites], [favoriteSites, frequentlyVisitedSites])
+  const isLocalNewTab = browser.url === SOCKFISH_QUICK_LINKS_URL
+  const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
+  useEffect(() => {
+    if (!isLocalNewTab) return
+    let mounted = true
+    const applyRemotePhotos = (photos: NewTabBackground[]): void => {
+      if (!mounted || photos.length === 0) return
+      setNewTabBackgrounds(withOfflinePhotoFallbacks(photos))
+      setNewTabBackgroundIndex(0)
+    }
+    const refreshCache = (): void => {
+      void window.api.browser.newTabBackgrounds.get().then(applyRemotePhotos).catch(() => undefined)
+    }
+    const unsubscribe = window.api.browser.newTabBackgrounds.onChange(applyRemotePhotos)
+    refreshCache()
+    const refreshTimer = window.setInterval(refreshCache, NEW_TAB_PHOTO_REFRESH_INTERVAL_MS)
+    return () => {
+      mounted = false
+      unsubscribe()
+      window.clearInterval(refreshTimer)
+    }
+  }, [isLocalNewTab])
   const activeOrigin = httpOrigin(browser.url)
   const currentOriginIsPinned = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
@@ -278,6 +301,24 @@ export default function Browser(): React.JSX.Element {
 
   async function refreshHistory(): Promise<void> {
     setHistory(await window.api.browser.history.get())
+  }
+
+  async function refreshNaturePhotos(): Promise<void> {
+    if (photoRefreshBusy) return
+    setPhotoRefreshBusy(true)
+    setPhotoRefreshStatus('Checking for new licensed nature photos.')
+    try {
+      const result = await window.api.browser.newTabBackgrounds.refresh()
+      if (result.backgrounds.length > 0) {
+        setNewTabBackgrounds(withOfflinePhotoFallbacks(result.backgrounds))
+        setNewTabBackgroundIndex(0)
+      }
+      setPhotoRefreshStatus(result.updated ? 'New nature photos are ready.' : result.error ?? 'Your current backgrounds are still in use.')
+    } catch {
+      setPhotoRefreshStatus('Could not refresh nature photos. Your saved or offline backgrounds are still in use.')
+    } finally {
+      setPhotoRefreshBusy(false)
+    }
   }
 
   async function refreshRuntimeDiagnostics(): Promise<void> {
@@ -547,7 +588,7 @@ export default function Browser(): React.JSX.Element {
       const edgeRevealWidth = sidebarVisible ? 0 : 14
       const contentWidth = rect.width - sidebarInset - edgeRevealWidth
       const suggestionsCoverPage = suggestionsOpen && addressSuggestions.length > 0
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !isQuickLinksTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'diagnostics' && sidebarMode !== 'network' && sidebarMode !== 'site' && !isLocalNewTab && !suggestionsCoverPage && contentWidth > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left + sidebarInset + edgeRevealWidth, y: rect.top, width: contentWidth, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -561,11 +602,11 @@ export default function Browser(): React.JSX.Element {
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isQuickLinksTab])
+  }, [sidebarMode, sidebarVisible, suggestionsOpen, addressSuggestions.length, isLocalNewTab])
 
   useEffect(() => {
-    if (document.activeElement !== addressRef.current) setAddress(isQuickLinksTab ? '' : browser.url)
-  }, [browser.url, isQuickLinksTab])
+    if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
+  }, [browser.url, isLocalNewTab])
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent): void => {
@@ -750,7 +791,7 @@ export default function Browser(): React.JSX.Element {
                     createNewTab()
                     setNewTabMenuOpen(false)
                   }}>
-                    <strong>New tab</strong><span>{newTabPage === 'quick-links' ? 'Sockfish Quick Links · local' : newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
+                    <strong>New tab</strong><span>{newTabPage === 'quick-links' ? 'Sockfish New Tab · local' : newTabPage === 'bonjourr' ? 'Bonjourr start page' : `${SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label} start page`}</span>
                   </button>
                   <button type="button" role="menuitem" disabled={!tabs.some((tab) => tab.active)} onClick={() => {
                     const activeTab = tabs.find((tab) => tab.active)
@@ -999,49 +1040,56 @@ export default function Browser(): React.JSX.Element {
         </header>
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'diagnostics' ? 'Diagnostics content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
-          {isQuickLinksTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
-            <section className="quick-links-page" aria-label="Sockfish Quick Links start page">
+          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
+            <section className="new-tab-page" aria-label="New Tab">
               <div
-                key={quickLinksBackground.title}
-                className="quick-links-backdrop"
+                key={newTabBackground.title}
+                className="new-tab-backdrop"
                 aria-hidden="true"
-                style={{ backgroundImage: `url("${quickLinksBackground.src}")` }}
+                style={{ backgroundImage: `url("${newTabBackground.src}")` }}
               />
-              <div className="quick-links-content">
-                <div className="quick-links-eyebrow"><span className="quick-links-brand" aria-hidden="true">S</span><span>SOCKFISH · LOCAL START PAGE</span></div>
-                <header className="quick-links-header">
-                  <div><h1>Quick Links</h1><p>Favorites and familiar sites, ready when you are.</p></div>
-                  <button className="quick-links-manage" type="button" onClick={() => { setSidebarMode('tabs'); setSidebarPinned(true) }}>Manage favorites</button>
-                </header>
-                <section className="quick-links-section" aria-labelledby="quick-links-favorites-heading">
-                  <div className="quick-links-section-heading"><h2 id="quick-links-favorites-heading">Favorites</h2><span>your pinned sites</span></div>
-                  {favoriteQuickLinks.length > 0 ? (
-                    <div className="quick-link-grid">{favoriteQuickLinks.map((site) => <QuickLinkTile key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}</div>
-                  ) : <p className="quick-links-empty">Pin a site with ☆ in the address bar and it will appear here.</p>}
-                </section>
-                <section className="quick-links-section" aria-labelledby="quick-links-frequent-heading">
-                  <div className="quick-links-section-heading"><h2 id="quick-links-frequent-heading">Frequently visited</h2><span>calculated from local history</span></div>
-                  {frequentQuickLinks.length > 0 ? (
-                    <div className="quick-link-grid">{frequentQuickLinks.map((site) => <QuickLinkTile key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}</div>
-                  ) : <p className="quick-links-empty">Sites you visit often will appear here. This list stays on this device.</p>}
-                </section>
-                <p className="quick-links-privacy">Favorites reuse your pinned sites. Frequently visited tiles are computed from Sockfish’s local history; no history is sent to Bonjourr or a suggestion service.</p>
-                <footer className="quick-links-background-footer">
-                  <a className="quick-links-photo-credit" href={quickLinksBackground.sourceUrl} target="_blank" rel="noreferrer">
-                    Photo: {quickLinksBackground.creator} · CC0 1.0
-                  </a>
-                  <button
-                    className="quick-links-next-background"
-                    type="button"
-                    title="Next background"
-                    aria-label="Show next background"
-                    onClick={() => setQuickLinksBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, QUICK_LINK_BACKGROUNDS.length))}
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M20 7v5h-5" />
-                      <path d="M19 12a7 7 0 1 0 2 4.9" />
-                    </svg>
-                  </button>
+              <div className="new-tab-content">
+                <h1 className="new-tab-sr-only">New Tab</h1>
+                {newTabSites.length > 0 ? (
+                  <div className="new-tab-icon-grid" role="group" aria-label="Favorite and frequently visited sites">
+                    {newTabSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} onOpen={() => void navigateTo(site.url)} />)}
+                  </div>
+                ) : <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
+                <span className="new-tab-sr-only" role="status" aria-live="polite">{photoRefreshStatus}</span>
+                <footer className="new-tab-photo-footer">
+                  <p className="new-tab-photo-credit">
+                    Photo: <a href={newTabBackground.sourceUrl} target="_blank" rel="noreferrer">{newTabBackground.title}</a>
+                    {' · '}{newTabBackground.creator}{' · '}
+                    <a href={newTabBackground.licenseUrl} target="_blank" rel="noreferrer">{newTabBackground.licenseName}</a>
+                  </p>
+                  <div className="new-tab-background-controls">
+                    <button
+                      className="new-tab-background-action"
+                      type="button"
+                      title="Next background"
+                      aria-label="Show next background"
+                      onClick={() => setNewTabBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, newTabBackgrounds.length))}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M20 7v5h-5" />
+                        <path d="M19 12a7 7 0 1 0 2 4.9" />
+                      </svg>
+                    </button>
+                    <button
+                      className={`new-tab-background-action${photoRefreshBusy ? ' is-refreshing' : ''}`}
+                      type="button"
+                      title={photoRefreshBusy ? 'Refreshing nature photos…' : 'Refresh nature photos'}
+                      aria-label="Refresh nature photos from Wikimedia Commons"
+                      disabled={photoRefreshBusy}
+                      onClick={() => void refreshNaturePhotos()}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M20 7v5h-5" />
+                        <path d="M19 12a7 7 0 0 0-13-4M5 17v-5h5" />
+                        <path d="M5 12a7 7 0 0 0 13 4" />
+                      </svg>
+                    </button>
+                  </div>
                 </footer>
               </div>
             </section>
@@ -1076,12 +1124,12 @@ export default function Browser(): React.JSX.Element {
                       const page = event.target.value as NewTabPageId
                       void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
                     }} aria-label="Default new tab page">
-                      <option value="quick-links">Sockfish Quick Links (local)</option>
+                      <option value="quick-links">Sockfish New Tab (local)</option>
                       <option value="bonjourr">Bonjourr (online)</option>
                       <option value="search">Search engine</option>
                     </select>
                   </label>
-                  <p className="settings-help">Quick Links is stored and rendered locally. Favorites reuse pinned sites; frequently visited sites are calculated from local browsing history. Favicon requests go directly to each tile’s own site origin without a referrer. Bonjourr and the selected search engine remain available. This setting applies to tabs opened from now on.</p>
+                  <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Each favicon is requested from its site's own origin. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
                 </section>
                 <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
                   <div className="settings-section-heading">

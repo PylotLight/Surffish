@@ -3,6 +3,22 @@ export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
 export type NewTabPageId = 'quick-links' | 'bonjourr' | 'search'
 
+export interface NewTabBackground {
+  id: string
+  src: string
+  title: string
+  creator: string
+  sourceUrl: string
+  licenseName: string
+  licenseUrl: string
+}
+
+export interface NewTabBackgroundRefreshResult {
+  backgrounds: NewTabBackground[]
+  updated: boolean
+  error: string | null
+}
+
 export interface PinnedSite {
   title: string
   url: string

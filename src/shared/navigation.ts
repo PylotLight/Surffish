@@ -17,6 +17,11 @@ export function getSearchHomepage(engineId: SearchEngineId): string {
   return SEARCH_ENGINES.find((engine) => engine.id === engineId)?.homeUrl ?? SEARCH_ENGINES[0].homeUrl
 }
 
+/** Local New Tab content is rendered by the app, so the absence of a BrowserView does not mean it is sleeping. */
+export function isBrowserTabSleeping(hasBrowserView: boolean, url: string): boolean {
+  return !hasBrowserView && url !== SOCKFISH_QUICK_LINKS_URL
+}
+
 function isIpv4(host: string): boolean {
   const parts = host.split('.')
   return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
