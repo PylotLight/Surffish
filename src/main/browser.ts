@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SOCKFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
@@ -18,6 +18,7 @@ interface BrowserTab {
   faviconRevision: number
   error: string | null
   downloadStartedForCurrentLoad: boolean
+  pauseAutoplayUntilVisited: boolean
   lastUrl: string
   pendingUrl: string
   inactiveSince: number | null
@@ -197,6 +198,11 @@ function markTabInactive(tab: BrowserTab): void {
   scheduleTabSleep(tab)
 }
 
+function openBackgroundTab(url: string): void {
+  const id = createTab(url, selectedSearchEngine, false, false, true)
+  if (id) persistOpenTabs()
+}
+
 function disposeTabView(tab: BrowserTab): void {
   cancelSleepTimer(tab)
   const view = tab.view
@@ -251,6 +257,7 @@ function activateTabInternal(id: string): boolean {
   if (previous && previous.id !== id) markTabInactive(previous)
   cancelSleepTimer(tab)
   tab.inactiveSince = null
+  tab.pauseAutoplayUntilVisited = false
   activeTabId = id
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents
@@ -276,10 +283,7 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       const id = createTab(url, selectedSearchEngine)
       if (id) persistOpenTabs()
     },
-    openInBackgroundTab: (url) => {
-      const id = createTab(url, selectedSearchEngine, false)
-      if (id) persistOpenTabs()
-    }
+    openInBackgroundTab: openBackgroundTab
   })
 }
 
@@ -311,6 +315,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
   })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  contents.on('media-started-playing', () => {
+    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || tab.id === activeTabId || contents.isDestroyed()) return
+    void contents.executeJavaScript(`
+      for (const media of document.querySelectorAll('video, audio')) {
+        if (!media.paused && !media.ended) media.pause()
+      }
+    `).catch(() => undefined)
+  })
   if (process.platform === 'darwin') {
     // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
@@ -319,8 +331,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
       if (details.disposition === 'background-tab') {
-        const backgroundTabId = createTab(target, selectedSearchEngine, false)
-        if (backgroundTabId) persistOpenTabs()
+        openBackgroundTab(target)
       } else if (getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
         const popupTabId = createTab(target, selectedSearchEngine)
         if (popupTabId) persistOpenTabs()
@@ -420,11 +431,13 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = input === SOCKFISH_QUICK_LINKS_URL
     ? SOCKFISH_QUICK_LINKS_URL
     : input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
+  const previous = getTab()
+  const shouldActivate = activate || activeTabId === null
   const tab: BrowserTab = {
     id: randomUUID(),
     view: null,
@@ -432,13 +445,12 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     faviconRevision: 0,
     error: null,
     downloadStartedForCurrentLoad: false,
+    pauseAutoplayUntilVisited: !shouldActivate && pauseAutoplayUntilVisited && isYouTubeUrl(target),
     lastUrl: target,
     pendingUrl: target,
     inactiveSince: null,
     sleepTimer: null
   }
-  const previous = getTab()
-  const shouldActivate = activate || activeTabId === null
   tabs.push(tab)
   if (shouldActivate) {
     if (previous && previous.id !== tab.id) markTabInactive(previous)

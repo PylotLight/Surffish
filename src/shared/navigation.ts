@@ -22,6 +22,20 @@ export function isBrowserTabSleeping(hasBrowserView: boolean, url: string): bool
   return !hasBrowserView && url !== SOCKFISH_QUICK_LINKS_URL
 }
 
+/** Match direct YouTube destinations without accepting lookalike hostnames. */
+export function isYouTubeUrl(input: string): boolean {
+  try {
+    const url = new URL(input)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return false
+    const host = url.hostname.toLowerCase()
+    return host === 'youtube.com' || host.endsWith('.youtube.com')
+      || host === 'youtu.be'
+      || host === 'youtube-nocookie.com' || host.endsWith('.youtube-nocookie.com')
+  } catch {
+    return false
+  }
+}
+
 function isIpv4(host: string): boolean {
   const parts = host.split('.')
   return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
