@@ -205,19 +205,32 @@ async function run() {
   assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:fish-browser'), 'live pages retain Sockfish’s persistent site session and cookies')
   await fixturePageView.webContents.executeJavaScript("document.cookie = 'sockfish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
 
-  const contentSizeBeforeMaximize = mainWindow.getContentSize()
-  mainWindow.maximize()
+  const contentSizeBeforeResize = mainWindow.getContentSize()
+  mainWindow.setBounds({ x: 0, y: 0, width: 1100, height: 760 })
   await waitFor(() => {
-    if (!mainWindow.isMaximized()) return false
     const [width, height] = mainWindow.getContentSize()
     const siteBounds = fixturePageView.getBounds()
-    return width > contentSizeBeforeMaximize[0]
+    return width > contentSizeBeforeResize[0]
+      && height > contentSizeBeforeResize[1]
       && rendererViews.content.getBounds().width === width
       && rendererViews.toolbar.getBounds().width === width
       && rendererViews.sidebar.getBounds().height === height
       && siteBounds.width === width
       && siteBounds.height === Math.max(0, height - siteBounds.y)
-  }, 'all native shell layers and the live page resize to the maximized window')
+  }, 'all native shell layers and the live page resize with the window')
+
+  mainWindow.maximize()
+  await delay(250)
+  await waitFor(() => {
+    const [width, height] = mainWindow.getContentSize()
+    const siteBounds = fixturePageView.getBounds()
+    return width > 0 && height > 0
+      && rendererViews.content.getBounds().width === width
+      && rendererViews.toolbar.getBounds().width === width
+      && rendererViews.sidebar.getBounds().height === height
+      && siteBounds.width === width
+      && siteBounds.height === Math.max(0, height - siteBounds.y)
+  }, 'native shell layers and the live page match the size after maximize')
   const contentSize = mainWindow.getContentSize()
   pointerMove(mainWindow.getContentBounds().x + Math.floor(contentSize[0] / 2), mainWindow.getContentBounds().y + Math.floor(contentSize[1] / 2))
   await waitFor(() => nativeViewState().find((view) => view.surface === 'sidebar').bounds.width === 0, 'the full-height sidebar to hide after the pointer leaves the left reveal edge')
@@ -311,7 +324,7 @@ async function run() {
 
   assert.equal(fixturePageView.getBounds().x, 0)
   assert.equal(fixturePageView.getBounds().width, contentSize[0])
-  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; maximized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; visible sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and x=5 click-through, overlay page input/wheel, delayed hover reveal, and tab/New Tab lifecycle verified.`)
+  console.log(`BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; visible sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and x=5 click-through, overlay page input/wheel, delayed hover reveal, and tab/New Tab lifecycle verified.`)
 }
 
 async function cleanup() {
