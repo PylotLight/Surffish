@@ -22,7 +22,7 @@ export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   showLinkLabels: false,
   backgroundDim: 34,
   backgroundBlur: 0,
-  iconVerticalOffset: 115
+  iconVerticalOffset: 340
 }
 export const MAX_WORLD_CLOCKS = 8
 const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
@@ -99,7 +99,7 @@ export function parseNewTabPreferences(value: unknown): NewTabPreferences {
     showLinkLabels: typeof record.showLinkLabels === 'boolean' ? record.showLinkLabels : DEFAULT_NEW_TAB_PREFERENCES.showLinkLabels,
     backgroundDim: boundedNumber(record.backgroundDim, DEFAULT_NEW_TAB_PREFERENCES.backgroundDim, 0, 70),
     backgroundBlur: boundedNumber(record.backgroundBlur, DEFAULT_NEW_TAB_PREFERENCES.backgroundBlur, 0, 12),
-    iconVerticalOffset: boundedNumber(record.iconVerticalOffset, DEFAULT_NEW_TAB_PREFERENCES.iconVerticalOffset, 0, 240)
+    iconVerticalOffset: boundedNumber(record.iconVerticalOffset, DEFAULT_NEW_TAB_PREFERENCES.iconVerticalOffset, 0, 480)
   }
 }
 
