@@ -2317,11 +2317,12 @@
 }
 .sidebar-window-controls {
   position: relative;
-  top: -15px;
+  top: -16px;
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
+  /* 9.5px gap + 13px dots matches the native macOS traffic light spacing. */
+  gap: 9.5px;
   height: 22px;
   margin-top: 28px;
   padding: 0 17px;
