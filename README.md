@@ -2,7 +2,7 @@
 
 Sockfish is a compact Electron browser with isolated Chromium tabs, a vertical glass sidebar, local browsing history, network-only ad blocking, an optional local SOCKS5 proxy, and a tested Bramble extension integration for a password-fill flow.
 
-![Sockfish live app with a scenic Quick Links background, favorites, and frequently visited sites](docs/screenshots/quick-links-new-tab.png)
+![Sockfish New Tab with a compact site-icon grid over a rotating nature photo](docs/screenshots/new-tab-page.png)
 
 ## Quick start
 
@@ -18,9 +18,9 @@ bun run build
 
 Enter a web address or search phrase in the slim address bar. Local suggestions come from pinned sites, open tabs, and history; queries are not sent to a remote suggestion service. Choose Brave Search (the default), DuckDuckGo, Google, or Bing from **Settings → General**. Domain-like addresses open over HTTPS by default; `localhost` and loopback addresses use HTTP. Only HTTP(S) pages can be opened.
 
-Fresh profiles open Sockfish's **Quick Links** page in new tabs. It rotates through four locally bundled CC0 nature photos every 15 minutes; use **Next background** to skip immediately. Photo credits link to their sources, and rotation makes no photo-service requests. Favorites are the same locally stored pinned sites shown in the sidebar; **Frequently visited** is calculated from local history (up to eight unpinned origins). History is not sent to a suggestion service or Bonjourr. Favicons are requested directly from each tile's own `/favicon.ico` with no referrer, and fall back to a letter if unavailable. Pin the current page with ☆; use the sidebar to remove a pin. In **Settings → General → New tab page**, switch future tabs to [Bonjourr's hosted start page](https://online.bonjourr.fr/) or the selected search engine. Bonjourr's extension-only bookmark/Most Visited import is not available in Sockfish's hosted-page integration. See the [background photo credits and source notes](docs/quick-links-backgrounds.md).
+Fresh profiles open Sockfish's **New Tab** page: a full-window nature photograph with a compact favicon grid, not large tiles. Pinned sites appear first, followed by up to eight unpinned origins computed from local history. Favicons are requested directly from each site's `/favicon.ico` without a referrer and fall back to an initial if unavailable. The two active backgrounds rotate locally every 15 minutes; **Next background** skips and **Refresh nature photos** requests another set. When the local New Tab is in use, Sockfish normally refreshes at most once per 24 hours from two fixed, generic Wikimedia Commons searches for mountain-lake and forest-lake photos. Requests use the browser session and its saved proxy choice, omit cookies and referrers, and contain no browsing history, pins, current page, typed address, or visited URLs. Only CC0 or attribution-only CC BY images are accepted; at most two remote thumbnails and their title, creator, source, and license metadata are cached. The two bundled CC0 fallback images keep rotation available offline. In **Settings → General → New tab page**, switch future tabs to [Bonjourr's hosted start page](https://online.bonjourr.fr/) or the selected search engine. Sockfish's local icon grid covers pinned favorites and local frequent sites; Bonjourr's extension-only bookmark import is not included in its hosted-page integration. See the [photo source, license, and cache notes](docs/new-tab-photo-sources.md).
 
-Project screenshots use genuine live Linux Electron app windows with synthetic demo sites and data; they are not mockups. See the [browser UI guide](docs/browser-ui-overhaul.md) for Tabs and History screenshots and platform limitations.
+Project screenshots use genuine live Linux Electron app windows with synthetic demo sites and data; they are not mockups. See the [browser UI guide](docs/browser-ui-overhaul.md) for New Tab, Tabs, and History screenshots and platform limitations.
 
 ## Tabs, sidebar, and history
 

@@ -20,6 +20,7 @@ import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getMainWindow } from './window'
+import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
@@ -108,6 +109,14 @@ export function registerIpc(): void {
   ipcMain.handle('browser:new-tab-page:set', (event, value: unknown) => {
     assertMainRenderer(event)
     return saveBrowserNewTabPage(value)
+  })
+  ipcMain.handle('browser:new-tab-backgrounds:get', (event) => {
+    assertMainRenderer(event)
+    return getNewTabBackgrounds()
+  })
+  ipcMain.handle('browser:new-tab-backgrounds:refresh', (event) => {
+    assertMainRenderer(event)
+    return refreshNewTabBackgrounds(true)
   })
   ipcMain.handle('browser:pinned-sites:get', (event) => {
     assertMainRenderer(event)

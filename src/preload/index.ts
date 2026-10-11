@@ -11,6 +11,8 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  NewTabBackground,
+  NewTabBackgroundRefreshResult,
   NewTabPageId,
   PinnedSite,
   NetworkRequestDetails,
@@ -33,6 +35,15 @@ const api = {
     newTabPage: {
       get: (): Promise<NewTabPageId> => ipcRenderer.invoke('browser:new-tab-page:get'),
       set: (page: NewTabPageId): Promise<NewTabPageId | null> => ipcRenderer.invoke('browser:new-tab-page:set', page)
+    },
+    newTabBackgrounds: {
+      get: (): Promise<NewTabBackground[]> => ipcRenderer.invoke('browser:new-tab-backgrounds:get'),
+      refresh: (): Promise<NewTabBackgroundRefreshResult> => ipcRenderer.invoke('browser:new-tab-backgrounds:refresh'),
+      onChange: (callback: (backgrounds: NewTabBackground[]) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, backgrounds: NewTabBackground[]): void => callback(backgrounds)
+        ipcRenderer.on('browser:new-tab-backgrounds:changed', listener)
+        return () => ipcRenderer.removeListener('browser:new-tab-backgrounds:changed', listener)
+      }
     },
     pinnedSites: {
       get: (): Promise<PinnedSite[]> => ipcRenderer.invoke('browser:pinned-sites:get'),

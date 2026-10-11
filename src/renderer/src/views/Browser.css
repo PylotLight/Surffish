@@ -2160,3 +2160,219 @@
     animation: none;
   }
 }
+
+/* New Tab: a small favicon grid over an offline-safe, rotating photo backdrop. */
+.new-tab-page {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #101419;
+  color: #f2f4f6;
+}
+.new-tab-page::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(8, 12, 16, 0.08) 0%, rgba(8, 12, 16, 0.2) 54%, rgba(8, 12, 16, 0.48) 100%),
+    linear-gradient(0deg, rgba(8, 12, 16, 0.48) 0%, transparent 28%, transparent 72%, rgba(8, 12, 16, 0.22) 100%);
+  content: '';
+  pointer-events: none;
+}
+.new-tab-backdrop {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  animation: new-tab-photo-in 900ms ease-out both;
+  pointer-events: none;
+}
+@keyframes new-tab-photo-in {
+  from { opacity: 0.58; }
+  to { opacity: 1; }
+}
+.new-tab-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+.new-tab-icon-grid {
+  display: flex;
+  width: max-content;
+  max-width: min(100%, 388px);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 19px;
+  background: rgba(10, 15, 19, 0.23);
+  box-shadow: 0 12px 38px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(12px) saturate(1.08);
+}
+.new-tab-icon-tile {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.085);
+  color: #a4edbd;
+  cursor: pointer;
+  transition: transform 130ms ease, border-color 130ms ease, background 130ms ease;
+}
+.new-tab-icon-tile:hover,
+.new-tab-icon-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(180, 243, 202, 0.75);
+  background: rgba(255, 255, 255, 0.16);
+  outline: 2px solid rgba(180, 243, 202, 0.56);
+  outline-offset: 2px;
+}
+.new-tab-site-icon {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  background: rgba(8, 12, 16, 0.3);
+  color: #a4edbd;
+  font-size: 14px;
+  font-weight: 650;
+}
+.new-tab-site-icon img {
+  display: block;
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
+}
+.new-tab-empty {
+  margin: 0;
+  padding: 11px 15px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(10, 15, 19, 0.3);
+  color: rgba(245, 247, 250, 0.8);
+  font-size: 11px;
+  backdrop-filter: blur(10px);
+}
+.new-tab-photo-footer {
+  position: absolute;
+  right: clamp(14px, 2.5vw, 30px);
+  bottom: clamp(12px, 2.2vh, 22px);
+  left: clamp(14px, 2.5vw, 30px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.new-tab-photo-credit {
+  max-width: min(78%, 900px);
+  margin: 0;
+  color: rgba(248, 250, 252, 0.75);
+  font-size: 10px;
+  line-height: 1.5;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+}
+.new-tab-photo-credit a {
+  color: rgba(248, 250, 252, 0.93);
+  text-decoration: underline;
+  text-decoration-color: rgba(248, 250, 252, 0.4);
+  text-underline-offset: 2px;
+}
+.new-tab-photo-credit a:hover,
+.new-tab-photo-credit a:focus-visible {
+  color: #fff;
+  text-decoration-color: currentColor;
+}
+.new-tab-background-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+.new-tab-background-action {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  background: rgba(9, 13, 17, 0.48);
+  color: rgba(248, 250, 252, 0.9);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.new-tab-background-action:hover,
+.new-tab-background-action:focus-visible {
+  border-color: rgba(180, 243, 202, 0.68);
+  background: rgba(9, 13, 17, 0.72);
+  color: #fff;
+  outline: 2px solid rgba(180, 243, 202, 0.45);
+  outline-offset: 2px;
+}
+.new-tab-background-action:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+.new-tab-background-action svg {
+  width: 16px;
+  height: 16px;
+}
+.new-tab-background-action.is-refreshing svg {
+  animation: new-tab-refresh-spin 1s linear infinite;
+}
+@keyframes new-tab-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+.new-tab-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+@media (max-width: 600px) {
+  .new-tab-icon-grid {
+    gap: 8px;
+    padding: 10px;
+  }
+  .new-tab-photo-footer {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .new-tab-photo-credit {
+    max-width: 100%;
+  }
+  .new-tab-background-controls {
+    align-self: flex-end;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .new-tab-backdrop {
+    animation: none;
+  }
+  .new-tab-icon-tile {
+    transition-duration: 0.01ms;
+  }
+  .new-tab-background-action.is-refreshing svg {
+    animation-duration: 2s;
+  }
+}

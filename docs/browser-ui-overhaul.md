@@ -6,11 +6,10 @@ Fresh profiles use a direct connection by default so the start page loads withou
 
 ## New tabs, pins, and address suggestions
 
-- Fresh profiles open the browser-owned **Sockfish Quick Links** page in new tabs. It is rendered in the app UI rather than loading history into a remote start page. **Settings → General → New tab page** also offers [Bonjourr's hosted start page](https://online.bonjourr.fr/) and the selected search engine.
-- Quick Links rotates among four locally bundled **CC0 nature-photo backgrounds** every 15 minutes; the accessible **Next background** button skips to the next scene. The visible photo credit links to its source. This rotation is offline and never contacts an image service; the background asset sources and license records are listed in [quick-links-backgrounds.md](quick-links-backgrounds.md).
-- Favorite (star) saves the current website's HTTP(S) origin as a local pinned site. Pins appear at the top of the sidebar, open in the current tab, and can be removed with a right-click; pins are also offered in the address suggestions.
-- Quick Links **Favorites** are the same pinned sites, not a second bookmark list. The **Frequently visited** tiles aggregate locally stored Sockfish history by origin, exclude pinned origins, and show up to eight sites. Clearing history removes the derived frequent list; pinning/unpinning controls the Favorites list.
-- Bonjourr's Quick Links extension can import browser bookmark groups and, where browser APIs permit, Most Visited links; its documented default favicon mode uses Bonjourr's favicon-fetcher service ([official Quick Links docs](https://bonjourr.fr/docs/widgets/quick-links/)). Sockfish does not install that extension or expose browser bookmark import APIs in its hosted-page integration. This local Quick Links page is a simpler native alternative: each visible tile requests only its own site's `/favicon.ico` with `no-referrer`, and uses an initial-letter fallback if unavailable. It does not send history to Bonjourr or a favicon service.
+- Fresh profiles open the browser-owned **New Tab** page, rendered locally as a full-window photo with a compact grid of favicon icons. It has no large tile cards or separate bookmark database. **Settings → General → New tab page** also offers [Bonjourr's hosted start page](https://online.bonjourr.fr/) and the selected search engine.
+- Pinned sites appear first in the icon grid; up to eight frequently visited, unpinned origins follow, derived from Sockfish's local history. Both lists remain on-device. Clicking an icon opens its site. The favicon request goes directly to that site's `/favicon.ico` with `no-referrer`, with a letter fallback if it is unavailable. Pinning/unpinning uses the existing ☆ address-bar control and sidebar; there is no second favorite list. Clearing history removes the derived frequent icons.
+- The two active backgrounds rotate every 15 minutes. **Next background** skips immediately; **Refresh nature photos** asks for a new set. While the local New Tab is in use, Sockfish performs two fixed mountain-lake/forest-lake Wikimedia Commons searches at most once every 24 hours; a manual refresh is separately available. Requests use the existing browser session and saved proxy setting, omit cookies/referrers, and contain no browsing history, pins, or visited URLs. Only declared CC0 or attribution-only CC BY photo metadata is accepted, and no more than two remote thumbnails are cached with their credits for offline use. If a request fails, the current cache or two bundled CC0 fallback photos remain. The visible title, creator, source, and license are linked; see [New Tab photo-source and cache notes](new-tab-photo-sources.md).
+- Bonjourr's **Quick Links** extension can import browser bookmark groups and, where browser APIs permit, Most Visited links; its documented default favicon mode uses Bonjourr's favicon-fetcher service ([official Quick Links docs](https://bonjourr.fr/docs/widgets/quick-links/)). Sockfish does not install that extension or expose browser bookmark import APIs in its hosted-page integration. Sockfish's compact grid is its local alternative: pinned favorites plus a local-history list, with no history sent to Bonjourr or a favicon service.
 - Address suggestions are generated locally from pins, open tabs, and browsing history. The query is not sent to a remote autocomplete service. Arrow keys and Enter select a suggestion; Escape closes the list. Unsafe schemes and credential-bearing URLs are excluded.
 
 ## Sidebar and tabs
@@ -37,10 +36,10 @@ Native macOS Touch ID for arbitrary website passkeys depends on Apple's managed 
 
 ## Verification
 
-Real app screenshots (Linux Electron build; synthetic local sites/history, not mockups):
+Real app screenshots (Linux Electron build; complete Sockfish window bounds; synthetic local sites/history, not mockups):
 
-- ![Sockfish Quick Links New Tab with a local scenic background](screenshots/quick-links-new-tab.png)
-- ![Sockfish Quick Links after rotating to another local scenic background](screenshots/quick-links-background-rotation.png)
+- ![Sockfish New Tab with compact favicon icons over a rotating nature photo](screenshots/new-tab-page.png)
+- ![Sockfish New Tab after rotating to a different credited nature photo](screenshots/new-tab-photo-rotation.png)
 - ![Tabs sidebar with local pins and open tabs](screenshots/tabs-sidebar.png)
 - ![History sidebar with synthetic local history](screenshots/history-sidebar.png)
 
@@ -56,11 +55,11 @@ bun run build
 
 Manual smoke checklist:
 
-1. Launch with a clean profile and confirm a new tab opens local Quick Links; verify Favorites reuse pins, Frequent tiles are derived from local history, and favicons either load from the site origin or fall back to a letter. Click **Next background**, check the credit changes, and verify no image-service request is made. Switch to Bonjourr or Search engine and verify the next tab uses that choice.
+1. Launch with a clean profile and confirm a new tab opens the local photo page with only a compact favicon grid. Verify pinned Favorites come first, frequent origins come only from local history, and site icons load from their own origin or fall back to a letter. Check the photo and license credits; use **Next background** and **Refresh nature photos**. Confirm Commons receives only generic search requests, no history/pins/URLs or cookies, and the cache remains limited to two remote images. Switch to Bonjourr or Search engine and verify the next tab uses that choice.
 2. Open a foreground and background tab; verify both begin loading immediately. Restart with several tabs and verify the selected tab loads automatically while inactive restored tabs load when selected.
 3. Confirm an audible/background media tab continues playing and is not hibernated while audible.
 4. Use the address-field Tabs and History icons; verify their accessible names/tooltips, keyboard focus, sidebar contents, hover reveal, and pin/unpin behavior. Open Settings from the sidebar footer.
-5. Pin a site, open it from a Quick Links favorite tile, the sidebar, and local autocomplete, then remove it; verify frequent tiles and address suggestions use only local history/tabs/pins.
+5. Pin a site, open it from a New Tab favorite icon, the sidebar, and local autocomplete, then remove it; verify frequent icons and address suggestions use only local history/tabs/pins.
 6. Change site ad blocking and permission choices for a test origin; verify other origins retain their defaults. Verify pop-ups stay blocked unless “Open pop-ups in tabs” is enabled for that site.
 7. On a page with a ready video, click Picture in Picture and verify the floating player can be toggled off; on a page without video, verify an explanatory message appears.
 8. Open **Settings → General** and review the actual runtime/WebAuthn diagnostic on the site under test; do not treat API presence as proof that an extension custom RP ID or macOS Touch ID entitlement works.
