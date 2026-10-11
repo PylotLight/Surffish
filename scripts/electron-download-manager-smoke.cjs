@@ -304,7 +304,7 @@ async function run() {
 
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
-  const browserSession = session.fromPartition('persist:fish-browser')
+  const browserSession = session.fromPartition('persist:surffish-browser')
   browserSession.on('will-download', (_event, item) => {
     const destination = join(downloadDirectory, `${Date.now()}-${Math.random().toString(16).slice(2)}-${basename(item.getFilename())}`)
     item.setSavePath(destination)

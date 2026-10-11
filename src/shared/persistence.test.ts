@@ -16,7 +16,7 @@ import {
   parseNewTabPreferences,
   parseBrowserSession
 } from './persistence.ts'
-import { LEGACY_QUICK_LINKS_URL, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 
 test('normalizes a saved tab list and retains its selected tab', () => {
   assert.deepEqual(normalizeBrowserSession(['https://one.test/', 'https://two.test/'], 1), {
@@ -36,14 +36,6 @@ test('drops unsafe URLs and adjusts the selected index', () => {
 
 test('preserves the internal Quick Links tab while still rejecting other non-web URLs', () => {
   assert.deepEqual(normalizeBrowserSession([SURFFISH_QUICK_LINKS_URL, 'file:///etc/passwd', 'https://safe.test/'], 0), {
-    urls: [SURFFISH_QUICK_LINKS_URL, 'https://safe.test/'],
-    activeIndex: 0,
-    pinnedIndexes: []
-  })
-})
-
-test('migrates the legacy internal New Tab URL in saved sessions', () => {
-  assert.deepEqual(normalizeBrowserSession([LEGACY_QUICK_LINKS_URL, 'https://safe.test/'], 0), {
     urls: [SURFFISH_QUICK_LINKS_URL, 'https://safe.test/'],
     activeIndex: 0,
     pinnedIndexes: []

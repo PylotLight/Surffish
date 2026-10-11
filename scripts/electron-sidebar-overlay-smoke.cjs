@@ -205,7 +205,7 @@ async function run() {
     return fixturePageView && fixturePageView.getBounds().width > 0
   }, 'the native page view with full-width bounds', 45000)
   await delay(250)
-  assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:fish-browser'), 'live pages retain Surffish’s persistent site session and cookies')
+  assert.equal(fixturePageView.webContents.session, session.fromPartition('persist:surffish-browser'), 'live pages use Surffish’s namespaced persistent site session')
   await fixturePageView.webContents.executeJavaScript("document.cookie = 'surffish-overlay-smoke=cookie-preserved; path=/; SameSite=Lax'")
 
   const contentSizeBeforeResize = mainWindow.getContentSize()

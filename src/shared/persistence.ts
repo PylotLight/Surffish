@@ -1,4 +1,4 @@
-import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, LEGACY_QUICK_LINKS_URL, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -186,7 +186,7 @@ export function normalizePinnedSites(value: unknown): PinnedSite[] {
 
 export function normalizeBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): SavedBrowserSession {
   const indexedUrls = urls.slice(0, MAX_RESTORED_TABS).map((url, index) => ({
-    url: url === LEGACY_QUICK_LINKS_URL ? SURFFISH_QUICK_LINKS_URL : url,
+    url,
     index
   }))
     .filter((entry) => entry.url === SURFFISH_QUICK_LINKS_URL || isHttpUrl(entry.url))
