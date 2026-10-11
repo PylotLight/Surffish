@@ -18,6 +18,7 @@ import {
   sha256Hex
 } from './bramble-release'
 import { getMainWindow } from './window'
+import { anchoredPopupBounds } from '../shared/window-geometry'
 import { sendToMainWindowRenderers } from './browser-shell'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
@@ -66,16 +67,7 @@ function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BaseWindo
   const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
   const area = display.workArea
   const content = owner?.getContentBounds() ?? area
-  const width = Math.min(BRAMBLE_POPUP_WIDTH, Math.max(1, area.width - 16))
-  const height = Math.min(BRAMBLE_POPUP_HEIGHT, Math.max(1, area.height - 16))
-  const cursor = screen.getCursorScreenPoint()
-  const left = content.x + (anchor?.x ?? cursor.x - content.x)
-  const top = content.y + (anchor?.y ?? cursor.y - content.y)
-  const x = Math.max(area.x, Math.min(left, area.x + area.width - width))
-  let y = top + (anchor?.height ?? 0) + 6
-  if (y + height > area.y + area.height) y = top - height - 6
-  y = Math.max(area.y, Math.min(y, area.y + area.height - height))
-  return { x, y, width, height }
+  return anchoredPopupBounds(anchor, content, area, { width: BRAMBLE_POPUP_WIDTH, height: BRAMBLE_POPUP_HEIGHT }, screen.getCursorScreenPoint())
 }
 
 async function fitOptionsWindowToDocument(win: BrowserWindow): Promise<void> {
@@ -421,7 +413,9 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
     return { action: 'deny' }
   })
   popup.once('ready-to-show', () => {
-    if (!popup.isDestroyed()) popup.show()
+    if (popup.isDestroyed()) return
+    popup.setBounds(bounds)
+    popup.show()
     updateState({ popupOpen: true })
   })
   popup.on('blur', () => {
