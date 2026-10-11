@@ -229,6 +229,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
+      // Run the session's sandboxed ad-filter preload in iframes too, so
+      // embedded players (YouTube embeds) and ad frames get scriptlets/CSS.
+      // Remote pages still get no Node.js: sandbox stays on.
+      nodeIntegrationInSubFrames: true,
       partition: BROWSER_SESSION_PARTITION
     }
   })
