@@ -11,7 +11,7 @@ import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -60,6 +60,8 @@ let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
 let nextMacTrackpadSwipeToken = 0
 const tabThumbnails = new Map<string, string>()
+// Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
+let newTabThumbnail: string | null = null
 const THUMBNAIL_WIDTH = 640
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
@@ -645,6 +647,7 @@ export function attachBrowserView(win: BaseWindow): void {
     stopMacTrackpadSwipe()
     detachTabOverview()
     tabThumbnails.clear()
+    newTabThumbnail = null
     const closingTabs = [...tabs]
     tabs.length = 0
     activeTabId = null
@@ -1032,8 +1035,8 @@ function finishMacTrackpadSwipe(
 ): void {
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
   if (contentsId === getTabOverviewContentsId()) {
-    // Fingers moving left (forward) reveal the card to the right.
-    if (committed) moveTabOverviewSelection(direction === 'forward' ? 1 : -1)
+    // Selection follows the fingers: swipe right moves right, swipe left moves left.
+    if (committed) moveTabOverviewSelection(direction === 'back' ? 1 : -1)
     return
   }
   const swipe = activeMacTrackpadSwipe
@@ -1100,16 +1103,32 @@ export function updateBrowserPageScale(contents: WebContents, input: unknown): v
   if (tab) tab.pageScale = input
 }
 
+function isLocalNewTab(tab: BrowserTab): boolean {
+  return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
+}
+
+function thumbnailDataUrl(image: Electron.NativeImage): string {
+  const size = image.getSize()
+  const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
+  return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
+}
+
 async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
+  if (tab.id !== activeTabId || browserBounds.width <= 0 || browserBounds.height <= 0) return
+  if (isLocalNewTab(tab)) {
+    const image = await captureLocalNewTabPage({ ...browserBounds })
+    if (!image || !tabs.includes(tab)) return
+    const shot = thumbnailDataUrl(image)
+    tabThumbnails.set(tab.id, shot)
+    newTabThumbnail = shot
+    return
+  }
   const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed() || tab.id !== activeTabId) return
-  if (browserBounds.width <= 0 || browserBounds.height <= 0) return
+  if (!contents || contents.isDestroyed()) return
   try {
     const image = await contents.capturePage()
     if (image.isEmpty() || contents.isDestroyed() || !tabs.includes(tab)) return
-    const size = image.getSize()
-    const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
-    tabThumbnails.set(tab.id, `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`)
+    tabThumbnails.set(tab.id, thumbnailDataUrl(image))
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.
   }
@@ -1129,7 +1148,8 @@ async function getTabOverviewItems(): Promise<TabOverviewItem[]> {
     active: summary.active,
     pinned: summary.pinned,
     sleeping: summary.sleeping,
-    thumbnail: tabThumbnails.get(summary.id) ?? null
+    newTab: summary.url === SURFFISH_QUICK_LINKS_URL,
+    thumbnail: tabThumbnails.get(summary.id) ?? (summary.url === SURFFISH_QUICK_LINKS_URL ? newTabThumbnail : null)
   }))
 }
 
