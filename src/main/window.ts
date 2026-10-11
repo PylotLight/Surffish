@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { is } from '@electron-toolkit/utils'
-import { attachBrowserView, handleBrowserShortcut, syncBrowserBoundsToWindow } from './browser'
+import { attachBrowserView, handleBrowserShortcutInput, syncBrowserBoundsToWindow } from './browser'
 import { attachBrowserShell, detachBrowserShell } from './browser-shell'
 import { APP_NAME, WINDOW } from '../shared/config'
 import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
@@ -115,8 +115,7 @@ function createRendererView(): WebContentsView {
     return { action: 'deny' }
   })
   view.webContents.on('before-input-event', (event, inputEvent) => {
-    if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
-    if (handleBrowserShortcut(inputEvent.key.toLowerCase(), inputEvent.shift)) event.preventDefault()
+    if (handleBrowserShortcutInput(inputEvent)) event.preventDefault()
   })
   return view
 }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, clipboard, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
+import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
@@ -11,8 +11,9 @@ import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
-import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
+import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
+import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -29,6 +30,8 @@ interface BrowserTab {
   inactiveSince: number | null
   sleepTimer: ReturnType<typeof setTimeout> | null
   pageScrollEdges: BrowserPageScrollEdges
+  /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
+  pageScale: number
 }
 interface BrowserPageScrollEdges {
   canScrollLeft: boolean
@@ -56,6 +59,10 @@ let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
 let nextMacTrackpadSwipeToken = 0
+const tabThumbnails = new Map<string, string>()
+// Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
+let newTabThumbnail: string | null = null
+const THUMBNAIL_WIDTH = 640
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
   const page = getBrowserNewTabPage()
@@ -306,6 +313,8 @@ function activateTabInternal(id: string): boolean {
   if (!tab) return false
   if (activeTabId !== id) cancelActiveMacTrackpadSwipe()
   const previous = getTab()
+  // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
+  if (previous && previous.id !== id) void captureTabThumbnail(previous)
   if (previous && previous.id !== id) markTabInactive(previous)
   cancelSleepTimer(tab)
   tab.inactiveSince = null
@@ -346,19 +355,19 @@ function showBrowserTabContextMenu(id: string): void {
   const origin = normalizeHttpOrigin(currentUrl(tab))
   const bookmarked = Boolean(origin && getBrowserPinnedSites().some((site) => normalizeHttpOrigin(site.url) === origin))
   const items: MenuItemConstructorOptions[] = [
-    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
-    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', click: () => setBrowserTabPinned(id, !tab.pinned) },
-    { label: 'Duplicate Tab', click: () => { void duplicateBrowserTab(id) } },
-    { label: 'Copy Link', enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
+    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
+    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
+    { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
+    { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
     { type: 'separator' },
-    { label: 'Reload Tab', click: () => reloadBrowserTab(id) },
+    { label: 'Reload Tab', ...tabMenuAccelerator('reload'), click: () => reloadBrowserTab(id) },
     { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
     { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
     { type: 'separator' },
-    { label: 'Close Tab', click: () => closeBrowserTab(id) },
+    { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
     { label: 'Close Tabs Above', enabled: tabs.some((candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
     { label: 'Close Tabs Below', enabled: tabs.some((candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
-    { label: 'Close Other Tabs', enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
+    { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
   ]
   Menu.buildFromTemplate(items).popup({ window: browserWindow })
 }
@@ -433,8 +442,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
-    const key = inputEvent.key.toLowerCase()
-    if (handleBrowserShortcut(key, inputEvent.shift, tab.id)) event.preventDefault()
+    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
   })
   contents.on('will-navigate', (event, url) => {
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
@@ -511,6 +519,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     tab.error = `${errorDescription} (${errorCode})`
     publishState()
   })
+  contents.on('did-stop-loading', () => {
+    setTimeout(() => {
+      if (isCurrentContents() && tab.id === activeTabId && !isTabOverviewOpen()) void captureTabThumbnail(tab)
+    }, 700)
+  })
   contents.on('destroyed', () => {
     if (activeMacTrackpadSwipe?.contents === contents) {
       activeMacTrackpadSwipe = null
@@ -552,7 +565,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pinned,
     inactiveSince: null,
     sleepTimer: null,
-    pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES }
+    pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES },
+    pageScale: 1
   }
   tabs.push(tab)
   if (shouldActivate) {
@@ -624,14 +638,31 @@ export function attachBrowserView(win: BaseWindow): void {
     startMacTrackpadSwipe(win, {
       onBegin: beginMacTrackpadSwipe,
       onProgress: reportMacTrackpadSwipeProgress,
-      onEnd: finishMacTrackpadSwipe
+      onEnd: finishMacTrackpadSwipe,
+      onPinch: handleMacTrackpadPinch
     })
   }
+  attachTabOverview(win, {
+    getItems: getTabOverviewItems,
+    getPageBounds: () => ({ ...browserBounds }),
+    activate: (id) => { activateBrowserTab(id) },
+    closeTab: (id) => { closeBrowserTab(id) },
+    newTab: () => { newBrowserTab() },
+    focusPage: () => {
+      const contents = getTab()?.view?.webContents
+      if (contents && !contents.isDestroyed()) contents.focus()
+      else focusVisibleShellPage()
+    },
+    handleShortcut: (input) => handleBrowserShortcutInput(input)
+  })
   win.on('close', persistOpenTabs)
   win.on('closed', () => {
     if (browserWindow !== win) return
     cancelActiveMacTrackpadSwipe()
     stopMacTrackpadSwipe()
+    detachTabOverview()
+    tabThumbnails.clear()
+    newTabThumbnail = null
     const closingTabs = [...tabs]
     tabs.length = 0
     activeTabId = null
@@ -718,7 +749,68 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId): string |
   return id
 }
 
-export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId): boolean {
+export type TabCommand = 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'reload' | 'close' | 'closeOthers'
+
+// One table for tab shortcuts: the key handler, the app menu and the tab context menu all read it.
+export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, { key: string, shift?: boolean, alt?: boolean, accelerator: string }> = {
+  bookmark: { key: 'd', accelerator: 'CmdOrCtrl+D' },
+  pin: { key: 'p', shift: true, accelerator: 'CmdOrCtrl+Shift+P' },
+  duplicate: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
+  copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
+  reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
+  close: { key: 'w', accelerator: 'CmdOrCtrl+W' },
+  closeOthers: { key: 'w', alt: true, accelerator: 'CmdOrCtrl+Alt+W' }
+}
+
+function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
+  // Shown as a hint only; the app menu and before-input-event do the real handling.
+  return { accelerator: TAB_COMMAND_SHORTCUTS[command].accelerator, registerAccelerator: false }
+}
+
+export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefined): void {
+  if (command === 'close') {
+    closeBrowserTabFromShortcut(tabId)
+    return
+  }
+  const tab = tabId ? getTab(tabId) : undefined
+  if (!tab) return
+  switch (command) {
+    case 'bookmark':
+      if (normalizeHttpOrigin(currentUrl(tab))) toggleTabBookmark(tab.id)
+      break
+    case 'pin':
+      setBrowserTabPinned(tab.id, !tab.pinned)
+      break
+    case 'duplicate':
+      duplicateBrowserTab(tab.id)
+      break
+    case 'copyLink':
+      if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(currentUrl(tab))
+      break
+    case 'reload':
+      reloadBrowserTab(tab.id)
+      break
+    case 'closeOthers':
+      closeBrowserTabsRelative(tab.id, 'others')
+      break
+  }
+}
+
+/** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
+export function handleBrowserShortcutInput(input: Electron.Input, tabId = activeTabId): boolean {
+  if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
+  const key = input.alt && /^Key[A-Z]$/.test(input.code) ? input.code.slice(3).toLowerCase() : input.key.toLowerCase()
+  return handleBrowserShortcut(key, input.shift, tabId, input.alt)
+}
+
+export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId, alt = false): boolean {
+  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, typeof TAB_COMMAND_SHORTCUTS[TabCommand]][]) {
+    if (shortcut.key === key && Boolean(shortcut.shift) === shift && Boolean(shortcut.alt) === alt) {
+      runTabCommand(command, tabId ?? undefined)
+      return true
+    }
+  }
+  if (alt) return false
   if (key === 'l' && !shift) {
     sendFocusAddressToVisibleRenderer()
     return true
@@ -727,8 +819,8 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     newBrowserTab()
     return true
   }
-  if (key === 'w' && !shift) {
-    if (tabId) closeBrowserTab(tabId)
+  if ((key === '\\' || key === '|') && shift) {
+    toggleTabOverview()
     return true
   }
   if (key === 'tab' && tabs.length > 1) {
@@ -771,6 +863,7 @@ export function closeBrowserTab(id: string): void {
   if (index < 0) return
   const tab = tabs[index]
   if (!tab) return
+  tabThumbnails.delete(id)
   const wasActive = activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   tabs.splice(index, 1)
@@ -791,6 +884,34 @@ export function closeBrowserTab(id: string): void {
   }
   persistOpenTabs()
   publishState()
+}
+
+let confirmingWindowClose = false
+
+/**
+ * Cmd+W: close the tab. On the last tab, ask before closing the whole window instead of
+ * silently swapping in a fresh New Tab or letting the menu close the window.
+ */
+export function closeBrowserTabFromShortcut(tabId = activeTabId ?? undefined): void {
+  if (tabs.length > 1) {
+    if (tabId) closeBrowserTab(tabId)
+    return
+  }
+  const win = browserWindow
+  if (!win || win.isDestroyed() || confirmingWindowClose) return
+  confirmingWindowClose = true
+  void dialog.showMessageBox(win, {
+    type: 'question',
+    buttons: ['Close Window', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'Close the window?',
+    detail: 'This is your last tab.'
+  }).then(({ response }) => {
+    if (response === 0 && !win.isDestroyed()) win.close()
+  }).finally(() => {
+    confirmingWindowClose = false
+  })
 }
 
 export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
@@ -939,6 +1060,15 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     return undefined
   }
   if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
+  if (isTabOverviewOpen()) {
+    // In the grid, horizontal swipes step the selection instead of navigating history.
+    const overviewId = getTabOverviewContentsId()
+    if (getTabOverviewState() !== 'open' || overviewId === null) return refuse('tab overview animating')
+    if (request.direction !== 'back' && request.direction !== 'forward') return refuse('bad request')
+    cancelActiveMacTrackpadSwipe()
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking overview selection', request.direction)
+    return overviewId
+  }
   // The handle only tells us which NSWindow the gesture landed in. Surffish drives one browser
   // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
   // reject every swipe).
@@ -985,6 +1115,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
 }
 
 function reportMacTrackpadSwipeProgress(contentsId: number, progress: number): void {
+  if (contentsId === getTabOverviewContentsId()) return
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.contents.isDestroyed()) return
   try {
@@ -1003,6 +1134,11 @@ function finishMacTrackpadSwipe(
   _maxProgress: number
 ): void {
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
+  if (contentsId === getTabOverviewContentsId()) {
+    // Selection follows the fingers: swipe right moves right, swipe left moves left.
+    if (committed) moveTabOverviewSelection(direction === 'back' ? 1 : -1)
+    return
+  }
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
   if (swipe.contents.isDestroyed()) {
@@ -1059,6 +1195,152 @@ export function updateBrowserTrackpadScrollEdges(contents: WebContents, input: u
   if (typeof edges.canScrollLeft !== 'boolean' || typeof edges.canScrollRight !== 'boolean') return
   const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
   if (tab) tab.pageScrollEdges = { canScrollLeft: edges.canScrollLeft, canScrollRight: edges.canScrollRight }
+}
+
+export function updateBrowserPageScale(contents: WebContents, input: unknown): void {
+  if (contents.isDestroyed() || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) return
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  if (tab) tab.pageScale = input
+}
+
+function isLocalNewTab(tab: BrowserTab): boolean {
+  return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
+}
+
+function thumbnailDataUrl(image: Electron.NativeImage): string {
+  const size = image.getSize()
+  const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
+  return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
+}
+
+async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
+  if (tab.id !== activeTabId || browserBounds.width <= 0 || browserBounds.height <= 0) return
+  if (isLocalNewTab(tab)) {
+    const image = await captureLocalNewTabPage({ ...browserBounds })
+    if (!image || !tabs.includes(tab)) return
+    const shot = thumbnailDataUrl(image)
+    tabThumbnails.set(tab.id, shot)
+    newTabThumbnail = shot
+    return
+  }
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed()) return
+  try {
+    const image = await contents.capturePage()
+    if (image.isEmpty() || contents.isDestroyed() || !tabs.includes(tab)) return
+    tabThumbnails.set(tab.id, thumbnailDataUrl(image))
+  } catch {
+    // A page that is navigating or crashing just keeps its previous thumbnail.
+  }
+}
+
+async function getTabOverviewItems(): Promise<TabOverviewItem[]> {
+  const active = getTab()
+  if (active) {
+    // Fresh shot of what is on screen right now; don't hold the gesture up for a slow page.
+    await Promise.race([captureTabThumbnail(active), new Promise((resolve) => setTimeout(resolve, 120))])
+  }
+  return getTabSummaries().map((summary) => ({
+    id: summary.id,
+    url: summary.url,
+    title: summary.title,
+    faviconUrl: summary.faviconUrl,
+    active: summary.active,
+    pinned: summary.pinned,
+    sleeping: summary.sleeping,
+    newTab: summary.url === SURFFISH_QUICK_LINKS_URL,
+    thumbnail: tabThumbnails.get(summary.id) ?? (summary.url === SURFFISH_QUICK_LINKS_URL ? newTabThumbnail : null)
+  }))
+}
+
+// How much pinch (summed NSEvent magnification) carries the overview the whole way in or out.
+const PINCH_FULL_TRAVEL = 0.55
+// Progress per second at release that counts as a flick, whatever the distance travelled.
+const PINCH_FLICK_SPEED = 1.6
+let pinchMode: 'none' | 'open' | 'close' | 'swallow' = 'none'
+let pinchSamples: { at: number; progress: number }[] = []
+
+function pinchProgress(magnification: number): number {
+  const travel = magnification / PINCH_FULL_TRAVEL
+  const progress = pinchMode === 'open' ? -travel : 1 - travel
+  return Math.min(1.25, Math.max(-0.05, progress))
+}
+
+function trackPinchProgress(magnification: number): number {
+  const progress = pinchProgress(magnification)
+  const now = Date.now()
+  pinchSamples.push({ at: now, progress })
+  while (pinchSamples.length > 2 && now - pinchSamples[0]!.at > 120) pinchSamples.shift()
+  setTabOverviewProgress(progress)
+  return progress
+}
+
+function pinchVelocity(): number {
+  const first = pinchSamples[0]
+  const last = pinchSamples[pinchSamples.length - 1]
+  if (!first || !last || last.at - first.at < 8) return 0
+  return (last.progress - first.progress) / ((last.at - first.at) / 1000)
+}
+
+function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: number): boolean {
+  if (MAC_SWIPE_DEBUG && phase !== 'change') {
+    console.info('[trackpad swipe] pinch', phase, { magnification, mode: pinchMode, overview: getTabOverviewState(), pageScale: getTab()?.pageScale })
+  }
+  if (phase === 'begin') {
+    pinchSamples = []
+    pinchMode = 'none'
+    const overview = getTabOverviewState()
+    if (overview === 'opening' || overview === 'closing') {
+      // Mid-animation: eat the pinch so the page underneath doesn't zoom.
+      pinchMode = 'swallow'
+      return true
+    }
+    if (overview === 'open') {
+      pinchMode = magnification > 0 ? 'close' : 'swallow'
+      if (pinchMode === 'close') {
+        // Swap the page underneath now so it is already there as the selected card grows into it.
+        const selected = getTabOverviewSelectedId()
+        if (selected && selected !== activeTabId) activateBrowserTab(selected)
+        trackPinchProgress(magnification)
+      }
+      return true
+    }
+    if (magnification > 0) return false
+    if (!browserWindow || browserWindow.isDestroyed() || !browserWindow.isFocused()) return false
+    const tab = getTab()
+    // Pinching in on a zoomed-in page should zoom it back out, not open the overview.
+    if (!tab || tab.pageScale > 1.01) return false
+    pinchMode = 'open'
+    void openTabOverview({ interactive: true })
+    trackPinchProgress(magnification)
+    return true
+  }
+
+  const mode = pinchMode
+  if (mode === 'none' || mode === 'swallow') {
+    if (phase !== 'change') pinchMode = 'none'
+    return mode === 'swallow'
+  }
+  if (phase === 'change') {
+    trackPinchProgress(magnification)
+    return true
+  }
+
+  const progress = pinchSamples[pinchSamples.length - 1]?.progress ?? (mode === 'open' ? 0 : 1)
+  const velocity = pinchVelocity()
+  pinchMode = 'none'
+  pinchSamples = []
+  if (phase === 'cancel') {
+    settleTabOverview(mode === 'close')
+    return true
+  }
+  // Released: a flick wins, otherwise go wherever it is closer to.
+  const open = velocity > PINCH_FLICK_SPEED ? true
+    : velocity < -PINCH_FLICK_SPEED ? false
+      : mode === 'open' ? progress > 0.4 : progress > 0.6
+  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] pinch released', { mode, progress, velocity, open })
+  settleTabOverview(open, open ? undefined : activeTabId ?? undefined)
+  return true
 }
 
 export function browserBack(): void {

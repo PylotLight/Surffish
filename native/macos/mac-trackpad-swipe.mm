@@ -17,6 +17,8 @@ constexpr double kHorizontalToVerticalRatio = 1.35;
 constexpr double kMaxVerticalPoints = 18.0;
 constexpr double kCompletionFallback = 0.995;
 constexpr CFTimeInterval kLostGestureSeconds = 12.0;
+// Magnification a pinch has to build up before JavaScript is asked whether to take it over.
+constexpr double kPinchStartThreshold = 0.03;
 
 napi_env g_env = nullptr;
 napi_ref g_begin = nullptr;
@@ -26,6 +28,11 @@ napi_ref g_resource = nullptr;
 napi_async_context g_async = nullptr;
 bool g_cleanupHook = false;
 id g_scrollMonitor = nil;
+id g_magnifyMonitor = nil;
+napi_ref g_pinch = nullptr;
+double g_pinchTotal = 0.0;
+bool g_pinchAsked = false;
+bool g_pinchTaken = false;
 
 NSSize g_pendingDelta = NSZeroSize;
 bool g_pendingRefused = false;
@@ -255,6 +262,60 @@ bool MonitorScrollWheel(NSEvent* event) {
   return true;
 }
 
+// Asks JavaScript whether a finished pinch ("in" or "out") should be taken over. A yes swallows
+// the rest of that pinch so the page doesn't also zoom.
+// Reports pinch phases to JavaScript: "begin" (return true to take the pinch over), then
+// "change" / "end" / "cancel" for a pinch that was taken, each with the running magnification.
+bool ReportPinch(const char* phase, double total) {
+  if (!g_env || !g_pinch) return false;
+  napi_handle_scope scope = nullptr;
+  if (napi_open_handle_scope(g_env, &scope) != napi_ok) return false;
+  napi_value args[2] = {nullptr, nullptr};
+  napi_create_string_utf8(g_env, phase, NAPI_AUTO_LENGTH, &args[0]);
+  napi_create_double(g_env, total, &args[1]);
+  napi_value response = nullptr;
+  bool taken = false;
+  if (Invoke(g_pinch, 2, args, &response) && response) {
+    napi_valuetype type = napi_undefined;
+    napi_typeof(g_env, response, &type);
+    if (type == napi_boolean) napi_get_value_bool(g_env, response, &taken);
+  }
+  napi_close_handle_scope(g_env, scope);
+  return taken;
+}
+
+void ResetPinch() {
+  g_pinchTotal = 0.0;
+  g_pinchAsked = false;
+  g_pinchTaken = false;
+}
+
+bool MonitorMagnify(NSEvent* event) {
+  if (HasPhase(event.phase, NSEventPhaseBegan)) {
+    ResetPinch();
+    return false;
+  }
+  const bool ended = HasPhase(event.phase, NSEventPhaseEnded);
+  const bool cancelled = HasPhase(event.phase, NSEventPhaseCancelled);
+  if (ended || cancelled) {
+    if (g_pinchTaken) ReportPinch(cancelled ? "cancel" : "end", g_pinchTotal);
+    ResetPinch();
+    // Always let the end through so Chromium closes the pinch it saw begin.
+    return false;
+  }
+  g_pinchTotal += event.magnification;
+  if (!g_pinchAsked) {
+    // A small dead zone so a resting pair of fingers doesn't claim the gesture.
+    if (std::abs(g_pinchTotal) < kPinchStartThreshold) return false;
+    g_pinchAsked = true;
+    g_pinchTaken = ReportPinch("begin", g_pinchTotal);
+    return g_pinchTaken;
+  }
+  if (!g_pinchTaken) return false;
+  ReportPinch("change", g_pinchTotal);
+  return true;
+}
+
 void ReleaseReference(napi_ref* reference) {
   if (g_env && *reference) napi_delete_reference(g_env, *reference);
   *reference = nullptr;
@@ -265,6 +326,11 @@ void StopMonitor() {
     [NSEvent removeMonitor:g_scrollMonitor];
     g_scrollMonitor = nil;
   }
+  if (g_magnifyMonitor) {
+    [NSEvent removeMonitor:g_magnifyMonitor];
+    g_magnifyMonitor = nil;
+  }
+  ResetPinch();
   ClearTracking(false);
   g_pendingDelta = NSZeroSize;
   g_pendingRefused = false;
@@ -274,6 +340,7 @@ void ReleaseCallbacks() {
   ReleaseReference(&g_begin);
   ReleaseReference(&g_progress);
   ReleaseReference(&g_end);
+  ReleaseReference(&g_pinch);
   if (g_env && g_async) {
     napi_async_destroy(g_env, g_async);
     g_async = nullptr;
@@ -310,9 +377,10 @@ napi_value Start(napi_env env, napi_callback_info info) {
   ReleaseCallbacks();
   if (!StoreCallback(env, argv[0], "onBegin", &g_begin) ||
       !StoreCallback(env, argv[0], "onProgress", &g_progress) ||
-      !StoreCallback(env, argv[0], "onEnd", &g_end)) {
+      !StoreCallback(env, argv[0], "onEnd", &g_end) ||
+      !StoreCallback(env, argv[0], "onPinch", &g_pinch)) {
     ReleaseCallbacks();
-    napi_throw_type_error(env, nullptr, "start expects onBegin, onProgress, and onEnd functions");
+    napi_throw_type_error(env, nullptr, "start expects onBegin, onProgress, onEnd, and onPinch functions");
     return nullptr;
   }
 
@@ -336,6 +404,14 @@ napi_value Start(napi_env env, napi_callback_info info) {
                                                             handler:^NSEvent*(NSEvent* event) {
       if (!g_env) return event;
       return MonitorScrollWheel(event) ? nil : event;
+    }];
+  }
+
+  if (!g_magnifyMonitor) {
+    g_magnifyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMagnify
+                                                             handler:^NSEvent*(NSEvent* event) {
+      if (!g_env) return event;
+      return MonitorMagnify(event) ? nil : event;
     }];
   }
 

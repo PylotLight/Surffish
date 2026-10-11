@@ -9,6 +9,7 @@ import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
 import { initializeDownloads } from './downloads'
+import { installAppMenu } from './app-menu'
 
 app.setName(APP_NAME)
 
@@ -46,6 +47,7 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId(APP_ID)
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
   registerIpc()
+  installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(disposeBramblePoc)
   createWindow()

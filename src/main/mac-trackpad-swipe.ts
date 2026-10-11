@@ -17,7 +17,14 @@ export interface MacTrackpadSwipeCallbacks {
   onBegin(request: MacTrackpadSwipeBeginRequest): number | undefined
   onProgress(contentsId: number, progress: number): void
   onEnd(contentsId: number, direction: MacTrackpadSwipeDirection, committed: boolean, maxProgress: number): void
+  /**
+   * Pinch phases with the running NSEvent magnification (negative = pinching in). Return true from
+   * 'begin' to take the pinch over: the page then sees none of it and 'change'/'end'/'cancel' follow.
+   */
+  onPinch(phase: MacTrackpadPinchPhase, magnification: number): boolean
 }
+
+export type MacTrackpadPinchPhase = 'begin' | 'change' | 'end' | 'cancel'
 
 interface NativeMacTrackpadSwipeAddon {
   start(callbacks: MacTrackpadSwipeCallbacks): void
@@ -61,6 +68,14 @@ export function startMacTrackpadSwipe(_window: BaseWindow, callbacks: MacTrackpa
           callbacks.onEnd(contentsId, direction, committed, maxProgress)
         } catch (error) {
           console.error('[trackpad swipe] Could not finish gesture:', error)
+        }
+      },
+      onPinch: (phase, magnification) => {
+        try {
+          return callbacks.onPinch(phase, magnification) === true
+        } catch (error) {
+          console.error('[trackpad swipe] Could not handle pinch:', error)
+          return false
         }
       }
     })
