@@ -264,6 +264,15 @@ export async function captureLocalNewTabPage(rect: { x: number; y: number; width
   }
 }
 
+/** Focus whichever shell surface is showing the page area (the New Tab page lives in the content renderer). */
+export function focusVisibleShellPage(): boolean {
+  if (!shellViews || shouldUseNativeOverlays()) return false
+  const contents = shellViews.content.webContents
+  if (contents.isDestroyed()) return false
+  contents.focus()
+  return true
+}
+
 export function sendFocusAddressToVisibleRenderer(): void {
   if (!shellViews) return
   const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
