@@ -1,6 +1,6 @@
 # macOS builds and releases
 
-Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the app zip locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. Releases ship a zip, not a DMG. The DMGs for v0.1.0 and v0.1.1 opened with "not supported on this Mac", and at about 320 MB each they were more than twice the size of the zip, which is about 135 MB.
+Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the app zip locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. Releases ship a zip, not a DMG. The DMGs for v0.1.0 and v0.1.1 opened with "not supported on this Mac", and at about 320 MB each they were more than twice the size of the zip, which is about 117 MB (max deflate, English-only Chromium locales).
 
 ## TL;DR: `bun run release`
 
@@ -16,7 +16,7 @@ bun run release --dry-run  # build + verify only, publishes nothing
 It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
 1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can edit and push it.
 2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
-3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `hdiutil verify`, then the SHA-256.
+3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `unzip -tq`, then the SHA-256.
 4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
 5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip through your fish `ghp` function (`SURFFISH_GH=gh` uses plain gh instead), and renders, commits and pushes `Casks/surffish.rb`.
 
@@ -58,10 +58,6 @@ brew install --cask surffish
 
 The Surffish repository doubles as its tap; a separate `homebrew-*` repository is not needed. The Cask points at the zip asset.
 
-## Legacy v0.1.0 release helper
-
-`scripts/publish-macos-release.sh` is pinned to the already-published `v0.1.0` release and deliberately retains validation of its historical ARM64 ZIP+DMG asset pair. It is not the pipeline for future releases: use `bun run release`. Do not use the legacy helper to build or publish a newer version. The v0.1.0 tag and its two published assets are not to be changed as part of this migration.
-
 ## Unsigned-install note
 
 The published artifacts are unsigned and not notarized. macOS may quarantine downloads and, depending on the OS version, show a “damaged” warning. Only for an app downloaded from the official release that you have verified and trust, remove the quarantine attribute with:
@@ -71,3 +67,4 @@ xattr -cr /Applications/Surffish.app
 ```
 
 Then open the app again (or Control-click it and choose **Open** on first launch). This removes the quarantine attribute; it does not sign or notarize the app. Homebrew's former `--no-quarantine` option is not available, so the manual `xattr` step may be needed after installation.
+
