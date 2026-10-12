@@ -2,7 +2,6 @@ import { BaseWindow, WebContentsView, app, nativeImage, screen, shell } from 'el
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { is } from '@electron-toolkit/utils'
 import { attachBrowserView, handleBrowserShortcutInput, syncBrowserBoundsToWindow } from './browser'
 import { attachBrowserShell, detachBrowserShell } from './browser-shell'
 import { isExpectedRendererDocument } from './renderer-security'
@@ -138,7 +137,7 @@ function createRendererView(expectedDocumentUrl: string): WebContentsView {
 }
 
 function expectedRendererDocumentUrl(surface: 'content' | 'toolbar' | 'sidebar'): string {
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     const url = new URL(process.env['ELECTRON_RENDERER_URL'])
     url.searchParams.set('surface', surface)
     return url.toString()

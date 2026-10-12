@@ -16,7 +16,8 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 - `src/main/browser-shell.ts` — native view ordering/visibility, measured toolbar geometry, hover/pin state synchronization, and the local-renderer allowlist.
 - Persisted browser preferences are read as one snapshot and broadcast to all three local surfaces, keeping pins and the selected search engine coherent when the visible renderer changes.
 - `src/main/browser.ts` — lazy per-tab page views, configurable tab hibernation, active-tab switching, full-width page bounds, navigation, and restoration of the last open tabs.
-- `src/main/network-inspector.ts` — per-tab Chromium DevTools Protocol Network capture, a 1,000-request in-memory ring, and on-demand request/response detail lookup.
+- `src/main/network-inspector.ts` — opt-in per-tab Chromium DevTools Protocol Network capture, a 1,000-request in-memory ring, and on-demand request/response detail lookup.
+- `src/main/deferred-writes.ts` — coalesces hot-path JSON writes (session tabs, history, favicon cache, downloads) and flushes them on quit. New frequently-updated stores should go through `deferWrite`.
 - `src/main/browser-persistence.ts` — app-data persistence for open tab URLs, active tab, and browser preferences including the tab-sleep interval.
 - `src/main/session-cookies.ts` — encrypted snapshot/restore of session-only cookies using Electron safeStorage when OS-backed encryption is available.
 - `src/main/history.ts` — validated, bounded browsing history persisted in the app's user-data directory.
@@ -26,6 +27,11 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 - `src/shared/navigation.ts` — HTTP(S)-only address parsing and selected-search-engine routing.
 - `src/shared/types.ts` — browser, proxy, chrome-state, and toolbar-metrics contracts shared across processes.
 - `src/renderer/` — shared React UI rendered as the full app, toolbar-only, or sidebar-only surface according to a trusted URL query parameter.
+  - `views/Browser.tsx` — the shell (toolbar, sidebar, New Tab, settings pages). Every surface mounts it, so effects that fetch or subscribe should be gated by `surface` / visibility.
+  - `views/NetworkView.tsx`, `DownloadsPanel.tsx`, `ExtensionToolbarButtons.tsx`, `ExtensionsSettings.tsx`, `TabIndicators.tsx` — self-contained features that own their own state; prefer adding new features as files like these instead of growing `Browser.tsx`.
+  - `views/settings/SettingsControls.tsx` — `SettingsGroup` / `SettingsRow` / `SettingsSlider` primitives for settings pages.
+  - `lib/` — renderer helpers (`stored-state.ts` for small cross-surface localStorage prefs, `format.ts`).
+  - Toolbar-surface popups must size in px, not `vh`: the toolbar view is only toolbar-tall until the popup's measured bottom grows it.
 
 ## Security and input boundaries
 
@@ -37,7 +43,7 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 
 ## Network inspector
 
-The Network panel attaches Electron's DevTools Protocol debugger to each loaded tab before its page navigation. It records request/response metadata and failures without installing another session-level `webRequest` callback, so the ad blocker keeps the session's single `webRequest` hook (Electron allows one listener per event; `src/main/adblock-engine.ts` owns it). The newest 1,000 requests are retained in process memory; request/response headers and bodies are fetched for the selected row, and response bodies are not retained unless requested. Clearing the panel drops the retained rows, and closing the app discards them. Since full DevTools headers can include cookies or authorization values, they are visible only in the local inspector and are not written to browser history or the profile.
+The inspector is a debug tool and is off by default (Settings → General → Developer). Nothing is attached until it is enabled and the Network view is first opened; rows are only streamed to the renderer while the view is open, and turning it off detaches from every tab and drops recorded rows. Once on, the Network panel attaches Electron's DevTools Protocol debugger to each loaded tab before its page navigation. It records request/response metadata and failures without installing another session-level `webRequest` callback, so the ad blocker keeps the session's single `webRequest` hook (Electron allows one listener per event; `src/main/adblock-engine.ts` owns it). The newest 1,000 requests are retained in process memory; request/response headers and bodies are fetched for the selected row, and response bodies are not retained unless requested. Clearing the panel drops the retained rows, and closing the app discards them. Since full DevTools headers can include cookies or authorization values, they are visible only in the local inspector and are not written to browser history or the profile.
 
 ## Overlay integration coverage
 

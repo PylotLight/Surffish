@@ -254,10 +254,6 @@ export function parseBrowserSession(value: unknown): SavedBrowserSession {
   return normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
 }
 
-function defaultSiteSettings(origin: string): BrowserSiteSettings {
-  return { origin, blockAds: true, openPopupsInTabs: false, allowMedia: false, allowGeolocation: false, allowNotifications: false }
-}
-
 export function parseBrowserPreferences(value: unknown): BrowserPreferences {
   const defaults: BrowserPreferences = {
     searchEngine: DEFAULT_SEARCH_ENGINE,

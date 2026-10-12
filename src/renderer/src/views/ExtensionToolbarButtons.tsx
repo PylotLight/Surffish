@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useStoredState } from '../lib/stored-state'
 import type { WebStoreExtensionsState, WebStoreExtensionSummary } from '../../../shared/types'
 import { runExtensionAction } from './useWebStoreExtensions'
 
@@ -8,34 +9,15 @@ export const BRAMBLE_TOOLBAR_ID = 'bramble'
 
 type PinMap = Record<string, boolean>
 
-function readPins(): PinMap {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(PIN_STORAGE_KEY) ?? '{}') as unknown
-    return parsed && typeof parsed === 'object' ? parsed as PinMap : {}
-  } catch {
-    return {}
-  }
-}
-
 /**
  * Which extensions sit on the toolbar. Background-only extensions (no popup) start hidden in the
- * overflow menu; everything else starts pinned. Shared across the toolbar/sidebar surfaces via
- * localStorage + the storage event.
+ * overflow menu; everything else starts pinned.
  */
 export function useExtensionPins(): { isPinned: (id: string, hasPopup: boolean) => boolean; setPinned: (id: string, pinned: boolean) => void } {
-  const [pins, setPins] = useState<PinMap>(readPins)
-  useEffect(() => {
-    const onStorage = (event: StorageEvent): void => { if (event.key === PIN_STORAGE_KEY) setPins(readPins()) }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  const [pins, setPins] = useStoredState<PinMap>(PIN_STORAGE_KEY, {})
   return {
     isPinned: (id, hasPopup) => pins[id] ?? hasPopup,
-    setPinned: (id, pinned) => {
-      const next = { ...readPins(), [id]: pinned }
-      localStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(next))
-      setPins(next)
-    }
+    setPinned: (id, pinned) => setPins({ ...pins, [id]: pinned })
   }
 }
 
