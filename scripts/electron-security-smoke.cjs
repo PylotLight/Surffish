@@ -116,11 +116,21 @@ function startTlsReleaseFixture(profile) {
       return
     }
     if (request.url === '/flythenimbus/bramble/releases/download/1.28.0-firefox/bramble_firefox_1.28.0.zip') {
+      if (String(request.headers.host).split(':')[0].toLowerCase() === 'github.com') {
+        response.writeHead(302, { location: `https://release-assets.githubusercontent.com${request.url}`, 'cache-control': 'no-store' })
+        response.end()
+        return
+      }
       response.writeHead(200, { 'content-type': 'application/zip', 'content-length': fixture.archive.length, 'cache-control': 'no-store' })
       response.end(fixture.archive)
       return
     }
     if (request.url === '/flythenimbus/bramble/releases/download/1.28.0-firefox/SHA256SUMS') {
+      if (String(request.headers.host).split(':')[0].toLowerCase() === 'github.com') {
+        response.writeHead(302, { location: `https://release-assets.githubusercontent.com${request.url}`, 'cache-control': 'no-store' })
+        response.end()
+        return
+      }
       response.writeHead(200, { 'content-type': 'text/plain', 'content-length': fixture.checksums.length, 'cache-control': 'no-store' })
       response.end(fixture.checksums)
       return
@@ -260,8 +270,8 @@ async function run() {
 
   await waitFor(async () => evaluate(views.toolbar, `(() => {
     const button = document.querySelector('.bramble-toolbar-button')
-    return button?.getAttribute('aria-label') === 'Open Bramble' && button.getAttribute('aria-haspopup') === 'dialog'
-  })()`), 'the Bramble popup action in the toolbar')
+    return button?.getAttribute('aria-label') === 'Install Bramble' && !button.hasAttribute('aria-haspopup')
+  })()`), 'the Bramble install action in the toolbar')
   const toolbarSiteControls = await evaluate(views.toolbar, `(() => {
     const omnibox = document.querySelector('.omnibox')
     const siteActions = omnibox?.querySelector('.site-actions-control')
@@ -287,12 +297,20 @@ async function run() {
   await evaluate(views.sidebar, `document.querySelector('.settings-done-button').click()`)
   await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'Done returning to browser tabs')
   await evaluate(views.toolbar, `window.api.browser.chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })`)
+  const browserSession = session.fromPartition('persist:surffish-browser')
+  const trustedReleaseHosts = new Set(['api.github.com', 'github.com', 'release-assets.githubusercontent.com'])
+  browserSession.setCertificateVerifyProc((certificateRequest, callback) => {
+    callback(trustedReleaseHosts.has(certificateRequest.hostname.toLowerCase()) ? 0 : -3)
+  })
+  const proxyResult = await evaluate(views.toolbar, `window.api.browser.proxy.set({ enabled: true, host: '127.0.0.1', port: ${socksPort} })`)
+  assert.equal(proxyResult.enabled, true, 'the temporary SOCKS proxy is accepted by the browser setting')
   await evaluate(views.toolbar, `document.querySelector('.bramble-toolbar-button').click()`)
-  await waitFor(async () => {
+  const brambleState = await waitFor(async () => {
     const state = await evaluate(views.toolbar, 'window.api.browser.bramble.get()')
-    return state.error?.includes('not installed in this Surffish profile') ? state : null
-  }, 'the toolbar Bramble popup request')
-  assert.equal((await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode, 'tabs', 'the Bramble toolbar action does not navigate to extension settings')
+    return state.error?.match(/ZIP|archive|directory/i) ? state : null
+  }, 'the toolbar Bramble install request to reject the deliberately invalid archive')
+  assert.equal((await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode, 'integrations', 'the Bramble toolbar install action opens Integrations')
+  assert.match(brambleState.error || '', /ZIP|archive|directory/i, 'the synthetic release is fetched and rejected before activation because its archive is deliberately invalid')
 
   const savedSessionPath = join(userData, 'browser-session.json')
   const migratedSession = await waitFor(() => {
@@ -360,6 +378,19 @@ async function run() {
     }
     return null
   }, 'the saved-session privacy control')
+  const integrationsTab = await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).some((button) => button.textContent.trim() === 'Integrations')`)
+  assert.equal(integrationsTab, true, 'Settings exposes a separate Integrations tab')
+  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'Integrations')?.click()`)
+  await waitFor(() => evaluate(settingsView, `document.querySelector('.settings-page-heading-copy h1')?.textContent === 'Integrations & add-ons'`), 'the Integrations page heading')
+  const integrationsControls = await evaluate(settingsView, `({
+    newTab: Boolean(document.querySelector('[aria-label="Default new tab page"]') && document.querySelector('[aria-label="New Tab clocks"]')),
+    adblocking: Boolean(document.querySelector('[aria-label="Site ad blocking"]')),
+    bramble: Boolean(document.querySelector('[aria-label="Bramble extension settings"]')),
+    generalOnly: Boolean(document.querySelector('[aria-label="Clear saved session"]'))
+  })`)
+  assert.deepEqual(integrationsControls, { newTab: true, adblocking: true, bramble: true, generalOnly: false }, 'New Tab, ad blocking, and Bramble configuration are grouped in Integrations')
+  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'General')?.click()`)
+  await waitFor(() => evaluate(settingsView, `Boolean(document.querySelector('[aria-label="Clear saved session"]'))`), 'the General settings page')
   const disclosure = await evaluate(settingsView, `document.querySelector('[aria-label="Saved session privacy"]')?.innerText || ''`)
   assert.match(disclosure, /stored locally/i, 'Settings disclose local session storage')
   assert.match(disclosure, /ordinary query parameters/i, 'Settings explain that normal URL behavior is preserved')
@@ -374,20 +405,14 @@ async function run() {
   assert.equal(JSON.parse(readFileSync(savedSessionPath, 'utf8')).tabs.length, 0, 'cleared URLs are not silently written back during the same run')
   assert.equal(statSync(savedSessionPath).mode & 0o077, 0, 'cleared session file remains owner-only on POSIX')
 
-  const browserSession = session.fromPartition('persist:surffish-browser')
-  const trustedReleaseHosts = new Set(['api.github.com', 'github.com'])
-  browserSession.setCertificateVerifyProc((certificateRequest, callback) => {
-    callback(trustedReleaseHosts.has(certificateRequest.hostname.toLowerCase()) ? 0 : -3)
-  })
-  const proxyResult = await evaluate(settingsView, `window.api.browser.proxy.set({ enabled: true, host: '127.0.0.1', port: ${socksPort} })`)
-  assert.equal(proxyResult.enabled, true, 'the temporary SOCKS proxy is accepted by the browser setting')
-  const brambleState = await evaluate(settingsView, 'window.api.browser.bramble.installLatest()')
-  assert.match(brambleState.error || '', /ZIP|archive|directory/i, 'the fake release is fetched but rejected before installation because its archive is deliberately invalid')
   assert.ok(socksRequests.some(({ host, port }) => host === 'api.github.com' && port === 443), 'Bramble release metadata uses the configured SOCKS proxy')
   assert.ok(socksRequests.some(({ host, port }) => host === 'github.com' && port === 443), 'Bramble release assets use the configured SOCKS proxy')
+  assert.ok(socksRequests.some(({ host, port }) => host === 'release-assets.githubusercontent.com' && port === 443), 'redirected Bramble release assets use the configured SOCKS proxy')
   assert.ok(requests.some(({ path }) => path === '/repos/flythenimbus/bramble/releases?per_page=100'), 'the synthetic release API received the metadata request')
   assert.ok(requests.some(({ path }) => path?.endsWith('/bramble_firefox_1.28.0.zip')), 'the synthetic release API received the archive request')
   assert.ok(requests.some(({ path }) => path?.endsWith('/SHA256SUMS')), 'the synthetic release API received the checksums request')
+  assert.ok(requests.some(({ host, path }) => String(host).startsWith('release-assets.githubusercontent.com') && path?.endsWith('/bramble_firefox_1.28.0.zip')), 'the archive was fetched from GitHub’s redirected asset host')
+  assert.ok(requests.some(({ host, path }) => String(host).startsWith('release-assets.githubusercontent.com') && path?.endsWith('/SHA256SUMS')), 'the checksums were fetched from GitHub’s redirected asset host')
 
   await browserSession.setProxy({ mode: 'direct' })
   console.log('[security-smoke] trusted renderer navigation, IPC, subframe isolation, session privacy/clear, and Bramble SOCKS transport passed')

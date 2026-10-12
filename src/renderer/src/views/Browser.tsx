@@ -118,8 +118,9 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarResizing: false
 }
 
-const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>; label: string }> = [
+const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'integrations' | 'site' | 'network'>; label: string }> = [
   { mode: 'settings', label: 'General' },
+  { mode: 'integrations', label: 'Integrations' },
   { mode: 'site', label: 'This site' },
   { mode: 'network', label: 'Network' }
 ]
@@ -634,7 +635,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     await window.api.browser.navigate(site.url, searchEngine)
   }
 
-  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'site' | 'network'>): void {
+  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'integrations' | 'site' | 'network'>): void {
     setSidebarMode(mode)
   }
 
@@ -667,7 +668,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     await dispatchBrambleToolbarAction(bramblePoc, {
       open: () => openBramblePoc(),
       install: async () => {
-        setSidebarMode('settings')
+        setSidebarMode('integrations')
         try {
           setBramblePoc(await window.api.browser.bramble.installLatest())
         } catch (error) {
@@ -735,7 +736,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface])
 
   useEffect(() => {
-    if (sidebarMode !== 'site') return
+    if (sidebarMode !== 'site' && sidebarMode !== 'integrations') return
     let cancelled = false
     if (!activeOrigin) {
       setSiteSettings(null)
@@ -1324,7 +1325,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
             <section className="new-tab-page" aria-label="New Tab" style={{
@@ -1434,12 +1435,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </nav>
           )}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" />}
-          {sidebarMode === 'settings' && (
+          {(sidebarMode === 'settings' || sidebarMode === 'integrations') && (
             <div className="settings-view">
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>Settings</h1>
-                  <p>Choose your start page, search engine, and browser behavior.</p>
+                  <h1>{sidebarMode === 'integrations' ? 'Integrations & add-ons' : 'Settings'}</h1>
+                  <p>{sidebarMode === 'integrations' ? 'Configure New Tab, ad blocking, and browser add-ons.' : 'Choose browser behavior, proxy, and saved-session options.'}</p>
                 </div>
                 <button
                   className="settings-done-button"
@@ -1450,6 +1451,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 >Done · Back to web</button>
               </header>
               <div className="settings-content">
+                {sidebarMode === 'settings' && <>
                 <section className="settings-section">
                   <label className="settings-field">
                     <span>Search engine</span>
@@ -1458,6 +1460,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </label>
                   <p className="settings-help">Used for searches typed into the address bar.</p>
+                </section>
+                </>}
+                {sidebarMode === 'integrations' && <>
+                <section className="settings-section" aria-label="Site ad blocking">
+                  <div className="settings-section-heading">
+                    <div>
+                      <strong>Ad blocking</strong>
+                      <span className={`settings-status${siteSettings?.blockAds ? ' is-on' : ''}`}>
+                        {siteSettingsLoading ? 'Loading this site…' : siteSettings ? siteSettings.blockAds ? 'On for this site' : 'Off for this site' : 'Per-site control'}
+                      </span>
+                    </div>
+                  </div>
+                  {siteSettingsLoading ? <p className="settings-help">Loading this site’s ad-blocking preference…</p> : siteSettings ? (
+                    <label className="site-setting-row">
+                      <span><strong>Block ads and trackers on this site</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
+                      <input type="checkbox" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
+                    </label>
+                  ) : <p className="settings-help">Select an HTTP or HTTPS page to customize its ad and tracker blocking. The browser filter remains enabled by default.</p>}
                 </section>
                 <section className="settings-section">
                   <label className="settings-field">
@@ -1554,6 +1574,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </section>
+                </>}
+                {sidebarMode === 'settings' && <>
                 <section className="settings-section" aria-label="Background tab sleep settings">
                   <label className="settings-field">
                     <span>Hibernate inactive tabs after</span>
@@ -1615,6 +1637,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <strong>Browser data stays local</strong>
                   <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
                 </section>
+                </>}
               </div>
             </div>
           )}
@@ -1629,10 +1652,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <>
                     <section className="settings-section">
                       <div className="settings-section-heading"><div><strong>Privacy</strong><span className="settings-status is-on">Applies to this origin only</span></div></div>
-                      <label className="site-setting-row">
-                        <span><strong>Block ads and trackers</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
-                        <input type="checkbox" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
-                      </label>
                       <label className="site-setting-row">
                         <span><strong>Open pop-ups in tabs</strong><small>Routes pop-up windows from this site into a regular browser tab.</small></span>
                         <input type="checkbox" checked={siteSettings.openPopupsInTabs} onChange={(event) => void updateSiteSetting('openPopupsInTabs', event.target.checked)} aria-label="Open this site’s pop-ups in tabs" />

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, screen, type BaseWindow } from 'electron'
+import { app, BrowserWindow, dialog, net, screen, type BaseWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -29,6 +29,14 @@ const BRAMBLE_POPUP_WIDTH = 500
 const BRAMBLE_POPUP_HEIGHT = 550
 const BRAMBLE_OPTIONS_WIDTH = 860
 const BRAMBLE_OPTIONS_HEIGHT = 720
+const BRAMBLE_RELEASE_REQUEST_HOSTS = new Set([
+  'api.github.com',
+  'github.com',
+  'release-assets.githubusercontent.com',
+  'objects.githubusercontent.com',
+  'github-releases.githubusercontent.com'
+])
+const MAX_BRAMBLE_RELEASE_RESPONSE_BYTES = 40 * 1024 * 1024
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 
 interface LoadedBrambleExtension {
@@ -56,8 +64,110 @@ let popupWindow: BrowserWindow | null = null
 let setupWindow: BrowserWindow | null = null
 let offscreenWindow: BrowserWindow | null = null
 
-function fetchBrambleRelease(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-  return getBrowserSession().fetch(input instanceof URL ? input.toString() : input, init)
+function isAllowedBrambleReleaseUrl(url: URL): boolean {
+  return url.protocol === 'https:' && !url.port && !url.username && !url.password && BRAMBLE_RELEASE_REQUEST_HOSTS.has(url.hostname)
+}
+
+// Session.fetch cancels redirect:'manual' in Electron instead of exposing the 3xx response; net.request preserves the configured session/proxy while leaving each redirect hop inspectable.
+function fetchBrambleReleaseOnce(url: URL, method: string, headers: Headers, signal?: AbortSignal | null): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const request = net.request({ url: url.toString(), method, session: getBrowserSession() })
+    headers.forEach((value, name) => request.setHeader(name, value))
+    let settled = false
+    const cleanup = (): void => signal?.removeEventListener('abort', onAbort)
+    const resolveOnce = (response: Response): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(response)
+    }
+    const rejectOnce = (error: unknown): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(error instanceof Error ? error : new Error(String(error)))
+    }
+    const onAbort = (): void => {
+      rejectOnce(signal?.reason ?? new DOMException('The request was aborted.', 'AbortError'))
+      request.abort()
+    }
+
+    request.on('error', rejectOnce)
+    request.on('redirect', (statusCode, _redirectMethod, _redirectUrl, responseHeaders) => {
+      const location = Object.entries(responseHeaders).find(([name]) => name.toLowerCase() === 'location')?.[1]?.[0]
+      if (!location) {
+        rejectOnce(new Error('The GitHub release download returned a redirect without a destination.'))
+      } else {
+        const headers = new Headers()
+        headers.set('location', location)
+        resolveOnce(new Response(null, { status: statusCode, headers }))
+      }
+      request.abort()
+    })
+    request.on('response', (response) => {
+      const responseHeaders = new Headers()
+      for (const [name, rawValue] of Object.entries(response.headers)) {
+        if (rawValue === undefined) continue
+        for (const value of Array.isArray(rawValue) ? rawValue : [rawValue]) responseHeaders.append(name, value)
+      }
+      const rawLength = responseHeaders.get('content-length')
+      if (rawLength && Number(rawLength) > MAX_BRAMBLE_RELEASE_RESPONSE_BYTES) {
+        rejectOnce(new Error('The GitHub release response exceeds the allowed download size.'))
+        request.abort()
+        return
+      }
+      const chunks: Buffer[] = []
+      let totalBytes = 0
+      response.on('data', (chunk: Buffer | string) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        totalBytes += bytes.length
+        if (totalBytes > MAX_BRAMBLE_RELEASE_RESPONSE_BYTES) {
+          rejectOnce(new Error('The GitHub release response exceeds the allowed download size.'))
+          request.abort()
+          return
+        }
+        chunks.push(bytes)
+      })
+      response.on('aborted', () => rejectOnce(new Error('The GitHub release response ended unexpectedly.')))
+      response.on('error', rejectOnce)
+      response.on('end', () => {
+        if (settled) return
+        const status = response.statusCode ?? 200
+        const body = [204, 205, 304].includes(status) ? null : Buffer.concat(chunks, totalBytes)
+        resolveOnce(new Response(body, { status, headers: responseHeaders }))
+      })
+    })
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+    }
+    request.end()
+  })
+}
+
+async function fetchBrambleRelease(input: string | URL | Request, init?: RequestInit, redirects = 0): Promise<Response> {
+  const requestInput = input instanceof Request ? input : null
+  const url = new URL(requestInput?.url ?? String(input))
+  if (!isAllowedBrambleReleaseUrl(url)) throw new Error('The Bramble release request URL is not an approved GitHub host.')
+  const method = init?.method ?? requestInput?.method ?? 'GET'
+  if (method !== 'GET' && method !== 'HEAD') throw new Error('Bramble release requests must use GET or HEAD.')
+  if (init?.body || requestInput?.body) throw new Error('Bramble release requests cannot send a request body.')
+  const headers = new Headers(requestInput?.headers)
+  if (init?.headers) new Headers(init.headers).forEach((value, name) => headers.set(name, value))
+  const redirectMode = init?.redirect ?? requestInput?.redirect ?? 'follow'
+  const response = await fetchBrambleReleaseOnce(url, method, headers, init?.signal ?? requestInput?.signal)
+  if (response.status < 300 || response.status >= 400) return response
+  if (redirectMode === 'manual') return response
+  if (redirectMode === 'error') throw new Error('The GitHub release endpoint redirected unexpectedly.')
+  if (redirects >= 4) throw new Error('The GitHub release request exceeded the redirect limit.')
+  const location = response.headers.get('location')
+  if (!location) throw new Error('The GitHub release request returned an invalid redirect.')
+  const nextUrl = new URL(location, url)
+  if (!isAllowedBrambleReleaseUrl(nextUrl)) throw new Error('The GitHub release request redirected outside the approved GitHub hosts.')
+  return fetchBrambleRelease(nextUrl, init, redirects + 1)
 }
 
 function resolveBramblePreload(): string {

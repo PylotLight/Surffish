@@ -110,7 +110,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'network' | 'site' | 'downloads'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'integrations' | 'network' | 'site' | 'downloads'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {

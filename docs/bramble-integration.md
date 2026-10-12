@@ -1,19 +1,19 @@
 # Bramble extension in Surffish
 
-Surffish provides a **Bramble-specific extension integration**. It is not a general Firefox/Chrome extension manager. Bramble’s vault popup, setup, and customization remain in Bramble’s own extension UI; Surffish Settings handles install, update checks, version, and effective permissions. The browser toolbar keeps a single Bramble icon that opens the compact password-grab popup.
+Surffish provides a **Bramble-specific extension integration**. It is not a general Firefox/Chrome extension manager. Bramble’s vault popup, setup, and customization remain in Bramble’s own extension UI; **Settings → Integrations** handles install, update checks, version, and effective permissions. The browser toolbar keeps a single Bramble icon that opens the compact password-grab popup.
 
 ## Install and update
 
-1. Open **Settings → Bramble password manager**.
-2. Choose **Check for updates** to ask the Bramble GitHub Releases API for the newest stable `*-firefox` release. The version and result appear in Settings.
+1. Open **Settings → Integrations → Bramble password manager**.
+2. Choose **Check for updates** to ask the Bramble GitHub Releases API for the newest stable `*-firefox` release. The version and result appear in Integrations.
 3. Choose **Install** or **Update**. Before extension code is activated, Surffish shows the selected version, integrity checks, and requested extension/site permissions. Cancel leaves the existing install unchanged.
-4. After installation, use the Bramble toolbar icon to open the compact popup. Use **Setup / customize** in Settings to open Bramble’s own vault setup/options window.
+4. After installation, use the Bramble toolbar icon to open the compact popup. Use **Setup / customize** in Integrations to open Bramble’s own vault setup/options window.
 
 Installation and updates are explicit; Surffish does not silently run a downloaded release. The app retains a verified release ZIP in its user-data directory and loads the adapted extension from Surffish’s persistent browser profile. On subsequent starts it verifies the retained archive’s SHA-256 before staging the extension. Updating replaces extension files at a stable path, checks the extension ID has not changed, rolls back on load failure, and does not clear the browser profile or extension storage.
 
 ### How the release is sourced
 
-The currently published Bramble Firefox GitHub release includes a ready-to-load `bramble_firefox_<version>.zip` and `SHA256SUMS`; no Bramble source clone, pnpm, Rust, `wasm-pack`, or build-time bundling is required for end users. Surffish selects the newest stable semantic version tagged `*-firefox` (excluding drafts/prereleases), validates the exact GitHub release URL, bounds download and extraction sizes, rejects unsafe ZIP paths and symlinks, checks the ZIP against `SHA256SUMS`, and compares GitHub release asset digests when available. The actual Bramble WASM and Firefox bundle are inside the upstream ZIP.
+The currently published Bramble Firefox GitHub release includes a ready-to-load `bramble_firefox_<version>.zip` and `SHA256SUMS`; no Bramble source clone, pnpm, Rust, `wasm-pack`, or build-time bundling is required for end users. Surffish selects the newest stable semantic version tagged `*-firefox` (excluding drafts/prereleases), validates the exact GitHub release URL, bounds download and extraction sizes, rejects unsafe ZIP paths and symlinks, checks the ZIP against `SHA256SUMS`, and compares GitHub release asset digests when available. Redirect hops are checked against approved GitHub release hosts and continue through the browser session, so the configured SOCKS proxy applies. The actual Bramble WASM and Firefox bundle are inside the upstream ZIP.
 
 The Firefox ZIP does **not** publish a detached maintainer signature on GitHub. SHA256SUMS and GitHub’s asset digest provide integrity checks against accidental or in-transit corruption and disagreement between release metadata and bytes; they are not an independent code-signing identity. This limitation is shown in the confirmation prompt. Installation remains a user action. Surffish does not change the Bramble source project or silently execute code during builds.
 
@@ -25,10 +25,10 @@ Surffish does not read, log, or store Bramble’s master password. Vault data be
 
 ## Manual smoke test
 
-1. Build and launch Surffish. Open **Settings → Bramble password manager** and choose **Check for updates**; confirm the version/status is shown.
+1. Build and launch Surffish. Open **Settings → Integrations → Bramble password manager** and choose **Check for updates**; confirm the version/status is shown.
 2. Click **Install**. Review the native confirmation’s version, digest statement, and permissions; choose **Cancel** and verify the install state stays unchanged. Repeat and choose **Install Bramble**.
-3. Confirm Settings shows the installed version and effective site/API permissions. Use the Bramble toolbar icon; confirm it opens the 500×550 compact popup anchored beneath the icon and dismisses on outside focus or Escape.
-4. Choose **Setup / customize** in Settings. Confirm Bramble’s options/setup page opens in a separate resizable window. Create a disposable local vault and verify it can be locked and unlocked from the popup.
+3. Confirm Integrations shows the installed version and effective site/API permissions. Use the Bramble toolbar icon; confirm it opens the 500×550 compact popup anchored beneath the icon and dismisses on outside focus or Escape.
+4. Choose **Setup / customize** in Integrations. Confirm Bramble’s options/setup page opens in a separate resizable window. Create a disposable local vault and verify it can be locked and unlocked from the popup.
 5. With the app offline, restart Surffish and confirm the already installed extension still loads from the locally retained archive. Reconnect, use **Check for updates**, and confirm the Settings status/error is informative.
 6. For an update test, use an upstream release newer than the installed version. Cancel at the permission prompt once; verify the old popup and vault remain usable. Then confirm the update; verify the new version is shown and the prior vault is still present.
 
