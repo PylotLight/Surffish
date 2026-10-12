@@ -162,6 +162,16 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
       });
     } catch {}
   }
+  // Electron's action.openPopup resolves without opening anything, so Bramble's passkey and
+  // save prompts ("Unlock & Use") never fell back to windows.create. Reject so they do.
+  if (typeof globalThis.document === 'undefined' && extensionApi?.action && typeof extensionApi.action.openPopup === 'function') {
+    try {
+      Object.defineProperty(extensionApi.action, 'openPopup', {
+        configurable: true,
+        value: async () => { throw new Error('openPopup is unavailable in Surffish.'); }
+      });
+    } catch {}
+  }
   const brambleBridge = globalThis.surffishBramble;
   if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime?.onMessage && typeof brambleBridge?.openPopout === 'function') {
     extensionApi.runtime.onMessage.addListener((message) => {
