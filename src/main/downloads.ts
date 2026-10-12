@@ -7,6 +7,7 @@ import { safeDownloadFilename, safeDownloadSource, safeStoredDownloadSource } fr
 import { markBrowserDownloadStarted } from './browser'
 import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
+import { deferWrite } from './deferred-writes'
 
 const HISTORY_FILENAME = 'downloads-history.json'
 const MAX_DOWNLOAD_HISTORY = 300
@@ -51,15 +52,19 @@ function parseStoredDownload(value: unknown): StoredDownload | null {
 }
 
 function persistHistory(): void {
+  deferWrite('downloads', writeHistory, 1000)
+}
+
+function writeHistory(): void {
   const target = historyPath()
   mkdirSync(join(target, '..'), { recursive: true })
   const temporary = `${target}.${randomUUID()}.tmp`
   const stored = records.slice(0, MAX_DOWNLOAD_HISTORY).map(({ fileAvailable: _fileAvailable, ...record }) => record)
   try {
-    writeFileSync(temporary, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
+    writeFileSync(temporary, `${JSON.stringify(stored)}\n`, { mode: 0o600, flag: 'wx' })
     renameSync(temporary, target)
   } catch {
-    try { writeFileSync(target, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 }) } catch {
+    try { writeFileSync(target, `${JSON.stringify(stored)}\n`, { mode: 0o600 }) } catch {
       // Keep downloads working if the local metadata store is unavailable; never log file paths or source URLs.
       console.warn('Could not persist download history.')
     }
@@ -104,10 +109,25 @@ function publishDownloads(): void {
   }
 }
 
+let publishTimer: ReturnType<typeof setTimeout> | null = null
+let lastPublishAt = 0
+const PUBLISH_INTERVAL_MS = 200
+
+/** Progress ticks arrive many times a second; renderers only need ~5 repaints a second. */
+function schedulePublish(): void {
+  if (publishTimer) return
+  const wait = Math.max(0, PUBLISH_INTERVAL_MS - (Date.now() - lastPublishAt))
+  publishTimer = setTimeout(() => {
+    publishTimer = null
+    lastPublishAt = Date.now()
+    publishDownloads()
+  }, wait)
+}
+
 function persistAndPublish(): void {
   records = records.slice(0, MAX_DOWNLOAD_HISTORY)
   persistHistory()
-  publishDownloads()
+  schedulePublish()
 }
 
 function itemPath(item: DownloadItemState): string {

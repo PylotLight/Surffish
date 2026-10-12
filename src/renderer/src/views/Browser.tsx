@@ -406,6 +406,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
+  const historyStaleRef = useRef(true)
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
@@ -682,8 +683,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }
 
   async function refreshHistory(): Promise<void> {
+    historyStaleRef.current = false
     setHistory(await window.api.browser.history.get())
   }
+
+  /** Surfaces that show history right now; the rest refetch lazily (address focus) instead of on every visit. */
+  const historyVisible = sidebarMode === 'history' ? surface !== 'toolbar' : surface === 'content' && isLocalNewTab
+  const historyVisibleRef = useRef(historyVisible)
+  historyVisibleRef.current = historyVisible
+  useEffect(() => {
+    if (historyVisible && historyStaleRef.current) void refreshHistory()
+  }, [historyVisible])
 
   async function refreshNaturePhotos(): Promise<void> {
     if (photoRefreshBusy) return
@@ -853,7 +863,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   useEffect(() => {
     const unsubscribeState = window.api.browser.onState(setBrowser)
     const unsubscribeTabs = window.api.browser.tabs.onChange(setTabs)
-    const unsubscribeHistory = window.api.browser.history.onChange(() => { void refreshHistory() })
+    let historyTimer: number | undefined
+    const unsubscribeHistory = window.api.browser.history.onChange(() => {
+      historyStaleRef.current = true
+      if (!historyVisibleRef.current) return
+      window.clearTimeout(historyTimer)
+      historyTimer = window.setTimeout(() => { void refreshHistory() }, 250)
+    })
     const applyPreferences = (preferences: BrowserPreferencesSnapshot): void => {
       setSearchEngine(preferences.searchEngine)
       setSearchEngineLoaded(true)
@@ -879,7 +895,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       }
     })
     void window.api.browser.tabs.get().then(setTabs)
-    void refreshHistory()
     void window.api.browser.proxy.get().then((settings) => {
       setProxy(settings)
       setAppliedProxy(settings)
@@ -888,6 +903,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       unsubscribeState()
       unsubscribeTabs()
       unsubscribeHistory()
+      window.clearTimeout(historyTimer)
       unsubscribePreferences()
       unsubscribeFocusAddress()
     }
@@ -914,10 +930,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [sidebarMode, activeOrigin])
 
   useEffect(() => {
+    // Network rows are only streamed while someone is looking at them; capture itself starts on first open.
+    if (surface !== 'content' || sidebarMode !== 'network') return
     const unsubscribeNetwork = window.api.browser.network.onChange(setNetworkRequests)
-    void window.api.browser.network.get().then(setNetworkRequests)
-    return unsubscribeNetwork
-  }, [])
+    void window.api.browser.network.watch(true).then(setNetworkRequests)
+    return () => {
+      unsubscribeNetwork()
+      void window.api.browser.network.watch(false)
+    }
+  }, [surface, sidebarMode === 'network'])
 
   useEffect(() => {
     const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc)
@@ -1259,7 +1280,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               />
             </label>
             <div className="history-list" aria-label="Recent browsing history">
-              {filteredHistory.map((entry) => (
+              {filteredHistory.slice(0, historyQuery ? 400 : 250).map((entry) => (
                 <button className="history-item" key={entry.id} type="button" onClick={() => void openHistoryEntry(entry)} title={entry.url}>
                   <strong>{entry.title}</strong>
                   <span className="history-host">{historyHost(entry.url)}</span>
@@ -1414,6 +1435,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onFocus={(event) => {
                     event.currentTarget.select()
                     setSuggestionsOpen(true)
+                    if (historyStaleRef.current) void refreshHistory()
                   }}
                   onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
                   onKeyDown={handleAddressKeyDown}

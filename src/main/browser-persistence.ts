@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { cancelDeferredWrite, deferWrite } from './deferred-writes'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -99,7 +100,7 @@ export function saveBrowserSiteFavicon(originInput: unknown, iconInput: unknown)
     if (!oldest) break
     cachedSiteIcons.delete(oldest)
   }
-  writeJson(SITE_ICON_CACHE_FILE, { version: 1, icons: Object.fromEntries(cachedSiteIcons) })
+  deferWrite('site-icons', () => writeJson(SITE_ICON_CACHE_FILE, { version: 1, icons: Object.fromEntries(cachedSiteIcons) }), 2000)
   return icon
 }
 
@@ -112,11 +113,14 @@ export function loadBrowserSession(): SavedBrowserSession {
 export function saveBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): void {
   if (sessionPersistenceDisabled) return
   const saved = normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
-  writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
+  deferWrite('session', () => {
+    if (!sessionPersistenceDisabled) writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
+  }, 600)
 }
 
 /** Clear the on-disk restore list without closing current tabs or re-saving them during this run. */
 export function clearSavedBrowserSession(): boolean {
+  cancelDeferredWrite('session')
   const cleared = writeJson(SESSION_FILE, { version: 1, tabs: [], activeIndex: 0, pinnedTabs: [] })
   if (cleared) sessionPersistenceDisabled = true
   return cleared

@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { cancelDeferredWrite, deferWrite } from './deferred-writes'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -49,6 +50,10 @@ function loadHistory(): void {
 }
 
 function persistHistory(): void {
+  deferWrite('history', writeHistory, 1500)
+}
+
+function writeHistory(): void {
   const path = historyPath()
   const directory = app.getPath('userData')
   const temporaryPath = `${path}.tmp`
@@ -102,5 +107,7 @@ export function updateLatestVisitFavicon(url: string, faviconUrl: string): void 
 export function clearBrowsingHistory(): void {
   loadHistory()
   entries = []
-  persistHistory()
+  // Clearing is a privacy action: hit the disk now rather than in a second.
+  cancelDeferredWrite('history')
+  writeHistory()
 }

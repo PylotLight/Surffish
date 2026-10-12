@@ -71,6 +71,11 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
-    plugins: [react()]
+    plugins: [react()],
+    build: {
+      // Three renderer surfaces each parse this bundle at launch; ship it minified.
+      minify: true,
+      cssMinify: true
+    }
   }
 })
