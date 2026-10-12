@@ -9,6 +9,7 @@ import {
   BRAMBLE_BACKGROUND_WORKER_SOURCE,
   BRAMBLE_BROWSER_ALIAS_FILE,
   BRAMBLE_BROWSER_ALIAS_SOURCE,
+  adaptBrambleAutofillSettleDelay,
   adaptBramblePopupViewport,
   adaptBrambleFirefoxManifest,
   injectBrambleBrowserAlias,
@@ -74,10 +75,19 @@ test('provides extension-context browser alias and wraps the original worker aft
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /typeof globalThis\.document === 'undefined'/)
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /surffishBramble/)
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /openOptionsPage/)
+  assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /writeClipboard/)
+  assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /clipboard, 'writeText'/)
   assert.match(BRAMBLE_BROWSER_ALIAS_SOURCE, /hasDocument: async \(\) => true/)
   assert.match(BRAMBLE_BACKGROUND_WORKER_SOURCE, /import '\.\/surffish-bramble-browser-alias\.js'/)
   assert.match(BRAMBLE_BACKGROUND_WORKER_SOURCE, /import '\.\/background\.js'/)
   assert.doesNotMatch(BRAMBLE_BACKGROUND_WORKER_SOURCE, /\bawait\b/)
+})
+
+test('shortens only the picker settle delay and leaves visibility policy unchanged', () => {
+  const source = 'var oi=500,si=-1/0;function ci(){si=performance.now()}function li(){return performance.now()-si<oi}'
+  const adapted = adaptBrambleAutofillSettleDelay(source)
+  assert.match(adapted, /var oi=100,si=-1\/0/)
+  assert.throws(() => adaptBrambleAutofillSettleDelay('unexpected bundle'), /unsupported autofill click guard/)
 })
 
 test('injects the browser alias before Bramble extension-page module scripts, idempotently', () => {
@@ -109,6 +119,10 @@ test('stages an adapted private copy and leaves the selected Firefox build uncha
   }
   writeFileSync(join(source, 'manifest.json'), `${JSON.stringify(sourceManifest, null, 2)}\n`)
   writeFileSync(join(source, 'background.js'), 'globalThis.__brambleTestBackground = true;\n')
+  const sourceContentScript = 'var oi=500,si=-1/0;function ci(){si=performance.now()}function li(){return performance.now()-si<oi}'
+  const sourceAutofillUi = 'var O=typeof IntersectionObserver<`u`&&`trackVisibility`in IntersectionObserver.prototype,k=!1;function A(){if(!O||k)return!0;return false}'
+  writeFileSync(join(source, 'content-script.js'), sourceContentScript)
+  writeFileSync(join(source, 'autofill-ui.js'), sourceAutofillUi)
   const sourcePopup = '<html><head><title>Vault</title></head><body><script type="module" src="./popup.js"></script></body></html>'
   writeFileSync(join(source, 'popup.html'), sourcePopup)
 
@@ -122,7 +136,11 @@ test('stages an adapted private copy and leaves the selected Firefox build uncha
     assert.match(readFileSync(join(target, BRAMBLE_BACKGROUND_WORKER_FILE), 'utf8'), /background\.js/)
     assert.match(readFileSync(join(target, 'popup.html'), 'utf8'), /surffish-bramble-browser-alias\.js/)
     assert.match(readFileSync(join(target, 'popup.html'), 'utf8'), /data-surffish-bramble-viewport/)
+    assert.match(readFileSync(join(target, 'content-script.js'), 'utf8'), /var oi=100,si=-1\/0/)
+    assert.equal(readFileSync(join(target, 'autofill-ui.js'), 'utf8'), sourceAutofillUi)
     assert.equal(readFileSync(join(source, 'manifest.json'), 'utf8'), `${JSON.stringify(sourceManifest, null, 2)}\n`)
+    assert.equal(readFileSync(join(source, 'content-script.js'), 'utf8'), sourceContentScript)
+    assert.equal(readFileSync(join(source, 'autofill-ui.js'), 'utf8'), sourceAutofillUi)
     assert.equal(readFileSync(join(source, 'popup.html'), 'utf8'), sourcePopup)
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })

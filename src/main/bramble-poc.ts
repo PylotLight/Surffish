@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, net, screen, type BaseWindow, type WebContents } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, net, screen, type BaseWindow, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -323,6 +323,7 @@ async function ensureOffscreenDocument(): Promise<void> {
     parent: mainWindow(),
     webPreferences: {
       session: getBrowserSession(),
+      preload: resolveBramblePreload(),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -762,6 +763,16 @@ export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | nul
 
 export function isBrambleUiWindow(win: BrowserWindow | null): boolean {
   return !!win && win === popupWindow
+}
+
+/** Allow clipboard writes only from Bramble's popup, hidden clear-clipboard host, or extension tabs. */
+export function isBrambleClipboardSource(win: BrowserWindow | null, contents: WebContents): boolean {
+  if (!loadedExtension || contents.isDestroyed() || !isBrambleExtensionUrl(contents.getURL(), loadedExtension.url)) return false
+  return win === popupWindow || win === offscreenWindow || isBrambleExtensionTab(contents)
+}
+
+export function writeBrambleClipboardText(text: string): void {
+  clipboard.writeText(text)
 }
 
 export function disposeBramblePoc(): void {

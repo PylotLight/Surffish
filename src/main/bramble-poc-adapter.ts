@@ -4,6 +4,9 @@ import { basename, join, resolve } from 'node:path'
 export const BRAMBLE_BROWSER_ALIAS_FILE = 'surffish-bramble-browser-alias.js'
 export const BRAMBLE_BACKGROUND_WORKER_FILE = 'surffish-bramble-background.js'
 
+const PICKER_SETTLE_GUARD = /var ([\w$]+)=500,([\w$]+)=-1\/0;function [\w$]+\(\)\{\2=performance\.now\(\)\}function [\w$]+\(\)\{return performance\.now\(\)-\2<\1\}/g
+const PICKER_SETTLE_MS = 100
+
 export type JsonRecord = Record<string, unknown>
 
 function record(value: unknown): JsonRecord {
@@ -14,6 +17,20 @@ function record(value: unknown): JsonRecord {
 
 export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Shorten only the fixed picker settle delay. Bramble's original browser-visibility
+ * behavior and the content script's final geometry/hit test remain untouched.
+ */
+export function adaptBrambleAutofillSettleDelay(contentScript: string): string {
+  const settleMatches = [...contentScript.matchAll(PICKER_SETTLE_GUARD)]
+  if (settleMatches.length !== 1) {
+    throw new Error('The Bramble release uses an unsupported autofill click guard; refusing an unsafe or incomplete adaptation.')
+  }
+  // 100 ms still rejects clicks already in flight when a page opens or moves the picker,
+  // while avoiding the upstream half-second no-op on a suggestion the user has aimed at.
+  return contentScript.replace(PICKER_SETTLE_GUARD, (guard) => guard.replace('=500,', `=${PICKER_SETTLE_MS},`))
 }
 
 /** Accept extension UI navigation only when it remains on Bramble's loaded extension origin. */
@@ -109,6 +126,14 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
     } catch {}
   }
   const brambleBridge = globalThis.surffishBramble;
+  if (typeof globalThis.document !== 'undefined' && typeof brambleBridge?.writeClipboard === 'function' && globalThis.navigator?.clipboard) {
+    try {
+      Object.defineProperty(globalThis.navigator.clipboard, 'writeText', {
+        configurable: true,
+        value: (text) => brambleBridge.writeClipboard(text)
+      });
+    } catch {}
+  }
   if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime &&
       typeof brambleBridge?.openOptionsPage === 'function' && typeof extensionApi.runtime.openOptionsPage === 'function') {
     try {
@@ -191,6 +216,14 @@ export function stageBrambleFirefoxBuild(sourceDirectory: string, targetDirector
   writeFileSync(join(stagedDirectory, 'manifest.json'), `${JSON.stringify(adaptedManifest, null, 2)}\n`)
   writeFileSync(join(stagedDirectory, BRAMBLE_BROWSER_ALIAS_FILE), BRAMBLE_BROWSER_ALIAS_SOURCE)
   writeFileSync(join(stagedDirectory, BRAMBLE_BACKGROUND_WORKER_FILE), BRAMBLE_BACKGROUND_WORKER_SOURCE)
+
+  const contentScriptPath = join(stagedDirectory, 'content-script.js')
+  if (!existsSync(contentScriptPath)) {
+    throw new Error('The selected Bramble build is missing its content-script bundle.')
+  }
+  const contentScript = adaptBrambleAutofillSettleDelay(readFileSync(contentScriptPath, 'utf8'))
+  writeFileSync(contentScriptPath, contentScript)
+
   for (const htmlPath of listHtmlFiles(stagedDirectory)) {
     const html = readFileSync(htmlPath, 'utf8')
     let adapted = injectBrambleBrowserAlias(html)

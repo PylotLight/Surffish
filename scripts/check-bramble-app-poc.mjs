@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash, createPublicKey, randomBytes, verify as verifySignature } from 'node:crypto'
 import { createServer as createHttpServer } from 'node:http'
 import { createServer } from 'node:net'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -61,6 +61,14 @@ function getFreePort() {
 
 function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
+}
+function readTestClipboard() {
+  if (process.platform !== 'linux') return null
+  return execFileSync('xclip', ['-selection', 'clipboard', '-out'], {
+    encoding: 'utf8',
+    timeout: 5000,
+    stdio: ['ignore', 'pipe', 'ignore']
+  })
 }
 
 async function waitFor(description, operation, timeoutMs = 30_000) {
@@ -220,8 +228,8 @@ async function findVisibleLoginSuggestion(connection, name, username, password) 
   if (!Array.isArray(border) || border.length < 8 || box.model?.width <= 0 || box.model?.height <= 0) return null
   return {
     point: {
-      x: (border[0] + border[2] + border[4] + border[6]) / 4,
-      y: (border[1] + border[3] + border[5] + border[7]) / 4
+      x: Math.round((border[0] + border[2] + border[4] + border[6]) / 4),
+      y: Math.round((border[1] + border[3] + border[5] + border[7]) / 4)
     }
   }
 }
@@ -424,12 +432,30 @@ try {
     const openOptionsPage = api?.runtime?.openOptionsPage;
     return {
       preloadBridge: typeof globalThis.surffishBramble?.openOptionsPage,
+      clipboardBridge: typeof globalThis.surffishBramble?.writeClipboard,
+      clipboardApi: typeof navigator.clipboard,
+      clipboardWriteOverridden: !!navigator.clipboard && Object.hasOwn(navigator.clipboard, 'writeText'),
       runtimeMethod: typeof openOptionsPage,
       wrappedForSurffish: typeof openOptionsPage === 'function' && Function.prototype.toString.call(openOptionsPage).includes('brambleBridge'),
       createButton: [...document.querySelectorAll('button')].map((button) => ({ text: button.innerText.trim(), disabled: button.disabled })).find((button) => button.text === 'Create your vault') ?? null
     };
   })()`)
   assert.equal(popupBridge.preloadBridge, 'function')
+  assert.equal(popupBridge.clipboardBridge, 'function')
+  assert.equal(popupBridge.clipboardApi, 'object', 'Bramble popup did not expose the Clipboard API to the adapter.')
+  assert.equal(popupBridge.clipboardWriteOverridden, true, 'Bramble popup did not route Clipboard API writes through Surffish.')
+  const nativeClipboardProbe = await popupConnection.evaluate(`(async () => {
+    try {
+      const accepted = await globalThis.surffishBramble.writeClipboard('surffish-bramble-clipboard-probe')
+      return { accepted, error: null }
+    } catch (error) {
+      return { accepted: false, error: { name: String(error?.name ?? ''), message: String(error?.message ?? '').slice(0, 160) } }
+    }
+  })()`)
+  assert.equal(nativeClipboardProbe.accepted, true, `Bramble's native clipboard bridge failed: ${JSON.stringify(nativeClipboardProbe.error)}`)
+  if (process.platform === 'linux') {
+    assert.equal(readTestClipboard() === 'surffish-bramble-clipboard-probe', true, 'The native Bramble clipboard bridge did not update the system clipboard.')
+  }
   assert.equal(popupBridge.runtimeMethod, 'function')
   assert.equal(popupBridge.wrappedForSurffish, true)
   await clickButtonByText(popupConnection, 'Create your vault')
@@ -700,6 +726,33 @@ try {
   const syntheticEntrySaved = await waitFor('Bramble synthetic login saved through the real editor', async () =>
     popupConnection.evaluate(`document.body?.innerText.includes(${JSON.stringify(syntheticLoginName)})`), 20_000)
   assert.equal(syntheticEntrySaved, true)
+  const copyFieldsAlreadyVisible = await popupConnection.evaluate(`(() =>
+    [...document.querySelectorAll('button')].some((button) => button.getAttribute('aria-label') === 'Copy username') &&
+    [...document.querySelectorAll('button')].some((button) => button.getAttribute('aria-label') === 'Copy password')
+  )()`)
+  if (!copyFieldsAlreadyVisible) {
+    const openLoginSelector = `button[aria-label=${JSON.stringify(`Open ${syntheticLoginName}`)}]`
+    await waitFor('the saved Bramble login row', async () => popupConnection.evaluate(`!!document.querySelector(${JSON.stringify(openLoginSelector)})`), 10_000)
+    await clickElementBySelector(popupConnection, openLoginSelector)
+  }
+  await waitFor('Bramble login detail copy controls', async () => popupConnection.evaluate(`(() =>
+    [...document.querySelectorAll('button')].some((button) => button.getAttribute('aria-label') === 'Copy username') &&
+    [...document.querySelectorAll('button')].some((button) => button.getAttribute('aria-label') === 'Copy password')
+  )()`), 10_000)
+  await clickElementBySelector(popupConnection, 'button[aria-label="Copy username"]')
+  let usernameClipboardPassed = null
+  if (process.platform === 'linux') {
+    usernameClipboardPassed = await waitFor('the system clipboard to receive the copied Bramble username', async () =>
+      readTestClipboard() === syntheticUsername, 5000)
+    assert.equal(usernameClipboardPassed, true, 'Bramble reported username copied, but the system clipboard did not contain it.')
+  }
+  await clickElementBySelector(popupConnection, 'button[aria-label="Copy password"]')
+  let passwordClipboardPassed = null
+  if (process.platform === 'linux') {
+    passwordClipboardPassed = await waitFor('the system clipboard to receive the copied Bramble password', async () =>
+      readTestClipboard() === syntheticPassword, 5000)
+    assert.equal(passwordClipboardPassed, true, 'Bramble reported password copied, but the system clipboard did not contain it.')
+  }
   const indexedLogin = await popupConnection.evaluate(`(async (expectedName, expectedUsername) => {
     const response = await browser.runtime.sendMessage({ type: 'AUTOFILL_FIND', payload: { hostname: '127.0.0.1', hasLogin: true } })
     const matches = Array.isArray(response?.data?.logins) ? response.data.logins : []
@@ -707,7 +760,7 @@ try {
   })(${JSON.stringify(syntheticLoginName)}, ${JSON.stringify(syntheticUsername)})`)
   assert.equal(indexedLogin.accepted, true, 'Bramble rejected the disposable extension-page index query.')
   assert.equal(indexedLogin.containsSyntheticLogin, true, 'Bramble did not index the login saved through its real editor for the test host.')
-  autofillResults = { indexedLogin: indexedLogin.containsSyntheticLogin }
+  autofillResults = { indexedLogin: indexedLogin.containsSyntheticLogin, usernameClipboardPassed, passwordClipboardPassed }
 
   await browserConnection.send('Target.closeTarget', { targetId: vaultPopupTarget.id })
   popupConnection.close()
@@ -728,6 +781,13 @@ try {
       autofillConnection.evaluate(`!!document.querySelector('#username') && !!document.querySelector('#password') && !!document.querySelector('#submit-login')`), 10_000)
     assert.equal(formReady, true)
     await autofillConnection.send('Runtime.enable')
+    await autofillConnection.evaluate(`(() => {
+      globalThis.__surffishInputProbe = [];
+      window.addEventListener('mousedown', (event) => globalThis.__surffishInputProbe.push({ trusted: event.isTrusted, targetId: event.target?.id ?? '' }), { capture: true });
+    })()`)
+    await clickElementBySelector(autofillConnection, '#submit-login')
+    const pageInputProbe = await autofillConnection.evaluate('globalThis.__surffishInputProbe ?? []')
+    assert.equal(pageInputProbe.some((event) => event.trusted && event.targetId === 'submit-login'), true, 'The smoke harness did not deliver a trusted click to the local form page.')
     const pageFrameTree = await autofillConnection.send('Page.getFrameTree')
     const contentContext = await waitFor('Bramble isolated-world content script on the local form', async () =>
       autofillConnection.executionContexts.find((context) => context.origin?.startsWith('chrome-extension://') && context.auxData?.frameId === pageFrameTree.frameTree.frame.id && context.auxData?.isDefault === false), 8_000)
@@ -777,9 +837,12 @@ try {
       const border = hostBox?.model?.border
       const visiblePicker = Boolean(Array.isArray(border) && border.length >= 8 && (hostBox.model?.width ?? 0) > 0 && (hostBox.model?.height ?? 0) > 0)
       if (visiblePicker && indexedLogin.matchCount === 1 && indexedLogin.unlocked && pageState.usernameFieldFocused && pageState.documentHasFocus) {
-        suggestion = { point: { x: (border[0] + border[2] + border[4] + border[6]) / 4, y: (border[1] + border[3] + border[5] + border[7]) / 4 } }
+        // The fallback renderer uses a closed Shadow DOM; DevTools can verify the visible host but
+        // cannot enumerate its row. With exactly one synthetic login in this disposable vault,
+        // the host's visible center is the only safe automation target available.
+        suggestion = { point: { x: Math.round((border[0] + border[2] + border[4] + border[6]) / 4), y: Math.round((border[1] + border[3] + border[5] + border[7]) / 4) } }
       } else {
-        throw new Error(`Bramble indexed the disposable login but no suggestion was selectable: ${JSON.stringify({ indexedLoginCount: indexedLogin.matchCount, vaultUnlocked: indexedLogin.unlocked, ...pageState, pickerHostPresent: Boolean(host), dropdownHasVisibleBounds: visiblePicker, suggestionRowPresent: Boolean(row), autofillUiFramePresent: frameUrls.some((url) => url.includes('autofill-ui.html')), frameCount: frameUrls.length })}`)
+        throw new Error(`Bramble indexed the disposable login but no visible picker host was selectable: ${JSON.stringify({ indexedLoginCount: indexedLogin.matchCount, vaultUnlocked: indexedLogin.unlocked, ...pageState, pickerHostPresent: Boolean(host), dropdownHasVisibleBounds: visiblePicker, suggestionRowPresent: Boolean(row), autofillUiFramePresent: frameUrls.some((url) => url.includes('autofill-ui.html')), frameCount: frameUrls.length })}`)
       }
     }
     const untouchedForm = await autofillConnection.evaluate(`(() => ({
@@ -788,7 +851,48 @@ try {
     }))()`)
     assert.equal(untouchedForm.usernameEmpty && untouchedForm.passwordEmpty, true, 'Bramble filled the local form before a user selected its suggestion.')
     Object.assign(autofillResults, { suggestionShown: true, passwordHiddenUntilSelection: true, noFillBeforeSelection: true })
-    await dispatchMouseClick(autofillConnection, suggestion.point)
+    const pointerPositionedAt = Date.now()
+    await autofillConnection.evaluate(`(() => {
+      globalThis.__surffishClickProbe = [];
+      window.addEventListener('mousedown', (event) => {
+        const target = event.target;
+        globalThis.__surffishClickProbe.push({ trusted: event.isTrusted, tag: target?.tagName ?? '', id: target?.id ?? '' });
+      }, { capture: true });
+    })()`)
+    const clickTargetResult = await autofillConnection.send('DOM.getNodeForLocation', {
+      x: suggestion.point.x,
+      y: suggestion.point.y,
+      includeUserAgentShadowDOM: true,
+      ignorePointerEventsNone: false
+    }).then((node) => ({ node })).catch((error) => ({ error: String(error?.message ?? error).slice(0, 160) }))
+    const clickTarget = clickTargetResult.node ?? null
+    let clickTargetName = null
+    if (clickTarget?.backendNodeId) {
+      const describedTarget = await autofillConnection.send('DOM.describeNode', { backendNodeId: clickTarget.backendNodeId, depth: 1 }).catch(() => null)
+      clickTargetName = describedTarget?.node?.nodeName ?? null
+    }
+    await autofillConnection.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: suggestion.point.x,
+      y: suggestion.point.y
+    })
+    await delay(150)
+    const earlyClickElapsedMs = Date.now() - pointerPositionedAt
+    assert.ok(earlyClickElapsedMs < 500, `The early-click smoke took ${earlyClickElapsedMs} ms, outside Bramble's original 500 ms suppression window.`)
+    await autofillConnection.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: suggestion.point.x,
+      y: suggestion.point.y,
+      button: 'left',
+      clickCount: 1
+    })
+    await autofillConnection.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: suggestion.point.x,
+      y: suggestion.point.y,
+      button: 'left',
+      clickCount: 1
+    })
     let selectedLoginFilled = { usernameMatches: false, passwordMatches: false }
     try {
       selectedLoginFilled = await waitFor('Bramble selected login to populate at least one local form field', async () => {
@@ -799,7 +903,74 @@ try {
         return result.usernameMatches || result.passwordMatches ? result : null
       }, 15_000)
     } catch {}
-    assert.equal(selectedLoginFilled.usernameMatches && selectedLoginFilled.passwordMatches, true, `Bramble autofill field result: username=${selectedLoginFilled.usernameMatches}, password=${selectedLoginFilled.passwordMatches}.`)
+    if (!selectedLoginFilled.usernameMatches || !selectedLoginFilled.passwordMatches) {
+      const pickerDiagnostics = { uiFramePresent: false, uiContextPresent: false, trackVisibilitySupported: null, keyboardHintPresent: false, host: null, clickTargetName, clickTargetError: clickTargetResult.error ?? null, clickPoint: suggestion.point, pageHitAtClickPoint: null, mouseDownEvents: [] }
+      try {
+        pickerDiagnostics.mouseDownEvents = await autofillConnection.evaluate('globalThis.__surffishClickProbe ?? []')
+        pickerDiagnostics.pageHitAtClickPoint = await autofillConnection.evaluate(`(() => {
+          const element = document.elementFromPoint(${JSON.stringify(suggestion.point.x)}, ${JSON.stringify(suggestion.point.y)});
+          return { tag: element?.tagName ?? null, id: element?.id ?? null, class: typeof element?.className === 'string' ? element.className.slice(0, 80) : '' };
+        })()`)
+        const dom = await autofillConnection.send('DOM.getDocument', { depth: -1, pierce: true })
+        const hint = findNode(dom.root, (node) => node.nodeName === 'DIV' && (nodeAttribute(node, 'class') ?? '').split(/\s+/).includes('tp-hint'))
+        pickerDiagnostics.keyboardHintPresent = Boolean(hint)
+        const host = findNode(dom.root, (node) => node.nodeName === 'DIV' && (nodeAttribute(node, 'id') ?? '').startsWith('tp-'))
+        if (host?.nodeId) {
+          const resolvedHost = await autofillConnection.send('DOM.resolveNode', { nodeId: host.nodeId })
+          const hostState = await autofillConnection.send('Runtime.callFunctionOn', {
+            objectId: resolvedHost.object.objectId,
+            functionDeclaration: `function () {
+              const r = this.getBoundingClientRect();
+              const s = getComputedStyle(this);
+              const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+              let opacity = 1;
+              for (let n = this; n; n = n.parentElement) {
+                const cs = getComputedStyle(n);
+                const value = Number.parseFloat(cs.opacity);
+                opacity *= Number.isNaN(value) ? 1 : value;
+              }
+              return {
+                rect: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) },
+                visible: s.visibility === 'visible' && s.display !== 'none',
+                opacity,
+                filter: s.filter,
+                mixBlendMode: s.mixBlendMode,
+                clipPath: s.clipPath,
+                inViewport: r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
+                centerHit: !!top && (top === this || this.contains(top) || top.contains(this)),
+                topTag: top?.tagName ?? null,
+                topId: top?.id ?? null,
+                topClass: typeof top?.className === 'string' ? top.className.slice(0, 80) : ''
+              };
+            }`,
+            returnByValue: true
+          })
+          pickerDiagnostics.host = hostState.result?.value ?? null
+        }
+        const tree = await autofillConnection.send('Page.getFrameTree')
+        const frames = []
+        const collectFrames = (frame) => {
+          if (frame?.frame) frames.push(frame.frame)
+          for (const child of frame?.childFrames ?? []) collectFrames(child)
+        }
+        collectFrames(tree.frameTree)
+        const uiFrame = frames.find((frame) => frame.url.includes('autofill-ui.html'))
+        pickerDiagnostics.uiFramePresent = Boolean(uiFrame)
+        const uiContext = uiFrame && autofillConnection.executionContexts.find((context) => context.auxData?.frameId === uiFrame.id && context.auxData?.isDefault === true)
+        pickerDiagnostics.uiContextPresent = Boolean(uiContext)
+        if (uiContext) {
+          const uiState = await autofillConnection.send('Runtime.evaluate', {
+            expression: `({ trackVisibilitySupported: 'trackVisibility' in IntersectionObserver.prototype, keyboardHintPresent: !!document.querySelector('.tp-hint') })`,
+            contextId: uiContext.id,
+            returnByValue: true
+          })
+          pickerDiagnostics.trackVisibilitySupported = uiState.result?.value?.trackVisibilitySupported ?? null
+          pickerDiagnostics.keyboardHintPresent ||= uiState.result?.value?.keyboardHintPresent === true
+        }
+      } catch {}
+      throw new Error(`Bramble autofill field result: username=${selectedLoginFilled.usernameMatches}, password=${selectedLoginFilled.passwordMatches}; picker diagnostics=${JSON.stringify(pickerDiagnostics)}.`)
+    }
+    autofillResults.earlyClickGuardPassed = earlyClickElapsedMs < 500 && selectedLoginFilled.usernameMatches && selectedLoginFilled.passwordMatches
     autofillResults.usernamePopulated = selectedLoginFilled.usernameMatches
     autofillResults.passwordPopulated = selectedLoginFilled.passwordMatches
     await clickElementBySelector(autofillConnection, '#submit-login')
@@ -1119,6 +1290,9 @@ try {
     lockScreenRendered: lockedScreen.passwordInput,
     passwordUnlockPassed: unlockedAgain.unlocked,
     genuinePasswordAutofillPassed: autofillResults?.suggestionShown === true && autofillResults?.usernamePopulated === true && autofillResults?.passwordPopulated === true,
+    autofillClickInsideSettleWindowPassed: autofillResults?.earlyClickGuardPassed === true,
+    usernameCopiedToSystemClipboard: autofillResults?.usernameClipboardPassed ?? null,
+    passwordCopiedToSystemClipboard: autofillResults?.passwordClipboardPassed ?? null,
     autofillContentScriptQueryPassed: autofillResults?.contentScriptQueryPassed === true,
     autofillSuggestionDidNotExposePassword: autofillResults?.passwordHiddenUntilSelection === true,
     autofillWaitedForUserSelection: autofillResults?.noFillBeforeSelection === true,

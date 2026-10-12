@@ -33,7 +33,7 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
-import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup } from './bramble-poc'
+import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleClipboardSource, isBrambleUiWindow, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, writeBrambleClipboardText } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -286,6 +286,17 @@ export function registerIpc(): void {
       throw new Error('Only a Bramble UI window can open Bramble Setup/Restore.')
     }
     await openBrambleOptionsFromUi(sourceWindow, event.sender)
+    return true
+  })
+  ipcMain.handle('browser:bramble:clipboard-write', (event, value: unknown) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (event.senderFrame !== event.sender.mainFrame || !isBrambleClipboardSource(sourceWindow, event.sender)) {
+      throw new Error('Only a Bramble extension UI page can write to the clipboard.')
+    }
+    if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 1024 * 1024) {
+      throw new Error('The Bramble clipboard text is invalid or exceeds the allowed size.')
+    }
+    writeBrambleClipboardText(value)
     return true
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
