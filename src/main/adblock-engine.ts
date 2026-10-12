@@ -14,7 +14,7 @@
  */
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type Session } from 'electron'
 import type { ElectronBlocker } from '@ghostery/adblocker-electron'
-import { isProtectedVideoDeliveryUrl } from './adblock-policy.ts'
+import { isExtensionExemptRequest, isProtectedVideoDeliveryUrl } from './adblock-policy.ts'
 import { frameStartPayload, frameUpdateStyles, type FrameDomFeatures, type FrameStartPayload } from './adblock-filters.ts'
 
 export { applyFilterEnvironment, buildFilterEngine, frameStartPayload, frameUpdateStyles } from './adblock-filters.ts'
@@ -37,6 +37,27 @@ export interface AdblockSessionHooks {
   isBlockingDisabledForPage(pageUrl: string): boolean
   onRequest?(details: BeforeRequestDetails, response: BeforeRequestResponse, pageUrl: string): void
   onFrameStart?(payload: FrameStartPayload): void
+  /** Hosts installed extensions depend on, which must never be blocked. */
+  getExemptHosts?(): ReadonlySet<string>
+}
+
+const NO_EXEMPT_HOSTS: ReadonlySet<string> = new Set()
+
+function requestExemptionDetails(details: BeforeRequestDetails | HeadersReceivedDetails): { url?: string; referrer?: string; initiator?: string; frameUrl?: string } {
+  const raw = details as unknown as Record<string, unknown>
+  let frameUrl: unknown
+  try {
+    // details.frame is a WebFrameMain that can already be gone.
+    frameUrl = (raw.frame as { url?: unknown } | null | undefined)?.url
+  } catch {
+    frameUrl = undefined
+  }
+  return {
+    url: typeof raw.url === 'string' ? raw.url : undefined,
+    referrer: typeof raw.referrer === 'string' ? raw.referrer : undefined,
+    initiator: typeof raw.initiator === 'string' ? raw.initiator : undefined,
+    frameUrl: typeof frameUrl === 'string' ? frameUrl : undefined
+  }
 }
 
 function topFrameUrl(event: IpcMainEvent | IpcMainInvokeEvent): string {
@@ -92,6 +113,8 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
     }
     if (!engine) return allow()
     if (pageUrl && hooks.isBlockingDisabledForPage(pageUrl)) return allow()
+    // Never block extension resources, extension-originated requests, or hosts extensions rely on.
+    if (isExtensionExemptRequest(requestExemptionDetails(details), hooks.getExemptHosts?.() ?? NO_EXEMPT_HOSTS)) return allow()
     // YouTube serves both ads and wanted video chunks through googlevideo.com.
     // Ads there are removed by scriptlets instead; never risk the stream.
     if (isProtectedVideoDeliveryUrl(details.url)) return allow()
@@ -106,6 +129,7 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
     if (!engine) return callback({})
     const pageUrl = hooks.pageUrlForRequest(details)
     if (pageUrl && hooks.isBlockingDisabledForPage(pageUrl)) return callback({})
+    if (isExtensionExemptRequest(requestExemptionDetails(details), hooks.getExemptHosts?.() ?? NO_EXEMPT_HOSTS)) return callback({})
     engine.onHeadersReceived(details, callback)
   })
 

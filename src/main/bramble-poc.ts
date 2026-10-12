@@ -1,6 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, net, screen, type BaseWindow, type WebContents } from 'electron'
-import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { app, BrowserWindow, clipboard, dialog, screen, type BaseWindow, type WebContents } from 'electron'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BrambleExtensionState, BramblePopupAnchor } from '../shared/types'
@@ -24,6 +23,8 @@ import {
 import { getMainWindow } from './window'
 import { anchoredPopupBounds, centredPopupAnchor } from '../shared/window-geometry'
 import { sendToMainWindowRenderers } from './browser-shell'
+import { createRestrictedFetch } from './restricted-fetch'
+import { activateStagedDirectory, assertExtensionIdentity, extensionWorkerStamp, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
 const BRAMBLE_DATA_DIRECTORY = 'bramble-firefox-poc'
@@ -69,107 +70,12 @@ function isAllowedBrambleReleaseUrl(url: URL): boolean {
   return url.protocol === 'https:' && !url.port && !url.username && !url.password && BRAMBLE_RELEASE_REQUEST_HOSTS.has(url.hostname)
 }
 
-// Session.fetch cancels redirect:'manual' in Electron instead of exposing the 3xx response; net.request preserves the configured session/proxy while leaving each redirect hop inspectable.
-function fetchBrambleReleaseOnce(url: URL, method: string, headers: Headers, signal?: AbortSignal | null): Promise<Response> {
-  return new Promise((resolve, reject) => {
-    const request = net.request({ url: url.toString(), method, session: getBrowserSession() })
-    headers.forEach((value, name) => request.setHeader(name, value))
-    let settled = false
-    const cleanup = (): void => signal?.removeEventListener('abort', onAbort)
-    const resolveOnce = (response: Response): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(response)
-    }
-    const rejectOnce = (error: unknown): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      reject(error instanceof Error ? error : new Error(String(error)))
-    }
-    const onAbort = (): void => {
-      rejectOnce(signal?.reason ?? new DOMException('The request was aborted.', 'AbortError'))
-      request.abort()
-    }
-
-    request.on('error', rejectOnce)
-    request.on('redirect', (statusCode, _redirectMethod, _redirectUrl, responseHeaders) => {
-      const location = Object.entries(responseHeaders).find(([name]) => name.toLowerCase() === 'location')?.[1]?.[0]
-      if (!location) {
-        rejectOnce(new Error('The GitHub release download returned a redirect without a destination.'))
-      } else {
-        const headers = new Headers()
-        headers.set('location', location)
-        resolveOnce(new Response(null, { status: statusCode, headers }))
-      }
-      request.abort()
-    })
-    request.on('response', (response) => {
-      const responseHeaders = new Headers()
-      for (const [name, rawValue] of Object.entries(response.headers)) {
-        if (rawValue === undefined) continue
-        for (const value of Array.isArray(rawValue) ? rawValue : [rawValue]) responseHeaders.append(name, value)
-      }
-      const rawLength = responseHeaders.get('content-length')
-      if (rawLength && Number(rawLength) > MAX_BRAMBLE_RELEASE_RESPONSE_BYTES) {
-        rejectOnce(new Error('The GitHub release response exceeds the allowed download size.'))
-        request.abort()
-        return
-      }
-      const chunks: Buffer[] = []
-      let totalBytes = 0
-      response.on('data', (chunk: Buffer | string) => {
-        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-        totalBytes += bytes.length
-        if (totalBytes > MAX_BRAMBLE_RELEASE_RESPONSE_BYTES) {
-          rejectOnce(new Error('The GitHub release response exceeds the allowed download size.'))
-          request.abort()
-          return
-        }
-        chunks.push(bytes)
-      })
-      response.on('aborted', () => rejectOnce(new Error('The GitHub release response ended unexpectedly.')))
-      response.on('error', rejectOnce)
-      response.on('end', () => {
-        if (settled) return
-        const status = response.statusCode ?? 200
-        const body = [204, 205, 304].includes(status) ? null : Buffer.concat(chunks, totalBytes)
-        resolveOnce(new Response(body, { status, headers: responseHeaders }))
-      })
-    })
-    if (signal) {
-      signal.addEventListener('abort', onAbort, { once: true })
-      if (signal.aborted) {
-        onAbort()
-        return
-      }
-    }
-    request.end()
-  })
-}
-
-async function fetchBrambleRelease(input: string | URL | Request, init?: RequestInit, redirects = 0): Promise<Response> {
-  const requestInput = input instanceof Request ? input : null
-  const url = new URL(requestInput?.url ?? String(input))
-  if (!isAllowedBrambleReleaseUrl(url)) throw new Error('The Bramble release request URL is not an approved GitHub host.')
-  const method = init?.method ?? requestInput?.method ?? 'GET'
-  if (method !== 'GET' && method !== 'HEAD') throw new Error('Bramble release requests must use GET or HEAD.')
-  if (init?.body || requestInput?.body) throw new Error('Bramble release requests cannot send a request body.')
-  const headers = new Headers(requestInput?.headers)
-  if (init?.headers) new Headers(init.headers).forEach((value, name) => headers.set(name, value))
-  const redirectMode = init?.redirect ?? requestInput?.redirect ?? 'follow'
-  const response = await fetchBrambleReleaseOnce(url, method, headers, init?.signal ?? requestInput?.signal)
-  if (response.status < 300 || response.status >= 400) return response
-  if (redirectMode === 'manual') return response
-  if (redirectMode === 'error') throw new Error('The GitHub release endpoint redirected unexpectedly.')
-  if (redirects >= 4) throw new Error('The GitHub release request exceeded the redirect limit.')
-  const location = response.headers.get('location')
-  if (!location) throw new Error('The GitHub release request returned an invalid redirect.')
-  const nextUrl = new URL(location, url)
-  if (!isAllowedBrambleReleaseUrl(nextUrl)) throw new Error('The GitHub release request redirected outside the approved GitHub hosts.')
-  return fetchBrambleRelease(nextUrl, init, redirects + 1)
-}
+const fetchBrambleRelease = createRestrictedFetch({
+  label: 'GitHub release',
+  isAllowedUrl: isAllowedBrambleReleaseUrl,
+  maxResponseBytes: MAX_BRAMBLE_RELEASE_RESPONSE_BYTES,
+  getSession: getBrowserSession
+})
 
 function resolveBramblePreload(): string {
   const base = join(mainDirectory, '../preload/bramble-poc')
@@ -245,30 +151,7 @@ function readSavedBrambleConfig(): SavedBrambleConfig | null {
 }
 
 function saveBrambleConfig(config: SavedBrambleConfig): void {
-  mkdirSync(dirname(configPath()), { recursive: true })
-  const targetPath = configPath()
-  const temporaryPath = `${targetPath}.${randomUUID()}.tmp`
-  const backupPath = `${targetPath}.${randomUUID()}.backup`
-  writeFileSync(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600, flag: 'wx' })
-  let backedUp = false
-  try {
-    if (existsSync(targetPath)) {
-      renameSync(targetPath, backupPath)
-      backedUp = true
-    }
-    renameSync(temporaryPath, targetPath)
-  } catch (error) {
-    if (backedUp && !existsSync(targetPath) && existsSync(backupPath)) renameSync(backupPath, targetPath)
-    rmSync(temporaryPath, { force: true })
-    throw error
-  }
-  if (backedUp) {
-    try {
-      rmSync(backupPath, { force: true })
-    } catch {
-      // The verified new config is already active; a stale backup is harmless.
-    }
-  }
+  writeJsonAtomic(configPath(), config)
 }
 
 function brambleDirectory(relativePath: string): string {
@@ -362,11 +245,9 @@ async function ensureOffscreenDocument(): Promise<void> {
 
 async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?: SavedBrambleConfig): Promise<void> {
   const finalDirectory = brambleDirectory(STAGING_DIRECTORY)
-  const backupDirectory = `${finalDirectory}.backup-${randomUUID()}`
   const previousExtension = loadedExtension
   const previousState = { ...state }
-  let backedUp = false
-  let activated = false
+  let activation: StagedActivation | null = null
   const browserSession = getBrowserSession()
 
   disposePopup()
@@ -377,17 +258,10 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
       browserSession.extensions.removeExtension(previousExtension.id)
       loadedExtension = null
     }
-    if (existsSync(finalDirectory)) {
-      renameSync(finalDirectory, backupDirectory)
-      backedUp = true
-    }
-    renameSync(stagedDirectory, finalDirectory)
-    activated = true
+    activation = activateStagedDirectory(stagedDirectory, finalDirectory)
     const extension = await loadBrambleExtension(finalDirectory)
     loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
-    if (previousExtension && extension.id !== previousExtension.id) {
-      throw new Error('The update would change Bramble’s extension identity. The existing vault copy was left in place.')
-    }
+    if (previousExtension) assertExtensionIdentity(previousExtension.id, extension.id, 'Bramble update (vault copy)')
     await ensureOffscreenDocument()
     const details = extensionDetails(finalDirectory)
     if (configToSave) saveBrambleConfig(configToSave)
@@ -402,13 +276,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
       hostPermissions: details.hostPermissions,
       iconDataUrl: details.iconDataUrl
     })
-    if (backedUp) {
-      try {
-        rmSync(backupDirectory, { recursive: true, force: true })
-      } catch {
-        // Keep the successful install; an unreferenced backup can be cleaned up later.
-      }
-    }
+    activation.commit()
   } catch (error) {
     const originalMessage = error instanceof Error ? error.message : String(error)
     disposePopup()
@@ -422,8 +290,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
       }
       loadedExtension = null
     }
-    if (activated && existsSync(finalDirectory)) rmSync(finalDirectory, { recursive: true, force: true })
-    if (backedUp && existsSync(backupDirectory)) renameSync(backupDirectory, finalDirectory)
+    activation?.rollback()
     let rollbackError = ''
     if (previousExtension && existsSync(finalDirectory)) {
       try {
@@ -561,36 +428,17 @@ function releaseArchivePath(version: string, sha256: string): string {
 
 const BRAMBLE_WORKER_STAMP_FILE = 'worker-stamp'
 
+const BRAMBLE_WORKER_FILES = ['surffish-bramble-background.js', BRAMBLE_BROWSER_ALIAS_FILE, 'background.js'] as const
+
 /** Fingerprint of every script Bramble's background worker loads, to spot a stale registration. */
 export function brambleWorkerStamp(directory: string): string {
-  const hash = createHash('sha256')
-  for (const file of ['surffish-bramble-background.js', BRAMBLE_BROWSER_ALIAS_FILE, 'background.js']) {
-    const path = join(directory, file)
-    hash.update(file).update('\0').update(existsSync(path) ? readFileSync(path) : '').update('\0')
-  }
-  return hash.digest('hex')
+  return extensionWorkerStamp(directory, BRAMBLE_WORKER_FILES)
 }
 
-/**
- * Load Bramble, making sure its background worker runs the scripts on disk. Electron keeps running
- * the previously registered service worker while the extension version is unchanged, so a Surffish
- * shim update (or a restage) never reached Bramble's background. When the worker scripts differ
- * from the last load, drop the stale registration and load again.
- */
+/** Load Bramble with a fresh service worker whenever its worker scripts changed (see extension-staging). */
 async function loadBrambleExtension(directory: string): Promise<Electron.Extension> {
-  const browserSession = getBrowserSession()
-  const stamp = brambleWorkerStamp(directory)
   const stampPath = join(brambleDirectory(BRAMBLE_DATA_DIRECTORY), BRAMBLE_WORKER_STAMP_FILE)
-  const previous = existsSync(stampPath) ? readFileSync(stampPath, 'utf8') : ''
-  let extension = await browserSession.extensions.loadExtension(directory)
-  if (previous !== stamp) {
-    await browserSession.clearStorageData({ origin: extension.url.replace(/\/$/, ''), storages: ['serviceworkers'] })
-    browserSession.extensions.removeExtension(extension.id)
-    extension = await browserSession.extensions.loadExtension(directory)
-    mkdirSync(brambleDirectory(BRAMBLE_DATA_DIRECTORY), { recursive: true })
-    writeFileSync(stampPath, stamp)
-  }
-  return extension
+  return loadExtensionWithFreshWorker(getBrowserSession(), directory, stampPath, BRAMBLE_WORKER_FILES)
 }
 
 async function loadExistingStagedBuild(directory: string): Promise<void> {

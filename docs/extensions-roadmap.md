@@ -1,6 +1,6 @@
 # Extension support roadmap
 
-There is **no general extension manager** in the current build. Electron can load extensions into a persistent session, but supports only a subset of Chrome extension APIs and does not target general Chrome Web Store compatibility. Bramble has its own first-party integration: install/update/version/permissions live under **Settings → Integrations**, while its compact popup is the sole extension-style toolbar action and vault setup remains in Bramble’s UI. This does not make Electron a general Chrome/Firefox extension host. General installed-extension controls, enable/disable/removal, per-extension popup hosting, and permission lifecycle/revocation remain future work.
+Surffish now installs general **Chrome Web Store extensions** (Settings → Integrations, or **Add to Surffish** on a store page), with a static compatibility gate, small compatibility shims, toolbar popups, enable/disable, updates, and removal. See [Chrome Web Store extensions](chrome-web-store-extensions.md); Modern for Hacker News is the first verified extension. Electron still supports only a subset of Chrome extension APIs, so this is not full Chrome compatibility. Bramble keeps its own first-party integration under **Settings → Integrations**. Permission lifecycle/revocation and the remaining API gaps listed in that doc are future work.
 
 ## Password-manager compatibility
 

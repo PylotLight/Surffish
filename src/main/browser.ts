@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, MAX_PINNED_SITES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
@@ -36,9 +37,14 @@ interface BrowserTab {
   pageScrollEdges: BrowserPageScrollEdges
   /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
   pageScale: number
-  brambleExtensionUrl: string | null
-  bramblePreloadPath: string | null
+  /** Extension origin (chrome-extension://id/) when this tab hosts an extension UI page. */
+  extensionPageOrigin: string | null
+  extensionPreloadPath: string | null
+  extensionPageOwner: ExtensionPageOwner | null
 }
+
+/** Who opened an extension UI tab: Bramble's own integration or a Chrome Web Store extension. */
+export type ExtensionPageOwner = 'bramble' | 'web-store'
 interface BrowserPageScrollEdges {
   canScrollLeft: boolean
   canScrollRight: boolean
@@ -86,8 +92,8 @@ function currentUrl(tab: BrowserTab): string {
   return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
 }
 
-function isBrambleExtensionPage(tab: BrowserTab, url: string): boolean {
-  return tab.brambleExtensionUrl !== null && isBrambleExtensionUrl(url, tab.brambleExtensionUrl)
+function isExtensionPage(tab: BrowserTab, url: string): boolean {
+  return tab.extensionPageOrigin !== null && isBrambleExtensionUrl(url, tab.extensionPageOrigin)
 }
 export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
   if (contents.isDestroyed()) return false
@@ -345,7 +351,7 @@ function hibernateTab(tab: BrowserTab): void {
 
 function scheduleTabSleep(tab: BrowserTab): void {
   cancelSleepTimer(tab)
-  if (tabSleepMinutes === 0 || !tab.view || tab.brambleExtensionUrl || tab.id === activeTabId || tab.inactiveSince === null) return
+  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.id === activeTabId || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
   tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
 }
@@ -519,7 +525,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
-  const preload = tab.bramblePreloadPath ?? browserViewPreload
+  const preload = tab.extensionPreloadPath ?? browserViewPreload
   const view = new WebContentsView({
     webPreferences: {
       ...(preload ? { preload } : {}),
@@ -560,13 +566,16 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   }
   contents.setWindowOpenHandler((details) => {
-    if (tab.brambleExtensionUrl && tab.bramblePreloadPath && isBrambleExtensionUrl(details.url, tab.brambleExtensionUrl)) {
-      openBrambleExtensionTab(details.url, tab.brambleExtensionUrl, tab.bramblePreloadPath)
+    if (tab.extensionPageOrigin && tab.extensionPreloadPath && isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)) {
+      openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
       return { action: 'deny' }
     }
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
-      if (details.disposition === 'background-tab') {
+      if (tab.extensionPageOwner === 'web-store') {
+        // Links from an extension's options page open as ordinary Surffish tabs.
+        if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab')) persistOpenTabs()
+      } else if (details.disposition === 'background-tab') {
         openBackgroundTab(target)
       } else if (getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
         const popupTabId = createTab(target, selectedSearchEngine)
@@ -580,12 +589,12 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
   })
   contents.on('will-navigate', (event, url) => {
-    if (isBrambleExtensionPage(tab, url)) return
+    if (isExtensionPage(tab, url)) return
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
     if (handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
-    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) return event.preventDefault()
+    if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url)) return event.preventDefault()
     if (isMainFrame && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
@@ -594,7 +603,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
   })
   contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url))) return
+    if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))) return
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
     tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
@@ -695,14 +704,15 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
-interface BrambleExtensionTabOptions {
+export interface ExtensionPageTabOptions {
   extensionUrl: string
   preloadPath: string
+  owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, brambleExtension?: BrambleExtensionTabOptions): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = brambleExtension && input
+  const target = extensionPage && input
     ? input
     : input === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
@@ -724,8 +734,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     sleepTimer: null,
     pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES },
     pageScale: 1,
-    brambleExtensionUrl: brambleExtension?.extensionUrl ?? null,
-    bramblePreloadPath: brambleExtension?.preloadPath ?? null
+    extensionPageOrigin: extensionPage?.extensionUrl ?? null,
+    extensionPreloadPath: extensionPage?.preloadPath ?? null,
+    extensionPageOwner: extensionPage?.owner ?? null
   }
   tabs.push(tab)
   if (shouldActivate) {
@@ -908,16 +919,17 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId): string |
   return id
 }
 
-/** Open Bramble UI only through this main-process-only path, never through address-bar navigation. */
-export function openBrambleExtensionTab(url: string, extensionUrl: string, preloadPath: string): string | null {
+/** Open extension UI only through this main-process-only path, never through address-bar navigation. */
+export function openExtensionPageTab(url: string, extensionUrl: string, preloadPath: string, owner: ExtensionPageOwner): string | null {
   if (!preloadPath || !isBrambleExtensionUrl(url, extensionUrl)) return null
-  let tab = tabs.find((candidate) => candidate.brambleExtensionUrl === extensionUrl && isBrambleExtensionPage(candidate, currentUrl(candidate)))
+  let tab = tabs.find((candidate) => candidate.extensionPageOrigin === extensionUrl && isExtensionPage(candidate, currentUrl(candidate)))
   if (!tab) {
-    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath })
+    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath, owner })
     if (!id) return null
     tab = getTab(id)
   } else {
-    tab.bramblePreloadPath = preloadPath
+    tab.extensionPreloadPath = preloadPath
+    tab.extensionPageOwner = owner
     if (currentUrl(tab) !== url) {
       tab.lastUrl = url
       tab.pendingUrl = url
@@ -947,16 +959,139 @@ export function openBrambleExtensionTab(url: string, extensionUrl: string, prelo
   return tab.id
 }
 
+/** Open Bramble UI only through this main-process-only path, never through address-bar navigation. */
+export function openBrambleExtensionTab(url: string, extensionUrl: string, preloadPath: string): string | null {
+  return openExtensionPageTab(url, extensionUrl, preloadPath, 'bramble')
+}
+
 export function isBrambleExtensionTab(contents: WebContents): boolean {
   const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
-  return Boolean(tab && isBrambleExtensionPage(tab, currentUrl(tab)))
+  return Boolean(tab && tab.extensionPageOwner === 'bramble' && isExtensionPage(tab, currentUrl(tab)))
+}
+
+/** True when `contents` is a Surffish tab showing a page of the extension at `extensionUrl`. */
+export function isExtensionPageTab(contents: WebContents, extensionUrl: string, owner: ExtensionPageOwner): boolean {
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  return Boolean(tab && tab.extensionPageOwner === owner && tab.extensionPageOrigin === extensionUrl && isExtensionPage(tab, currentUrl(tab)))
 }
 
 /** Close extension-host tabs before replacing or unloading Bramble's extension build. */
 export function closeBrambleExtensionTabs(): void {
   for (const tab of [...tabs]) {
-    if (tab.brambleExtensionUrl) closeBrowserTab(tab.id)
+    if (tab.extensionPageOrigin && tab.extensionPageOwner === 'bramble') closeBrowserTab(tab.id)
   }
+}
+
+/** Close tabs showing pages of one extension (before disabling, updating, or uninstalling it). */
+export function closeExtensionPageTabs(extensionUrl: string): void {
+  for (const tab of [...tabs]) {
+    if (tab.extensionPageOrigin === extensionUrl) closeBrowserTab(tab.id)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// chrome.tabs for Web Store extension pages (popups/options). Electron's own tabs API does not
+// know Surffish's tab model, so the extension shim asks here. Tab IDs are the tab's WebContents id
+// (what content scripts see as sender.tab.id); unloaded tabs get a stable synthetic id.
+
+const syntheticExtensionTabIds = new Map<string, number>()
+let nextSyntheticExtensionTabId = 1_000_000
+
+function extensionTabId(tab: BrowserTab): number {
+  const contents = tab.view?.webContents
+  if (contents && !contents.isDestroyed()) return contents.id
+  let id = syntheticExtensionTabIds.get(tab.id)
+  if (id === undefined) {
+    id = nextSyntheticExtensionTabId++
+    syntheticExtensionTabIds.set(tab.id, id)
+  }
+  return id
+}
+
+function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord {
+  const contents = tab.view?.webContents
+  const live = contents && !contents.isDestroyed()
+  return {
+    id: extensionTabId(tab),
+    index,
+    active: tab.id === activeTabId,
+    pinned: tab.pinned,
+    url: currentUrl(tab),
+    title: pageTitle(tab),
+    faviconUrl: tab.faviconUrl,
+    loading: Boolean(live && contents.isLoading()),
+    sleeping: !live
+  }
+}
+
+function findTabByExtensionId(id: number | undefined): BrowserTab | undefined {
+  if (id === undefined) return getTab()
+  return tabs.find((tab) => extensionTabId(tab) === id)
+}
+
+export function listExtensionTabs(): ExtensionTabRecord[] {
+  return tabs.map((tab, index) => extensionTabRecord(tab, index))
+}
+
+export function getExtensionTab(id: number | undefined): ExtensionTabRecord | null {
+  const tab = findTabByExtensionId(id)
+  return tab ? extensionTabRecord(tab, tabs.indexOf(tab)) : null
+}
+
+export function reloadExtensionTab(id: number | undefined, bypassCache: boolean): boolean {
+  const tab = findTabByExtensionId(id)
+  if (!tab) return false
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed()) {
+    ensureTabLoaded(tab)
+    return true
+  }
+  if (bypassCache) contents.reloadIgnoringCache()
+  else contents.reload()
+  return true
+}
+
+/** Navigate/activate/pin a tab for an extension. `url` must already be checked by the caller. */
+export function updateExtensionTab(id: number | undefined, update: { url?: string; active?: boolean; pinned?: boolean }): ExtensionTabRecord | null {
+  const tab = findTabByExtensionId(id)
+  if (!tab) return null
+  if (typeof update.pinned === 'boolean') setBrowserTabPinned(tab.id, update.pinned)
+  if (update.url) {
+    tab.lastUrl = update.url
+    tab.pendingUrl = update.url
+    tab.error = null
+    const contents = tab.view?.webContents
+    if (contents && !contents.isDestroyed()) void contents.loadURL(update.url).catch(() => {})
+    else if (tab.id === activeTabId || update.active) ensureTabLoaded(tab)
+  }
+  if (update.active) activateTabInternal(tab.id)
+  persistOpenTabs()
+  publishState()
+  return extensionTabRecord(tab, tabs.indexOf(tab))
+}
+
+/** Open a tab for an extension (http(s) or that extension's own page, checked by the caller). */
+export function createExtensionTab(url: string | undefined, active: boolean, extensionPage?: ExtensionPageTabOptions): ExtensionTabRecord | null {
+  const id = extensionPage && url
+    ? openExtensionPageTab(url, extensionPage.extensionUrl, extensionPage.preloadPath, extensionPage.owner)
+    : createTab(url, selectedSearchEngine, active)
+  if (!id) return null
+  persistOpenTabs()
+  const tab = getTab(id)
+  return tab ? extensionTabRecord(tab, tabs.indexOf(tab)) : null
+}
+
+export function removeExtensionTabs(ids: readonly number[]): void {
+  for (const id of ids) {
+    const tab = findTabByExtensionId(id)
+    if (tab) closeBrowserTab(tab.id)
+  }
+}
+
+/** Main-frame WebContents of the active tab, when it is loaded. */
+export function getActiveTabWebContents(): WebContents | null {
+  const contents = getTab()?.view?.webContents
+  return contents && !contents.isDestroyed() ? contents : null
 }
 
 export type TabCommand = 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'reload' | 'close' | 'closeOthers'

@@ -16,7 +16,7 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "bun check",
-    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts scripts/release-version.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/shared/world-cities.test.ts src/renderer/src/views/useTabDragSort.test.ts src/main/renderer-security.test.ts src/main/adblock.test.ts src/main/google-webkit-sign-in.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
+    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts scripts/release-version.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/shared/world-cities.test.ts src/renderer/src/views/useTabDragSort.test.ts src/main/renderer-security.test.ts src/main/adblock.test.ts src/main/google-webkit-sign-in.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts src/main/crx.test.ts src/main/extension-staging.test.ts src/main/web-store-extension-adapter.test.ts src/shared/chrome-web-store.test.ts src/shared/extension-compat.test.ts src/shared/extension-tabs.test.ts",
     "test:electron-security": "electron scripts/electron-security-smoke.cjs",
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
@@ -28,6 +28,7 @@
     "test:bramble-poc": "node --experimental-strip-types scripts/check-bramble-poc.ts",
     "test:bramble-app-poc": "node scripts/check-bramble-app-poc.mjs",
     "probe:electron-extension-real": "electron scripts/electron-real-extension-probe.cjs",
+    "probe:web-store-extension": "bun scripts/fetch-web-store-extension.ts",
     "check:password-extension": "node --experimental-strip-types scripts/check-password-extension.ts",
     "postinstall": "install-electron"
   },

@@ -3069,3 +3069,129 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
+
+/* Chrome Web Store extensions */
+.extension-toolbar-buttons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.extension-toolbar-button {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border: 0;
+}
+.extension-toolbar-button.is-open {
+  background: rgba(255, 255, 255, 0.12);
+}
+.extension-toolbar-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+.extension-toolbar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.store-add-button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: #83dba5;
+  color: #102218;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.store-add-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.extensions-install-form {
+  display: flex;
+  gap: 6px;
+}
+.extensions-install-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 27px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #f2f4f6;
+  font: inherit;
+  font-size: 10px;
+}
+.extensions-install-form .settings-action {
+  flex: 0 0 auto;
+  min-width: 72px;
+}
+.extension-settings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.extension-settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.extension-settings-icon {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.extension-settings-title {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+.extension-settings-title strong {
+  color: rgba(248, 250, 252, 0.88);
+  font-size: 10px;
+  font-weight: 600;
+}
+.extension-compat.is-supported {
+  color: #a4edbd;
+}
+.extension-compat.is-partial {
+  color: #f5d48a;
+}
+.extension-compat.is-unsupported {
+  color: #ffb2b8;
+}
+.extension-gaps {
+  color: rgba(242, 244, 246, 0.6);
+  font-size: 9px;
+}
+.extension-gaps summary {
+  cursor: pointer;
+  color: #f5d48a;
+}
+.extension-gaps ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.extension-settings-actions {
+  flex-wrap: wrap;
+}
+.extension-settings-actions .settings-action {
+  flex: 1 1 110px;
+}

@@ -179,3 +179,39 @@ export function chromeUserAgent(value: string): string {
     .replace(/\s{2,}/g, ' ')
     .trim()
 }
+
+function hostMatches(host: string, exemptHosts: ReadonlySet<string>): boolean {
+  for (const exempt of exemptHosts) {
+    if (host === exempt || host.endsWith(`.${exempt}`)) return true
+  }
+  return false
+}
+
+/**
+ * Requests the ad blocker must leave alone: extension resources (chrome-extension://), requests an
+ * extension page or worker makes, and hosts installed extensions depend on (extensionpay.com for
+ * ExtPay-based extensions, supplied by the extension installer).
+ */
+export function isExtensionExemptRequest(
+  details: { url?: string; referrer?: string; initiator?: string; frameUrl?: string },
+  exemptHosts: ReadonlySet<string>
+): boolean {
+  const sources = [details.url, details.referrer, details.initiator, details.frameUrl]
+  if (sources.some((value) => typeof value === 'string' && value.startsWith('chrome-extension://'))) return true
+  if (exemptHosts.size === 0 || !details.url) return false
+  try {
+    const url = new URL(details.url)
+    if (hostMatches(url.hostname.toLowerCase(), exemptHosts)) return true
+  } catch {
+    return false
+  }
+  // Pages on an exempt host (the extension's payment page) load their own resources unblocked too.
+  if (details.referrer) {
+    try {
+      if (hostMatches(new URL(details.referrer).hostname.toLowerCase(), exemptHosts)) return true
+    } catch {
+      // Not a URL; fall through.
+    }
+  }
+  return false
+}

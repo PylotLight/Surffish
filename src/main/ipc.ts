@@ -35,6 +35,19 @@ import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, remove
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
+import {
+  checkWebStoreExtensionUpdate,
+  getWebStoreExtensionsState,
+  handleExtensionTabsCall,
+  installFromStorePage,
+  installWebStoreExtension,
+  openOptionsFromExtensionPage,
+  openWebStoreExtensionOptions,
+  openWebStoreExtensionPopup,
+  setWebStoreExtensionEnabled,
+  uninstallWebStoreExtension,
+  webStoreExtensionForSender
+} from './web-store-extensions'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -323,6 +336,50 @@ export function registerIpc(): void {
       throw new Error('The Bramble clipboard text is invalid or exceeds the allowed size.')
     }
     writeBrambleClipboardText(value)
+    return true
+  })
+  ipcMain.handle('browser:extensions:get', (event) => {
+    assertMainRenderer(event)
+    return getWebStoreExtensionsState()
+  })
+  ipcMain.handle('browser:extensions:install', async (event, input: unknown) => {
+    assertMainRenderer(event)
+    return installWebStoreExtension(input)
+  })
+  ipcMain.handle('browser:extensions:set-enabled', async (event, id: unknown, enabled: unknown) => {
+    assertMainRenderer(event)
+    return setWebStoreExtensionEnabled(id, enabled)
+  })
+  ipcMain.handle('browser:extensions:uninstall', async (event, id: unknown) => {
+    assertMainRenderer(event)
+    return uninstallWebStoreExtension(id)
+  })
+  ipcMain.handle('browser:extensions:check-update', async (event, id: unknown) => {
+    assertMainRenderer(event)
+    return checkWebStoreExtensionUpdate(id)
+  })
+  ipcMain.handle('browser:extensions:open-popup', (event, id: unknown, anchor: unknown) => {
+    assertMainRenderer(event)
+    return openWebStoreExtensionPopup(id, parseBramblePopupAnchor(anchor))
+  })
+  ipcMain.handle('browser:extensions:open-options', (event, id: unknown) => {
+    assertMainRenderer(event)
+    return openWebStoreExtensionOptions(id)
+  })
+  // From a Web Store extension's own popup/options page (extension-host.cjs).
+  ipcMain.handle('browser:extensions:host-tabs', (event, op: unknown, payload: unknown) => {
+    const entry = webStoreExtensionForSender(event.sender, event.senderFrame)
+    if (!entry) throw new Error('Only an installed extension’s own page can use this bridge.')
+    return handleExtensionTabsCall(entry, op, payload)
+  })
+  ipcMain.handle('browser:extensions:host-options', (event) => {
+    const entry = webStoreExtensionForSender(event.sender, event.senderFrame)
+    if (!entry) throw new Error('Only an installed extension’s own page can use this bridge.')
+    return openOptionsFromExtensionPage(entry)
+  })
+  // "Add to Surffish" on a chromewebstore.google.com detail page (web-store-page.cjs).
+  ipcMain.handle('browser:extensions:store-page-install', async (event) => {
+    await installFromStorePage(event.sender, event.senderFrame)
     return true
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })

@@ -8,6 +8,7 @@ import {
   FILTER_LIST_SOURCES,
   FULL_FILTER_CONFIG,
   isFullFilterConfig,
+  isExtensionExemptRequest,
   isProtectedVideoDeliveryUrl,
   isWebPageUrl,
   prepareFilterListText,
@@ -145,4 +146,18 @@ test('isWebPageUrl accepts only http(s)', () => {
 test('browser user agent drops Electron and app tokens but keeps Chrome', () => {
   const raw = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) surffish/0.1.0 Chrome/152.0.7977.130 Electron/44.7.0 Safari/537.36'
   assert.equal(chromeUserAgent(raw), 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Safari/537.36')
+})
+
+test('the ad blocker never blocks extension resources or hosts extensions rely on', () => {
+  const none: ReadonlySet<string> = new Set()
+  const extPay: ReadonlySet<string> = new Set(['extensionpay.com'])
+  assert.equal(isExtensionExemptRequest({ url: 'chrome-extension://dabkegjlekdcmefifaolmdhnhdcplklo/content.css' }, none), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://ads.example/x.js', referrer: 'chrome-extension://abc/popup.html' }, none), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://ads.example/x.js', frameUrl: 'chrome-extension://abc/options.html' }, none), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://extensionpay.com/extension/x/api/v2/user' }, extPay), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://cdn.extensionpay.com/x.js' }, extPay), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://js.stripe.com/v3', referrer: 'https://extensionpay.com/extension/x/choose-plan' }, extPay), true)
+  assert.equal(isExtensionExemptRequest({ url: 'https://extensionpay.com/x' }, none), false)
+  assert.equal(isExtensionExemptRequest({ url: 'https://extensionpay.com.evil.example/x' }, extPay), false)
+  assert.equal(isExtensionExemptRequest({ url: 'https://doubleclick.net/ad.js', referrer: 'https://news.ycombinator.com/' }, extPay), false)
 })

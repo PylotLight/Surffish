@@ -227,20 +227,20 @@ function crc32(bytes: Buffer): number {
   return (crc ^ 0xffffffff) >>> 0
 }
 
-function normalizedArchivePath(name: string): string {
+function normalizedArchivePath(name: string, label: string): string {
   const portable = name.replaceAll('\\', '/')
   if (!portable || portable.startsWith('/') || portable.startsWith('//') || /^[a-z\d]:/i.test(portable) || portable.includes('\u0000')) {
-    throw new Error('The Bramble ZIP contains an unsafe file path.')
+    throw new Error(`The ${label} ZIP contains an unsafe file path.`)
   }
   const parts = portable.split('/').filter((part) => part !== '' && part !== '.')
-  if (parts.some((part) => part === '..' || part.includes(':'))) throw new Error('The Bramble ZIP contains a path traversal entry.')
+  if (parts.some((part) => part === '..' || part.includes(':'))) throw new Error(`The ${label} ZIP contains a path traversal entry.`)
   const normalized = parts.join('/')
-  if (!normalized) throw new Error('The Bramble ZIP contains an empty file path.')
+  if (!normalized) throw new Error(`The ${label} ZIP contains an empty file path.`)
   return normalized
 }
 
-function readZipEntries(archive: Buffer): { entries: ZipEntry[]; directoryOffset: number } {
-  if (archive.length < 22 || archive.length > MAX_ARCHIVE_BYTES) throw new Error('The Bramble Firefox ZIP has an invalid size.')
+function readZipEntries(archive: Buffer, label: string, maxArchiveBytes: number): { entries: ZipEntry[]; directoryOffset: number } {
+  if (archive.length < 22 || archive.length > maxArchiveBytes) throw new Error(`The ${label} ZIP has an invalid size.`)
   const minimumEocd = Math.max(0, archive.length - 22 - 65_535)
   let eocd = -1
   for (let offset = archive.length - 22; offset >= minimumEocd; offset -= 1) {
@@ -249,7 +249,7 @@ function readZipEntries(archive: Buffer): { entries: ZipEntry[]; directoryOffset
       break
     }
   }
-  if (eocd < 0) throw new Error('The Bramble Firefox ZIP is missing its end-of-directory record.')
+  if (eocd < 0) throw new Error(`The ${label} ZIP is missing its end-of-directory record.`)
   const diskNumber = archive.readUInt16LE(eocd + 4)
   const directoryDisk = archive.readUInt16LE(eocd + 6)
   const diskEntries = archive.readUInt16LE(eocd + 8)
@@ -257,16 +257,16 @@ function readZipEntries(archive: Buffer): { entries: ZipEntry[]; directoryOffset
   const directorySize = archive.readUInt32LE(eocd + 12)
   const directoryOffset = archive.readUInt32LE(eocd + 16)
   if (diskNumber !== 0 || directoryDisk !== 0 || diskEntries !== entryCount || entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
-    throw new Error('The Bramble Firefox ZIP uses an unsupported multi-disk or ZIP64 format.')
+    throw new Error(`The ${label} ZIP uses an unsupported multi-disk or ZIP64 format.`)
   }
-  if (entryCount > MAX_ARCHIVE_FILES || directoryOffset + directorySize !== eocd) throw new Error('The Bramble Firefox ZIP directory is invalid or too large.')
+  if (entryCount > MAX_ARCHIVE_FILES || directoryOffset + directorySize !== eocd) throw new Error(`The ${label} ZIP directory is invalid or too large.`)
 
   const entries: ZipEntry[] = []
   const paths = new Set<string>()
   let totalUncompressed = 0
   let offset = directoryOffset
   for (let index = 0; index < entryCount; index += 1) {
-    if (offset + 46 > eocd || archive.readUInt32LE(offset) !== 0x02014b50) throw new Error('The Bramble Firefox ZIP contains an invalid directory entry.')
+    if (offset + 46 > eocd || archive.readUInt32LE(offset) !== 0x02014b50) throw new Error(`The ${label} ZIP contains an invalid directory entry.`)
     const madeBy = archive.readUInt16LE(offset + 4)
     const flags = archive.readUInt16LE(offset + 8)
     const method = archive.readUInt16LE(offset + 10)
@@ -280,46 +280,60 @@ function readZipEntries(archive: Buffer): { entries: ZipEntry[]; directoryOffset
     const localOffset = archive.readUInt32LE(offset + 42)
     const end = offset + 46 + filenameLength + extraLength + commentLength
     if (end > eocd || compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff || localOffset >= directoryOffset) {
-      throw new Error('The Bramble Firefox ZIP contains an unsupported ZIP64 or truncated entry.')
+      throw new Error(`The ${label} ZIP contains an unsupported ZIP64 or truncated entry.`)
     }
-    if ((flags & 0x0001) !== 0 || (flags & 0x0040) !== 0 || ![0, 8].includes(method)) throw new Error('The Bramble Firefox ZIP uses encryption or an unsupported compression method.')
+    if ((flags & 0x0001) !== 0 || (flags & 0x0040) !== 0 || ![0, 8].includes(method)) throw new Error(`The ${label} ZIP uses encryption or an unsupported compression method.`)
     const originalName = Buffer.from(archive.subarray(offset + 46, offset + 46 + filenameLength))
     let decodedName: string
     try {
       decodedName = new TextDecoder('utf-8', { fatal: true }).decode(originalName)
     } catch {
-      throw new Error('The Bramble Firefox ZIP contains a non-UTF-8 file name.')
+      throw new Error(`The ${label} ZIP contains a non-UTF-8 file name.`)
     }
     const directory = decodedName.endsWith('/') || ((externalAttributes >>> 16) & 0o170000) === 0o040000
     const unixFileType = (madeBy >>> 8) === 3 ? (externalAttributes >>> 16) & 0o170000 : 0
-    if (unixFileType !== 0 && unixFileType !== 0o100000 && unixFileType !== 0o040000) throw new Error('The Bramble Firefox ZIP contains a link or special file.')
-    const name = normalizedArchivePath(decodedName)
+    if (unixFileType !== 0 && unixFileType !== 0o100000 && unixFileType !== 0o040000) throw new Error(`The ${label} ZIP contains a link or special file.`)
+    const name = normalizedArchivePath(decodedName, label)
     const collisionKey = name.toLowerCase()
-    if (paths.has(collisionKey)) throw new Error('The Bramble Firefox ZIP contains duplicate or case-colliding paths.')
+    if (paths.has(collisionKey)) throw new Error(`The ${label} ZIP contains duplicate or case-colliding paths.`)
     paths.add(collisionKey)
     if (uncompressedSize > MAX_FILE_BYTES || compressedSize > MAX_ARCHIVE_BYTES || (directory && uncompressedSize !== 0)) {
-      throw new Error('The Bramble Firefox ZIP contains an oversized or invalid file entry.')
+      throw new Error(`The ${label} ZIP contains an oversized or invalid file entry.`)
     }
     totalUncompressed += uncompressedSize
-    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES) throw new Error('The Bramble Firefox ZIP expands beyond the allowed size.')
+    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES) throw new Error(`The ${label} ZIP expands beyond the allowed size.`)
     entries.push({ name, originalName, directory, method, flags, crc, compressedSize, uncompressedSize, localOffset })
     offset = end
   }
-  if (offset !== directoryOffset + directorySize) throw new Error('The Bramble Firefox ZIP directory size is inconsistent.')
-  if (!entries.some((entry) => !entry.directory && entry.name === 'manifest.json')) throw new Error('The Bramble Firefox ZIP does not contain a root manifest.json.')
+  if (offset !== directoryOffset + directorySize) throw new Error(`The ${label} ZIP directory size is inconsistent.`)
+  if (!entries.some((entry) => !entry.directory && entry.name === 'manifest.json')) throw new Error(`The ${label} ZIP does not contain a root manifest.json.`)
   return { entries, directoryOffset }
+}
+
+export interface ExtractExtensionZipOptions {
+  /** Name used in error messages, e.g. "Bramble Firefox" or "extension package". */
+  label: string
+  /** Skip entries for which this returns true (e.g. the Web Store's `_metadata/`). */
+  skip?: (path: string) => boolean
+  maxArchiveBytes?: number
 }
 
 /** Extract only regular files from a checksum-verified, bounded ZIP; reject links and traversal. */
 export function extractBrambleFirefoxArchive(archiveBytes: Uint8Array, destinationDirectory: string): void {
+  extractExtensionZip(archiveBytes, destinationDirectory, { label: 'Bramble Firefox' })
+}
+
+/** Extract only regular files from a bounded extension ZIP; reject links, traversal, and ZIP64. */
+export function extractExtensionZip(archiveBytes: Uint8Array, destinationDirectory: string, options: ExtractExtensionZipOptions): void {
+  const label = options.label
   const archive = Buffer.from(archiveBytes.buffer, archiveBytes.byteOffset, archiveBytes.byteLength)
-  const { entries, directoryOffset } = readZipEntries(archive)
+  const { entries, directoryOffset } = readZipEntries(archive, label, options.maxArchiveBytes ?? MAX_ARCHIVE_BYTES)
   const destination = resolve(destinationDirectory)
   rmSync(destination, { recursive: true, force: true })
   mkdirSync(destination, { recursive: true })
   for (const entry of entries) {
     const local = entry.localOffset
-    if (local + 30 > archive.length || archive.readUInt32LE(local) !== 0x04034b50) throw new Error('The Bramble Firefox ZIP contains an invalid local file header.')
+    if (local + 30 > archive.length || archive.readUInt32LE(local) !== 0x04034b50) throw new Error(`The ${label} ZIP contains an invalid local file header.`)
     const localFlags = archive.readUInt16LE(local + 6)
     const localMethod = archive.readUInt16LE(local + 8)
     const localCrc = archive.readUInt32LE(local + 14)
@@ -331,12 +345,12 @@ export function extractBrambleFirefoxArchive(archiveBytes: Uint8Array, destinati
     const dataStart = localNameStart + localNameLength + localExtraLength
     const dataEnd = dataStart + entry.compressedSize
     if (dataEnd > directoryOffset || localFlags !== entry.flags || localMethod !== entry.method || (localFlags & 0x0001) !== 0 || !archive.subarray(localNameStart, localNameStart + localNameLength).equals(entry.originalName)) {
-      throw new Error('The Bramble Firefox ZIP local header does not match its directory.')
+      throw new Error(`The ${label} ZIP local header does not match its directory.`)
     }
     if ((entry.flags & 0x0008) === 0 && (localCrc !== entry.crc || localCompressedSize !== entry.compressedSize || localUncompressedSize !== entry.uncompressedSize)) {
-      throw new Error('The Bramble Firefox ZIP local file sizes are inconsistent.')
+      throw new Error(`The ${label} ZIP local file sizes are inconsistent.`)
     }
-    if (entry.directory) continue
+    if (entry.directory || options.skip?.(entry.name)) continue
     const compressed = archive.subarray(dataStart, dataEnd)
     let contents: Buffer
     try {
@@ -344,18 +358,18 @@ export function extractBrambleFirefoxArchive(archiveBytes: Uint8Array, destinati
         ? Buffer.from(compressed)
         : inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.uncompressedSize) })
     } catch (error) {
-      throw new Error(`Could not unpack Bramble file ${entry.name}: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`Could not unpack ${label} file ${entry.name}: ${error instanceof Error ? error.message : String(error)}`)
     }
-    if (contents.length !== entry.uncompressedSize || crc32(contents) !== entry.crc) throw new Error(`Bramble ZIP integrity check failed for ${entry.name}.`)
+    if (contents.length !== entry.uncompressedSize || crc32(contents) !== entry.crc) throw new Error(`${label} ZIP integrity check failed for ${entry.name}.`)
     const outputPath = resolve(destination, ...entry.name.split('/'))
-    if (!outputPath.startsWith(`${destination}${sep}`)) throw new Error('The Bramble Firefox ZIP contains a path outside its installation directory.')
+    if (!outputPath.startsWith(`${destination}${sep}`)) throw new Error(`The ${label} ZIP contains a path outside its installation directory.`)
     mkdirSync(dirname(outputPath), { recursive: true })
     writeFileSync(outputPath, contents, { mode: 0o600, flag: 'wx' })
   }
   try {
-    JSON.parse(readFileSync(join(destination, 'manifest.json'), 'utf8'))
+    JSON.parse(readFileSync(join(destination, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''))
   } catch {
-    throw new Error('The Bramble Firefox ZIP contains an invalid root manifest.json.')
+    throw new Error(`The ${label} ZIP contains an invalid root manifest.json.`)
   }
 }
 
