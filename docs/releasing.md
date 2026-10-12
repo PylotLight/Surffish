@@ -29,6 +29,8 @@ From fish, run Bash explicitly and pass the path to the final notes file:
 bash scripts/publish-macos-release.sh /path/to/approved-release-notes.md
 ```
 
+The helper starts Fish, loads `~/.config/fish/config.fish` (or `$XDG_CONFIG_HOME/fish/config.fish` when set), and routes **every** GitHub CLI operation—including authentication checks—through the `ghp` function defined there. Ensure `ghp` is available after sourcing that config and is authenticated for `PylotLight/Surffish`; the helper does not fall back to invoking `gh` directly. You can check access in Fish first with `ghp auth status --hostname github.com` and `ghp repo view PylotLight/Surffish`.
+
 If the ARM64 ZIP and DMG already exist and must not be rebuilt, pass the full source commit SHA used to build them:
 
 ```fish
@@ -37,9 +39,9 @@ bash scripts/publish-macos-release.sh --reuse-artifacts FULL_40_CHARACTER_SOURCE
 
 The declared artifact source SHA must be the full 40-character lowercase SHA, be an ancestor of the clean current `main` commit at `origin/main`, and have no intervening application/build-file changes (only `docs/` files and this publishing helper may differ). The tag still targets current `origin/main`. Because ZIP/DMG files do not prove their own source commit, reuse mode also requires typing `ARTIFACT SOURCE COMMIT <full-sha>` at a separate interactive prompt to attest that **both** existing artifacts were built from that exact commit. Only after that attestation does the normal `PUBLISH v0.1.0` confirmation appear. A mismatch or any other input cancels before creating a tag or release. Both modes still require running the helper from a native Apple-silicon Mac with Apple's command-line tools.
 
-The script prints the commit, release title, exact two asset names, sizes, checksums, and full notes before it will do anything public. After confirmation it creates and pushes the annotated tag, creates the public GitHub release with **only** `Surffish-0.1.0-mac-arm64.zip` and `Surffish-0.1.0-mac-arm64.dmg`, verifies that exact asset list, then renders `Casks/surffish.rb` from the ZIP checksum and commits/pushes the Cask update to `main`. It does not change or enable GitHub Actions.
+The script prints the commit, release title, exact two asset names, sizes, checksums, and full notes before it will do anything public. The annotated `v0.1.0` tag must already exist and match its pinned tag object and commit; the helper only verifies it and never creates, moves, deletes, or pushes a tag. After confirmation, it creates or resumes the public GitHub release with **only** `Surffish-0.1.0-mac-arm64.zip` and `Surffish-0.1.0-mac-arm64.dmg`, verifies that exact asset list, then renders `Casks/surffish.rb` from the ZIP checksum and commits/pushes the Cask update to `main`. It does not change or enable GitHub Actions.
 
-Requirements: a clean, up-to-date `main` checkout matching `origin/main`, configured Git commit identity, authenticated `gh`, Bun/dependencies, and Xcode Command Line Tools on an Apple-silicon Mac. If dependencies are not installed yet, run `bun install` first. If a publish step fails after the confirmation, inspect the tag/release and current Git status before attempting recovery; the tag or public release may already exist.
+Requirements: a clean, up-to-date `main` checkout matching `origin/main`, configured Git commit identity, Fish with a readable config that defines the authenticated `ghp` function, Bun/dependencies, and Xcode Command Line Tools on an Apple-silicon Mac. If GitHub authentication is missing, use `ghp auth login` from Fish. If dependencies are not installed yet, run `bun install` first. If a publish step fails after the confirmation, inspect the tag/release and current Git status before attempting recovery; the tag or public release may already exist.
 
 After publishing, on a Mac with Homebrew, validate the Cask against the published archives, then install:
 

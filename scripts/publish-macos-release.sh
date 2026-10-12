@@ -9,6 +9,7 @@ TITLE='Surffish 0.1.0 — Security and Session Privacy'
 EXPECTED_TAG_COMMIT='7fd28435d2d4b0ab34987ee4ebc3c8a350ca8de3'
 EXPECTED_TAG_OBJECT='f68b9ea2fbced8ab158f7f23d6329aca90f0b9af'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/fish-ghp.sh"
 ARTIFACT_DIR="$ROOT/release"
 ZIP="$ARTIFACT_DIR/Surffish-${VERSION}-mac-arm64.zip"
 DMG="$ARTIFACT_DIR/Surffish-${VERSION}-mac-arm64.dmg"
@@ -65,13 +66,13 @@ verify_release_record() {
   local assets
   local expected_metadata
 
-  metadata="$(gh release view "$TAG" --repo "$REPO" \
+  metadata="$(surffish_ghp release view "$TAG" --repo "$REPO" \
     --json tagName,name,isDraft,isPrerelease \
     --jq '[.tagName, .name, (.isDraft | tostring), (.isPrerelease | tostring)] | @tsv')" || fail "Could not inspect GitHub release $TAG."
   expected_metadata="$(printf '%s\t%s\tfalse\tfalse' "$TAG" "$TITLE")"
   [[ "$metadata" == "$expected_metadata" ]] || fail "GitHub release $TAG conflicts with the expected title, tag, or public release state."
 
-  assets="$(gh release view "$TAG" --repo "$REPO" --json assets \
+  assets="$(surffish_ghp release view "$TAG" --repo "$REPO" --json assets \
     --template '{{range .assets}}{{.name}}{{"\n"}}{{end}}' | LC_ALL=C sort)" || fail "Could not inspect the assets for GitHub release $TAG."
   [[ "$assets" == "$EXPECTED_ASSETS" ]] || fail "Release $TAG must contain exactly the two approved ARM64 assets. Found:\n$assets"
 }
@@ -115,7 +116,7 @@ NOTES_FILE="$(cd -- "$(dirname -- "$NOTES_FILE")" && pwd)/$(basename -- "$NOTES_
 cd "$ROOT"
 [[ -r "$ROOT/scripts/release-tag-guard.sh" ]] || fail 'The release tag validation helper is missing.'
 source "$ROOT/scripts/release-tag-guard.sh"
-for command_name in git bun gh shasum awk sort unzip ditto hdiutil lipo cmp stat; do
+for command_name in git bun fish shasum awk sort unzip ditto hdiutil lipo cmp stat; do
   require_command "$command_name"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || fail 'Apple PlistBuddy is unavailable; install Xcode Command Line Tools.'
@@ -142,8 +143,8 @@ case "$NORMALIZED_ORIGIN_URL" in
   *) fail 'origin must resolve to the configured PylotLight/Surffish GitHub repository.' ;;
 esac
 
-gh auth status --hostname github.com >/dev/null 2>&1 || fail 'GitHub CLI is not authenticated for github.com; run gh auth login on your Mac, then retry.'
-gh repo view "$REPO" --json nameWithOwner --jq '.nameWithOwner' >/dev/null || fail "GitHub CLI cannot access $REPO."
+surffish_ghp auth status --hostname github.com >/dev/null 2>&1 || fail 'The ghp Fish function is not authenticated for github.com; run ghp auth login in Fish, then retry.'
+surffish_ghp repo view "$REPO" --json nameWithOwner --jq '.nameWithOwner' >/dev/null || fail "The ghp Fish function cannot access $REPO."
 
 git fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 COMMIT="$(git rev-parse HEAD)"
@@ -192,7 +193,7 @@ if ([...expected.values()].some((present) => !present)) {
 
 EXPECTED_ASSETS="$(printf '%s\n%s\n' "$(basename "$ZIP")" "$(basename "$DMG")" | LC_ALL=C sort)"
 RELEASE_MODE='create'
-EXISTING_RELEASE="$(gh release list --repo "$REPO" --json tagName --jq ".[] | select(.tagName == \"$TAG\") | .tagName")" || fail 'Could not check existing GitHub releases.'
+EXISTING_RELEASE="$(surffish_ghp release list --repo "$REPO" --json tagName --jq ".[] | select(.tagName == \"$TAG\") | .tagName")" || fail 'Could not check existing GitHub releases.'
 if [[ -n "$EXISTING_RELEASE" ]]; then
   [[ "$EXISTING_RELEASE" == "$TAG" ]] || fail "A conflicting GitHub release entry exists for $TAG."
   RELEASE_MODE='reuse'
@@ -289,7 +290,7 @@ surffish_validate_existing_tag "$TAG" "$EXPECTED_TAG_COMMIT" "$EXPECTED_TAG_OBJE
 [[ "$(stat -f '%z:%m:%i' "$ZIP")" == "$ZIP_FINGERPRINT" ]] || fail 'The ZIP changed after the confirmation preview; nothing was published.'
 [[ "$(stat -f '%z:%m:%i' "$DMG")" == "$DMG_FINGERPRINT" ]] || fail 'The DMG changed after the confirmation preview; nothing was published.'
 
-CURRENT_RELEASE="$(gh release list --repo "$REPO" --json tagName --jq ".[] | select(.tagName == \"$TAG\") | .tagName")" || fail 'Could not recheck existing GitHub releases.'
+CURRENT_RELEASE="$(surffish_ghp release list --repo "$REPO" --json tagName --jq ".[] | select(.tagName == \"$TAG\") | .tagName")" || fail 'Could not recheck existing GitHub releases.'
 if [[ "$RELEASE_MODE" == 'create' ]]; then
   [[ -z "$CURRENT_RELEASE" ]] || fail "GitHub release $TAG appeared after the preview; refusing to overwrite it. Re-run to inspect and resume only if it matches."
 else
@@ -300,7 +301,7 @@ fi
 PUBLISH_STARTED=1
 if [[ "$RELEASE_MODE" == 'create' ]]; then
   printf '\n[release] Creating the public GitHub release with the two ARM64 assets...\n'
-  gh release create "$TAG" "$ZIP" "$DMG" \
+  surffish_ghp release create "$TAG" "$ZIP" "$DMG" \
     --repo "$REPO" \
     --title "$TITLE" \
     --notes-file "$NOTES_FILE" \
@@ -311,7 +312,7 @@ fi
 
 verify_release_record
 printf '[release] Downloading and comparing the published assets byte-for-byte...\n'
-gh release download "$TAG" --repo "$REPO" --dir "$REMOTE_ASSET_DIR"
+surffish_ghp release download "$TAG" --repo "$REPO" --dir "$REMOTE_ASSET_DIR"
 DOWNLOADED_ASSETS="$(find "$REMOTE_ASSET_DIR" -maxdepth 1 -type f -print | sed 's#^.*/##' | LC_ALL=C sort)"
 [[ "$DOWNLOADED_ASSETS" == "$EXPECTED_ASSETS" ]] || fail "Downloaded release assets did not match the two approved ARM64 files. Found:\n$DOWNLOADED_ASSETS"
 cmp -s "$ZIP" "$REMOTE_ASSET_DIR/$(basename "$ZIP")" || fail 'The published ZIP does not match the validated local ARM64 ZIP.'
