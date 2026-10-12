@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 if (process.platform !== 'darwin') process.exit(0)
 
-const source = join(root, 'native/macos/google-sign-in/main.swift')
+const source = join(root, 'src/native/macos/google-sign-in/main.swift')
 const outputDirectory = join(root, 'out/native')
 const output = join(outputDirectory, 'google-sign-in')
 mkdirSync(outputDirectory, { recursive: true })
