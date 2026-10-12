@@ -710,7 +710,7 @@ export interface ExtensionPageTabOptions {
   owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = extensionPage && input
     ? input
@@ -738,7 +738,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     extensionPreloadPath: extensionPage?.preloadPath ?? null,
     extensionPageOwner: extensionPage?.owner ?? null
   }
-  tabs.push(tab)
+  // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
+  if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
+  else tabs.push(tab)
   if (shouldActivate) {
     if (previous && previous.id !== tab.id) markTabInactive(previous)
     activeTabId = tab.id
@@ -1164,6 +1166,10 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     newBrowserTab()
     return true
   }
+  if (key === 't' && shift) {
+    reopenClosedBrowserTab()
+    return true
+  }
   if ((key === '\\' || key === '|') && shift) {
     toggleTabOverview()
     return true
@@ -1203,6 +1209,28 @@ export function cycleBrowserTab(offset: number): void {
   if (next) activateBrowserTab(next.id)
 }
 
+const MAX_RECENTLY_CLOSED_TABS = 25
+interface RecentlyClosedTab { url: string; index: number; pinned: boolean }
+const recentlyClosedTabs: RecentlyClosedTab[] = []
+
+function rememberClosedTab(tab: BrowserTab, index: number): void {
+  // Extension UI pages need their preload wiring and a blank New Tab isn't worth bringing back.
+  if (tab.extensionPageOrigin) return
+  const url = currentUrl(tab)
+  if (!url || url === SURFFISH_QUICK_LINKS_URL) return
+  recentlyClosedTabs.push({ url, index, pinned: tab.pinned })
+  if (recentlyClosedTabs.length > MAX_RECENTLY_CLOSED_TABS) recentlyClosedTabs.shift()
+}
+
+/** Cmd+Shift+T: bring back the most recently closed tab at its old position. */
+export function reopenClosedBrowserTab(): string | null {
+  const entry = recentlyClosedTabs.pop()
+  if (!entry) return null
+  const id = createTab(entry.url, selectedSearchEngine, true, false, false, entry.pinned, undefined, entry.index)
+  if (id) persistOpenTabs()
+  return id
+}
+
 export function closeBrowserTab(id: string): void {
   const index = tabs.findIndex((tab) => tab.id === id)
   if (index < 0) return
@@ -1211,6 +1239,7 @@ export function closeBrowserTab(id: string): void {
   tabThumbnails.delete(id)
   const wasActive = activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
+  rememberClosedTab(tab, index)
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
   if (wasActive) activeTabId = null
