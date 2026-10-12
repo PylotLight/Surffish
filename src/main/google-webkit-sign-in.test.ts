@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isGoogleSignInPage, parseHelperMessage, isBrambleFillHost, helperFrameArgument, signInContinueUrl, toElectronCookie } from './google-webkit-sign-in-policy.ts'
+import { isGoogleSignInPage, shouldHandOffSignIn, parseHelperMessage, isBrambleFillHost, helperFrameArgument, signInContinueUrl, toElectronCookie } from './google-webkit-sign-in-policy.ts'
 
 test('detects Google sign-in pages only', () => {
   for (const url of [
@@ -60,4 +60,15 @@ test('formats the owner window frame for the helper', () => {
   assert.equal(helperFrameArgument({ x: 10.4, y: 20, width: 1200, height: 800 }), '--frame=10,20,1200,800')
   assert.equal(helperFrameArgument({ x: 0, y: 0, width: 0, height: 800 }), null)
   assert.equal(helperFrameArgument(null), null)
+})
+
+test('lets silent session checks through to the service', () => {
+  const passive = 'https://accounts.google.com/ServiceLogin?passive=1209600&continue=https%3A%2F%2Fchromewebstore.google.com%2F'
+  assert.equal(isGoogleSignInPage(passive), false)
+  assert.equal(shouldHandOffSignIn(passive, false), false)
+  const serviceLogin = 'https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fchromewebstore.google.com%2F'
+  assert.equal(shouldHandOffSignIn(serviceLogin, true), false)
+  assert.equal(shouldHandOffSignIn(serviceLogin, false), true)
+  const identifier = 'https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fchromewebstore.google.com%2F'
+  assert.equal(shouldHandOffSignIn(identifier, true), true)
 })

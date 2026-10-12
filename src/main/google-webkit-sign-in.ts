@@ -11,6 +11,21 @@ import { helperFrameArgument, isBrambleFillHost, parseHelperMessage, toElectronC
 export type GoogleSignInResult = 'signed-in' | 'cancelled' | 'unavailable' | 'failed'
 
 let running: Promise<GoogleSignInResult> | null = null
+let googleSession = false
+let watchingGoogleSession = false
+
+/** Whether the Electron session holds a Google SID, kept current from cookie changes. */
+export function hasGoogleSessionCookie(): boolean {
+  if (!watchingGoogleSession) {
+    watchingGoogleSession = true
+    const session = getBrowserSession()
+    void session.cookies.get({ url: 'https://www.google.com/', name: 'SID' }).then((cookies) => { googleSession = cookies.length > 0 }).catch(() => {})
+    session.cookies.on('changed', (_event, cookie, _cause, removed) => {
+      if (cookie.name === 'SID' && cookie.domain?.replace(/^\./, '') === 'google.com') googleSession = !removed
+    })
+  }
+  return googleSession
+}
 
 function helperPath(): string | null {
   if (process.platform !== 'darwin') return null

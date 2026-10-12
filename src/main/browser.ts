@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { isGoogleSignInPage, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
-import { isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
+import { shouldHandOffSignIn, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
+import { hasGoogleSessionCookie, isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -491,9 +491,11 @@ function resolveBrowserViewPreload(): string | null {
  */
 let lastGoogleSignInImportAt = 0
 const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000
+// The cancelled load a hand-off leaves behind is not an address error.
+const googleHandOffAt = new WeakMap<Electron.WebContents, number>()
 
 function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
-  if (!isGoogleSignInPage(url) || !isWebKitGoogleSignInAvailable()) return false
+  if (!isWebKitGoogleSignInAvailable() || !shouldHandOffSignIn(url, hasGoogleSessionCookie())) return false
   // If Google sends us straight back to sign-in right after an import, it did
   // not accept the session in Electron; don't trap the user in a pop-up loop.
   if (Date.now() - lastGoogleSignInImportAt < GOOGLE_SIGN_IN_LOOP_GUARD_MS) {
@@ -501,6 +503,7 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
     return false
   }
   const continueUrl = signInContinueUrl(url)
+  googleHandOffAt.set(contents, Date.now())
   void runWebKitGoogleSignIn(continueUrl).then((result) => {
     if (contents.isDestroyed()) return
     if (result === 'signed-in') {
@@ -1216,6 +1219,11 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
     if (tab.downloadStartedForCurrentLoad) {
+      tab.error = null
+      publishState()
+      return true
+    }
+    if (message.includes('ERR_ABORTED') && Date.now() - (googleHandOffAt.get(contents) ?? 0) < 5000) {
       tab.error = null
       publishState()
       return true
