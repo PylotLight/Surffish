@@ -9,6 +9,7 @@ import {
   updateBrowserTrackpadScrollEdges,
   updateBrowserPageScale,
   closeBrowserTab,
+  moveBrowserTab,
   getBrowserState,
   getBrowserTabs,
   navigateBrowser,
@@ -139,6 +140,11 @@ export function registerIpc(): void {
   ipcMain.handle('browser:tabs:close', (event, id: string) => {
     assertMainRenderer(event)
     if (typeof id === 'string') closeBrowserTab(id)
+  })
+  ipcMain.handle('browser:tabs:move', (event, id: unknown, beforeId: unknown) => {
+    assertMainRenderer(event)
+    if (typeof id !== 'string' || (beforeId !== null && typeof beforeId !== 'string')) return false
+    return moveBrowserTab(id, beforeId)
   })
   ipcMain.handle('browser:navigate', (event, input: string, engine?: unknown) => {
     assertMainRenderer(event)

@@ -104,6 +104,7 @@ const api = {
       create: (input?: string, engine?: SearchEngineId): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new', input, engine),
       activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
       close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
+      move: (id: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move', id, beforeId),
       onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, tabs: BrowserTabSummary[]): void => callback(tabs)
         ipcRenderer.on('browser:tabs', listener)
