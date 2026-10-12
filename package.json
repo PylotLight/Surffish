@@ -56,8 +56,17 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
         }
       ]
+    },
+    "dmg": {
+      "format": "ULMO"
     }
   },
   "devDependencies": {
