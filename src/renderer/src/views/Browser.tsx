@@ -313,6 +313,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
+  const sidebarPointerInsideRef = useRef(false)
   const sidebarResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null)
   const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
@@ -557,6 +558,26 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setSidebarHovered(true)
   }
 
+  function pointerIsOverSidebar(clientX: number, clientY: number): boolean {
+    const rect = sidebarRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false
+    return clientX >= rect.left && clientX < rect.right && clientY >= rect.top && clientY < rect.bottom
+  }
+
+  function handleSidebarPointerEnter(): void {
+    sidebarPointerInsideRef.current = true
+    revealSidebar()
+  }
+
+  function handleSidebarPointerLeave(event: React.MouseEvent<HTMLElement>): void {
+    // Chromium fires a synthetic mouseleave when this surface's view is hidden or restacked
+    // (opening/closing a tab swaps the New Tab renderer in and out). The pointer hasn't moved,
+    // so it's still over the sidebar: don't treat that as the user leaving.
+    if (pointerIsOverSidebar(event.clientX, event.clientY)) return
+    sidebarPointerInsideRef.current = false
+    scheduleSidebarHide()
+  }
+
   function scheduleSidebarHide(): void {
     if (sidebarResizeRef.current) return
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -576,6 +597,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const nextTarget = event.relatedTarget as Node | null
     if (nextTarget && sidebarRef.current?.contains(nextTarget)) return
     setSidebarFocused(false)
+    // Closing or opening a tab moves focus to the page / address bar. That's not a reason to
+    // collapse while the pointer is still sitting on the sidebar; mouseleave handles the real exit.
+    if (sidebarPointerInsideRef.current) return
     scheduleSidebarHide()
   }
 
@@ -1106,13 +1130,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   return (
     <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}${sidebarResizing ? ' is-sidebar-resizing' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} aria-label="Surffish browser" onMouseMove={(event) => {
       if (!sidebarVisible && event.clientX <= 18) revealSidebar()
-    }} onMouseLeave={surface === 'sidebar' ? scheduleSidebarHide : undefined}>
+    }} onMouseLeave={surface === 'sidebar' ? handleSidebarPointerLeave : undefined}>
       <aside
         ref={sidebarRef}
         className="browser-sidebar"
         aria-label="Browser sidebar"
-        onMouseEnter={revealSidebar}
-        onMouseLeave={scheduleSidebarHide}
+        onMouseEnter={handleSidebarPointerEnter}
+        onMouseLeave={handleSidebarPointerLeave}
         onFocusCapture={keepSidebarVisibleForFocus}
         onBlurCapture={releaseSidebarFocus}
       >

@@ -74,11 +74,21 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
     return list ? Array.from(list.querySelectorAll<HTMLElement>(ITEM_SELECTOR)) : []
   }, [])
 
-  const rememberTops = useCallback((): void => {
+  /**
+   * Snapshot each tab's position in list-content coordinates, so list scrolling or things above
+   * the list changing height can't masquerade as movement. By default this is the layout slot
+   * (offsetTop ignores transforms) — measuring mid-FLIP with getBoundingClientRect would record the
+   * inverted start positions, and the next open/close would replay that stale offset as a jump.
+   * `visual` captures where tabs are drawn right now, for gliding out of a drag.
+   */
+  const rememberTops = useCallback((visual = false): void => {
+    const list = listRef.current
     const next = new Map<string, number>()
+    const listTop = list ? list.getBoundingClientRect().top + list.clientTop - list.scrollTop : 0
     for (const el of items()) {
       const id = el.dataset.browserTabId
-      if (id) next.set(id, el.getBoundingClientRect().top)
+      if (!id) continue
+      next.set(id, visual ? el.getBoundingClientRect().top - listTop : el.offsetTop)
     }
     lastTops.current = next
   }, [items])
@@ -88,7 +98,9 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
   useLayoutEffect(() => {
     if (drag.current?.started) return
     const els = items()
-    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    // A collapsed sidebar view is zero-width; its layout isn't what the user will see, so don't animate from it.
+    const listHidden = (listRef.current?.clientWidth ?? 0) === 0
+    const reduceMotion = listHidden || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     const moved: HTMLElement[] = []
     for (const el of els) {
       el.style.transition = 'none'
@@ -99,7 +111,7 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
       const id = el.dataset.browserTabId
       const before = id ? lastTops.current.get(id) : undefined
       if (before === undefined || reduceMotion) continue
-      const delta = before - el.getBoundingClientRect().top
+      const delta = before - el.offsetTop
       if (Math.abs(delta) < 0.5) continue
       el.style.transform = `translateY(${delta}px)`
       moved.push(el)
@@ -123,14 +135,16 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
     if (!state?.started) return
     suppressClick.current = true
     window.setTimeout(() => { suppressClick.current = false }, 0)
-    // Capture where everything is drawn right now (mid-drag) so the FLIP pass glides from there.
-    rememberTops()
     if (commit && state.target !== state.from) {
+      // Capture where everything is drawn right now (mid-drag) so the FLIP pass glides from there.
+      rememberTops(true)
       const order = state.slots.map((slot) => slot.id)
       const next = reorderIds(order, state.from, state.target)
       setPending(next)
       onMove(state.id, next[state.target + 1] ?? null)
     } else {
+      // Order didn't change, so no FLIP pass will refresh the snapshot: keep the layout slots.
+      rememberTops()
       // Snap back with the same easing.
       for (const slot of state.slots) {
         slot.el.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`

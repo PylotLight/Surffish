@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
-import { newBrowserTab, runTabCommand, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
+import { newBrowserTab, reopenClosedBrowserTab, runTabCommand, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
 import { getMainWindow } from './window'
 import { APP_NAME } from '../shared/config'
 
@@ -33,6 +33,7 @@ export function installAppMenu(): void {
       label: 'File',
       submenu: [
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => { newBrowserTab() } },
+        { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: () => { reopenClosedBrowserTab() } },
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
         {
