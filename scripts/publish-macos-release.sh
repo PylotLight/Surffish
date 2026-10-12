@@ -159,7 +159,7 @@ if (( REUSE_EXISTING_ARTIFACTS )); then
   SOURCE_DIFF_FILES="$(git diff --name-only "$ARTIFACT_SOURCE_COMMIT" "$COMMIT")" || fail 'Could not compare the artifact source commit with current origin/main.'
   UNSAFE_SOURCE_DIFF=''
   if [[ -n "$SOURCE_DIFF_FILES" ]]; then
-    UNSAFE_SOURCE_DIFF="$(printf '%s\n' "$SOURCE_DIFF_FILES" | grep -Ev '^(\.gitignore$|docs/|scripts/(publish-macos-release\.sh|release-tag-guard(\.test)?\.sh)$)' || true)"
+    UNSAFE_SOURCE_DIFF="$(printf '%s\n' "$SOURCE_DIFF_FILES" | grep -Ev '^(\.gitignore$|docs/|scripts/(publish-macos-release\.sh|release-tag-guard(\.test)?\.sh|fish-ghp(\.test)?\.sh)$)' || true)"
   fi
   [[ -z "$UNSAFE_SOURCE_DIFF" ]] || fail "Application/build files changed after the artifact source commit; rebuild instead of reusing these artifacts. Changed files:\n$UNSAFE_SOURCE_DIFF"
 fi
