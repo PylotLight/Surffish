@@ -3321,3 +3321,102 @@
 }
 .settings-view .extension-settings-header { display: flex; align-items: center; gap: 12px; }
 .settings-view .extension-settings-title { flex: 1 1 auto; min-width: 0; }
+
+/* ── Private tabs ─────────────────────────────────────────── */
+.private-glyph {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+.private-glyph-eye { fill: rgba(20, 14, 32, 0.9); }
+.sidebar-new-tab-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.sidebar-new-tab-actions .sidebar-new-tab-row { flex: 1 1 auto; min-width: 0; }
+.sidebar-new-private-tab {
+  display: inline-flex;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(200, 180, 255, 0.6);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.sidebar-new-private-tab:hover { background: rgba(170, 140, 255, 0.14); color: #d9cbff; }
+.sidebar-new-private-tab .private-glyph { width: 18px; height: 18px; }
+.tab-item.is-private {
+  background: linear-gradient(120deg, rgba(150, 110, 255, 0.1), rgba(150, 110, 255, 0.03));
+}
+.tab-item.is-private.is-active {
+  border-color: rgba(180, 150, 255, 0.32);
+  background: linear-gradient(120deg, rgba(150, 110, 255, 0.26), rgba(150, 110, 255, 0.1));
+}
+.tab-private-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: #c9b6ff;
+}
+.browser-toolbar.is-private {
+  box-shadow: inset 0 -2px rgba(160, 125, 255, 0.55);
+}
+.omnibox-private-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  background: rgba(150, 110, 255, 0.22);
+  color: #e1d6ff;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.omnibox-private-pill .private-glyph { width: 14px; height: 14px; }
+.new-tab-page.is-private .new-tab-backdrop {
+  filter: saturate(0.35) brightness(0.45) hue-rotate(30deg) blur(var(--new-tab-background-blur, 0px));
+}
+.new-tab-page.is-private::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 30%, rgba(110, 70, 200, 0.35), rgba(12, 8, 24, 0.75) 70%);
+  content: '';
+}
+.new-tab-private-hero {
+  display: flex;
+  max-width: 520px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 28px auto 0;
+  padding: 26px 30px 24px;
+  border: 1px solid rgba(190, 160, 255, 0.22);
+  border-radius: 22px;
+  background: rgba(30, 20, 52, 0.5);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35), inset 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  color: rgba(240, 235, 255, 0.92);
+  text-align: center;
+}
+.new-tab-private-icon {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(160, 125, 255, 0.24);
+  color: #e3d8ff;
+}
+.new-tab-private-icon .private-glyph { width: 30px; height: 30px; }
+.new-tab-private-hero strong { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+.new-tab-private-hero p { margin: 0; color: rgba(230, 222, 255, 0.72); font-size: 13.5px; line-height: 1.55; }

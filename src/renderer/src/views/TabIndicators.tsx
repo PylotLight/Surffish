@@ -63,3 +63,14 @@ export function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.El
     </button>
   )
 }
+
+/** Mask glyph marking private tabs. */
+export function PrivateGlyph(): React.JSX.Element {
+  return (
+    <svg className="private-glyph" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 10.5c0-1.4 1.1-2.5 2.5-2.5h13c1.4 0 2.5 1.1 2.5 2.5v.6c0 3-2.2 5.4-5 5.4-1.6 0-2.6-.9-3.2-2.2-.3-.6-.6-.8-.8-.8s-.5.2-.8.8c-.6 1.3-1.6 2.2-3.2 2.2-2.8 0-5-2.4-5-5.4z" />
+      <circle className="private-glyph-eye" cx="8" cy="11.3" r="1.4" />
+      <circle className="private-glyph-eye" cx="16" cy="11.3" r="1.4" />
+    </svg>
+  )
+}

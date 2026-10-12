@@ -8,6 +8,7 @@ import { getExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
 import {
   applyFilterEnvironment,
   attachAdblockToSession,
+  type AdblockSessionHooks,
   buildFilterEngine,
   type BeforeRequestDetails,
   type BeforeRequestResponse,
@@ -15,7 +16,7 @@ import {
   type HeadersReceivedDetails,
   type ListFetch
 } from './adblock-engine.ts'
-import { getBrowserSession } from './browser-session'
+import { getBrowserSession, onPrivateSessionCreated } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
@@ -191,16 +192,24 @@ function recordFrameStart(payload: FrameStartPayload): void {
   scheduleDiagnosticsBroadcast()
 }
 
-function ensureSessionAttached(): void {
-  if (sessionAttached) return
-  attachAdblockToSession(getBrowserSession(), {
+function adblockHooks(): AdblockSessionHooks {
+  return {
     getEngine: () => activeBlocker,
     pageUrlForRequest: requestingPageUrl,
     isBlockingDisabledForPage,
     onRequest: recordRequest,
     onFrameStart: recordFrameStart,
     getExemptHosts: getExtensionAdblockExemptHosts
-  }, resolveFramePreload())
+  }
+}
+
+function ensureSessionAttached(): void {
+  if (sessionAttached) return
+  attachAdblockToSession(getBrowserSession(), adblockHooks(), resolveFramePreload())
+  // Private tabs get the same filtering; the engine reference is shared, so refreshes cover both.
+  onPrivateSessionCreated((privateSession) => {
+    attachAdblockToSession(privateSession, adblockHooks(), resolveFramePreload())
+  })
   sessionAttached = true
 }
 

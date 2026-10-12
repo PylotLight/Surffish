@@ -10,6 +10,7 @@ import {
   updateBrowserPageScale,
   closeBrowserTab,
   setBrowserTabMuted,
+  newPrivateBrowserTab,
   moveBrowserTab,
   getBrowserState,
   getBrowserTabs,
@@ -146,6 +147,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:tabs:new', (event, input?: string, engine?: unknown) => {
     assertMainRenderer(event)
     return newBrowserTab(typeof input === 'string' ? input : undefined, isSearchEngineId(engine) ? engine : undefined)
+  })
+  ipcMain.handle('browser:tabs:new-private', (event, input?: unknown) => {
+    assertMainRenderer(event)
+    return newPrivateBrowserTab(typeof input === 'string' ? input : undefined)
   })
   ipcMain.handle('browser:tabs:activate', (event, id: string) => {
     assertMainRenderer(event)

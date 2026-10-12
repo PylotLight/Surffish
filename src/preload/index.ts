@@ -103,6 +103,7 @@ const api = {
     tabs: {
       get: (): Promise<BrowserTabSummary[]> => ipcRenderer.invoke('browser:tabs:get'),
       create: (input?: string, engine?: SearchEngineId): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new', input, engine),
+      createPrivate: (input?: string): Promise<string | null> => ipcRenderer.invoke('browser:tabs:new-private', input),
       activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
       close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
       move: (id: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move', id, beforeId),

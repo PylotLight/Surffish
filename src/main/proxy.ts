@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { BrowserProxySettings, BrowserProxyTestResult } from '../shared/types'
 import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../shared/persistence'
-import { getBrowserSession } from './browser-session'
+import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
@@ -50,27 +50,43 @@ function persistSettings(settings: BrowserProxySettings): void {
   writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 })
 }
 
+function proxyConfig(settings: BrowserProxySettings): Electron.ProxyConfig {
+  return settings.enabled
+    ? {
+        mode: 'fixed_servers',
+        proxyRules: `socks5://${settings.host.includes(':') ? `[${settings.host}]` : settings.host}:${settings.port}`,
+        proxyBypassRules: '<local>'
+      }
+    : { mode: 'direct' }
+}
+
+async function applyToSession(target: Electron.Session, settings: BrowserProxySettings): Promise<void> {
+  await target.setProxy(proxyConfig(settings))
+  await target.closeAllConnections()
+}
+
 async function configureSession(settings: BrowserProxySettings): Promise<void> {
-  if (settings.enabled) {
-    await getBrowserSession().setProxy({
-      mode: 'fixed_servers',
-      proxyRules: `socks5://${settings.host.includes(':') ? `[${settings.host}]` : settings.host}:${settings.port}`,
-      proxyBypassRules: '<local>'
-    })
-  } else {
-    await getBrowserSession().setProxy({ mode: 'direct' })
-  }
-  await getBrowserSession().closeAllConnections()
+  await applyToSession(getBrowserSession(), settings)
+  // Private tabs must never bypass the user's proxy.
+  if (hasPrivateSession()) await applyToSession(getPrivateSession(), settings)
+}
+
+function applyPermissionPolicy(target: Electron.Session): void {
+  target.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
+  target.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(siteAllowsPermission(details.requestingUrl || webContents.getURL(), permission))
+  })
 }
 
 /** Called after app.whenReady and before any browser content is created. */
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
   await configureSession(currentSettings)
-  const session = getBrowserSession()
-  session.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
-  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(siteAllowsPermission(details.requestingUrl || webContents.getURL(), permission))
+  applyPermissionPolicy(getBrowserSession())
+  onPrivateSessionCreated((privateSession) => {
+    applyPermissionPolicy(privateSession)
+    // Private tabs wait on this (whenPrivateSessionReady) before their first load.
+    return applyToSession(privateSession, currentSettings)
   })
   return { ...currentSettings }
 }

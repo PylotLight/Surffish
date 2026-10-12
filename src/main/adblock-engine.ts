@@ -66,43 +66,51 @@ function topFrameUrl(event: IpcMainEvent | IpcMainInvokeEvent): string {
   return top?.url || event.sender.getURL()
 }
 
+const attachedSessions = new Map<Session, AdblockSessionHooks>()
+
+function onFrameStart(event: IpcMainEvent, reportedUrl: unknown): void {
+  // sendSync blocks the renderer until returnValue is set: always set it.
+  let payload: FrameStartPayload = { active: false, styles: '', scripts: [], observe: false }
+  try {
+    const hooks = attachedSessions.get(event.sender.session)
+    const engine = hooks?.getEngine()
+    if (hooks && engine) {
+      const frameUrl = event.senderFrame?.url || (typeof reportedUrl === 'string' ? reportedUrl : '')
+      const pageUrl = topFrameUrl(event) || frameUrl
+      if (!hooks.isBlockingDisabledForPage(pageUrl)) {
+        payload = frameStartPayload(engine, frameUrl)
+        hooks.onFrameStart?.(payload)
+      }
+    }
+  } catch (error) {
+    console.warn('Ad-filter frame injection failed:', error)
+  } finally {
+    event.returnValue = payload
+  }
+}
+
+function onFrameUpdate(event: IpcMainInvokeEvent, reportedUrl: unknown, features: FrameDomFeatures): string {
+  const hooks = attachedSessions.get(event.sender.session)
+  const engine = hooks?.getEngine()
+  if (!hooks || !engine) return ''
+  const frameUrl = event.senderFrame?.url || (typeof reportedUrl === 'string' ? reportedUrl : '')
+  if (hooks.isBlockingDisabledForPage(topFrameUrl(event) || frameUrl)) return ''
+  return frameUpdateStyles(engine, frameUrl, features)
+}
+
 /**
- * Attach network, CSP and frame-injection handling to a session. Returns a
- * detach function. Only one session per process can own the frame IPC.
+ * Attach network, CSP and frame-injection handling to a session. Returns a detach function.
+ * Several sessions (profile + private) can be attached; the frame IPC channels are shared and
+ * dispatch on the sender's session.
  */
 export function attachAdblockToSession(session: Session, hooks: AdblockSessionHooks, preloadPath: string): () => void {
+  if (attachedSessions.has(session)) throw new Error('Ad blocking is already attached to this session.')
   const preloadId = session.registerPreloadScript({ type: 'frame', filePath: preloadPath })
-
-  const onFrameStart = (event: IpcMainEvent, reportedUrl: unknown): void => {
-    // sendSync blocks the renderer until returnValue is set: always set it.
-    let payload: FrameStartPayload = { active: false, styles: '', scripts: [], observe: false }
-    try {
-      const engine = hooks.getEngine()
-      if (engine && event.sender.session === session) {
-        const frameUrl = event.senderFrame?.url || (typeof reportedUrl === 'string' ? reportedUrl : '')
-        const pageUrl = topFrameUrl(event) || frameUrl
-        if (!hooks.isBlockingDisabledForPage(pageUrl)) {
-          payload = frameStartPayload(engine, frameUrl)
-          hooks.onFrameStart?.(payload)
-        }
-      }
-    } catch (error) {
-      console.warn('Ad-filter frame injection failed:', error)
-    } finally {
-      event.returnValue = payload
-    }
+  if (attachedSessions.size === 0) {
+    ipcMain.on(FRAME_START_CHANNEL, onFrameStart)
+    ipcMain.handle(FRAME_UPDATE_CHANNEL, onFrameUpdate)
   }
-
-  const onFrameUpdate = (event: IpcMainInvokeEvent, reportedUrl: unknown, features: FrameDomFeatures): string => {
-    const engine = hooks.getEngine()
-    if (!engine || event.sender.session !== session) return ''
-    const frameUrl = event.senderFrame?.url || (typeof reportedUrl === 'string' ? reportedUrl : '')
-    if (hooks.isBlockingDisabledForPage(topFrameUrl(event) || frameUrl)) return ''
-    return frameUpdateStyles(engine, frameUrl, features)
-  }
-
-  ipcMain.on(FRAME_START_CHANNEL, onFrameStart)
-  ipcMain.handle(FRAME_UPDATE_CHANNEL, onFrameUpdate)
+  attachedSessions.set(session, hooks)
 
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const engine = hooks.getEngine()
@@ -136,8 +144,11 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
   return () => {
     session.webRequest.onBeforeRequest(null)
     session.webRequest.onHeadersReceived(null)
-    ipcMain.removeListener(FRAME_START_CHANNEL, onFrameStart)
-    ipcMain.removeHandler(FRAME_UPDATE_CHANNEL)
     session.unregisterPreloadScript(preloadId)
+    attachedSessions.delete(session)
+    if (attachedSessions.size === 0) {
+      ipcMain.removeListener(FRAME_START_CHANNEL, onFrameStart)
+      ipcMain.removeHandler(FRAME_UPDATE_CHANNEL)
+    }
   }
 }
