@@ -482,8 +482,8 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
     { type: 'separator' },
     { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
-    { label: 'Close Tabs Above', enabled: tabs.some((candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
-    { label: 'Close Tabs Below', enabled: tabs.some((candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
+    { label: 'Close Tabs Above', enabled: tabs.some((_candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
+    { label: 'Close Tabs Below', enabled: tabs.some((_candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
     { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
   ]
   Menu.buildFromTemplate(items).popup({ window: browserWindow })

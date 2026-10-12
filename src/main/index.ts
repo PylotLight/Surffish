@@ -1,5 +1,4 @@
 import { app, BaseWindow } from 'electron'
-import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
@@ -47,8 +46,8 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Could not initialize network ad filtering; continuing without it:', error)
   }
-  electronApp.setAppUserModelId(APP_ID)
-  app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
+  // Windows taskbar grouping/notifications; dev builds group under the Electron binary.
+  if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath)
   registerIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
