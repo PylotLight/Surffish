@@ -186,6 +186,7 @@ const api = {
     },
     network: {
       get: (): Promise<NetworkRequestSummary[]> => ipcRenderer.invoke('browser:network:get'),
+      disable: (): Promise<void> => ipcRenderer.invoke('browser:network:disable'),
       watch: (watching: boolean): Promise<NetworkRequestSummary[]> => ipcRenderer.invoke('browser:network:watch', watching),
       details: (id: string): Promise<NetworkRequestDetails | null> => ipcRenderer.invoke('browser:network:details', id),
       responseBody: (id: string): Promise<{ body: NetworkResponseBody | null; error: string | null }> => ipcRenderer.invoke('browser:network:response-body', id),
