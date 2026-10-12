@@ -49,7 +49,7 @@ import {
   uninstallWebStoreExtension,
   webStoreExtensionForSender
 } from './web-store-extensions'
-import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests } from './network-inspector'
+import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
 import {
@@ -432,6 +432,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:network:watch', (event, watching: unknown) => {
     assertMainRenderer(event)
     return watchNetworkRequests(watching === true)
+  })
+  ipcMain.handle('browser:network:disable', (event) => {
+    assertMainRenderer(event)
+    disableNetworkCapture()
   })
   ipcMain.handle('browser:network:details', async (event, id: unknown) => {
     assertMainRenderer(event)

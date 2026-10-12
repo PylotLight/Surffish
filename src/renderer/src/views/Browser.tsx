@@ -131,6 +131,25 @@ function isSettingsSection(mode: SidebarMode): boolean {
 
 type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network'>
 
+const NETWORK_TOOL_STORAGE_KEY = 'surffish.devtools.networkInspector'
+
+/** The Network inspector is a debug tool: off by default, opt in from Settings → General. */
+function useNetworkToolEnabled(): [boolean, (enabled: boolean) => void] {
+  const [enabled, setEnabled] = useState(() => localStorage.getItem(NETWORK_TOOL_STORAGE_KEY) === 'on')
+  useEffect(() => {
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === NETWORK_TOOL_STORAGE_KEY) setEnabled(event.newValue === 'on')
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+  return [enabled, (next) => {
+    localStorage.setItem(NETWORK_TOOL_STORAGE_KEY, next ? 'on' : 'off')
+    setEnabled(next)
+    if (!next) void window.api.browser.network.disable()
+  }]
+}
+
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
   { mode: 'newtab', label: 'New Tab' },
@@ -435,6 +454,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
   const extensionPins = useExtensionPins()
+  const [networkToolEnabled, setNetworkToolEnabled] = useNetworkToolEnabled()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
@@ -931,14 +951,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   useEffect(() => {
     // Network rows are only streamed while someone is looking at them; capture itself starts on first open.
-    if (surface !== 'content' || sidebarMode !== 'network') return
+    if (surface !== 'content' || sidebarMode !== 'network' || !networkToolEnabled) return
     const unsubscribeNetwork = window.api.browser.network.onChange(setNetworkRequests)
     void window.api.browser.network.watch(true).then(setNetworkRequests)
     return () => {
       unsubscribeNetwork()
       void window.api.browser.network.watch(false)
     }
-  }, [surface, sidebarMode === 'network'])
+  }, [surface, sidebarMode === 'network', networkToolEnabled])
+
+  useEffect(() => {
+    if (sidebarMode === 'network' && !networkToolEnabled) setSidebarMode('settings')
+  }, [sidebarMode, networkToolEnabled])
 
   useEffect(() => {
     const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc)
@@ -1076,7 +1100,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = sidebarMode !== 'settings' && sidebarMode !== 'network' && sidebarMode !== 'site' && sidebarMode !== 'downloads' && !isLocalNewTab && rect.width > 0 && rect.height > 0
+      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && !isLocalNewTab && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -1665,7 +1689,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           )}
           {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
-              {SETTINGS_SECTIONS.map((section) => (
+              {SETTINGS_SECTIONS.filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
                 <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}</button>
               ))}
               <button
@@ -1746,6 +1770,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <button className="settings-action primary" type="button" disabled={busy} onClick={() => void saveProxy()}>{busy ? 'Working…' : 'Save'}</button>
                   </div>
                   {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
+                </SettingsGroup>
+                <SettingsGroup title="Developer">
+                  <SettingsRow label="Network inspector" hint="Adds a Network tab that records requests from every tab. Off saves CPU and memory; turning it off also stops capture and clears recorded requests.">
+                    <input type="checkbox" className="settings-switch" checked={networkToolEnabled} onChange={(event) => setNetworkToolEnabled(event.target.checked)} aria-label="Enable network inspector" />
+                  </SettingsRow>
                 </SettingsGroup>
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
                 </>}
@@ -1910,7 +1939,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             </div>
           )}
-          {sidebarMode === 'network' && (
+          {sidebarMode === 'network' && networkToolEnabled && (
             <div className="network-view">
               <header className="network-page-header">
                 <div>

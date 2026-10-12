@@ -307,6 +307,15 @@ export function watchNetworkRequests(watching: boolean): NetworkRequestSummary[]
   return watching ? getNetworkRequests() : []
 }
 
+/** Network tool switched off in Settings: detach CDP from every tab and drop recorded rows. */
+export function disableNetworkCapture(): void {
+  captureEnabled = false
+  watchers = 0
+  for (const tracker of [...trackers.values()]) detachNetworkInspector(tracker.contents, false)
+  records.clear()
+  lastResponseBody = null
+}
+
 function startTracking(tabId: string, contents: WebContents): void {
   if (contents.isDestroyed() || trackers.has(contents.id)) return
   const debuggerApi = contents.debugger
@@ -341,8 +350,8 @@ function startTracking(tabId: string, contents: WebContents): void {
 }
 
 /** Stop CDP capture when a tab view is disposed, while keeping its recent rows for inspection. */
-export function detachNetworkInspector(contents: WebContents): void {
-  candidates.delete(contents.id)
+export function detachNetworkInspector(contents: WebContents, forget = true): void {
+  if (forget) candidates.delete(contents.id)
   const tracker = trackers.get(contents.id)
   if (!tracker) return
   trackers.delete(contents.id)
