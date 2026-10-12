@@ -2392,9 +2392,9 @@
   display: none !important;
 }
 .app-shell[data-surface='sidebar'] .browser-sidebar {
-  top: 14px !important;
+  top: 10px !important;
   right: auto;
-  bottom: 14px;
+  bottom: 10px;
   left: 0;
   width: min(var(--sidebar-width, 320px), 100%);
   max-width: none;
@@ -2425,6 +2425,9 @@
   margin-top: 28px;
   padding: 0 17px;
   -webkit-app-region: no-drag;
+}
+.app-shell[data-surface='sidebar'] .sidebar-window-controls {
+  margin-top: 18px;
 }
 .sidebar-window-control {
   display: grid;
