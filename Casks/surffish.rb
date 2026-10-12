@@ -1,9 +1,9 @@
-# Starter Cask only: replace the version and zeroed checksums after publishing release assets.
+# Rendered from Casks/surffish.rb.tmpl; update checksums from the published ZIP assets.
 cask "surffish" do
   depends_on arch: :arm64
 
   version "0.1.0"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "a106edb23428abd9a4bba7a867cb521a366c9bd43b26eea3f133c54d9407e412"
 
   url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.zip"
   name "Surffish"
