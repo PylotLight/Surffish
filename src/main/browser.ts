@@ -157,7 +157,7 @@ function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
     saveBrowserPinnedSites(nextPinnedSites)
     sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
   }
-  sendToMainWindowRenderers('browser:history-changed')
+  notifyHistoryChanged()
 }
 
 async function readBoundedFaviconBody(response: Response): Promise<Buffer | null> {
@@ -284,6 +284,16 @@ function refreshTabFavicon(tab: BrowserTab): void {
       }
     })
   }).catch(() => undefined)
+}
+
+let historyChangedTimer: ReturnType<typeof setTimeout> | null = null
+/** Navigations, title and favicon updates arrive in bursts; renderers refetch history once per burst. */
+function notifyHistoryChanged(): void {
+  if (historyChangedTimer) return
+  historyChangedTimer = setTimeout(() => {
+    historyChangedTimer = null
+    sendToMainWindowRenderers('browser:history-changed')
+  }, 300)
 }
 
 function publishTabs(): void {
@@ -651,7 +661,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
     if (/^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
-      sendToMainWindowRenderers('browser:history-changed')
+      notifyHistoryChanged()
     }
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
@@ -662,7 +672,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
     if (/^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
-      sendToMainWindowRenderers('browser:history-changed')
+      notifyHistoryChanged()
     }
   })
   contents.on('page-title-updated', (_event, title) => {
@@ -670,7 +680,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     updateLatestVisitTitle(contents.getURL(), title)
     publishState()
     refreshTabFavicon(tab)
-    sendToMainWindowRenderers('browser:history-changed')
+    notifyHistoryChanged()
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame) return
@@ -686,7 +696,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-stop-loading', () => {
     setTimeout(() => {
-      if (isCurrentContents() && tab.id === activeTabId && !isTabOverviewOpen()) void captureTabThumbnail(tab)
+      // Overview open and tab switches capture fresh shots anyway; only seed tabs that have none,
+      // so ordinary page loads don't pay for a full-page capture + JPEG encode on the main thread.
+      if (isCurrentContents() && tab.id === activeTabId && !isTabOverviewOpen() && !tabThumbnails.has(tab.id)) void captureTabThumbnail(tab)
     }, 700)
   })
   contents.on('destroyed', () => {

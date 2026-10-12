@@ -13,6 +13,8 @@ import { installAppMenu } from './app-menu'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 
 app.setName(APP_NAME)
+// Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
+app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
 
 if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(async () => {

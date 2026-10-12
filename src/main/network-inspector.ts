@@ -10,7 +10,7 @@ import { sendToMainWindowRenderers } from './browser-shell'
 const MAX_RETAINED_REQUESTS = 1000
 const MAX_BODY_CHARACTERS = 1_000_000
 const MAX_REQUEST_BODY_CHARACTERS = 128_000
-const BROADCAST_INTERVAL_MS = 100
+const BROADCAST_INTERVAL_MS = 250
 
 type HeaderMap = Record<string, unknown>
 type CdpRequest = {
@@ -53,6 +53,10 @@ const records = new Map<string, InternalRequest>()
 const trackers = new Map<number, Tracker>()
 let nextRequestNumber = 0
 let broadcastTimer: ReturnType<typeof setTimeout> | null = null
+/** Tabs that could be captured. CDP is only attached once capture is on, so normal browsing pays nothing. */
+const candidates = new Map<number, { tabId: string; contents: WebContents }>()
+let captureEnabled = false
+let watchers = 0
 let lastResponseBody: { id: string; value: NetworkResponseBody } | null = null
 
 function stringValue(value: unknown): string {
@@ -110,7 +114,7 @@ function summaryOf(record: InternalRequest): NetworkRequestSummary {
 }
 
 function publish(): void {
-  if (broadcastTimer) return
+  if (broadcastTimer || watchers === 0) return
   broadcastTimer = setTimeout(() => {
     broadcastTimer = null
     sendToMainWindowRenderers('browser:network:changed', getNetworkRequests())
@@ -281,8 +285,29 @@ function markInFlightFailed(tracker: Tracker, reason: string): void {
   publish()
 }
 
-/** Attach before the first navigation so the main document and subresources are both observed. */
+/**
+ * Register a tab for capture. Attaching the CDP debugger with Network.enable costs CPU and a
+ * renderer-side buffer on every page, so it only happens once the Network view has been opened
+ * this session; from then on new tabs attach before their first navigation.
+ */
 export function attachNetworkInspector(tabId: string, contents: WebContents): void {
+  if (contents.isDestroyed()) return
+  candidates.set(contents.id, { tabId, contents })
+  contents.once('destroyed', () => candidates.delete(contents.id))
+  if (captureEnabled) startTracking(tabId, contents)
+}
+
+/** The Network view opened or closed. Returns the current rows so the view can paint immediately. */
+export function watchNetworkRequests(watching: boolean): NetworkRequestSummary[] {
+  watchers = Math.max(0, watchers + (watching ? 1 : -1))
+  if (watching && !captureEnabled) {
+    captureEnabled = true
+    for (const { tabId, contents } of candidates.values()) startTracking(tabId, contents)
+  }
+  return watching ? getNetworkRequests() : []
+}
+
+function startTracking(tabId: string, contents: WebContents): void {
   if (contents.isDestroyed() || trackers.has(contents.id)) return
   const debuggerApi = contents.debugger
   if (debuggerApi.isAttached()) {
@@ -305,8 +330,8 @@ export function attachNetworkInspector(tabId: string, contents: WebContents): vo
     debuggerApi.on('message', tracker.messageListener)
     debuggerApi.on('detach', tracker.detachListener)
     void debuggerApi.sendCommand('Network.enable', {
-      maxTotalBufferSize: 20 * 1024 * 1024,
-      maxResourceBufferSize: 2 * 1024 * 1024
+      maxTotalBufferSize: 8 * 1024 * 1024,
+      maxResourceBufferSize: 1024 * 1024
     }).catch((error: unknown) => {
       console.warn(`Could not enable network capture for tab ${tabId}:`, error)
     })
@@ -317,6 +342,7 @@ export function attachNetworkInspector(tabId: string, contents: WebContents): vo
 
 /** Stop CDP capture when a tab view is disposed, while keeping its recent rows for inspection. */
 export function detachNetworkInspector(contents: WebContents): void {
+  candidates.delete(contents.id)
   const tracker = trackers.get(contents.id)
   if (!tracker) return
   trackers.delete(contents.id)
