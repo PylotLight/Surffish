@@ -144,22 +144,22 @@ const fs = require("node:fs")
 const version = process.env.BUN_RELEASE_VERSION
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
 if (pkg.version !== version) {
-  console.error(`[release] package.json version must be ${version}; found ${pkg.version}`)
+  console.error("[release] package.json version must be " + version + "; found " + pkg.version)
   process.exit(1)
 }
-const targets = pkg.build?.mac?.target ?? []
-const expected = new Map([['zip', false], ['dmg', false]])
+const targets = (pkg.build && pkg.build.mac && pkg.build.mac.target) || []
+const expected = new Map([["zip", false], ["dmg", false]])
 for (const entry of targets) {
-  const target = typeof entry === 'string' ? entry : entry.target
-  const arch = typeof entry === 'string' ? [] : entry.arch
-  if (!expected.has(target) || !Array.isArray(arch) || arch.length !== 1 || arch[0] !== 'arm64') {
-    console.error(`[release] Unexpected macOS target; expected only arm64 ZIP and DMG targets.`)
+  const target = typeof entry === "string" ? entry : entry.target
+  const arch = typeof entry === "string" ? [] : entry.arch
+  if (!expected.has(target) || !Array.isArray(arch) || arch.length !== 1 || arch[0] !== "arm64") {
+    console.error("[release] Unexpected macOS target; expected only arm64 ZIP and DMG targets.")
     process.exit(1)
   }
   expected.set(target, true)
 }
 if ([...expected.values()].some((present) => !present)) {
-  console.error('[release] package.json must define both ZIP and DMG targets for arm64.')
+  console.error("[release] package.json must define both ZIP and DMG targets for arm64.")
   process.exit(1)
 }
 '
