@@ -32,7 +32,7 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
-import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBramblePoc, openBrambleSetup } from './bramble-poc'
+import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleUiWindow, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -280,10 +280,11 @@ export function registerIpc(): void {
     return openBrambleSetup()
   })
   ipcMain.handle('browser:bramble:open-options-from-ui', async (event) => {
-    if (!isBrambleUiWindow(BrowserWindow.fromWebContents(event.sender))) {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!isBrambleUiWindow(sourceWindow)) {
       throw new Error('Only a Bramble UI window can open Bramble Setup/Restore.')
     }
-    await openBrambleSetup()
+    await openBrambleOptionsFromUi(sourceWindow)
     return true
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })

@@ -16,6 +16,18 @@ export function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Accept extension UI navigation only when it remains on Bramble's loaded extension origin. */
+export function isBrambleExtensionUrl(candidate: string, extensionUrl: string): boolean {
+  try {
+    const requested = new URL(candidate)
+    const extension = new URL(extensionUrl)
+    return requested.protocol === 'chrome-extension:' && extension.protocol === 'chrome-extension:' &&
+      requested.host === extension.host && !requested.username && !requested.password && !requested.port
+  } catch {
+    return false
+  }
+}
+
 /**
  * Convert Bramble's Firefox MV3 event-page build into the Electron MV3 shape.
  * This is intentionally narrow: it refuses arbitrary extensions and only adapts

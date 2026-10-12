@@ -12,6 +12,7 @@ import {
   adaptBramblePopupViewport,
   adaptBrambleFirefoxManifest,
   injectBrambleBrowserAlias,
+  isBrambleExtensionUrl,
   stageBrambleFirefoxBuild
 } from './bramble-poc-adapter.ts'
 
@@ -56,6 +57,16 @@ test('adapts only the known Bramble Firefox MV3 build to an Electron module work
 test('refuses non-Bramble and incompatible background builds', () => {
   assert.throws(() => adaptBrambleFirefoxManifest({ ...firefoxManifest, name: 'Other extension' }), /Select Bramble/)
   assert.throws(() => adaptBrambleFirefoxManifest({ ...firefoxManifest, background: { service_worker: 'background.js' } }), /Firefox module background/)
+})
+
+test('allows popup navigation only within the loaded Bramble extension origin', () => {
+  const extensionUrl = 'chrome-extension://bramble-extension-id/'
+  assert.equal(isBrambleExtensionUrl('chrome-extension://bramble-extension-id/options.html', extensionUrl), true)
+  assert.equal(isBrambleExtensionUrl('chrome-extension://bramble-extension-id/popup.html#vault', extensionUrl), true)
+  assert.equal(isBrambleExtensionUrl('chrome-extension://other-extension-id/options.html', extensionUrl), false)
+  assert.equal(isBrambleExtensionUrl('chrome-extension://bramble-extension-id.evil/options.html', extensionUrl), false)
+  assert.equal(isBrambleExtensionUrl('https://bramble-extension-id/options.html', extensionUrl), false)
+  assert.equal(isBrambleExtensionUrl('not a URL', extensionUrl), false)
 })
 
 test('provides extension-context browser alias and wraps the original worker after alias setup', () => {

@@ -1559,7 +1559,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </div>
                     {bramblePoc.installed && bramblePoc.iconDataUrl && <img className="bramble-settings-icon" src={bramblePoc.iconDataUrl} alt="" />}
                   </div>
-                  <p className="settings-help">Install or update the verified Firefox release here. The install and vault storage stay scoped to this Surffish profile; legacy Sockfish profile and vault data are never imported. Bramble’s vault setup and customization open in Bramble’s own window; the toolbar keeps only its popup icon.</p>
+                  <p className="settings-help">Install or update the verified Firefox release here. The install and vault storage stay scoped to this Surffish profile; legacy Sockfish profile and vault data are never imported. “Create your vault” from the toolbar stays in the popup; Setup / customize here opens the larger setup window.</p>
                   <div className="settings-actions bramble-settings-actions">
                     <button className="settings-action secondary" type="button" disabled={bramblePoc.loading} onClick={() => void window.api.browser.bramble.checkForUpdates()}>{bramblePoc.loading ? 'Checking…' : 'Check for updates'}</button>
                     <button className="settings-action primary" type="button" disabled={bramblePoc.loading || (bramblePoc.installed && bramblePoc.latestVersion !== null && !bramblePoc.updateAvailable)} onClick={() => void window.api.browser.bramble.installLatest()}>
