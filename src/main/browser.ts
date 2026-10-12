@@ -1131,6 +1131,26 @@ export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
   return true
 }
 
+/** Move a tab so it lands before `beforeId` (or at the end when null). Pinned and unpinned tabs keep their own groups. */
+export function moveBrowserTab(id: string, beforeId: string | null): boolean {
+  const from = tabs.findIndex((tab) => tab.id === id)
+  if (from < 0 || id === beforeId) return false
+  const [tab] = tabs.splice(from, 1)
+  if (!tab) return false
+  let to = beforeId ? tabs.findIndex((item) => item.id === beforeId) : -1
+  if (to < 0) {
+    // append after the last tab in the same pinned group
+    let last = -1
+    tabs.forEach((item, index) => { if (item.pinned === tab.pinned) last = index })
+    to = last + 1
+  }
+  tabs.splice(to, 0, tab)
+  if (to === from) return false
+  persistOpenTabs()
+  publishTabs()
+  return true
+}
+
 export function duplicateBrowserTab(id: string): string | null {
   const tab = getTab(id)
   if (!tab) return null

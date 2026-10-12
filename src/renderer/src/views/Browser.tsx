@@ -36,6 +36,9 @@ import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
 import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-lake.webp'
 import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
+import { useTabDragSort } from './useTabDragSort'
+import TimeZonePicker from './TimeZonePicker'
+import { WORLD_CITIES } from '../../../shared/world-cities'
 import './Browser.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
@@ -116,6 +119,10 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarFocused: false,
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   sidebarResizing: false
+}
+
+function isSettingsSection(mode: SidebarMode): boolean {
+  return mode === 'settings' || mode === 'integrations' || mode === 'site' || mode === 'network'
 }
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'integrations' | 'site' | 'network'>; label: string }> = [
@@ -312,6 +319,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
+  const unpinnedTabIds = useMemo(() => tabs.filter((tab) => !tab.pinned).map((tab) => tab.id), [tabs])
+  const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) })
+  const tabsById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
@@ -639,6 +649,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setSidebarMode(mode)
   }
 
+  function exitSettings(): void {
+    setSidebarMode('tabs')
+  }
+
+  /** The sidebar gear is a toggle: open General, or close settings from whichever section is showing. */
+  function toggleSettings(): void {
+    if (isSettingsSection(sidebarMode)) exitSettings()
+    else selectSettingsSection('settings')
+  }
+
   async function updateSiteSetting(key: Exclude<keyof BrowserSiteSettings, 'origin'>, value: boolean): Promise<void> {
     if (!siteSettings || !activeOrigin) return
     try {
@@ -831,6 +851,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.removeEventListener('keydown', closeOnEscape)
     }
   }, [downloadsPopupOpen])
+
+  useEffect(() => {
+    if (surface === 'sidebar' || !isSettingsSection(sidebarMode)) return
+    const exitOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented || downloadsPopupOpen || siteActionsOpen) return
+      const target = event.target as HTMLElement | null
+      if (target?.tagName === 'SELECT') return
+      exitSettings()
+    }
+    window.addEventListener('keydown', exitOnEscape)
+    return () => window.removeEventListener('keydown', exitOnEscape)
+  }, [surface, sidebarMode, downloadsPopupOpen, siteActionsOpen])
 
   useEffect(() => {
     if (!siteActionsOpen) return
@@ -1055,7 +1087,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             <button className="sidebar-window-control is-zoom" type="button" aria-label="Toggle window zoom" title="Toggle window zoom" onClick={() => void window.api.browser.windowControl('toggle-zoom')} />
           </div>
         )}
-        {sidebarMode !== 'tabs' && <div className="sidebar-heading">
+        {sidebarMode !== 'tabs' && !isSettingsSection(sidebarMode) && <div className="sidebar-heading">
           <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>
           {sidebarMode === 'history' && (
             <button className="sidebar-icon-button" type="button" aria-label="Clear browsing history" title="Clear history" disabled={history.length === 0} onClick={() => void clearHistory()}>
@@ -1097,18 +1129,30 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
           </div>
         ) : (
-          <div className="tab-list" role="tablist" aria-label="Open tabs">
-            {tabs.filter((tab) => !tab.pinned).map((tab) => (
+          <div ref={tabDrag.listRef} className={`tab-list${tabDrag.draggingId ? ' is-drag-sorting' : ''}`} role="tablist" aria-label="Open tabs" onClickCapture={tabDrag.onClickCapture}>
+            {tabDrag.orderedIds.map((id) => tabsById.get(id)).filter((tab): tab is BrowserTabSummary => Boolean(tab)).map((tab) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}`}
                 key={tab.id}
                 data-browser-tab-id={tab.id}
                 role="tab"
                 aria-selected={tab.active}
+                aria-grabbed={tabDrag.draggingId === tab.id ? true : undefined}
                 tabIndex={0}
                 title={tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title}
-                onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
-                onKeyDown={(event) => selectTabOnKeyboard(event, tab.id)}
+                onClick={() => {
+                  void window.api.browser.tabs.activate(tab.id)
+                  if (isSettingsSection(sidebarMode)) exitSettings()
+                }}
+                onKeyDown={(event) => {
+                  if (event.altKey && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+                    event.preventDefault()
+                    tabDrag.moveBy(tab.id, event.key === 'ArrowUp' ? -1 : 1)
+                    return
+                  }
+                  selectTabOnKeyboard(event, tab.id)
+                }}
+                {...tabDrag.itemHandlers(tab.id)}
               >
                 <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
@@ -1123,17 +1167,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             ))}
             {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
+            <button className="sidebar-new-tab-row" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>
+              <span className="sidebar-new-tab-row-icon" aria-hidden="true">＋</span>
+              <span className="sidebar-new-tab-row-label">New Tab</span>
+            </button>
           </div>
         )}
 
-        {sidebarMode === 'tabs' && (
-          <button className="sidebar-new-tab-button" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>
-            <span aria-hidden="true">＋</span>
-          </button>
-        )}
-
         <div className="sidebar-footer">
-          <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" title="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} onClick={() => selectSettingsSection('settings')}>
+          <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} aria-pressed={isSettingsSection(sidebarMode)} title={isSettingsSection(sidebarMode) ? 'Close settings (Esc)' : 'Settings'} onClick={toggleSettings}>
             <span aria-hidden="true">⚙</span>
           </button>
           <button className="sidebar-footer-icon-button sidebar-quit-button" type="button" aria-label="Quit Surffish" title="Quit Surffish" onClick={() => void window.api.browser.quit()}>
@@ -1432,6 +1474,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               {SETTINGS_SECTIONS.map((section) => (
                 <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}</button>
               ))}
+              <button
+                className="settings-subnav-close"
+                type="button"
+                aria-label="Close settings and return to web content"
+                title="Close settings (Esc)"
+                onClick={exitSettings}
+              >
+                <span>Close</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
             </nav>
           )}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" />}
@@ -1442,13 +1494,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <h1>{sidebarMode === 'integrations' ? 'Integrations & add-ons' : 'Settings'}</h1>
                   <p>{sidebarMode === 'integrations' ? 'Configure New Tab, ad blocking, and browser add-ons.' : 'Choose browser behavior, proxy, and saved-session options.'}</p>
                 </div>
-                <button
-                  className="settings-done-button"
-                  type="button"
-                  aria-label="Done with settings and return to web content"
-                  title="Return to web content"
-                  onClick={() => setSidebarMode('tabs')}
-                >Done · Back to web</button>
               </header>
               <div className="settings-content">
                 {sidebarMode === 'settings' && <>
@@ -1520,9 +1565,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     {newTabPreferences.worldClocks.map((clock, index) => (
                       <div className="new-tab-world-clock-editor" key={clock.id}>
                         <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
-                        <select className="settings-select" value={clock.timeZone} aria-label={`World clock ${index + 1} timezone`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, timeZone: event.target.value } : item) })}>
-                          {Array.from(new Set([...TIME_ZONE_OPTIONS, clock.timeZone])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
-                        </select>
+                        <TimeZonePicker
+                          value={clock.timeZone}
+                          label={clock.label}
+                          ariaLabel={`World clock ${index + 1} city or time zone`}
+                          onSelect={(result) => patchNewTabPreferences({
+                            worldClocks: newTabPreferences.worldClocks.map((item) => {
+                              if (item.id !== clock.id) return item
+                              const autoLabels = new Set([timeZoneCityName(item.timeZone), ...WORLD_CITIES.filter((city) => city.timeZone === item.timeZone).map((city) => city.city)])
+                              const keepLabel = item.label.trim() !== '' && !autoLabels.has(item.label.trim())
+                              return { ...item, timeZone: result.timeZone, label: keepLabel ? item.label : result.city.slice(0, 40) }
+                            })
+                          })}
+                        />
                         <button className="settings-action secondary" type="button" aria-label={`Remove ${clock.label} world clock`} onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>Remove</button>
                       </div>
                     ))}
