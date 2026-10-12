@@ -56,8 +56,8 @@ jobs:
       - name: Load the compiled native addon with Node
         run: node -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function') throw new Error('Native trackpad addon exports are missing')"
       - name: Run native WebKit API tests
-        working-directory: native/macos
+        working-directory: src/native/macos
         run: swift test
       - name: Build native prototype
-        working-directory: native/macos
+        working-directory: src/native/macos
         run: swift build
