@@ -7,6 +7,7 @@ import test from 'node:test'
 import {
   downloadVerifiedBrambleFirefoxRelease,
   extractBrambleFirefoxArchive,
+  extractExtensionZip,
   selectLatestBrambleFirefoxRelease
 } from './bramble-release.ts'
 
@@ -143,6 +144,19 @@ test('extracts a valid release ZIP and rejects path traversal entries', () => {
 
     const traversal = storedZip({ 'manifest.json': '{}', '../outside.txt': 'not outside' })
     assert.throws(() => extractBrambleFirefoxArchive(traversal, join(directory, 'invalid')), /path traversal/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
+test('extracts a Web Store extension ZIP without its _metadata folder', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'surffish-extension-zip-test-'))
+  try {
+    const archive = storedZip({ 'manifest.json': '\uFEFF{"manifest_version":3,"name":"X","version":"1.0"}', '_metadata/verified_contents.json': '[]', 'content.js': '' })
+    extractExtensionZip(archive, join(directory, 'out'), { label: 'extension package', skip: (path) => path === '_metadata' || path.startsWith('_metadata/') })
+    assert.equal(readFileSync(join(directory, 'out', 'content.js'), 'utf8'), '')
+    assert.throws(() => readFileSync(join(directory, 'out', '_metadata', 'verified_contents.json')))
+    assert.throws(() => extractExtensionZip(storedZip({ 'manifest.json': '{}', '../x': '' }), join(directory, 'bad'), { label: 'extension package' }), /The extension package ZIP contains a path traversal entry/)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
