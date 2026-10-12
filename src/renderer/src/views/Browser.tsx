@@ -258,7 +258,12 @@ function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
   useEffect(() => setIconFailed(false), [tab.faviconUrl])
   return (
     <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}`} aria-hidden="true">
-      {tab.loading ? '' : tab.faviconUrl && !iconFailed
+      {tab.loading ? (
+        <svg className="tab-spinner" viewBox="0 0 16 16">
+          <circle className="tab-spinner-track" cx="8" cy="8" r="6" />
+          <circle className="tab-spinner-arc" cx="8" cy="8" r="6" pathLength="100" />
+        </svg>
+      ) : tab.faviconUrl && !iconFailed
         ? <img src={tab.faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
         : tab.title.slice(0, 1).toUpperCase()}
     </span>
