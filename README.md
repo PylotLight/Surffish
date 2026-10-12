@@ -12,4 +12,21 @@
 
 Your favorites, history, and preferences are stored locally. Address suggestions are based on your own tabs, favorites, and history—not a remote suggestion service. Surffish is an actively developing browser; its privacy and proxy features are not an audited anonymity service.
 
-For development setup, architecture, and technical notes, see the [developer documentation](docs/development.md).
+## Install on macOS
+
+The Homebrew tap and macOS packaging are prepared, but Surffish does not yet have a published release or an installable Cask. These commands will work after the first release archives and matching Cask with real SHA-256 hashes are published:
+
+```bash
+brew tap pylotlight/surffish https://github.com/PylotLight/Surffish.git
+brew install --cask surffish
+```
+
+Surffish is currently planned as an unsigned, non-notarized app. If macOS blocks a downloaded copy with a “damaged” warning, first make sure it came from the official [Surffish releases](https://github.com/PylotLight/Surffish/releases) and that you trust it. Then remove the quarantine attribute and open the app again:
+
+```bash
+xattr -cr /Applications/Surffish.app
+```
+
+You can also Control-click the app and choose **Open** on first launch. Clearing quarantine bypasses that Gatekeeper download check; do it only for a copy you trust. Homebrew no longer provides a `--no-quarantine` install option.
+
+For development setup, architecture, and technical notes, see the [developer documentation](docs/development.md). Release and packaging notes are in [docs/releasing.md](docs/releasing.md).
