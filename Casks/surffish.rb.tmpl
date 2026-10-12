@@ -1,12 +1,11 @@
 # Rendered from Casks/surffish.rb.tmpl; update checksums from the published ZIP assets.
 cask "surffish" do
-  arch arm: "arm64", intel: "x64"
+  depends_on arch: :arm64
 
   version "{{VERSION}}"
-  sha256 arm:   "{{SHA256_ARM64}}",
-         intel: "{{SHA256_X64}}"
+  sha256 "{{SHA256_ARM64}}"
 
-  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-#{arch}.zip"
+  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.zip"
   name "Surffish"
   desc "A focused desktop browser with an adjustable sidebar and SOCKS5 proxy support"
   homepage "https://github.com/PylotLight/Surffish"

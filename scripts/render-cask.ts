@@ -17,32 +17,27 @@ function argValue(flag: string): string | undefined {
 
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(
-    'Usage: bun scripts/render-cask.ts --version X.Y.Z --sha256-arm HEX --sha256-intel HEX [--out PATH]'
+    'Usage: bun scripts/render-cask.ts --version X.Y.Z --sha256-arm64 HEX [--out PATH]'
   )
   console.log('Without --out, prints the rendered cask to stdout.')
   process.exit(0)
 }
 
 const version = argValue('--version')
-const shaArm = argValue('--sha256-arm')
-const shaIntel = argValue('--sha256-intel')
+const shaArm64 = argValue('--sha256-arm64')
 const output = argValue('--out')
 
 if (!version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) {
   fail(`--version is required and must be semver, got '${version}'`)
 }
 const sha256Pattern = /^[0-9a-f]{64}$/
-if (!shaArm || !sha256Pattern.test(shaArm)) {
-  fail('--sha256-arm must be a lowercase 64-character SHA-256 hex digest')
-}
-if (!shaIntel || !sha256Pattern.test(shaIntel)) {
-  fail('--sha256-intel must be a lowercase 64-character SHA-256 hex digest')
+if (!shaArm64 || !sha256Pattern.test(shaArm64)) {
+  fail('--sha256-arm64 must be a lowercase 64-character SHA-256 hex digest')
 }
 
 const cask = readFileSync(templatePath, 'utf8')
   .replaceAll('{{VERSION}}', version)
-  .replaceAll('{{SHA256_ARM64}}', shaArm)
-  .replaceAll('{{SHA256_X64}}', shaIntel)
+  .replaceAll('{{SHA256_ARM64}}', shaArm64)
 
 if (cask.includes('{{')) fail('template still has unfilled placeholders')
 

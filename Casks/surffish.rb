@@ -1,12 +1,11 @@
 # Starter Cask only: replace the version and zeroed checksums after publishing release assets.
 cask "surffish" do
-  arch arm: "arm64", intel: "x64"
+  depends_on arch: :arm64
 
   version "0.1.0"
-  sha256 arm:   "0000000000000000000000000000000000000000000000000000000000000000",
-         intel: "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
 
-  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-#{arch}.zip"
+  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.zip"
   name "Surffish"
   desc "A focused desktop browser with an adjustable sidebar and SOCKS5 proxy support"
   homepage "https://github.com/PylotLight/Surffish"

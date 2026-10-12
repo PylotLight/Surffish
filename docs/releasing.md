@@ -1,6 +1,6 @@
 # macOS releases and Homebrew
 
-Surffish has a **manual** macOS packaging path. There is no release workflow in this repository: do not enable or add GitHub Actions for publishing as part of this setup. The existing app version is `0.1.0`, but no macOS release archives have been published yet, so the starter cask in `Casks/surffish.rb` is intentionally not installable until real archives and checksums are available.
+Surffish has a **manual** macOS packaging path. There is no release workflow in this repository: do not enable or add GitHub Actions for publishing as part of this setup. The existing app version is `0.1.0`, but no macOS release archives have been published yet, so the Apple-silicon-only starter Cask in `Casks/surffish.rb` is intentionally not installable until real archives and checksums are available.
 
 ## Build the macOS archives
 
@@ -13,15 +13,17 @@ bun run test
 bun run dist:mac
 ```
 
-`dist:mac` builds the app, then packages Intel (`x64`) and Apple silicon (`arm64`) ZIP and DMG files under `release/`. The ZIP assets are named `Surffish-<version>-mac-arm64.zip` and `Surffish-<version>-mac-x64.zip`; Homebrew installs from those ZIPs. The native `.node` addon is explicitly unpacked from the app archive so Electron can load it.
+`dist:mac` builds the app, then packages Apple silicon (`arm64`) ZIP and DMG files only under `release/`. The supported assets are `Surffish-<version>-mac-arm64.zip` and `Surffish-<version>-mac-arm64.dmg`; Homebrew installs from the ZIP. The native `.node` addon is explicitly unpacked from the app archive so Electron can load it.
 
-Before considering the first release, inspect and test both bundles on their matching Mac architectures. Verify that the app starts, the sidebar/native trackpad integration works, and the bundle contains `Surffish.app` with the expected app identifier `com.pylotlight.surffish`.
+**Transition note:** A `dist:mac` process already running when the ARM64-only source change is applied may still finish writing its previously configured Intel (`x64`) ZIP/DMG files. This source change affects builds started afterward, not that in-progress process. Treat its Intel output as stale and do not publish it; only ARM64 artifacts are supported.
+
+Before considering the first release, inspect and test the ARM64 bundle on an Apple-silicon Mac. Verify that the app starts, the sidebar/native trackpad integration works, and the bundle contains `Surffish.app` with the expected app identifier `com.pylotlight.surffish`.
 
 ## Manual release and cask update
 
-Release publishing is deliberately separate from packaging. **Do not create or push a version tag or publish a GitHub release until the exact version, release notes, and all four archive files have been shown to the user and approved.** Once that approval is given and the archives have been built and checked:
+Release publishing is deliberately separate from packaging. **Do not create or push a version tag or publish a GitHub release until the exact version, release notes, and both ARM64 archive files have been shown to the user and approved.** Once that approval is given and the archives have been built and checked:
 
-1. From the approved commit, create and push the matching annotated tag, then create the GitHub release with the approved notes and all four artifacts. This is manual; no release workflow or Actions enablement is part of this setup:
+1. From the approved commit, create and push the matching annotated tag, then create the GitHub release with the approved notes and the ARM64 ZIP and DMG. This is manual; no release workflow or Actions enablement is part of this setup:
 
    ```bash
    # Replace X.Y.Z only after the release payload has been approved.
@@ -30,24 +32,20 @@ Release publishing is deliberately separate from packaging. **Do not create or p
    git push origin "v${version}"
    gh release create "v${version}" \
      "release/Surffish-${version}-mac-arm64.zip" \
-     "release/Surffish-${version}-mac-x64.zip" \
      "release/Surffish-${version}-mac-arm64.dmg" \
-     "release/Surffish-${version}-mac-x64.dmg" \
      --title "Surffish v${version}" \
      --notes-file /path/to/approved-release-notes.md
    ```
 
    `dist:mac` only builds files; it does not create a tag or release. Never run these publishing commands before the approval gate above.
-2. Calculate the two ZIP checksums and render the Cask with the same approved version:
+2. Calculate the ARM64 ZIP checksum and render the Cask with the same approved version:
 
    ```bash
    version="X.Y.Z" # use the approved version
-   sha256_arm="$(shasum -a 256 "release/Surffish-${version}-mac-arm64.zip" | awk '{print $1}')"
-   sha256_intel="$(shasum -a 256 "release/Surffish-${version}-mac-x64.zip" | awk '{print $1}')"
+   sha256_arm64="$(shasum -a 256 "release/Surffish-${version}-mac-arm64.zip" | awk '{print $1}')"
    bun scripts/render-cask.ts \
      --version "$version" \
-     --sha256-arm "$sha256_arm" \
-     --sha256-intel "$sha256_intel" \
+     --sha256-arm64 "$sha256_arm64" \
      --out Casks/surffish.rb
    ```
 

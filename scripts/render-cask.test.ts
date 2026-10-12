@@ -8,8 +8,7 @@ import { test } from 'node:test'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'render-cask.ts')
-const shaArm = 'a'.repeat(64)
-const shaIntel = 'b'.repeat(64)
+const shaArm64 = 'a'.repeat(64)
 
 function render(args: string[]) {
   return spawnSync(process.execPath, [script, ...args], {
@@ -18,36 +17,39 @@ function render(args: string[]) {
   })
 }
 
-test('renders version and architecture-specific SHA-256 values into the Cask', () => {
+test('renders the version and ARM64 SHA-256 value into an Apple-silicon-only Cask', () => {
   const result = render([
     '--version', '1.2.3-beta.1',
-    '--sha256-arm', shaArm,
-    '--sha256-intel', shaIntel
+    '--sha256-arm64', shaArm64
   ])
 
   assert.equal(result.status, 0, result.stderr)
   assert.match(result.stdout, /version "1\.2\.3-beta\.1"/)
-  assert.match(result.stdout, new RegExp(`sha256 arm:\\s+"${shaArm}",\\s+intel: "${shaIntel}"`))
-  assert.match(result.stdout, /Surffish-#\{version\}-mac-#\{arch\}\.zip/)
+  assert.match(result.stdout, new RegExp(`sha256 "${shaArm64}"`))
+  assert.match(result.stdout, /depends_on arch: :arm64/)
+  assert.match(result.stdout, /Surffish-#\{version\}-mac-arm64\.zip/)
+  assert.doesNotMatch(result.stdout, /intel|x64/i)
   assert.equal(result.stdout.includes('{{'), false)
 })
 
 test('rejects unsafe versions and malformed SHA-256 values', () => {
   const unsafeVersion = render([
     '--version', '1.2.3/../../other',
-    '--sha256-arm', shaArm,
-    '--sha256-intel', shaIntel
+    '--sha256-arm64', shaArm64
   ])
   assert.notEqual(unsafeVersion.status, 0)
   assert.match(unsafeVersion.stderr, /must be semver/)
 
   const malformedHash = render([
     '--version', '1.2.3',
-    '--sha256-arm', shaArm.toUpperCase(),
-    '--sha256-intel', shaIntel
+    '--sha256-arm64', shaArm64.toUpperCase()
   ])
   assert.notEqual(malformedHash.status, 0)
   assert.match(malformedHash.stderr, /lowercase 64-character SHA-256/)
+
+  const missingHash = render(['--version', '1.2.3'])
+  assert.notEqual(missingHash.status, 0)
+  assert.match(missingHash.stderr, /--sha256-arm64 must be/)
 })
 
 test('writes a rendered Cask when an output path is supplied', (t) => {
@@ -57,13 +59,13 @@ test('writes a rendered Cask when an output path is supplied', (t) => {
 
   const result = render([
     '--version', '0.1.0',
-    '--sha256-arm', shaArm,
-    '--sha256-intel', shaIntel,
+    '--sha256-arm64', shaArm64,
     '--out', output
   ])
 
   assert.equal(result.status, 0, result.stderr)
   const cask = readFileSync(output, 'utf8')
   assert.match(cask, /version "0\.1\.0"/)
+  assert.match(cask, new RegExp(`sha256 "${shaArm64}"`))
   assert.equal(cask.includes('{{'), false)
 })
