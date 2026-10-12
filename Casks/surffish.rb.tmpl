@@ -1,11 +1,11 @@
-# Rendered from Casks/surffish.rb.tmpl; update checksums from the published DMG assets.
+# Rendered from Casks/surffish.rb.tmpl; update checksums from the published ZIP asset.
 cask "surffish" do
   depends_on arch: :arm64
 
   version "{{VERSION}}"
   sha256 "{{SHA256_ARM64}}"
 
-  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.dmg"
+  url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.zip"
   name "Surffish"
   desc "A focused desktop browser with an adjustable sidebar and SOCKS5 proxy support"
   homepage "https://github.com/PylotLight/Surffish"

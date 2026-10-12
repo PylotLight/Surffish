@@ -1,8 +1,28 @@
 # macOS builds and releases
 
-Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the DMG locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. The published `v0.1.0` release has both ARM64 ZIP and DMG assets. Those existing assets and the tag remain unchanged; the current Homebrew Cask installs from the already-published DMG.
+Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the app zip locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. Releases ship a zip, not a DMG. The DMGs for v0.1.0 and v0.1.1 opened with "not supported on this Mac", and at about 320 MB each they were more than twice the size of the zip, which is about 135 MB.
 
-## Future builds: ARM64 DMG only
+## TL;DR: `bun run release`
+
+On an Apple-silicon Mac, on an up-to-date clean `main`:
+
+```bash
+bun run release            # patch bump, e.g. 0.1.1 -> 0.1.2
+bun run release minor      # or major, or an exact 0.3.0
+bun run release current    # package.json already bumped by hand, just ship it
+bun run release --dry-run  # build + verify only, publishes nothing
+```
+
+It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
+1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can edit and push it.
+2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
+3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `hdiutil verify`, then the SHA-256.
+4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
+5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip through your fish `ghp` function (`SURFFISH_GH=gh` uses plain gh instead), and renders, commits and pushes `Casks/surffish.rb`.
+
+The manual steps below are what it automates.
+
+## Builds: ARM64 zip only
 
 Build on an Apple-silicon Mac with Xcode Command Line Tools installed. Surffish's Electron 44 runtime requires macOS Ventura (13) or later. Set `package.json` to the approved version before building. The build also compiles the AppKit trackpad addon and needs Apple's `xcrun`/Clang toolchain.
 
@@ -13,18 +33,18 @@ bun run test
 bun run dist:mac
 ```
 
-`build.mac.target` contains only the ARM64 `dmg` target, so future `dist:mac` builds produce `Surffish-<version>-mac-arm64.dmg` and do not produce a ZIP or ZIP blockmap. `build.dmg.writeUpdateInfo: false` disables DMG blockmap/update-info generation as well. No updater currently depends on ZIP artifacts. The native `.node` addon remains unpacked from the app archive so Electron can load it.
+`build.mac.target` contains only the ARM64 `zip` target, so `dist:mac` builds `release/Surffish-<version>-mac-arm64.zip`, with the unpacked app at `release/mac-arm64/Surffish.app`. Ignore any `.blockmap` it writes. No updater uses it. The native `.node` addon remains unpacked from the app archive so Electron can load it.
 
-Before publishing a future DMG, inspect and test the app on an Apple-silicon Mac: verify it starts, the sidebar/native trackpad integration works, and `Surffish.app` contains the expected app identifier `com.pylotlight.surffish`. Verify the DMG with `hdiutil verify` and calculate its checksum with `shasum -a 256`.
+Before publishing, inspect and test the app on an Apple-silicon Mac: verify it starts, the sidebar/native trackpad integration works, and `Surffish.app` contains the expected app identifier `com.pylotlight.surffish`. Check the zip with `unzip -tq` and get its checksum with `shasum -a 256`.
 
 ## Future manual release and Cask update
 
-There is no version-agnostic release-publishing helper yet. For a future version, publish only `Surffish-<version>-mac-arm64.dmg` as the macOS release asset; do not add ZIP or blockmap assets. Render the Cask from the published DMG's ARM64 SHA-256, then review and push the source/Cask changes through the normal repository workflow:
+`bun run release` does all of this. To do it by hand: for a future version, publish only `Surffish-<version>-mac-arm64.zip` as the macOS release asset. Render the Cask from the published zip's SHA-256, then review and push the source/Cask changes through the normal repository workflow:
 
 ```bash
 bun scripts/render-cask.ts \
   --version X.Y.Z \
-  --sha256-arm64 <published-dmg-sha256> \
+  --sha256-arm64 <published-zip-sha256> \
   --out Casks/surffish.rb
 ```
 
@@ -36,11 +56,11 @@ brew tap pylotlight/surffish https://github.com/PylotLight/Surffish.git
 brew install --cask surffish
 ```
 
-The Surffish repository doubles as its tap; a separate `homebrew-*` repository is not needed. The checked-in Cask's `0.1.0` checksum is for the published ARM64 DMG.
+The Surffish repository doubles as its tap; a separate `homebrew-*` repository is not needed. The Cask points at the zip asset.
 
 ## Legacy v0.1.0 release helper
 
-`scripts/publish-macos-release.sh` is pinned to the already-published `v0.1.0` release and deliberately retains validation of its historical ARM64 ZIP+DMG asset pair. It is not the pipeline for future releases: the current `package.json` has a DMG-only target, and future releases must use only a DMG asset. Do not use the legacy helper to build or publish a newer version. The v0.1.0 tag and its two published assets are not to be changed as part of this migration.
+`scripts/publish-macos-release.sh` is pinned to the already-published `v0.1.0` release and deliberately retains validation of its historical ARM64 ZIP+DMG asset pair. It is not the pipeline for future releases: use `bun run release`. Do not use the legacy helper to build or publish a newer version. The v0.1.0 tag and its two published assets are not to be changed as part of this migration.
 
 ## Unsigned-install note
 
