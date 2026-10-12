@@ -23,7 +23,9 @@ The default mode runs checks and builds the 0.1.0 ARM64 macOS artifacts. The
 reuse mode skips only the packaging build and uses existing ARM64 ZIP/DMG files;
 it requires the full 40-character source commit and a separate interactive
 attestation that both files were built from that exact commit. The declared
-commit must match current origin/main.
+commit must be an ancestor of current origin/main, and only documentation or
+this publishing helper may differ from it; the release tag still targets the
+current origin/main commit.
 
 Both modes validate and preview the exact release payload, then require typing
 "PUBLISH v0.1.0" before creating/pushing the tag, creating the public GitHub
@@ -116,7 +118,14 @@ COMMIT="$(git rev-parse HEAD)"
 REMOTE_MAIN="$(git rev-parse "refs/remotes/origin/$BRANCH")"
 [[ "$COMMIT" == "$REMOTE_MAIN" ]] || fail 'Local main is not exactly at origin/main. Update/push the approved source commit, then retry.'
 if (( REUSE_EXISTING_ARTIFACTS )); then
-  [[ "$ARTIFACT_SOURCE_COMMIT" == "$COMMIT" ]] || fail "The declared artifact source commit $ARTIFACT_SOURCE_COMMIT does not match current origin/main $COMMIT. Rebuild from current main or update the checkout before reusing artifacts."
+  git cat-file -e "${ARTIFACT_SOURCE_COMMIT}^{commit}" 2>/dev/null || fail "The declared artifact source commit is not present in this checkout: $ARTIFACT_SOURCE_COMMIT."
+  git merge-base --is-ancestor "$ARTIFACT_SOURCE_COMMIT" "$COMMIT" || fail 'The artifact source commit is not an ancestor of current origin/main; refusing to reuse artifacts from another line of history.'
+  SOURCE_DIFF_FILES="$(git diff --name-only "$ARTIFACT_SOURCE_COMMIT" "$COMMIT")" || fail 'Could not compare the artifact source commit with current origin/main.'
+  UNSAFE_SOURCE_DIFF=''
+  if [[ -n "$SOURCE_DIFF_FILES" ]]; then
+    UNSAFE_SOURCE_DIFF="$(printf '%s\n' "$SOURCE_DIFF_FILES" | grep -Ev '^(docs/|scripts/publish-macos-release\.sh$)' || true)"
+  fi
+  [[ -z "$UNSAFE_SOURCE_DIFF" ]] || fail "Application/build files changed after the artifact source commit; rebuild instead of reusing these artifacts. Changed files:\n$UNSAFE_SOURCE_DIFF"
 fi
 git var GIT_COMMITTER_IDENT >/dev/null || fail 'Git commit identity is not configured; set user.name and user.email before running this script.'
 
@@ -204,7 +213,7 @@ grep -Fq "sha256 \"$ZIP_SHA256\"" "$RENDERED_CASK" || fail 'Rendered Cask does n
 
 printf '\n============================================================\n'
 printf 'PUBLIC RELEASE CONFIRMATION — review every item below\n'
-printf 'Repository: %s\nBranch/commit: %s @ %s\nTag: %s\nTitle: %s\n' "$REPO" "$BRANCH" "$COMMIT" "$TAG" "$TITLE"
+printf 'Repository: %s\nBranch: %s\nRelease tag commit: %s\nTag: %s\nTitle: %s\n' "$REPO" "$BRANCH" "$COMMIT" "$TAG" "$TITLE"
 if (( REUSE_EXISTING_ARTIFACTS )); then
   printf 'Artifact mode: reuse existing ARM64 ZIP and DMG (no packaging rebuild)\n'
   printf 'Declared artifact source commit: %s\n' "$ARTIFACT_SOURCE_COMMIT"
@@ -222,9 +231,9 @@ printf '\nAfter release asset verification, this will render and push Casks/surf
 printf 'No GitHub Actions workflow will be enabled or changed.\n\n'
 [[ -r /dev/tty ]] || fail 'An interactive terminal is required for the publish confirmation.'
 if (( REUSE_EXISTING_ARTIFACTS )); then
-  printf '[release] The archives cannot prove their own source commit. Confirm that BOTH existing artifacts were built from the exact current source commit shown above.\n'
-  read -r -p "Type ARTIFACT SOURCE COMMIT $COMMIT to attest to that exact source: " ARTIFACT_SOURCE_CONFIRMATION </dev/tty
-  [[ "$ARTIFACT_SOURCE_CONFIRMATION" == "ARTIFACT SOURCE COMMIT $COMMIT" ]] || fail 'Artifact source commit confirmation did not match; nothing was published.'
+  printf '[release] The archives cannot prove their own source commit. Confirm that BOTH existing artifacts were built from the exact declared artifact source commit shown above.\n'
+  read -r -p "Type ARTIFACT SOURCE COMMIT $ARTIFACT_SOURCE_COMMIT to attest to that exact source: " ARTIFACT_SOURCE_CONFIRMATION </dev/tty
+  [[ "$ARTIFACT_SOURCE_CONFIRMATION" == "ARTIFACT SOURCE COMMIT $ARTIFACT_SOURCE_COMMIT" ]] || fail 'Artifact source commit confirmation did not match; nothing was published.'
 fi
 read -r -p 'Type PUBLISH v0.1.0 to create/push the public tag and release, then push the Cask: ' CONFIRMATION </dev/tty
 [[ "$CONFIRMATION" == "PUBLISH $TAG" ]] || fail 'Confirmation did not match; nothing was published.'
