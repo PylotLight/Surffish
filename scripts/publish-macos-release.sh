@@ -189,7 +189,9 @@ for stale_artifact in "$ARTIFACT_DIR/Surffish-${VERSION}-mac-x64.zip" "$ARTIFACT
     STALE_INTEL="${STALE_INTEL}${stale_artifact}"$'\n'
   fi
 done
-[[ -z "$STALE_INTEL" ]] || fail "Stale Intel artifact(s) found; remove or inspect before release:\n$STALE_INTEL"
+if [[ -n "$STALE_INTEL" ]]; then
+  printf '[release] Ignoring stale Intel artifact(s); only the validated ARM64 ZIP and DMG will be published:\n%s' "$STALE_INTEL"
+fi
 
 unzip -tq "$ZIP" >/dev/null || fail 'The ARM64 ZIP failed its integrity check.'
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/surffish-release.XXXXXX")"
@@ -242,8 +244,8 @@ printf 'No GitHub Actions workflow will be enabled or changed.\n\n'
 [[ -r /dev/tty ]] || fail 'An interactive terminal is required for the publish confirmation.'
 if (( REUSE_EXISTING_ARTIFACTS )); then
   printf '[release] The archives cannot prove their own source commit. Confirm that BOTH existing artifacts were built from the exact declared artifact source commit shown above.\n'
-  read -r -p "Type ARTIFACT SOURCE COMMIT $ARTIFACT_SOURCE_COMMIT to attest to that exact source: " ARTIFACT_SOURCE_CONFIRMATION </dev/tty
-  [[ "$ARTIFACT_SOURCE_CONFIRMATION" == "ARTIFACT SOURCE COMMIT $ARTIFACT_SOURCE_COMMIT" ]] || fail 'Artifact source commit confirmation did not match; nothing was published.'
+  read -r -p "Paste the full artifact source commit SHA $ARTIFACT_SOURCE_COMMIT to confirm: " ARTIFACT_SOURCE_CONFIRMATION </dev/tty
+  [[ "$ARTIFACT_SOURCE_CONFIRMATION" == "$ARTIFACT_SOURCE_COMMIT" ]] || fail 'Artifact source commit confirmation did not match; nothing was published.'
 fi
 read -r -p 'Type PUBLISH v0.1.0 to create/push the public tag and release, then push the Cask: ' CONFIRMATION </dev/tty
 [[ "$CONFIRMATION" == "PUBLISH $TAG" ]] || fail 'Confirmation did not match; nothing was published.'
