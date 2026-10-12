@@ -105,9 +105,19 @@ CURRENT_BRANCH="$(git branch --show-current)"
 [[ -z "$(git status --porcelain --untracked-files=all)" ]] || fail 'The worktree is not clean. Commit or stash all changes before releasing.'
 
 ORIGIN_URL="$(git remote get-url origin)" || fail 'Git remote "origin" is not configured.'
-case "$ORIGIN_URL" in
+NORMALIZED_ORIGIN_URL="$ORIGIN_URL"
+if [[ "$ORIGIN_URL" == https://*@github.com/* ]]; then
+  REMOTE_REMAINDER="${ORIGIN_URL#https://}"
+  REMOTE_AUTHORITY="${REMOTE_REMAINDER%%/*}"
+  REMOTE_HOST="${REMOTE_AUTHORITY##*@}"
+  REMOTE_PATH="${REMOTE_REMAINDER#*/}"
+  if [[ "$REMOTE_HOST" == 'github.com' ]]; then
+    NORMALIZED_ORIGIN_URL="https://github.com/$REMOTE_PATH"
+  fi
+fi
+case "$NORMALIZED_ORIGIN_URL" in
   https://github.com/PylotLight/Surffish|https://github.com/PylotLight/Surffish.git|git@github.com:PylotLight/Surffish.git|ssh://git@github.com/PylotLight/Surffish.git) ;;
-  *) fail "origin must point to https://github.com/${REPO}.git (found $ORIGIN_URL)." ;;
+  *) fail 'origin must resolve to the configured PylotLight/Surffish GitHub repository.' ;;
 esac
 
 gh auth status --hostname github.com >/dev/null 2>&1 || fail 'GitHub CLI is not authenticated for github.com; run gh auth login on your Mac, then retry.'
