@@ -669,6 +669,37 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }
 
+  // Keep main told where the Bramble button sits, so popups Bramble opens itself (autofill
+  // "Vault locked", passkey "Unlock & Use") attach to it like a toolbar click does.
+  const brambleButtonMounted = !!brambleButtonRef.current
+  useEffect(() => {
+    const button = brambleButtonRef.current
+    const setAnchor = window.api.browser.bramble.setAnchor
+    if (!button || typeof setAnchor !== 'function') return
+    let frame = 0
+    const report = (): void => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const bounds = button.getBoundingClientRect()
+        setAnchor(bounds.width > 0 && bounds.height > 0
+          ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
+          : null)
+      })
+    }
+    report()
+    const observer = new ResizeObserver(report)
+    observer.observe(button)
+    observer.observe(document.documentElement)
+    if (button.parentElement) observer.observe(button.parentElement)
+    window.addEventListener('resize', report)
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', report)
+      setAnchor(null)
+    }
+  }, [brambleButtonMounted, bramblePoc.installed])
+
   async function openBramblePoc(): Promise<void> {
     try {
       const bounds = brambleButtonRef.current?.getBoundingClientRect()

@@ -34,6 +34,21 @@ function clamp(value: number, min: number, max: number): number {
  * The anchor is in the window's content coordinates. Everything is rounded because
  * BrowserWindow treats a fractional x/y as missing and centers the window instead.
  */
+/**
+ * Anchor (in content coordinates) that makes anchoredPopupBounds centre a popup over `content`:
+ * the popup hangs GAP below an anchor's bottom edge and right-aligns to its right edge.
+ */
+export function centredPopupAnchor(content: Rect, size: { width: number; height: number }): PopupAnchor {
+  const width = Math.min(size.width, content.width)
+  const height = Math.min(size.height, content.height)
+  return {
+    x: Math.round((content.width - width) / 2),
+    y: Math.round(Math.max(0, (content.height - height) / 2 - GAP - 1)),
+    width,
+    height: 1
+  }
+}
+
 export function anchoredPopupBounds(
   anchor: PopupAnchor | undefined,
   content: Rect,
