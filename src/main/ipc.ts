@@ -39,6 +39,7 @@ import { getMainWindow } from './window'
 import {
   clearSavedBrowserSession,
   getBrowserNewTabPage,
+  getBrowserSiteFaviconCache,
   getBrowserPinnedSites,
   getBrowserSiteSettings,
   getBrowserSearchEngine,
@@ -89,6 +90,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:preferences:get', (event) => {
     assertMainRenderer(event)
     return getBrowserPreferencesSnapshot()
+  })
+  ipcMain.handle('browser:site-icons:get', (event, origins: unknown) => {
+    assertMainRenderer(event)
+    return getBrowserSiteFaviconCache(origins)
   })
   ipcMain.handle('browser:chrome:get', (event) => {
     assertMainRenderer(event)

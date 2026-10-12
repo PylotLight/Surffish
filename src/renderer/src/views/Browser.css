@@ -658,6 +658,47 @@
 .settings-content {
   width: min(100%, 720px);
 }
+.settings-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0;
+  background: rgba(16, 20, 24, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.settings-page-heading-copy {
+  min-width: 0;
+}
+.settings-done-button {
+  min-height: 38px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid rgba(132, 222, 165, 0.6);
+  border-radius: 9px;
+  background: #83dba5;
+  color: #102218;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 130ms ease, box-shadow 130ms ease, transform 130ms ease;
+}
+.settings-done-button:hover {
+  background: #9ae9b7;
+  box-shadow: 0 5px 18px rgba(74, 184, 113, 0.2);
+}
+.settings-done-button:active {
+  transform: translateY(1px);
+}
+.settings-done-button:focus-visible {
+  outline: 2px solid #d0ffdf;
+  outline-offset: 3px;
+}
 .settings-page-header h1 {
   margin: 0;
   color: rgba(248, 250, 252, 0.96);
@@ -1458,16 +1499,6 @@
 .favorite-button.is-favorite {
   color: #f3d689;
 }
-.picture-in-picture-button span {
-  font-size: 15px;
-}
-.site-controls-button span {
-  font-size: 17px;
-}
-.site-controls-button.is-current {
-  background: rgba(126, 226, 168, 0.13);
-  color: #a4edbd;
-}
 .address-suggestions {
   position: absolute;
   z-index: 10;
@@ -1714,6 +1745,75 @@
   flex: 0 0 auto;
   -webkit-app-region: no-drag;
 }
+.site-actions-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+.site-actions-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.site-actions-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  width: 208px;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  -webkit-app-region: no-drag;
+}
+.site-actions-menu button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.9);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.site-actions-menu button:hover:not(:disabled),
+.site-actions-menu button:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  outline: 0;
+}
+.site-actions-menu button:disabled {
+  color: rgba(245, 247, 250, 0.38);
+  cursor: default;
+}
+.site-actions-menu-icon {
+  display: inline-flex;
+  width: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  color: #a4edbd;
+  font-size: 15px;
+}
 .omnibox-action-button {
   display: inline-flex;
   align-items: center;
@@ -1747,6 +1847,22 @@
   stroke-width: 1.7;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.omnibox-favorite-button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  margin-right: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, background 130ms ease, color 130ms ease, transform 130ms ease;
+}
+.omnibox:hover .omnibox-favorite-button,
+.omnibox:focus-within .omnibox-favorite-button,
+.omnibox-favorite-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* Local start page: favorites are existing pins; frequent tiles are derived from local history. */

@@ -258,6 +258,42 @@ async function run() {
     return found.content && found.toolbar && found.sidebar ? found : null
   }, 'all trusted Surffish renderer surfaces', 45000)
 
+  await waitFor(async () => evaluate(views.toolbar, `(() => {
+    const button = document.querySelector('.bramble-toolbar-button')
+    return button?.getAttribute('aria-label') === 'Open Bramble' && button.getAttribute('aria-haspopup') === 'dialog'
+  })()`), 'the Bramble popup action in the toolbar')
+  const toolbarSiteControls = await evaluate(views.toolbar, `(() => {
+    const omnibox = document.querySelector('.omnibox')
+    const siteActions = omnibox?.querySelector('.site-actions-control')
+    const address = omnibox?.querySelector('input')
+    const favorite = omnibox?.querySelector('.omnibox-favorite-button')
+    return {
+      siteActionsBeforeAddress: Boolean(siteActions && address && (siteActions.compareDocumentPosition(address) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      favoriteAfterAddress: Boolean(address && favorite && (address.compareDocumentPosition(favorite) & Node.DOCUMENT_POSITION_FOLLOWING))
+    }
+  })()`)
+  assert.equal(toolbarSiteControls.siteActionsBeforeAddress, true, 'site actions sit to the left of the address input')
+  assert.equal(toolbarSiteControls.favoriteAfterAddress, true, 'the bookmark star sits at the address bar trailing edge')
+  await evaluate(views.toolbar, `document.querySelector('.site-actions-button').click()`)
+  const siteActionsMenu = await waitFor(async () => evaluate(views.toolbar, `document.querySelector('#site-actions-menu')?.innerText || null`), 'the site-actions menu')
+  assert.match(siteActionsMenu, /Site settings/)
+  assert.match(siteActionsMenu, /Picture in Picture/)
+  await evaluate(views.toolbar, `Array.from(document.querySelectorAll('#site-actions-menu [role="menuitem"]')).find((item) => item.textContent?.includes('Site settings'))?.click()`)
+  await waitFor(async () => (await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'site', 'the Site settings menu action')
+  await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]').click()`)
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'the Settings gear action')
+  const doneButtonText = await waitFor(async () => evaluate(views.sidebar, `document.querySelector('.settings-done-button')?.innerText || null`), 'the Settings Done button')
+  assert.match(doneButtonText, /Done.*Back to web/)
+  await evaluate(views.sidebar, `document.querySelector('.settings-done-button').click()`)
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'Done returning to browser tabs')
+  await evaluate(views.toolbar, `window.api.browser.chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })`)
+  await evaluate(views.toolbar, `document.querySelector('.bramble-toolbar-button').click()`)
+  await waitFor(async () => {
+    const state = await evaluate(views.toolbar, 'window.api.browser.bramble.get()')
+    return state.error?.includes('not installed in this Surffish profile') ? state : null
+  }, 'the toolbar Bramble popup request')
+  assert.equal((await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode, 'tabs', 'the Bramble toolbar action does not navigate to extension settings')
+
   const savedSessionPath = join(userData, 'browser-session.json')
   const migratedSession = await waitFor(() => {
     try {

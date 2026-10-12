@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
-import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_PINNED_SITES, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
+import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, MAX_PINNED_SITES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
-import { BROWSER_SESSION_PARTITION } from './browser-session'
-import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession } from './browser-persistence'
+import { BROWSER_SESSION_PARTITION, getBrowserSession } from './browser-session'
+import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
@@ -63,6 +64,8 @@ const tabThumbnails = new Map<string, string>()
 // Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
 let newTabThumbnail: string | null = null
 const THUMBNAIL_WIDTH = 640
+const FAVICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
+const faviconFetches = new Map<string, Promise<string | null>>()
 
 function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
   const page = getBrowserNewTabPage()
@@ -140,6 +143,84 @@ function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
   sendToMainWindowRenderers('browser:history-changed')
 }
 
+async function readBoundedFaviconBody(response: Response): Promise<Buffer | null> {
+  const body = response.body
+  if (!body) return null
+  const reader = body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_CACHED_FAVICON_BYTES) {
+        await reader.cancel()
+        return null
+      }
+      chunks.push(Buffer.from(value))
+    }
+    return total > 0 ? Buffer.concat(chunks, total) : null
+  } catch {
+    return null
+  } finally {
+    try { reader.releaseLock() } catch { /* the stream may already be cancelled */ }
+  }
+}
+
+function cachePageFavicon(pageUrl: string, faviconUrl: string): Promise<string | null> {
+  const origin = normalizeHttpOrigin(pageUrl)
+  if (!origin) return Promise.resolve(null)
+  const inlineIcon = normalizeCachedFaviconDataUrl(faviconUrl)
+  if (inlineIcon) {
+    const previous = getCachedBrowserSiteFavicon(origin)
+    const saved = saveBrowserSiteFavicon(origin, inlineIcon)
+    if (saved && previous !== saved) sendToMainWindowRenderers('browser:site-icon:changed', { origin, faviconUrl: saved })
+    return Promise.resolve(saved)
+  }
+  const safeIconUrl = normalizeFaviconUrl(faviconUrl)
+  if (!safeIconUrl) return Promise.resolve(null)
+  const key = `${origin}\n${safeIconUrl}`
+  const inFlight = faviconFetches.get(key)
+  if (inFlight) return inFlight
+
+  const request = (async (): Promise<string | null> => {
+    try {
+      const response = await getBrowserSession().fetch(safeIconUrl, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8_000)
+      })
+      if (!response.ok) return null
+      const finalUrl = normalizeFaviconUrl(response.url || safeIconUrl)
+      if (!finalUrl) return null
+      const declaredSize = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declaredSize) && declaredSize > MAX_CACHED_FAVICON_BYTES) return null
+      const mimeFromHeader = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+      const mime = FAVICON_MIME_TYPES.has(mimeFromHeader)
+        ? mimeFromHeader
+        : mimeFromHeader === 'application/octet-stream' && new URL(finalUrl).pathname.toLowerCase().endsWith('.ico')
+          ? 'image/x-icon'
+          : null
+      if (!mime) return null
+      const bytes = await readBoundedFaviconBody(response)
+      if (!bytes) return null
+      const dataUrl = normalizeCachedFaviconDataUrl(`data:${mime};base64,${bytes.toString('base64')}`)
+      if (!dataUrl) return null
+      const previous = getCachedBrowserSiteFavicon(origin)
+      const saved = saveBrowserSiteFavicon(origin, dataUrl)
+      if (saved && previous !== saved) sendToMainWindowRenderers('browser:site-icon:changed', { origin, faviconUrl: saved })
+      return saved
+    } catch {
+      return null
+    }
+  })()
+  faviconFetches.set(key, request)
+  void request.finally(() => {
+    if (faviconFetches.get(key) === request) faviconFetches.delete(key)
+  })
+  return request
+}
+
 function refreshTabFavicon(tab: BrowserTab): void {
   const contents = tab.view?.webContents
   if (!contents || contents.isDestroyed()) return
@@ -172,10 +253,19 @@ function refreshTabFavicon(tab: BrowserTab): void {
         faviconUrl = null
       }
     }
+    if (!faviconUrl) return
     persistPageFavicon(pageUrl, faviconUrl)
-    if (tab.faviconUrl === faviconUrl) return
-    tab.faviconUrl = faviconUrl
-    publishTabs()
+    if (tab.faviconUrl !== faviconUrl) {
+      tab.faviconUrl = faviconUrl
+      publishTabs()
+    }
+    void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
+      if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
+      if (tab.faviconUrl !== cachedIcon) {
+        tab.faviconUrl = cachedIcon
+        publishTabs()
+      }
+    })
   }).catch(() => undefined)
 }
 
@@ -459,7 +549,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (!isCurrentContents() || !isMainFrame || !/^https?:\/\//i.test(url)) return
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
-    tab.faviconUrl = null
+    tab.faviconUrl = getCachedBrowserSiteFavicon(url)
     tab.faviconRevision += 1
     persistOpenTabs()
     publishTabs()
@@ -469,14 +559,22 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     const pageUrl = contents.getURL()
     if (!/^https?:\/\//i.test(pageUrl)) return
     const faviconUrl = favicons
-      .map(normalizeFaviconUrl)
+      .map((candidate) => normalizeFaviconUrl(candidate) ?? normalizeCachedFaviconDataUrl(candidate))
       .find((candidate): candidate is string => candidate !== null)
     if (!faviconUrl) return
-    tab.faviconRevision += 1
+    const revision = ++tab.faviconRevision
     persistPageFavicon(pageUrl, faviconUrl)
-    if (tab.faviconUrl === faviconUrl) return
-    tab.faviconUrl = faviconUrl
-    publishTabs()
+    if (tab.faviconUrl !== faviconUrl) {
+      tab.faviconUrl = faviconUrl
+      publishTabs()
+    }
+    void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
+      if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
+      if (tab.faviconUrl !== cachedIcon) {
+        tab.faviconUrl = cachedIcon
+        publishTabs()
+      }
+    })
   })
   contents.on('did-stop-loading', () => {
     if (!isCurrentContents()) return
@@ -555,7 +653,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   const tab: BrowserTab = {
     id: randomUUID(),
     view: null,
-    faviconUrl: null,
+    faviconUrl: getCachedBrowserSiteFavicon(target),
     faviconRevision: 0,
     error: null,
     downloadStartedForCurrentLoad: false,

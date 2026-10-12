@@ -27,6 +27,7 @@ const appOutput = []
 const secretsToRedact = []
 let child
 let mainConnection
+let sidebarConnection
 let popupConnection
 let setupConnection
 let browserConnection
@@ -350,9 +351,30 @@ try {
   }, 45_000)
   const mainTarget = await waitFor('Surffish renderer target', async () => {
     const targets = await getTargets(port)
-    return targets.find((target) => target.type === 'page' && target.url.includes('/out/renderer/index.html'))
+    return targets.find((target) => {
+      if (target.type !== 'page') return false
+      try {
+        const targetUrl = new URL(target.url)
+        return targetUrl.pathname.endsWith('/out/renderer/index.html') && targetUrl.searchParams.get('surface') === 'toolbar'
+      } catch {
+        return false
+      }
+    })
   }, 45_000)
   mainConnection = await connectCdp(mainTarget.webSocketDebuggerUrl)
+  const sidebarTarget = await waitFor('Surffish sidebar renderer target', async () => {
+    const targets = await getTargets(port)
+    return targets.find((target) => {
+      if (target.type !== 'page') return false
+      try {
+        const targetUrl = new URL(target.url)
+        return targetUrl.pathname.endsWith('/out/renderer/index.html') && targetUrl.searchParams.get('surface') === 'sidebar'
+      } catch {
+        return false
+      }
+    })
+  }, 45_000)
+  sidebarConnection = await connectCdp(sidebarTarget.webSocketDebuggerUrl)
   const browserVersion = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) => response.json())
   browserConnection = await connectCdp(browserVersion.webSocketDebuggerUrl)
   const initialState = await waitFor('Bramble extension installation in the Surffish session', async () => {
@@ -960,13 +982,25 @@ try {
     const targets = await getTargets(port)
     return !targets.some((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
   }, 10_000)
-  await mainConnection.evaluate('document.querySelector(".sidebar-mode-button[aria-label=\\"Settings\\"]")?.click()')
-  await waitFor('Bramble management actions in Settings', async () => mainConnection.evaluate('Boolean(document.querySelector(".bramble-settings-actions .settings-action:last-child"))'))
-  await clickElementBySelector(mainConnection, '.bramble-settings-actions .settings-action:last-child')
-  const restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
-    const targets = await getTargets(port)
-    return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
-  }, 20_000)
+  await sidebarConnection.evaluate('document.querySelector(".sidebar-footer-icon-button[aria-label=\\"Settings\\"]")?.click()')
+  await waitFor('Bramble management actions in Settings', async () => sidebarConnection.evaluate('Boolean(document.querySelector(".bramble-settings-actions .settings-action:last-child"))'))
+  const restoreButtonState = await sidebarConnection.evaluate(`(() => {
+    const button = document.querySelector('.bramble-settings-actions .settings-action:last-child');
+    return button instanceof HTMLButtonElement ? { text: button.innerText.trim(), disabled: button.disabled } : null;
+  })()`)
+  assert.ok(restoreButtonState && !restoreButtonState.disabled, `Bramble Setup / customize should be enabled: ${JSON.stringify(restoreButtonState)}`)
+  await sidebarConnection.evaluate('document.querySelector(".bramble-settings-actions .settings-action:last-child")?.click()')
+  let restoreSetupTarget
+  try {
+    restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
+      const targets = await getTargets(port)
+      return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
+    }, 20_000)
+  } catch (error) {
+    const appState = await mainConnection.evaluate('window.api.browser.bramble.get()').catch(() => null)
+    const safeState = appState && { installed: appState.installed, loading: appState.loading, version: appState.version, popupOpen: appState.popupOpen, error: appState.error }
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; Bramble state: ${JSON.stringify(safeState)}`)
+  }
   setupConnection = await connectCdp(restoreSetupTarget.webSocketDebuggerUrl)
   await waitFor('Bramble setup tabs in the fresh options window', async () =>
     setupConnection.evaluate(`document.body?.innerText.includes('Restore from backup') && document.body?.innerText.includes('Join a device')`), 20_000)
@@ -1092,6 +1126,7 @@ try {
   setupConnection?.close()
   rpConnection?.close()
   browserConnection?.close()
+  sidebarConnection?.close()
   mainConnection?.close()
   await stopChild()
   if (rpServer?.listening) await new Promise((resolveClose) => rpServer.close(() => resolveClose()))

@@ -11,6 +11,7 @@ import {
   parseBrowserPreferences,
   parseBrowserSession,
   parseNewTabPreferences,
+  normalizeCachedFaviconDataUrl,
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
@@ -18,9 +19,13 @@ import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, New
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
+const SITE_ICON_CACHE_FILE = 'browser-site-icons.json'
+const MAX_CACHED_SITE_ICONS = 128
 let preferencesLoaded = false
 let preferences: BrowserPreferences = parseBrowserPreferences(null)
 let sessionPersistenceDisabled = false
+let siteIconsLoaded = false
+const cachedSiteIcons = new Map<string, string>()
 
 function readJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
@@ -48,6 +53,54 @@ function writeJson(filename: string, value: unknown): boolean {
     console.error(`Could not save ${filename}:`, error)
     return false
   }
+}
+
+function loadCachedSiteIcons(): void {
+  if (siteIconsLoaded) return
+  siteIconsLoaded = true
+  const value: unknown = readJson(SITE_ICON_CACHE_FILE)
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return
+  const record = value as Record<string, unknown>
+  if (record.version !== 1 || typeof record.icons !== 'object' || record.icons === null || Array.isArray(record.icons)) return
+  for (const [originInput, iconInput] of Object.entries(record.icons as Record<string, unknown>).slice(-MAX_CACHED_SITE_ICONS)) {
+    const origin = normalizeHttpOrigin(originInput)
+    const icon = normalizeCachedFaviconDataUrl(iconInput)
+    if (origin && icon) cachedSiteIcons.set(origin, icon)
+  }
+}
+
+export function getCachedBrowserSiteFavicon(originInput: unknown): string | null {
+  loadCachedSiteIcons()
+  const origin = normalizeHttpOrigin(originInput)
+  return origin ? cachedSiteIcons.get(origin) ?? null : null
+}
+
+export function getBrowserSiteFaviconCache(originsInput: unknown): Record<string, string> {
+  loadCachedSiteIcons()
+  if (!Array.isArray(originsInput)) return {}
+  const icons: Record<string, string> = {}
+  for (const originInput of originsInput.slice(0, MAX_CACHED_SITE_ICONS)) {
+    const origin = normalizeHttpOrigin(originInput)
+    const icon = origin ? cachedSiteIcons.get(origin) : undefined
+    if (origin && icon) icons[origin] = icon
+  }
+  return icons
+}
+
+export function saveBrowserSiteFavicon(originInput: unknown, iconInput: unknown): string | null {
+  loadCachedSiteIcons()
+  const origin = normalizeHttpOrigin(originInput)
+  const icon = normalizeCachedFaviconDataUrl(iconInput)
+  if (!origin || !icon) return null
+  cachedSiteIcons.delete(origin)
+  cachedSiteIcons.set(origin, icon)
+  while (cachedSiteIcons.size > MAX_CACHED_SITE_ICONS) {
+    const oldest = cachedSiteIcons.keys().next().value as string | undefined
+    if (!oldest) break
+    cachedSiteIcons.delete(oldest)
+  }
+  writeJson(SITE_ICON_CACHE_FILE, { version: 1, icons: Object.fromEntries(cachedSiteIcons) })
+  return icon
 }
 
 export function loadBrowserSession(): SavedBrowserSession {

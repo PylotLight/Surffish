@@ -229,7 +229,8 @@ function NewTabSiteIcon({ site, faviconUrl, showLabel, iconSize, onOpen }: { sit
     <button className={`new-tab-icon-tile${showLabel ? ' has-label' : ''}`} style={{ width: iconSize, minHeight: iconSize }} type="button" onClick={onOpen} title={`Open ${site.title} · ${site.origin}`} aria-label={`Open ${site.title}, ${hostname}`}>
       <span className="new-tab-site-icon" aria-hidden="true">
         {!iconFailed && <img src={iconSource} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => {
-          if (iconSource !== fallbackFaviconUrl) setIconSource(fallbackFaviconUrl)
+          const nextSource = iconSource === faviconUrl ? site.faviconUrl ?? fallbackFaviconUrl : fallbackFaviconUrl
+          if (nextSource && iconSource !== nextSource) setIconSource(nextSource)
           else setIconFailed(true)
         }} />}
         {iconFailed && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
@@ -267,10 +268,10 @@ function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
   )
 }
 
-function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: () => void; onUnpin: () => void }): React.JSX.Element {
+function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin }: { site: PinnedSite; cachedFaviconUrl?: string | null; onOpen: () => void; onUnpin: () => void }): React.JSX.Element {
   const quickLink = toQuickLinkSite(site)
   const fallbackFaviconUrl = quickLink ? `${quickLink.origin}/favicon.ico` : null
-  const preferredFaviconUrl = quickLink ? site.faviconUrl ?? fallbackFaviconUrl : null
+  const preferredFaviconUrl = quickLink ? cachedFaviconUrl ?? site.faviconUrl ?? fallbackFaviconUrl : null
   const [iconFailed, setIconFailed] = useState(false)
   const [iconSource, setIconSource] = useState(preferredFaviconUrl)
   useEffect(() => {
@@ -285,7 +286,8 @@ function PinnedSiteIcon({ site, onOpen, onUnpin }: { site: PinnedSite; onOpen: (
     }}>
       <span className="pinned-site-mark" aria-hidden="true">
         {quickLink && iconSource && !iconFailed && <img src={iconSource} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => {
-          if (fallbackFaviconUrl && iconSource !== fallbackFaviconUrl) setIconSource(fallbackFaviconUrl)
+          const nextSource = iconSource === cachedFaviconUrl ? site.faviconUrl ?? fallbackFaviconUrl : fallbackFaviconUrl
+          if (nextSource && iconSource !== nextSource) setIconSource(nextSource)
           else setIconFailed(true)
         }} />}
         {(!quickLink || iconFailed) && <span>{site.title.trim().slice(0, 1).toUpperCase() || hostname.slice(0, 1).toUpperCase() || '↗'}</span>}
@@ -302,6 +304,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const sidebarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const addressRef = useRef<HTMLInputElement>(null)
   const brambleButtonRef = useRef<HTMLButtonElement>(null)
+  const siteActionsControlRef = useRef<HTMLDivElement>(null)
+  const siteActionsButtonRef = useRef<HTMLButtonElement>(null)
   const downloadsControlRef = useRef<HTMLDivElement>(null)
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
@@ -309,6 +313,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
+  const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
   const [browserChromeHeight, setBrowserChromeHeight] = useState(window.api.platform === 'darwin' ? 50 : 45)
@@ -332,6 +337,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
+  const [siteActionsOpen, setSiteActionsOpen] = useState(false)
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
@@ -447,6 +453,23 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
   const newTabSites = useMemo(() => [...favoriteSites, ...frequentlyVisitedSites], [favoriteSites, frequentlyVisitedSites])
+  const siteIconOrigins = useMemo(
+    () => [...new Set(newTabSites.map((site) => site.origin))].slice(0, 128),
+    [newTabSites]
+  )
+  useEffect(() => {
+    let cancelled = false
+    const unsubscribe = window.api.browser.siteIcons.onChange(({ origin, faviconUrl }) => {
+      setCachedSiteIcons((current) => ({ ...current, [origin]: faviconUrl }))
+    })
+    void window.api.browser.siteIcons.get(siteIconOrigins).then((icons) => {
+      if (!cancelled) setCachedSiteIcons((current) => ({ ...icons, ...current }))
+    }).catch(() => undefined)
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [siteIconOrigins])
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   useEffect(() => {
@@ -791,6 +814,25 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [downloadsPopupOpen])
 
   useEffect(() => {
+    if (!siteActionsOpen) return
+    const closeOnOutsideClick = (event: PointerEvent): void => {
+      if (!siteActionsControlRef.current?.contains(event.target as Node)) setSiteActionsOpen(false)
+    }
+    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setSiteActionsOpen(false)
+        siteActionsButtonRef.current?.focus()
+      }
+    }
+    window.addEventListener('pointerdown', closeOnOutsideClick)
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsideClick)
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [siteActionsOpen])
+
+  useEffect(() => {
     const element = browserChromeRef.current
     if (!element) return
     const updateChromeHeight = (): void => {
@@ -863,6 +905,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   async function navigate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
     await navigateTo(address)
+  }
+
+  async function openPictureInPicture(): Promise<void> {
+    try {
+      const started = await window.api.browser.pictureInPicture()
+      if (!started) setNavigationError('No active video can open in Picture in Picture on this page.')
+      else setNavigationError('')
+    } catch (error) {
+      setNavigationError(error instanceof Error ? error.message : 'Picture in Picture could not be opened.')
+    }
   }
 
   function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
@@ -996,7 +1048,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           <section className="sidebar-pinned-sites" aria-label="Pinned tabs and bookmarks">
             <div className="sidebar-pinned-list">
               {tabs.filter((tab) => tab.pinned).map((tab) => <PinnedTabIcon key={`tab:${tab.id}`} tab={tab} />)}
-              {pinnedSites.map((site) => <PinnedSiteIcon key={`bookmark:${site.url}`} site={site} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
+              {pinnedSites.map((site) => <PinnedSiteIcon key={`bookmark:${site.url}`} site={site} cachedFaviconUrl={cachedSiteIcons[httpOrigin(site.url) ?? '']} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
             </div>
           </section>
         )}
@@ -1110,6 +1162,37 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
             <div className="omnibox-wrap">
               <div className="omnibox">
+                <div className="site-actions-control" ref={siteActionsControlRef}>
+                  <button
+                    className={`omnibox-action-button site-actions-button${siteActionsOpen ? ' is-current' : ''}`}
+                    ref={siteActionsButtonRef}
+                    type="button"
+                    aria-label={activeOrigin ? `Site actions for ${activeOrigin}` : 'Site actions'}
+                    aria-haspopup="menu"
+                    aria-expanded={siteActionsOpen}
+                    aria-controls="site-actions-menu"
+                    title={activeOrigin ? `Site actions for ${activeOrigin}` : 'Site actions'}
+                    onClick={() => setSiteActionsOpen((open) => !open)}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.8 12h16.4M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5Z" /></svg>
+                  </button>
+                  {siteActionsOpen && <div id="site-actions-menu" className="site-actions-menu" role="menu" aria-label="Site actions">
+                    <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
+                      setSiteActionsOpen(false)
+                      selectSettingsSection('site')
+                    }}>
+                      <span className="site-actions-menu-icon" aria-hidden="true">⛨</span>
+                      <span>Site settings</span>
+                    </button>
+                    <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
+                      setSiteActionsOpen(false)
+                      void openPictureInPicture()
+                    }}>
+                      <span className="site-actions-menu-icon" aria-hidden="true">▣</span>
+                      <span>Picture in Picture</span>
+                    </button>
+                  </div>}
+                </div>
                 <input
                   ref={addressRef}
                   type="text"
@@ -1135,6 +1218,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   autoCapitalize="none"
                   placeholder="Search or enter address"
                 />
+                <button
+                  className={`toolbar-button favorite-button omnibox-favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
+                  type="button"
+                  aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
+                  aria-pressed={currentOriginIsBookmarked}
+                  title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
+                  disabled={!activeOrigin}
+                  onClick={() => void toggleCurrentSiteBookmark()}
+                ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
               </div>
               {suggestionsOpen && addressSuggestions.length > 0 && (
                 <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
@@ -1166,45 +1258,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </button>
               </div>
               <button
-                className={`toolbar-button favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
-                type="button"
-                aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-                aria-pressed={currentOriginIsBookmarked}
-                title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-                disabled={!activeOrigin}
-                onClick={() => void toggleCurrentSiteBookmark()}
-              ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
-              <button
-                className="toolbar-button picture-in-picture-button"
-                type="button"
-                aria-label="Picture in Picture"
-                title="Picture in Picture (video opens in a floating window)"
-                onClick={() => {
-                  void window.api.browser.pictureInPicture().then((started) => {
-                    if (!started) setNavigationError('No active video can open in Picture in Picture on this page.')
-                    else setNavigationError('')
-                  })
-                }}
-              ><span aria-hidden="true">▣</span></button>
-              <button
-                className={`toolbar-button site-controls-button${sidebarMode === 'site' ? ' is-current' : ''}`}
-                type="button"
-                aria-label="Site settings"
-                aria-pressed={sidebarMode === 'site'}
-                title={activeOrigin ? `Site settings for ${activeOrigin}` : 'Site settings unavailable for this page'}
-                disabled={!activeOrigin}
-                onClick={() => selectSettingsSection('site')}
-              ><span aria-hidden="true">⛨</span></button>
-              <button
                 className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
                 ref={brambleButtonRef}
                 type="button"
-                aria-label={bramblePoc.installed ? 'Open Bramble' : 'Open Bramble extension settings'}
-                aria-pressed={bramblePoc.popupOpen}
+                aria-label="Open Bramble"
+                aria-haspopup="dialog"
+                aria-expanded={bramblePoc.popupOpen}
                 aria-busy={bramblePoc.loading}
-                title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Bramble extension settings'}
+                title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Open Bramble popup · install Bramble in Settings if needed'}
                 disabled={bramblePoc.loading}
-                onClick={() => bramblePoc.installed ? void openBramblePoc() : selectSettingsSection('settings')}
+                onClick={() => { void openBramblePoc() }}
               >
                 <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
               </button>
@@ -1293,13 +1356,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   } as React.CSSProperties}>
                     {frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
                       <div className="new-tab-icon-grid" role="group" aria-label="Most visited sites">
-                        {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                        {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
                       </div>
                       <span className="new-tab-group-label">Most visited</span>
                     </section>}
                     {favoriteSites.length > 0 && <section className="new-tab-link-group" aria-label="Favourite sites">
                       <div className="new-tab-icon-grid" role="group" aria-label="Favourite sites">
-                        {favoriteSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                        {favoriteSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
                       </div>
                       <span className="new-tab-group-label">Favourites</span>
                     </section>}
@@ -1355,8 +1418,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {sidebarMode === 'settings' && (
             <div className="settings-view">
               <header className="settings-page-header">
-                <h1>Settings</h1>
-                <p>Choose your start page, search engine, and browser behavior.</p>
+                <div className="settings-page-heading-copy">
+                  <h1>Settings</h1>
+                  <p>Choose your start page, search engine, and browser behavior.</p>
+                </div>
+                <button
+                  className="settings-done-button"
+                  type="button"
+                  aria-label="Done with settings and return to web content"
+                  title="Return to web content"
+                  onClick={() => setSidebarMode('tabs')}
+                >Done · Back to web</button>
               </header>
               <div className="settings-content">
                 <section className="settings-section">
@@ -1380,7 +1452,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <option value="search">Search engine</option>
                     </select>
                   </label>
-                  <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Each favicon is requested from its site's own origin. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
+                  <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Site icons use the page’s declared icon URL (or the site origin’s /favicon.ico fallback) and are cached locally. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
                 </section>
                 <section className="settings-section new-tab-settings-section" aria-label="New Tab clocks">
                   <div className="settings-section-heading"><div><strong>New Tab · time and clocks</strong><span className="settings-status">Choose any supported time zone and give each of up to {MAX_WORLD_CLOCKS} world clocks its own label.</span></div></div>
@@ -1443,7 +1515,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <div>
                       <strong>Bramble password manager</strong>
                       <span className={`settings-status${bramblePoc.installed ? ' is-on' : ''}`}>
-                        {bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}` : 'Not installed'}
+                        {bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}` : 'Not installed in this Surffish profile'}
                       </span>
                     </div>
                     {bramblePoc.installed && bramblePoc.iconDataUrl && <img className="bramble-settings-icon" src={bramblePoc.iconDataUrl} alt="" />}

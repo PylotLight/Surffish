@@ -4,6 +4,7 @@ import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPre
 export const MAX_RESTORED_TABS = 50
 export const MAX_PINNED_SITES = 12
 export const MAX_SAVED_SITE_SETTINGS = 200
+export const MAX_CACHED_FAVICON_BYTES = 48 * 1024
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
 export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'quick-links'
 export const DEFAULT_SIDEBAR_WIDTH = 320
@@ -176,6 +177,19 @@ export function normalizeFaviconUrl(value: unknown): string | null {
   } catch {
     return null
   }
+}
+
+/** Validate a bounded raster/vector image data URL for the private on-disk favicon cache. */
+export function normalizeCachedFaviconDataUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > Math.ceil(MAX_CACHED_FAVICON_BYTES * 4 / 3) + 128) return null
+  const match = /^data:(image\/(?:png|jpeg|gif|webp|x-icon|vnd\.microsoft\.icon|svg\+xml));base64,([A-Za-z\d+/]+={0,2})$/i.exec(value)
+  if (!match) return null
+  const encoded = match[2]!
+  if (encoded.length % 4 !== 0) return null
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0
+  const byteLength = encoded.length * 3 / 4 - padding
+  if (byteLength <= 0 || byteLength > MAX_CACHED_FAVICON_BYTES) return null
+  return `data:${match[1]!.toLowerCase()};base64,${encoded}`
 }
 
 export function parseBrowserSiteSettings(originInput: unknown, value: unknown): BrowserSiteSettings | null {

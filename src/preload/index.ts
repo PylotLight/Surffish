@@ -40,6 +40,14 @@ const api = {
         return () => ipcRenderer.removeListener('browser:preferences-changed', listener)
       }
     },
+    siteIcons: {
+      get: (origins: string[]): Promise<Record<string, string>> => ipcRenderer.invoke('browser:site-icons:get', origins),
+      onChange: (callback: (payload: { origin: string; faviconUrl: string }) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, payload: { origin: string; faviconUrl: string }): void => callback(payload)
+        ipcRenderer.on('browser:site-icon:changed', listener)
+        return () => ipcRenderer.removeListener('browser:site-icon:changed', listener)
+      }
+    },
     sidebarWidth: {
       set: (width: number): Promise<number> => ipcRenderer.invoke('browser:sidebar-width:set', width)
     },

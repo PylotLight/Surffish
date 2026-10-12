@@ -569,6 +569,9 @@ export async function initializeBramblePoc(): Promise<void> {
   const savedConfig = readSavedBrambleConfig()
   if (!savedConfig) {
     if (existsSync(configPath())) updateState({ error: 'Surffish could not read the saved Bramble configuration. Reinstall Bramble from Settings.' })
+    else if (existsSync(brambleDirectory(STAGING_DIRECTORY))) {
+      updateState({ error: 'Bramble files exist in this Surffish profile, but its verified install record is missing. Reinstall from Settings → Bramble to restore it safely.' })
+    }
     return
   }
   updateState({ loading: true, error: null })
@@ -689,7 +692,7 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
 export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<BrambleExtensionState> {
   if (state.loading) return getBramblePocState()
   if (!loadedExtension) {
-    updateState({ error: 'Install Bramble from Settings before opening its toolbar popup.' })
+    updateState({ error: 'Bramble is not installed in this Surffish profile. Install it in Settings → Bramble before opening the toolbar popup.' })
     return getBramblePocState()
   }
   if (loadedExtension) {

@@ -14,6 +14,8 @@ import {
   normalizeBrowserSession,
   normalizeSessionUrl,
   normalizeFaviconUrl,
+  normalizeCachedFaviconDataUrl,
+  MAX_CACHED_FAVICON_BYTES,
   normalizePinnedSites,
   parseBrowserProxySettings,
   parseBrowserPreferences,
@@ -146,6 +148,16 @@ test('persists only bounded, credential-free HTTP(S) favicon URLs on pins', () =
   ])
   assert.equal(normalizeFaviconUrl(`https://${'a'.repeat(4_100)}.test/icon.png`), null)
   assert.equal(normalizeFaviconUrl('http://assets.example.test/icon.ico'), 'http://assets.example.test/icon.ico')
+})
+
+test('accepts only small, base64-encoded image data URLs for the local favicon cache', () => {
+  const icon = 'data:image/png;base64,iVBORw0KGgo='
+  assert.equal(normalizeCachedFaviconDataUrl(icon), icon)
+  assert.equal(normalizeCachedFaviconDataUrl('data:text/html;base64,PGgxPk5vPC9oMT4='), null)
+  assert.equal(normalizeCachedFaviconDataUrl('data:image/png,<svg/>'), null)
+  assert.equal(normalizeCachedFaviconDataUrl('data:image/png;base64,AAAA='), null)
+  const tooLarge = `data:image/png;base64,${'A'.repeat(Math.ceil(MAX_CACHED_FAVICON_BYTES * 4 / 3) + 4)}`
+  assert.equal(normalizeCachedFaviconDataUrl(tooLarge), null)
 })
 
 test('accepts only HTTP(S) site settings and defaults each site to blocking and denying permissions', () => {
