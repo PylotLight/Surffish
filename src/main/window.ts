@@ -81,7 +81,7 @@ function trackWindowState(win: BaseWindow, initial: SavedWindowState | null): vo
 const isMac = process.platform === 'darwin'
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 const rendererFile = join(mainDirectory, '../renderer/index.html')
-const appIconPath = join(mainDirectory, '../../resources/icons/surffish-512.png')
+const appIconPath = join(mainDirectory, '../../src/resources/icons/surffish-512.png')
 let mainWindow: BaseWindow | null = null
 let onMainWindowClosed: () => void = () => {}
 

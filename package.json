@@ -49,7 +49,7 @@
       "out/native/google-sign-in"
     ],
     "mac": {
-      "icon": "resources/icons/Surffish.icns",
+      "icon": "src/resources/icons/Surffish.icns",
       "category": "public.app-category.productivity",
       "electronLanguages": [
         "en",
