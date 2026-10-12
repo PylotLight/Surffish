@@ -287,3 +287,11 @@ export interface WebStoreExtensionsState {
   notice: string | null
   error: string | null
 }
+
+export interface DefaultBrowserStatus {
+  /** Surffish handles both http and https links system-wide. */
+  isDefault: boolean
+  /** Only the packaged app can register; a dev build would register the bare Electron binary. */
+  canSet: boolean
+  platform: string
+}

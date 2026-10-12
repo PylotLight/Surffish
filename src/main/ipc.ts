@@ -30,6 +30,7 @@ import {
 import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
+import { getDefaultBrowserStatus, makeDefaultBrowser } from './external-links'
 import {
   getBrowserChromeState,
   isMainWindowRenderer,
@@ -189,6 +190,14 @@ export function registerIpc(): void {
   ipcMain.handle('browser:search-engine:get', (event) => {
     assertMainRenderer(event)
     return getBrowserSearchEngine()
+  })
+  ipcMain.handle('browser:default-browser:get', (event) => {
+    assertMainRenderer(event)
+    return getDefaultBrowserStatus()
+  })
+  ipcMain.handle('browser:default-browser:set', (event) => {
+    assertMainRenderer(event)
+    return makeDefaultBrowser()
   })
   ipcMain.handle('browser:tab-sleep:get', (event) => {
     assertMainRenderer(event)

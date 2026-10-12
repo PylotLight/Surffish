@@ -17,6 +17,8 @@ import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getP
 import { forgetPrivateDownloads } from './downloads'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
+import { isShowingPdf, printPdf } from './pdf-viewer'
+import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
@@ -320,7 +322,8 @@ function publishState(): void {
 }
 
 function persistOpenTabs(): void {
-  const saved = tabs.filter((tab) => !tab.isPrivate)
+  // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
+  const saved = tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
   const urls = saved.map(currentUrl)
   const pinnedIndexes = saved.flatMap((tab, index) => tab.pinned ? [index] : [])
   saveBrowserSession(urls, saved.findIndex((tab) => tab.id === activeTabId), pinnedIndexes)
@@ -479,7 +482,9 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       const id = createTab(url, selectedSearchEngine)
       if (id) persistOpenTabs()
     },
-    openInBackgroundTab: openBackgroundTab
+    openInBackgroundTab: openBackgroundTab,
+    pdfDocument: isBrowserPage && isShowingPdf(contents),
+    printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined
   })
 }
 
@@ -773,9 +778,11 @@ export interface ExtensionPageTabOptions {
   owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = extensionPage && input
+    ? input
+    : allowLocalDocument && input && isLocalDocumentUrl(input)
     ? input
     : input === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
@@ -982,6 +989,20 @@ export function getExperimentalExtensionFrames(electronTabId: number): Experimen
 export function newPrivateBrowserTab(input?: string): string | null {
   const id = createTab(input ?? SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, true)
   if (id) setImmediate(sendFocusAddressToVisibleRenderer)
+  return id
+}
+
+/**
+ * A link or file handed over by the OS (default browser, Open With, command line): always a new
+ * foreground tab. Only http(s) URLs and local PDF/HTML documents (from the trusted main-process
+ * opener, never from a page or the address bar) are accepted.
+ */
+export function openExternalBrowserTab(target: string): string | null {
+  const localDocument = isLocalDocumentUrl(target)
+  const url = localDocument ? target : resolveNavigationTarget(target)
+  if (!url || (!localDocument && !/^https?:\/\//i.test(url))) return null
+  const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, localDocument)
+  if (id) persistOpenTabs()
   return id
 }
 

@@ -2,20 +2,24 @@ import { app, BaseWindow } from 'electron'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
-import { createWindow, setMainWindowCloseHandler, showWindow } from './window'
+import { createWindow, setMainWindowCloseHandler } from './window'
 import { setBrowserSearchEngine } from './browser'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
 import { initializeDownloads } from './downloads'
 import { installAppMenu } from './app-menu'
+import { flushExternalOpens, registerExternalOpenHandlers } from './external-links'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 
 app.setName(APP_NAME)
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
 
-if (!app.requestSingleInstanceLock()) app.quit()
+const hasInstanceLock = app.requestSingleInstanceLock()
+if (!hasInstanceLock) app.quit()
+// Default-browser links and opened files can arrive before ready; they queue until tabs exist.
+else registerExternalOpenHandlers()
 app.whenReady().then(async () => {
   if (!app.isPackaged) console.info('Surffish browser profile:', app.getPath('userData'))
   try {
@@ -62,6 +66,7 @@ app.whenReady().then(async () => {
     console.warn('Could not load Chrome Web Store extensions; continuing without them:', error)
   }
   createWindow()
+  flushExternalOpens()
   try {
     await initializeBramblePoc()
   } catch (error) {
@@ -74,7 +79,6 @@ app.whenReady().then(async () => {
   console.error('App startup failed:', error)
   app.quit()
 })
-app.on('second-instance', () => showWindow())
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })

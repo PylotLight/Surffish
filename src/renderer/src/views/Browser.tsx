@@ -38,6 +38,7 @@ import { FindBar } from './FindBar'
 import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
+import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
 import { formatVisitedAt } from '../lib/format'
 import { useTabDragSort } from './useTabDragSort'
 import TimeZonePicker from './TimeZonePicker'
@@ -1520,7 +1521,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
                   <h1>{sidebarMode === 'integrations' ? 'Extensions' : sidebarMode === 'newtab' ? 'New Tab' : 'General'}</h1>
-                  <p>{sidebarMode === 'integrations' ? 'Bramble and Chrome Web Store extensions.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, tabs, privacy and connection.'}</p>
+                  <p>{sidebarMode === 'integrations' ? 'Bramble and Chrome Web Store extensions.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
               </header>
               <div className="settings-content">
@@ -1532,6 +1533,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
+                <DefaultBrowserSettings />
                 <SettingsGroup title="Tabs">
                   <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake. Hibernated tabs reload their last page; unsaved form state is lost.">
                     <select
