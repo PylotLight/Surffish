@@ -3,7 +3,7 @@
  * re-packs the dmg with hdiutil. ULMO is ~98mb vs ~126mb ULFO on electron 44 arm64. macOS only.
  */
 import { existsSync, renameSync, rmSync } from 'node:fs'
-import pkg from '../package.json'
+const pkg = await Bun.file(new URL('../package.json', import.meta.url)).json()
 
 if (process.platform !== 'darwin') {
   console.log('compress-dmg: not macOS, skipping')
