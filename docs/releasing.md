@@ -1,6 +1,6 @@
 # macOS releases and Homebrew
 
-Surffish has a **manual** macOS packaging path. There is no release workflow in this repository: do not enable or add GitHub Actions for publishing as part of this setup. The existing app version is `0.1.0`, but no macOS release archives have been published yet, so the Apple-silicon-only starter Cask in `Casks/surffish.rb` is intentionally not installable until real archives and checksums are available.
+Surffish has a **manual** macOS packaging and publishing path, driven by a local Bash helper. There is no automated GitHub Actions release workflow: do not enable or add Actions for publishing as part of this setup. The existing app version is `0.1.0`, but no macOS release archives have been published yet, so the Apple-silicon-only starter Cask in `Casks/surffish.rb` is intentionally not installable until real archives and checksums are available.
 
 ## Build the macOS archives
 
@@ -19,45 +19,29 @@ bun run dist:mac
 
 Before considering the first release, inspect and test the ARM64 bundle on an Apple-silicon Mac. Verify that the app starts, the sidebar/native trackpad integration works, and the bundle contains `Surffish.app` with the expected app identifier `com.pylotlight.surffish`.
 
-## Manual release and cask update
+## Manual release and Cask update
 
-Release publishing is deliberately separate from packaging. **Do not create or push a version tag or publish a GitHub release until the exact version, release notes, and both ARM64 archive files have been shown to the user and approved.** Once that approval is given and the archives have been built and checked:
+Publishing is deliberately gated and remains manual; there is no release workflow. First prepare and review a **final** release-notes file (do not pass the `-draft.md` file), and inspect/test the ARM64 app bundle on an Apple-silicon Mac. In either mode, the helper checks that the worktree is clean, the branch is current `main`, and the package and build targets are version `0.1.0` and ARM64-only. It runs typecheck and unit tests, verifies the ZIP/DMG and app bundle, calculates both checksums, and renders a preview Cask from the actual ZIP checksum. The normal mode also runs `dist:mac`; reuse mode skips that packaging build.
 
-1. From the approved commit, create and push the matching annotated tag, then create the GitHub release with the approved notes and the ARM64 ZIP and DMG. This is manual; no release workflow or Actions enablement is part of this setup:
+From fish, run Bash explicitly and pass the path to the final notes file:
 
-   ```bash
-   # Replace X.Y.Z only after the release payload has been approved.
-   version="X.Y.Z"
-   git tag -a "v${version}" -m "Surffish v${version}"
-   git push origin "v${version}"
-   gh release create "v${version}" \
-     "release/Surffish-${version}-mac-arm64.zip" \
-     "release/Surffish-${version}-mac-arm64.dmg" \
-     --title "Surffish v${version}" \
-     --notes-file /path/to/approved-release-notes.md
-   ```
+```fish
+bash scripts/publish-macos-release.sh /path/to/approved-release-notes.md
+```
 
-   `dist:mac` only builds files; it does not create a tag or release. Never run these publishing commands before the approval gate above.
-2. Calculate the ARM64 ZIP checksum and render the Cask with the same approved version:
+If the ARM64 ZIP and DMG already exist and must not be rebuilt, pass the full source commit SHA used to build them:
 
-   ```bash
-   version="X.Y.Z" # use the approved version
-   sha256_arm64="$(shasum -a 256 "release/Surffish-${version}-mac-arm64.zip" | awk '{print $1}')"
-   bun scripts/render-cask.ts \
-     --version "$version" \
-     --sha256-arm64 "$sha256_arm64" \
-     --out Casks/surffish.rb
-   ```
+```fish
+bash scripts/publish-macos-release.sh --reuse-artifacts FULL_40_CHARACTER_SOURCE_SHA /path/to/approved-release-notes.md
+```
 
-3. Commit the rendered Cask to the tap's default branch:
+The declared artifact source SHA must be the full 40-character lowercase SHA and match the clean, current `main` commit at `origin/main`. Because ZIP/DMG files do not prove their own source commit, reuse mode also requires typing `ARTIFACT SOURCE COMMIT <full-sha>` at a separate interactive prompt to attest that **both** existing artifacts were built from that exact commit. Only after that attestation does the normal `PUBLISH v0.1.0` confirmation appear. A mismatch or any other input cancels before creating a tag or release. Both modes still require running the helper from a native Apple-silicon Mac with Apple's command-line tools.
 
-   ```bash
-   git add Casks/surffish.rb
-   git commit -m "chore(tap): update Surffish Cask to v${version}"
-   git push origin main
-   ```
+The script prints the commit, release title, exact two asset names, sizes, checksums, and full notes before it will do anything public. After confirmation it creates and pushes the annotated tag, creates the public GitHub release with **only** `Surffish-0.1.0-mac-arm64.zip` and `Surffish-0.1.0-mac-arm64.dmg`, verifies that exact asset list, then renders `Casks/surffish.rb` from the ZIP checksum and commits/pushes the Cask update to `main`. It does not change or enable GitHub Actions.
 
-4. On a Mac with Homebrew, validate the Cask against the published archives, then install:
+Requirements: a clean, up-to-date `main` checkout matching `origin/main`, configured Git commit identity, authenticated `gh`, Bun/dependencies, and Xcode Command Line Tools on an Apple-silicon Mac. If dependencies are not installed yet, run `bun install` first. If a publish step fails after the confirmation, inspect the tag/release and current Git status before attempting recovery; the tag or public release may already exist.
+
+After publishing, on a Mac with Homebrew, validate the Cask against the published archives, then install:
 
    ```bash
    brew audit --cask --strict --online Casks/surffish.rb
