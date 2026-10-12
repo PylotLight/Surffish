@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { DownloadEntry } from '../../../shared/downloads'
 import { formatDownloadSize, getDownloadProgress } from '../../../shared/downloads'
 import './DownloadsPanel.css'
@@ -56,6 +56,7 @@ function DownloadRow({ entry, onMessage }: { entry: DownloadEntry; onMessage: (m
 
   return (
     <li className={`download-row is-${entry.state}`}>
+      <span className="download-file-badge" aria-hidden="true">{/\.([a-z0-9]{1,4})$/i.exec(entry.filename)?.[1]?.toUpperCase() ?? 'FILE'}</span>
       <div className="download-row-main">
         <div className="download-row-title-line">
           <strong className="download-filename" title={entry.filename}>{entry.filename}</strong>
@@ -88,11 +89,30 @@ function DownloadRow({ entry, onMessage }: { entry: DownloadEntry; onMessage: (m
   )
 }
 
+const Icon = {
+  folder: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" /></svg>,
+  search: <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m15.5 15.5 4 4" /></svg>,
+  more: <svg viewBox="0 0 24 24" aria-hidden="true"><circle className="downloads-dot" cx="6" cy="12" r="1.3" /><circle className="downloads-dot" cx="12" cy="12" r="1.3" /><circle className="downloads-dot" cx="18" cy="12" r="1.3" /></svg>,
+  close: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>,
+  external: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 5.5h5v5M18.5 5.5l-7 7M10 6.5H6.5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V14" /></svg>,
+  trash: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></svg>
+}
+
+function matches(entry: DownloadEntry, query: string): boolean {
+  if (!query) return true
+  const q = query.toLowerCase()
+  return entry.filename.toLowerCase().includes(q) || entry.source.toLowerCase().includes(q)
+}
+
 export default function DownloadsPanel({ mode, onShowAll, onClose }: DownloadsPanelProps): React.JSX.Element {
   const [items, setItems] = useState<DownloadEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [actionMessage, setActionMessage] = useState('')
+  const [searchOpen, setSearchOpen] = useState(mode === 'page')
+  const [query, setQuery] = useState('')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let mounted = true
@@ -118,24 +138,67 @@ export default function DownloadsPanel({ mode, onShowAll, onClose }: DownloadsPa
     }
   }, [])
 
-  const visibleItems = mode === 'popup' ? items.slice(0, 6) : items
+  useEffect(() => {
+    if (!menuOpen) return
+    const closeOnOutside = (event: PointerEvent): void => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', closeOnOutside)
+    return () => window.removeEventListener('pointerdown', closeOnOutside)
+  }, [menuOpen])
+
+  const filtered = items.filter((entry) => matches(entry, query))
+  const visibleItems = mode === 'popup' ? filtered.slice(0, 6) : filtered
   const id = mode === 'popup' ? 'downloads-popup' : 'downloads-page'
+  const clearable = items.some((entry) => entry.state !== 'progressing' && entry.state !== 'paused' && !(entry.state === 'interrupted' && entry.canResume))
+
+  const openFolder = (): void => {
+    void window.api.browser.downloads.openFolder().then((ok) => { if (!ok) setActionMessage('Could not open the Downloads folder.') })
+  }
+  const clearAll = (): void => {
+    setMenuOpen(false)
+    void window.api.browser.downloads.clear()
+  }
+
+  const tools = (
+    <div className="downloads-tools">
+      <button type="button" className="downloads-icon-button" onClick={openFolder} aria-label="Open Downloads folder" title="Open Downloads folder">{Icon.folder}</button>
+      {mode === 'popup' && (
+        <button type="button" className={`downloads-icon-button${searchOpen ? ' is-active' : ''}`} onClick={() => { setSearchOpen((open) => !open); if (searchOpen) setQuery('') }} aria-label="Search downloads" aria-pressed={searchOpen} title="Search downloads">{Icon.search}</button>
+      )}
+      <div className="downloads-menu-control" ref={menuRef}>
+        <button type="button" className={`downloads-icon-button${menuOpen ? ' is-active' : ''}`} onClick={() => setMenuOpen((open) => !open)} aria-label="More download options" aria-haspopup="menu" aria-expanded={menuOpen} title="More options">{Icon.more}</button>
+        {menuOpen && (
+          <div className="downloads-menu" role="menu">
+            {mode === 'popup' && onShowAll && <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); onShowAll() }}>{Icon.external}<span>Open downloads page</span></button>}
+            <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); openFolder() }}>{Icon.folder}<span>Open Downloads folder</span></button>
+            <hr />
+            <button type="button" role="menuitem" disabled={!clearable} onClick={clearAll}>{Icon.trash}<span>Clear all download history</span></button>
+          </div>
+        )}
+      </div>
+      {mode === 'page' && onClose && <button type="button" className="downloads-icon-button downloads-page-close" onClick={onClose} aria-label="Close downloads" title="Close (Esc)">{Icon.close}<span>Close</span></button>}
+    </div>
+  )
 
   return (
     <section className={`downloads-panel downloads-panel-${mode}${mode === 'page' ? ' downloads-page' : ''}`} id={id} aria-label={mode === 'popup' ? 'Recent downloads' : 'Downloads'} role={mode === 'popup' ? 'dialog' : undefined}>
       {mode === 'popup' ? (
         <header className="downloads-popup-header">
-          <div><strong>Downloads</strong><span>{items.length ? `${items.length} saved in this list` : 'Recent activity'}</span></div>
-          <div className="downloads-popup-header-actions">
-            {onShowAll && <button type="button" className="downloads-show-all" onClick={onShowAll}>Show all</button>}
-            {onClose && <button type="button" className="downloads-close" onClick={onClose} aria-label="Close downloads" title="Close">×</button>}
-          </div>
+          <strong>Downloads</strong>
+          {tools}
         </header>
       ) : (
         <header className="downloads-page-header">
-          <div><h1>Downloads</h1><p>Recent files and transfers from this browser.</p></div>
-          <span className="downloads-count">{items.length} {items.length === 1 ? 'item' : 'items'}</span>
+          <div><h1>Downloads</h1><p>{items.length} {items.length === 1 ? 'item' : 'items'} · removing an item never deletes the file.</p></div>
+          {tools}
         </header>
+      )}
+      {searchOpen && (
+        <label className="downloads-search">
+          {Icon.search}
+          <input type="search" value={query} autoFocus={mode === 'popup'} placeholder="Search downloads" aria-label="Search downloads" onChange={(event) => setQuery(event.target.value)} />
+        </label>
       )}
 
       {loading ? (
@@ -151,19 +214,20 @@ export default function DownloadsPanel({ mode, onShowAll, onClose }: DownloadsPa
         </div>
       ) : visibleItems.length === 0 ? (
         <div className="downloads-empty" role="status">
-          <span className="downloads-empty-icon" aria-hidden="true">↓</span>
-          <strong>No downloads yet</strong>
-          <span>Files you download will appear here.</span>
+          <span className="downloads-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4.5v10M7.5 10.5l4.5 4.5 4.5-4.5M5.5 19h13" /></svg></span>
+          <strong>{query ? 'No matching downloads' : 'No downloads yet'}</strong>
+          {!query && <span>Files you download will appear here.</span>}
         </div>
       ) : (
-        <>
-          <ul className="downloads-list" aria-label={mode === 'popup' ? 'Recent downloads list' : 'Download history'}>
-            {visibleItems.map((entry) => <DownloadRow key={entry.id} entry={entry} onMessage={setActionMessage} />)}
-          </ul>
-          {mode === 'popup' && items.length > visibleItems.length && <p className="downloads-more-note">Showing the 6 most recent downloads.</p>}
-          {mode === 'page' && <p className="downloads-history-note">Removing an item clears its history only; it never deletes the downloaded file.</p>}
-          {actionMessage && <p className="downloads-action-message" role="status">{actionMessage}</p>}
-        </>
+        <ul className="downloads-list" aria-label={mode === 'popup' ? 'Recent downloads list' : 'Download history'}>
+          {visibleItems.map((entry) => <DownloadRow key={entry.id} entry={entry} onMessage={setActionMessage} />)}
+        </ul>
+      )}
+      {actionMessage && <p className="downloads-action-message" role="status">{actionMessage}</p>}
+      {mode === 'popup' && onShowAll && (
+        <footer className="downloads-popup-footer">
+          <button type="button" className="downloads-show-all" onClick={onShowAll}>{filtered.length > visibleItems.length ? `See all ${filtered.length}` : 'See all downloads'}</button>
+        </footer>
       )}
     </section>
   )

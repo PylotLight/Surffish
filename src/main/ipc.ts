@@ -9,6 +9,7 @@ import {
   updateBrowserTrackpadScrollEdges,
   updateBrowserPageScale,
   closeBrowserTab,
+  setBrowserTabMuted,
   moveBrowserTab,
   getBrowserState,
   getBrowserTabs,
@@ -31,7 +32,7 @@ import {
   setBrowserChromeMetrics,
   setBrowserChromeState
 } from './browser-shell'
-import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
+import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload, clearDownloadHistory, openDownloadsFolder } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
 import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
@@ -154,6 +155,10 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     if (typeof id === 'string') closeBrowserTab(id)
   })
+  ipcMain.handle('browser:tabs:mute', (event, id: unknown, muted: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && typeof muted === 'boolean' && setBrowserTabMuted(id, muted)
+  })
   ipcMain.handle('browser:tabs:move', (event, id: unknown, beforeId: unknown) => {
     assertMainRenderer(event)
     if (typeof id !== 'string' || (beforeId !== null && typeof beforeId !== 'string')) return false
@@ -258,6 +263,14 @@ export function registerIpc(): void {
   ipcMain.handle('browser:downloads:open', (event, id: unknown) => {
     assertMainRenderer(event)
     return typeof id === 'string' ? openDownload(id) : false
+  })
+  ipcMain.handle('browser:downloads:clear', (event) => {
+    assertMainRenderer(event)
+    return clearDownloadHistory()
+  })
+  ipcMain.handle('browser:downloads:open-folder', (event) => {
+    assertMainRenderer(event)
+    return openDownloadsFolder()
   })
   ipcMain.handle('browser:downloads:reveal', (event, id: unknown) => {
     assertMainRenderer(event)

@@ -95,6 +95,10 @@ export interface BrowserTabSummary {
   active: boolean
   pinned: boolean
   sleeping: boolean
+  /** Tab is currently producing sound (Chromium's audible state, ~ignores silent media). */
+  audible: boolean
+  /** Tab audio is muted by the user. */
+  muted: boolean
 }
 export interface BrowsingHistoryEntry {
   id: string
@@ -110,7 +114,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'integrations' | 'network' | 'site' | 'downloads'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {

@@ -106,6 +106,7 @@ const api = {
       activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
       close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
       move: (id: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move', id, beforeId),
+      setMuted: (id: string, muted: boolean): Promise<boolean> => ipcRenderer.invoke('browser:tabs:mute', id, muted),
       onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, tabs: BrowserTabSummary[]): void => callback(tabs)
         ipcRenderer.on('browser:tabs', listener)
@@ -147,6 +148,8 @@ const api = {
       remove: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:remove', id),
       open: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:open', id),
       reveal: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:downloads:reveal', id),
+      clear: (): Promise<boolean> => ipcRenderer.invoke('browser:downloads:clear'),
+      openFolder: (): Promise<boolean> => ipcRenderer.invoke('browser:downloads:open-folder'),
       onChange: (callback: (downloads: DownloadEntry[]) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, downloads: DownloadEntry[]): void => callback(downloads)
         ipcRenderer.on('browser:downloads:changed', listener)

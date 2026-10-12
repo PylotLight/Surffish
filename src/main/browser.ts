@@ -133,7 +133,9 @@ function getTabSummaries(): BrowserTabSummary[] {
     loading: tab.view?.webContents.isLoading() ?? false,
     active: tab.id === activeTabId,
     pinned: tab.pinned,
-    sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab))
+    sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
+    audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
+    muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted())
   }))
 }
 
@@ -596,6 +598,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
     if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url)) return event.preventDefault()
     if (isMainFrame && handOffGoogleSignIn(contents, url)) event.preventDefault()
+  })
+  contents.on('audio-state-changed', () => {
+    if (!isCurrentContents()) return
+    publishTabs()
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
@@ -1229,6 +1235,14 @@ export function reopenClosedBrowserTab(): string | null {
   const id = createTab(entry.url, selectedSearchEngine, true, false, false, entry.pinned, undefined, entry.index)
   if (id) persistOpenTabs()
   return id
+}
+
+export function setBrowserTabMuted(id: string, muted: boolean): boolean {
+  const contents = getTab(id)?.view?.webContents
+  if (!contents || contents.isDestroyed()) return false
+  contents.setAudioMuted(muted)
+  publishTabs()
+  return true
 }
 
 export function closeBrowserTab(id: string): void {

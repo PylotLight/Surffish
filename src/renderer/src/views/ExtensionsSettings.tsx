@@ -47,7 +47,7 @@ export function ExtensionsSettings({ state, setState }: Props): React.JSX.Elemen
         />
         <button className="settings-action primary" type="submit" disabled={!validInput || state.busy}>{state.busy && !state.busyId ? 'Installing…' : 'Install'}</button>
       </form>
-      <p className="settings-help">Paste a store link, or open the extension’s store page in Surffish and click <strong>Add to Surffish</strong>. Surffish checks compatibility first: Supported and Partial extensions can be installed (Partial lists what won’t work), Unsupported ones are blocked.</p>
+      <p className="settings-help">Paste a store link, or click <strong>Add to Surffish</strong> on the store page. Partial extensions list what won’t work; Unsupported ones are blocked. Hide or pin extensions from the toolbar’s puzzle menu.</p>
       {state.extensions.map((extension) => (
         <div className="extension-settings-row" key={extension.id}>
           <div className="extension-settings-header">
@@ -59,10 +59,7 @@ export function ExtensionsSettings({ state, setState }: Props): React.JSX.Elemen
                 {!extension.enabled ? ' · Off' : !extension.loaded ? ' · Not loaded' : ''}
               </span>
             </div>
-            <label className="settings-toggle">
-              <input type="checkbox" checked={extension.enabled} disabled={state.busy} aria-label={`${extension.name} on`} onChange={(event) => run(() => api.setEnabled(extension.id, event.target.checked))} />
-              On
-            </label>
+            <input type="checkbox" className="settings-switch" checked={extension.enabled} disabled={state.busy} aria-label={`${extension.name} on`} onChange={(event) => run(() => api.setEnabled(extension.id, event.target.checked))} />
           </div>
           {extension.description && <p className="settings-help">{extension.description}</p>}
           {extension.gaps.length > 0 && (
