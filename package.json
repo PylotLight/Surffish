@@ -51,15 +51,12 @@
       "category": "public.app-category.productivity",
       "target": [
         {
-          "target": "dmg",
+          "target": "zip",
           "arch": [
             "arm64"
           ]
         }
       ]
-    },
-    "dmg": {
-      "writeUpdateInfo": false
     }
   },
   "devDependencies": {

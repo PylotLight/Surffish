@@ -2,7 +2,7 @@
 /**
  * bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks]
  *
- * One-shot local macOS release: bump version -> checks -> DMG -> verify -> confirm ->
+ * One-shot local macOS release: bump version -> checks -> ZIP -> verify -> confirm ->
  * push + tag -> GitHub release via `ghp` -> render + push the Cask.
  * Runs on an Apple-silicon Mac (GitHub macOS runner minutes are used up).
  */
@@ -71,7 +71,7 @@ async function confirm(question: string): Promise<boolean> {
 
 // ---- preflight -------------------------------------------------------------
 if (process.platform !== 'darwin' || process.arch !== 'arm64') fail('run this on an Apple-silicon Mac')
-for (const tool of ['git', 'hdiutil', 'shasum']) {
+for (const tool of ['git', 'unzip']) {
   if (spawnSync('which', [tool]).status !== 0) fail(`missing ${tool}`)
 }
 if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') fail('switch to main first')
@@ -132,25 +132,25 @@ if (!skipChecks) {
   step('typecheck', 'bun', ['run', 'typecheck'])
   step('tests', 'bun', ['run', 'test'])
 }
-step('building DMG', 'bun', ['run', 'dist:mac'])
+step('building app zip', 'bun', ['run', 'dist:mac'])
 
-const dmgName = `Surffish-${version}-mac-arm64.dmg`
-const dmg = join(root, 'release', dmgName)
-if (!existsSync(dmg)) {
+const artifactName = `Surffish-${version}-mac-arm64.zip`
+const artifact = join(root, 'release', artifactName)
+if (!existsSync(artifact)) {
   undoBump()
-  fail(`expected ${dmg} after dist:mac`)
+  fail(`expected ${artifact} after dist:mac`)
 }
-step('hdiutil verify', 'hdiutil', ['verify', dmg])
-const sha256 = createHash('sha256').update(readFileSync(dmg)).digest('hex')
-log(`${dmgName}\n          sha256 ${sha256}`)
+step('zip integrity', 'unzip', ['-tq', artifact])
+const sha256 = createHash('sha256').update(readFileSync(artifact)).digest('hex')
+log(`${artifactName}\n          sha256 ${sha256}`)
 
 if (dryRun) {
   undoBump()
-  log(`dry run done, nothing published. DMG is at release/${dmgName}`)
+  log(`dry run done, nothing published. zip is at release/${artifactName}`)
   process.exit(0)
 }
 
-if (!(await confirm(`smoke test release/${dmgName} if you want (open it), then publish ${tag}?`))) {
+if (!(await confirm(`smoke test release/mac-arm64/Surffish.app if you want, then publish ${tag}?`))) {
   undoBump()
   log('not published')
   process.exit(1)
@@ -162,7 +162,7 @@ run('git', ['tag', '-a', tag, '-m', `Surffish ${tag}`])
 run('git', ['push', '--quiet', 'origin', tag])
 log(`pushed ${tag}`)
 
-gh(['release', 'create', tag, dmg, '--repo', REPO, '--title', `Surffish ${tag}`, '--notes-file', notesPath, '--verify-tag'])
+gh(['release', 'create', tag, artifact, '--repo', REPO, '--title', `Surffish ${tag}`, '--notes-file', notesPath, '--verify-tag'])
 log('github release created')
 
 run('bun', ['scripts/render-cask.ts', '--version', version, '--sha256-arm64', sha256, '--out', 'Casks/surffish.rb'])
