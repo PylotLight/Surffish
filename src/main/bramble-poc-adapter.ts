@@ -125,7 +125,52 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
       });
     } catch {}
   }
+  // Electron has no chrome.windows. Bramble's autofill "Vault locked" row (and the passkey unlock)
+  // asks the background to windows.create its popup, which threw and did nothing. In the worker,
+  // forward create/remove to the offscreen page; in the offscreen page, hand them to Surffish.
+  const WINDOWS_MESSAGE = '__surffishBrambleWindows';
+  const POPOUT_WINDOW_ID = 1;
+  if (typeof globalThis.document === 'undefined' && extensionApi?.runtime && typeof extensionApi.windows === 'undefined') {
+    const forward = (op, url) => {
+      try {
+        const sent = extensionApi.runtime.sendMessage({ [WINDOWS_MESSAGE]: op, url });
+        if (sent && typeof sent.catch === 'function') sent.catch(() => {});
+      } catch {}
+    };
+    const noWindow = async () => { throw new Error('No window with that id.'); };
+    try {
+      Object.defineProperty(extensionApi, 'windows', {
+        configurable: true,
+        value: {
+          WINDOW_ID_NONE: -1,
+          WINDOW_ID_CURRENT: -2,
+          create: async (info) => {
+            const raw = info && (Array.isArray(info.url) ? info.url[0] : info.url);
+            const url = typeof raw === 'string' ? new URL(raw, extensionApi.runtime.getURL('/')).href : undefined;
+            forward('create', url);
+            return { id: POPOUT_WINDOW_ID, focused: true, type: 'popup', state: 'normal', alwaysOnTop: false, incognito: false };
+          },
+          remove: async (id) => { if (id === POPOUT_WINDOW_ID) forward('remove'); },
+          update: async (id) => ({ id, focused: true }),
+          get: noWindow,
+          getCurrent: noWindow,
+          getLastFocused: noWindow,
+          getAll: async () => [],
+          onRemoved: { addListener() {}, removeListener() {}, hasListener: () => false },
+          onFocusChanged: { addListener() {}, removeListener() {}, hasListener: () => false }
+        }
+      });
+    } catch {}
+  }
   const brambleBridge = globalThis.surffishBramble;
+  if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime?.onMessage && typeof brambleBridge?.openPopout === 'function') {
+    extensionApi.runtime.onMessage.addListener((message) => {
+      const op = message && message[WINDOWS_MESSAGE];
+      if (op === 'create') void brambleBridge.openPopout(typeof message.url === 'string' ? message.url : '').catch(() => {});
+      else if (op === 'remove') void brambleBridge.closePopout().catch(() => {});
+      return false;
+    });
+  }
   if (typeof globalThis.document !== 'undefined' && typeof brambleBridge?.writeClipboard === 'function' && globalThis.navigator?.clipboard) {
     try {
       Object.defineProperty(globalThis.navigator.clipboard, 'writeText', {
