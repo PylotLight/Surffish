@@ -79,9 +79,34 @@ export function toElectronCookie(cookie: WebKitCookie): ElectronCookieDetails | 
   return details
 }
 
-export function parseHelperOutput(stdout: string): WebKitCookie[] {
-  const line = stdout.trim().split('\n').pop() ?? ''
-  const parsed: unknown = JSON.parse(line)
-  if (!Array.isArray(parsed)) throw new Error('Google sign-in helper returned no cookie list.')
-  return parsed as WebKitCookie[]
+export type HelperMessage =
+  | { type: 'cookies'; cookies: WebKitCookie[] }
+  | { type: 'bramble-list'; host: string }
+  | { type: 'bramble-fill'; id: string }
+
+/** One line the helper wrote on stdout, or null for noise and malformed lines. */
+export function parseHelperMessage(line: string): HelperMessage | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line.trim())
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const message = parsed as Record<string, unknown>
+  if (message.type === 'cookies' && Array.isArray(message.cookies)) return { type: 'cookies', cookies: message.cookies as WebKitCookie[] }
+  if (message.type === 'bramble-list' && typeof message.host === 'string') return { type: 'bramble-list', host: message.host.toLowerCase() }
+  if (message.type === 'bramble-fill' && typeof message.id === 'string' && message.id.length > 0 && message.id.length <= 256) return { type: 'bramble-fill', id: message.id }
+  return null
+}
+
+/** Bramble fills only ever answer for Google's own sign-in host. */
+export function isBrambleFillHost(host: string): boolean {
+  return host === 'accounts.google.com'
+}
+
+/** Electron top-left window frame as the helper's --frame argument. */
+export function helperFrameArgument(bounds: { x: number; y: number; width: number; height: number } | null | undefined): string | null {
+  if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0) return null
+  return `--frame=${Math.round(bounds.x)},${Math.round(bounds.y)},${Math.round(bounds.width)},${Math.round(bounds.height)}`
 }

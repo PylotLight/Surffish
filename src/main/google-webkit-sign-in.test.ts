@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isGoogleSignInPage, parseHelperOutput, signInContinueUrl, toElectronCookie } from './google-webkit-sign-in-policy.ts'
+import { isGoogleSignInPage, parseHelperMessage, isBrambleFillHost, helperFrameArgument, signInContinueUrl, toElectronCookie } from './google-webkit-sign-in-policy.ts'
 
 test('detects Google sign-in pages only', () => {
   for (const url of [
@@ -40,7 +40,24 @@ test('maps WebKit cookies to Electron cookie details', () => {
   assert.equal(toElectronCookie({ name: 'x', value: 'y', domain: '.notgoogle.com' }), null)
 })
 
-test('parses the helper JSON line', () => {
-  assert.deepEqual(parseHelperOutput('noise\n[{"name":"SID","value":"v","domain":".google.com"}]\n'), [{ name: 'SID', value: 'v', domain: '.google.com' }])
-  assert.throws(() => parseHelperOutput('{}'))
+test('parses helper protocol lines', () => {
+  assert.deepEqual(parseHelperMessage('{"type":"cookies","cookies":[{"name":"SID","value":"v","domain":".google.com"}]}'), { type: 'cookies', cookies: [{ name: 'SID', value: 'v', domain: '.google.com' }] })
+  assert.deepEqual(parseHelperMessage('{"type":"bramble-list","host":"Accounts.Google.com"}'), { type: 'bramble-list', host: 'accounts.google.com' })
+  assert.deepEqual(parseHelperMessage('{"type":"bramble-fill","id":"abc"}'), { type: 'bramble-fill', id: 'abc' })
+  assert.equal(parseHelperMessage('2026-10-12 noise'), null)
+  assert.equal(parseHelperMessage('[]'), null)
+  assert.equal(parseHelperMessage('{"type":"cookies"}'), null)
+  assert.equal(parseHelperMessage('{"type":"bramble-fill","id":""}'), null)
+})
+
+test('only fills Bramble logins on Google sign-in', () => {
+  assert.equal(isBrambleFillHost('accounts.google.com'), true)
+  assert.equal(isBrambleFillHost('evil.example'), false)
+  assert.equal(isBrambleFillHost('accounts.google.com.evil.example'), false)
+})
+
+test('formats the owner window frame for the helper', () => {
+  assert.equal(helperFrameArgument({ x: 10.4, y: 20, width: 1200, height: 800 }), '--frame=10,20,1200,800')
+  assert.equal(helperFrameArgument({ x: 0, y: 0, width: 0, height: 800 }), null)
+  assert.equal(helperFrameArgument(null), null)
 })
