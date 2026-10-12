@@ -22,7 +22,7 @@ import {
   sha256Hex
 } from './bramble-release'
 import { getMainWindow } from './window'
-import { anchoredPopupBounds } from '../shared/window-geometry'
+import { anchoredPopupBounds, centredPopupAnchor } from '../shared/window-geometry'
 import { sendToMainWindowRenderers } from './browser-shell'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
@@ -176,6 +176,19 @@ function resolveBramblePreload(): string {
   if (existsSync(`${base}.cjs`)) return `${base}.cjs`
   if (existsSync(`${base}.js`)) return `${base}.js`
   return `${base}.mjs`
+}
+
+let toolbarAnchor: BramblePopupAnchor | undefined
+
+export function setBrambleToolbarAnchor(anchor: BramblePopupAnchor | undefined): void {
+  toolbarAnchor = anchor
+}
+
+/** A zero-height anchor above the centre of the window content, so the popup lands centred. */
+function centredAnchor(owner: BaseWindow | undefined): BramblePopupAnchor | undefined {
+  if (!owner) return undefined
+  const content = owner.getContentBounds()
+  return centredPopupAnchor(content, { width: BRAMBLE_POPUP_WIDTH, height: BRAMBLE_POPUP_HEIGHT })
 }
 
 function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BaseWindow | undefined): { x: number; y: number; width: number; height: number } {
@@ -818,7 +831,9 @@ export async function openBramblePopoutFromBackground(requestedUrl: string): Pro
   const pageUrl = `${extension.url}popup.html`
   const owner = mainWindow()
   if (owner && !owner.isDestroyed() && owner.isMinimized()) owner.restore()
-  showBrambleLauncher(undefined, pageUrl)
+  // Attach to the toolbar's Bramble button like a toolbar click; with no button on screen,
+  // centre over the window instead of dropping it wherever the cursor happens to be.
+  showBrambleLauncher(toolbarAnchor ?? centredAnchor(owner), pageUrl)
 }
 
 export function closeBramblePopoutFromBackground(): void {

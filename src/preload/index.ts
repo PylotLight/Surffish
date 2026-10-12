@@ -157,6 +157,8 @@ const api = {
       checkForUpdates: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:check-for-updates'),
       installLatest: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:install-latest'),
       open: (anchor?: BramblePopupAnchor): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:open', anchor),
+      /** Where the toolbar's Bramble button sits, so popups Bramble opens itself attach to it. */
+      setAnchor: (anchor: BramblePopupAnchor | null): void => ipcRenderer.send('browser:bramble:anchor', anchor),
       setup: (): Promise<BrambleExtensionState> => ipcRenderer.invoke('browser:bramble:setup'),
       onChange: (callback: (state: BrambleExtensionState) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, state: BrambleExtensionState): void => callback(state)

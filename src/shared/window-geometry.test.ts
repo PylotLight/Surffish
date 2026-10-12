@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { anchoredPopupBounds, fitBoundsToDisplays, parseSavedWindowState } from './window-geometry.ts'
+import { anchoredPopupBounds, centredPopupAnchor, fitBoundsToDisplays, parseSavedWindowState } from './window-geometry.ts'
 
 const area = { x: 0, y: 25, width: 1728, height: 1092 }
 const size = { width: 500, height: 550 }
@@ -47,4 +47,15 @@ test('bounds pick the display they mostly sit on', () => {
   const second = { x: 1728, y: 0, width: 2560, height: 1415 }
   const fitted = fitBoundsToDisplays({ x: 2000, y: 200, width: 1240, height: 820 }, [area, second], { width: 800, height: 540 })
   assert.deepEqual(fitted, { x: 2000, y: 200, width: 1240, height: 820 })
+})
+
+test('centredPopupAnchor centres the popup over the window content', () => {
+  const content = { x: 100, y: 50, width: 1400, height: 900 }
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 }
+  const size = { width: 500, height: 550 }
+  const bounds = anchoredPopupBounds(centredPopupAnchor(content, size), content, workArea, size, { x: 0, y: 0 })
+  assert.equal(bounds.x, 100 + (1400 - 500) / 2)
+  assert.equal(bounds.y, 50 + (900 - 550) / 2)
+  assert.equal(bounds.width, 500)
+  assert.equal(bounds.height, 550)
 })

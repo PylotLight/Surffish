@@ -34,7 +34,7 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
-import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, writeBrambleClipboardText } from './bramble-poc'
+import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -281,6 +281,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:bramble:open', async (event, anchor: unknown) => {
     assertMainRenderer(event)
     return openBramblePoc(parseBramblePopupAnchor(anchor))
+  })
+  ipcMain.on('browser:bramble:anchor', (event, anchor: unknown) => {
+    if (!isMainWindowRenderer(event.sender, event.senderFrame)) return
+    setBrambleToolbarAnchor(parseBramblePopupAnchor(anchor))
   })
   ipcMain.handle('browser:bramble:setup', async (event) => {
     assertMainRenderer(event)
