@@ -692,7 +692,7 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
 export async function openBramblePoc(anchor?: BramblePopupAnchor): Promise<BrambleExtensionState> {
   if (state.loading) return getBramblePocState()
   if (!loadedExtension) {
-    updateState({ error: 'Bramble is not installed in this Surffish profile. Install it in Settings → Bramble before opening the toolbar popup.' })
+    updateState({ error: 'Bramble is not installed in this Surffish profile. Use the Bramble toolbar icon or Settings → Bramble to install the verified release.' })
     return getBramblePocState()
   }
   if (loadedExtension) {
