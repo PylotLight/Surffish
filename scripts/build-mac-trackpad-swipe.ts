@@ -11,7 +11,7 @@ if (process.platform !== 'darwin') {
   process.exit(0)
 }
 
-const source = join(root, 'native/macos/mac-trackpad-swipe.mm')
+const source = join(root, 'src/native/macos/mac-trackpad-swipe.mm')
 const outputDirectory = join(root, 'out/native')
 const output = join(outputDirectory, 'mac-trackpad-swipe.node')
 const fingerprintFile = join(outputDirectory, 'mac-trackpad-swipe.inputs.sha256')

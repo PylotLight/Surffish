@@ -5,7 +5,7 @@ const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { app, BrowserWindow, session } = require('electron')
 
-const fixtureRoot = join(__dirname, '..', 'tests', 'extension-probes')
+const fixtureRoot = join(__dirname, 'fixtures', 'extension-probes')
 const allCases = [
   { name: 'chromium-mv2', expected: 'documented baseline; must pass' },
   { name: 'bitwarden-mv2', expected: 'observational; Bitwarden-like API permissions and action UI' },

@@ -7,7 +7,7 @@ This SwiftPM project is deliberately separate from the Electron app. It targets 
 No paid Apple Developer membership is needed to compile or run locally:
 
 ```sh
-cd native/macos
+cd src/native/macos
 ./Scripts/test-macos.sh
 swift run SurffishNative
 ```
@@ -50,4 +50,4 @@ The standard Safari routes above install extensions **in Safari**. This prototyp
 - Public App Store distribution, Developer ID distribution/notarization, and Apple's restricted passkey entitlement are not part of this POC. The local app and WebKit API smoke tests do not require paid membership.
 - Do not enable App Sandbox for this first local test build; the prototype is not hardened or audited. Keep the native experiment isolated from the user's normal browser profile and credentials.
 
-See [`../../docs/native-webkit-evaluation.md`](../../docs/native-webkit-evaluation.md) for architecture comparison and sources.
+See [`../../../docs/native-webkit-evaluation.md`](../../../docs/native-webkit-evaluation.md) for architecture comparison and sources.

@@ -23,7 +23,7 @@ function run(label, executable, args, env) {
 }
 
 const buildEnvironment = { ...process.env }
-run('build isolated Electron entry', process.execPath, [viteCli, 'build', '--config', 'electron-host-probe.vite.config.ts'], buildEnvironment)
+run('build isolated Electron entry', process.execPath, [viteCli, 'build', '--config', 'scripts/electron-host-probe.vite.config.ts'], buildEnvironment)
 
 const probeEnvironment = {
   ...process.env,

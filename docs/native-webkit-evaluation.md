@@ -1,6 +1,6 @@
 # Native macOS WebKit evaluation
 
-Surffish's current app remains Electron/Chromium. The native experiment is isolated under [`native/macos`](../native/macos/README.md); it does not modify the Electron runtime, profile, or UI.
+Surffish's current app remains Electron/Chromium. The native experiment is isolated under [`src/native/macos`](../src/native/macos/README.md); it does not modify the Electron runtime, profile, or UI.
 
 ## What the proof of concept exercises
 
@@ -18,7 +18,7 @@ The prototype is a SwiftPM macOS app targeting **macOS 15.4+**. It creates a `WK
 Run the automated checks on macOS from the repository root:
 
 ```sh
-cd native/macos
+cd src/native/macos
 ./Scripts/test-macos.sh
 swift run SurffishNative
 ```
