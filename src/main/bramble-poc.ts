@@ -8,6 +8,8 @@ import { getBrowserSession } from './browser-session'
 import { closeBrambleExtensionTabs, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
 import {
   adaptBrambleFirefoxManifest,
+  BRAMBLE_BROWSER_ALIAS_FILE,
+  BRAMBLE_BROWSER_ALIAS_SOURCE,
   isBrambleExtensionUrl,
   isRecord,
   stageBrambleFirefoxBuild
@@ -461,9 +463,9 @@ function showBrambleExtensionPage(pageUrl: string): void {
   updateState({ popupOpen: false, error: null })
 }
 
-function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
+function showBrambleLauncher(anchor?: BramblePopupAnchor, requestedPageUrl?: string): void {
   if (!loadedExtension) throw new Error('Bramble has not been loaded yet.')
-  const pageUrl = `${loadedExtension.url}popup.html`
+  const pageUrl = requestedPageUrl ?? `${loadedExtension.url}popup.html`
   const owner = mainWindow()
   const bounds = launcherBounds(anchor, owner)
   if (popupWindow && !popupWindow.isDestroyed()) {
@@ -553,6 +555,8 @@ async function loadExistingStagedBuild(directory: string): Promise<void> {
       !existsSync(join(directory, 'surffish-bramble-browser-alias.js')) || !existsSync(join(directory, 'popup.html'))) {
     throw new Error('The saved Bramble install is incomplete. Use Settings → Bramble to install a verified release.')
   }
+  // Refresh Surffish's own compatibility shim so fixes reach builds staged by an older Surffish.
+  writeFileSync(join(directory, BRAMBLE_BROWSER_ALIAS_FILE), BRAMBLE_BROWSER_ALIAS_SOURCE)
   try {
     const extension = await getBrowserSession().extensions.loadExtension(directory)
     loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
@@ -759,6 +763,32 @@ export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | nul
     throw new Error('Only a Bramble UI page can open Bramble Setup / Restore.')
   }
   await openBrambleSetup()
+}
+
+/** True for Bramble's hidden offscreen host, the only page allowed to ask for the pop-out. */
+export function isBrambleOffscreenSource(win: BrowserWindow | null, contents: WebContents): boolean {
+  return !!loadedExtension && !!win && win === offscreenWindow && !contents.isDestroyed() &&
+    isBrambleExtensionUrl(contents.getURL(), loadedExtension.url)
+}
+
+/**
+ * Open Bramble's popup for a background windows.create (the autofill "Vault locked" row, passkey
+ * unlock). Electron has no chrome.windows, so this reuses the toolbar launcher, anchored like it.
+ */
+export async function openBramblePopoutFromBackground(requestedUrl: string): Promise<void> {
+  const extension = loadedExtension
+  if (!extension) throw new Error('Bramble has not been loaded yet.')
+  // Show the same compact popup the toolbar opens (not Bramble's 500x600 detached layout);
+  // the unlock reason travels in Bramble's session storage, not the URL.
+  if (requestedUrl && !isBrambleExtensionUrl(requestedUrl, extension.url)) throw new Error('Bramble can only open its own pages.')
+  const pageUrl = `${extension.url}popup.html`
+  const owner = mainWindow()
+  if (owner && !owner.isDestroyed() && owner.isMinimized()) owner.restore()
+  showBrambleLauncher(undefined, pageUrl)
+}
+
+export function closeBramblePopoutFromBackground(): void {
+  disposePopup()
 }
 
 export function isBrambleUiWindow(win: BrowserWindow | null): boolean {

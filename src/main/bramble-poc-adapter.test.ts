@@ -163,3 +163,38 @@ test('routes the Bramble toolbar to install for a missing profile instead of rep
   await dispatchBrambleToolbarAction({ installed: false, loading: true }, handlers)
   assert.deepEqual(actions, ['install', 'open'])
 })
+
+test('alias shims chrome.windows in the worker and forwards the pop-out to the offscreen page', async () => {
+  const { runInNewContext } = await import('node:vm')
+  const sent: unknown[] = []
+  const worker: Record<string, unknown> = {
+    URL,
+    chrome: { runtime: { getURL: (path: string) => `chrome-extension://abc${path}`, sendMessage: (message: unknown) => { sent.push(message); return Promise.resolve() } } }
+  }
+  worker.globalThis = worker
+  runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, worker)
+  const windows = (worker.chrome as { windows: { create: (info: unknown) => Promise<{ id: number }>; remove: (id: number) => Promise<void>; get: (id: number) => Promise<unknown> } }).windows
+  const created = await windows.create({ url: 'popup.html?detached=1', type: 'popup' })
+  assert.equal(created.id, 1)
+  await windows.remove(1)
+  await assert.rejects(windows.get(1))
+  assert.equal(JSON.stringify(sent), JSON.stringify([
+    { __surffishBrambleWindows: 'create', url: 'chrome-extension://abc/popup.html?detached=1' },
+    { __surffishBrambleWindows: 'remove' }
+  ]))
+
+  const calls: string[] = []
+  let listener: ((message: unknown) => unknown) | undefined
+  const page: Record<string, unknown> = {
+    document: {},
+    navigator: {},
+    surffishBramble: { openPopout: async (url: string) => { calls.push(`open ${url}`) }, closePopout: async () => { calls.push('close') } },
+    chrome: { runtime: { onMessage: { addListener: (fn: (message: unknown) => unknown) => { listener = fn } } } }
+  }
+  page.globalThis = page
+  runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, page)
+  listener?.(sent[0])
+  listener?.(sent[1])
+  listener?.({ type: 'unrelated' })
+  assert.deepEqual(calls, ['open chrome-extension://abc/popup.html?detached=1', 'close'])
+})

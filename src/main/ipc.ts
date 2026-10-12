@@ -33,7 +33,7 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
-import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, isBrambleClipboardSource, isBrambleUiWindow, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, writeBrambleClipboardText } from './bramble-poc'
+import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, writeBrambleClipboardText } from './bramble-poc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -286,6 +286,22 @@ export function registerIpc(): void {
       throw new Error('Only a Bramble UI window can open Bramble Setup/Restore.')
     }
     await openBrambleOptionsFromUi(sourceWindow, event.sender)
+    return true
+  })
+  ipcMain.handle('browser:bramble:popout-open', async (event, url: unknown) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (event.senderFrame !== event.sender.mainFrame || !isBrambleOffscreenSource(sourceWindow, event.sender)) {
+      throw new Error('Only Bramble’s background host can open the Bramble pop-out.')
+    }
+    await openBramblePopoutFromBackground(typeof url === 'string' ? url : '')
+    return true
+  })
+  ipcMain.handle('browser:bramble:popout-close', (event) => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender)
+    if (event.senderFrame !== event.sender.mainFrame || !isBrambleOffscreenSource(sourceWindow, event.sender)) {
+      throw new Error('Only Bramble’s background host can close the Bramble pop-out.')
+    }
+    closeBramblePopoutFromBackground()
     return true
   })
   ipcMain.handle('browser:bramble:clipboard-write', (event, value: unknown) => {
