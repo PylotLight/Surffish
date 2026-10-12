@@ -35,7 +35,25 @@ export function isGoogleSignInPage(value: string | undefined | null): boolean {
   try {
     const url = new URL(value)
     if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== 'accounts.google.com') return false
+    // passive=... is Google's silent "are you still signed in?" bounce; it
+    // never shows a form, so let Electron follow it back to the service.
+    if (url.searchParams.has('passive')) return false
     return SIGN_IN_PATHS.some((pattern) => pattern.test(url.pathname))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * ServiceLogin is a router: with a live session Google bounces straight back
+ * to the service, without one it moves on to the identifier page (which is
+ * handed off then). So once Electron holds a Google session, let it through.
+ */
+export function shouldHandOffSignIn(value: string, hasGoogleSession: boolean): boolean {
+  if (!isGoogleSignInPage(value)) return false
+  if (!hasGoogleSession) return true
+  try {
+    return !/^\/ServiceLogin/i.test(new URL(value).pathname)
   } catch {
     return false
   }

@@ -890,7 +890,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       const toolbarHeight = element.getBoundingClientRect().height
       setBrowserChromeHeight(toolbarHeight)
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -902,7 +902,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
