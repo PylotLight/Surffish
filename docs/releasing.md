@@ -1,6 +1,6 @@
 # macOS builds and releases
 
-Surffish's macOS release process is manual; there is no GitHub Actions release workflow. The published `v0.1.0` release has both ARM64 ZIP and DMG assets. Those existing assets and the tag remain unchanged; the current Homebrew Cask installs from the already-published DMG.
+Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the DMG locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. The published `v0.1.0` release has both ARM64 ZIP and DMG assets. Those existing assets and the tag remain unchanged; the current Homebrew Cask installs from the already-published DMG.
 
 ## Future builds: ARM64 DMG only
 
