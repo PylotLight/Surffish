@@ -11,7 +11,8 @@ import type { ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, MAX_PINNED_SITES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
-import { BROWSER_SESSION_PARTITION, getBrowserSession } from './browser-session'
+import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getPrivateSession, whenPrivateSessionReady } from './browser-session'
+import { forgetPrivateDownloads } from './downloads'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
@@ -41,6 +42,8 @@ interface BrowserTab {
   extensionPageOrigin: string | null
   extensionPreloadPath: string | null
   extensionPageOwner: ExtensionPageOwner | null
+  /** Private tab: in-memory session, never saved to history, the session file or the favicon cache. */
+  isPrivate: boolean
 }
 
 /** Who opened an extension UI tab: Bramble's own integration or a Chrome Web Store extension. */
@@ -120,7 +123,8 @@ function getState(): BrowserState {
     loading: contents?.isLoading() ?? false,
     canGoBack: contents?.navigationHistory.canGoBack() ?? false,
     canGoForward: contents?.navigationHistory.canGoForward() ?? false,
-    error: tab?.error ?? null
+    error: tab?.error ?? null,
+    private: tab?.isPrivate ?? false
   }
 }
 
@@ -134,6 +138,7 @@ function getTabSummaries(): BrowserTabSummary[] {
     active: tab.id === activeTabId,
     pinned: tab.pinned,
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
+    private: tab.isPrivate,
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted())
   }))
@@ -271,12 +276,12 @@ function refreshTabFavicon(tab: BrowserTab): void {
       }
     }
     if (!faviconUrl) return
-    persistPageFavicon(pageUrl, faviconUrl)
+    if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
     if (tab.faviconUrl !== faviconUrl) {
       tab.faviconUrl = faviconUrl
       publishTabs()
     }
-    void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
+    if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
       if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
       if (tab.faviconUrl !== cachedIcon) {
         tab.faviconUrl = cachedIcon
@@ -310,9 +315,10 @@ function publishState(): void {
 }
 
 function persistOpenTabs(): void {
-  const urls = tabs.map(currentUrl)
-  const pinnedIndexes = tabs.flatMap((tab, index) => tab.pinned ? [index] : [])
-  saveBrowserSession(urls, tabs.findIndex((tab) => tab.id === activeTabId), pinnedIndexes)
+  const saved = tabs.filter((tab) => !tab.isPrivate)
+  const urls = saved.map(currentUrl)
+  const pinnedIndexes = saved.flatMap((tab, index) => tab.pinned ? [index] : [])
+  saveBrowserSession(urls, saved.findIndex((tab) => tab.id === activeTabId), pinnedIndexes)
 }
 
 function toggleTabBookmark(id: string): void {
@@ -373,8 +379,8 @@ function markTabInactive(tab: BrowserTab): void {
   scheduleTabSleep(tab)
 }
 
-function openBackgroundTab(url: string): void {
-  const id = createTab(url, selectedSearchEngine, false, false, true)
+function openBackgroundTab(url: string, isPrivate = false): void {
+  const id = createTab(url, selectedSearchEngine, false, false, true, false, undefined, undefined, isPrivate)
   if (id) persistOpenTabs()
 }
 
@@ -404,7 +410,9 @@ function ensureTabLoaded(tab: BrowserTab): void {
   if (tab.id === activeTabId) tab.inactiveSince = null
   applyTabBounds()
   const contents = view.webContents
-  void contents.loadURL(target).catch((error: unknown) => {
+  // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
+  const ready = tab.isPrivate ? whenPrivateSessionReady() : Promise.resolve()
+  void ready.then(() => contents.isDestroyed() ? undefined : contents.loadURL(target)).catch((error: unknown) => {
     if (tab.view?.webContents !== contents) return
     const message = error instanceof Error ? error.message : String(error)
     if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
@@ -550,7 +558,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       // embedded players (YouTube embeds) and ad frames get scriptlets/CSS.
       // Remote pages still get no Node.js: sandbox stays on.
       nodeIntegrationInSubFrames: true,
-      partition: BROWSER_SESSION_PARTITION
+      ...(tab.isPrivate ? { session: getPrivateSession() } : { partition: BROWSER_SESSION_PARTITION }),
+      spellcheck: !tab.isPrivate
     }
   })
   tab.view = view
@@ -588,9 +597,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
         // Links from an extension's options page open as ordinary Surffish tabs.
         if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab')) persistOpenTabs()
       } else if (details.disposition === 'background-tab') {
-        openBackgroundTab(target)
+        openBackgroundTab(target, tab.isPrivate)
       } else if (getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
-        const popupTabId = createTab(target, selectedSearchEngine)
+        const popupTabId = createTab(target, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate)
         if (popupTabId) persistOpenTabs()
       }
     }
@@ -603,11 +612,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('will-navigate', (event, url) => {
     if (isExtensionPage(tab, url)) return
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
-    if (handOffGoogleSignIn(contents, url)) event.preventDefault()
+    if (!tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
     if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url)) return event.preventDefault()
-    if (isMainFrame && handOffGoogleSignIn(contents, url)) event.preventDefault()
+    if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('audio-state-changed', () => {
     if (!isCurrentContents()) return
@@ -636,12 +645,12 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       .find((candidate): candidate is string => candidate !== null)
     if (!faviconUrl) return
     const revision = ++tab.faviconRevision
-    persistPageFavicon(pageUrl, faviconUrl)
+    if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
     if (tab.faviconUrl !== faviconUrl) {
       tab.faviconUrl = faviconUrl
       publishTabs()
     }
-    void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
+    if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
       if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
       if (tab.faviconUrl !== cachedIcon) {
         tab.faviconUrl = cachedIcon
@@ -659,7 +668,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     tab.lastUrl = url
     persistOpenTabs()
     publishState()
-    if (/^https?:\/\//i.test(url)) {
+    if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
       notifyHistoryChanged()
     }
@@ -670,14 +679,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     tab.lastUrl = url
     persistOpenTabs()
     publishState()
-    if (/^https?:\/\//i.test(url)) {
+    if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
       notifyHistoryChanged()
     }
   })
   contents.on('page-title-updated', (_event, title) => {
     if (!isCurrentContents()) return
-    updateLatestVisitTitle(contents.getURL(), title)
+    if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title)
     publishState()
     refreshTabFavicon(tab)
     notifyHistoryChanged()
@@ -728,7 +737,7 @@ export interface ExtensionPageTabOptions {
   owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const target = extensionPage && input
     ? input
@@ -754,7 +763,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pageScale: 1,
     extensionPageOrigin: extensionPage?.extensionUrl ?? null,
     extensionPreloadPath: extensionPage?.preloadPath ?? null,
-    extensionPageOwner: extensionPage?.owner ?? null
+    extensionPageOwner: extensionPage?.owner ?? null,
+    isPrivate: isPrivate && !extensionPage
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -930,6 +940,13 @@ export function getExperimentalExtensionFrames(electronTabId: number): Experimen
   }))
 }
 
+/** Private tab: opens on the local New Tab (private variant) unless given a URL. */
+export function newPrivateBrowserTab(input?: string): string | null {
+  const id = createTab(input ?? SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, true)
+  if (id) setImmediate(sendFocusAddressToVisibleRenderer)
+  return id
+}
+
 export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {
   const id = createTab(input, engine ?? selectedSearchEngine)
   if (id) {
@@ -1045,12 +1062,16 @@ function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord 
 }
 
 function findTabByExtensionId(id: number | undefined): BrowserTab | undefined {
-  if (id === undefined) return getTab()
-  return tabs.find((tab) => extensionTabId(tab) === id)
+  if (id === undefined) {
+    const active = getTab()
+    return active?.isPrivate ? undefined : active
+  }
+  return tabs.find((tab) => !tab.isPrivate && extensionTabId(tab) === id)
 }
 
+/** Extensions never see private tabs (like Chrome's default "not allowed in Incognito"). */
 export function listExtensionTabs(): ExtensionTabRecord[] {
-  return tabs.map((tab, index) => extensionTabRecord(tab, index))
+  return tabs.filter((tab) => !tab.isPrivate).map((tab, index) => extensionTabRecord(tab, index))
 }
 
 export function getExtensionTab(id: number | undefined): ExtensionTabRecord | null {
@@ -1233,7 +1254,8 @@ const recentlyClosedTabs: RecentlyClosedTab[] = []
 
 function rememberClosedTab(tab: BrowserTab, index: number): void {
   // Extension UI pages need their preload wiring and a blank New Tab isn't worth bringing back.
-  if (tab.extensionPageOrigin) return
+  // Private tabs leave no trace, so they can't be reopened either.
+  if (tab.extensionPageOrigin || tab.isPrivate) return
   const url = currentUrl(tab)
   if (!url || url === SURFFISH_QUICK_LINKS_URL) return
   recentlyClosedTabs.push({ url, index, pinned: tab.pinned })
@@ -1270,6 +1292,7 @@ export function closeBrowserTab(id: string): void {
   cancelSleepTimer(tab)
   if (wasActive) activeTabId = null
   disposeTabView(tab)
+  if (tab.isPrivate && !tabs.some((candidate) => candidate.isPrivate)) endPrivateSession()
   if (tabs.length === 0) {
     activeTabId = null
     createTab()
@@ -1284,6 +1307,12 @@ export function closeBrowserTab(id: string): void {
   }
   persistOpenTabs()
   publishState()
+}
+
+/** Last private tab closed: wipe the in-memory session and forget its downloads. */
+function endPrivateSession(): void {
+  forgetPrivateDownloads()
+  void clearPrivateSession()
 }
 
 let confirmingWindowClose = false
@@ -1401,6 +1430,7 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   if (!contents) return false
   publishState()
   try {
+    if (tab.isPrivate) await whenPrivateSessionReady()
     await contents.loadURL(url)
     return true
   } catch (error) {

@@ -85,6 +85,8 @@ export interface BrowserState {
   canGoBack: boolean
   canGoForward: boolean
   error: string | null
+  /** The active tab is a private tab. */
+  private: boolean
 }
 export interface BrowserTabSummary {
   id: string
@@ -99,6 +101,8 @@ export interface BrowserTabSummary {
   audible: boolean
   /** Tab audio is muted by the user. */
   muted: boolean
+  /** Private tab: in-memory session, nothing saved. */
+  private: boolean
 }
 export interface BrowsingHistoryEntry {
   id: string

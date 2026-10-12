@@ -34,7 +34,7 @@ import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-la
 import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
 import NetworkView, { useNetworkToolEnabled } from './NetworkView'
-import { PinnedTabIcon, TabAudioButton, TabFavicon } from './TabIndicators'
+import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { formatVisitedAt } from '../lib/format'
 import { useTabDragSort } from './useTabDragSort'
@@ -97,7 +97,8 @@ const EMPTY_BROWSER: BrowserState = {
   loading: true,
   canGoBack: false,
   canGoForward: false,
-  error: null
+  error: null,
+  private: false
 }
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
@@ -1077,7 +1078,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           <div ref={tabDrag.listRef} className={`tab-list${tabDrag.draggingId ? ' is-drag-sorting' : ''}`} role="tablist" aria-label="Open tabs" onClickCapture={tabDrag.onClickCapture}>
             {tabDrag.orderedIds.map((id) => tabsById.get(id)).filter((tab): tab is BrowserTabSummary => Boolean(tab)).map((tab) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}`}
                 key={tab.id}
                 data-browser-tab-id={tab.id}
                 role="tab"
@@ -1101,6 +1102,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               >
                 <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
+                {tab.private && <span className="tab-private-badge" title="Private tab" aria-label="Private tab"><PrivateGlyph /></span>}
                 <TabAudioButton tab={tab} />
                 {tab.sleeping && <span className="tab-sleep-indicator" title="Sleeping tab" aria-label="Sleeping tab">☾</span>}
                 <button
@@ -1113,10 +1115,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             ))}
             {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
-            <button className="sidebar-new-tab-row" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>
-              <span className="sidebar-new-tab-row-icon" aria-hidden="true">＋</span>
-              <span className="sidebar-new-tab-row-label">New Tab</span>
-            </button>
+            <div className="sidebar-new-tab-actions">
+              <button className="sidebar-new-tab-row" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>
+                <span className="sidebar-new-tab-row-icon" aria-hidden="true">＋</span>
+                <span className="sidebar-new-tab-row-label">New Tab</span>
+              </button>
+              <button className="sidebar-new-private-tab" type="button" aria-label="New private tab" title="New private tab (Ctrl/⌘+Shift+N)" onClick={() => void window.api.browser.tabs.createPrivate()}>
+                <PrivateGlyph />
+              </button>
+            </div>
           </div>
         )}
 
@@ -1153,7 +1160,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
-          <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
+          <form className={`browser-toolbar${browser.private ? ' is-private' : ''}`} onSubmit={(event) => void navigate(event)}>
             <div className="browser-toolbar-leading" aria-hidden="true" />
             <div className="omnibox-wrap">
               <div className="browser-nav-buttons">
@@ -1174,6 +1181,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </button>
               </div>
               <div className="omnibox">
+                {browser.private && <span className="omnibox-private-pill" title="Private tab: nothing from this tab is saved"><PrivateGlyph /><span>Private</span></span>}
                 <div className="site-actions-control" ref={siteActionsControlRef}>
                   <button
                     className={`omnibox-action-button site-actions-button${siteActionsOpen ? ' is-current' : ''}`}
@@ -1347,7 +1355,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
-            <section className="new-tab-page" aria-label="New Tab" style={{
+            <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
               '--new-tab-dim': (newTabPreferences.backgroundDim / 100).toFixed(2),
               '--new-tab-dim-soft': (newTabPreferences.backgroundDim / 350).toFixed(2),
               '--new-tab-dim-mid': (newTabPreferences.backgroundDim / 165).toFixed(2),
@@ -1360,7 +1368,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 style={{ backgroundImage: `url("${newTabBackground.src}")` }}
               />
               <div className="new-tab-content">
-                <h1 className="new-tab-sr-only">New Tab</h1>
+                <h1 className="new-tab-sr-only">{browser.private ? 'New private tab' : 'New Tab'}</h1>
+                {browser.private && (
+                  <div className="new-tab-private-hero">
+                    <span className="new-tab-private-icon" aria-hidden="true"><PrivateGlyph /></span>
+                    <strong>Private tab</strong>
+                    <p>Nothing here is saved to history, tabs or downloads, and cookies and site data are wiped when you close the last private tab. You're signed out of everything, so searches aren't personalised. Extensions are off; your proxy and ad blocking still apply.</p>
+                  </div>
+                )}
                 {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled) && (
                   <div className="new-tab-widgets" aria-label="Time and weather">
                     {newTabPreferences.showClock && (
@@ -1387,13 +1402,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     )}
                   </div>
                 )}
-                {newTabSites.length > 0 ? (
+                {(browser.private ? favoriteSites.length > 0 : newTabSites.length > 0) ? (
                   <div className="new-tab-link-groups" style={{
                     '--new-tab-icon-size': `${newTabPreferences.iconSize}px`,
                     '--new-tab-links-per-row': newTabPreferences.linksPerRow,
                     '--new-tab-icon-offset': `${newTabPreferences.iconVerticalOffset}px`
                   } as React.CSSProperties}>
-                    {frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
+                    {!browser.private && frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
                       <div className="new-tab-icon-grid" role="group" aria-label="Most visited sites">
                         {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
                       </div>
@@ -1406,7 +1421,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <span className="new-tab-group-label">Favourites</span>
                     </section>}
                   </div>
-                ) : <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
+                ) : !browser.private && <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
                 <span className="new-tab-sr-only" role="status" aria-live="polite">{photoRefreshStatus}</span>
                 <footer className="new-tab-photo-footer">
                   <p className="new-tab-photo-credit">

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { DownloadEntry, DownloadState } from '../shared/downloads'
 import { safeDownloadFilename, safeDownloadSource, safeStoredDownloadSource } from '../shared/downloads'
 import { markBrowserDownloadStarted } from './browser'
-import { getBrowserSession } from './browser-session'
+import { getBrowserSession, onPrivateSessionCreated } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { deferWrite } from './deferred-writes'
 
@@ -16,6 +16,8 @@ type DownloadItemState = Electron.DownloadItem
 interface StoredDownload extends DownloadEntry {
   /** Kept in the private app-data store for explicit Open/Reveal actions; never sent to the renderer. */
   filePath: string
+  /** Started from a private tab: listed this session only, never written to download history. */
+  isPrivate?: boolean
 }
 
 let initialized = false
@@ -59,7 +61,7 @@ function writeHistory(): void {
   const target = historyPath()
   mkdirSync(join(target, '..'), { recursive: true })
   const temporary = `${target}.${randomUUID()}.tmp`
-  const stored = records.slice(0, MAX_DOWNLOAD_HISTORY).map(({ fileAvailable: _fileAvailable, ...record }) => record)
+  const stored = records.filter((record) => !record.isPrivate).slice(0, MAX_DOWNLOAD_HISTORY).map(({ fileAvailable: _fileAvailable, ...record }) => record)
   try {
     writeFileSync(temporary, `${JSON.stringify(stored)}\n`, { mode: 0o600, flag: 'wx' })
     renameSync(temporary, target)
@@ -98,7 +100,7 @@ function fileExists(record: StoredDownload): boolean {
 }
 
 function publicEntries(): DownloadEntry[] {
-  return records.map(({ filePath, ...record }) => ({ ...record, fileAvailable: record.state === 'completed' && fileExists({ ...record, filePath }) }))
+  return records.map(({ filePath, isPrivate: _isPrivate, ...record }) => ({ ...record, fileAvailable: record.state === 'completed' && fileExists({ ...record, filePath }) }))
 }
 
 function publishDownloads(): void {
@@ -169,7 +171,21 @@ export function initializeDownloads(): void {
   if (initialized) return
   initialized = true
   loadHistory()
-  getBrowserSession().on('will-download', (_event, item, webContents) => {
+  getBrowserSession().on('will-download', (_event, item, webContents) => trackDownload(item, webContents, false))
+  onPrivateSessionCreated((privateSession) => {
+    privateSession.on('will-download', (_event, item, webContents) => trackDownload(item, webContents, true))
+  })
+}
+
+/** Private session ended: drop its finished entries from the list (files on disk are untouched). */
+export function forgetPrivateDownloads(): void {
+  const before = records.length
+  records = records.filter((record) => !record.isPrivate || activeItems.has(record.id))
+  if (records.length !== before) persistAndPublish()
+}
+
+function trackDownload(item: DownloadItemState, webContents: Electron.WebContents, isPrivate: boolean): void {
+  {
     markBrowserDownloadStarted(webContents.id)
     const startSeconds = item.getStartTime()
     const id = randomUUID()
@@ -186,7 +202,8 @@ export function initializeDownloads(): void {
       canResume: false,
       fileAvailable: false,
       message: null,
-      filePath: itemPath(item)
+      filePath: itemPath(item),
+      ...(isPrivate ? { isPrivate: true } : {})
     }
     records.unshift(record)
     activeItems.set(id, item)
@@ -201,7 +218,7 @@ export function initializeDownloads(): void {
       if (state !== 'interrupted' || !record.canResume) activeItems.delete(id)
       persistAndPublish()
     })
-  })
+  }
 }
 
 export function getDownloadHistory(): DownloadEntry[] {
