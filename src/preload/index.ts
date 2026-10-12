@@ -6,6 +6,7 @@ import type {
   BrowserBounds,
   BrowserChromeMetrics,
   BrowserChromeState,
+  BrowserFindState,
   BrowserPreferencesSnapshot,
   BrowserProxySettings,
   BrowserProxyTestResult,
@@ -95,6 +96,23 @@ const api = {
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
     },
     pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
+    zoom: (action: 'in' | 'out' | 'reset'): Promise<void> => ipcRenderer.invoke('browser:zoom', action),
+    find: {
+      get: (): Promise<BrowserFindState> => ipcRenderer.invoke('browser:find:get'),
+      query: (text: string): Promise<void> => ipcRenderer.invoke('browser:find:query', text),
+      step: (forward: boolean): Promise<void> => ipcRenderer.invoke('browser:find:step', forward),
+      close: (): Promise<void> => ipcRenderer.invoke('browser:find:close'),
+      onChange: (callback: (state: BrowserFindState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: BrowserFindState): void => callback(state)
+        ipcRenderer.on('browser:find', listener)
+        return () => ipcRenderer.removeListener('browser:find', listener)
+      },
+      onFocus: (callback: () => void): (() => void) => {
+        const listener = (): void => callback()
+        ipcRenderer.on('browser:find:focus', listener)
+        return () => ipcRenderer.removeListener('browser:find:focus', listener)
+      }
+    },
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),

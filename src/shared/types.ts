@@ -87,6 +87,22 @@ export interface BrowserState {
   error: string | null
   /** The active tab is a private tab. */
   private: boolean
+  /** Page zoom of the active tab (1 = 100%). */
+  zoomFactor: number
+}
+
+/** Find-in-page result for the active tab, from Electron's `found-in-page`. */
+export interface BrowserFindResult {
+  activeMatchOrdinal: number
+  matches: number
+  finalUpdate: boolean
+}
+
+/** What the toolbar find bar should show; `open` false hides it. */
+export interface BrowserFindState {
+  open: boolean
+  text: string
+  result: BrowserFindResult | null
 }
 export interface BrowserTabSummary {
   id: string

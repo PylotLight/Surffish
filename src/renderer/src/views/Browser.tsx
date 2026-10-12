@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { formatZoomPercent, isDefaultZoom } from '../../../shared/zoom'
 import { dispatchBrambleToolbarAction, resolveBrambleToolbarAction } from '../../../shared/bramble-toolbar'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
 import {
@@ -33,6 +34,7 @@ import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
 import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-lake.webp'
 import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
+import { FindBar } from './FindBar'
 import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
@@ -98,7 +100,8 @@ const EMPTY_BROWSER: BrowserState = {
   canGoBack: false,
   canGoForward: false,
   error: null,
-  private: false
+  private: false,
+  zoomFactor: 1
 }
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
@@ -277,6 +280,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
   const extensionPins = useExtensionPins()
   const [networkToolEnabled, setNetworkToolEnabled] = useNetworkToolEnabled()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -836,7 +840,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const updateChromeHeight = (): void => {
       const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -844,14 +848,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     observer.observe(element)
     // Popups fill in after they mount (downloads load async); re-measure as they grow so the
     // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu').forEach((popup) => observer.observe(popup))
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, extensionsMenuOpen, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, extensionsMenuOpen, findOpen, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -1097,6 +1101,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   void window.api.browser.tabs.activate(tab.id)
                   if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads') exitSettings()
                 }}
+                // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
+                onMouseDown={(event) => { if (event.button === 1) event.preventDefault() }}
+                onAuxClick={(event) => {
+                  if (event.button !== 1) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  void window.api.browser.tabs.close(tab.id)
+                }}
                 onKeyDown={(event) => {
                   if (event.altKey && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
                     event.preventDefault()
@@ -1253,6 +1265,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   autoCapitalize="none"
                   placeholder="Search or enter address"
                 />
+                {activeOrigin && !isDefaultZoom(browser.zoomFactor) && (
+                  <button
+                    className="omnibox-zoom-pill"
+                    type="button"
+                    aria-label={`Page zoom ${formatZoomPercent(browser.zoomFactor)}. Reset to 100%`}
+                    title="Reset zoom to 100% (Ctrl/⌘+0)"
+                    onClick={() => void window.api.browser.zoom('reset')}
+                  >{formatZoomPercent(browser.zoomFactor)}</button>
+                )}
                 <button
                   className={`toolbar-button favorite-button omnibox-favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
                   type="button"
@@ -1360,6 +1381,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             </div>
           </form>
+          {surface === 'toolbar' && <FindBar onOpenChange={setFindOpen} />}
           {(browser.error || navigationError) && (
             <p className="browser-error" role="status">
               {browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}

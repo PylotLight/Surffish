@@ -111,6 +111,7 @@ test('defaults older preference files to Quick Links without losing existing set
   assert.deepEqual(parsed.pinnedSites, [])
   assert.equal(parsed.sidebarWidth, DEFAULT_SIDEBAR_WIDTH)
   assert.deepEqual(parsed.siteSettings, {})
+  assert.deepEqual(parsed.siteZoom, {})
 })
 
 test('normalizes sidebar width to a rounded, usable range', () => {
@@ -227,4 +228,12 @@ test('caps saved world clocks to a small, bounded list', () => {
     timeZone: 'UTC'
   }))
   assert.equal(parseNewTabPreferences({ worldClocks: clocks }).worldClocks.length, MAX_WORLD_CLOCKS)
+})
+
+test('per-site zoom keeps valid http origins with non-default factors only', () => {
+  const parsed = parseBrowserPreferences({
+    version: 1,
+    siteZoom: { 'https://example.com/path': 1.25, 'https://default.test': 1, 'file:///tmp': 2, 'https://big.test': 12, 'https://bad.test': 'x' }
+  })
+  assert.deepEqual(parsed.siteZoom, { 'https://example.com': 1.25, 'https://big.test': 5 })
 })

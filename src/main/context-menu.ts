@@ -1,4 +1,5 @@
 import { clipboard, dialog, Menu, type BaseWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents } from 'electron'
+import { cleanLinkUrl } from '../shared/clean-link'
 import { SEARCH_ENGINES, resolveNavigationTarget } from '../shared/navigation'
 import type { SearchEngineId } from '../shared/types'
 
@@ -148,7 +149,8 @@ export function showBrowserContextMenu(
       { label: 'Open Link in New Tab', click: () => options.openInNewTab(linkUrl) },
       { label: 'Open Link in Background Tab', click: () => options.openInBackgroundTab(linkUrl) },
       { label: 'Save Link As…', click: () => runMenuTask(saveUrl(contents, options.window, linkUrl, params.suggestedFilename || 'download')) },
-      { label: 'Copy Link Address', click: () => clipboard.writeText(linkUrl) }
+      { label: 'Copy Link Address', click: () => clipboard.writeText(linkUrl) },
+      { label: 'Copy Clean Link', toolTip: 'Copy without tracking parameters (utm_*, fbclid, gclid…)', click: () => clipboard.writeText(cleanLinkUrl(linkUrl)) }
     )
   }
   if (mediaUrl && params.mediaType !== 'none') {
@@ -176,6 +178,11 @@ export function showBrowserContextMenu(
       { label: 'Forward', enabled: contents.navigationHistory.canGoForward(), click: () => contents.navigationHistory.goForward() },
       { label: 'Reload', click: () => contents.reload() }
     )
+    const pageUrl = safeHttpUrl(params.pageURL)
+    if (pageUrl && !linkUrl) {
+      addSeparator(items)
+      items.push({ label: 'Copy Clean Link', toolTip: 'Copy this page’s address without tracking parameters', click: () => clipboard.writeText(cleanLinkUrl(pageUrl)) })
+    }
     addSeparator(items)
     items.push(
       { label: 'Save Page As…', click: () => runMenuTask(savePage(contents, options.window, pageFilename(params.pageURL))) },

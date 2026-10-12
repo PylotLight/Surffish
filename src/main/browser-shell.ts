@@ -303,6 +303,32 @@ export function isFocusAddressShortcut(input: Pick<Electron.Input, 'type' | 'key
   return process.platform !== 'darwin' && input.alt && !input.control && !input.meta && !input.shift && input.code === 'KeyD'
 }
 
+/** True while live pages show with the toolbar/sidebar overlay surfaces above them (not New Tab or a full panel). */
+export function isNativeOverlayMode(): boolean {
+  return shouldUseNativeOverlays()
+}
+
+/** Focus the toolbar overlay and send it a message; false when the toolbar surface isn't on screen. */
+export function sendToToolbarRenderer(channel: string, focus: boolean, ...args: unknown[]): boolean {
+  if (!shellViews || !shouldUseNativeOverlays()) return false
+  const target = shellViews.toolbar.webContents
+  if (target.isDestroyed()) return false
+  if (focus) target.focus()
+  target.send(channel, ...args)
+  return true
+}
+
+/**
+ * Stack a small native view directly above the site pages but below every shell surface,
+ * so the sidebar, toolbar popups and tab overview still cover it.
+ */
+export function addViewAbovePages(view: WebContentsView): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || !shellViews) return false
+  const index = mainWindow.contentView.children.indexOf(shellViews.content)
+  mainWindow.contentView.addChildView(view, index < 0 ? undefined : index)
+  return true
+}
+
 export function sendFocusAddressToVisibleRenderer(): void {
   if (!shellViews) return
   const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents

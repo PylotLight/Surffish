@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
-import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
+import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, selectBrowserTabByNumber, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
 import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
@@ -64,22 +64,54 @@ export function installAppMenu(): void {
         { role: 'paste' },
         { role: 'pasteAndMatchStyle' },
         { role: 'delete' },
-        { role: 'selectAll' }
+        { role: 'selectAll' },
+        { type: 'separator' },
+        tabItem('Find…', 'find'),
+        tabItem('Find Next', 'findNext'),
+        tabItem('Find Previous', 'findPrevious')
       ]
     },
     {
       label: 'Tab',
       submenu: [
         tabItem('Reload Tab', 'reload'),
+        tabItem('Hard Reload Tab', 'hardReload'),
         tabItem('Duplicate Tab', 'duplicate'),
         tabItem('Pin / Unpin Tab', 'pin'),
         tabItem('Bookmark Tab', 'bookmark'),
-        tabItem('Copy Link', 'copyLink')
+        tabItem('Copy Link', 'copyLink'),
+        tabItem('Copy Clean Link', 'copyCleanLink'),
+        { type: 'separator' },
+        tabItem('Select Next Tab', 'nextTab'),
+        tabItem('Select Previous Tab', 'previousTab'),
+        // Cmd+1..8 / Cmd+9: hidden like Chrome's, but registered so they work with no page focused.
+        ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((number): MenuItemConstructorOptions => ({
+          label: number === 9 ? 'Select Last Tab' : `Select Tab ${number}`,
+          accelerator: `CmdOrCtrl+${number}`,
+          visible: false,
+          acceleratorWorksWhenHidden: true,
+          click: () => selectBrowserTabByNumber(number)
+        }))
+      ]
+    },
+    {
+      label: 'History',
+      submenu: [
+        tabItem('Back', 'back'),
+        tabItem('Forward', 'forward'),
+        { type: 'separator' },
+        tabItem('Show History', 'history')
       ]
     },
     {
       label: 'View',
       submenu: [
+        tabItem('Zoom In', 'zoomIn'),
+        // Cmd+Shift+= types "+"; keep the Plus accelerator working without a second visible item.
+        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, acceleratorWorksWhenHidden: true, click: () => runTabCommand('zoomIn') },
+        tabItem('Zoom Out', 'zoomOut'),
+        tabItem('Actual Size', 'zoomReset'),
+        { type: 'separator' },
         ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const, { type: 'separator' } as const]),
         { role: 'togglefullscreen' }
       ]
@@ -89,6 +121,8 @@ export function installAppMenu(): void {
       submenu: [
         { role: 'minimize' },
         { role: 'zoom' },
+        { type: 'separator' },
+        tabItem('Downloads', 'downloads'),
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : [])
       ]
     }

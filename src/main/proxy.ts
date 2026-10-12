@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, webContents as allWebContents, type WebContents } from 'electron'
 import { createConnection } from 'node:net'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -71,6 +71,37 @@ async function configureSession(settings: BrowserProxySettings): Promise<void> {
   if (hasPrivateSession()) await applyToSession(getPrivateSession(), settings)
 }
 
+/**
+ * WebRTC talks UDP straight to peers/STUN servers and would reveal the real IP even with the SOCKS5
+ * proxy on. While the proxy is enabled, only let it use proxied paths ('disable_non_proxied_udp');
+ * restore the default when it is off. Applied to every WebContents (tabs, extension pages, popups);
+ * the local shell surfaces never use WebRTC, so the policy is harmless there.
+ */
+function webRTCPolicy(settings: BrowserProxySettings): 'default' | 'disable_non_proxied_udp' {
+  return settings.enabled ? 'disable_non_proxied_udp' : 'default'
+}
+
+function applyWebRTCPolicy(contents: WebContents, settings: BrowserProxySettings = currentSettings): void {
+  if (contents.isDestroyed()) return
+  try {
+    contents.setWebRTCIPHandlingPolicy(webRTCPolicy(settings))
+  } catch (error) {
+    console.warn('Could not apply the WebRTC IP handling policy:', error)
+  }
+}
+
+function applyWebRTCPolicyToAll(settings: BrowserProxySettings): void {
+  for (const contents of allWebContents.getAllWebContents()) applyWebRTCPolicy(contents, settings)
+}
+
+let webRTCHookInstalled = false
+function installWebRTCPolicyHook(): void {
+  if (webRTCHookInstalled) return
+  webRTCHookInstalled = true
+  // Runs before the new page loads anything, so a fresh tab never gets a window without the policy.
+  app.on('web-contents-created', (_event, contents) => applyWebRTCPolicy(contents))
+}
+
 function applyPermissionPolicy(target: Electron.Session): void {
   target.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
   target.setPermissionRequestHandler((webContents, permission, callback, details) => {
@@ -81,6 +112,8 @@ function applyPermissionPolicy(target: Electron.Session): void {
 /** Called after app.whenReady and before any browser content is created. */
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
+  installWebRTCPolicyHook()
+  applyWebRTCPolicyToAll(currentSettings)
   await configureSession(currentSettings)
   applyPermissionPolicy(getBrowserSession())
   onPrivateSessionCreated((privateSession) => {
@@ -97,9 +130,12 @@ export function getBrowserProxySettings(): BrowserProxySettings {
 
 export async function setBrowserProxySettings(input: unknown): Promise<BrowserProxySettings> {
   const settings = validateSettings(input)
+  // Tighten WebRTC before the proxy switches on (and only relax it once the proxy is really off).
+  if (settings.enabled) applyWebRTCPolicyToAll(settings)
   await configureSession(settings)
   persistSettings(settings)
   currentSettings = settings
+  applyWebRTCPolicyToAll(settings)
   return { ...currentSettings }
 }
 
