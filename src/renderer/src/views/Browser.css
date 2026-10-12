@@ -2392,9 +2392,9 @@
   display: none !important;
 }
 .app-shell[data-surface='sidebar'] .browser-sidebar {
-  top: 0 !important;
+  top: 14px !important;
   right: auto;
-  bottom: 0;
+  bottom: 14px;
   left: 0;
   width: min(var(--sidebar-width, 320px), 100%);
   max-width: none;
