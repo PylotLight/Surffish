@@ -13,7 +13,7 @@ const output = join(outputDirectory, 'google-sign-in')
 mkdirSync(outputDirectory, { recursive: true })
 
 const result = spawnSync('xcrun', [
-  'swiftc', '-O', '-swift-version', '5',
+  'swiftc', '-O', '-swift-version', '5', '-parse-as-library',
   '-target', 'arm64-apple-macos13.0',
   '-framework', 'AppKit', '-framework', 'WebKit',
   '-o', output, source

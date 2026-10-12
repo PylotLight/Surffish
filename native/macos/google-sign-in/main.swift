@@ -102,7 +102,16 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
     }
 }
 
-let application = NSApplication.shared
-let signInDelegate = SignInDelegate()
-application.delegate = signInDelegate
-application.run()
+@main
+struct GoogleSignInHelper {
+    // NSApplication.delegate is weak; keep the delegate alive for the run.
+    @MainActor static var delegate: SignInDelegate?
+
+    @MainActor static func main() {
+        let application = NSApplication.shared
+        let signInDelegate = SignInDelegate()
+        delegate = signInDelegate
+        application.delegate = signInDelegate
+        application.run()
+    }
+}
