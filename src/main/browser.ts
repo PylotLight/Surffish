@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { isGoogleSignInPage, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
+import { isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -482,6 +484,22 @@ function resolveBrowserViewPreload(): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null
 }
 
+/**
+ * Google rejects sign-in inside Electron ("This browser or app may not be
+ * secure"). Hand its sign-in pages to the native WebKit helper, import the
+ * session it returns, then continue where the page was headed.
+ */
+function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
+  if (!isGoogleSignInPage(url) || !isWebKitGoogleSignInAvailable()) return false
+  const continueUrl = signInContinueUrl(url)
+  void runWebKitGoogleSignIn().then((result) => {
+    if (contents.isDestroyed()) return
+    if (result === 'signed-in') void contents.loadURL(continueUrl).catch(() => {})
+    else if (result === 'failed') console.warn('[google sign-in] WebKit sign-in failed; the session was not imported.')
+  })
+  return true
+}
+
 function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
@@ -548,10 +566,12 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('will-navigate', (event, url) => {
     if (isBrambleExtensionPage(tab, url)) return
-    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
+    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
+    if (handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
-  contents.on('will-redirect', (event, url) => {
-    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) event.preventDefault()
+  contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
+    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) return event.preventDefault()
+    if (isMainFrame && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return

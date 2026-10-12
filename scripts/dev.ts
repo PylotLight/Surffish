@@ -24,6 +24,8 @@ if (nativeBuild.error || nativeBuild.status !== 0) {
   console.error(`[dev] failed to prepare the macOS gesture module: ${nativeBuild.error?.message ?? nativeBuild.status}`)
   process.exit(1)
 }
+// Non-fatal: without the helper, Google sign-in just stays inside Electron.
+spawnSync(process.execPath, [join(root, 'scripts/build-google-sign-in.ts')], { cwd: root, stdio: 'inherit', env: process.env })
 
 const bin =
   process.platform === 'win32'
