@@ -779,3 +779,83 @@ export function disposeBramblePoc(): void {
   disposePopup()
   disposeOffscreen()
 }
+
+// ---------------------------------------------------------------------------
+// Login bridge for the native Google sign-in window.
+//
+// Bramble's background answers AUTOFILL_FIND (summaries for a hostname) and
+// AUTOFILL_FETCH (one entry's secret) only for extension-origin senders, so
+// the request is sent from Bramble's own offscreen page. Surffish only
+// fetches ids that the latest FIND for that hostname returned, keeping the
+// fill scoped to the hostname even though FETCH itself is unscoped.
+
+export interface BrambleLoginSummary { id: string; label: string }
+export type BrambleLoginList = { status: 'ok'; logins: BrambleLoginSummary[] } | { status: 'locked' | 'unavailable' }
+export interface BrambleLoginSecret { username: string; password: string; totp: string }
+
+interface BrambleEnvelope { ok: boolean; data?: unknown; error?: string }
+
+const BRAMBLE_OFFERED_TTL_MS = 2 * 60 * 1000
+let offeredLogins: { hostname: string; ids: Set<string>; at: number } | null = null
+
+async function sendBrambleBackgroundMessage(message: Record<string, unknown>): Promise<BrambleEnvelope> {
+  await ensureOffscreenDocument()
+  const host = offscreenWindow
+  if (!host || host.isDestroyed()) throw new Error('Bramble offscreen page is not running.')
+  const script = `new Promise((resolve) => {
+    const runtime = globalThis.chrome?.runtime ?? globalThis.browser?.runtime
+    if (!runtime) return resolve({ ok: false, error: 'no runtime' })
+    runtime.sendMessage(${JSON.stringify(message)}, (response) => {
+      const error = globalThis.chrome?.runtime?.lastError
+      resolve(response ?? { ok: false, error: error?.message ?? 'no response' })
+    })
+  })`
+  const response = (await host.webContents.executeJavaScript(script, true)) as unknown
+  return response && typeof response === 'object' ? (response as BrambleEnvelope) : { ok: false, error: 'bad response' }
+}
+
+export async function findBrambleLogins(hostname: string): Promise<BrambleLoginList> {
+  offeredLogins = null
+  if (!loadedExtension) return { status: 'unavailable' }
+  try {
+    const response = await sendBrambleBackgroundMessage({ type: 'AUTOFILL_FIND', payload: { hostname, hasLogin: true } })
+    if (!response.ok || !isRecord(response.data)) return { status: 'unavailable' }
+    if (response.data.locked === true) {
+      try {
+        app.focus({ steal: true })
+        await openBramblePoc()
+      } catch { /* the helper tells the user to unlock */ }
+      return { status: 'locked' }
+    }
+    const logins = (Array.isArray(response.data.logins) ? response.data.logins : [])
+      .filter(isRecord)
+      .filter((entry) => typeof entry.id === 'string')
+      .map((entry) => {
+        const name = typeof entry.name === 'string' ? entry.name : 'Google'
+        const user = typeof entry.secondary === 'string' && entry.secondary ? entry.secondary : ''
+        return { id: entry.id as string, label: user ? `${user} — ${name}` : name }
+      })
+    offeredLogins = { hostname, ids: new Set(logins.map((login) => login.id)), at: Date.now() }
+    return { status: 'ok', logins }
+  } catch (error) {
+    console.warn('[bramble] login lookup for the sign-in window failed:', error instanceof Error ? error.message : String(error))
+    return { status: 'unavailable' }
+  }
+}
+
+export async function fetchBrambleLogin(hostname: string, id: string): Promise<BrambleLoginSecret | null> {
+  const offered = offeredLogins
+  if (!offered || offered.hostname !== hostname || !offered.ids.has(id) || Date.now() - offered.at > BRAMBLE_OFFERED_TTL_MS) return null
+  try {
+    const response = await sendBrambleBackgroundMessage({ type: 'AUTOFILL_FETCH', payload: { entryId: id } })
+    if (!response.ok || !isRecord(response.data) || response.data.kind !== 'login') return null
+    const { username, password, totp } = response.data
+    return {
+      username: typeof username === 'string' ? username : '',
+      password: typeof password === 'string' ? password : '',
+      totp: typeof totp === 'string' ? totp : ''
+    }
+  } catch {
+    return null
+  }
+}

@@ -8,14 +8,14 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "bun scripts/dev.ts",
-    "dev:bare": "bun scripts/build-mac-trackpad-swipe.ts --dev && electron-vite dev",
-    "build": "electron-vite build && bun scripts/build-mac-trackpad-swipe.ts",
+    "dev:bare": "bun scripts/build-mac-trackpad-swipe.ts --dev && bun scripts/build-google-sign-in.ts && electron-vite dev",
+    "build": "electron-vite build && bun scripts/build-mac-trackpad-swipe.ts && bun scripts/build-google-sign-in.ts",
     "dist:mac": "bun run build && electron-builder --mac --publish never",
     "start": "electron ./out/main/index.js",
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "bun check",
-    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/main/renderer-security.test.ts src/main/adblock.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
+    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/main/renderer-security.test.ts src/main/adblock.test.ts src/main/google-webkit-sign-in.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts",
     "test:electron-security": "electron scripts/electron-security-smoke.cjs",
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
@@ -42,7 +42,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "out/native/**/*.node"
+      "out/native/**/*.node",
+      "out/native/google-sign-in"
     ],
     "mac": {
       "icon": "resources/icons/Surffish.icns",

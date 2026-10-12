@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { isGoogleSignInPage, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
+import { isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
 import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -482,6 +484,34 @@ function resolveBrowserViewPreload(): string | null {
   return candidates.find((candidate) => existsSync(candidate)) ?? null
 }
 
+/**
+ * Google rejects sign-in inside Electron ("This browser or app may not be
+ * secure"). Hand its sign-in pages to the native WebKit helper, import the
+ * session it returns, then continue where the page was headed.
+ */
+let lastGoogleSignInImportAt = 0
+const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000
+
+function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
+  if (!isGoogleSignInPage(url) || !isWebKitGoogleSignInAvailable()) return false
+  // If Google sends us straight back to sign-in right after an import, it did
+  // not accept the session in Electron; don't trap the user in a pop-up loop.
+  if (Date.now() - lastGoogleSignInImportAt < GOOGLE_SIGN_IN_LOOP_GUARD_MS) {
+    console.warn('[google sign-in] Google asked for sign-in again right after an import; leaving it in the tab.')
+    return false
+  }
+  const continueUrl = signInContinueUrl(url)
+  void runWebKitGoogleSignIn(continueUrl).then((result) => {
+    if (contents.isDestroyed()) return
+    if (result === 'signed-in') {
+      lastGoogleSignInImportAt = Date.now()
+      void contents.loadURL(continueUrl).catch(() => {})
+    }
+    else if (result === 'failed') console.warn('[google sign-in] WebKit sign-in failed; the session was not imported.')
+  })
+  return true
+}
+
 function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
@@ -548,10 +578,12 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('will-navigate', (event, url) => {
     if (isBrambleExtensionPage(tab, url)) return
-    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
+    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
+    if (handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
-  contents.on('will-redirect', (event, url) => {
-    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) event.preventDefault()
+  contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
+    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) return event.preventDefault()
+    if (isMainFrame && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
