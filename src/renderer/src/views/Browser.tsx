@@ -38,6 +38,10 @@ import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
 import { useTabDragSort } from './useTabDragSort'
 import TimeZonePicker from './TimeZonePicker'
+import { ExtensionToolbarButtons } from './ExtensionToolbarButtons'
+import { ExtensionsSettings } from './ExtensionsSettings'
+import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
+import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { WORLD_CITIES } from '../../../shared/world-cities'
 import './Browser.css'
 
@@ -323,6 +327,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) })
   const tabsById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
+  const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
@@ -1350,6 +1355,21 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
                 </button>
               </div>
+              {isChromeWebStoreDetailUrl(browser.url) && (
+                <button
+                  className="store-add-button"
+                  type="button"
+                  disabled={webStoreExtensions.busy}
+                  title="Install this Chrome Web Store extension in Surffish"
+                  onClick={() => {
+                    setSidebarMode('integrations')
+                    void runExtensionAction(() => window.api.browser.extensions.install(browser.url), setWebStoreExtensions, webStoreExtensions)
+                  }}
+                >
+                  {webStoreExtensions.busy ? 'Installing…' : 'Add to Surffish'}
+                </button>
+              )}
+              <ExtensionToolbarButtons state={webStoreExtensions} setState={setWebStoreExtensions} />
               <button
                 className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
                 ref={brambleButtonRef}
@@ -1660,6 +1680,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </section>
+                <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
                 </>}
                 {sidebarMode === 'settings' && <>
                 <section className="settings-section" aria-label="Background tab sleep settings">

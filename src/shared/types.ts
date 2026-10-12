@@ -229,3 +229,37 @@ export interface NetworkResponseBody {
   base64Encoded: boolean
   truncated: boolean
 }
+
+export type WebStoreExtensionCompatLevel = 'supported' | 'partial' | 'unsupported'
+
+/** A Chrome Web Store extension installed in this Surffish profile. */
+export interface WebStoreExtensionSummary {
+  id: string
+  name: string
+  description: string
+  version: string
+  enabled: boolean
+  /** Loaded into the browser session right now. */
+  loaded: boolean
+  iconDataUrl: string | null
+  hasPopup: boolean
+  hasOptions: boolean
+  compatibility: WebStoreExtensionCompatLevel
+  gaps: string[]
+  shimmed: string[]
+  permissions: string[]
+  hostPermissions: string[]
+  installedAt: number
+  updatedAt: number
+  error: string | null
+}
+
+export interface WebStoreExtensionsState {
+  extensions: WebStoreExtensionSummary[]
+  /** An install/update/uninstall is running. */
+  busy: boolean
+  busyId: string | null
+  popupOpenId: string | null
+  notice: string | null
+  error: string | null
+}

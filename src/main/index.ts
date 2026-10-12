@@ -10,6 +10,7 @@ import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
 import { initializeDownloads } from './downloads'
 import { installAppMenu } from './app-menu'
+import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 
 app.setName(APP_NAME)
 
@@ -49,7 +50,16 @@ app.whenReady().then(async () => {
   registerIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
-  setMainWindowCloseHandler(disposeBramblePoc)
+  setMainWindowCloseHandler(() => {
+    disposeBramblePoc()
+    disposeWebStoreExtensions()
+  })
+  try {
+    // Load Chrome Web Store extensions before restored tabs load, so content scripts apply.
+    await initializeWebStoreExtensions()
+  } catch (error) {
+    console.warn('Could not load Chrome Web Store extensions; continuing without them:', error)
+  }
   createWindow()
   try {
     await initializeBramblePoc()
@@ -67,4 +77,7 @@ app.on('second-instance', () => showWindow())
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
-app.on('before-quit', disposeBramblePoc)
+app.on('before-quit', () => {
+  disposeBramblePoc()
+  disposeWebStoreExtensions()
+})

@@ -29,6 +29,15 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/tab-overview.cjs'),
       join(outputDirectory, 'tab-overview.cjs')
     )
+    // Chrome Web Store extensions: popup/options bridge and the store page "Add to Surffish" hook.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/extension-host.cjs'),
+      join(outputDirectory, 'extension-host.cjs')
+    )
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/web-store-page.cjs'),
+      join(outputDirectory, 'web-store-page.cjs')
+    )
   }
 }
 

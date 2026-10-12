@@ -22,7 +22,8 @@ import type {
   NetworkRequestSummary,
   NetworkResponseBody,
   SearchEngineId,
-  TabSleepMinutes
+  TabSleepMinutes,
+  WebStoreExtensionsState
 } from '../shared/types'
 import type { DownloadEntry } from '../shared/downloads'
 
@@ -164,6 +165,20 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, state: BrambleExtensionState): void => callback(state)
         ipcRenderer.on('browser:bramble:changed', listener)
         return () => ipcRenderer.removeListener('browser:bramble:changed', listener)
+      }
+    },
+    extensions: {
+      get: (): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:get'),
+      install: (input: string): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:install', input),
+      setEnabled: (id: string, enabled: boolean): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:set-enabled', id, enabled),
+      uninstall: (id: string): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:uninstall', id),
+      checkForUpdate: (id: string): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:check-update', id),
+      openPopup: (id: string, anchor?: BramblePopupAnchor): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:open-popup', id, anchor),
+      openOptions: (id: string): Promise<WebStoreExtensionsState> => ipcRenderer.invoke('browser:extensions:open-options', id),
+      onChange: (callback: (state: WebStoreExtensionsState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: WebStoreExtensionsState): void => callback(state)
+        ipcRenderer.on('browser:extensions:changed', listener)
+        return () => ipcRenderer.removeListener('browser:extensions:changed', listener)
       }
     },
     network: {

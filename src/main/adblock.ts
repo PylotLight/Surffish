@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ElectronBlocker } from '@ghostery/adblocker-electron'
 import { FILTER_REFRESH_INTERVAL_MS, isFullFilterConfig, isWebPageUrl } from './adblock-policy.ts'
+import { getExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
 import {
   applyFilterEnvironment,
   attachAdblockToSession,
@@ -197,7 +198,8 @@ function ensureSessionAttached(): void {
     pageUrlForRequest: requestingPageUrl,
     isBlockingDisabledForPage,
     onRequest: recordRequest,
-    onFrameStart: recordFrameStart
+    onFrameStart: recordFrameStart,
+    getExemptHosts: getExtensionAdblockExemptHosts
   }, resolveFramePreload())
   sessionAttached = true
 }
