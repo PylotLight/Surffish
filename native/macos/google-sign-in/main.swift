@@ -6,13 +6,22 @@
 // Google/YouTube cookies as JSON on stdout and exits 0. Surffish imports them
 // into its Electron session. Closing the window exits 2 without output.
 //
-// Usage: google-sign-in [continue-host]   (default: myaccount.google.com)
+// Usage: google-sign-in [continue-url]   (default: https://myaccount.google.com/)
+// The flow finishes once WebKit lands on the continue URL's host, so services
+// such as YouTube complete their own SetSID hop inside WebKit first.
 import AppKit
 import WebKit
 
-let doneHost = CommandLine.arguments.count > 1 ? CommandLine.arguments[1].lowercased() : "myaccount.google.com"
+let continueURL: URL = {
+    if CommandLine.arguments.count > 1, let url = URL(string: CommandLine.arguments[1]),
+       url.scheme == "https", url.host != nil {
+        return url
+    }
+    return URL(string: "https://myaccount.google.com/")!
+}()
+let doneHost = continueURL.host!.lowercased()
 let startURL = URL(string: "https://accounts.google.com/ServiceLogin?continue=" +
-    ("https://\(doneHost)/".addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))!
+    (continueURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))!
 
 func safariUserAgent() -> String {
     var version = "26.0"
@@ -50,9 +59,38 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
         window.delegate = self
         window.center()
         window.makeKeyAndOrderFront(nil)
+        installMenu()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         webView.load(URLRequest(url: startURL))
+    }
+
+    // Without a main menu carrying Edit items, Cmd+C/V/X/A never reach WebKit.
+    func installMenu() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit Google Sign-In", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        NSApp.mainMenu = mainMenu
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if !finished { exit(2) }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

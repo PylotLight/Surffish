@@ -20,12 +20,12 @@ export function isWebKitGoogleSignInAvailable(): boolean {
 }
 
 /** Run the native WebKit sign-in window and import its Google cookies. */
-export function runWebKitGoogleSignIn(): Promise<GoogleSignInResult> {
+export function runWebKitGoogleSignIn(continueUrl: string): Promise<GoogleSignInResult> {
   if (running) return running
   const path = helperPath()
   if (!path) return Promise.resolve('unavailable')
   running = new Promise<GoogleSignInResult>((resolve) => {
-    const child = spawn(path, [], { stdio: ['ignore', 'pipe', 'inherit'] })
+    const child = spawn(path, [continueUrl], { stdio: ['ignore', 'pipe', 'inherit'] })
     let stdout = ''
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => { stdout += chunk })
@@ -50,8 +50,10 @@ export function runWebKitGoogleSignIn(): Promise<GoogleSignInResult> {
           }
         }
         await session.cookies.flushStore()
-        console.log(`[google sign-in] imported ${imported} of ${cookies.length} cookies`)
-        resolve(imported > 0 ? 'signed-in' : 'failed')
+        const sid = await session.cookies.get({ url: 'https://www.google.com/', name: 'SID' })
+        const youtube = cookies.filter((cookie) => cookie.domain.replace(/^\./, '').endsWith('youtube.com')).length
+        console.log(`[google sign-in] imported ${imported} of ${cookies.length} cookies (${youtube} youtube); SID in session: ${sid.length > 0}`)
+        resolve(imported > 0 && sid.length > 0 ? 'signed-in' : 'failed')
       } catch (error) {
         console.warn('[google sign-in] could not read helper output:', error)
         resolve('failed')

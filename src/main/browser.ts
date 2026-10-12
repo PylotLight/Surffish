@@ -489,12 +489,24 @@ function resolveBrowserViewPreload(): string | null {
  * secure"). Hand its sign-in pages to the native WebKit helper, import the
  * session it returns, then continue where the page was headed.
  */
+let lastGoogleSignInImportAt = 0
+const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000
+
 function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
   if (!isGoogleSignInPage(url) || !isWebKitGoogleSignInAvailable()) return false
+  // If Google sends us straight back to sign-in right after an import, it did
+  // not accept the session in Electron; don't trap the user in a pop-up loop.
+  if (Date.now() - lastGoogleSignInImportAt < GOOGLE_SIGN_IN_LOOP_GUARD_MS) {
+    console.warn('[google sign-in] Google asked for sign-in again right after an import; leaving it in the tab.')
+    return false
+  }
   const continueUrl = signInContinueUrl(url)
-  void runWebKitGoogleSignIn().then((result) => {
+  void runWebKitGoogleSignIn(continueUrl).then((result) => {
     if (contents.isDestroyed()) return
-    if (result === 'signed-in') void contents.loadURL(continueUrl).catch(() => {})
+    if (result === 'signed-in') {
+      lastGoogleSignInImportAt = Date.now()
+      void contents.loadURL(continueUrl).catch(() => {})
+    }
     else if (result === 'failed') console.warn('[google sign-in] WebKit sign-in failed; the session was not imported.')
   })
   return true
