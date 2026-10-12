@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { dispatchBrambleToolbarAction, resolveBrambleToolbarAction } from '../shared/bramble-toolbar.ts'
 import {
   BRAMBLE_BACKGROUND_WORKER_FILE,
   BRAMBLE_BACKGROUND_WORKER_SOURCE,
@@ -115,4 +116,21 @@ test('stages an adapted private copy and leaves the selected Firefox build uncha
   } finally {
     rmSync(temporaryRoot, { recursive: true, force: true })
   }
+})
+
+test('routes the Bramble toolbar to install for a missing profile instead of reporting a popup as open', async () => {
+  assert.equal(resolveBrambleToolbarAction({ installed: false, loading: false }), 'install')
+  assert.equal(resolveBrambleToolbarAction({ installed: true, loading: false }), 'open')
+  assert.equal(resolveBrambleToolbarAction({ installed: false, loading: true }), 'busy')
+  assert.equal(resolveBrambleToolbarAction({ installed: true, loading: true }), 'busy')
+
+  const actions: string[] = []
+  const handlers = {
+    open: () => { actions.push('open') },
+    install: () => { actions.push('install') }
+  }
+  await dispatchBrambleToolbarAction({ installed: false, loading: false }, handlers)
+  await dispatchBrambleToolbarAction({ installed: true, loading: false }, handlers)
+  await dispatchBrambleToolbarAction({ installed: false, loading: true }, handlers)
+  assert.deepEqual(actions, ['install', 'open'])
 })

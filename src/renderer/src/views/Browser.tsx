@@ -24,6 +24,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { dispatchBrambleToolbarAction, resolveBrambleToolbarAction } from '../../../shared/bramble-toolbar'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
 import {
   getQuickLinkBackgroundIndex,
@@ -662,6 +663,23 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }
 
+  async function handleBrambleToolbarClick(): Promise<void> {
+    await dispatchBrambleToolbarAction(bramblePoc, {
+      open: () => openBramblePoc(),
+      install: async () => {
+        setSidebarMode('settings')
+        try {
+          setBramblePoc(await window.api.browser.bramble.installLatest())
+        } catch (error) {
+          setBramblePoc((current) => ({
+            ...current,
+            error: error instanceof Error ? error.message : String(error)
+          }))
+        }
+      }
+    })
+  }
+
   async function openBrambleSetupPage(): Promise<void> {
     try {
       setBramblePoc(await window.api.browser.bramble.setup())
@@ -1014,6 +1032,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       : bramblePoc.updateAvailable && bramblePoc.latestVersion
         ? `Update to ${bramblePoc.latestVersion}`
         : bramblePoc.latestVersion ? 'Up to date' : 'Install / update'
+  const brambleToolbarAction = resolveBrambleToolbarAction(bramblePoc)
 
   return (
     <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}${sidebarResizing ? ' is-sidebar-resizing' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} aria-label="Surffish browser" onMouseMove={(event) => {
@@ -1261,13 +1280,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
                 ref={brambleButtonRef}
                 type="button"
-                aria-label="Open Bramble"
-                aria-haspopup="dialog"
+                aria-label={brambleToolbarAction === 'install' ? 'Install Bramble' : 'Open Bramble'}
+                aria-haspopup={brambleToolbarAction === 'open' ? 'dialog' : undefined}
                 aria-expanded={bramblePoc.popupOpen}
                 aria-busy={bramblePoc.loading}
-                title={bramblePoc.installed ? `Open Bramble${bramblePoc.version ? ` ${bramblePoc.version}` : ''}` : 'Open Bramble popup · install Bramble in Settings if needed'}
-                disabled={bramblePoc.loading}
-                onClick={() => { void openBramblePoc() }}
+                title={brambleToolbarAction === 'install' ? 'Install Bramble in this Surffish profile · verified release and permission confirmation' : bramblePoc.version ? `Open Bramble ${bramblePoc.version}` : 'Open Bramble'}
+                disabled={brambleToolbarAction === 'busy'}
+                onClick={() => { void handleBrambleToolbarClick() }}
               >
                 <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
               </button>
@@ -1520,7 +1539,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </div>
                     {bramblePoc.installed && bramblePoc.iconDataUrl && <img className="bramble-settings-icon" src={bramblePoc.iconDataUrl} alt="" />}
                   </div>
-                  <p className="settings-help">Install or update the verified Firefox release here. Bramble’s vault setup and customization open in Bramble’s own window; the toolbar keeps only its popup icon.</p>
+                  <p className="settings-help">Install or update the verified Firefox release here. The install and vault storage stay scoped to this Surffish profile; legacy Sockfish profile and vault data are never imported. Bramble’s vault setup and customization open in Bramble’s own window; the toolbar keeps only its popup icon.</p>
                   <div className="settings-actions bramble-settings-actions">
                     <button className="settings-action secondary" type="button" disabled={bramblePoc.loading} onClick={() => void window.api.browser.bramble.checkForUpdates()}>{bramblePoc.loading ? 'Checking…' : 'Check for updates'}</button>
                     <button className="settings-action primary" type="button" disabled={bramblePoc.loading || (bramblePoc.installed && bramblePoc.latestVersion !== null && !bramblePoc.updateAvailable)} onClick={() => void window.api.browser.bramble.installLatest()}>
