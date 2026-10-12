@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Frozen legacy helper for the already-published v0.1.0 ZIP+DMG release. Future
+# dist:mac builds are DMG-only; do not use this pinned helper for newer releases.
 VERSION='0.1.0'
 TAG="v${VERSION}"
 BRANCH='main'
@@ -21,6 +23,10 @@ usage() {
 Usage:
   bash scripts/publish-macos-release.sh <final-release-notes.md>
   bash scripts/publish-macos-release.sh --reuse-artifacts <source-commit> <final-release-notes.md>
+
+This is a frozen v0.1.0-only helper for the already-published legacy ARM64
+ZIP+DMG release. It retains that release's exact asset validation and is not
+the future release pipeline; current and future dist:mac builds are DMG-only.
 
 The default mode runs checks and builds the 0.1.0 ARM64 macOS artifacts. The
 reuse mode skips only the packaging build and uses existing ARM64 ZIP/DMG files;
@@ -319,17 +325,17 @@ cmp -s "$ZIP" "$REMOTE_ASSET_DIR/$(basename "$ZIP")" || fail 'The published ZIP 
 cmp -s "$DMG" "$REMOTE_ASSET_DIR/$(basename "$DMG")" || fail 'The published DMG does not match the validated local ARM64 DMG.'
 printf '[release] Both published ARM64 assets are present and match the approved local files.\n'
 
-# Compute the Homebrew checksum only after release metadata and both asset bytes
+# Compute the Homebrew DMG checksum only after release metadata and both asset bytes
 # have been verified successfully.
-ZIP_SHA256="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
-[[ "$ZIP_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail 'Could not calculate a valid ZIP SHA-256 checksum.'
-printf '[release] Verified ZIP SHA-256: %s\n' "$ZIP_SHA256"
+DMG_SHA256="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+[[ "$DMG_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail 'Could not calculate a valid DMG SHA-256 checksum.'
+printf '[release] Verified DMG SHA-256: %s\n' "$DMG_SHA256"
 RENDERED_CASK="$TEMP_DIR/surffish.rb"
 bun scripts/render-cask.ts \
   --version "$VERSION" \
-  --sha256-arm64 "$ZIP_SHA256" \
+  --sha256-arm64 "$DMG_SHA256" \
   --out "$RENDERED_CASK"
-grep -Fq "sha256 \"$ZIP_SHA256\"" "$RENDERED_CASK" || fail 'Rendered Cask does not contain the ZIP checksum.'
+grep -Fq "sha256 \"$DMG_SHA256\"" "$RENDERED_CASK" || fail 'Rendered Cask does not contain the DMG checksum.'
 
 REMOTE_MAIN="$(git ls-remote origin "refs/heads/$BRANCH" | awk 'NR == 1 {print $1}')"
 [[ "$REMOTE_MAIN" == "$COMMIT" ]] || fail 'origin/main moved while the release was being published; the release is intact, but the Cask update was not pushed.'
@@ -338,7 +344,7 @@ REMOTE_MAIN="$(git ls-remote origin "refs/heads/$BRANCH" | awk 'NR == 1 {print $
 
 printf '[release] Rendering and pushing the Cask update...\n'
 if cmp -s "$RENDERED_CASK" Casks/surffish.rb; then
-  printf '[release] Cask already matched the released ZIP checksum; no Cask commit was needed.\n'
+  printf '[release] Cask already matched the released DMG checksum; no Cask commit was needed.\n'
 else
   cp "$RENDERED_CASK" Casks/surffish.rb
   git add -- Casks/surffish.rb

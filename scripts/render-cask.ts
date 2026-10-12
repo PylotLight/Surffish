@@ -19,6 +19,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(
     'Usage: bun scripts/render-cask.ts --version X.Y.Z --sha256-arm64 HEX [--out PATH]'
   )
+  console.log('The ARM64 SHA-256 must be for the published DMG asset.')
   console.log('Without --out, prints the rendered cask to stdout.')
   process.exit(0)
 }

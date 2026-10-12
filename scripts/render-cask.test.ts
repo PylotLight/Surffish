@@ -27,9 +27,19 @@ test('renders the version and ARM64 SHA-256 value into an Apple-silicon-only Cas
   assert.match(result.stdout, /version "1\.2\.3-beta\.1"/)
   assert.match(result.stdout, new RegExp(`sha256 "${shaArm64}"`))
   assert.match(result.stdout, /depends_on arch: :arm64/)
-  assert.match(result.stdout, /Surffish-#\{version\}-mac-arm64\.zip/)
+  assert.match(result.stdout, /Surffish-#\{version\}-mac-arm64\.dmg/)
+  assert.doesNotMatch(result.stdout, /mac-arm64\.zip/)
   assert.doesNotMatch(result.stdout, /intel|x64/i)
   assert.equal(result.stdout.includes('{{'), false)
+})
+
+test('disables DMG update info and builds only an ARM64 DMG', () => {
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+
+  assert.equal(packageJson.build.dmg.writeUpdateInfo, false)
+  assert.deepEqual(packageJson.build.mac.target, [
+    { target: 'dmg', arch: ['arm64'] }
+  ])
 })
 
 test('rejects unsafe versions and malformed SHA-256 values', () => {
