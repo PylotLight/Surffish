@@ -2,6 +2,26 @@
 
 Surffish's macOS release process is manual; there is no GitHub Actions release workflow. Build the DMG locally on your own Apple-silicon Mac: the GitHub macOS runner minutes are used up. Release notes for each version go in `docs/releases/vX.Y.Z.md`. The published `v0.1.0` release has both ARM64 ZIP and DMG assets. Those existing assets and the tag remain unchanged; the current Homebrew Cask installs from the already-published DMG.
 
+## TL;DR: `bun run release`
+
+On an Apple-silicon Mac, on an up-to-date clean `main`:
+
+```bash
+bun run release            # patch bump, e.g. 0.1.1 -> 0.1.2
+bun run release minor      # or major, or an exact 0.3.0
+bun run release current    # package.json already bumped by hand, just ship it
+bun run release --dry-run  # build + verify only, publishes nothing
+```
+
+It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
+1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can edit and push it.
+2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
+3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `hdiutil verify`, then the SHA-256.
+4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
+5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the DMG through your fish `ghp` function (`SURFFISH_GH=gh` uses plain gh instead), and renders, commits and pushes `Casks/surffish.rb`.
+
+The manual steps below are what it automates.
+
 ## Future builds: ARM64 DMG only
 
 Build on an Apple-silicon Mac with Xcode Command Line Tools installed. Surffish's Electron 44 runtime requires macOS Ventura (13) or later. Set `package.json` to the approved version before building. The build also compiles the AppKit trackpad addon and needs Apple's `xcrun`/Clang toolchain.
@@ -19,7 +39,7 @@ Before publishing a future DMG, inspect and test the app on an Apple-silicon Mac
 
 ## Future manual release and Cask update
 
-There is no version-agnostic release-publishing helper yet. For a future version, publish only `Surffish-<version>-mac-arm64.dmg` as the macOS release asset; do not add ZIP or blockmap assets. Render the Cask from the published DMG's ARM64 SHA-256, then review and push the source/Cask changes through the normal repository workflow:
+`bun run release` does all of this. To do it by hand: for a future version, publish only `Surffish-<version>-mac-arm64.dmg` as the macOS release asset; do not add ZIP or blockmap assets. Render the Cask from the published DMG's ARM64 SHA-256, then review and push the source/Cask changes through the normal repository workflow:
 
 ```bash
 bun scripts/render-cask.ts \
