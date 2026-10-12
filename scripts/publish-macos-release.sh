@@ -93,7 +93,7 @@ fi
 NOTES_FILE="$(cd -- "$(dirname -- "$NOTES_FILE")" && pwd)/$(basename -- "$NOTES_FILE")"
 
 cd "$ROOT"
-for command_name in git bun node gh shasum awk sort unzip ditto hdiutil lipo; do
+for command_name in git bun gh shasum awk sort unzip ditto hdiutil lipo; do
   require_command "$command_name"
 done
 [[ -x /usr/libexec/PlistBuddy ]] || fail 'Apple PlistBuddy is unavailable; install Xcode Command Line Tools.'
@@ -129,10 +129,10 @@ if (( REUSE_EXISTING_ARTIFACTS )); then
 fi
 git var GIT_COMMITTER_IDENT >/dev/null || fail 'Git commit identity is not configured; set user.name and user.email before running this script.'
 
-node - "$VERSION" <<'NODE'
-const fs = require('node:fs')
-const version = process.argv[2]
-const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+BUN_RELEASE_VERSION="$VERSION" bun -e '
+const fs = require("node:fs")
+const version = process.env.BUN_RELEASE_VERSION
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"))
 if (pkg.version !== version) {
   console.error(`[release] package.json version must be ${version}; found ${pkg.version}`)
   process.exit(1)
@@ -152,7 +152,7 @@ if ([...expected.values()].some((present) => !present)) {
   console.error('[release] package.json must define both ZIP and DMG targets for arm64.')
   process.exit(1)
 }
-NODE
+'
 
 LOCAL_TAG="$(git tag --list "$TAG")"
 [[ -z "$LOCAL_TAG" ]] || fail "Local tag $TAG already exists."
