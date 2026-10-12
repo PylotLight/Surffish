@@ -370,7 +370,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
     }
     renameSync(stagedDirectory, finalDirectory)
     activated = true
-    const extension = await browserSession.extensions.loadExtension(finalDirectory)
+    const extension = await loadBrambleExtension(finalDirectory)
     loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
     if (previousExtension && extension.id !== previousExtension.id) {
       throw new Error('The update would change Bramble’s extension identity. The existing vault copy was left in place.')
@@ -414,7 +414,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
     let rollbackError = ''
     if (previousExtension && existsSync(finalDirectory)) {
       try {
-        const restored = await browserSession.extensions.loadExtension(finalDirectory)
+        const restored = await loadBrambleExtension(finalDirectory)
         if (restored.id !== previousExtension.id) throw new Error('the restored extension identity did not match')
         loadedExtension = { id: restored.id, name: restored.name, version: restored.version, url: restored.url }
         await ensureOffscreenDocument()
@@ -546,16 +546,38 @@ function releaseArchivePath(version: string, sha256: string): string {
   return join(brambleDirectory(RELEASE_DIRECTORY), `bramble_firefox_${version}_${sha256}.zip`)
 }
 
-const BRAMBLE_WORKER_STAMP_FILE = '.surffish-worker-stamp'
+const BRAMBLE_WORKER_STAMP_FILE = 'worker-stamp'
 
 /** Fingerprint of every script Bramble's background worker loads, to spot a stale registration. */
-function brambleWorkerStamp(directory: string, worker: string): string {
+export function brambleWorkerStamp(directory: string): string {
   const hash = createHash('sha256')
-  for (const file of [worker, BRAMBLE_BROWSER_ALIAS_FILE, 'background.js']) {
+  for (const file of ['surffish-bramble-background.js', BRAMBLE_BROWSER_ALIAS_FILE, 'background.js']) {
     const path = join(directory, file)
     hash.update(file).update('\0').update(existsSync(path) ? readFileSync(path) : '').update('\0')
   }
   return hash.digest('hex')
+}
+
+/**
+ * Load Bramble, making sure its background worker runs the scripts on disk. Electron keeps running
+ * the previously registered service worker while the extension version is unchanged, so a Surffish
+ * shim update (or a restage) never reached Bramble's background. When the worker scripts differ
+ * from the last load, drop the stale registration and load again.
+ */
+async function loadBrambleExtension(directory: string): Promise<Electron.Extension> {
+  const browserSession = getBrowserSession()
+  const stamp = brambleWorkerStamp(directory)
+  const stampPath = join(brambleDirectory(BRAMBLE_DATA_DIRECTORY), BRAMBLE_WORKER_STAMP_FILE)
+  const previous = existsSync(stampPath) ? readFileSync(stampPath, 'utf8') : ''
+  let extension = await browserSession.extensions.loadExtension(directory)
+  if (previous !== stamp) {
+    await browserSession.clearStorageData({ origin: extension.url.replace(/\/$/, ''), storages: ['serviceworkers'] })
+    browserSession.extensions.removeExtension(extension.id)
+    extension = await browserSession.extensions.loadExtension(directory)
+    mkdirSync(brambleDirectory(BRAMBLE_DATA_DIRECTORY), { recursive: true })
+    writeFileSync(stampPath, stamp)
+  }
+  return extension
 }
 
 async function loadExistingStagedBuild(directory: string): Promise<void> {
@@ -569,21 +591,8 @@ async function loadExistingStagedBuild(directory: string): Promise<void> {
   }
   // Refresh Surffish's own compatibility shim so fixes reach builds staged by an older Surffish.
   writeFileSync(join(directory, BRAMBLE_BROWSER_ALIAS_FILE), BRAMBLE_BROWSER_ALIAS_SOURCE)
-  const workerStamp = brambleWorkerStamp(directory, worker)
-  const stampPath = join(directory, BRAMBLE_WORKER_STAMP_FILE)
-  const workerChanged = !existsSync(stampPath) || readFileSync(stampPath, 'utf8') !== workerStamp
   try {
-    const browserSession = getBrowserSession()
-    let extension = await browserSession.extensions.loadExtension(directory)
-    if (workerChanged) {
-      // Electron keeps running the previously registered service worker script while the
-      // extension version is unchanged, so an updated shim never reached Bramble's background.
-      // Drop the stale registration and load again so the worker starts from the files on disk.
-      await browserSession.clearStorageData({ origin: extension.url.replace(/\/$/, ''), storages: ['serviceworkers'] })
-      browserSession.extensions.removeExtension(extension.id)
-      extension = await browserSession.extensions.loadExtension(directory)
-      writeFileSync(stampPath, workerStamp)
-    }
+    const extension = await loadBrambleExtension(directory)
     loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
     await ensureOffscreenDocument()
     const details = extensionDetails(directory)

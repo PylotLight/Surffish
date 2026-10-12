@@ -169,10 +169,15 @@ test('alias shims chrome.windows in the worker and forwards the pop-out to the o
   const sent: unknown[] = []
   const worker: Record<string, unknown> = {
     URL,
-    chrome: { runtime: { getURL: (path: string) => `chrome-extension://abc${path}`, sendMessage: (message: unknown) => { sent.push(message); return Promise.resolve() } } }
+    chrome: {
+      action: { openPopup: async () => undefined },
+      runtime: { getURL: (path: string) => `chrome-extension://abc${path}`, sendMessage: (message: unknown) => { sent.push(message); return Promise.resolve() } }
+    }
   }
   worker.globalThis = worker
   runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, worker)
+  // Electron's openPopup is a silent no-op; it must reject so Bramble falls back to windows.create.
+  await assert.rejects((worker.chrome as { action: { openPopup: () => Promise<void> } }).action.openPopup())
   const windows = (worker.chrome as { windows: { create: (info: unknown) => Promise<{ id: number }>; remove: (id: number) => Promise<void>; get: (id: number) => Promise<unknown> } }).windows
   const created = await windows.create({ url: 'popup.html?detached=1', type: 'popup' })
   assert.equal(created.id, 1)
