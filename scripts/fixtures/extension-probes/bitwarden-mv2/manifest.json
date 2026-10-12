@@ -1,0 +1,42 @@
+{
+  "manifest_version": 2,
+  "name": "Surffish Bitwarden API Probe",
+  "version": "1.0.0",
+  "description": "A local-only API compatibility probe; not Bitwarden code and contains no credentials.",
+  "permissions": [
+    "alarms",
+    "clipboardRead",
+    "clipboardWrite",
+    "contextMenus",
+    "notifications",
+    "storage",
+    "tabs",
+    "webNavigation",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_action": {
+    "default_title": "Bitwarden Probe",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "_execute_browser_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+Y"
+      },
+      "description": "Open the local probe popup"
+    }
+  }
+}
