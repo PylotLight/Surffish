@@ -38,7 +38,7 @@ import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
 import { useTabDragSort } from './useTabDragSort'
 import TimeZonePicker from './TimeZonePicker'
-import { ExtensionToolbarButtons } from './ExtensionToolbarButtons'
+import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { ExtensionsSettings } from './ExtensionsSettings'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
@@ -126,12 +126,15 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'integrations' || mode === 'site' || mode === 'network'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network'
 }
 
-const SETTINGS_SECTIONS: ReadonlyArray<{ mode: Extract<SidebarMode, 'settings' | 'integrations' | 'site' | 'network'>; label: string }> = [
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network'>
+
+const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
-  { mode: 'integrations', label: 'Integrations' },
+  { mode: 'newtab', label: 'New Tab' },
+  { mode: 'integrations', label: 'Extensions' },
   { mode: 'site', label: 'This site' },
   { mode: 'network', label: 'Network' }
 ]
@@ -259,14 +262,81 @@ function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
   return (
     <span className={`tab-favicon${tab.loading ? ' is-loading' : ''}`} aria-hidden="true">
       {tab.loading ? (
-        <svg className="tab-spinner" viewBox="0 0 16 16">
-          <circle className="tab-spinner-track" cx="8" cy="8" r="6" />
-          <circle className="tab-spinner-arc" cx="8" cy="8" r="6" pathLength="100" />
+        <svg className="tab-spinner" viewBox="0 0 24 24" shapeRendering="geometricPrecision">
+          <circle className="tab-spinner-track" cx="12" cy="12" r="9" />
+          {/* SMIL rotation keeps the arc vector-drawn every frame; a CSS transform on the svg
+              gets rasterised into a layer and wobbles into a lumpy squircle at favicon size. */}
+          <g>
+            <circle className="tab-spinner-arc" cx="12" cy="12" r="9" pathLength="100" />
+            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite" />
+          </g>
         </svg>
       ) : tab.faviconUrl && !iconFailed
         ? <img src={tab.faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
         : tab.title.slice(0, 1).toUpperCase()}
     </span>
+  )
+}
+
+function SettingsGroup({ title, status, statusOn, aside, icon, className = '', children }: { title: string; status?: string; statusOn?: boolean; aside?: React.ReactNode; icon?: string; className?: string; children?: React.ReactNode }): React.JSX.Element {
+  return (
+    <section className={`settings-group ${className}`.trim()} aria-label={title}>
+      <header className="settings-group-header">
+        {icon && <img className="settings-group-icon" src={icon} alt="" />}
+        <div className="settings-group-title">
+          <h2>{title}</h2>
+          {status && <span className={`settings-status${statusOn ? ' is-on' : ''}`}>{status}</span>}
+        </div>
+        {aside && <div className="settings-group-aside">{aside}</div>}
+      </header>
+      {children && <div className="settings-group-body">{children}</div>}
+    </section>
+  )
+}
+
+function SettingsRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.JSX.Element {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-copy">
+        <span className="settings-row-label">{label}</span>
+        {hint && <span className="settings-row-hint">{hint}</span>}
+      </div>
+      <div className="settings-row-control">{children}</div>
+    </div>
+  )
+}
+
+function SettingsSlider({ label, value, unit = '', min, max, step = 1, onChange }: { label: string; value: number; unit?: string; min: number; max: number; step?: number; onChange: (value: number) => void }): React.JSX.Element {
+  const percent = ((value - min) / (max - min)) * 100
+  return (
+    <label className="settings-row settings-slider-row">
+      <span className="settings-row-label">{label}</span>
+      <input className="settings-range" type="range" min={min} max={max} step={step} value={value} style={{ '--range-fill': `${percent}%` } as React.CSSProperties} onChange={(event) => onChange(Number(event.target.value))} aria-label={label} />
+      <output className="settings-slider-value">{value}{unit}</output>
+    </label>
+  )
+}
+
+function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary; className?: string }): React.JSX.Element | null {
+  if (!tab.audible && !tab.muted) return null
+  const label = tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`
+  return (
+    <button
+      className={`tab-audio-button${tab.muted ? ' is-muted' : ' is-playing'} ${className}`.trim()}
+      type="button"
+      aria-label={label}
+      aria-pressed={tab.muted}
+      title={tab.muted ? 'Unmute tab' : 'Playing audio · click to mute'}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => { event.stopPropagation(); void window.api.browser.tabs.setMuted(tab.id, !tab.muted) }}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path className="tab-audio-speaker" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />
+        {tab.muted
+          ? <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
+          : <><path className="tab-audio-wave1" d="M15 9.2a4 4 0 0 1 0 5.6" /><path className="tab-audio-wave2" d="M17.6 6.8a7.4 7.4 0 0 1 0 10.4" /></>}
+      </svg>
+    </button>
   )
 }
 
@@ -277,11 +347,12 @@ function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
       type="button"
       data-browser-tab-id={tab.id}
       aria-label={`Open pinned tab ${tab.title}`}
-      title={`${tab.title}${tab.sleeping ? ' · sleeping' : ''}`}
+      title={`${tab.title}${tab.sleeping ? ' · sleeping' : ''}${tab.muted ? ' · muted' : tab.audible ? ' · playing audio' : ''}`}
       onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
     >
       <TabFavicon tab={tab} />
       {tab.sleeping && <span className="pinned-tab-sleep-indicator" aria-hidden="true">☾</span>}
+      {(tab.audible || tab.muted) && <span className={`pinned-tab-audio-indicator${tab.muted ? ' is-muted' : ''}`} aria-hidden="true"><svg viewBox="0 0 24 24"><path className="tab-audio-speaker" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />{tab.muted ? <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" /> : <path d="M15 9.2a4 4 0 0 1 0 5.6M17.6 6.8a7.4 7.4 0 0 1 0 10.4" />}</svg></span>}
     </button>
   )
 }
@@ -361,6 +432,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
+  const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
+  const extensionPins = useExtensionPins()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
@@ -679,7 +752,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     await window.api.browser.navigate(site.url, searchEngine)
   }
 
-  function selectSettingsSection(mode: Extract<SidebarMode, 'settings' | 'integrations' | 'site' | 'network'>): void {
+  function selectSettingsSection(mode: SettingsSectionMode): void {
     setSidebarMode(mode)
   }
 
@@ -821,7 +894,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface])
 
   useEffect(() => {
-    if (sidebarMode !== 'site' && sidebarMode !== 'integrations') return
+    if (sidebarMode !== 'site') return
     let cancelled = false
     if (!activeOrigin) {
       setSiteSettings(null)
@@ -918,16 +991,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [downloadsPopupOpen])
 
   useEffect(() => {
-    if (surface === 'sidebar' || !isSettingsSection(sidebarMode)) return
+    if (surface === 'sidebar' || (!isSettingsSection(sidebarMode) && sidebarMode !== 'downloads')) return
     const exitOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key !== 'Escape' || event.defaultPrevented || downloadsPopupOpen || siteActionsOpen) return
+      if (event.key !== 'Escape' || event.defaultPrevented || downloadsPopupOpen || siteActionsOpen || extensionsMenuOpen) return
       const target = event.target as HTMLElement | null
       if (target?.tagName === 'SELECT') return
       exitSettings()
     }
     window.addEventListener('keydown', exitOnEscape)
     return () => window.removeEventListener('keydown', exitOnEscape)
-  }, [surface, sidebarMode, downloadsPopupOpen, siteActionsOpen])
+  }, [surface, sidebarMode, downloadsPopupOpen, siteActionsOpen, extensionsMenuOpen])
 
   useEffect(() => {
     if (!siteActionsOpen) return
@@ -955,19 +1028,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       const toolbarHeight = element.getBoundingClientRect().height
       setBrowserChromeHeight(toolbarHeight)
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
     const observer = new ResizeObserver(updateChromeHeight)
     observer.observe(element)
+    // Popups fill in after they mount (downloads load async); re-measure as they grow so the
+    // toolbar view isn't left too short and clips them against the page view.
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, extensionsMenuOpen, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -1207,7 +1283,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 title={tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title}
                 onClick={() => {
                   void window.api.browser.tabs.activate(tab.id)
-                  if (isSettingsSection(sidebarMode)) exitSettings()
+                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads') exitSettings()
                 }}
                 onKeyDown={(event) => {
                   if (event.altKey && event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
@@ -1221,6 +1297,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               >
                 <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
+                <TabAudioButton tab={tab} />
                 {tab.sleeping && <span className="tab-sleep-indicator" title="Sleeping tab" aria-label="Sleeping tab">☾</span>}
                 <button
                   className="tab-close"
@@ -1240,6 +1317,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         )}
 
         <div className="sidebar-footer">
+          {sidebarMode === 'tabs' && (
+            <button className={`sidebar-footer-icon-button sidebar-pin-button${sidebarPinned ? ' is-current' : ''}`} type="button" aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Keep sidebar open'} aria-pressed={sidebarPinned} title={sidebarPinned ? 'Auto-hide sidebar' : 'Keep sidebar open'} onClick={() => setSidebarPinned((pinned) => !pinned)}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" /><path d="M9 5v14" />{sidebarPinned ? <path d="m15.5 10-2 2 2 2" /> : <path d="m13.5 10 2 2-2 2" />}</svg>
+            </button>
+          )}
           <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} aria-pressed={isSettingsSection(sidebarMode)} title={isSettingsSection(sidebarMode) ? 'Close settings (Esc)' : 'Settings'} onClick={toggleSettings}>
             <span aria-hidden="true">⚙</span>
           </button>
@@ -1268,7 +1350,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
           <form className="browser-toolbar" onSubmit={(event) => void navigate(event)}>
-            <div className="browser-toolbar-leading">
+            <div className="browser-toolbar-leading" aria-hidden="true" />
+            <div className="omnibox-wrap">
               <div className="browser-nav-buttons">
                 <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
                   <span aria-hidden="true">‹</span>
@@ -1286,8 +1369,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
                 </button>
               </div>
-            </div>
-            <div className="omnibox-wrap">
               <div className="omnibox">
                 <div className="site-actions-control" ref={siteActionsControlRef}>
                   <button
@@ -1377,9 +1458,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
             <div className="browser-toolbar-trailing">
               <div className="omnibox-actions" role="group" aria-label="Browser panels">
-                <button className={`omnibox-action-button tabs-sidebar-button${sidebarMode === 'tabs' && sidebarPinned ? ' is-current' : ''}`} type="button" aria-label={sidebarMode === 'tabs' && sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'} aria-pressed={sidebarMode === 'tabs' && sidebarPinned} title={sidebarMode === 'tabs' && sidebarPinned ? 'Auto-hide sidebar' : 'Pin sidebar open'} onClick={() => toggleToolbarPanel('tabs')}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="4.5" width="15" height="15" rx="3" /><path d="M8 9h8M8 12.5h8M8 16h5" /></svg>
-                </button>
                 <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
                 </button>
@@ -1398,7 +1476,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {webStoreExtensions.busy ? 'Installing…' : 'Add to Surffish'}
                 </button>
               )}
-              <ExtensionToolbarButtons state={webStoreExtensions} setState={setWebStoreExtensions} />
+              {extensionPins.isPinned(BRAMBLE_TOOLBAR_ID, true) && (
               <button
                 className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
                 ref={brambleButtonRef}
@@ -1413,6 +1491,20 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               >
                 <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
               </button>
+              )}
+              <ExtensionToolbarButtons
+                state={webStoreExtensions}
+                setState={setWebStoreExtensions}
+                pins={extensionPins}
+                onManage={() => selectSettingsSection('integrations')}
+                onMenuOpenChange={setExtensionsMenuOpen}
+                bramble={{
+                  label: brambleToolbarAction === 'install' ? 'Install Bramble' : 'Bramble',
+                  iconSrc: brambleExtensionIcon,
+                  disabled: brambleToolbarAction === 'busy',
+                  onOpen: () => { void handleBrambleToolbarClick() }
+                }}
+              />
               <div className="downloads-toolbar-control" ref={downloadsControlRef}>
                 <button
                   className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
@@ -1447,7 +1539,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
             <section className="new-tab-page" aria-label="New Tab" style={{
@@ -1566,155 +1658,26 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </button>
             </nav>
           )}
-          {sidebarMode === 'downloads' && <DownloadsPanel mode="page" />}
-          {(sidebarMode === 'settings' || sidebarMode === 'integrations') && (
-            <div className="settings-view">
+          {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
+          {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
+            <div className={`settings-view settings-view-${sidebarMode}`}>
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>{sidebarMode === 'integrations' ? 'Integrations & add-ons' : 'Settings'}</h1>
-                  <p>{sidebarMode === 'integrations' ? 'Configure New Tab, ad blocking, and browser add-ons.' : 'Choose browser behavior, proxy, and saved-session options.'}</p>
+                  <h1>{sidebarMode === 'integrations' ? 'Extensions' : sidebarMode === 'newtab' ? 'New Tab' : 'General'}</h1>
+                  <p>{sidebarMode === 'integrations' ? 'Bramble and Chrome Web Store extensions.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, tabs, privacy and connection.'}</p>
                 </div>
               </header>
               <div className="settings-content">
                 {sidebarMode === 'settings' && <>
-                <section className="settings-section">
-                  <label className="settings-field">
-                    <span>Search engine</span>
+                <SettingsGroup title="Search">
+                  <SettingsRow label="Search engine" hint="Used for searches typed into the address bar.">
                     <select className="settings-select" value={searchEngine} disabled={!searchEngineLoaded} onChange={(event) => setSearchEngine(event.target.value as SearchEngineId)} aria-label="Default search engine">
                       {SEARCH_ENGINES.map((engine) => <option key={engine.id} value={engine.id}>{engine.label}</option>)}
                     </select>
-                  </label>
-                  <p className="settings-help">Used for searches typed into the address bar.</p>
-                </section>
-                </>}
-                {sidebarMode === 'integrations' && <>
-                <section className="settings-section" aria-label="Site ad blocking">
-                  <div className="settings-section-heading">
-                    <div>
-                      <strong>Ad blocking</strong>
-                      <span className={`settings-status${siteSettings?.blockAds ? ' is-on' : ''}`}>
-                        {siteSettingsLoading ? 'Loading this site…' : siteSettings ? siteSettings.blockAds ? 'On for this site' : 'Off for this site' : 'Per-site control'}
-                      </span>
-                    </div>
-                  </div>
-                  {siteSettingsLoading ? <p className="settings-help">Loading this site’s ad-blocking preference…</p> : siteSettings ? (
-                    <label className="site-setting-row">
-                      <span><strong>Block ads and trackers on this site</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
-                      <input type="checkbox" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
-                    </label>
-                  ) : <p className="settings-help">Select an HTTP or HTTPS page to customize its ad and tracker blocking. The browser filter remains enabled by default.</p>}
-                </section>
-                <section className="settings-section">
-                  <label className="settings-field">
-                    <span>New tab page</span>
-                    <select className="settings-select" value={newTabPage} onChange={(event) => {
-                      const page = event.target.value as NewTabPageId
-                      void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
-                    }} aria-label="Default new tab page">
-                      <option value="quick-links">Surffish New Tab (local)</option>
-                      <option value="bonjourr">Bonjourr (online)</option>
-                      <option value="search">Search engine</option>
-                    </select>
-                  </label>
-                  <p className="settings-help">The local page uses a compact site-icon grid and rotating nature photos. Favorites reuse pinned sites; frequent sites are calculated from local history. Commons photo requests contain no browsing data, and approved photos are cached with source and license credits. Site icons use the page’s declared icon URL (or the site origin’s /favicon.ico fallback) and are cached locally. Bonjourr and the selected search engine remain available. This setting applies to new tabs opened from now on.</p>
-                </section>
-                <section className="settings-section new-tab-settings-section" aria-label="New Tab clocks">
-                  <div className="settings-section-heading"><div><strong>New Tab · time and clocks</strong><span className="settings-status">Choose any supported time zone and give each of up to {MAX_WORLD_CLOCKS} world clocks its own label.</span></div></div>
-                  <label className="new-tab-setting-toggle"><span>Show local clock</span><input type="checkbox" checked={newTabPreferences.showClock} onChange={(event) => patchNewTabPreferences({ showClock: event.target.checked })} /></label>
-                  <label className="new-tab-setting-toggle"><span>Show date</span><input type="checkbox" checked={newTabPreferences.showDate} onChange={(event) => patchNewTabPreferences({ showDate: event.target.checked })} /></label>
-                  <label className="new-tab-setting-toggle"><span>Use 24-hour time</span><input type="checkbox" checked={newTabPreferences.use24HourTime} onChange={(event) => patchNewTabPreferences({ use24HourTime: event.target.checked })} /></label>
-                  <label className="new-tab-setting-toggle"><span>Show seconds</span><input type="checkbox" checked={newTabPreferences.showSeconds} onChange={(event) => patchNewTabPreferences({ showSeconds: event.target.checked })} /></label>
-                  <label className="settings-field">
-                    <span>Primary time zone</span>
-                    <select className="settings-select" value={newTabPreferences.timeZone} onChange={(event) => patchNewTabPreferences({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
-                      <option value="local">Automatic · device time</option>
-                      {Array.from(new Set([...TIME_ZONE_OPTIONS, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
-                    </select>
-                  </label>
-                  <div className="new-tab-world-clocks">
-                    <div className="new-tab-world-clocks-heading"><strong>World clocks</strong><button className="settings-action secondary" type="button" disabled={newTabPreferences.worldClocks.length >= MAX_WORLD_CLOCKS} onClick={() => {
-                      const usedTimeZones = new Set([
-                        Intl.DateTimeFormat().resolvedOptions().timeZone,
-                        ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone]),
-                        ...newTabPreferences.worldClocks.map((item) => item.timeZone)
-                      ])
-                      const timeZone = TIME_ZONE_OPTIONS.find((zone) => !usedTimeZones.has(zone)) ?? 'UTC'
-                      const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: timeZoneCityName(timeZone), timeZone }
-                      patchNewTabPreferences({ worldClocks: [...newTabPreferences.worldClocks, clock] })
-                    }}>Add clock</button></div>
-                    {newTabPreferences.worldClocks.map((clock, index) => (
-                      <div className="new-tab-world-clock-editor" key={clock.id}>
-                        <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
-                        <TimeZonePicker
-                          value={clock.timeZone}
-                          label={clock.label}
-                          ariaLabel={`World clock ${index + 1} city or time zone`}
-                          onSelect={(result) => patchNewTabPreferences({
-                            worldClocks: newTabPreferences.worldClocks.map((item) => {
-                              if (item.id !== clock.id) return item
-                              const autoLabels = new Set([timeZoneCityName(item.timeZone), ...WORLD_CITIES.filter((city) => city.timeZone === item.timeZone).map((city) => city.city)])
-                              const keepLabel = item.label.trim() !== '' && !autoLabels.has(item.label.trim())
-                              return { ...item, timeZone: result.timeZone, label: keepLabel ? item.label : result.city.slice(0, 40) }
-                            })
-                          })}
-                        />
-                        <button className="settings-action secondary" type="button" aria-label={`Remove ${clock.label} world clock`} onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-                <section className="settings-section new-tab-settings-section" aria-label="New Tab weather">
-                  <div className="settings-section-heading"><div><strong>New Tab · weather</strong><span className="settings-status">Optional current conditions, loaded only when enabled.</span></div></div>
-                  <label className="new-tab-setting-toggle"><span>Show weather</span><input type="checkbox" checked={newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherEnabled: event.target.checked })} /></label>
-                  <label className="settings-field"><span>City or town</span><input type="text" maxLength={100} value={newTabPreferences.weatherLocation} placeholder="e.g. Melbourne" onChange={(event) => patchNewTabPreferences({ weatherLocation: event.target.value })} aria-label="Weather city or town" /></label>
-                  <label className="settings-field">
-                    <span>Temperature unit</span>
-                    <select className="settings-select" value={newTabPreferences.temperatureUnit} onChange={(event) => patchNewTabPreferences({ temperatureUnit: event.target.value as NewTabPreferences['temperatureUnit'] })} aria-label="Weather temperature unit">
-                      <option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option>
-                    </select>
-                  </label>
-                  <p className="settings-help">Weather is off by default. When enabled, the app sends only the city name you enter to Open-Meteo to retrieve current conditions; it does not use device geolocation or browsing history.</p>
-                </section>
-                <section className="settings-section new-tab-settings-section" aria-label="New Tab display options">
-                  <div className="settings-section-heading"><div><strong>New Tab · display</strong><span className="settings-status">Adjust icon density and background treatment.</span></div></div>
-                  <label className="new-tab-setting-toggle"><span>Show site names under icons</span><input type="checkbox" checked={newTabPreferences.showLinkLabels} onChange={(event) => patchNewTabPreferences({ showLinkLabels: event.target.checked })} /></label>
-                  <label className="settings-field"><span>Icon size · {newTabPreferences.iconSize}px</span><input className="settings-range" type="range" min={20} max={52} value={newTabPreferences.iconSize} onChange={(event) => patchNewTabPreferences({ iconSize: Number(event.target.value) })} aria-label="New Tab icon size" /></label>
-                  <label className="settings-field"><span>Links per row · {newTabPreferences.linksPerRow}</span><input className="settings-range" type="range" min={3} max={12} value={newTabPreferences.linksPerRow} onChange={(event) => patchNewTabPreferences({ linksPerRow: Number(event.target.value) })} aria-label="New Tab links per row" /></label>
-                  <label className="settings-field"><span>Icon vertical position · {newTabPreferences.iconVerticalOffset}px</span><input className="settings-range" type="range" min={0} max={480} step={10} value={newTabPreferences.iconVerticalOffset} onChange={(event) => patchNewTabPreferences({ iconVerticalOffset: Number(event.target.value) })} aria-label="New Tab icon vertical position" /></label>
-                  <label className="settings-field"><span>Background dim · {newTabPreferences.backgroundDim}%</span><input className="settings-range" type="range" min={0} max={70} value={newTabPreferences.backgroundDim} onChange={(event) => patchNewTabPreferences({ backgroundDim: Number(event.target.value) })} aria-label="New Tab background dim" /></label>
-                  <label className="settings-field"><span>Background blur · {newTabPreferences.backgroundBlur}px</span><input className="settings-range" type="range" min={0} max={12} value={newTabPreferences.backgroundBlur} onChange={(event) => patchNewTabPreferences({ backgroundBlur: Number(event.target.value) })} aria-label="New Tab background blur" /></label>
-                </section>
-                <section className="settings-section bramble-settings-section" aria-label="Bramble extension settings">
-                  <div className="settings-section-heading">
-                    <div>
-                      <strong>Bramble password manager</strong>
-                      <span className={`settings-status${bramblePoc.installed ? ' is-on' : ''}`}>
-                        {bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}` : 'Not installed in this Surffish profile'}
-                      </span>
-                    </div>
-                    {bramblePoc.installed && bramblePoc.iconDataUrl && <img className="bramble-settings-icon" src={bramblePoc.iconDataUrl} alt="" />}
-                  </div>
-                  <p className="settings-help">Install or update the verified Firefox release here. The install and vault storage stay scoped to this Surffish profile; legacy Sockfish profile and vault data are never imported. “Create your vault” from the toolbar and Setup / customize here open Bramble setup in a regular Surffish browser tab.</p>
-                  <div className="settings-actions bramble-settings-actions">
-                    <button className="settings-action secondary" type="button" disabled={bramblePoc.loading} onClick={() => void window.api.browser.bramble.checkForUpdates()}>{bramblePoc.loading ? 'Checking…' : 'Check for updates'}</button>
-                    <button className="settings-action primary" type="button" disabled={bramblePoc.loading || (bramblePoc.installed && bramblePoc.latestVersion !== null && !bramblePoc.updateAvailable)} onClick={() => void window.api.browser.bramble.installLatest()}>
-                      {brambleInstallLabel}
-                    </button>
-                    <button className="settings-action secondary" type="button" disabled={!bramblePoc.installed || bramblePoc.loading} onClick={() => void openBrambleSetupPage()}>Setup / customize</button>
-                  </div>
-                  {bramblePoc.latestVersion && <p className="settings-help bramble-version-note">Latest Firefox release: <strong>{bramblePoc.latestVersion}</strong>{bramblePoc.installed && bramblePoc.updateAvailable ? ' · update available' : ''}</p>}
-                  {bramblePoc.permissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Extension permissions:</strong> {bramblePoc.permissions.join(', ')}</p>}
-                  {bramblePoc.hostPermissions.length > 0 && <p className="settings-help bramble-permission-note"><strong>Site access:</strong> {bramblePoc.hostPermissions.join(', ')}</p>}
-                  <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and GitHub asset digest when available. Installation and updates are always manual; every release shows its requested access before activation. Surffish removes Firefox-only OAuth access, so Google Drive backup is unavailable.</p>
-                  {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
-                  {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
-                </section>
-                <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
-                </>}
-                {sidebarMode === 'settings' && <>
-                <section className="settings-section" aria-label="Background tab sleep settings">
-                  <label className="settings-field">
-                    <span>Hibernate inactive tabs after</span>
+                  </SettingsRow>
+                </SettingsGroup>
+                <SettingsGroup title="Tabs">
+                  <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake. Hibernated tabs reload their last page; unsaved form state is lost.">
                     <select
                       className="settings-select"
                       value={tabSleepMinutes}
@@ -1727,52 +1690,158 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       aria-label="Hibernate inactive tabs after"
                     >
                       <option value={0}>Never</option>
-                      <option value={5}>5 minutes</option>
-                      <option value={15}>15 minutes</option>
-                      <option value={30}>30 minutes</option>
-                      <option value={60}>1 hour</option>
+                      <option value={5}>After 5 minutes</option>
+                      <option value={15}>After 15 minutes</option>
+                      <option value={30}>After 30 minutes</option>
+                      <option value={60}>After 1 hour</option>
                     </select>
-                  </label>
-              <p className="settings-help">New tabs load immediately, including tabs opened in the background. Restored tabs may defer loading until selected. Loaded tabs keep playing media when you switch away, and audible tabs stay awake while playing. Hibernated tabs reload their last page; unsaved forms and in-page state are cleared.</p>
-                </section>
-                <section className="settings-section" aria-label="Saved session privacy">
-                  <div className="settings-section-heading"><div><strong>Saved tabs</strong><span className="settings-status">Restore on next launch</span></div></div>
-                  <p className="settings-help">Saved tab URLs are stored locally in your Surffish profile and are not separately encrypted. URL fragments and common credential-like query parameters (such as tokens, codes, passwords, and keys) are removed before saving; ordinary query parameters, such as searches and filters, are preserved.</p>
-                  <div className="settings-actions">
-                    <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear saved session</button>
-                  </div>
+                  </SettingsRow>
+                  <SettingsRow label="Saved session" hint="Tabs restore on next launch. Tokens, codes and other credential-like URL parts are stripped before saving.">
+                    <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear</button>
+                  </SettingsRow>
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
-                </section>
-                <section className="settings-section settings-connection" aria-label="SOCKS5 proxy settings">
-                  <div className="settings-section-heading">
-                    <div>
-                      <strong>SOCKS5 proxy</strong>
-                      <span className={`settings-status${appliedProxy.enabled ? ' is-on' : ''}`}>{appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}</span>
-                    </div>
-                    <label className="settings-toggle" title="Use local SOCKS5 proxy">
-                      <input type="checkbox" checked={proxy.enabled} onChange={(event) => setProxy((current) => ({ ...current, enabled: event.target.checked }))} />
-                      <span>On</span>
+                </SettingsGroup>
+                <SettingsGroup
+                  title="SOCKS5 proxy"
+                  status={appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}
+                  statusOn={appliedProxy.enabled}
+                  className="settings-connection"
+                  aside={<input type="checkbox" className="settings-switch" checked={proxy.enabled} onChange={(event) => setProxy((current) => ({ ...current, enabled: event.target.checked }))} aria-label="Use local SOCKS5 proxy" />}
+                >
+                  <div className="settings-inline-fields">
+                    <label className="settings-field settings-field-grow">
+                      <span>Host</span>
+                      <input type="text" value={proxy.host} spellCheck={false} onChange={(event) => setProxy((current) => ({ ...current, host: event.target.value }))} aria-label="Local SOCKS5 host" />
+                    </label>
+                    <label className="settings-field settings-field-port">
+                      <span>Port</span>
+                      <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
                     </label>
                   </div>
-                  <label className="settings-field">
-                    <span>Host</span>
-                    <input type="text" value={proxy.host} spellCheck={false} onChange={(event) => setProxy((current) => ({ ...current, host: event.target.value }))} aria-label="Local SOCKS5 host" />
-                  </label>
-                  <label className="settings-field">
-                    <span>Port</span>
-                    <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
-                  </label>
                   <div className="settings-actions">
+                    <p className="settings-help">Start a tunnel first: <code>ssh -N -D 127.0.0.1:1080 user@host</code></p>
                     <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void testProxy()}>Test port</button>
                     <button className="settings-action primary" type="button" disabled={busy} onClick={() => void saveProxy()}>{busy ? 'Working…' : 'Save'}</button>
                   </div>
-                  <p className="settings-help">Start an SSH tunnel locally first: <code>ssh -N -D 127.0.0.1:1080 user@your-ssh-host</code></p>
                   {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
-                </section>
-                <section className="settings-section settings-data-note">
-                  <strong>Browser data stays local</strong>
-                  <p>Site data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available; sites can still expire logins themselves.</p>
-                </section>
+                </SettingsGroup>
+                <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
+                </>}
+                {sidebarMode === 'newtab' && <>
+                <SettingsGroup title="Page">
+                  <SettingsRow label="New tab opens" hint="Applies to tabs opened from now on.">
+                    <select className="settings-select" value={newTabPage} onChange={(event) => {
+                      const page = event.target.value as NewTabPageId
+                      void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
+                    }} aria-label="Default new tab page">
+                      <option value="quick-links">Surffish New Tab</option>
+                      <option value="bonjourr">Bonjourr (online)</option>
+                      <option value="search">Search engine</option>
+                    </select>
+                  </SettingsRow>
+                  {newTabPage === 'quick-links' && <p className="settings-help">Favorites reuse pinned sites, frequent sites come from local history, and site icons and Wikimedia Commons photos are cached locally. No browsing data is sent.</p>}
+                </SettingsGroup>
+                <SettingsGroup title="Layout">
+                  <SettingsRow label="Show site names"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showLinkLabels} onChange={(event) => patchNewTabPreferences({ showLinkLabels: event.target.checked })} aria-label="Show site names under icons" /></SettingsRow>
+                  <SettingsSlider label="Icon size" value={newTabPreferences.iconSize} unit="px" min={20} max={52} onChange={(iconSize) => patchNewTabPreferences({ iconSize })} />
+                  <SettingsSlider label="Links per row" value={newTabPreferences.linksPerRow} min={3} max={12} onChange={(linksPerRow) => patchNewTabPreferences({ linksPerRow })} />
+                  <SettingsSlider label="Vertical position" value={newTabPreferences.iconVerticalOffset} unit="px" min={0} max={480} step={10} onChange={(iconVerticalOffset) => patchNewTabPreferences({ iconVerticalOffset })} />
+                </SettingsGroup>
+                <SettingsGroup title="Background">
+                  <SettingsSlider label="Dim" value={newTabPreferences.backgroundDim} unit="%" min={0} max={70} onChange={(backgroundDim) => patchNewTabPreferences({ backgroundDim })} />
+                  <SettingsSlider label="Blur" value={newTabPreferences.backgroundBlur} unit="px" min={0} max={12} onChange={(backgroundBlur) => patchNewTabPreferences({ backgroundBlur })} />
+                </SettingsGroup>
+                <SettingsGroup title="Clock">
+                  <SettingsRow label="Show clock"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showClock} onChange={(event) => patchNewTabPreferences({ showClock: event.target.checked })} aria-label="Show local clock" /></SettingsRow>
+                  <SettingsRow label="Show date"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showDate} onChange={(event) => patchNewTabPreferences({ showDate: event.target.checked })} aria-label="Show date" /></SettingsRow>
+                  <SettingsRow label="24-hour time"><input type="checkbox" className="settings-switch" checked={newTabPreferences.use24HourTime} onChange={(event) => patchNewTabPreferences({ use24HourTime: event.target.checked })} aria-label="Use 24-hour time" /></SettingsRow>
+                  <SettingsRow label="Show seconds"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showSeconds} onChange={(event) => patchNewTabPreferences({ showSeconds: event.target.checked })} aria-label="Show seconds" /></SettingsRow>
+                  <SettingsRow label="Time zone">
+                    <select className="settings-select" value={newTabPreferences.timeZone} onChange={(event) => patchNewTabPreferences({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
+                      <option value="local">Automatic · device time</option>
+                      {Array.from(new Set([...TIME_ZONE_OPTIONS, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
+                    </select>
+                  </SettingsRow>
+                </SettingsGroup>
+                <SettingsGroup
+                  title="World clocks"
+                  status={`${newTabPreferences.worldClocks.length} of ${MAX_WORLD_CLOCKS}`}
+                  aside={<button className="settings-action secondary" type="button" disabled={newTabPreferences.worldClocks.length >= MAX_WORLD_CLOCKS} onClick={() => {
+                    const usedTimeZones = new Set([
+                      Intl.DateTimeFormat().resolvedOptions().timeZone,
+                      ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone]),
+                      ...newTabPreferences.worldClocks.map((item) => item.timeZone)
+                    ])
+                    const timeZone = TIME_ZONE_OPTIONS.find((zone) => !usedTimeZones.has(zone)) ?? 'UTC'
+                    const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: timeZoneCityName(timeZone), timeZone }
+                    patchNewTabPreferences({ worldClocks: [...newTabPreferences.worldClocks, clock] })
+                  }}>+ Add clock</button>}
+                >
+                  {newTabPreferences.worldClocks.length === 0 && <p className="settings-help">No world clocks yet.</p>}
+                  {newTabPreferences.worldClocks.map((clock, index) => (
+                    <div className="new-tab-world-clock-editor" key={clock.id}>
+                      <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
+                      <TimeZonePicker
+                        value={clock.timeZone}
+                        label={clock.label}
+                        ariaLabel={`World clock ${index + 1} city or time zone`}
+                        onSelect={(result) => patchNewTabPreferences({
+                          worldClocks: newTabPreferences.worldClocks.map((item) => {
+                            if (item.id !== clock.id) return item
+                            const autoLabels = new Set([timeZoneCityName(item.timeZone), ...WORLD_CITIES.filter((city) => city.timeZone === item.timeZone).map((city) => city.city)])
+                            const keepLabel = item.label.trim() !== '' && !autoLabels.has(item.label.trim())
+                            return { ...item, timeZone: result.timeZone, label: keepLabel ? item.label : result.city.slice(0, 40) }
+                          })
+                        })}
+                      />
+                      <button className="settings-icon-action" type="button" aria-label={`Remove ${clock.label} world clock`} title="Remove" onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>×</button>
+                    </div>
+                  ))}
+                </SettingsGroup>
+                <SettingsGroup
+                  title="Weather"
+                  status="Only the city name is sent to Open-Meteo"
+                  aside={<input type="checkbox" className="settings-switch" checked={newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherEnabled: event.target.checked })} aria-label="Show weather" />}
+                >
+                  <SettingsRow label="City or town"><input type="text" className="settings-input" maxLength={100} value={newTabPreferences.weatherLocation} placeholder="e.g. Melbourne" disabled={!newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherLocation: event.target.value })} aria-label="Weather city or town" /></SettingsRow>
+                  <SettingsRow label="Units">
+                    <div className="settings-segmented" role="radiogroup" aria-label="Weather temperature unit">
+                      {(['celsius', 'fahrenheit'] as const).map((unit) => (
+                        <button key={unit} type="button" role="radio" aria-checked={newTabPreferences.temperatureUnit === unit} className={newTabPreferences.temperatureUnit === unit ? 'is-selected' : ''} disabled={!newTabPreferences.weatherEnabled} onClick={() => patchNewTabPreferences({ temperatureUnit: unit })}>{unit === 'celsius' ? '°C' : '°F'}</button>
+                      ))}
+                    </div>
+                  </SettingsRow>
+                </SettingsGroup>
+                </>}
+                {sidebarMode === 'integrations' && <>
+                <SettingsGroup
+                  title="Bramble password manager"
+                  status={bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}${bramblePoc.updateAvailable ? ' · update available' : ''}` : 'Not installed'}
+                  statusOn={bramblePoc.installed}
+                  icon={bramblePoc.iconDataUrl ?? brambleExtensionIcon}
+                  className="bramble-settings-section"
+                >
+                  <p className="settings-help">Verified Firefox release, scoped to this Surffish profile. Google Drive backup is unavailable (Firefox-only OAuth).</p>
+                  <div className="settings-actions bramble-settings-actions">
+                    <button className="settings-action secondary" type="button" disabled={bramblePoc.loading} onClick={() => void window.api.browser.bramble.checkForUpdates()}>{bramblePoc.loading ? 'Checking…' : 'Check for updates'}</button>
+                    <button className="settings-action secondary" type="button" disabled={!bramblePoc.installed || bramblePoc.loading} onClick={() => void openBrambleSetupPage()}>Setup</button>
+                    <button className="settings-action primary" type="button" disabled={bramblePoc.loading || (bramblePoc.installed && bramblePoc.latestVersion !== null && !bramblePoc.updateAvailable)} onClick={() => void window.api.browser.bramble.installLatest()}>
+                      {brambleInstallLabel}
+                    </button>
+                  </div>
+                  {(bramblePoc.permissions.length > 0 || bramblePoc.hostPermissions.length > 0) && (
+                    <details className="extension-gaps">
+                      <summary>Permissions and verification</summary>
+                      {bramblePoc.latestVersion && <p className="settings-help">Latest Firefox release: <strong>{bramblePoc.latestVersion}</strong></p>}
+                      {bramblePoc.permissions.length > 0 && <p className="settings-help"><strong>Extension permissions:</strong> {bramblePoc.permissions.join(', ')}</p>}
+                      {bramblePoc.hostPermissions.length > 0 && <p className="settings-help"><strong>Site access:</strong> {bramblePoc.hostPermissions.join(', ')}</p>}
+                      <p className="settings-help">Releases are checked against Bramble’s SHA256SUMS and the GitHub asset digest. Installs and updates are always manual and show requested access first.</p>
+                    </details>
+                  )}
+                  {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
+                  {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
+                </SettingsGroup>
+                <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
                 </>}
               </div>
             </div>
@@ -1789,23 +1858,27 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <section className="settings-section">
                       <div className="settings-section-heading"><div><strong>Privacy</strong><span className="settings-status is-on">Applies to this origin only</span></div></div>
                       <label className="site-setting-row">
+                        <span><strong>Block ads and trackers</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
+                      </label>
+                      <label className="site-setting-row">
                         <span><strong>Open pop-ups in tabs</strong><small>Routes pop-up windows from this site into a regular browser tab.</small></span>
-                        <input type="checkbox" checked={siteSettings.openPopupsInTabs} onChange={(event) => void updateSiteSetting('openPopupsInTabs', event.target.checked)} aria-label="Open this site’s pop-ups in tabs" />
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.openPopupsInTabs} onChange={(event) => void updateSiteSetting('openPopupsInTabs', event.target.checked)} aria-label="Open this site’s pop-ups in tabs" />
                       </label>
                     </section>
                     <section className="settings-section">
                       <div className="settings-section-heading"><div><strong>Permissions</strong><span className="settings-status">Denied unless allowed below</span></div></div>
                       <label className="site-setting-row">
                         <span><strong>Camera and microphone</strong><small>Allows media access requests for this origin; the operating system may still require approval.</small></span>
-                        <input type="checkbox" checked={siteSettings.allowMedia} onChange={(event) => void updateSiteSetting('allowMedia', event.target.checked)} aria-label="Allow camera and microphone on this site" />
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowMedia} onChange={(event) => void updateSiteSetting('allowMedia', event.target.checked)} aria-label="Allow camera and microphone on this site" />
                       </label>
                       <label className="site-setting-row">
                         <span><strong>Location</strong><small>Allows location requests for this origin.</small></span>
-                        <input type="checkbox" checked={siteSettings.allowGeolocation} onChange={(event) => void updateSiteSetting('allowGeolocation', event.target.checked)} aria-label="Allow location on this site" />
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowGeolocation} onChange={(event) => void updateSiteSetting('allowGeolocation', event.target.checked)} aria-label="Allow location on this site" />
                       </label>
                       <label className="site-setting-row">
                         <span><strong>Notifications</strong><small>Allows notification requests for this origin.</small></span>
-                        <input type="checkbox" checked={siteSettings.allowNotifications} onChange={(event) => void updateSiteSetting('allowNotifications', event.target.checked)} aria-label="Allow notifications on this site" />
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowNotifications} onChange={(event) => void updateSiteSetting('allowNotifications', event.target.checked)} aria-label="Allow notifications on this site" />
                       </label>
                       <p className="settings-help">All other web permissions stay denied. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
                     </section>

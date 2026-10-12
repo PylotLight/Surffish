@@ -254,3 +254,19 @@ export function revealDownload(id: string): boolean {
   if (!record || !fileExists(record)) return false
   try { shell.showItemInFolder(record.filePath); return true } catch { return false }
 }
+
+/** Clears every finished entry from the list (active transfers stay). Never deletes files. */
+export function clearDownloadHistory(): boolean {
+  const before = records.length
+  records = records.filter((record) => activeItems.has(record.id))
+  if (records.length !== before) persistAndPublish()
+  return true
+}
+
+export async function openDownloadsFolder(): Promise<boolean> {
+  try {
+    return (await shell.openPath(app.getPath('downloads'))) === ''
+  } catch {
+    return false
+  }
+}
