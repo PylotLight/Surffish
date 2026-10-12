@@ -11,6 +11,7 @@ import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle }
 import { BROWSER_SESSION_PARTITION, getBrowserSession } from './browser-session'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
+import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
@@ -33,6 +34,8 @@ interface BrowserTab {
   pageScrollEdges: BrowserPageScrollEdges
   /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
   pageScale: number
+  brambleExtensionUrl: string | null
+  bramblePreloadPath: string | null
 }
 interface BrowserPageScrollEdges {
   canScrollLeft: boolean
@@ -79,6 +82,10 @@ function getTab(id: string | null = activeTabId): BrowserTab | undefined {
 
 function currentUrl(tab: BrowserTab): string {
   return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
+}
+
+function isBrambleExtensionPage(tab: BrowserTab, url: string): boolean {
+  return tab.brambleExtensionUrl !== null && isBrambleExtensionUrl(url, tab.brambleExtensionUrl)
 }
 export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
   if (contents.isDestroyed()) return false
@@ -336,7 +343,7 @@ function hibernateTab(tab: BrowserTab): void {
 
 function scheduleTabSleep(tab: BrowserTab): void {
   cancelSleepTimer(tab)
-  if (tabSleepMinutes === 0 || !tab.view || tab.id === activeTabId || tab.inactiveSince === null) return
+  if (tabSleepMinutes === 0 || !tab.view || tab.brambleExtensionUrl || tab.id === activeTabId || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
   tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
 }
@@ -479,9 +486,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
+  const preload = tab.bramblePreloadPath ?? browserViewPreload
   const view = new WebContentsView({
     webPreferences: {
-      ...(browserViewPreload ? { preload: browserViewPreload } : {}),
+      ...(preload ? { preload } : {}),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -519,6 +527,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   }
   contents.setWindowOpenHandler((details) => {
+    if (tab.brambleExtensionUrl && tab.bramblePreloadPath && isBrambleExtensionUrl(details.url, tab.brambleExtensionUrl)) {
+      openBrambleExtensionTab(details.url, tab.brambleExtensionUrl, tab.bramblePreloadPath)
+      return { action: 'deny' }
+    }
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
       if (details.disposition === 'background-tab') {
@@ -535,10 +547,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
   })
   contents.on('will-navigate', (event, url) => {
+    if (isBrambleExtensionPage(tab, url)) return
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) event.preventDefault()
   })
   contents.on('will-redirect', (event, url) => {
-    if (!/^https?:\/\//i.test(url)) event.preventDefault()
+    if (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url)) event.preventDefault()
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
@@ -546,10 +559,10 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
   })
   contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame || !/^https?:\/\//i.test(url)) return
+    if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isBrambleExtensionPage(tab, url))) return
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
-    tab.faviconUrl = getCachedBrowserSiteFavicon(url)
+    tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
     tab.faviconRevision += 1
     persistOpenTabs()
     publishTabs()
@@ -584,19 +597,23 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
     tab.lastUrl = url
-    recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
     publishState()
-    sendToMainWindowRenderers('browser:history-changed')
+    if (/^https?:\/\//i.test(url)) {
+      recordBrowsingVisit(url, pageTitle(tab))
+      sendToMainWindowRenderers('browser:history-changed')
+    }
   })
   contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame) return
     resetMacTrackpadSwipeFor(contents)
     tab.lastUrl = url
-    recordBrowsingVisit(url, pageTitle(tab))
     persistOpenTabs()
     publishState()
-    sendToMainWindowRenderers('browser:history-changed')
+    if (/^https?:\/\//i.test(url)) {
+      recordBrowsingVisit(url, pageTitle(tab))
+      sendToMainWindowRenderers('browser:history-changed')
+    }
   })
   contents.on('page-title-updated', (_event, title) => {
     if (!isCurrentContents()) return
@@ -643,9 +660,16 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false): string | null {
+interface BrambleExtensionTabOptions {
+  extensionUrl: string
+  preloadPath: string
+}
+
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, brambleExtension?: BrambleExtensionTabOptions): string | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = input === SURFFISH_QUICK_LINKS_URL
+  const target = brambleExtension && input
+    ? input
+    : input === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
     : input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const previous = getTab()
@@ -664,7 +688,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     inactiveSince: null,
     sleepTimer: null,
     pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES },
-    pageScale: 1
+    pageScale: 1,
+    brambleExtensionUrl: brambleExtension?.extensionUrl ?? null,
+    bramblePreloadPath: brambleExtension?.preloadPath ?? null
   }
   tabs.push(tab)
   if (shouldActivate) {
@@ -845,6 +871,57 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId): string |
     setImmediate(sendFocusAddressToVisibleRenderer)
   }
   return id
+}
+
+/** Open Bramble UI only through this main-process-only path, never through address-bar navigation. */
+export function openBrambleExtensionTab(url: string, extensionUrl: string, preloadPath: string): string | null {
+  if (!preloadPath || !isBrambleExtensionUrl(url, extensionUrl)) return null
+  let tab = tabs.find((candidate) => candidate.brambleExtensionUrl === extensionUrl && isBrambleExtensionPage(candidate, currentUrl(candidate)))
+  if (!tab) {
+    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath })
+    if (!id) return null
+    tab = getTab(id)
+  } else {
+    tab.bramblePreloadPath = preloadPath
+    if (currentUrl(tab) !== url) {
+      tab.lastUrl = url
+      tab.pendingUrl = url
+      tab.error = null
+      const contents = tab.view?.webContents
+      if (contents && !contents.isDestroyed()) {
+        void contents.loadURL(url).catch((error: unknown) => {
+          if (tab?.view?.webContents !== contents) return
+          tab.error = error instanceof Error ? error.message : String(error)
+          publishState()
+        })
+      } else {
+        ensureTabLoaded(tab)
+      }
+    }
+    activateTabInternal(tab.id)
+  }
+  if (!tab) return null
+  persistOpenTabs()
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    browserWindow.show()
+    browserWindow.focus()
+    const contents = getTab()?.view?.webContents
+    if (contents && !contents.isDestroyed()) contents.focus()
+  }
+  publishState()
+  return tab.id
+}
+
+export function isBrambleExtensionTab(contents: WebContents): boolean {
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  return Boolean(tab && isBrambleExtensionPage(tab, currentUrl(tab)))
+}
+
+/** Close extension-host tabs before replacing or unloading Bramble's extension build. */
+export function closeBrambleExtensionTabs(): void {
+  for (const tab of [...tabs]) {
+    if (tab.brambleExtensionUrl) closeBrowserTab(tab.id)
+  }
 }
 
 export type TabCommand = 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'reload' | 'close' | 'closeOthers'

@@ -1,10 +1,11 @@
-import { app, BrowserWindow, dialog, net, screen, type BaseWindow } from 'electron'
+import { app, BrowserWindow, dialog, net, screen, type BaseWindow, type WebContents } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BrambleExtensionState, BramblePopupAnchor } from '../shared/types'
 import { getBrowserSession } from './browser-session'
+import { closeBrambleExtensionTabs, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
 import {
   adaptBrambleFirefoxManifest,
   isBrambleExtensionUrl,
@@ -28,8 +29,6 @@ const STAGING_DIRECTORY = 'bramble-firefox-poc/extension'
 const RELEASE_DIRECTORY = 'bramble-firefox-poc/releases'
 const BRAMBLE_POPUP_WIDTH = 500
 const BRAMBLE_POPUP_HEIGHT = 550
-const BRAMBLE_OPTIONS_WIDTH = 860
-const BRAMBLE_OPTIONS_HEIGHT = 720
 const BRAMBLE_RELEASE_REQUEST_HOSTS = new Set([
   'api.github.com',
   'github.com',
@@ -62,7 +61,6 @@ const state: BrambleExtensionState = {
 }
 let loadedExtension: LoadedBrambleExtension | null = null
 let popupWindow: BrowserWindow | null = null
-let setupWindow: BrowserWindow | null = null
 let offscreenWindow: BrowserWindow | null = null
 
 function isAllowedBrambleReleaseUrl(url: URL): boolean {
@@ -185,57 +183,6 @@ function launcherBounds(anchor: BramblePopupAnchor | undefined, owner: BaseWindo
   return anchoredPopupBounds(anchor, content, area, { width: BRAMBLE_POPUP_WIDTH, height: BRAMBLE_POPUP_HEIGHT }, screen.getCursorScreenPoint())
 }
 
-async function fitOptionsWindowToDocument(win: BrowserWindow): Promise<void> {
-  if (win.isDestroyed()) return
-  const workArea = screen.getDisplayMatching(win.getBounds()).workArea
-  const bounds = await win.webContents.executeJavaScript(`new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const root = document.querySelector('#root');
-      const documentElement = document.documentElement;
-      resolve({
-        width: Math.max(documentElement.scrollWidth, root?.scrollWidth ?? 0),
-        height: Math.max(documentElement.scrollHeight, root?.scrollHeight ?? 0)
-      });
-    }));
-  })`) as { width?: number; height?: number }
-  if (win.isDestroyed()) return
-  const maxWidth = Math.max(640, workArea.width - 48)
-  const maxHeight = Math.max(560, workArea.height - 48)
-  const width = Math.min(maxWidth, Math.max(760, bounds.width || BRAMBLE_OPTIONS_WIDTH))
-  const height = Math.min(maxHeight, Math.max(680, Math.min(bounds.height || BRAMBLE_OPTIONS_HEIGHT, 900)))
-  win.setContentSize(width, height)
-}
-
-async function showBramblePopupPage(popup: BrowserWindow, pageUrl: string): Promise<void> {
-  const extension = loadedExtension
-  if (!extension || !isBrambleExtensionUrl(pageUrl, extension.url)) {
-    throw new Error('Only Bramble extension pages can open in the Bramble popup.')
-  }
-  if (popup.webContents.getURL() !== pageUrl) await popup.loadURL(pageUrl)
-  if (popup.isDestroyed()) return
-
-  const requested = new URL(pageUrl)
-  const optionsPath = new URL(`${extension.url}options.html`).pathname
-  popup.setResizable(false)
-  if (requested.pathname === optionsPath) {
-    await fitOptionsWindowToDocument(popup)
-    if (popup.isDestroyed()) return
-    const [width = BRAMBLE_OPTIONS_WIDTH, height = BRAMBLE_OPTIONS_HEIGHT] = popup.getContentSize()
-    const workArea = screen.getDisplayMatching(popup.getBounds()).workArea
-    const x = Math.max(workArea.x, Math.min(workArea.x + workArea.width - width, Math.round(workArea.x + (workArea.width - width) / 2)))
-    const y = Math.max(workArea.y, Math.min(workArea.y + workArea.height - height, Math.round(workArea.y + (workArea.height - height) / 2)))
-    popup.setBounds({ x, y, width, height })
-    popup.setTitle('Bramble Setup / Restore')
-  } else {
-    popup.setBounds(launcherBounds(undefined, mainWindow()))
-    popup.setTitle('Bramble')
-  }
-  if (popup.isMinimized()) popup.restore()
-  popup.show()
-  popup.focus()
-  updateState({ popupOpen: true, error: null })
-}
-
 function mainWindow(): BaseWindow | undefined {
   const win = getMainWindow()
   return win && !win.isDestroyed() ? win : undefined
@@ -354,12 +301,6 @@ function disposePopup(): void {
   updateState({ popupOpen: false })
 }
 
-function disposeSetupWindow(): void {
-  const current = setupWindow
-  setupWindow = null
-  if (current && !current.isDestroyed()) current.close()
-}
-
 function disposeOffscreen(): void {
   const current = offscreenWindow
   offscreenWindow = null
@@ -413,7 +354,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
   const browserSession = getBrowserSession()
 
   disposePopup()
-  disposeSetupWindow()
+  closeBrambleExtensionTabs()
   disposeOffscreen()
   try {
     if (previousExtension) {
@@ -455,7 +396,7 @@ async function replaceStagedBrambleBuild(stagedDirectory: string, configToSave?:
   } catch (error) {
     const originalMessage = error instanceof Error ? error.message : String(error)
     disposePopup()
-    disposeSetupWindow()
+    closeBrambleExtensionTabs()
     disposeOffscreen()
     if (loadedExtension) {
       try {
@@ -508,6 +449,17 @@ async function loadFromDirectory(sourceDirectory: string, persistPath: boolean):
   }
 }
 
+function showBrambleExtensionPage(pageUrl: string): void {
+  const extension = loadedExtension
+  if (!extension || !isBrambleExtensionUrl(pageUrl, extension.url)) {
+    throw new Error('Only Bramble extension pages can open in Surffish tabs.')
+  }
+  const tabId = openBrambleExtensionTab(pageUrl, extension.url, resolveBramblePreload())
+  if (!tabId) throw new Error('Could not open Bramble’s page in a Surffish tab.')
+  disposePopup()
+  updateState({ popupOpen: false, error: null })
+}
+
 function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
   if (!loadedExtension) throw new Error('Bramble has not been loaded yet.')
   const pageUrl = `${loadedExtension.url}popup.html`
@@ -555,12 +507,14 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
     updateState({ popupOpen: false })
   })
   popup.webContents.setWindowOpenHandler(({ url }) => {
-    // Route trusted extension pages into this popup instead of creating a detached window.
+    // Route trusted extension pages into Surffish tabs instead of separate windows.
     const extension = loadedExtension
     if (extension && isBrambleExtensionUrl(url, extension.url)) {
-      void showBramblePopupPage(popup, url).catch((error: unknown) => {
+      try {
+        showBrambleExtensionPage(url)
+      } catch (error) {
         updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
-      })
+      }
     }
     return { action: 'deny' }
   })
@@ -582,79 +536,6 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor): void {
   void popup.loadURL(pageUrl).catch((error: unknown) => {
     updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
     if (!popup.isDestroyed()) popup.close()
-  })
-}
-
-function showBrambleSetupWindow(): void {
-  if (!loadedExtension) throw new Error('Bramble has not been loaded yet.')
-  const pageUrl = `${loadedExtension.url}options.html`
-  if (setupWindow && !setupWindow.isDestroyed()) {
-    if (setupWindow.webContents.getURL() !== pageUrl) {
-      void setupWindow.loadURL(pageUrl).catch((error: unknown) => {
-        updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
-      })
-    }
-    if (setupWindow.isMinimized()) setupWindow.restore()
-    setupWindow.show()
-    setupWindow.focus()
-    disposePopup()
-    updateState({ popupOpen: false, error: null })
-    return
-  }
-
-  const owner = mainWindow()
-  const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
-  const width = Math.min(BRAMBLE_OPTIONS_WIDTH, Math.max(640, display.workArea.width - 48))
-  const height = Math.min(BRAMBLE_OPTIONS_HEIGHT, Math.max(560, display.workArea.height - 72))
-  const setup = new BrowserWindow({
-    title: 'Bramble Setup / Restore',
-    width,
-    height,
-    minWidth: Math.min(760, width),
-    minHeight: Math.min(640, height),
-    useContentSize: true,
-    show: false,
-    resizable: true,
-    fullscreenable: false,
-    autoHideMenuBar: true,
-    parent: owner,
-    webPreferences: {
-      session: getBrowserSession(),
-      preload: resolveBramblePreload(),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true
-    }
-  })
-  setupWindow = setup
-  setup.on('closed', () => {
-    if (setupWindow === setup) setupWindow = null
-  })
-  setup.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith(loadedExtension!.url)) return { action: 'allow' }
-    return { action: 'deny' }
-  })
-  setup.once('ready-to-show', () => {
-    void fitOptionsWindowToDocument(setup).then(() => {
-      if (!setup.isDestroyed()) {
-        setup.show()
-        setup.focus()
-        disposePopup()
-      }
-    }).catch((error: unknown) => {
-      updateState({ error: `Could not size Bramble’s setup window: ${error instanceof Error ? error.message : String(error)}` })
-      if (!setup.isDestroyed()) {
-        setup.show()
-        setup.focus()
-        disposePopup()
-      }
-    })
-    updateState({ popupOpen: false, error: null })
-  })
-  void setup.loadURL(pageUrl).catch((error: unknown) => {
-    updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
-    if (!setup.isDestroyed()) setup.close()
   })
 }
 
@@ -801,7 +682,7 @@ export async function installLatestBramble(): Promise<BrambleExtensionState> {
         `Requested extension permissions: ${requestedPermissions.join(', ') || 'none'}.`,
         `Requested site access: ${requestedHosts.join(', ') || 'none'}.`,
         'Bramble requests access to all websites for autofill and its passkey bridge. The Firefox-only identity permission is removed by Surffish; Bramble’s Google Drive/OAuth backup is unsupported here.',
-        'The “Create your vault” flow from the toolbar stays in the popup. Setup / customize in Integrations opens the larger setup window. Updating replaces extension files but keeps the existing browser profile and vault storage.'
+        '“Create your vault” from the toolbar and Setup / customize in Integrations open Bramble’s options page in a regular Surffish browser tab. Updating replaces extension files but keeps the existing browser profile and vault storage.'
       ].join('\n\n'),
       buttons: ['Cancel', `${state.installed ? 'Update' : 'Install'} Bramble`],
       defaultId: 1,
@@ -863,7 +744,7 @@ export async function openBrambleSetup(): Promise<BrambleExtensionState> {
   if (loadedExtension) {
     try {
       await ensureOffscreenDocument()
-      showBrambleSetupWindow()
+      showBrambleExtensionPage(`${loadedExtension.url}options.html`)
     } catch (error) {
       updateState({ error: error instanceof Error ? error.message : String(error) })
     }
@@ -871,28 +752,19 @@ export async function openBrambleSetup(): Promise<BrambleExtensionState> {
   return getBramblePocState()
 }
 
-export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | null): Promise<void> {
-  if (sourceWindow && sourceWindow === popupWindow && !sourceWindow.isDestroyed()) {
-    if (!loadedExtension) {
-      updateState({ error: 'Bramble has not been loaded yet.' })
-      return
-    }
-    try {
-      await showBramblePopupPage(sourceWindow, `${loadedExtension.url}options.html`)
-    } catch (error) {
-      updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
-    }
-    return
+export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | null, sourceContents: WebContents): Promise<void> {
+  const isPopup = !!sourceWindow && sourceWindow === popupWindow && !sourceWindow.isDestroyed()
+  if (!isPopup && !isBrambleExtensionTab(sourceContents)) {
+    throw new Error('Only a Bramble UI page can open Bramble Setup / Restore.')
   }
   await openBrambleSetup()
 }
 
 export function isBrambleUiWindow(win: BrowserWindow | null): boolean {
-  return !!win && (win === popupWindow || win === setupWindow)
+  return !!win && win === popupWindow
 }
 
 export function disposeBramblePoc(): void {
   disposePopup()
-  disposeSetupWindow()
   disposeOffscreen()
 }

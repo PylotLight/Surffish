@@ -13,6 +13,7 @@ import {
   getBrowserTabs,
   navigateBrowser,
   newBrowserTab,
+  isBrambleExtensionTab,
   setBrowserTabSleepMinutes,
   setBrowserSearchEngine,
   setBrowserBounds,
@@ -281,10 +282,10 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:bramble:open-options-from-ui', async (event) => {
     const sourceWindow = BrowserWindow.fromWebContents(event.sender)
-    if (!isBrambleUiWindow(sourceWindow)) {
+    if (!isBrambleUiWindow(sourceWindow) && !isBrambleExtensionTab(event.sender)) {
       throw new Error('Only a Bramble UI window can open Bramble Setup/Restore.')
     }
-    await openBrambleOptionsFromUi(sourceWindow)
+    await openBrambleOptionsFromUi(sourceWindow, event.sender)
     return true
   })
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })

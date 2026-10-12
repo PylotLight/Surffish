@@ -435,9 +435,9 @@ try {
   await clickButtonByText(popupConnection, 'Create your vault')
   let optionsTarget
   try {
-    optionsTarget = await waitFor("Bramble's options/setup page to open inside the toolbar popup", async () => {
+    optionsTarget = await waitFor("Bramble's options/setup page to open in a Surffish browser tab", async () => {
       const targets = await getTargets(port)
-      return targets.find((target) => target.id === popupTarget.id && target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
+      return targets.find((target) => target.id !== popupTarget.id && target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
     }, 20_000)
   } catch (error) {
     const targets = (await getTargets(port)).filter((target) => target.type === 'page' && target.url.startsWith('chrome-extension://')).map(({ id, type, url }) => ({ id, type, url }))
@@ -451,17 +451,26 @@ try {
     } catch (diagnosticError) {
       popupState = { error: diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError) }
     }
-    throw new Error(`Create your vault did not navigate the popup to Setup/Restore. Bridge: ${JSON.stringify(popupBridge)}; popup: ${JSON.stringify(popupState)}; extension targets: ${JSON.stringify(targets)}; ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`Create your vault did not open a Surffish Setup/Restore tab. Bridge: ${JSON.stringify(popupBridge)}; popup: ${JSON.stringify(popupState)}; extension targets: ${JSON.stringify(targets)}; ${error instanceof Error ? error.message : String(error)}`)
   }
-  assert.equal(optionsTarget.id, popupTarget.id, 'Create your vault must reuse the existing Bramble popup window.')
-  const detachedOptionsTargets = (await getTargets(port)).filter((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html') && target.id !== popupTarget.id)
-  assert.equal(detachedOptionsTargets.length, 0, 'Create your vault must not open a detached setup window.')
-  setupConnection = popupConnection
+  assert.notEqual(optionsTarget.id, popupTarget.id, 'Create your vault must open a browser tab instead of reusing the popup window.')
+  await waitFor('the toolbar popup to close after opening the Setup tab', async () => {
+    const targets = await getTargets(port)
+    return !targets.some((target) => target.id === popupTarget.id)
+  }, 10_000)
+  popupConnection.close()
   popupConnection = null
-  const setupWindowInfo = await waitFor("Bramble's options layout to resize inside the popup", async () => {
-    const dimensions = await setupConnection.evaluate('({ x: window.screenX, y: window.screenY, width: window.outerWidth, height: window.outerHeight, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })')
-    return dimensions.viewportWidth >= 760 && dimensions.viewportWidth <= 1000 && dimensions.viewportHeight >= 640 && dimensions.viewportHeight <= 900 ? dimensions : null
+  const tabSummary = await waitFor('the Bramble options page to appear in Surffish’s own tab list', async () => {
+    const tabs = await mainConnection.evaluate('window.api.browser.tabs.get()')
+    return tabs.find((tab) => tab.url.includes('/options.html') && tab.active) ?? null
+  }, 10_000)
+  assert.ok(tabSummary.title)
+  setupConnection = await connectCdp(optionsTarget.webSocketDebuggerUrl)
+  const setupTabInfo = await waitFor("Bramble's options page to render in the Surffish tab viewport", async () => {
+    const dimensions = await setupConnection.evaluate('({ width: window.innerWidth, height: window.innerHeight })')
+    return dimensions.width > 500 && dimensions.height > 500 ? dimensions : null
   }, 20_000)
+  assert.ok(setupTabInfo.width > 500 && setupTabInfo.height > 500)
   const setup = await waitFor("Bramble's real vault-setup form", async () => {
     const value = await setupConnection.evaluate(`(() => ({
       title: document.title,
@@ -472,7 +481,7 @@ try {
     return value?.readyState === 'complete' && value?.createForm && value?.createButton ? value : null
   }, 20_000)
   const setupLayout = await inspectViewport(setupConnection)
-  assertViewportFitsOrScrolls(setupLayout, 'Bramble Setup/Restore window')
+  assertViewportFitsOrScrolls(setupLayout, 'Bramble Setup/Restore browser tab')
   const finalState = await mainConnection.evaluate('window.api.browser.bramble.get()')
   assert.equal(setup.title, 'Vault Setup')
   assert.equal(finalState.installed, true)
@@ -491,7 +500,7 @@ try {
   assert.equal(joinFormReady.joinButton, true)
   const joinLayout = await inspectViewport(setupConnection)
   assertViewportFitsOrScrolls(joinLayout, 'Bramble Join form')
-  assert.equal(joinLayout.height >= 680, true, 'The Join route should fit the 680 px setup window on the test display.')
+  assert.equal(joinLayout.height >= 500, true, 'The Join route should fit or scroll within the browser tab viewport.')
   await clickButtonByText(setupConnection, 'Restore from backup')
   const restoreTabReady = await waitFor('Bramble embedded restore tab', async () =>
     setupConnection.evaluate(`!!document.querySelector('input[type="file"]') && document.body?.innerText.includes('Choose a .bramble file')`), 10_000)
@@ -565,10 +574,10 @@ try {
 
   setupConnection.close()
   setupConnection = null
-  await browserConnection.send('Target.closeTarget', { targetId: optionsTarget.id })
-  await waitFor('the Bramble popup to close before reopening it for unlock', async () => {
-    const targets = await getTargets(port)
-    return !targets.some((target) => target.id === optionsTarget.id)
+  await mainConnection.evaluate(`window.api.browser.tabs.close(${JSON.stringify(tabSummary.id)})`)
+  await waitFor('Surffish to close the Bramble options tab through its tab lifecycle', async () => {
+    const [targets, tabs] = await Promise.all([getTargets(port), mainConnection.evaluate('window.api.browser.tabs.get()')])
+    return !targets.some((target) => target.id === optionsTarget.id) && !tabs.some((tab) => tab.id === tabSummary.id)
   }, 10_000)
   await clickElementBySelector(mainConnection, '.bramble-toolbar-button')
   const vaultPopupTarget = await waitFor('Bramble popup after vault creation', async () => {
@@ -577,23 +586,32 @@ try {
   }, 20_000)
   popupConnection = await connectCdp(vaultPopupTarget.webSocketDebuggerUrl)
 
-  const vaultView = await waitFor('the unlocked Bramble vault UI and persisted registry', async () => {
-    const value = await popupConnection.evaluate(`(async () => {
-      const stored = await browser.storage.local.get('vault.registry');
-      const vaults = stored['vault.registry']?.vaults;
-      const vaultId = Array.isArray(vaults) ? vaults[0]?.id : undefined;
-      const session = await browser.storage.session.get(null);
-      return {
-        title: document.title,
-        vaultCount: Array.isArray(vaults) ? vaults.length : 0,
-        unlocked: typeof vaultId === 'string' && Object.hasOwn(session, 'vault.vek:' + vaultId),
-        unlockFormVisible: !!document.querySelector('form input[type="password"]'),
-        firstRunVisible: document.body?.innerText.includes('Welcome to Bramble') ?? false,
-        appRootReady: (document.querySelector('#root')?.children.length ?? 0) > 0
-      };
-    })()`)
-    return value?.vaultCount === 1 && value?.unlocked && !value?.unlockFormVisible && value?.appRootReady ? value : null
-  }, 30_000)
+  const popupDocument = await waitFor('the compact Bramble popup document to respond after vault creation', async () => {
+    const value = await popupConnection.evaluate(`({
+      readyState: document.readyState,
+      title: document.title,
+      bodyText: document.body?.innerText.slice(0, 240) ?? '',
+      appRootReady: (document.querySelector('#root')?.children.length ?? 0) > 0
+    })`)
+    return value?.readyState === 'complete' && value?.appRootReady ? value : null
+  }, 20_000)
+  const vaultRegistry = await waitFor('the Bramble local vault registry in the compact popup', async () => {
+    const stored = await popupConnection.evaluate('browser.storage.local.get("vault.registry")')
+    return Array.isArray(stored?.['vault.registry']?.vaults) ? stored['vault.registry'] : null
+  }, 20_000)
+  const vaultId = vaultRegistry.vaults[0]?.id
+  const popupSession = await waitFor('the Bramble unlocked session key in the compact popup', async () => {
+    const session = await popupConnection.evaluate('browser.storage.session.get(null)')
+    return typeof vaultId === 'string' && Object.hasOwn(session, `vault.vek:${vaultId}`) ? session : null
+  }, 20_000)
+  const vaultView = {
+    title: popupDocument.title,
+    vaultCount: vaultRegistry.vaults.length,
+    unlocked: typeof vaultId === 'string' && Object.hasOwn(popupSession, `vault.vek:${vaultId}`),
+    unlockFormVisible: await popupConnection.evaluate('!!document.querySelector("form input[type=password]")'),
+    firstRunVisible: popupDocument.bodyText.includes('Welcome to Bramble'),
+    appRootReady: popupDocument.appRootReady
+  }
   assert.equal(vaultView.vaultCount, 1)
   assert.equal(vaultView.unlocked, true)
   assert.equal(vaultView.firstRunVisible, false)
@@ -975,10 +993,15 @@ try {
   }
   assert.equal(signatureVerified, true, 'The passkey assertion signature did not verify against the registration public key.')
 
+  const brambleTabs = (await mainConnection.evaluate('window.api.browser.tabs.get()')).filter((tab) =>
+    tab.url.startsWith('chrome-extension://') && !tab.url.endsWith('/offscreen.html'))
+  for (const tab of brambleTabs) {
+    await mainConnection.evaluate(`window.api.browser.tabs.close(${JSON.stringify(tab.id)})`)
+  }
   const openBramblePages = (await getTargets(port)).filter((target) =>
     target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
   for (const target of openBramblePages) await browserConnection.send('Target.closeTarget', { targetId: target.id })
-  await waitFor('Bramble UI windows to close before reopening setup', async () => {
+  await waitFor('all Bramble UI pages to close before reopening setup', async () => {
     const targets = await getTargets(port)
     return !targets.some((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && !target.url.endsWith('/offscreen.html'))
   }, 10_000)
@@ -994,7 +1017,7 @@ try {
   await sidebarConnection.evaluate('document.querySelector(".bramble-settings-actions .settings-action:last-child")?.click()')
   let restoreSetupTarget
   try {
-    restoreSetupTarget = await waitFor("Bramble's setup page reopened for safe backup restore", async () => {
+    restoreSetupTarget = await waitFor("Bramble's setup page reopened in a tab for safe backup restore", async () => {
       const targets = await getTargets(port)
       return targets.find((target) => target.type === 'page' && target.url.startsWith('chrome-extension://') && target.url.includes('/options.html'))
     }, 20_000)
@@ -1004,7 +1027,7 @@ try {
     throw new Error(`${error instanceof Error ? error.message : String(error)}; Bramble state: ${JSON.stringify(safeState)}`)
   }
   setupConnection = await connectCdp(restoreSetupTarget.webSocketDebuggerUrl)
-  await waitFor('Bramble setup tabs in the fresh options window', async () =>
+  await waitFor('Bramble setup in the options tab', async () =>
     setupConnection.evaluate(`document.body?.innerText.includes('Restore from backup') && document.body?.innerText.includes('Join a device')`), 20_000)
   const backupInfo = await waitFor('the disposable vault encrypted backup bytes', async () => {
     const value = await setupConnection.evaluate(`(async () => {

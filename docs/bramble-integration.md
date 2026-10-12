@@ -1,13 +1,13 @@
 # Bramble extension in Surffish
 
-Surffish provides a **Bramble-specific extension integration**. It is not a general Firefox/Chrome extension manager. Bramble’s vault popup, setup, and customization remain in Bramble’s own extension UI; **Settings → Integrations** handles install, update checks, version, and effective permissions. The browser toolbar keeps a single Bramble icon that opens the compact password-grab popup. Choosing **Create your vault** from that popup keeps setup in the same popup rather than opening a separate window.
+Surffish provides a **Bramble-specific extension integration**. It is not a general Firefox/Chrome extension manager. Bramble’s vault popup, setup, and customization remain in Bramble’s own extension UI; **Settings → Integrations** handles install, update checks, version, and effective permissions. The browser toolbar keeps a single Bramble icon that opens the compact password-grab popup. **Create your vault** opens Bramble’s options/setup page in a regular Surffish browser tab, matching the normal extension behavior.
 
 ## Install and update
 
 1. Open **Settings → Integrations → Bramble password manager**.
 2. Choose **Check for updates** to ask the Bramble GitHub Releases API for the newest stable `*-firefox` release. The version and result appear in Integrations.
 3. Choose **Install** or **Update**. Before extension code is activated, Surffish shows the selected version, integrity checks, and requested extension/site permissions. Cancel leaves the existing install unchanged.
-4. After installation, use the Bramble toolbar icon to open the compact popup. **Create your vault** remains in that popup; **Setup / customize** in Integrations still opens Bramble’s larger setup/options window.
+4. After installation, use the Bramble toolbar icon to open the compact popup. **Create your vault** opens setup in a browser tab; **Setup / customize** in Integrations opens or focuses that same tab.
 
 Installation and updates are explicit; Surffish does not silently run a downloaded release. The app retains a verified release ZIP in its user-data directory and loads the adapted extension from Surffish’s persistent browser profile. On subsequent starts it verifies the retained archive’s SHA-256 before staging the extension. Updating replaces extension files at a stable path, checks the extension ID has not changed, rolls back on load failure, and does not clear the browser profile or extension storage.
 
