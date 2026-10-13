@@ -48,7 +48,10 @@ jobs:
           if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           "$HOME/.bun/bin/bun" --version
-      - run: bun install
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
       - name: Git identity for the release commit + tag
         run: |
           git config user.name "github-actions[bot]"
