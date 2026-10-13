@@ -81,6 +81,8 @@ import { SpacesSwitcher, useSpaces } from './spaces/SpacesSwitcher'
 import { SPACE_COLOR_VALUES } from '../../../shared/spaces'
 import { BookmarksManager } from './bookmarks/BookmarksManager'
 import { BookmarkImportPanel } from './bookmarks/BookmarkImportPanel'
+import { BrowserNotice, LoadErrorNotice, LoadErrorPage } from './BrowserNotice'
+import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigation-errors'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
 
@@ -140,8 +142,11 @@ const EMPTY_BROWSER: BrowserState = {
   zoomFactor: 1,
   pdf: null,
   reader: null,
-  interstitial: null
+  interstitial: null,
+  loadError: null
 }
+/** navigationError value for address-bar input that can't be opened (shown with its own copy). */
+const INVALID_ADDRESS_ERROR = `${INVALID_ADDRESS_COPY.title}. ${INVALID_ADDRESS_COPY.detail}`
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
   loading: false,
@@ -386,6 +391,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [proxyMessage, setProxyMessage] = useState('')
   const [sessionMessage, setSessionMessage] = useState('')
   const [navigationError, setNavigationError] = useState('')
+  // Load-error notices the user closed, per tab + error (a new failure shows again).
+  const [dismissedLoadErrors, setDismissedLoadErrors] = useState<string[]>([])
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
   function updateChromeState(patch: Partial<BrowserChromeState>): void {
     setChromeState((current) => ({ ...current, ...patch }))
@@ -510,6 +517,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [siteIconOrigins])
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
   const hasInterstitial = browser.interstitial !== null
+  // A main-frame load failure leaves an empty error page: show the in-page error over it instead.
+  const hasLoadErrorPage = !hasInterstitial && browser.loadError?.fullPage === true
+  const coversPage = hasInterstitial || hasLoadErrorPage
+  const activeTabId = tabs.find((tab) => tab.active)?.id ?? ''
+  const loadErrorKey = browser.error && browser.loadError ? `${activeTabId}\n${browser.error}\n${browser.loadError.url}` : ''
+  const showLoadErrorNotice = loadErrorKey !== '' && !coversPage && !dismissedLoadErrors.includes(loadErrorKey)
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   // The New Tab page (clock, photos) is only on screen in the content surface, on a New Tab,
   // with no settings/downloads panel over it. Nothing behind it needs to tick otherwise.
@@ -946,7 +959,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const updateChromeHeight = (): void => {
       const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -954,14 +967,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     observer.observe(element)
     // Popups fill in after they mount (downloads load async); re-measure as they grow so the
     // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover').forEach((popup) => observer.observe(popup))
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, surface, navigationError !== '' || showLoadErrorNotice])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -973,7 +986,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && !isLocalNewTab && !hasInterstitial && rect.width > 0 && rect.height > 0
+      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && !isLocalNewTab && !coversPage && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -987,7 +1000,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [surface, sidebarMode, isLocalNewTab, hasInterstitial])
+  }, [surface, sidebarMode, isLocalNewTab, coversPage])
+
+  // Address-bar notices belong to the tab they were raised on.
+  useEffect(() => {
+    setNavigationError('')
+  }, [activeTabId])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
@@ -1005,9 +1023,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       addressRef.current?.blur()
       return
     }
-    const ok = await window.api.browser.navigate(value, searchEngine)
-    if (!ok) {
-      setNavigationError('That address could not be opened. Use an HTTP(S) address or search terms.')
+    const result = await window.api.browser.navigate(value, searchEngine)
+    if (!result.ok) {
+      // Load failures surface through the tab's error state (notice or in-page error).
+      setNavigationError(result.reason === 'invalid' ? INVALID_ADDRESS_ERROR : '')
     } else {
       setNavigationError('')
       setProxyMessage('')
@@ -1561,10 +1580,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {surface === 'toolbar' && <FindBar onOpenChange={setFindOpen} />}
           {surface !== 'sidebar' && <ProxyDownBanner />}
           {surface !== 'sidebar' && <CommandPalette tabs={tabs} pinnedSites={pinnedSites} searchEngine={searchEngine} searchEngineLabel={SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label ?? 'the web'} onOpenChange={setPaletteOpen} />}
-          {((browser.error && !hasInterstitial) || navigationError) && (
-            <p className="browser-error" role="status">
-              {browser.error && !hasInterstitial ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
-            </p>
+          {surface !== 'sidebar' && navigationError && (
+            <BrowserNotice
+              tone="error"
+              title={navigationError === INVALID_ADDRESS_ERROR ? INVALID_ADDRESS_COPY.title : navigationError}
+              detail={navigationError === INVALID_ADDRESS_ERROR ? INVALID_ADDRESS_COPY.detail : undefined}
+              onDismiss={() => setNavigationError('')}
+            />
+          )}
+          {surface !== 'sidebar' && !navigationError && showLoadErrorNotice && browser.loadError && (
+            <LoadErrorNotice loadError={browser.loadError} onDismiss={() => setDismissedLoadErrors((keys) => [...keys.slice(-19), loadErrorKey])} />
           )}
         </header>
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'bookmarks' ? 'Bookmark manager' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
@@ -1694,6 +1719,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </nav>
           )}
           {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
+          {surface === 'content' && hasLoadErrorPage && browser.loadError && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && <LoadErrorPage loadError={browser.loadError} canGoBack={browser.canGoBack} />}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
           {sidebarMode === 'privacy' && <PrivacySettings />}
           {sidebarMode === 'watchers' && <PageWatchersSettings />}
@@ -1772,7 +1798,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void testProxy()}>Test port</button>
                     <button className="settings-action primary" type="button" disabled={busy} onClick={() => void saveProxy()}>{busy ? 'Working…' : 'Save'}</button>
                   </div>
-                  {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
+                  {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? (() => { const copy = describeLoadError({ ...browser.loadError, message: browser.error }); return `${copy.title}. ${copy.detail}` })() : proxyMessage}</p>}
                 </SettingsGroup>
                 <NetworkRulesSettings />
                 <SettingsGroup title="Developer">

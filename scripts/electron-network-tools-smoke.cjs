@@ -150,8 +150,10 @@ async function run() {
   const fixturePort = server.address().port
   const navigate = async (url) => {
     await api(`navigate(${JSON.stringify(url)})`)
-    await waitFor(() => activePage()?.webContents.getURL().startsWith(url.replace(/\/$/, '')) || activePage()?.webContents.getURL().startsWith('chrome-error'), `navigation to ${url}`)
-    await waitFor(() => !activePage().webContents.isLoading(), `${url} to finish loading`)
+    // A failed main-frame load shows Surffish's in-page error, which takes the page view off screen.
+    const failedHere = async () => (await api('state()')).loadError?.url.startsWith(url.replace(/\/$/, ''))
+    await waitFor(async () => activePage()?.webContents.getURL().startsWith(url.replace(/\/$/, '')) || activePage()?.webContents.getURL().startsWith('chrome-error') || await failedHere(), `navigation to ${url}`)
+    await waitFor(async () => await failedHere() || !activePage().webContents.isLoading(), `${url} to finish loading`)
     await delay(200)
   }
   await navigate(`http://site.work.test:${fixturePort}/`)
@@ -178,7 +180,9 @@ async function run() {
   workLog.length = 0
   mainLog.length = 0
   await navigate(`http://x.dead.test:${fixturePort}/`)
-  assert.notEqual(activePage().webContents.getTitle(), `Fixture x.dead.test:${fixturePort}`, 'a dead proxy does not fall back to DIRECT')
+  const deadState = await api('state()')
+  assert.notEqual(deadState.title, `Fixture x.dead.test:${fixturePort}`, 'a dead proxy does not fall back to DIRECT')
+  assert.equal(deadState.loadError?.viaProxy, true, 'the load error knows this site is routed through a proxy')
 
   // Kill switch: only the dead proxy's routes are blocked.
   await api('safety.proxyGuard.set(true)')

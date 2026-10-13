@@ -557,13 +557,6 @@
 .omnibox input::placeholder {
   color: rgba(245, 247, 250, 0.45);
 }
-.browser-error {
-  margin: 0;
-  padding: 0 20px 8px;
-  color: #ffb2b8;
-  font-size: 10px;
-  -webkit-app-region: no-drag;
-}
 .browser-viewport {
   position: relative;
   flex: 1 1 auto;
@@ -1534,10 +1527,6 @@
   flex: 0 0 auto;
   accent-color: #7ee2a8;
   cursor: pointer;
-}
-.browser-error {
-  position: relative;
-  z-index: 2;
 }
 @media (max-width: 760px) {
   .browser-layout {

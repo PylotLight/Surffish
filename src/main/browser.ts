@@ -36,6 +36,8 @@ import { resolveAddressInput } from './search-keywords'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
 import { onPermissionDenied } from './proxy'
+import { noteTabLoadError, tabLoadError } from './load-errors'
+import { isAbortedNavigation, parseLoadError, shouldShowFullPageError, type NavigateResult } from '../shared/navigation-errors'
 import { attachTabSafety } from './safety'
 import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitials'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -293,7 +295,8 @@ function getState(w = currentWindowState()): BrowserState {
     zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
     pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
     reader: tab?.pdfEditor ? null : readerStateFor(contents),
-    interstitial: getTabInterstitial(contents)
+    interstitial: getTabInterstitial(contents),
+    loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents.session : undefined) : null
   }
 }
 
@@ -497,8 +500,8 @@ function publishTabs(w = currentWindowState()): void {
 function publishState(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
   const state = getState(w)
-  // Crash / hang / HTTPS notices are drawn by the content renderer, like the local New Tab page.
-  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null, w.window)
+  // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
+  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
   sendToWindowRenderers(w.window, 'browser:state', state)
   publishTabs(w)
 }
@@ -682,6 +685,8 @@ function ensureTabLoaded(tab: BrowserTab): void {
   tab.restoreHistory = null
   void ready.then(() => contents.isDestroyed() ? undefined : restore ? contents.navigationHistory.restore(restore) : contents.loadURL(target)).catch((error: unknown) => {
     if (tab.view?.webContents !== contents) return
+    // Superseded by a redirect, history replace or another load: not a failure.
+    if (isAbortedNavigation(error)) return
     const message = error instanceof Error ? error.message : String(error)
     if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
       return new Promise<void>((resolve) => setTimeout(resolve, 100)).then(() => {
@@ -1129,7 +1134,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     refreshTabFavicon(tab)
     notifyHistoryChanged()
   })
-  contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame) return
     resetMacTrackpadSwipeFor(contents)
     if (errorCode === -3) return
@@ -1139,6 +1144,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       return
     }
     tab.error = `${errorDescription} (${errorCode})`
+    noteTabLoadError(tab, tab.error, validatedURL, shouldShowFullPageError(errorCode))
     publishState(tab.win)
   })
   contents.on('did-stop-loading', () => {
@@ -1984,7 +1990,7 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
       const contents = tab.view?.webContents
       if (contents && !contents.isDestroyed()) {
         void contents.loadURL(url).catch((error: unknown) => {
-          if (tab?.view?.webContents !== contents) return
+          if (tab?.view?.webContents !== contents || isAbortedNavigation(error)) return
           tab.error = error instanceof Error ? error.message : String(error)
           publishState(tab.win)
         })
@@ -2801,35 +2807,36 @@ function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'oth
   for (const tabId of idsToClose) closeBrowserTab(tabId)
 }
 
-export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<boolean> {
+export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<NavigateResult> {
   const url = resolveAddressInput(input, engine)
+  if (!url) return { ok: false, reason: 'invalid' }
   const tab = getTab()
-  if (!url || !tab) return false
+  if (!tab) return { ok: false, reason: 'cancelled' }
   if (tab.pdfEditor) {
     // Leaving the editor: ask about unsaved edits, then load the address in a normal page view.
-    if (!allowLeavingPdfEditor(tab, 'Leave Page')) return false
+    if (!allowLeavingPdfEditor(tab, 'Leave Page')) return { ok: false, reason: 'cancelled' }
     replaceTabView(tab, null, url)
-    return Boolean(tab.view)
+    return tab.view ? { ok: true } : { ok: false, reason: 'cancelled' }
   }
   if (tab.lastUrl === SURFFISH_QUICK_LINKS_URL && !tab.view) {
     tab.lastUrl = url
     tab.pendingUrl = url
     tab.error = null
     ensureTabLoaded(tab)
-    if (!tab.view) return false
+    if (!tab.view) return { ok: false, reason: 'cancelled' }
     publishState(tab.win)
-    return true
+    return { ok: true }
   }
   tab.error = null
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents
-  if (!contents) return false
+  if (!contents) return { ok: false, reason: 'cancelled' }
   publishState(tab.win)
   try {
     if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION)
     else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION) await whenPageSessionReady(partitionForTab(tab))
     await contents.loadURL(url)
-    return true
+    return { ok: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
@@ -2838,16 +2845,24 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     if (tab.downloadStartedForCurrentLoad) {
       tab.error = null
       publishState(tab.win)
-      return true
+      return { ok: true }
     }
     if (message.includes('ERR_ABORTED') && Date.now() - (googleHandOffAt.get(contents) ?? 0) < 5000) {
       tab.error = null
       publishState(tab.win)
-      return true
+      return { ok: true }
     }
-    tab.error = message
+    // The page superseded this load (redirect, history replace, service worker, a newer
+    // navigation). did-fail-load already ignores -3; any error now belongs to the newer load.
+    if (isAbortedNavigation(error)) return { ok: true }
+    if (tab.view?.webContents !== contents) return { ok: false, reason: 'cancelled' }
+    // did-fail-load usually got here first with the same failure; keep its details.
+    if (tab.error === null) {
+      tab.error = message
+      noteTabLoadError(tab, message, url, false)
+    }
     publishState(tab.win)
-    return false
+    return { ok: false, reason: 'load', code: parseLoadError(message).code, message }
   }
 }
 
