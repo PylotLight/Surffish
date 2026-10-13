@@ -225,8 +225,8 @@ async function seedNewTabDemo(siteBases) {
       const state = await evaluate('window.api.browser.state()')
       return state.url === url ? state : null
     }, `synthetic page ${new URL(url).host} to navigate`)
-    await waitFor(async () => evaluateIn(rendererViews.toolbar, 'Boolean(document.querySelector("[aria-label=\\\"Bookmark this site\\\"]") && !document.querySelector("[aria-label=\\\"Bookmark this site\\\"]").disabled)'), 'the Bookmark this site control in the toolbar renderer')
-    assert.equal(await evaluateIn(rendererViews.toolbar, '(() => { const button = document.querySelector("[aria-label=\\\"Bookmark this site\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()'), true, 'the current synthetic site should be bookmarkable')
+    await waitFor(async () => evaluateIn(rendererViews.toolbar, 'Boolean(document.querySelector("[aria-label=\\\"Bookmark this page\\\"]") && !document.querySelector("[aria-label=\\\"Bookmark this page\\\"]").disabled)'), 'the Bookmark this page control in the toolbar renderer')
+    assert.equal(await evaluateIn(rendererViews.toolbar, '(() => { const button = document.querySelector("[aria-label=\\\"Bookmark this page\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()'), true, 'the current synthetic site should be bookmarkable')
     await waitFor(async () => evaluateIn(rendererViews.sidebar, `document.querySelectorAll(".sidebar-pinned-list .pinned-site-icon-button").length >= ${index + 1}`), `synthetic pin ${index + 1}`)
   }
   for (const url of [`${siteBases[2]}/`, `${siteBases[3]}/`]) {
@@ -260,8 +260,10 @@ async function seedNewTabDemo(siteBases) {
   await clickSelector('[aria-label="Show next background"]')
   await delay(900)
   await captureScreenshot('new-tab-photo-rotation.png')
-  assert.equal(await clickSelector('.tabs-sidebar-button'), true, 'the toolbar Tabs button should open the sidebar')
-  await waitFor(async () => evaluate('document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the tabs sidebar')
+  assert.equal(await evaluate('(() => { const layout = document.querySelector(".browser-layout"); if (!layout) return false; layout.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 200 })); return true; })()'), true, 'the browser layout should accept a hover at the reveal edge')
+  await waitFor(async () => evaluate('document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'the tabs sidebar to reveal on hover')
+  assert.equal(await clickSelector('[aria-label="Keep sidebar open"]'), true, 'the sidebar pin control should keep the sidebar open')
+  await waitFor(async () => evaluate('Boolean(document.querySelector("[aria-label=\\"Auto-hide sidebar\\"]"))'), 'the sidebar to stay pinned open')
   await delay(300)
   await captureScreenshot('tabs-sidebar.png')
   if (screenshotDirectory) {
@@ -371,6 +373,12 @@ async function run() {
   assert.equal((await getHistory()).some((entry) => entry.id === first.id), false)
   assert.equal(await evaluate(`window.api.browser.downloads.cancel(${JSON.stringify(active.id)})`), true)
   await waitForHistory((entries) => entries.find((entry) => entry.id === active.id)?.state === 'cancelled', 'the popup fixture transfer to cancel')
+  await waitFor(async () => {
+    try {
+      const onDisk = JSON.parse(readFileSync(join(userData, 'downloads-history.json'), 'utf8'))
+      return onDisk.some((entry) => entry.state === 'cancelled') && !onDisk.some((entry) => entry.id === first.id) ? onDisk : null
+    } catch { return null }
+  }, 'safe download metadata (with the removal applied) to persist on disk')
   const persistedHistory = JSON.parse(readFileSync(join(userData, 'downloads-history.json'), 'utf8'))
   assert.ok(persistedHistory.some((entry) => entry.state === 'cancelled'), 'safe download metadata should persist on disk')
   assert.ok(persistedHistory.some((entry) => entry.state === 'interrupted' || entry.state === 'failed'))
