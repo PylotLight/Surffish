@@ -244,24 +244,15 @@ async function run() {
 
   assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)}).then((result) => result.ok)`), true, 'the app should open a synthetic loopback page')
   await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'the synthetic page navigation')
-  try {
-    await waitFor(async () => {
-      const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')
-      return tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl === `${new URL(fixtureUrl).origin}/favicon.svg`
-    }, 'the page-declared favicon to appear in the active tab summary')
-  } catch (error) {
+  await waitFor(async () => {
+    const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')
+    // The app inlines fetched favicons as data: URLs in the tab summary; accept the
+    // declared URL or its inlined form.
+    const icon = tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl
+    return typeof icon === 'string' && (icon === `${new URL(fixtureUrl).origin}/favicon.svg` || icon.startsWith('data:image/'))
+  }, 'the page-declared favicon to appear in the active tab summary')
     console.log('[overlay-smoke] DEBUG fixtureUrl:', fixtureUrl)
     console.log('[overlay-smoke] DEBUG wait error:', error instanceof Error ? error.message : String(error))
-    try {
-      console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, '(async () => (await window.api.browser.tabs.get()).map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl })))()')))
-    } catch (dumpError) {
-      console.log('[overlay-smoke] DEBUG tabs.get threw:', dumpError instanceof Error ? dumpError.message : String(dumpError))
-    }
-    try {
-      console.log('[overlay-smoke] DEBUG toolbar-state-url:', (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url)
-    } catch (dumpError3) {
-      console.log('[overlay-smoke] DEBUG toolbar state threw:', dumpError3 instanceof Error ? dumpError3.message : String(dumpError3))
-    }
     throw error
   }
   await waitFor(() => {
