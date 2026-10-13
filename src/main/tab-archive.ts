@@ -21,6 +21,7 @@ import {
   closeBrowserTabForArchive,
   flashBrowserStatus,
   getBrowserTabArchiveCandidates,
+  getBrowserTabIdsInSameWindow,
   getBrowserTabs,
   openArchivedBrowserTab,
   setBrowserTabMenuExtras
@@ -85,8 +86,10 @@ export function archiveBrowserTab(id: string | undefined): boolean {
 
 /** Everything but `keepId` that auto-archive could take (pinned, audible, private, unsaved-PDF tabs stay). */
 function otherArchivableTabs(keepId: string): string[] {
+  // "Other tabs" are the other tabs of the same window; other windows are left alone.
+  const sameWindow = new Set(getBrowserTabIdsInSameWindow(keepId))
   return getBrowserTabArchiveCandidates()
-    .filter((tab) => tab.id !== keepId && !tab.pinned && archiveBlocker({ ...tab, active: false }, false) === null)
+    .filter((tab) => tab.id !== keepId && sameWindow.has(tab.id) && !tab.pinned && archiveBlocker({ ...tab, active: false }, false) === null)
     .map((tab) => tab.id)
 }
 

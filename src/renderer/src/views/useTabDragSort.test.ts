@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { dragTargetIndex, reorderIds } from './useTabDragSort'
+import { dragTargetIndex, isOutsideSurface, reorderIds } from './useTabDragSort'
 
 const slots = [0, 44, 88, 132].map((top) => ({ top, height: 40 }))
 
@@ -18,4 +18,13 @@ describe('tab drag sort helpers', () => {
     expect(reorderIds(['a', 'b', 'c', 'd'], 0, 2)).toEqual(['b', 'c', 'a', 'd'])
     expect(reorderIds(['a', 'b', 'c', 'd'], 3, 0)).toEqual(['d', 'a', 'b', 'c'])
   })
+})
+
+test('a drag leaves the surface only past its edges', () => {
+  expect(isOutsideSurface(10, 10, 300, 800)).toBe(false)
+  expect(isOutsideSurface(0, 0, 300, 800)).toBe(false)
+  expect(isOutsideSurface(300, 10, 300, 800)).toBe(true)
+  expect(isOutsideSurface(-1, 10, 300, 800)).toBe(true)
+  expect(isOutsideSurface(10, 800, 300, 800)).toBe(true)
+  expect(isOutsideSurface(10, -20, 300, 800)).toBe(true)
 })

@@ -9,6 +9,7 @@ import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
 import { revealPageWatchers } from './page-watchers'
+import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -43,6 +44,7 @@ export function installAppMenu(): void {
       submenu: [
         { label: 'New Tab', accelerator: APP_SHORTCUTS.newTab, click: () => { newBrowserTab() } },
         { label: 'New Private Tab', accelerator: APP_SHORTCUTS.newPrivateTab, click: () => { newPrivateBrowserTab() } },
+        ...newWindowMenuItems(),
         { label: 'Reopen Closed Tab', accelerator: APP_SHORTCUTS.reopenClosedTab, click: () => { reopenClosedBrowserTab() } },
         { label: 'Open Location…', accelerator: APP_SHORTCUTS.openLocation, click: () => { sendFocusAddressToVisibleRenderer() } },
         // F6 (and Alt+D off macOS) also focus the address bar; hidden so the menu shows one entry.
@@ -156,11 +158,18 @@ export function installAppMenu(): void {
         tabItem('Downloads', 'downloads'),
         { label: 'Page Watchers', click: () => { revealPageWatchers() } },
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
-        ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : [])
+        ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
+        ...windowListMenuItems()
       ]
     },
     // macOS has it in the app menu; elsewhere it lives under Help.
     ...(isMac ? [] : [{ label: 'Help', submenu: [{ label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() }] } satisfies MenuItemConstructorOptions])
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  if (!windowMenuWatched) {
+    windowMenuWatched = true
+    keepWindowMenuCurrent(installAppMenu)
+  }
 }
+
+let windowMenuWatched = false

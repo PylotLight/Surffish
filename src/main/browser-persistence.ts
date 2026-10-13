@@ -16,6 +16,8 @@ import {
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
+import { normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, type SavedWindowsSession, type SessionWindowInput } from '../shared/window-session'
+import type { SavedWindowState } from '../shared/window-geometry'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
@@ -117,6 +119,19 @@ export function saveBrowserSession(urls: readonly string[], activeIndex: number,
   const saved = normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
   deferWrite('session', () => {
     if (!sessionPersistenceDisabled) writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
+  }, 600)
+}
+
+/** Every window's tabs (multi-window session); the file stays readable as a one-window session by older builds. */
+export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | null): SavedWindowsSession {
+  return parseWindowsSession(readJson(SESSION_FILE), legacyGeometry)
+}
+
+export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): void {
+  if (sessionPersistenceDisabled) return
+  const saved = normalizeWindowsSession(windows, focusedIndex)
+  deferWrite('session', () => {
+    if (!sessionPersistenceDisabled) writeJson(SESSION_FILE, serializeWindowsSession(saved))
   }, 600)
 }
 

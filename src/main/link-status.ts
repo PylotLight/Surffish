@@ -1,6 +1,7 @@
-import { WebContentsView } from 'electron'
+import { WebContentsView, type BaseWindow } from 'electron'
 import type { BrowserBounds } from '../shared/types'
 import { addViewAbovePages, isNativeOverlayMode } from './browser-shell'
+import { currentBrowserWindow } from './window-scope'
 
 /**
  * Hovered-link status pill (bottom-left of the page, like Chrome's status bubble).
@@ -28,17 +29,34 @@ color:#e8ecef;background:rgba(24,28,33,.92);border:1px solid rgba(255,255,255,.1
 window.__setStatus = (text) => { const pill = document.getElementById('pill'); pill.textContent = text; return Math.ceil(pill.getBoundingClientRect().width) }
 </script></body></html>`
 
-let view: WebContentsView | null = null
-let ready: Promise<void> | null = null
-let currentText = ''
-let pillWidth = 0
-let pointer: { x: number; y: number } | null = null
-let pageBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
-let hideTimer: ReturnType<typeof setTimeout> | null = null
-let generation = 0
+/** One pill per window; it lives in that window's view stack. */
+interface LinkStatus {
+  view: WebContentsView | null
+  ready: Promise<void> | null
+  currentText: string
+  pillWidth: number
+  pointer: { x: number; y: number } | null
+  pageBounds: BrowserBounds
+  hideTimer: ReturnType<typeof setTimeout> | null
+  generation: number
+}
 
-function ensureView(): WebContentsView | null {
-  if (view && !view.webContents.isDestroyed()) return view
+const pills = new Map<BaseWindow, LinkStatus>()
+
+function pillFor(window?: BaseWindow | null): LinkStatus | null {
+  const target = window ?? currentBrowserWindow()
+  if (!target || target.isDestroyed()) return null
+  let pill = pills.get(target)
+  if (!pill) {
+    pill = { view: null, ready: null, currentText: '', pillWidth: 0, pointer: null, pageBounds: { x: 0, y: 0, width: 0, height: 0 }, hideTimer: null, generation: 0 }
+    pills.set(target, pill)
+    target.once('closed', () => destroyLinkStatus(target))
+  }
+  return pill
+}
+
+function ensureView(pill: LinkStatus, window: BaseWindow): WebContentsView | null {
+  if (pill.view && !pill.view.webContents.isDestroyed()) return pill.view
   const created = new WebContentsView({
     webPreferences: {
       sandbox: true,
@@ -56,17 +74,17 @@ function ensureView(): WebContentsView | null {
   created.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   created.webContents.on('will-navigate', (event) => event.preventDefault())
   created.webContents.on('render-process-gone', () => {
-    if (view === created) {
-      view = null
-      ready = null
+    if (pill.view === created) {
+      pill.view = null
+      pill.ready = null
     }
   })
-  if (!addViewAbovePages(created)) {
+  if (!addViewAbovePages(created, window)) {
     created.webContents.close()
     return null
   }
-  view = created
-  ready = created.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(STATUS_DOCUMENT)}`).catch(() => undefined)
+  pill.view = created
+  pill.ready = created.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(STATUS_DOCUMENT)}`).catch(() => undefined)
   return created
 }
 
@@ -84,66 +102,75 @@ function displayText(url: string): string {
   return url
 }
 
-function layout(): void {
+function layout(pill: LinkStatus, window: BaseWindow): void {
+  const { view, pageBounds } = pill
   if (!view || view.webContents.isDestroyed()) return
-  if (!currentText || pillWidth <= 0 || pageBounds.width <= 0 || pageBounds.height <= 0 || !isNativeOverlayMode()) {
+  if (!pill.currentText || pill.pillWidth <= 0 || pageBounds.width <= 0 || pageBounds.height <= 0 || !isNativeOverlayMode(window)) {
     view.setVisible(false)
     return
   }
-  const width = Math.min(pillWidth, PILL_MAX_WIDTH, Math.max(0, pageBounds.width - PILL_MARGIN * 2))
-  const onRight = pointerNearLeftPill(width)
+  const width = Math.min(pill.pillWidth, PILL_MAX_WIDTH, Math.max(0, pageBounds.width - PILL_MARGIN * 2))
+  const onRight = pointerNearLeftPill(pill, width)
   const x = onRight ? pageBounds.x + pageBounds.width - width - PILL_MARGIN : pageBounds.x + PILL_MARGIN
   const y = pageBounds.y + pageBounds.height - PILL_HEIGHT - PILL_MARGIN
   view.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: PILL_HEIGHT })
   view.setVisible(true)
 }
 
-function clearHideTimer(): void {
-  if (hideTimer) clearTimeout(hideTimer)
-  hideTimer = null
+function clearHideTimer(pill: LinkStatus): void {
+  if (pill.hideTimer) clearTimeout(pill.hideTimer)
+  pill.hideTimer = null
 }
 
 /** Show `url` in the pill over the page at `bounds` (window coordinates); an empty url hides it. */
-export function showLinkStatus(url: string, bounds: BrowserBounds): void {
-  pageBounds = { ...bounds }
+export function showLinkStatus(url: string, bounds: BrowserBounds, window?: BaseWindow | null): void {
+  const target = window ?? currentBrowserWindow()
+  const pill = pillFor(target)
+  if (!pill || !target) return
+  pill.pageBounds = { ...bounds }
   if (!url) {
-    hideLinkStatus(true)
+    hideLinkStatus(true, target)
     return
   }
-  clearHideTimer()
+  clearHideTimer(pill)
   const text = displayText(url)
-  const target = ensureView()
-  if (!target || !ready) return
-  if (text === currentText && pillWidth > 0) {
-    layout()
+  const view = ensureView(pill, target)
+  const ready = pill.ready
+  if (!view || !ready) return
+  if (text === pill.currentText && pill.pillWidth > 0) {
+    layout(pill, target)
     return
   }
-  currentText = text
-  const token = ++generation
-  void ready.then(() => target.webContents.isDestroyed()
+  pill.currentText = text
+  const token = ++pill.generation
+  void ready.then(() => view.webContents.isDestroyed()
     ? 0
-    : target.webContents.executeJavaScript(`window.__setStatus(${JSON.stringify(text)})`, false)
+    : view.webContents.executeJavaScript(`window.__setStatus(${JSON.stringify(text)})`, false)
   ).then((measured: unknown) => {
-    if (token !== generation || view !== target) return
-    pillWidth = typeof measured === 'number' && Number.isFinite(measured) ? measured : 0
-    layout()
+    if (token !== pill.generation || pill.view !== view) return
+    pill.pillWidth = typeof measured === 'number' && Number.isFinite(measured) ? measured : 0
+    layout(pill, target)
   }).catch(() => undefined)
 }
 
 /** Hide the pill. Hover changes arrive as "" then the next url, so by default wait a beat to avoid flicker. */
-export function hideLinkStatus(deferred = false): void {
-  clearHideTimer()
+export function hideLinkStatus(deferred = false, window?: BaseWindow | null): void {
+  const target = window ?? currentBrowserWindow()
+  const pill = target ? pills.get(target) : undefined
+  if (!pill) return
+  clearHideTimer(pill)
   const hide = (): void => {
-    generation += 1
-    currentText = ''
-    pillWidth = 0
-    if (view && !view.webContents.isDestroyed()) view.setVisible(false)
+    pill.generation += 1
+    pill.currentText = ''
+    pill.pillWidth = 0
+    if (pill.view && !pill.view.webContents.isDestroyed()) pill.view.setVisible(false)
   }
-  if (deferred) hideTimer = setTimeout(() => { hideTimer = null; hide() }, HIDE_DELAY_MS)
+  if (deferred) pill.hideTimer = setTimeout(() => { pill.hideTimer = null; hide() }, HIDE_DELAY_MS)
   else hide()
 }
 
-function pointerNearLeftPill(width: number): boolean {
+function pointerNearLeftPill(pill: LinkStatus, width: number): boolean {
+  const { pointer, pageBounds } = pill
   if (!pointer) return false
   const nearBottom = pointer.y >= pageBounds.height - PILL_HEIGHT - PILL_MARGIN - AVOID_PADDING
   const overLeft = pointer.x <= PILL_MARGIN + width + AVOID_PADDING
@@ -153,32 +180,42 @@ function pointerNearLeftPill(width: number): boolean {
 }
 
 /** Pointer moved over the page (page coordinates): keep the pill out from under it. */
-export function avoidLinkStatusPointer(x: number, y: number): void {
-  const before = pillWidth > 0 && pointerNearLeftPill(Math.min(pillWidth, PILL_MAX_WIDTH))
-  pointer = { x, y }
-  if (!currentText || pillWidth <= 0) return
-  if (pointerNearLeftPill(Math.min(pillWidth, PILL_MAX_WIDTH)) !== before) layout()
+export function avoidLinkStatusPointer(x: number, y: number, window?: BaseWindow | null): void {
+  const target = window ?? currentBrowserWindow()
+  const pill = target ? pills.get(target) : undefined
+  if (!pill || !target) return
+  const before = pill.pillWidth > 0 && pointerNearLeftPill(pill, Math.min(pill.pillWidth, PILL_MAX_WIDTH))
+  pill.pointer = { x, y }
+  if (!pill.currentText || pill.pillWidth <= 0) return
+  if (pointerNearLeftPill(pill, Math.min(pill.pillWidth, PILL_MAX_WIDTH)) !== before) layout(pill, target)
 }
 
-/** Diagnostics: the pill's web contents id (it runs in its own small renderer once created). */
-export function getLinkStatusContentsId(): number | null {
-  return view && !view.webContents.isDestroyed() ? view.webContents.id : null
+/** Diagnostics: the pills' web contents ids (each runs in its own small renderer once created). */
+export function getLinkStatusContentsIds(): number[] {
+  return [...pills.values()].flatMap((pill) => pill.view && !pill.view.webContents.isDestroyed() ? [pill.view.webContents.id] : [])
 }
 
-export function destroyLinkStatus(): void {
-  clearHideTimer()
-  generation += 1
-  currentText = ''
-  pillWidth = 0
-  const closing = view
-  view = null
-  ready = null
+export function destroyLinkStatus(window?: BaseWindow | null): void {
+  const target = window ?? currentBrowserWindow()
+  const pill = target ? pills.get(target) : undefined
+  if (!pill || !target) return
+  pills.delete(target)
+  clearHideTimer(pill)
+  pill.generation += 1
+  pill.currentText = ''
+  pill.pillWidth = 0
+  const closing = pill.view
+  pill.view = null
+  pill.ready = null
   if (closing && !closing.webContents.isDestroyed()) closing.webContents.close()
 }
 
 /** Briefly show a short message (not a url) in the status pill, e.g. "Image copied". */
-export function flashLinkStatus(message: string, bounds: BrowserBounds, durationMs = 1400): void {
-  showLinkStatus(message, bounds)
-  clearHideTimer()
-  hideTimer = setTimeout(() => { hideTimer = null; hideLinkStatus() }, durationMs)
+export function flashLinkStatus(message: string, bounds: BrowserBounds, durationMs = 1400, window?: BaseWindow | null): void {
+  const target = window ?? currentBrowserWindow()
+  showLinkStatus(message, bounds, target)
+  const pill = target ? pills.get(target) : undefined
+  if (!pill) return
+  clearHideTimer(pill)
+  pill.hideTimer = setTimeout(() => { pill.hideTimer = null; hideLinkStatus(false, target) }, durationMs)
 }

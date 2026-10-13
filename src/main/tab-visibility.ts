@@ -10,6 +10,8 @@ export interface TabProcessEntry {
   extensionPage: boolean
   /** Null while the tab sleeps (no view, no process). */
   contents: WebContents | null
+  /** Which window the tab is in (1-based), only set while more than one window is open. */
+  windowNumber?: number
 }
 
 /**
