@@ -111,3 +111,16 @@ export function clearBrowsingHistory(): void {
   cancelDeferredWrite('history')
   writeHistory()
 }
+
+/** Remove entries matching `predicate` (Clear browsing data, Forget this site). Returns how many went. */
+export function removeBrowsingHistory(predicate: (entry: BrowsingHistoryEntry) => boolean): number {
+  loadHistory()
+  const before = entries.length
+  entries = entries.filter((entry) => !predicate(entry))
+  const removed = before - entries.length
+  if (removed > 0) {
+    cancelDeferredWrite('history')
+    writeHistory()
+  }
+  return removed
+}

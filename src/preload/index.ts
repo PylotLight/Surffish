@@ -28,6 +28,12 @@ import type {
   WebStoreExtensionsState
 } from '../shared/types'
 import type { DownloadEntry } from '../shared/downloads'
+import type { SpellcheckSettings } from '../shared/spellcheck'
+import type { ProxyGuardStatus } from '../shared/proxy-guard'
+import type { ClearBrowsingDataOptions, ClearBrowsingDataResult, CookieSiteSummary, SiteDataSummary } from '../shared/browsing-data'
+
+interface SpellcheckState { settings: SpellcheckSettings; available: string[]; active: string[]; osManagedLanguages: boolean }
+interface HttpsOnlyState { enabled: boolean; exceptions: string[] }
 import type { UpdateState } from '../shared/update-feed'
 
 const api = {
@@ -182,6 +188,38 @@ const api = {
       const listener = (): void => callback()
       ipcRenderer.on('browser:focus-address', listener)
       return () => ipcRenderer.removeListener('browser:focus-address', listener)
+    },
+    /** Safety pack: tab recovery, spellcheck, privacy / site data, HTTPS-only, proxy kill switch. */
+    safety: {
+      tabRecovery: (action: 'reload' | 'wait' | 'kill' | 'continue-http' | 'back'): Promise<boolean> => ipcRenderer.invoke('browser:tab-recovery', action),
+      spellcheck: {
+        get: (): Promise<SpellcheckState> => ipcRenderer.invoke('browser:spellcheck:get'),
+        set: (settings: SpellcheckSettings): Promise<SpellcheckState> => ipcRenderer.invoke('browser:spellcheck:set', settings)
+      },
+      httpsOnly: {
+        get: (): Promise<HttpsOnlyState> => ipcRenderer.invoke('browser:https-only:get'),
+        set: (enabled: boolean): Promise<HttpsOnlyState> => ipcRenderer.invoke('browser:https-only:set', enabled),
+        removeException: (host: string): Promise<HttpsOnlyState> => ipcRenderer.invoke('browser:https-only:remove-exception', host)
+      },
+      proxyGuard: {
+        get: (): Promise<ProxyGuardStatus> => ipcRenderer.invoke('browser:proxy-guard:get'),
+        set: (killSwitch: boolean): Promise<ProxyGuardStatus> => ipcRenderer.invoke('browser:proxy-guard:set', killSwitch),
+        check: (): Promise<ProxyGuardStatus> => ipcRenderer.invoke('browser:proxy-guard:check'),
+        onChange: (callback: (status: ProxyGuardStatus) => void): (() => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, status: ProxyGuardStatus): void => callback(status)
+          ipcRenderer.on('browser:proxy-guard:changed', listener)
+          return () => ipcRenderer.removeListener('browser:proxy-guard:changed', listener)
+        }
+      },
+      privacy: {
+        clear: (options: ClearBrowsingDataOptions): Promise<ClearBrowsingDataResult> => ipcRenderer.invoke('browser:privacy:clear', options),
+        cookieSites: (): Promise<CookieSiteSummary[]> => ipcRenderer.invoke('browser:privacy:cookie-sites'),
+        deleteCookieSite: (site: string): Promise<CookieSiteSummary[]> => ipcRenderer.invoke('browser:privacy:delete-cookie-site', site)
+      },
+      siteData: {
+        get: (origin: string): Promise<SiteDataSummary | null> => ipcRenderer.invoke('browser:site-data:get', origin),
+        forget: (origin: string, includeHistory: boolean): Promise<SiteDataSummary | null> => ipcRenderer.invoke('browser:site-data:forget', origin, includeHistory)
+      }
     },
     proxy: {
       get: (): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:get'),

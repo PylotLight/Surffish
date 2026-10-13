@@ -328,3 +328,12 @@ export function recordSavedFile(saved: { filePath: string; sourceUrl: string; by
   })
   persistAndPublish()
 }
+
+/** Clear browsing data: drop finished entries started at or after `since` (files on disk are untouched). */
+export function clearDownloadHistorySince(since: number): number {
+  const before = records.length
+  records = records.filter((record) => activeItems.has(record.id) || record.startedAt < since)
+  const removed = before - records.length
+  if (removed > 0) persistAndPublish()
+  return removed
+}

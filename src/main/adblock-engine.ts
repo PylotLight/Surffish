@@ -16,6 +16,7 @@ import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type Session } fro
 import type { ElectronBlocker } from '@ghostery/adblocker-electron'
 import { isExtensionExemptRequest, isProtectedVideoDeliveryUrl } from './adblock-policy.ts'
 import { frameStartPayload, frameUpdateStyles, type FrameDomFeatures, type FrameStartPayload } from './adblock-filters.ts'
+import { gateRequest, installFallbackRequestGate } from './request-gate.ts'
 
 export { applyFilterEnvironment, buildFilterEngine, frameStartPayload, frameUpdateStyles } from './adblock-filters.ts'
 export type { BuiltFilterEngine, FrameDomFeatures, FrameStartPayload, ListFetch } from './adblock-filters.ts'
@@ -113,6 +114,9 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
   attachedSessions.set(session, hooks)
 
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    // Kill switch / HTTPS-only run first, whatever the ad blocker would do.
+    const gated = gateRequest(details)
+    if (gated) return callback(gated)
     const engine = hooks.getEngine()
     const pageUrl = hooks.pageUrlForRequest(details)
     const allow = (): void => {
@@ -143,6 +147,7 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
 
   return () => {
     session.webRequest.onBeforeRequest(null)
+    installFallbackRequestGate(session)
     session.webRequest.onHeadersReceived(null)
     session.unregisterPreloadScript(preloadId)
     attachedSessions.delete(session)
