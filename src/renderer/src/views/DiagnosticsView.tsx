@@ -1,33 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   formatDiagnosticsMemory,
-  formatTabUsageHint,
   sortDiagnosticsRows,
   type DiagnosticsPayload,
   type DiagnosticsRow,
   type DiagnosticsSortDirection,
-  type DiagnosticsSortKey,
-  type DiagnosticsTabUsage
+  type DiagnosticsSortKey
 } from '../../../shared/diagnostics'
 import './DiagnosticsView.css'
 
-/**
- * Per-tab CPU/memory for the sidebar tooltips. Empty unless a Diagnostics view is sampling, so
- * the sidebar costs nothing extra the rest of the time.
- */
-export function useTabUsageHints(enabled: boolean): Record<string, DiagnosticsTabUsage> {
-  const [usage, setUsage] = useState<Record<string, DiagnosticsTabUsage>>({})
-  useEffect(() => {
-    if (!enabled) return
-    return window.api.browser.diagnostics.onChange((snapshot) => setUsage(snapshot?.tabs ?? {}))
-  }, [enabled])
-  return enabled ? usage : {}
-}
-
-export function withTabUsageHint(title: string, usage: DiagnosticsTabUsage | undefined): string {
-  const hint = formatTabUsageHint(usage)
-  return hint ? `${title}\n${hint}` : title
-}
+export { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
 
 const COLUMNS: ReadonlyArray<{ key: DiagnosticsSortKey; label: string; numeric: boolean }> = [
   { key: 'name', label: 'Process', numeric: false },
