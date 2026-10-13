@@ -3568,3 +3568,14 @@
 .tab-list.is-drag-sorting .tab-item {
   will-change: transform;
 }
+
+.suggestion-mark img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.suggestion-mark span {
+  font-size: 12px;
+  font-weight: 650;
+}
