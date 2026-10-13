@@ -1,6 +1,6 @@
 import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './types'
 
-export type AddressSuggestionSource = 'Pinned site' | 'Open tab' | 'History'
+export type AddressSuggestionSource = 'Pinned site' | 'Bookmark' | 'Open tab' | 'History'
 
 export interface AddressSuggestion {
   title: string
@@ -31,13 +31,16 @@ export function buildAddressSuggestions(
   pinnedSites: readonly PinnedSite[],
   tabs: readonly BrowserTabSummary[],
   history: readonly BrowsingHistoryEntry[],
-  limit = 7
+  limit = 7,
+  bookmarks: ReadonlyArray<{ title: string; url: string }> = []
 ): AddressSuggestion[] {
   const query = input.trim().toLocaleLowerCase()
   if (!query || limit < 1) return []
 
   const candidates: AddressSuggestion[] = [
     ...pinnedSites.map((site) => ({ title: site.title, url: site.url, source: 'Pinned site' as const })),
+    // Bookmarks rank above open tabs and history.
+    ...bookmarks.map((bookmark) => ({ title: bookmark.title, url: bookmark.url, source: 'Bookmark' as const })),
     ...tabs.map((tab) => ({ title: tab.title, url: tab.url, source: 'Open tab' as const })),
     ...history.map((entry) => ({ title: entry.title, url: entry.url, source: 'History' as const }))
   ]

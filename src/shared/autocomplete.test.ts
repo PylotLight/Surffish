@@ -42,3 +42,16 @@ test('returns no suggestions for a blank query or unsafe local data', () => {
 test('respects the result limit', () => {
   assert.equal(buildAddressSuggestions('github', pins, tabs, history, 2).length, 2)
 })
+
+test('bookmarks rank above open tabs and history, after pinned sites', () => {
+  const results = buildAddressSuggestions('github', pins, tabs, history, 7, [
+    { title: 'GitHub', url: 'https://github.com/' },
+    { title: 'Surffish repo', url: 'https://github.com/PylotLight/Surffish' },
+    { title: 'Docs', url: 'https://docs.github.com/' }
+  ])
+  assert.deepEqual(results.map((result) => [result.source, result.url]), [
+    ['Pinned site', 'https://github.com/'],
+    ['Bookmark', 'https://github.com/PylotLight/Surffish'],
+    ['Bookmark', 'https://docs.github.com/']
+  ])
+})

@@ -6,7 +6,7 @@ import { isAuthorizedShellIpcSender } from './renderer-security'
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
 const PAGE_EXIT_DELAY_MS = 160
-const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics'])
+const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics', 'bookmarks'])
 
 const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: 'tabs',
@@ -327,6 +327,17 @@ export function addViewAbovePages(view: WebContentsView): boolean {
   if (!mainWindow || mainWindow.isDestroyed() || !shellViews) return false
   const index = mainWindow.contentView.children.indexOf(shellViews.content)
   mainWindow.contentView.addChildView(view, index < 0 ? undefined : index)
+  return true
+}
+
+/** Send to whichever surface is drawing the toolbar right now (overlay toolbar or the content surface). */
+export function sendToVisibleToolbarSurface(channel: string, ...args: unknown[]): boolean {
+  if (!shellViews) return false
+  const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
+  if (target.isDestroyed()) return false
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.focus()
+  target.focus()
+  target.send(channel, ...args)
   return true
 }
 

@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { FAVOURITES_FOLDER_ID } from '../../../shared/bookmarks'
 import { formatZoomPercent, isDefaultZoom } from '../../../shared/zoom'
 import { dispatchBrambleToolbarAction, resolveBrambleToolbarAction } from '../../../shared/bramble-toolbar'
 import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../../shared/quick-links'
@@ -62,7 +63,13 @@ import { ExtensionsSettings } from './ExtensionsSettings'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { WORLD_CITIES } from '../../../shared/world-cities'
+import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
+import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
+import { BookmarksSidebar } from './bookmarks/BookmarksSidebar'
+import { BookmarksManager } from './bookmarks/BookmarksManager'
+import { BookmarkImportPanel } from './bookmarks/BookmarkImportPanel'
 import './Browser.css'
+import './bookmarks/bookmarks.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
@@ -274,7 +281,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const historyStaleRef = useRef(true)
-  const [pinnedSites, setPinnedSites] = useState<PinnedSite[]>([])
+  const bookmarks = useBookmarks()
+  // The strip and new tab favourites: the first bookmarks directly in Favourites.
+  const pinnedSites = useMemo<PinnedSite[]>(() => (bookmarks.index.children.get(FAVOURITES_FOLDER_ID) ?? [])
+    .filter((node) => node.type === 'bookmark' && node.url)
+    .slice(0, MAX_PINNED_SITES)
+    .map((node) => ({ title: node.title, url: node.url!, ...(node.faviconUrl ? { faviconUrl: node.faviconUrl } : {}) })), [bookmarks.index])
+  const bookmarkSuggestions = useMemo(() => bookmarks.nodes.flatMap((node) => node.type === 'bookmark' && node.url ? [{ title: node.title, url: node.url }] : []), [bookmarks.nodes])
+  const [bookmarkPopoverOpen, setBookmarkPopoverOpen] = useState(false)
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
@@ -399,8 +413,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // address bar). Otherwise every tab/history update re-ran the matcher in all three renderers.
   const suggestionsActive = suggestionsOpen && surface !== 'sidebar'
   const addressSuggestions = useMemo(
-    () => suggestionsActive ? buildAddressSuggestions(address, pinnedSites, tabs, history) : [],
-    [suggestionsActive, address, pinnedSites, tabs, history]
+    // Favourites come first in tree order, so the old pinned-site ranking holds without a separate list.
+    () => suggestionsActive ? buildAddressSuggestions(address, [], tabs, history, 7, bookmarkSuggestions) : [],
+    [suggestionsActive, address, tabs, history, bookmarkSuggestions]
   )
   // "yt cats" / "cats !yt": show which engine the address bar will use.
   const searchKeywordEngines = useSearchKeywords(surface !== 'sidebar')
@@ -412,8 +427,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
   const newTabSites = useMemo(() => [...favoriteSites, ...frequentlyVisitedSites], [favoriteSites, frequentlyVisitedSites])
   const siteIconOrigins = useMemo(
-    () => [...new Set(newTabSites.map((site) => site.origin))].slice(0, 128),
-    [newTabSites]
+    () => [...new Set([
+      ...newTabSites.map((site) => site.origin),
+      ...bookmarkSuggestions.slice(0, 400).map((bookmark) => bookmarkOrigin(bookmark.url)).filter((origin): origin is string => Boolean(origin))
+    ])].slice(0, 128),
+    [newTabSites, bookmarkSuggestions]
   )
   useEffect(() => {
     let cancelled = false
@@ -513,7 +531,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface, isLocalNewTab, newTabPreferences.weatherEnabled, newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
-  const currentOriginIsBookmarked = Boolean(activeOrigin && pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin))
 
   function revealSidebar(): void {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -619,25 +636,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   async function savePinnedSites(next: PinnedSite[]): Promise<void> {
     try {
-      setPinnedSites(await window.api.browser.pinnedSites.set(next))
+      await window.api.browser.pinnedSites.set(next)
     } catch (error) {
       setNavigationError(error instanceof Error ? error.message : String(error))
     }
-  }
-
-  async function toggleCurrentSiteBookmark(): Promise<void> {
-    if (!activeOrigin) return
-    const bookmarked = pinnedSites.some((site) => httpOrigin(site.url) === activeOrigin)
-    if (!bookmarked && pinnedSites.length >= MAX_PINNED_SITES) {
-      setNavigationError(`You can save up to ${MAX_PINNED_SITES} favorite sites. Remove one from the sidebar first.`)
-      return
-    }
-    const title = browser.title.trim().slice(0, 80) || new URL(activeOrigin).hostname
-    const faviconUrl = tabs.find((tab) => httpOrigin(tab.url) === activeOrigin)?.faviconUrl
-    const next = bookmarked
-      ? pinnedSites.filter((site) => httpOrigin(site.url) !== activeOrigin)
-      : [...pinnedSites, { title, url: activeOrigin, ...(faviconUrl ? { faviconUrl } : {}) }]
-    await savePinnedSites(next)
   }
 
   async function openPinnedSite(site: PinnedSite): Promise<void> {
@@ -759,7 +761,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       setSearchEngineLoaded(true)
       setNewTabPage(preferences.newTabPage)
       setNewTabPreferences(preferences.newTabPreferences)
-      setPinnedSites(preferences.pinnedSites)
       setTabSleepMinutes(preferences.tabSleepMinutes)
       setChromeState((current) => ({ ...current, sidebarWidth: preferences.sidebarWidth }))
       void window.api.browser.chrome.set({ sidebarWidth: preferences.sidebarWidth }).catch(() => undefined)
@@ -847,7 +848,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [downloadsPopupOpen])
 
   useEffect(() => {
-    if (surface === 'sidebar' || (!isSettingsSection(sidebarMode) && sidebarMode !== 'downloads')) return
+    if (surface === 'sidebar' || (!isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks')) return
     const exitOnEscape = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented || downloadsPopupOpen || siteActionsOpen || extensionsMenuOpen) return
       const target = event.target as HTMLElement | null
@@ -883,7 +884,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const updateChromeHeight = (): void => {
       const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -891,14 +892,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     observer.observe(element)
     // Popups fill in after they mount (downloads load async); re-measure as they grow so the
     // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette').forEach((popup) => observer.observe(popup))
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -910,7 +911,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && !isLocalNewTab && !hasInterstitial && rect.width > 0 && rect.height > 0
+      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && !isLocalNewTab && !hasInterstitial && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -1088,7 +1089,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         )}
         {sidebarMode !== 'tabs' && !isSettingsSection(sidebarMode) && <div className="sidebar-heading">
-          <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>
+          <strong>{sidebarMode === 'history' ? 'History' : sidebarMode === 'downloads' ? 'Downloads' : sidebarMode === 'bookmarks' ? 'Bookmarks' : sidebarMode === 'network' ? 'Network' : 'This site'}</strong>
           {sidebarMode === 'history' && (
             <button className="sidebar-icon-button" type="button" aria-label="Clear browsing history" title="Clear history" disabled={history.length === 0} onClick={() => void clearHistory()}>
               <span aria-hidden="true">⌫</span>
@@ -1142,7 +1143,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 title={withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
                 onClick={() => {
                   void window.api.browser.tabs.activate(tab.id)
-                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads') exitSettings()
+                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
                 }}
                 // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
                 onMouseDown={(event) => { if (event.button === 1) event.preventDefault() }}
@@ -1189,6 +1190,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
           </div>
         )}
+        {sidebarMode === 'tabs' && <BookmarksSidebar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} onShowManager={() => setSidebarMode('bookmarks')} />}
 
         <div className="sidebar-footer">
           {sidebarMode === 'tabs' && (
@@ -1332,15 +1334,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10v4Z" /><path d="m13 7 4 4" /></svg>}
                   <span>{browser.pdf === 'editor' ? 'Viewer' : 'Edit'}</span>
                 </button>}
-                <button
-                  className={`toolbar-button favorite-button omnibox-favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
-                  type="button"
-                  aria-label={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-                  aria-pressed={currentOriginIsBookmarked}
-                  title={currentOriginIsBookmarked ? 'Remove bookmark' : 'Bookmark this site'}
-                  disabled={!activeOrigin}
-                  onClick={() => void toggleCurrentSiteBookmark()}
-                ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
+                <BookmarkStarControl
+                  bookmarks={bookmarks}
+                  url={isLocalNewTab ? '' : browser.url}
+                  title={browser.title}
+                  faviconUrl={tabs.find((tab) => tab.active)?.faviconUrl ?? null}
+                  isPrivate={browser.private}
+                  onOpenChange={setBookmarkPopoverOpen}
+                  onShowManager={() => setSidebarMode('bookmarks')}
+                />
               </div>
               {suggestionsOpen && (addressSuggestions.length > 0 || keywordMatch) && (
                 <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
@@ -1368,7 +1370,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => void navigateTo(suggestion.url)}
                     >
-                      <span className="suggestion-mark" aria-hidden="true">{suggestion.source === 'Pinned site' ? '★' : suggestion.source === 'Open tab' ? '▤' : '◷'}</span>
+                      <span className="suggestion-mark" aria-hidden="true">{suggestion.source === 'Pinned site' || suggestion.source === 'Bookmark' ? '★' : suggestion.source === 'Open tab' ? '▤' : '◷'}</span>
                       <span className="suggestion-main"><strong>{suggestion.title || suggestion.url}</strong><small>{suggestion.url}</small></span>
                       <span className="suggestion-source">{suggestion.source}</span>
                     </button>
@@ -1462,9 +1464,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'bookmarks' ? 'Bookmark manager' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
-          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
+          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && (
             <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
               '--new-tab-dim': (newTabPreferences.backgroundDim / 100).toFixed(2),
               '--new-tab-dim-soft': (newTabPreferences.backgroundDim / 350).toFixed(2),
@@ -1591,6 +1593,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
           {sidebarMode === 'privacy' && <PrivacySettings />}
+          {sidebarMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
           {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
             <div className={`settings-view settings-view-${sidebarMode}`}>
               <header className="settings-page-header">
@@ -1611,6 +1614,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <SearchKeywordsSettings />
                 <CommandPaletteSettings />
                 <DefaultBrowserSettings />
+                <SettingsGroup title="Import">
+                  <BookmarkImportPanel />
+                </SettingsGroup>
                 <SettingsGroup title="Tabs">
                   <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake. Hibernated tabs reload their last page; unsaved form state is lost.">
                     <select

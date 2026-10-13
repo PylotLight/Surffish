@@ -40,6 +40,7 @@ import type { CustomSearchEngine } from '../shared/search-keywords'
 import type { DiagnosticsPayload } from '../shared/diagnostics'
 
 type DiagnosticsUpdate = DiagnosticsPayload | null
+import { bookmarksApi } from './bookmarks'
 
 const api = {
   platform: process.platform,
@@ -129,6 +130,7 @@ const api = {
       get: (): Promise<PinnedSite[]> => ipcRenderer.invoke('browser:pinned-sites:get'),
       set: (sites: PinnedSite[]): Promise<PinnedSite[]> => ipcRenderer.invoke('browser:pinned-sites:set', sites)
     },
+    bookmarks: bookmarksApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)

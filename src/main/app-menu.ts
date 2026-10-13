@@ -12,7 +12,8 @@ import { toggleTaskManager } from './diagnostics'
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
 // always Close Tab, and the window only closes from it with confirmation on the last tab.
 function tabItem(label: string, command: TabCommand): MenuItemConstructorOptions {
-  return { label, accelerator: TAB_COMMAND_SHORTCUTS[command].accelerator, click: () => runTabCommand(command) }
+  const { accelerator } = TAB_COMMAND_SHORTCUTS[command]
+  return { label, ...(accelerator ? { accelerator } : {}), click: () => runTabCommand(command) }
 }
 
 export function installAppMenu(): void {
@@ -88,7 +89,6 @@ export function installAppMenu(): void {
         tabItem('Hard Reload Tab', 'hardReload'),
         tabItem('Duplicate Tab', 'duplicate'),
         tabItem('Pin / Unpin Tab', 'pin'),
-        tabItem('Bookmark Tab', 'bookmark'),
         tabItem('Copy Link', 'copyLink'),
         tabItem('Copy Clean Link', 'copyCleanLink'),
         { type: 'separator' },
@@ -104,6 +104,15 @@ export function installAppMenu(): void {
           acceleratorWorksWhenHidden: true,
           click: () => selectBrowserTabByNumber(number)
         }))
+      ]
+    },
+    {
+      label: 'Bookmarks',
+      submenu: [
+        tabItem('Bookmark This Tab…', 'bookmark'),
+        tabItem('Bookmark All Tabs…', 'bookmarkAllTabs'),
+        { type: 'separator' },
+        tabItem('Bookmark Manager', 'bookmarks')
       ]
     },
     {
