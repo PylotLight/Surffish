@@ -56,20 +56,24 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Check gh, fish and ghp
-        # GitHub calls go through the user's fish `ghp` (personal gh over their SOCKS proxy):
-        # the Mac's network blocks non-enterprise GitHub API tokens on the direct route.
+      - name: Check the GitHub API route (SURFFISH_GH_PROXY, else fish ghp)
+        # The Mac's network blocks non-enterprise GitHub API tokens on the direct route. With
+        # SURFFISH_GH_PROXY in the runner's .env (e.g. socks5h://127.0.0.1:1080) release.ts makes its
+        # REST calls with curl --proxy and the workflow token; otherwise it falls back to fish `ghp`.
         run: |
-          command -v gh || { echo "::error::install the GitHub CLI on the Mac runner (brew install gh)"; exit 1; }
-          command -v fish || { echo "::error::fish is needed for ghp"; exit 1; }
-          fish -c 'functions -q ghp' || { echo "::error::no ghp fish function for the runner user ($HOME/.config/fish)"; exit 1; }
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then echo "SURFFISH_GH_PROXY present: yes (release.ts checks the API through it)"; exit 0; fi
+          echo "SURFFISH_GH_PROXY not set, falling back to fish ghp"
+          command -v gh || { echo "::error::set SURFFISH_GH_PROXY in the runner .env, or install gh + fish ghp"; exit 1; }
+          command -v fish || { echo "::error::set SURFFISH_GH_PROXY in the runner .env, or install fish + ghp"; exit 1; }
+          fish -c 'functions -q ghp' || { echo "::error::set SURFFISH_GH_PROXY in the runner .env, or add a ghp fish function for the runner user"; exit 1; }
       - name: bun run release
         env:
           VERSION: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
           RESUME: ${{ inputs.resume }}
+          # only release.ts's own curl calls use it (named so electron-builder can't pick it up to publish)
+          SURFFISH_GH_TOKEN: ${{ github.token }}
         run: |
-          # no GH_TOKEN / SURFFISH_GH here, so release.ts goes through ghp with its own auth + proxy
           unset GH_TOKEN GITHUB_TOKEN
           flags="--yes"
           [ "$DRY_RUN" = "true" ] && flags="$flags --dry-run"

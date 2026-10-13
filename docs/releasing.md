@@ -10,7 +10,7 @@ On an Apple-silicon Mac, on an up-to-date clean `main`:
 bun run release            # patch bump, e.g. 0.1.1 -> 0.1.2
 bun run release minor      # or major, or an exact 0.3.0
 bun run release current    # package.json already bumped by hand, just ship it
-bun run release --dry-run  # build + verify only, publishes nothing
+bun run release --dry-run  # build + verify only, publishes nothing (still checks the GitHub API read-only)
 ```
 
 It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
@@ -18,7 +18,7 @@ It works out the next version from the latest `vX.Y.Z` tag and `package.json` (w
 2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
 3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `unzip -tq`, then the SHA-256.
 4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
-5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip through your fish `ghp` function (`SURFFISH_GH=gh` uses plain gh instead), and renders, commits and pushes `Casks/surffish.rb`.
+5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip (REST calls via `curl --proxy "$SURFFISH_GH_PROXY"` with `SURFFISH_GH_TOKEN`/`GITHUB_TOKEN` when `SURFFISH_GH_PROXY` is set, which the release workflow uses on the Mac runner; otherwise through your fish `ghp` function, or plain gh with `SURFFISH_GH=gh`), and renders, commits and pushes `Casks/surffish.rb`.
 
 The manual steps below are what it automates.
 
