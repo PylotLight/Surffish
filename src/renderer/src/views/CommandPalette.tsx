@@ -34,6 +34,9 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
   const [mode, setMode] = useState<PaletteMode>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
+  // Last pointer position seen over the list: Chromium fires a synthetic mousemove when the list
+  // scrolls or the view resizes under a still pointer, which must not steal the keyboard selection.
+  const pointerRef = useRef<string | null>(null)
   const [snapshot, setSnapshot] = useState<CommandPaletteSnapshot>(EMPTY_SNAPSHOT)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
   const [archivedTabs, setArchivedTabs] = useState<ArchivedTab[]>([])
@@ -66,6 +69,7 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
     setMode(requested)
     setQuery('')
     setSelected(0)
+    pointerRef.current = null
     setOpen(true)
     void window.api.browser.commands.list().then(setSnapshot).catch(() => undefined)
     void window.api.browser.tabArchive.get().then((archive) => setArchivedTabs(archive.tabs)).catch(() => undefined)
@@ -220,7 +224,12 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
             aria-selected={index === selected}
             className={`command-palette-item${index === selected ? ' is-selected' : ''}`}
             onMouseDown={(event) => event.preventDefault()}
-            onMouseMove={() => { if (index !== selected) setSelected(index) }}
+            onMouseMove={(event) => {
+              const at = `${event.screenX},${event.screenY}`
+              const moved = pointerRef.current !== null && pointerRef.current !== at
+              pointerRef.current = at
+              if (moved && index !== selected) setSelected(index)
+            }}
             onClick={(event) => void execute(item, event.metaKey || event.ctrlKey)}
           >
             <ItemIcon item={item} />
