@@ -4,7 +4,7 @@
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
-const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
+const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -124,8 +124,18 @@ async function run() {
   await waitFor(() => Math.abs(page.webContents.getZoomFactor() - 1.1) < 0.001, 'Cmd/Ctrl+= to zoom to 110%')
   await waitFor(async () => (await evaluate(toolbar, 'document.querySelector(".omnibox-zoom-pill")?.textContent')) === '110%', 'the 110% zoom pill')
   await waitFor(() => {
-    const saved = JSON.parse(readFileSync(join(userData, 'browser-preferences.json'), 'utf8'))
-    return saved.siteZoom?.[origin] === 1.1
+    // Saved to surffish.db (settings row zoom:<hash of origin>); browser-preferences.json is the
+    // fallback copy and follows on a slow timer / at quit. With SURFFISH_STORE=json it is the file.
+    if (!existsSync(join(userData, 'surffish.db'))) return JSON.parse(readFileSync(join(userData, 'browser-preferences.json'), 'utf8')).siteZoom?.[origin] === 1.1
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite')
+    const db = new DatabaseSync(join(userData, 'surffish.db'), { readOnly: true })
+    try {
+      const key = `zoom:${require('node:crypto').createHash('sha256').update(origin).digest('hex').slice(0, 32)}`
+      const row = db.prepare('SELECT value FROM settings WHERE key = ? AND deleted_at IS NULL').get(key)
+      return row !== undefined && JSON.parse(row.value).factor === 1.1
+    } finally {
+      db.close()
+    }
   }, 'the zoom level to be saved for the origin', 5000)
   key(page, '-', [primary])
   key(page, '-', [primary])
