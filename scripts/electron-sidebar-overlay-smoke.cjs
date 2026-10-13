@@ -251,7 +251,12 @@ async function run() {
     }, 'the page-declared favicon to appear in the active tab summary')
   } catch (error) {
     console.log('[overlay-smoke] DEBUG fixtureUrl:', fixtureUrl)
-    console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get().map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl }))')))
+    console.log('[overlay-smoke] DEBUG wait error:', error instanceof Error ? error.message : String(error))
+    try {
+      console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get().map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl }))')))
+    } catch (dumpError) {
+      console.log('[overlay-smoke] DEBUG tabs.get threw:', dumpError instanceof Error ? dumpError.message : String(dumpError))
+    }
     throw error
   }
   await waitFor(() => {
