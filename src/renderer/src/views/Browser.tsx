@@ -49,6 +49,8 @@ import { isInsecurePageUrl } from '../../../shared/https-only'
 import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
 import { dismissPopovers, usePopoverDismiss } from '../lib/popover-dismiss'
+import { useDismissOnTabSwitch, useHistoryPanelDismiss, useToolbarExtent } from './useToolbarPopovers'
+import { BrandEasterEgg, useBrandTripleClick } from './easter-egg/BrandEasterEgg'
 import { useTabDragSort } from './useTabDragSort'
 import { SplitTabEntry } from './SplitTabEntry'
 import { groupTabEntries } from '../../../shared/split-view'
@@ -80,6 +82,7 @@ import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
 import { useUnseenWatcherCount } from './settings/useWatchers'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
+import './toolbar-popovers.css'
 import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from './SidebarBackdrop'
 import './SidebarBackdrop.css'
 import './motion.css'
@@ -296,7 +299,6 @@ function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: str
 export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
-  const reportedChromeMetricsRef = useRef<{ toolbarHeight: number; toolbarExtent: number } | null>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarPointerInsideRef = useRef(false)
   const sidebarResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null)
@@ -307,6 +309,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const siteActionsButtonRef = useRef<HTMLButtonElement>(null)
   const downloadsControlRef = useRef<HTMLDivElement>(null)
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
+  const historyButtonRef = useRef<HTMLButtonElement>(null)
+  // Triple-click the Surffish logo (top right of the toolbar).
+  const brandEgg = useBrandTripleClick()
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const spaces = useSpaces()
@@ -956,33 +961,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Main saw a press on the page view (a separate WebContentsView this document never hears).
   useEffect(() => window.api.browser.onDismissPopovers(dismissPopovers), [])
 
-  useEffect(() => {
-    const element = browserChromeRef.current
-    if (!element) return
-    const updateChromeHeight = (): void => {
-      if (surface !== 'toolbar') return
-      const toolbarHeight = element.getBoundingClientRect().height
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice, .bookmarks-menu-panel'))
-        .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
-      const metrics = { toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }
-      // This runs on every popup/suggestion state change; main re-lays out all views per report, so only send changes.
-      const last = reportedChromeMetricsRef.current
-      if (last && last.toolbarHeight === metrics.toolbarHeight && last.toolbarExtent === metrics.toolbarExtent) return
-      reportedChromeMetricsRef.current = metrics
-      void window.api.browser.chrome.reportMetrics(metrics).catch(() => { reportedChromeMetricsRef.current = null })
-    }
-    const observer = new ResizeObserver(updateChromeHeight)
-    observer.observe(element)
-    // Popups fill in after they mount (downloads load async); re-measure as they grow so the
-    // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice, .bookmarks-menu-panel').forEach((popup) => observer.observe(popup))
-    window.addEventListener('resize', updateChromeHeight)
-    updateChromeHeight()
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', updateChromeHeight)
-    }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  // Toolbar view sized to the toolbar + open popovers (useToolbarPopovers.ts).
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+
+  // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
+  const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
+  useHistoryPanelDismiss(sidebarMode === 'history' && surface === 'toolbar', historyButtonRef, closeHistoryPanel)
+  useHistoryPanelDismiss(sidebarMode === 'history' && surface === 'sidebar', sidebarRef, closeHistoryPanel)
+  useDismissOnTabSwitch(surface === 'sidebar' ? '' : activeTabId)
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -1533,7 +1519,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onOpenChange={setBookmarksMenuOpen}
                   onLayout={bumpBookmarksMenuLayout}
                 />}
-                <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
+                <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
                 </button>
               </div>
@@ -1602,7 +1588,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   downloadsButtonRef.current?.focus()
                 }} />}
               </div>
-              <div className="toolbar-brand" aria-label="Surffish" title="Surffish">
+              <div className="toolbar-brand" aria-label="Surffish" title="Surffish" onClick={brandEgg.onClick}>
                 <img className="toolbar-brand-icon" src="./surffish-brand-icon.png" alt="" aria-hidden="true" draggable={false} />
                 <strong>Surffish</strong>
               </div>
@@ -1623,6 +1609,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {surface !== 'sidebar' && !navigationError && showLoadErrorNotice && browser.loadError && (
             <LoadErrorNotice loadError={browser.loadError} onDismiss={() => setDismissedLoadErrors((keys) => [...keys.slice(-19), loadErrorKey])} />
           )}
+          {surface !== 'sidebar' && brandEgg.open && <BrandEasterEgg onClose={brandEgg.close} />}
         </header>
         <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'bookmarks' ? 'Bookmark manager' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}

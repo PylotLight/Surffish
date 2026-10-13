@@ -151,9 +151,9 @@ const api = {
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
     },
     pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
-    /** Main saw a press on the page view: close toolbar popovers (shared/popover-dismiss.ts). */
-    onDismissPopovers: (callback: () => void): (() => void) => {
-      const listener = (): void => callback()
+    /** Main saw a press on the page/sidebar view or the window blur: close toolbar popovers (shared/popover-dismiss.ts). */
+    onDismissPopovers: (callback: (reason?: string) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, reason?: string): void => callback(reason)
       ipcRenderer.on(POPOVER_DISMISS_CHANNEL, listener)
       return () => ipcRenderer.removeListener(POPOVER_DISMISS_CHANNEL, listener)
     },

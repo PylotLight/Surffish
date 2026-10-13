@@ -1,0 +1,113 @@
+/* ══ Toolbar popovers: one type scale and window-aware heights (2026-10) ══
+   Downloads (+ its … menu), Extensions, Bookmarks (dropdown, bar folders, star), site menu and the
+   History panel share a Chrome/Arc-like scale: 13px body, 14px titles, 11.5px secondary text.
+   Selectors are scoped under .browser-chrome / .history-sidebar so they beat each view's own
+   (possibly lazily loaded) stylesheet without touching it, and never reach the full Downloads page.
+   --popover-room is the height the window leaves below the toolbar (set by useToolbarExtent);
+   a popover caps itself at it and scrolls inside instead of running off the window. */
+.browser-chrome,
+.history-sidebar {
+  --pop-title: 14px;
+  --pop-body: 13px;
+  --pop-meta: 11.5px;
+}
+
+/* ---- Downloads popup ---- */
+.browser-chrome .downloads-panel-popup {
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(560px, var(--popover-room, 560px));
+  font-size: var(--pop-body);
+}
+.browser-chrome .downloads-popup-header strong,
+.browser-chrome .downloads-popup-header > strong {
+  font-size: var(--pop-title);
+}
+.browser-chrome .downloads-popup-header span { font-size: var(--pop-meta); }
+.browser-chrome .downloads-panel-popup .download-filename { font-size: var(--pop-body); }
+.browser-chrome .downloads-panel-popup .download-state,
+.browser-chrome .downloads-panel-popup .download-row-meta,
+.browser-chrome .downloads-panel-popup .download-progress-wrap,
+.browser-chrome .downloads-panel-popup .download-file-note,
+.browser-chrome .downloads-panel-popup .download-row-message,
+.browser-chrome .downloads-panel-popup .download-file-badge,
+.browser-chrome .downloads-panel-popup .download-complete-size {
+  font-size: var(--pop-meta);
+}
+.browser-chrome .downloads-panel-popup .download-row-actions button { font-size: 12px; }
+.browser-chrome .downloads-panel-popup .downloads-empty { font-size: var(--pop-body); }
+.browser-chrome .downloads-panel-popup .downloads-empty strong { font-size: var(--pop-title); }
+.browser-chrome .downloads-panel-popup .downloads-show-all { font-size: var(--pop-body); }
+.browser-chrome .downloads-panel-popup .downloads-search input { font-size: var(--pop-body); }
+.browser-chrome .downloads-panel-popup .downloads-action-message { font-size: 12px; }
+.browser-chrome .downloads-panel-popup .downloads-state-message { font-size: var(--pop-body); }
+.browser-chrome .downloads-menu {
+  min-width: 260px;
+  max-height: min(320px, var(--popover-room, 320px));
+  overflow-y: auto;
+}
+.browser-chrome .downloads-menu button,
+.browser-chrome .downloads-menu button span {
+  font-size: var(--pop-body);
+}
+
+/* ---- Extensions ---- */
+.browser-chrome .extensions-menu {
+  width: 320px;
+  max-height: min(480px, var(--popover-room, 480px));
+  font-size: var(--pop-body);
+}
+.browser-chrome .extensions-menu-header strong { font-size: var(--pop-title); }
+.browser-chrome .extensions-menu-header span { font-size: var(--pop-meta); }
+/* The list is the part that scrolls: without min-height 0 a flex child never shrinks below its
+   content, and the footer (Manage extensions) was pushed out of the box. */
+.browser-chrome .extensions-menu-list { min-height: 0; flex: 1 1 auto; }
+.browser-chrome .extensions-menu-header,
+.browser-chrome .extensions-menu-manage { flex: 0 0 auto; }
+.browser-chrome .extensions-menu-name { font-size: var(--pop-body); }
+.browser-chrome .extensions-menu-name small { font-size: var(--pop-meta); }
+.browser-chrome .extensions-menu-manage { font-size: var(--pop-body); }
+.browser-chrome .extensions-menu-empty { font-size: var(--pop-body); }
+
+/* ---- Bookmarks: toolbar dropdown, bookmarks-bar folders, star popover ---- */
+.browser-chrome .bookmarks-menu-panel {
+  width: 320px;
+  font-size: var(--pop-body);
+}
+.browser-chrome .bookmarks-menu-root {
+  max-height: min(520px, var(--popover-room, 520px));
+}
+.browser-chrome .bookmarks-menu-item { min-height: 30px; }
+.browser-chrome .bookmarks-menu-item kbd { font-size: var(--pop-meta); }
+.browser-chrome .bookmarks-menu-item.is-more { font-size: 12px; }
+.browser-chrome .bookmarks-menu-empty { font-size: 12.5px; }
+.browser-chrome .bookmark-popover {
+  width: 320px;
+  max-height: min(520px, var(--popover-room, 520px));
+  overflow-y: auto;
+}
+.browser-chrome .bookmark-popover-title { font-size: var(--pop-title); }
+.browser-chrome .bookmark-popover-note { font-size: var(--pop-meta); }
+.browser-chrome .bookmark-popover-field,
+.browser-chrome .bookmark-popover-field input,
+.browser-chrome .bookmark-popover-actions .settings-action {
+  font-size: var(--pop-body);
+}
+
+/* ---- Site menu (globe) ---- */
+.browser-chrome .site-actions-menu {
+  width: 236px;
+  max-height: min(480px, var(--popover-room, 480px));
+  overflow-y: auto;
+}
+.browser-chrome .site-actions-menu button {
+  min-height: 34px;
+  font-size: var(--pop-body);
+}
+
+/* ---- History panel (opened from the toolbar, drawn in the sidebar) ---- */
+.history-sidebar .history-search input { font-size: var(--pop-body); }
+.history-sidebar .history-item strong { font-size: var(--pop-body); }
+.history-sidebar .history-host,
+.history-sidebar .history-item time {
+  font-size: var(--pop-meta);
+}

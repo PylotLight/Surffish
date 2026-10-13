@@ -189,6 +189,10 @@ export interface BrowserChromeState {
 export interface BrowserChromeMetrics {
   toolbarHeight: number
   toolbarExtent: number
+  /** Toolbar → main: a popover is open (shared/popover-dismiss.ts). */
+  popoverOpen?: boolean
+  /** Main → toolbar: the window's content height, so popovers can cap themselves to it. */
+  windowHeight?: number
 }
 
 export interface BrowserPreferencesSnapshot {
