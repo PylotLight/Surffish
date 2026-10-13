@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { DownloadEntry, DownloadState } from '../shared/downloads'
 import { safeDownloadFilename, safeDownloadSource, safeStoredDownloadSource } from '../shared/downloads'
 import { markBrowserDownloadStarted } from './browser'
-import { getBrowserSession, onPrivateSessionCreated } from './browser-session'
+import { onPageSessionCreated } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { deferWrite } from './deferred-writes'
 
@@ -171,9 +171,8 @@ export function initializeDownloads(): void {
   if (initialized) return
   initialized = true
   loadHistory()
-  getBrowserSession().on('will-download', (_event, item, webContents) => trackDownload(item, webContents, false))
-  onPrivateSessionCreated((privateSession) => {
-    privateSession.on('will-download', (_event, item, webContents) => trackDownload(item, webContents, true))
+  void onPageSessionCreated((target, info) => {
+    target.on('will-download', (_event, item, webContents) => trackDownload(item, webContents, info.isPrivate))
   })
 }
 

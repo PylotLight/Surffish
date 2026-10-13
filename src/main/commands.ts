@@ -35,6 +35,9 @@ import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canAr
 import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
 import { takeScreenshot } from './screenshot'
 import { readerStateFor, toggleReaderMode } from './reader-mode'
+import { cycleBrowserSpace, getBrowserSpacesSnapshot, moveBrowserTabToSpace, switchBrowserSpace } from './browser'
+import { createBrowserSpace, deleteBrowserSpaceWithConfirm } from './spaces-ipc'
+import { DEFAULT_SPACE_ID } from '../shared/spaces'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -182,6 +185,43 @@ const COMMANDS: BrowserCommand[] = [
 
 const COMMANDS_BY_ID = new Map(COMMANDS.map((command) => [command.id, command]))
 
+/** Space accelerators: Ctrl+1..9 on macOS (Cmd+1..9 selects tabs), Ctrl+Shift+1..9 elsewhere. */
+function spaceAccelerator(index: number): string | null {
+  if (index >= 9) return null
+  return process.platform === 'darwin' ? `Ctrl+${index + 1}` : `Ctrl+Shift+${index + 1}`
+}
+
+/** Space commands exist only while Spaces are on (and never in a private window). */
+function spaceCommands(): BrowserCommand[] {
+  const snapshot = getBrowserSpacesSnapshot()
+  if (!snapshot.enabled) return []
+  const label = (space: (typeof snapshot.spaces)[number]): string => `${space.icon ? `${space.icon} ` : ''}${space.name}`
+  const tab = activeTab()
+  const several = snapshot.spaces.length > 1
+  const current = snapshot.spaces.find((space) => space.id === snapshot.activeSpaceId)
+  return [
+    { id: 'space.new', title: 'New Space', section: 'Space', keywords: ['workspace', 'profile', 'create space'], run: () => createBrowserSpace() },
+    { id: 'space.next', title: 'Next Space', section: 'Space', keywords: ['switch space', 'workspace'], enabled: () => several, run: () => cycleBrowserSpace(1) },
+    { id: 'space.previous', title: 'Previous Space', section: 'Space', keywords: ['switch space', 'workspace'], enabled: () => several, run: () => cycleBrowserSpace(-1) },
+    ...snapshot.spaces.map((space, index): BrowserCommand => ({
+      id: `space.switch:${space.id}`, title: `Switch to Space: ${label(space)}`, section: 'Space', accelerator: spaceAccelerator(index), keywords: ['go to space', 'workspace'],
+      enabled: () => space.id !== snapshot.activeSpaceId, run: () => switchBrowserSpace(space.id)
+    })),
+    ...snapshot.spaces.map((space): BrowserCommand => ({
+      id: `space.moveTab:${space.id}`, title: `Move Tab to Space: ${label(space)}`, section: 'Space', keywords: ['send tab', 'workspace'], refocusPage: true,
+      enabled: () => Boolean(tab && !tab.private) && space.id !== snapshot.activeSpaceId, run: () => { if (tab) moveBrowserTabToSpace(tab.id, space.id) }
+    })),
+    {
+      id: 'space.delete', title: `Delete Space${current && current.id !== DEFAULT_SPACE_ID ? `: ${label(current)}` : ''}…`, section: 'Space', keywords: ['remove space'],
+      enabled: () => snapshot.activeSpaceId !== DEFAULT_SPACE_ID, run: () => deleteBrowserSpaceWithConfirm(snapshot.activeSpaceId)
+    }
+  ]
+}
+
+function allCommands(): BrowserCommand[] {
+  return [...COMMANDS, ...spaceCommands()]
+}
+
 function isEnabled(command: BrowserCommand): boolean {
   try {
     return command.enabled ? command.enabled() : true
@@ -191,7 +231,7 @@ function isEnabled(command: BrowserCommand): boolean {
 }
 
 export function listCommands(): CommandDescriptor[] {
-  return COMMANDS.map((command) => ({
+  return allCommands().map((command) => ({
     id: command.id,
     title: typeof command.title === 'function' ? command.title() : command.title,
     keywords: command.keywords ?? [],
@@ -213,7 +253,7 @@ export function focusActivePage(): void {
 
 export async function runCommand(id: unknown): Promise<boolean> {
   if (typeof id !== 'string') return false
-  const command = COMMANDS_BY_ID.get(id)
+  const command = COMMANDS_BY_ID.get(id) ?? (id.startsWith('space.') ? allCommands().find((candidate) => candidate.id === id) : undefined)
   if (!command || !isEnabled(command)) return false
   noteCommandUsed(id)
   if (command.refocusPage) focusActivePage()

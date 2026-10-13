@@ -13,7 +13,16 @@ import {
   type SiteDataSummary
 } from '../shared/browsing-data'
 import { normalizeHttpOrigin } from '../shared/persistence'
-import { getBrowserSession } from './browser-session'
+import { getBrowserSession, getPageSession, listPageSessions } from './browser-session'
+import { knownSpacePartitions } from './spaces-store'
+
+/** The profile session plus every Space partition (separate logins), opened this run or not. */
+function persistentPageSessions(): Session[] {
+  const sessions = new Set<Session>([getBrowserSession()])
+  for (const partition of knownSpacePartitions()) sessions.add(getPageSession(partition))
+  for (const { session, info } of listPageSessions()) if (info.persistent) sessions.add(session)
+  return [...sessions]
+}
 import { getBrowsingHistory, removeBrowsingHistory } from './history'
 import { clearDownloadHistory, clearDownloadHistorySince } from './downloads'
 import { clearBrowserSiteZoom, resetBrowserSiteSettings } from './browser-persistence'
@@ -22,7 +31,8 @@ import { getActiveTabWebContents } from './browser'
 import { forgetArchivedTabsSince } from './tab-archive-store'
 
 /**
- * Clear browsing data (Settings → Privacy) and per-site data controls. Acts on the profile
+ * Clear browsing data (Settings → Privacy) and per-site data controls. Clearing and Forget This
+ * Site act on the profile session and every Space partition; the cookie list reads the profile
  * session only; private tabs keep everything in memory and wipe it when the last one closes.
  *
  * Electron can't clear cookies, storage or cache by date, so for a time range those are
@@ -71,9 +81,9 @@ function hostsOf(origins: readonly string[]): string[] {
 }
 
 function resetZoomOnOpenPages(origins: readonly string[] | null): void {
-  const browserSession = getBrowserSession()
+  const sessions = new Set(persistentPageSessions())
   for (const contents of allWebContents.getAllWebContents()) {
-    if (contents.isDestroyed() || contents.session !== browserSession) continue
+    if (contents.isDestroyed() || !sessions.has(contents.session)) continue
     const origin = normalizeHttpOrigin(contents.getURL())
     if (!origin || (origins && !origins.includes(origin))) continue
     contents.setZoomFactor(1)
@@ -83,7 +93,6 @@ function resetZoomOnOpenPages(origins: readonly string[] | null): void {
 export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDataResult> {
   const options = parseClearBrowsingDataOptions(input)
   if (!options) throw new Error('Choose a time range and what to clear.')
-  const target = getBrowserSession()
   const since = clearRangeStart(options.range, Date.now())
   const allTime = since === 0
   // Read history before clearing it: it decides which sites a time range covers.
@@ -91,6 +100,7 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
   const result: ClearBrowsingDataResult = { scopedOrigins: origins ? origins.length : null, historyRemoved: 0, downloadsRemoved: 0 }
   const scoped = origins !== null && origins.length > 0
 
+  for (const target of persistentPageSessions()) {
   if (options.cookies) {
     if (allTime) {
       const excludeOrigins = extensionOrigins(target)
@@ -112,6 +122,7 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
     } else if (scoped) {
       await target.clearData({ dataTypes: ['cache'], origins })
     }
+  }
   }
   if (options.permissions && (allTime || scoped)) resetBrowserSiteSettings(origins)
   if (options.zoom && (allTime || scoped)) {
@@ -178,11 +189,12 @@ export async function getSiteData(originInput: unknown): Promise<SiteDataSummary
 export async function forgetSite(originInput: unknown, includeHistory: unknown): Promise<SiteDataSummary | null> {
   const origin = normalizeHttpOrigin(originInput)
   if (!origin) return null
-  const target = getBrowserSession()
   const host = new URL(origin).hostname.toLowerCase()
-  await removeCookies(target, (cookie) => cookieMatchesHost(cookie.domain ?? '', host))
   const origins = originsForHosts([host])
-  await target.clearData({ dataTypes: [...STORAGE_TYPES, 'cache'], origins })
+  for (const target of persistentPageSessions()) {
+    await removeCookies(target, (cookie) => cookieMatchesHost(cookie.domain ?? '', host))
+    await target.clearData({ dataTypes: [...STORAGE_TYPES, 'cache'], origins })
+  }
   resetBrowserSiteSettings(origins)
   clearBrowserSiteZoom(origins)
   resetZoomOnOpenPages(origins)

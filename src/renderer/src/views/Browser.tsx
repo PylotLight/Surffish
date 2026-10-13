@@ -74,6 +74,9 @@ import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksSidebar } from './bookmarks/BookmarksSidebar'
 import { ArchivedTabsSidebar } from './tab-archive/ArchivedTabsSidebar'
 import { TabArchiveSettings } from './settings/TabArchiveSettings'
+import { SpacesSettings } from './settings/SpacesSettings'
+import { SpacesSwitcher, useSpaces } from './spaces/SpacesSwitcher'
+import { SPACE_COLOR_VALUES } from '../../../shared/spaces'
 import { BookmarksManager } from './bookmarks/BookmarksManager'
 import { BookmarkImportPanel } from './bookmarks/BookmarkImportPanel'
 import './Browser.css'
@@ -300,6 +303,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
+  const spaces = useSpaces()
+  const activeSpace = spaces?.enabled ? spaces.spaces.find((space) => space.id === spaces.activeSpaceId) : undefined
   // A split view is one sidebar entry (keyed by its first tab), so it sorts and drags as one.
   const tabEntries = useMemo(() => groupTabEntries(tabs.filter((tab) => !tab.pinned)), [tabs])
   const tabEntriesByKey = useMemo(() => new Map(tabEntries.map((entry) => [entry.key, entry])), [tabEntries])
@@ -1112,7 +1117,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }} onMouseLeave={surface === 'sidebar' ? handleSidebarPointerLeave : undefined}>
       <aside
         ref={sidebarRef}
-        className="browser-sidebar"
+        className={`browser-sidebar${activeSpace ? ' has-spaces' : ''}`}
+        style={activeSpace ? { '--active-space-color': SPACE_COLOR_VALUES[activeSpace.color] } as React.CSSProperties : undefined}
+        data-space-id={activeSpace?.id}
         aria-label="Browser sidebar"
         onMouseEnter={handleSidebarPointerEnter}
         onMouseLeave={handleSidebarPointerLeave}
@@ -1246,6 +1253,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         {sidebarMode === 'tabs' && <BookmarksSidebar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} onShowManager={() => setSidebarMode('bookmarks')} />}
         {sidebarMode === 'tabs' && <ArchivedTabsSidebar cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} />}
 
+        {sidebarMode === 'tabs' && spaces?.enabled && <SpacesSwitcher snapshot={spaces} />}
         <div className="sidebar-footer">
           {sidebarMode === 'tabs' && (
             <button className={`sidebar-footer-icon-button sidebar-pin-button${sidebarPinned ? ' is-current' : ''}`} type="button" aria-label={sidebarPinned ? 'Auto-hide sidebar' : 'Keep sidebar open'} aria-pressed={sidebarPinned} title={sidebarPinned ? 'Auto-hide sidebar' : 'Keep sidebar open'} onClick={() => setSidebarPinned((pinned) => !pinned)}>
@@ -1710,6 +1718,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </SettingsGroup>
                 <TabArchiveSettings />
+                <SpacesSettings />
                 <SpellcheckSettings />
                 <SettingsGroup
                   title="SOCKS5 proxy"

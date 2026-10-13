@@ -16,7 +16,7 @@ import {
   type HeadersReceivedDetails,
   type ListFetch
 } from './adblock-engine.ts'
-import { getBrowserSession, onPrivateSessionCreated } from './browser-session'
+import { getBrowserSession, onPageSessionCreated } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
@@ -205,10 +205,10 @@ function adblockHooks(): AdblockSessionHooks {
 
 function ensureSessionAttached(): void {
   if (sessionAttached) return
-  attachAdblockToSession(getBrowserSession(), adblockHooks(), resolveFramePreload())
-  // Private tabs get the same filtering; the engine reference is shared, so refreshes cover both.
-  onPrivateSessionCreated((privateSession) => {
-    attachAdblockToSession(privateSession, adblockHooks(), resolveFramePreload())
+  // Every page session (profile, private, Spaces with separate logins) gets the same filtering;
+  // the engine reference is shared, so refreshes cover them all.
+  void onPageSessionCreated((target) => {
+    attachAdblockToSession(target, adblockHooks(), resolveFramePreload())
   })
   sessionAttached = true
 }

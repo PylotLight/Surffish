@@ -119,7 +119,7 @@ export function restoreArchivedTab(id: unknown, activate = true): string | null 
   if (!entry) return null
   // Already open (restored before, or opened again since): just switch to it.
   const open = findOpenTabForUrl(getBrowserTabs(), entry.url)
-  const tabId = open ? (activate && activateBrowserTab(open.id), open.id) : openArchivedBrowserTab(entry.url, entry.history, activate)
+  const tabId = open ? (activate && activateBrowserTab(open.id), open.id) : openArchivedBrowserTab(entry.url, entry.history, activate, entry.spaceId)
   if (tabId) removeFromArchive([id])
   return tabId
 }

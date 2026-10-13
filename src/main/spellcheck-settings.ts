@@ -1,5 +1,5 @@
 import type { Session } from 'electron'
-import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
+import { getBrowserSession, listPageSessions, onPageSessionCreated } from './browser-session'
 import { parseSpellcheckSettings, spellcheckEnabledFor, type SpellcheckSettings } from '../shared/spellcheck'
 import { readSettingsFile, writeSettingsFile } from './safety-store'
 
@@ -28,15 +28,13 @@ function applyToSession(target: Session, isPrivate: boolean): void {
 }
 
 function applyAll(): void {
-  applyToSession(getBrowserSession(), false)
-  if (hasPrivateSession()) applyToSession(getPrivateSession(), true)
+  for (const { session: target, info } of listPageSessions()) applyToSession(target, info.isPrivate)
 }
 
 export function initializeSpellcheck(): void {
   settings = parseSpellcheckSettings(readSettingsFile(FILE), osManaged ? undefined : getBrowserSession().availableSpellCheckerLanguages)
-  applyAll()
   // getPrivateSession() turns spelling off; this runs after and applies the user's choice.
-  onPrivateSessionCreated((privateSession) => applyToSession(privateSession, true))
+  void onPageSessionCreated((target, info) => applyToSession(target, info.isPrivate))
 }
 
 export function getSpellcheckState(): SpellcheckState {

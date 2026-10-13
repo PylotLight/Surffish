@@ -1,5 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron'
-import { getBrowserSession, onPrivateSessionCreated } from './browser-session'
+import { onPageSessionCreated } from './browser-session'
 import { installFallbackRequestGate, watchRequestErrors } from './request-gate'
 import { getSpellcheckState, initializeSpellcheck, setSpellcheckSettings } from './spellcheck-settings'
 import { continueToHttp, getHttpsOnlyState, initializeHttpsOnly, removeHttpsOnlyException, setHttpsOnlyEnabled } from './https-only-mode'
@@ -17,12 +17,9 @@ import { getActiveTabWebContents } from './browser'
 
 /** After the proxy is configured and before ad blocking attaches (which then calls the gates first). */
 export function initializeBrowserSafety(): void {
-  const browserSession = getBrowserSession()
-  installFallbackRequestGate(browserSession)
-  watchRequestErrors(browserSession)
-  onPrivateSessionCreated((privateSession) => {
-    installFallbackRequestGate(privateSession)
-    watchRequestErrors(privateSession)
+  void onPageSessionCreated((target) => {
+    installFallbackRequestGate(target)
+    watchRequestErrors(target)
   })
   initializeSpellcheck()
   initializeHttpsOnly()

@@ -51,6 +51,9 @@ export interface ArchivedTab {
   reason: 'auto' | 'manual'
   /** Back/forward list at archive time, when the tab was loaded (sleeping tabs only have their URL). */
   history?: { entries: ArchivedHistoryEntry[]; index: number }
+  /** The Space it was in (only recorded while Spaces are on); restore goes back there if it still exists. */
+  spaceId?: string
+  spaceName?: string
 }
 
 export interface TabArchiveSnapshot {
@@ -239,7 +242,19 @@ export function sanitizeArchivedTab(value: unknown): ArchivedTab | null {
   }
   const history = cleanHistory(record.history, url)
   if (history) tab.history = history
+  const label = cleanLabel(record.spaceName)
+  if (typeof record.spaceId === 'string' && /^[a-z0-9][a-z0-9-]{0,39}$/.test(record.spaceId) && label) {
+    tab.spaceId = record.spaceId
+    tab.spaceName = label
+  }
   return tab
+}
+
+/** A short display label (Space / group name): one line, at most 32 characters. */
+function cleanLabel(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const label = value.replace(/\s+/g, ' ').trim().slice(0, 32).trim()
+  return label || null
 }
 
 function stripPageState(tab: ArchivedTab): ArchivedTab {
