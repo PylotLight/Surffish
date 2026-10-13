@@ -1,0 +1,66 @@
+name: release
+
+# Manual only: Actions -> release -> Run workflow. Wraps `bun run release` on the self-hosted Mac.
+# Needs docs/releases/vX.Y.Z.md committed first (the script stops and drafts one if missing).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'patch | minor | major | current | X.Y.Z'
+        required: true
+        default: patch
+      dry_run:
+        description: 'build + verify only, publish nothing'
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main (plain git)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"
+          git fetch -q --tags origin main
+          git checkout -q --force -B main origin/main
+          git clean -qffdx -e node_modules
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          "$HOME/.bun/bin/bun" --version
+      - run: bun install
+      - name: Git identity for the release commit + tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Check gh is installed
+        run: command -v gh || { echo "::error::install the GitHub CLI on the Mac runner (brew install gh)"; exit 1; }
+      - name: bun run release
+        env:
+          SURFFISH_GH: gh
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          flags="--yes"
+          [ "$DRY_RUN" = "true" ] && flags="$flags --dry-run"
+          bun scripts/release.ts "$VERSION" $flags
+      - name: Where the zip is
+        if: always()
+        run: ls -la release/*.zip 2>/dev/null || true
