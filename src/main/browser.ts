@@ -25,7 +25,8 @@ import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { guardPageDragRegions } from './page-drag-guard'
-import { avoidLinkStatusPointer, destroyLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
+import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
+import { copyImageAtPoint, isCopyImageClick } from './copy-image'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -615,6 +616,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (activeTabId !== tab.id || !isCurrentContents()) return
     handleBrowserPageMouseEvent(mouseEvent)
     if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y)
+    if (isCopyImageClick(mouseEvent)) {
+      void copyImageAtPoint(contents, mouseEvent.x, mouseEvent.y).then((copied) => {
+        if (copied) flashLinkStatus('Image copied', browserBounds)
+      })
+    }
   })
   contents.on('update-target-url', (_event, url) => {
     if (activeTabId === tab.id && isCurrentContents()) showLinkStatus(url, browserBounds)
