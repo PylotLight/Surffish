@@ -296,6 +296,7 @@ function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: str
 export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
+  const reportedChromeMetricsRef = useRef<{ toolbarHeight: number; toolbarExtent: number } | null>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarPointerInsideRef = useRef(false)
   const sidebarResizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null)
@@ -781,13 +782,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const setAnchor = window.api.browser.bramble.setAnchor
     if (!button || typeof setAnchor !== 'function') return
     let frame = 0
+    let lastKey = ''
     const report = (): void => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(() => {
         const bounds = button.getBoundingClientRect()
-        setAnchor(bounds.width > 0 && bounds.height > 0
+        const anchor = bounds.width > 0 && bounds.height > 0
           ? { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height }
-          : null)
+          : null
+        // The observers fire on every toolbar resize (popups, suggestions); the button rarely moves.
+        const key = anchor ? `${anchor.x},${anchor.y},${anchor.width},${anchor.height}` : 'none'
+        if (key === lastKey) return
+        lastKey = key
+        setAnchor(anchor)
       })
     }
     report()
@@ -953,11 +960,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const element = browserChromeRef.current
     if (!element) return
     const updateChromeHeight = (): void => {
-      const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
+      const toolbarHeight = element.getBoundingClientRect().height
       const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice, .bookmarks-menu-panel'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
-      void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
+      const metrics = { toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }
+      // This runs on every popup/suggestion state change; main re-lays out all views per report, so only send changes.
+      const last = reportedChromeMetricsRef.current
+      if (last && last.toolbarHeight === metrics.toolbarHeight && last.toolbarExtent === metrics.toolbarExtent) return
+      reportedChromeMetricsRef.current = metrics
+      void window.api.browser.chrome.reportMetrics(metrics).catch(() => { reportedChromeMetricsRef.current = null })
     }
     const observer = new ResizeObserver(updateChromeHeight)
     observer.observe(element)

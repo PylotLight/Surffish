@@ -142,6 +142,20 @@ async function run() {
   await evaluate(page, 'history.pushState(null, "", "/app/after"); 1')
   await expectBar('/app/after', 'navigation after leaving typed text')
 
+  // --- a new tab opened on a URL keeps focus on its page; only a blank New Tab focuses the bar
+  // (It used to focus the bar too, flashing its suggestions, until the page took focus back on load.)
+  await focusPage()
+  await evaluate(toolbar, `(() => { window.__barFocuses = 0; ${INPUT}.addEventListener('focus', () => { window.__barFocuses++ }); return 1 })()`)
+  await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/opened`)})`)
+  const opened = await waitFor(() => allWebContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL() === `${origin}/opened` && !contents.isLoading()), 'the tab opened on a URL')
+  await waitFor(() => opened.isFocused(), 'focus in the page opened in a new tab')
+  await delay(300)
+  assert.equal(await evaluate(toolbar, 'window.__barFocuses'), 0, 'a tab opened on a URL never focuses the address bar')
+  await evaluate(toolbar, 'window.api.browser.tabs.create()')
+  // On the New Tab page the content surface draws the address bar.
+  const content = surface('content').webContents
+  await waitFor(() => evaluate(content, 'document.hasFocus() && document.activeElement?.tagName === "INPUT"'), 'a blank New Tab focuses the address bar')
+
   console.log('Address bar sync smoke passed.')
 }
 
