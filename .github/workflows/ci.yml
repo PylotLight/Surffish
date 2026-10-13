@@ -17,10 +17,144 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  quick:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
-    timeout-minutes: 45
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          "$HOME/.bun/bin/bun" --version
+      - run: bun install
+      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+        run: |
+          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          if sudo -n true 2>/dev/null; then
+            sudo chown root:root "$helper" && sudo chmod 4755 "$helper"
+          else
+            echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+          fi
+      - name: Check xvfb + system deps
+        run: |
+          missing=""
+          for tool in xvfb-run xdotool; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          if sudo -n true 2>/dev/null; then
+            sudo apt-get update
+            [ -z "$missing" ] || sudo apt-get install --no-install-recommends -y xvfb xdotool
+            # Electron runtime libs missing from the ARC runner image (ubuntu-latest has them baked in)
+            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0 || \
+            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0
+          else
+            echo "::error::runner is missing:$missing and no passwordless sudo"; exit 1
+          fi
+      - name: Start D-Bus (silences Chromium bus spam in containers)
+        run: |
+          sudo apt-get install --no-install-recommends -y dbus
+          sudo mkdir -p /run/dbus
+          sudo dbus-daemon --system --fork 2>/dev/null || true
+          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
+      - run: bun run typecheck
+      - run: bun run test
+
+  electron:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 30
+    env:
+      # Software rendering under xvfb is slower than a real GPU; smoke scripts honor this.
+      SMOKE_WAIT_MS: 90000
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - lane: A
+          tests: "test:electron-security test:electron-downloads test:electron-table-stakes"
+        - lane: B
+          tests: "test:electron-safety test:electron-updates test:electron-command-palette test:electron-bookmarks"
+        - lane: C
+          tests: "test:electron-multi-window test:electron-tab-archive test:electron-screenshot test:electron-network-tools"
+        - lane: D
+          tests: "test:electron-reader-watchers test:electron-split-view test:electron-spaces test:electron-tab-groups"
+        - lane: E
+          tests: "test:electron-nav-errors test:electron-perf test:electron-pdf-editor test:electron-adblock"
+        - lane: F
+          tests: "test:electron-extensions test:electron-host-bridge"
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          "$HOME/.bun/bin/bun" --version
+      - run: bun install
+      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+        run: |
+          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          if sudo -n true 2>/dev/null; then
+            sudo chown root:root "$helper" && sudo chmod 4755 "$helper"
+          else
+            echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+          fi
+      - name: Check xvfb + system deps
+        run: |
+          missing=""
+          for tool in xvfb-run xdotool; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          if sudo -n true 2>/dev/null; then
+            sudo apt-get update
+            [ -z "$missing" ] || sudo apt-get install --no-install-recommends -y xvfb xdotool
+            # Electron runtime libs missing from the ARC runner image (ubuntu-latest has them baked in)
+            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0 || \
+            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0
+          else
+            echo "::error::runner is missing:$missing and no passwordless sudo"; exit 1
+          fi
+      - name: Start D-Bus (silences Chromium bus spam in containers)
+        run: |
+          sudo apt-get install --no-install-recommends -y dbus
+          sudo mkdir -p /run/dbus
+          sudo dbus-daemon --system --fork 2>/dev/null || true
+          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
+      - run: bun run build
+      - name: Run lane ${{ matrix.lane }} suites
+        run: |
+          for t in ${{ matrix.tests }}; do
+            echo "--- $t"
+            xvfb-run -a bun run "$t" || exit 1
+          done
+
+  overlay:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 20
     env:
       # Software rendering under xvfb is slower than a real GPU; smoke scripts honor this.
       SMOKE_WAIT_MS: 90000
@@ -72,32 +206,8 @@ jobs:
           sudo dbus-daemon --system --fork 2>/dev/null || true
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
           echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
-      - run: bun run typecheck
-      - run: bun run test
       - run: bun run build
-      - run: xvfb-run -a bun run test:electron-security
-      - run: xvfb-run -a bun run test:electron-downloads
-      - run: xvfb-run -a bun run test:electron-table-stakes
-      - run: xvfb-run -a bun run test:electron-safety
-      - run: xvfb-run -a bun run test:electron-updates
-      - run: xvfb-run -a bun run test:electron-command-palette
-      - run: xvfb-run -a bun run test:electron-bookmarks
-      - run: xvfb-run -a bun run test:electron-multi-window
-      - run: xvfb-run -a bun run test:electron-tab-archive
-      - run: xvfb-run -a bun run test:electron-screenshot
-      - run: xvfb-run -a bun run test:electron-network-tools
-      - run: xvfb-run -a bun run test:electron-reader-watchers
-      - run: xvfb-run -a bun run test:electron-split-view
-      - run: xvfb-run -a bun run test:electron-spaces
-      - run: xvfb-run -a bun run test:electron-tab-groups
-      - run: xvfb-run -a bun run test:electron-nav-errors
-      - run: xvfb-run -a bun run test:electron-perf
-      - run: xvfb-run -a bun run test:electron-pdf-editor
-      - run: xvfb-run -a bun run test:electron-adblock
-      - run: xvfb-run -a bun run test:electron-extensions
-      - run: xvfb-run -a bun run test:electron-host-bridge
-      - name: Sidebar overlay probe (known failing on main, non-blocking)
-        continue-on-error: true
+      - name: Probe native sidebar overlay bounds in the production Electron app
         run: xvfb-run -a bun run test:electron-sidebar-overlay
 
   native-macos:
