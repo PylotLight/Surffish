@@ -7,6 +7,16 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["app/**/*", "src/**/*", "modules/**/*.ts", "expo-env.d.ts", ".expo/types/**/*.ts"],
-  "exclude": ["node_modules", "android"]
+  "include": [
+    "app/**/*",
+    "src/**/*",
+    "modules/**/*.ts",
+    "expo-env.d.ts",
+    ".expo/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "android",
+    "**/*.test.ts"
+  ]
 }
