@@ -290,12 +290,16 @@ async function run() {
   assert.match(siteActionsMenu, /Picture in Picture/)
   await evaluate(views.toolbar, `Array.from(document.querySelectorAll('#site-actions-menu [role="menuitem"]')).find((item) => item.textContent?.includes('Site settings'))?.click()`)
   await waitFor(async () => (await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'site', 'the Site settings menu action')
+  // Site settings is a settings section, so the gear closes settings first, then opens them.
+  await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]').click()`)
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the Settings gear closing Site settings')
   await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]').click()`)
   await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'the Settings gear action')
-  const doneButtonText = await waitFor(async () => evaluate(views.sidebar, `document.querySelector('.settings-done-button')?.innerText || null`), 'the Settings Done button')
-  assert.match(doneButtonText, /Done.*Back to web/)
-  await evaluate(views.sidebar, `document.querySelector('.settings-done-button').click()`)
-  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'Done returning to browser tabs')
+  // The Done button went away in #56; the gear (title "Close settings (Esc)") closes settings now.
+  const gearTitle = await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]')?.title || null`)
+  assert.match(gearTitle || '', /Close settings/)
+  await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]').click()`)
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the gear returning to browser tabs')
   await evaluate(views.toolbar, `window.api.browser.chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })`)
   const browserSession = session.fromPartition('persist:surffish-browser')
   const trustedReleaseHosts = new Set(['api.github.com', 'github.com', 'release-assets.githubusercontent.com'])
@@ -423,7 +427,8 @@ async function cleanup() {
   openSockets.clear()
   for (const server of servers) server.closeAllConnections?.()
   await Promise.all(servers.map((server) => closeServer(server).catch(() => undefined)))
-  if (app.isReady()) {
+  // app.quit() ends the process with code 0, so a failed run must exit with its code instead.
+  if (app.isReady() && !process.exitCode) {
     app.quit()
     await delay(250)
   }
