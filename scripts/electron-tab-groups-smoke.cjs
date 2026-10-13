@@ -191,9 +191,17 @@ async function mainPhase() {
   // The tab menu: main resolves the row under the right-click with elementFromPoint.
   lastMenu = null
   await api(win, 'chrome.set({ sidebarPinned: true })')
-  await delay(500)
-  const sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
-  const box = await evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); return { x: Math.round(r.x + 20), y: Math.round(r.y + r.height / 2) } })()`)
+  // Wait until the row is really under its own centre (the pinned sidebar slides in), not a fixed delay:
+  // under load (2 smokes at a time on the Mac runner) 500 ms wasn't always enough.
+  let sidebarView
+  let box
+  await waitFor(async () => {
+    sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
+    box = await evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); const x = Math.round(r.x + 20); const y = Math.round(r.y + r.height / 2); return { x, y, hit: document.elementFromPoint(x, y)?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null } })()`)
+    return box.hit === id.f
+  }, 'the tab row under the pointer in the pinned sidebar').catch((error) => {
+    throw new Error(`${error.message} Last: ${surfaceFor(sidebarView)} view ${JSON.stringify(sidebarView?.getBounds())}, row ${JSON.stringify(box)}`)
+  })
   sidebarView.webContents.emit('context-menu', { preventDefault() {} }, { x: box.x, y: box.y })
   await waitFor(() => lastMenu && lastMenu.some((item) => item.label === 'Remove from Group'), 'the tab menu with group items')
   assert.ok(lastMenu.some((item) => item.label === 'Add Tab to New Group'))

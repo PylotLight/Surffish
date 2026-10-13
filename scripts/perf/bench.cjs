@@ -11,7 +11,7 @@ const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { app, BaseWindow, webContents, ipcMain } = require('electron')
-// SURFFISH_SMOKE_HIDDEN=1 (Mac CI only): windows never show or take focus; applies to base and PR alike
+// SURFFISH_SMOKE_HIDDEN=1|2 (Mac CI only): windows never take focus (2: never shown); applies to base and PR alike
 require('../smoke-hidden.cjs')
 
 const APP_DIR = resolve(process.env.PERF_APP_DIR || process.cwd())
