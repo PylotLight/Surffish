@@ -21,6 +21,9 @@ import type { SavedWindowState } from '../shared/window-geometry'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
 import { createFileTextCache, isOwnerOnlyMode } from '../shared/write-skip'
+import { getProfileDatabase } from './store'
+import { SessionStore } from './store/session-store'
+import { legacyFileNeedsImport, markLegacyFileImported } from './store/legacy-json'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
@@ -137,13 +140,71 @@ export function saveBrowserSession(urls: readonly string[], activeIndex: number,
   }, 600)
 }
 
-/** Every window's tabs (multi-window session); the file stays readable as a one-window session by older builds. */
+let sessionStore: SessionStore | null | undefined
+
+/** The session tables in surffish.db, or null (no database: the JSON file is the only copy). */
+function sqlSessions(): SessionStore | null {
+  if (sessionStore !== undefined) return sessionStore
+  const db = getProfileDatabase()
+  sessionStore = db ? new SessionStore(db) : null
+  return sessionStore
+}
+
+function sessionFilePath(): string {
+  return join(app.getPath('userData'), SESSION_FILE)
+}
+
+/** Remember browser-session.json as written by us, so a later change means another build wrote it. */
+function markSessionFileOurs(): void {
+  const db = getProfileDatabase()
+  if (db && sqlSessions()) {
+    try { markLegacyFileImported(db, SESSION_FILE, sessionFilePath()) } catch { /* bookkeeping only */ }
+  }
+}
+
+/** True when the database now holds `saved`. */
+function saveSessionToDatabase(saved: SavedWindowsSession): boolean {
+  const store = sqlSessions()
+  if (!store) return false
+  try {
+    store.save(saved)
+    return true
+  } catch (error) {
+    console.error('Could not save the session to the database (browser-session.json still has it):', error)
+    return false
+  }
+}
+
+/**
+ * Every window's tabs (multi-window session). Read from surffish.db when it has this device's
+ * session and browser-session.json hasn't been written by anything else since (a fallback run or
+ * an older build); otherwise from the JSON file. The JSON file keeps being written alongside, so
+ * it is always a complete fallback and an older build still restores.
+ */
 export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | null): SavedWindowsSession {
   const raw = readJson(SESSION_FILE)
-  const session = parseWindowsSession(raw, legacyGeometry)
+  let session = parseWindowsSession(raw, legacyGeometry)
+  const store = sqlSessions()
+  const db = getProfileDatabase()
+  let fromDatabase: SavedWindowsSession | null = null
+  if (store && db) {
+    try {
+      fromDatabase = store.savedAt() !== null && !legacyFileNeedsImport(db, SESSION_FILE, sessionFilePath()) ? store.load() : null
+      if (fromDatabase) session = fromDatabase
+    } catch (error) {
+      console.error('Could not read the session from the database; using browser-session.json:', error)
+    }
+  }
+  const normalized = normalizeWindowsSession(session.windows, session.focusedIndex)
+  // Read from JSON (first run with the database, or the file changed): import it now.
+  const inDatabase = fromDatabase !== null || saveSessionToDatabase(normalized)
   // Rewrite the file at startup so a session saved by an older build (credential-like URL parts,
   // world-readable mode) is sanitized and owner-only right away, not only after the next tab change.
-  if (raw !== null && raw !== undefined) writeJson(SESSION_FILE, serializeWindowsSession(normalizeWindowsSession(session.windows, session.focusedIndex)))
+  if ((raw !== null && raw !== undefined) || fromDatabase) {
+    if (writeJson(SESSION_FILE, serializeWindowsSession(normalized)) && inDatabase) markSessionFileOurs()
+  } else if (inDatabase) {
+    markSessionFileOurs()
+  }
   return session
 }
 
@@ -151,7 +212,11 @@ export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[]
   if (sessionPersistenceDisabled) return
   const saved = normalizeWindowsSession(windows, focusedIndex)
   deferWrite('session', () => {
-    if (!sessionPersistenceDisabled) writeJson(SESSION_FILE, serializeWindowsSession(saved))
+    if (sessionPersistenceDisabled) return
+    const wroteJson = writeJson(SESSION_FILE, serializeWindowsSession(saved))
+    // Only mark the JSON file as matching the database when both writes landed; otherwise the
+    // next start sees a changed file and restores from JSON.
+    if (saveSessionToDatabase(saved) && wroteJson) markSessionFileOurs()
   }, 600)
 }
 
@@ -159,7 +224,18 @@ export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[]
 export function clearSavedBrowserSession(): boolean {
   cancelDeferredWrite('session')
   const cleared = writeJson(SESSION_FILE, { version: 1, tabs: [], activeIndex: 0, pinnedTabs: [] })
-  if (cleared) sessionPersistenceDisabled = true
+  const store = sqlSessions()
+  if (store) {
+    try {
+      store.clear()
+    } catch (error) {
+      console.error('Could not clear the session in the database:', error)
+    }
+  }
+  if (cleared) {
+    markSessionFileOurs()
+    sessionPersistenceDisabled = true
+  }
   return cleared
 }
 
