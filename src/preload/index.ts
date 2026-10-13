@@ -13,6 +13,7 @@ import type {
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
+  DefaultBrowserStatus,
   NewTabBackground,
   NewTabBackgroundRefreshResult,
   NewTabPageId,
@@ -66,6 +67,10 @@ const api = {
     navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
     setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
     getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),
+    defaultBrowser: {
+      get: (): Promise<DefaultBrowserStatus> => ipcRenderer.invoke('browser:default-browser:get'),
+      set: (): Promise<DefaultBrowserStatus> => ipcRenderer.invoke('browser:default-browser:set')
+    },
     getTabSleepMinutes: (): Promise<TabSleepMinutes> => ipcRenderer.invoke('browser:tab-sleep:get'),
     setTabSleepMinutes: (minutes: TabSleepMinutes): Promise<TabSleepMinutes | null> => ipcRenderer.invoke('browser:tab-sleep:set', minutes),
     newTabPage: {

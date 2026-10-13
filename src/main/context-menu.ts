@@ -15,6 +15,9 @@ export interface BrowserContextMenuOptions {
   searchEngine: SearchEngineId
   openInNewTab: (url: string) => void
   openInBackgroundTab: (url: string) => void
+  /** The page is a PDF in the built-in viewer: offer Save PDF As… and print through the viewer. */
+  pdfDocument?: boolean
+  printPage?: () => void
 }
 
 function safeHttpUrl(value: string): string | null {
@@ -86,6 +89,17 @@ async function saveUrl(contents: WebContents, window: BaseWindow, url: string, s
     browserSession.removeListener('will-download', onWillDownload)
     throw error
   }
+}
+
+function pdfFilename(pageURL: string): string {
+  let name = 'document'
+  try {
+    name = decodeURIComponent(new URL(pageURL).pathname.split('/').pop() || '') || new URL(pageURL).hostname || name
+  } catch {
+    // Keep the generic name for malformed paths.
+  }
+  const safe = safeFilename(name, 'document')
+  return /\.pdf$/i.test(safe) ? safe : `${safe}.pdf`
 }
 
 function pageFilename(pageURL: string): string {
@@ -184,9 +198,15 @@ export function showBrowserContextMenu(
       items.push({ label: 'Copy Clean Link', toolTip: 'Copy this page’s address without tracking parameters', click: () => clipboard.writeText(cleanLinkUrl(pageUrl)) })
     }
     addSeparator(items)
+    const pdfUrl = options.pdfDocument ? safeHttpUrl(params.pageURL) : null
+    if (pdfUrl) {
+      // Goes through will-download, so it lands in the downloads list like any other file.
+      items.push({ label: 'Save PDF As…', click: () => runMenuTask(saveUrl(contents, options.window, pdfUrl, pdfFilename(pdfUrl))) })
+    } else if (!options.pdfDocument) {
+      items.push({ label: 'Save Page As…', click: () => runMenuTask(savePage(contents, options.window, pageFilename(params.pageURL))) })
+    }
     items.push(
-      { label: 'Save Page As…', click: () => runMenuTask(savePage(contents, options.window, pageFilename(params.pageURL))) },
-      { label: 'Print…', click: () => contents.print() },
+      { label: 'Print…', click: () => options.printPage ? options.printPage() : contents.print() },
       { label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) }
     )
   } else if (!params.isEditable && !params.selectionText.trim() && flags.canSelectAll) {
