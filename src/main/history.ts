@@ -1,52 +1,79 @@
 import { app } from 'electron'
 import { cancelDeferredWrite, deferWrite } from './deferred-writes'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BrowsingHistoryEntry } from '../shared/types'
 import { normalizeFaviconUrl } from '../shared/persistence'
+import { getProfileDatabase } from './store'
+import { HistoryStore } from './store/history-store'
+import { importLegacyHistory, LEGACY_HISTORY_FILE, parseLegacyHistory, scrubLegacyHistory } from './store/history-legacy'
+import { readLegacyJson } from './store/legacy-json'
+
+/**
+ * Browsing history. Stored in the profile database (surffish.db, history_visits) when it opens;
+ * otherwise in browsing-history.json exactly as before (safe fallback). `entries` is an in-memory
+ * cache of the newest MAX_HISTORY_ENTRIES visits either way, which is what the UI reads.
+ *
+ * With SQLite every visit is one indexed insert (no 5,000-entry file rewrite), and up to
+ * MAX_STORED_VISITS stay on disk. If a database write fails mid-run, history drops to the JSON
+ * file for the rest of the run, and the next start merges that file back in.
+ */
 
 const MAX_HISTORY_ENTRIES = 5000
 let loaded = false
 let entries: BrowsingHistoryEntry[] = []
-
-function normalizeHistoryEntry(value: unknown): BrowsingHistoryEntry | null {
-  if (typeof value !== 'object' || value === null) return null
-  const entry = value as Partial<BrowsingHistoryEntry>
-  if (typeof entry.id !== 'string'
-    || typeof entry.url !== 'string'
-    || !/^https?:\/\//i.test(entry.url)
-    || typeof entry.title !== 'string'
-    || typeof entry.visitedAt !== 'number'
-    || !Number.isFinite(entry.visitedAt)) return null
-  const faviconUrl = normalizeFaviconUrl(entry.faviconUrl)
-  return {
-    id: entry.id,
-    url: entry.url,
-    title: entry.title,
-    visitedAt: entry.visitedAt,
-    ...(faviconUrl ? { faviconUrl } : {})
-  }
-}
+let sqlStore: HistoryStore | null | undefined
 
 function historyPath(): string {
-  return join(app.getPath('userData'), 'browsing-history.json')
+  return join(app.getPath('userData'), LEGACY_HISTORY_FILE)
+}
+
+function store(): HistoryStore | null {
+  if (sqlStore !== undefined) return sqlStore
+  const db = getProfileDatabase()
+  if (!db) return (sqlStore = null)
+  try {
+    const candidate = new HistoryStore(db)
+    importLegacyHistory(db, candidate, historyPath())
+    sqlStore = candidate
+  } catch (error) {
+    console.error('History database unavailable; using browsing-history.json:', error)
+    sqlStore = null
+  }
+  return sqlStore
+}
+
+/** Run a database write; on failure fall back to the JSON file for the rest of this run. */
+function write(run: (target: HistoryStore) => void): void {
+  const target = store()
+  if (!target) {
+    persistHistory()
+    return
+  }
+  try {
+    run(target)
+  } catch (error) {
+    console.error('History database write failed; falling back to browsing-history.json:', error)
+    sqlStore = null
+    persistHistory()
+  }
 }
 
 function loadHistory(): void {
   if (loaded) return
   loaded = true
-  const path = historyPath()
-  if (!existsSync(path)) return
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
-    if (Array.isArray(parsed)) {
-      entries = parsed.map(normalizeHistoryEntry).filter((entry): entry is BrowsingHistoryEntry => entry !== null).slice(0, MAX_HISTORY_ENTRIES)
+  const target = store()
+  if (target) {
+    try {
+      entries = target.recent(MAX_HISTORY_ENTRIES)
+      return
+    } catch (error) {
+      console.error('Could not read history from the database:', error)
+      sqlStore = null
     }
-  } catch (error) {
-    console.warn('Could not read browsing history:', error)
-    entries = []
   }
+  entries = parseLegacyHistory(readLegacyJson(historyPath()), MAX_HISTORY_ENTRIES)
 }
 
 function persistHistory(): void {
@@ -74,14 +101,15 @@ export function getBrowsingHistory(): BrowsingHistoryEntry[] {
 export function recordBrowsingVisit(url: string, title: string): void {
   if (!/^https?:\/\//i.test(url)) return
   loadHistory()
-  entries.unshift({
+  const entry: BrowsingHistoryEntry = {
     id: randomUUID(),
     url,
     title: title.trim() || url,
     visitedAt: Date.now()
-  })
+  }
+  entries.unshift(entry)
   entries = entries.slice(0, MAX_HISTORY_ENTRIES)
-  persistHistory()
+  write((target) => { target.add(entry) })
 }
 
 export function updateLatestVisitTitle(url: string, title: string): void {
@@ -90,7 +118,7 @@ export function updateLatestVisitTitle(url: string, title: string): void {
   const entry = entries.find((candidate) => candidate.url === url)
   if (!entry || entry.title === title) return
   entry.title = title
-  persistHistory()
+  write((target) => target.setTitle(entry.id, title))
 }
 
 export function updateLatestVisitFavicon(url: string, faviconUrl: string): void {
@@ -101,15 +129,25 @@ export function updateLatestVisitFavicon(url: string, faviconUrl: string): void 
   const entry = entries.find((candidate) => candidate.url === url)
   if (!entry || entry.faviconUrl === normalizedFaviconUrl) return
   entry.faviconUrl = normalizedFaviconUrl
-  persistHistory()
+  write((target) => target.setFavicon(entry.id, normalizedFaviconUrl))
 }
 
 export function clearBrowsingHistory(): void {
   loadHistory()
   entries = []
-  // Clearing is a privacy action: hit the disk now rather than in a second.
+  // Clearing is a privacy action: hit the disk now rather than in a second, in both stores.
   cancelDeferredWrite('history')
-  writeHistory()
+  const target = store()
+  if (target) {
+    try {
+      target.clear()
+    } catch (error) {
+      console.error('Could not clear history in the database:', error)
+    }
+    scrubLegacyHistory(getProfileDatabase(), historyPath(), null)
+  } else {
+    writeHistory()
+  }
 }
 
 /** Remove entries matching `predicate` (Clear browsing data, Forget this site). Returns how many went. */
@@ -117,8 +155,17 @@ export function removeBrowsingHistory(predicate: (entry: BrowsingHistoryEntry) =
   loadHistory()
   const before = entries.length
   entries = entries.filter((entry) => !predicate(entry))
-  const removed = before - entries.length
-  if (removed > 0) {
+  let removed = before - entries.length
+  const target = store()
+  if (target) {
+    try {
+      // The database may hold older visits than the cache, so count what it removed.
+      removed = Math.max(removed, target.removeWhere(predicate))
+    } catch (error) {
+      console.error('Could not remove history from the database:', error)
+    }
+    scrubLegacyHistory(getProfileDatabase(), historyPath(), predicate)
+  } else if (removed > 0) {
     cancelDeferredWrite('history')
     writeHistory()
   }
@@ -143,6 +190,6 @@ export function importBrowsingHistory(imported: ReadonlyArray<{ url: string; tit
   if (added.length === 0) return 0
   const addedIds = new Set(added.map((entry) => entry.id))
   entries = [...entries, ...added].sort((a, b) => b.visitedAt - a.visitedAt).slice(0, MAX_HISTORY_ENTRIES)
-  persistHistory()
+  write((target) => { target.addMany(added) })
   return entries.reduce((count, entry) => count + (addedIds.has(entry.id) ? 1 : 0), 0)
 }
