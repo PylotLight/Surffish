@@ -39,6 +39,8 @@ jobs:
           git init -q .
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"
           git fetch -q --tags origin main
+          # the work dir persists between runs; an old shallow checkout breaks --resume's ancestry check
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow --tags origin main; fi
           git checkout -q --force -B main origin/main
           git clean -qffdx -e node_modules
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)

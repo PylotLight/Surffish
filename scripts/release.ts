@@ -122,7 +122,10 @@ const tag = `v${version}`
 const tagOnOrigin = Boolean(git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`))
 if (resume) {
   if (!tagOnOrigin) fail(`--resume needs ${tag} on origin already (package.json says ${version})`)
-  if (spawnSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: root }).status !== 0) fail(`${tag} isn't on main`)
+  if (spawnSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: root }).status !== 0) {
+    const shallow = git('rev-parse', '--is-shallow-repository') === 'true'
+    fail(`${tag} isn't on main${shallow ? ' (this clone is shallow: git fetch --unshallow --tags origin main)' : ''}`)
+  }
 } else if (tagOnOrigin) {
   fail(`${tag} already exists on origin (finish it with --resume)`)
 }
