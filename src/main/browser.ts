@@ -1517,8 +1517,10 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
       // A split entry's halves carry their own tab id (data-browser-pane-id) inside the row's.
       const script = `(() => { const el = document.elementFromPoint(${x}, ${y})?.closest('[data-browser-pane-id],[data-browser-tab-id]'); return el?.getAttribute('data-browser-pane-id') ?? el?.getAttribute('data-browser-tab-id') ?? null })()`
       void contents.executeJavaScript(script, true).then((id: unknown) => {
-        if (typeof id === 'string' && getTab(id)) showBrowserTabContextMenu(id)
-        else showTabContextMenu(contents, event, params)
+        if (typeof id === 'string' && getTab(id)) {
+          // Right-click on a tab of a multi-selection: the bulk menu (tab-selection.ts).
+          if (!tabSelectionHooks?.showMenu(id, win)) showBrowserTabContextMenu(id)
+        } else showTabContextMenu(contents, event, params)
       }).catch(() => showTabContextMenu(contents, event, params))
     })
   }
@@ -2360,6 +2362,8 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
   if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
     return runInWindow(owner, () => handleBrowserShortcut(key, shift, tabId, alt, primary))
   }
+  // Cmd/Ctrl+G groups the sidebar's multi-selection when 2+ tabs are selected; otherwise it's Find Next.
+  if (key === 'g' && !shift && !alt && primary && tabSelectionHooks?.groupShortcut()) return true
   for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, CommandShortcut][]) {
     if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue
     if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue
@@ -4203,6 +4207,23 @@ export function listBrowserTabGroups(w = currentWindowState()): { id: string; la
 /** The active tab's group id (palette commands act on it). */
 export function activeBrowserTabGroupId(): string | null {
   return activeTabOf(currentWindowState())?.groupId ?? null
+}
+
+/** The window a tab is in (tab-selection.ts moves a selection into one new window). */
+export function browserWindowOfTab(id: string): BaseWindow | null {
+  return findTab(id)?.win.window ?? null
+}
+
+interface TabSelectionHooks {
+  /** Right-click on tab `id`: show the multi-select menu and return true, or false for the normal tab menu. */
+  showMenu: (id: string, window: BaseWindow) => boolean
+  /** Cmd/Ctrl+G: group the selection and return true, or false to leave the key to Find Next. */
+  groupShortcut: () => boolean
+}
+let tabSelectionHooks: TabSelectionHooks | null = null
+/** tab-selection.ts owns the sidebar multi-select (its state lives in the renderer). */
+export function setTabSelectionHooks(hooks: TabSelectionHooks | null): void {
+  tabSelectionHooks = hooks
 }
 
 type TabGroupHeaderMenuHook = (groupId: string) => MenuItemConstructorOptions[]

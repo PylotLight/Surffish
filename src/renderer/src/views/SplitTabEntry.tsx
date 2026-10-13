@@ -1,4 +1,4 @@
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { BrowserTabSummary } from '../../../shared/types'
 import { TabAudioButton, TabFavicon, PrivateGlyph } from './TabIndicators'
 import './SplitTabEntry.css'
@@ -16,7 +16,7 @@ interface DragHandlers {
  * pane, left to right. Clicking a half shows the split with that pane focused; each half has its
  * own close button and right-click menu (data-browser-pane-id).
  */
-export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onActivate, onMoveBy, titleFor, groupColor }: {
+export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onActivate, onMoveBy, titleFor, groupColor, selected = false, onSelectClick }: {
   entryId: string
   /** The split's tab group colour (it sits in the group's run with the coloured rail). */
   groupColor?: string
@@ -27,12 +27,16 @@ export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onAc
   onActivate: (id: string) => void
   onMoveBy: (offset: number) => void
   titleFor: (tab: BrowserTabSummary) => string
+  /** Part of the sidebar multi-select (the split is selected as a whole). */
+  selected?: boolean
+  /** Multi-select gesture check (Cmd/Shift-click); true = handled, don't open the pane. */
+  onSelectClick?: (event: ReactMouseEvent) => boolean
 }): React.JSX.Element {
   const active = tabs.some((tab) => tab.active)
   const label = tabs.map((tab) => tab.title).join(' | ')
   return (
     <div
-      className={`tab-item tab-split-entry${active ? ' is-active' : ''}${tabs.some((tab) => tab.private) ? ' is-private' : ''}${dragging ? ' is-dragging' : ''}${groupColor ? ' is-grouped' : ''}`}
+      className={`tab-item tab-split-entry${active ? ' is-active' : ''}${tabs.some((tab) => tab.private) ? ' is-private' : ''}${dragging ? ' is-dragging' : ''}${groupColor ? ' is-grouped' : ''}${selected ? ' is-multi-selected' : ''}`}
       style={groupColor ? { '--group-color': groupColor } as React.CSSProperties : undefined}
       data-browser-tab-id={entryId}
       role="tab"
@@ -59,7 +63,7 @@ export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onAc
           className={`tab-split-pane${tab.active ? ' is-focused' : ''}${tab.sleeping ? ' is-sleeping' : ''}`}
           data-browser-pane-id={tab.id}
           title={titleFor(tab)}
-          onClick={() => onActivate(tab.id)}
+          onClick={(event) => { if (!onSelectClick?.(event)) onActivate(tab.id) }}
           onMouseDown={(event) => { if (event.button === 1) event.preventDefault() }}
           onAuxClick={(event) => {
             if (event.button !== 1) return

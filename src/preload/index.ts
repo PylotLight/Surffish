@@ -49,6 +49,7 @@ import { splitViewApi } from './split-view'
 import { spacesApi } from './spaces'
 import { sidebarBackdropApi } from './sidebar-backdrop'
 import { tabGroupsApi } from './tab-groups'
+import { tabSelectionApi } from './tab-selection'
 import { watchersApi } from './watchers'
 import { onTabsChange } from './tab-sync'
 
@@ -192,6 +193,7 @@ const api = {
     spaces: spacesApi,
     sidebarBackdrop: sidebarBackdropApi,
     tabGroups: tabGroupsApi,
+    tabSelection: tabSelectionApi,
     session: {
       clear: (): Promise<boolean> => ipcRenderer.invoke('browser:session:clear')
     },

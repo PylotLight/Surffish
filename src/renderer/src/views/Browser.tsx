@@ -52,6 +52,7 @@ import { useTabDragSort } from './useTabDragSort'
 import { SplitTabEntry } from './SplitTabEntry'
 import { groupTabEntries } from '../../../shared/split-view'
 import { dropTargetGroup, TAB_GROUP_COLOR_VALUES, withGroupHeaders } from '../../../shared/tab-groups'
+import { useTabSelection } from './tab-groups/useTabSelection'
 import { TabGroupHeader } from './tab-groups/TabGroupHeader'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
@@ -546,6 +547,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
   const tabUsage = useTabUsageHints(surface !== 'toolbar')
   const sidebarOnScreen = sidebarVisible && (surface === 'sidebar' || (surface === 'content' && (isLocalNewTab || (sidebarMode !== 'tabs' && sidebarMode !== 'history'))))
+  // Cmd/Ctrl-click and Shift-click multi-select (a split entry stands for all its panes);
+  // only the surface showing the tab list mirrors its selection to main.
+  const activeEntryKey = useMemo(() => tabEntries.find((entry) => entry.kind === 'split' ? entry.tabs.some((tab) => tab.active) : entry.kind === 'tab' && entry.tab.active)?.key ?? null, [tabEntries])
+  const tabSelection = useTabSelection(unpinnedTabIds, (key) => {
+    const entry = tabEntriesByKey.get(key)
+    return entry?.kind === 'split' ? entry.tabs.map((tab) => tab.id) : entry?.kind === 'tab' ? [entry.tab.id] : []
+  }, activeEntryKey, sidebarOnScreen)
   useEffect(() => {
     if (surface !== 'content' || !isLocalNewTab) return
     const rotationTimer = window.setInterval(() => {
@@ -1236,6 +1244,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         ) : (
           <div ref={tabDrag.listRef} className={`tab-list${tabDrag.draggingId ? ' is-drag-sorting' : ''}`} role="tablist" aria-label="Open tabs" onClickCapture={tabDrag.onClickCapture}>
+            {tabSelection.count >= 2 && (
+              <div className="tab-selection-bar" role="toolbar" aria-label="Selected tabs">
+                <span className="tab-selection-count">{tabSelection.count} tabs selected</span>
+                <button type="button" title={`Group the selected tabs (${window.api.platform === 'darwin' ? '⌘G' : 'Ctrl+G'})`} onClick={tabSelection.group}>Group</button>
+                <button className="tab-selection-clear" type="button" aria-label="Clear selection" title="Clear selection (Esc)" onClick={tabSelection.clear}>×</button>
+              </div>
+            )}
             {tabDrag.orderedIds.map((id) => tabEntriesByKey.get(id)).filter((entry) => entry !== undefined).map((entry) => entry.kind === 'group' ? (
               <TabGroupHeader key={entry.key} entryKey={entry.key} group={entry.group} dragging={tabDrag.draggingId === entry.key} handlers={tabDrag.itemHandlers(entry.key)} />
             ) : entry.kind === 'split' ? (
@@ -1247,6 +1262,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 dragging={tabDrag.draggingId === entry.key}
                 animate={sidebarOnScreen}
                 handlers={tabDrag.itemHandlers(entry.key)}
+                selected={tabSelection.selectedKeys.has(entry.key)}
+                onSelectClick={(event) => tabSelection.handleClick(event, entry.key)}
                 onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
                 titleFor={(tab) => withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
                 onActivate={(id) => {
@@ -1256,7 +1273,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               />
             ) : (({ tab }) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}${tab.group ? ' is-grouped' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}${tab.group ? ' is-grouped' : ''}${tabSelection.selectedKeys.has(tab.id) ? ' is-multi-selected' : ''}`}
                 style={tab.group ? { '--group-color': TAB_GROUP_COLOR_VALUES[tab.group.color] } as React.CSSProperties : undefined}
                 key={tab.id}
                 data-browser-tab-id={tab.id}
@@ -1265,7 +1282,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 aria-grabbed={tabDrag.draggingId === tab.id ? true : undefined}
                 tabIndex={0}
                 title={withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
-                onClick={() => {
+                onClick={(event) => {
+                  if (tabSelection.handleClick(event, tab.id)) return
                   void window.api.browser.tabs.activate(tab.id)
                   if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
                 }}
