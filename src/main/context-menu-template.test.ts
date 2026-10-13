@@ -95,4 +95,14 @@ describe('rest of the menu', () => {
   test('PDF editor tabs swap page actions for Save / Back to Viewer', () => {
     expect(labels(buildBrowserContextMenuTemplate(params(), { ...PAGE, pdfEditor: true }, actions()))).toEqual(['Save PDF…', 'Back to Viewer', '—', 'Inspect'])
   })
+
+  test('Take Screenshot… sits with the page actions only when offered', () => {
+    expect(labels(buildBrowserContextMenuTemplate(params(), PAGE, actions()))).not.toContain('Take Screenshot…')
+    const takeScreenshot = mock(() => undefined)
+    const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, hasScreenshot: true }, { ...actions(), takeScreenshot })
+    const names = labels(items)
+    expect(names.indexOf('Take Screenshot…')).toBe(names.indexOf('Save Page As…') + 1)
+    click(items.find((item) => item.label === 'Take Screenshot…'))
+    expect(takeScreenshot).toHaveBeenCalledTimes(1)
+  })
 })

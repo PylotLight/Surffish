@@ -39,6 +39,7 @@ import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase
 import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
 import { restoredTabInactiveSince } from './tab-archive-store'
 import type { TabArchiveCandidate } from '../shared/tab-archive'
+import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -540,7 +541,8 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     pdfEditor: editorTab ? {
       save: () => sendPdfEditorCommand(contents, 'save'),
       backToViewer: () => { closePdfEditor(editorTab.id) }
-    } : undefined
+    } : undefined,
+    takeScreenshot: isBrowserPage && tab.id === activeTabId ? () => { void takeScreenshot('choose') } : undefined
   })
 }
 
@@ -917,7 +919,8 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
     // Cmd/Ctrl+S saves here (and only here), so the page and the app menu never both fire.
-    if (inputEvent.key.toLowerCase() === 's' && !inputEvent.alt) {
+    // Cmd/Ctrl+Shift+S falls through to the screenshot shortcut.
+    if (inputEvent.key.toLowerCase() === 's' && !inputEvent.alt && !inputEvent.shift) {
       event.preventDefault()
       if (!inputEvent.isAutoRepeat) sendPdfEditorCommand(contents, 'save')
       return
@@ -1192,6 +1195,22 @@ export function attachBrowserView(win: BaseWindow): void {
     },
     handleShortcut: (input) => handleBrowserShortcutInput(input)
   })
+  attachScreenshots(win, {
+    getTarget: () => {
+      const tab = getTab()
+      const contents = tab?.view?.webContents
+      if (!tab || !contents || contents.isDestroyed() || isLocalNewTab(tab)) return null
+      return { contents, isPrivate: tab.isPrivate, url: currentUrl(tab) }
+    },
+    getPageBounds: () => ({ ...browserBounds }),
+    focusPage: () => {
+      const contents = getTab()?.view?.webContents
+      if (contents && !contents.isDestroyed()) contents.focus()
+      else focusVisibleShellPage()
+    },
+    flash: (message) => flashLinkStatus(message, browserBounds, 2000),
+    handleShortcut: (input) => handleBrowserShortcutInput(input)
+  })
   win.on('close', (event) => {
     const unsaved = hasUnsavedPdfEdits()
     if (unsaved.length > 0) {
@@ -1209,6 +1228,7 @@ export function attachBrowserView(win: BaseWindow): void {
     cancelActiveMacTrackpadSwipe()
     stopMacTrackpadSwipe()
     detachTabOverview()
+    detachScreenshots()
     destroyLinkStatus()
     findState = { tabId: null, open: false, text: '', result: null }
     tabThumbnails.clear()
@@ -1519,6 +1539,7 @@ export type TabCommand =
   | 'zoomIn' | 'zoomOut' | 'zoomReset'
   | 'history' | 'downloads'
   | 'bookmarkAllTabs' | 'bookmarks'
+  | 'screenshot'
 
 interface CommandShortcut {
   key: string
@@ -1559,7 +1580,9 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   zoomReset: { key: '0', primaryOnly: true, accelerator: 'CmdOrCtrl+0' },
   // Chrome's bindings: Cmd+Y / Cmd+Shift+J on macOS, Ctrl+H / Ctrl+J elsewhere (Ctrl+Y is Redo there).
   history: IS_MAC ? { key: 'y', primaryOnly: true, accelerator: 'Cmd+Y' } : { key: 'h', primaryOnly: true, accelerator: 'Ctrl+H' },
-  downloads: IS_MAC ? { key: 'j', shift: true, primaryOnly: true, accelerator: 'Cmd+Shift+J' } : { key: 'j', primaryOnly: true, accelerator: 'Ctrl+J' }
+  downloads: IS_MAC ? { key: 'j', shift: true, primaryOnly: true, accelerator: 'Cmd+Shift+J' } : { key: 'j', primaryOnly: true, accelerator: 'Ctrl+J' },
+  // Free in Chrome on every platform (it has no screenshot binding); Cmd+Shift+3/4/5 stay with macOS.
+  screenshot: { key: 's', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+S' }
 }
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
@@ -1606,6 +1629,9 @@ export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefi
       return
     case 'bookmarkAllTabs':
       bookmarkAllBrowserTabs()
+      return
+    case 'screenshot':
+      void takeScreenshot('choose')
       return
   }
   const tab = tabId ? getTab(tabId) : undefined

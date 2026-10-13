@@ -51,6 +51,8 @@ export function installAppMenu(): void {
         { label: 'Edit PDF / Back to Viewer', accelerator: APP_SHORTCUTS.editPdf, click: () => { togglePdfEditor() } },
         { label: 'Save Edited PDF…', accelerator: APP_SHORTCUTS.savePdf, click: () => { savePdfEditor() } },
         { type: 'separator' },
+        tabItem('Take Screenshot…', 'screenshot'),
+        { type: 'separator' },
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
         {
