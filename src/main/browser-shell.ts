@@ -39,6 +39,25 @@ interface ShellState {
   syncPageBounds: BrowserShellLayoutSync | null
   layoutScheduled: boolean
   scheduleLayout: () => void
+  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
+  sidebarFrame: { inset: number; radius: number } | null
+  sidebarOverlayShown: boolean
+}
+
+export type SidebarOverlayEvent = 'shown' | 'hidden' | 'prefetch'
+let sidebarOverlayListener: ((window: BaseWindow, event: SidebarOverlayEvent) => void) | null = null
+
+/** sidebar-backdrop.ts: hear when the overlay sidebar opens/closes over a live page (and just before a hover reveal). */
+export function setSidebarOverlayListener(listener: ((window: BaseWindow, event: SidebarOverlayEvent) => void) | null): void {
+  sidebarOverlayListener = listener
+}
+
+function emitSidebarOverlay(shell: ShellState, event: SidebarOverlayEvent): void {
+  try {
+    sidebarOverlayListener?.(shell.window, event)
+  } catch (error) {
+    console.warn('Sidebar overlay listener failed:', error)
+  }
 }
 
 const shells = new Map<BaseWindow, ShellState>()
@@ -121,17 +140,24 @@ function applyShellLayout(shell: ShellState): void {
   shellViews.toolbar.setBounds({ x: 0, y: 0, width, height: toolbarExtent })
   shellViews.toolbar.setVisible(overlayMode)
 
+  // With the native blur on, the view is cut to the card itself (the blur covers the whole view).
+  const inset = shell.sidebarFrame ? Math.min(shell.sidebarFrame.inset, Math.floor(height / 4)) : 0
   shellViews.sidebar.setBounds({
     x: 0,
-    y: 0,
+    y: inset,
     // The visible sidebar covers the complete window; a zero-width hidden layer leaves page pixels interactive.
     width: sidebarVisible
       ? Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, width)
       : 0,
-    height
+    height: Math.max(0, height - inset * 2)
   })
   // Hidden, not just zero-width, while collapsed: nothing in it should paint or animate then.
-  shellViews.sidebar.setVisible(overlayMode && sidebarVisible)
+  const overlayShown = overlayMode && sidebarVisible
+  shellViews.sidebar.setVisible(overlayShown)
+  if (overlayShown !== shell.sidebarOverlayShown) {
+    shell.sidebarOverlayShown = overlayShown
+    emitSidebarOverlay(shell, overlayShown ? 'shown' : 'hidden')
+  }
   shell.syncPageBounds?.(width, height, overlayMode, shell.window)
 }
 
@@ -162,7 +188,9 @@ export function attachBrowserShell(
     pageExitTimer: null,
     syncPageBounds: syncPageBounds ?? null,
     layoutScheduled: false,
-    scheduleLayout: () => scheduleShellLayout(shell)
+    scheduleLayout: () => scheduleShellLayout(shell),
+    sidebarFrame: null,
+    sidebarOverlayShown: false
   }
   shells.set(window, shell)
   for (const contents of shell.renderers.keys()) bindContentsToWindow(contents, window)
@@ -273,6 +301,8 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
     clearPageExitTimer(shell)
     if (input.x <= REVEAL_WIDTH) {
       if (!shell.revealTimer) {
+        // The reveal waits REVEAL_DELAY_MS; start the backdrop capture now so it's ready when it shows.
+        emitSidebarOverlay(shell, 'prefetch')
         shell.revealTimer = setTimeout(() => {
           shell.revealTimer = null
           if (shouldUseNativeOverlays(shell) && shell.chromeState.sidebarMode === 'tabs' && !isSidebarVisible(shell)) {
@@ -433,4 +463,29 @@ export function sendToVisibleShellRenderer(channel: string, ...args: unknown[]):
   target.focus()
   target.send(channel, ...args)
   return true
+}
+
+/** The overlay sidebar view of a window (sidebar-backdrop.ts paints its background). */
+export function getSidebarOverlayView(window: BaseWindow): WebContentsView | null {
+  const shell = shells.get(window)
+  return shell && !shell.window.isDestroyed() ? shell.views.sidebar : null
+}
+
+/** True while the overlay sidebar is on screen above a live page in this window. */
+export function isSidebarOverlayShown(window: BaseWindow): boolean {
+  return Boolean(shells.get(window)?.sidebarOverlayShown)
+}
+
+/** Inset + round the overlay sidebar view to its card (native blur), or back to the full-height strip (null). */
+export function setSidebarOverlayFrame(window: BaseWindow, frame: { inset: number; radius: number } | null): void {
+  const shell = shells.get(window)
+  if (!shell || shell.window.isDestroyed()) return
+  const same = shell.sidebarFrame?.inset === frame?.inset && shell.sidebarFrame?.radius === frame?.radius
+  shell.sidebarFrame = frame ? { ...frame } : null
+  if (!same) applyShellLayout(shell)
+}
+
+/** Every browser window with a shell. */
+export function getShellWindows(): BaseWindow[] {
+  return [...shells.keys()].filter((window) => !window.isDestroyed())
 }

@@ -1,3 +1,4 @@
+import { attachSidebarBackdrop } from './sidebar-backdrop'
 import { BaseWindow, WebContentsView, app, nativeImage, screen, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -232,6 +233,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   win.contentView.addChildView(sidebarView)
   attachBrowserShell(win, { content: contentView, toolbar: toolbarView, sidebar: sidebarView }, rendererDocuments, syncBrowserBoundsToWindow)
   attachBrowserView(win, { private: options.private, session: options.session, adoptTabId: options.adoptTabId })
+  attachSidebarBackdrop(win)
 
   win.on('closed', () => {
     detachBrowserShell(win)

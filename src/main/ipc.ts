@@ -62,6 +62,8 @@ import {
 import { registerNetworkToolsIpc } from './network-tools-ipc'
 import { registerSplitViewIpc } from './split-view-ipc'
 import { registerSpacesIpc } from './spaces-ipc'
+import { registerSidebarBackdropIpc } from './sidebar-backdrop'
+import { registerBookmarksBarIpc } from './bookmarks-bar'
 import { registerTabGroupsIpc } from './tab-groups-ipc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
@@ -110,6 +112,8 @@ export function registerIpc(): void {
   registerNetworkToolsIpc()
   registerSplitViewIpc()
   registerSpacesIpc()
+  registerSidebarBackdropIpc()
+  registerBookmarksBarIpc()
   registerTabGroupsIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
