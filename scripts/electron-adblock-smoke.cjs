@@ -136,7 +136,7 @@ async function run() {
   })
 
   const evaluate = (code) => window.webContents.executeJavaScript(code)
-  const waitFor = async (code, timeout = 5000) => {
+  const waitFor = async (code, timeout = Number(process.env.SMOKE_WAIT_MS || 5000)) => {
     const deadline = Date.now() + timeout
     let value
     do {
