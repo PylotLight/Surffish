@@ -52,7 +52,7 @@ const server = createServer((request, response) => {
 let mainWindow
 const delay = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
 
-async function waitFor(predicate, description, timeout = 20000) {
+async function waitFor(predicate, description, timeout = Number(process.env.SMOKE_WAIT_MS || 20000)) {
   if (process.env.SMOKE_DEBUG) console.log("waiting:", description)
   const deadline = Date.now() + timeout
   let lastError
