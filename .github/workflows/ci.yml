@@ -49,22 +49,14 @@ jobs:
             echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
             echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
           fi
-      - name: Check xvfb + system deps
+      - name: Check xvfb + system deps (baked into the runner image)
         run: |
           missing=""
-          for tool in xvfb-run xdotool; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
-          if sudo -n true 2>/dev/null; then
-            sudo apt-get update
-            [ -z "$missing" ] || sudo apt-get install --no-install-recommends -y xvfb xdotool
-            # Electron runtime libs missing from the ARC runner image (ubuntu-latest has them baked in)
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0 || \
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0
-          else
-            echo "::error::runner is missing:$missing and no passwordless sudo"; exit 1
-          fi
+          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          for lib in libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0; do dpkg -s "$lib" >/dev/null 2>&1 || missing="$missing $lib"; done
+          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
       - name: Start D-Bus (silences Chromium bus spam in containers)
         run: |
-          sudo apt-get install --no-install-recommends -y dbus
           sudo mkdir -p /run/dbus
           sudo dbus-daemon --system --fork 2>/dev/null || true
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
@@ -123,22 +115,14 @@ jobs:
             echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
             echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
           fi
-      - name: Check xvfb + system deps
+      - name: Check xvfb + system deps (baked into the runner image)
         run: |
           missing=""
-          for tool in xvfb-run xdotool; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
-          if sudo -n true 2>/dev/null; then
-            sudo apt-get update
-            [ -z "$missing" ] || sudo apt-get install --no-install-recommends -y xvfb xdotool
-            # Electron runtime libs missing from the ARC runner image (ubuntu-latest has them baked in)
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0 || \
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0
-          else
-            echo "::error::runner is missing:$missing and no passwordless sudo"; exit 1
-          fi
+          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          for lib in libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0; do dpkg -s "$lib" >/dev/null 2>&1 || missing="$missing $lib"; done
+          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
       - name: Start D-Bus (silences Chromium bus spam in containers)
         run: |
-          sudo apt-get install --no-install-recommends -y dbus
           sudo mkdir -p /run/dbus
           sudo dbus-daemon --system --fork 2>/dev/null || true
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
@@ -186,22 +170,14 @@ jobs:
             echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
             echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
           fi
-      - name: Check xvfb + system deps
+      - name: Check xvfb + system deps (baked into the runner image)
         run: |
           missing=""
-          for tool in xvfb-run xdotool; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
-          if sudo -n true 2>/dev/null; then
-            sudo apt-get update
-            [ -z "$missing" ] || sudo apt-get install --no-install-recommends -y xvfb xdotool
-            # Electron runtime libs missing from the ARC runner image (ubuntu-latest has them baked in)
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0 || \
-            sudo apt-get install --no-install-recommends -y libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libgtk-3-0 libxss1 libxtst6 libatspi2.0-0
-          else
-            echo "::error::runner is missing:$missing and no passwordless sudo"; exit 1
-          fi
+          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          for lib in libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libgtk-3-0; do dpkg -s "$lib" >/dev/null 2>&1 || missing="$missing $lib"; done
+          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
       - name: Start D-Bus (silences Chromium bus spam in containers)
         run: |
-          sudo apt-get install --no-install-recommends -y dbus
           sudo mkdir -p /run/dbus
           sudo dbus-daemon --system --fork 2>/dev/null || true
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
