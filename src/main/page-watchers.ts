@@ -424,11 +424,11 @@ export async function watchPageFromTab(contents: WebContents, mode: 'page' | 'pi
   revealPageWatchers(result.watcher.id, 'edit')
 }
 
-async function updateWatcher(id: unknown, patch: unknown): Promise<PageWatchersSnapshot> {
+async function updateWatcher(id: unknown, patch: unknown): Promise<{ ok: true; snapshot: PageWatchersSnapshot } | { ok: false; error: string }> {
   const { isSupportedWatchSelector } = await loadWatchText()
   load()
   const watcher = typeof id === 'string' ? watchers.find((candidate) => candidate.id === id) : undefined
-  if (!watcher) throw new Error('That watcher no longer exists.')
+  if (!watcher) return { ok: false, error: 'That watcher no longer exists.' }
   const record = typeof patch === 'object' && patch !== null ? patch as Record<string, unknown> : {}
   const clean: WatcherPatch = {}
   if (typeof record.title === 'string') clean.title = record.title
@@ -437,15 +437,15 @@ async function updateWatcher(id: unknown, patch: unknown): Promise<PageWatchersS
   if (typeof record.renderJs === 'boolean') clean.renderJs = record.renderJs
   if (typeof record.paused === 'boolean') clean.paused = record.paused
   if (record.seen === true) clean.seen = true
-  if (typeof clean.selector === 'string' && clean.selector.trim() && !isSupportedWatchSelector(clean.selector.trim())) throw new Error('That CSS selector is not supported.')
+  if (typeof clean.selector === 'string' && clean.selector.trim() && !isSupportedWatchSelector(clean.selector.trim())) return { ok: false, error: 'That CSS selector is not supported.' }
   const result = editWatcher(watcher, clean, Date.now())
-  if (!result.ok) throw new Error(result.error)
+  if (!result.ok) return { ok: false, error: result.error }
   replace(result.watcher)
   if (result.watcher.unseen !== watcher.unseen && !result.watcher.unseen) notifications.get(id as string)?.close()
   persist()
   publish()
   schedule()
-  return snapshot()
+  return { ok: true, snapshot: snapshot() }
 }
 
 function deleteWatcher(id: unknown): PageWatchersSnapshot {

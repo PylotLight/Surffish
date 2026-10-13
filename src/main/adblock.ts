@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writ
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ElectronBlocker } from '@ghostery/adblocker-electron'
-import { FILTER_REFRESH_INTERVAL_MS, isFullFilterConfig, isWebPageUrl } from './adblock-policy.ts'
+import { ADBLOCK_CACHE_FILE, FILTER_REFRESH_INTERVAL_MS, isFullFilterConfig, isWebPageUrl } from './adblock-policy.ts'
 import { getExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
 import {
   applyFilterEnvironment,
@@ -22,7 +22,7 @@ import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
 import type { AdblockDiagnostics, AdblockBlockedRequest } from '../shared/types'
 
-const CACHE_FILE = 'adblock-engine-v2.bin'
+const CACHE_FILE = ADBLOCK_CACHE_FILE
 const LEGACY_CACHE_FILES = ['adblock-engine.bin']
 const FILTER_FETCH_TIMEOUT_MS = 20_000
 const FIRST_RUN_WAIT_MS = 8_000

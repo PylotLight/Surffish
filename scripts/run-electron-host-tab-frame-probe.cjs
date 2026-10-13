@@ -1,6 +1,7 @@
 const { spawnSync } = require('node:child_process')
 const { join } = require('node:path')
 const { createRequire } = require('node:module')
+const { smokeChromiumArgs } = require('./smoke-chromium-args.cjs')
 
 const repoRoot = join(__dirname, '..')
 const requireFromProject = createRequire(join(repoRoot, 'package.json'))
@@ -29,4 +30,5 @@ const probeEnvironment = {
   ...process.env,
   SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE: '1'
 }
-run('run loopback-only disposable profile', electronBinary, [probeEntry], probeEnvironment)
+// Smoke-only switches against Chromium's per-renderer OOM-score log spam on Linux CI.
+run('run loopback-only disposable profile', electronBinary, [...smokeChromiumArgs(), probeEntry], probeEnvironment)

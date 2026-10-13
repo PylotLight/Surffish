@@ -1,3 +1,4 @@
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createHash, X509Certificate } = require('node:crypto')
 const { createServer: createHttpServer } = require('node:http')
@@ -13,15 +14,6 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const root = resolve(__dirname, '..')
 const userData = join(tmpdir(), `surffish-security-smoke-${process.pid}`)
-const NETWORK_ONLY_CONFIG = {
-  loadNetworkFilters: true,
-  loadCosmeticFilters: false,
-  loadCSPFilters: false,
-  enableHtmlFiltering: false,
-  enableMutationObserver: false,
-  loadExtendedSelectors: false,
-  loadGenericCosmeticsFilters: false
-}
 const servers = []
 const openSockets = new Set()
 const requests = []
@@ -51,8 +43,8 @@ async function waitFor(predicate, description, timeout = Number(process.env.SMOK
 
 function seedProfile(legacySessionUrl) {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-security-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-security-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`, { mode: 0o600 })
   writeFileSync(join(userData, 'browser-session.json'), `${JSON.stringify({ version: 1, tabs: [legacySessionUrl], activeIndex: 0, pinnedTabs: [] })}\n`, { mode: 0o644 })

@@ -6,6 +6,7 @@
 // hiding (incl. nodes added after load), scriptlets running *before* the page's
 // own inline scripts, scriptlets in iframes, `%` in scriptlet args, and the
 // per-site "allow ads" switch.
+require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { existsSync, mkdtempSync } = require('node:fs')
 const { tmpdir } = require('node:os')

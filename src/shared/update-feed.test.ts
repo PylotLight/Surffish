@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import {
   DEFAULT_UPDATE_FEED_URL,
   DEFAULT_UPDATE_PREFERENCES,
+  INVALID_FEED_URL_MESSAGE,
+  applyUpdateSettings,
   compareSemver,
   decideUpdate,
   describeFeedHttpFailure,
@@ -139,6 +141,19 @@ test('feed URLs: http(s) only, blank means the default', () => {
   assert.equal(normalizeFeedUrl(42), null)
   assert.equal(effectiveFeedUrl({ feedUrl: '' }), DEFAULT_UPDATE_FEED_URL)
   assert.equal(redactFeedUrl('https://user:pw@feeds.example.com/r.atom?token=abc#x'), 'https://feeds.example.com/r.atom?…')
+})
+
+test('settings patches: invalid input is a validation result, never a throw', () => {
+  const base = { ...DEFAULT_UPDATE_PREFERENCES, feedUrl: 'https://feeds.example.com/r.atom' }
+  assert.deepEqual(applyUpdateSettings(base, { feedUrl: 'file:///etc/passwd' }), { ok: false, error: INVALID_FEED_URL_MESSAGE })
+  assert.deepEqual(applyUpdateSettings(base, { feedUrl: 42, betaChannel: true }), { ok: false, error: INVALID_FEED_URL_MESSAGE }, 'nothing applies when one field is bad')
+  assert.equal(applyUpdateSettings(base, null).ok, false)
+  assert.equal(applyUpdateSettings(base, 'https://x.test').ok, false)
+  assert.equal(applyUpdateSettings(base, []).ok, false)
+  assert.deepEqual(applyUpdateSettings(base, { feedUrl: '' }), { ok: true, preferences: { ...base, feedUrl: '' }, changed: true })
+  assert.deepEqual(applyUpdateSettings(base, { betaChannel: true }), { ok: true, preferences: { ...base, betaChannel: true }, changed: true })
+  assert.deepEqual(applyUpdateSettings(base, { feedUrl: ' https://feeds.example.com/r.atom ', betaChannel: 'yes' }), { ok: true, preferences: base, changed: false })
+  assert.equal(base.feedUrl, 'https://feeds.example.com/r.atom', 'the input preferences are not mutated')
 })
 
 test('HTTP failures: a GitHub 404 means the repo is private', () => {

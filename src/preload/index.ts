@@ -35,9 +35,9 @@ import type { ClearBrowsingDataOptions, ClearBrowsingDataResult, CookieSiteSumma
 
 interface SpellcheckState { settings: SpellcheckSettings; available: string[]; active: string[]; osManagedLanguages: boolean }
 interface HttpsOnlyState { enabled: boolean; exceptions: string[] }
-import type { UpdateState } from '../shared/update-feed'
+import type { UpdateSettingsResult, UpdateState } from '../shared/update-feed'
 import type { CommandPaletteOpenRequest, CommandPaletteSettings, CommandPaletteSnapshot } from '../shared/command-palette'
-import type { CustomSearchEngine } from '../shared/search-keywords'
+import type { CustomSearchEngine, CustomSearchEnginesResult } from '../shared/search-keywords'
 import type { DiagnosticsPayload } from '../shared/diagnostics'
 
 type DiagnosticsUpdate = DiagnosticsPayload | null
@@ -99,7 +99,7 @@ const api = {
       check: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:check'),
       skip: (version: string): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:skip', version),
       remindLater: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:remind-later'),
-      setSettings: (settings: { feedUrl?: string; betaChannel?: boolean }): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:settings:set', settings),
+      setSettings: (settings: { feedUrl?: string; betaChannel?: boolean }): Promise<UpdateSettingsResult> => ipcRenderer.invoke('browser:updates:settings:set', settings),
       download: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:download'),
       openInstaller: (): Promise<boolean> => ipcRenderer.invoke('browser:updates:open-installer'),
       revealDownload: (): Promise<boolean> => ipcRenderer.invoke('browser:updates:reveal-download'),
@@ -318,7 +318,7 @@ const api = {
     },
     searchKeywords: {
       get: (): Promise<CustomSearchEngine[]> => ipcRenderer.invoke('browser:search-keywords:get'),
-      set: (engines: CustomSearchEngine[]): Promise<CustomSearchEngine[]> => ipcRenderer.invoke('browser:search-keywords:set', engines),
+      set: (engines: CustomSearchEngine[]): Promise<CustomSearchEnginesResult> => ipcRenderer.invoke('browser:search-keywords:set', engines),
       onChange: (callback: (engines: CustomSearchEngine[]) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, engines: CustomSearchEngine[]): void => callback(engines)
         ipcRenderer.on('browser:search-keywords:changed', listener)

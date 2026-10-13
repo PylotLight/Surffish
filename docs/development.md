@@ -33,6 +33,16 @@ The desktop app embeds Chromium/Blink through Electron. Electron extension suppo
 
 Network filtering uses uBlock Origin filter lists through `@ghostery/adblocker-electron`, including network, cosmetic, and scriptlet rules. A dedicated persistent Chromium session can use an optional local SOCKS5 proxy; it affects this browser session only. The saved proxy choice is off for fresh profiles. Surffish is not an audited privacy browser and does not promise DNS or WebRTC leak protection.
 
+## Electron smoke tests
+
+Every `scripts/electron-*-smoke.cjs` (and the perf / extension probes) requires `scripts/smoke-harness.cjs` first. It:
+
+- Fails a stuck smoke instead of letting it hang: a hard overall limit of `SMOKE_TIMEOUT_MS` (default 4 × `SMOKE_WAIT_MS`, at least 4 minutes; 6 minutes in CI) exits with code 124, the last line the smoke printed, and the open windows and views. Child phases (e.g. the multi-window relaunch) are killed with it.
+- Seeds the adblock engine under the app's real cache name and filter config (`scripts/smoke-adblock-config.cjs`, kept in sync by a unit test), so smokes never download the real filter lists at launch.
+- On Linux with the sandbox off (`ELECTRON_DISABLE_SANDBOX=1` / `--no-sandbox`), adds `--no-zygote` (`scripts/smoke-chromium-args.cjs`; `SMOKE_KEEP_ZYGOTE=1` turns it off). The app itself never gets it. Zygote-forked renderers are non-dumpable, so their `/proc/<pid>/oom_score_adj` is root-owned and the browser logs `Failed to adjust OOM score of renderer … Permission denied (13)` for every renderer. Without a zygote, renderers are launched directly and no write is attempted. Chromium only allows this when the sandbox is off.
+
+The k3s runner has passwordless sudo, so CI runs sandboxed. Chromium picks the user-namespace sandbox there and the OOM-score line still shows up for each renderer. It's harmless. Routing the write through the setuid `chrome-sandbox` helper (`--disable-namespace-sandbox`) doesn't work in the pod: the setuid sandbox can't create its PID namespace ("Failed to move to new namespace … Operation not permitted"). Adding capabilities to the pod securityContext doesn't help either, because the runner isn't root.
+
 ## Further technical references
 
 - [Architecture](architecture.md)

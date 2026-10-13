@@ -2,12 +2,13 @@ const { spawnSync } = require('node:child_process')
 const { join } = require('node:path')
 
 const electronExecutable = require('electron')
+const { smokeChromiumArgs } = require('./smoke-chromium-args.cjs')
 const probeScript = join(__dirname, 'electron-extension-probe.cjs')
 const caseNames = ['chromium-mv2', 'bitwarden-mv2', 'chromium-mv3', 'firefox-mv3']
 const results = []
 
 for (const name of caseNames) {
-  const child = spawnSync(electronExecutable, [probeScript, name], {
+  const child = spawnSync(electronExecutable, [...smokeChromiumArgs(), probeScript, name], {
     encoding: 'utf8',
     timeout: 60_000,
     maxBuffer: 8 * 1024 * 1024,

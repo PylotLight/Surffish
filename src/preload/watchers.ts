@@ -10,7 +10,7 @@ export interface PageWatchersSnapshot {
 export const watchersApi = {
   list: (): Promise<PageWatchersSnapshot> => ipcRenderer.invoke('browser:watchers:list'),
   add: (input: { url: string; title?: string; selector?: string | null; intervalMinutes?: WatchIntervalMinutes; renderJs?: boolean }): Promise<{ ok: true; watcher: PageWatcherSummary } | { ok: false; error: string }> => ipcRenderer.invoke('browser:watchers:add', input),
-  update: (id: string, patch: WatcherPatch): Promise<PageWatchersSnapshot> => ipcRenderer.invoke('browser:watchers:update', id, patch),
+  update: (id: string, patch: WatcherPatch): Promise<{ ok: true; snapshot: PageWatchersSnapshot } | { ok: false; error: string }> => ipcRenderer.invoke('browser:watchers:update', id, patch),
   remove: (id: string): Promise<PageWatchersSnapshot> => ipcRenderer.invoke('browser:watchers:delete', id),
   checkNow: (id: string): Promise<PageWatchersSnapshot> => ipcRenderer.invoke('browser:watchers:check-now', id),
   onChange: (callback: (snapshot: PageWatchersSnapshot) => void): (() => void) => {

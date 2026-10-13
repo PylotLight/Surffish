@@ -1,3 +1,4 @@
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { execFileSync } = require('node:child_process')
@@ -8,15 +9,6 @@ const { pathToFileURL } = require('node:url')
 const { app, BaseWindow, session } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
-const NETWORK_ONLY_CONFIG = {
-  loadNetworkFilters: true,
-  loadCosmeticFilters: false,
-  loadCSPFilters: false,
-  enableHtmlFiltering: false,
-  enableMutationObserver: false,
-  loadExtendedSelectors: false,
-  loadGenericCosmeticsFilters: false
-}
 const userData = join(tmpdir(), `surffish-download-smoke-${process.pid}`)
 const downloadDirectory = join(userData, 'synthetic-downloads')
 const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR
@@ -212,8 +204,8 @@ async function waitForHistory(predicate, description) {
 function seedOfflineProfile() {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
   mkdirSync(downloadDirectory, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`, { mode: 0o600 })
 }

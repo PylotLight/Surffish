@@ -99,6 +99,30 @@ export function parseCustomSearchEngines(value: unknown): CustomSearchEngine[] {
 }
 
 /** Fill `%s` with the encoded query (spaces as `+` look nicer but `%20` works everywhere). */
+/** Result of saving the whole list from Settings: a bad entry is a message for the form, not a throw. */
+export type CustomSearchEnginesResult = { ok: true; engines: CustomSearchEngine[] } | { ok: false; error: string }
+
+/** Validate a full replacement list from the renderer; names the first bad entry so the form can show why. */
+export function validateCustomSearchEngineList(input: unknown): CustomSearchEnginesResult {
+  if (!Array.isArray(input)) return { ok: false, error: 'Expected a list of search engines.' }
+  if (input.length > MAX_CUSTOM_SEARCH_ENGINES) return { ok: false, error: `Up to ${MAX_CUSTOM_SEARCH_ENGINES} search engines.` }
+  const engines = parseCustomSearchEngines(input)
+  if (engines.length === input.length) return { ok: true, engines }
+  const accepted: CustomSearchEngine[] = []
+  for (const candidate of input as Array<Record<string, unknown> | null>) {
+    const engine = {
+      id: String(candidate?.id ?? ''),
+      name: String(candidate?.name ?? ''),
+      keyword: String(candidate?.keyword ?? ''),
+      urlTemplate: String(candidate?.urlTemplate ?? '')
+    }
+    const error = validateCustomSearchEngine(engine, accepted)
+    if (error) return { ok: false, error: `${engine.name || 'Search engine'}: ${error}` }
+    accepted.push(engine)
+  }
+  return { ok: false, error: 'A search engine is invalid.' }
+}
+
 export function buildKeywordSearchUrl(template: string, query: string): string {
   return template.replaceAll('%s', encodeURIComponent(query))
 }

@@ -2,6 +2,7 @@
 // palette-off setting and search keywords. Runs the production build:
 // `bun run build && bun run test:electron-command-palette`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-command-palette-smoke.cjs`).
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdirSync, writeFileSync } = require('node:fs')
@@ -67,8 +68,8 @@ function key(view, keyCode, modifiers = []) {
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
@@ -162,7 +163,9 @@ async function run() {
   key(toolbar, 'Escape')
   const custom = await evaluate(toolbar, 'window.api.browser.searchKeywords.get()')
   assert.deepEqual(custom.map((engine) => engine.keyword), ['g', 'd', 'b', 'yt', 'w', 'gh', 'npm'])
-  await assert.rejects(evaluate(toolbar, 'window.api.browser.searchKeywords.set([{ id: "x", name: "Bad", keyword: "x", urlTemplate: "http://example.com/?q=%s" }])'), /https/)
+  const badEngine = await evaluate(toolbar, 'window.api.browser.searchKeywords.set([{ id: "x", name: "Bad", keyword: "x", urlTemplate: "http://example.com/?q=%s" }])')
+  assert.equal(badEngine.ok, false, 'an invalid engine is a validation result, not a thrown IPC error')
+  assert.match(badEngine.error, /^Bad: .*https/)
   await evaluate(toolbar, '(async () => window.api.browser.searchKeywords.set([...(await window.api.browser.searchKeywords.get()), { id: "so", name: "Stack Overflow", keyword: "so", urlTemplate: "https://stackoverflow.com/search?q=%s" }]))()')
   const navigations = []
   page.webContents.on('did-start-navigation', (_event, url, _inPlace, isMainFrame) => { if (isMainFrame) navigations.push(url) })

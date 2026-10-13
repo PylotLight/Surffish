@@ -68,8 +68,9 @@ function EditForm({ watcher, onDone }: { watcher: PageWatcherSummary; onDone: ()
     setBusy(true)
     setError(null)
     try {
-      await window.api.browser.watchers.update(watcher.id, { title, selector: selector.trim() || null, intervalMinutes: interval, renderJs })
-      onDone()
+      const result = await window.api.browser.watchers.update(watcher.id, { title, selector: selector.trim() || null, intervalMinutes: interval, renderJs })
+      if (result.ok) onDone()
+      else setError(result.error)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : 'Could not save.')
     } finally {
