@@ -28,6 +28,7 @@ import type {
   WebStoreExtensionsState
 } from '../shared/types'
 import type { DownloadEntry } from '../shared/downloads'
+import type { UpdateState } from '../shared/update-feed'
 
 const api = {
   platform: process.platform,
@@ -70,6 +71,27 @@ const api = {
     defaultBrowser: {
       get: (): Promise<DefaultBrowserStatus> => ipcRenderer.invoke('browser:default-browser:get'),
       set: (): Promise<DefaultBrowserStatus> => ipcRenderer.invoke('browser:default-browser:set')
+    },
+    updates: {
+      get: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:get'),
+      check: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:check'),
+      skip: (version: string): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:skip', version),
+      remindLater: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:remind-later'),
+      setSettings: (settings: { feedUrl?: string; betaChannel?: boolean }): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:settings:set', settings),
+      download: (): Promise<UpdateState> => ipcRenderer.invoke('browser:updates:download'),
+      openInstaller: (): Promise<boolean> => ipcRenderer.invoke('browser:updates:open-installer'),
+      revealDownload: (): Promise<boolean> => ipcRenderer.invoke('browser:updates:reveal-download'),
+      revealSettings: (): Promise<void> => ipcRenderer.invoke('browser:updates:reveal-settings'),
+      onChange: (callback: (state: UpdateState) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, state: UpdateState): void => callback(state)
+        ipcRenderer.on('browser:updates:changed', listener)
+        return () => ipcRenderer.removeListener('browser:updates:changed', listener)
+      },
+      onReveal: (callback: () => void): (() => void) => {
+        const listener = (): void => callback()
+        ipcRenderer.on('browser:updates:reveal', listener)
+        return () => ipcRenderer.removeListener('browser:updates:reveal', listener)
+      }
     },
     getTabSleepMinutes: (): Promise<TabSleepMinutes> => ipcRenderer.invoke('browser:tab-sleep:get'),
     setTabSleepMinutes: (minutes: TabSleepMinutes): Promise<TabSleepMinutes | null> => ipcRenderer.invoke('browser:tab-sleep:set', minutes),

@@ -1,0 +1,86 @@
+<!-- Captured from https://github.com/PylotLight/Surffish/releases.atom (2026-10-13); the last two entries are synthetic. -->
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/PylotLight/Surffish/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/PylotLight/Surffish/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/PylotLight/Surffish/releases.atom"/>
+  <title>Release notes from Surffish</title>
+  <updated>2026-10-12T13:40:11Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/1411723069/v0.1.1</id>
+    <updated>2026-10-12T13:42:05Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/PylotLight/Surffish/releases/tag/v0.1.1"/>
+    <title>Surffish v0.1.1</title>
+    <content type="html">&lt;h1&gt;Surffish v0.1.1&lt;/h1&gt;
+&lt;h2&gt;New&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Sign in with Google through a native WebKit helper, with Bramble able to fill the login (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809521628&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/36&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/36/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/36&quot;&gt;#36&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Drag tabs to reorder them (with a smooth animation), or use ⌥⇧↑ / ⌥⇧↓ from the keyboard (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809557249&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/37&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/37/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/37&quot;&gt;#37&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;A New Tab row sits under your last tab (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809557249&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/37&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/37/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/37&quot;&gt;#37&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Settings got a rework: the gear opens and closes it, Esc or clicking a tab gets you out, close button moved to the right, and the layout is wider with bigger text (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809557249&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/37&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/37/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/37&quot;&gt;#37&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;New Tab world clocks now have a city search (Tampa, Seattle and friends) instead of raw time zones (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809557249&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/37&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/37/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/37&quot;&gt;#37&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Install Chrome Web Store extensions: paste a store link or ID in Settings → Integrations, or hit Add to Surffish on the store page. Modern for Hacker News is the first one verified (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5810863774&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/46&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/46/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/46&quot;&gt;#46&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;⌘⇧T reopens the tab you just closed (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5812987747&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/48&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/48/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/48&quot;&gt;#48&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Fixed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;The sidebar no longer collapses or jitters when you open or close a tab (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5812987747&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/48&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/48/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/48&quot;&gt;#48&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Bramble autofill clicks and copy-to-clipboard work again&lt;/li&gt;
+&lt;li&gt;The Bramble autofill &quot;Vault locked · Click to unlock&quot; row (and passkey &quot;Unlock &amp;amp; Use&quot;) now opens the unlock popup instead of doing nothing, dropping down from the Bramble icon (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809647391&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/38&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/38/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/38&quot;&gt;#38&lt;/a&gt;, &lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809848648&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/40&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/40/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/40&quot;&gt;#40&lt;/a&gt;, &lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5809999921&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/42&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/42/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/42&quot;&gt;#42&lt;/a&gt;, &lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5810054460&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/43&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/43/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/43&quot;&gt;#43&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Packaging&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;macOS release is just the Apple-silicon zip now, at about 117 MB with max compression and only English Chromium locales bundled (&lt;a class=&quot;issue-link js-issue-link&quot; data-error-text=&quot;Failed to load title&quot; data-id=&quot;5814406326&quot; data-permission-text=&quot;Title is private&quot; data-url=&quot;https://github.com/PylotLight/Surffish/issues/49&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/PylotLight/Surffish/pull/49/hovercard&quot; href=&quot;https://github.com/PylotLight/Surffish/pull/49&quot;&gt;#49&lt;/a&gt;). The old DMG was about 320 MB and never opened (&quot;not supported on this Mac&quot;)&lt;/li&gt;
+&lt;li&gt;Still unsigned and not notarized. If macOS says it&#39;s damaged, run &lt;code&gt;xattr -cr /Applications/Surffish.app&lt;/code&gt; on a copy you got from the official release&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>PylotLight</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/7006124?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1411723069/v0.1.0</id>
+    <updated>2026-10-12T03:37:50Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/PylotLight/Surffish/releases/tag/v0.1.0"/>
+    <title>Surffish 0.1.0 — Security and Session Privacy</title>
+    <content type="html">&lt;h1&gt;Surffish 0.1.0&lt;/h1&gt;
+&lt;p&gt;An early Apple-silicon release of Surffish, a focused Electron desktop browser.&lt;/p&gt;
+&lt;h2&gt;Highlights&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;A resizable translucent sidebar for tabs, pinned sites, and browsing history.&lt;/li&gt;
+&lt;li&gt;A nature-photo New Tab page with compact favorite and frequent-site shortcuts.&lt;/li&gt;
+&lt;li&gt;Built-in downloads, network ad and tracker blocking, and optional app-level SOCKS5 proxy support.&lt;/li&gt;
+&lt;li&gt;Bramble password-manager integration, with vault setup in a regular browser tab.&lt;/li&gt;
+&lt;li&gt;Per-site controls, Picture in Picture, and persistent site icons.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Security and privacy&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Trusted app surfaces are sandboxed; navigation and privileged IPC are restricted to their expected local documents.&lt;/li&gt;
+&lt;li&gt;Saved session URLs remove fragments and common secret-like query parameters while preserving ordinary search parameters.&lt;/li&gt;
+&lt;li&gt;Bramble release metadata and downloads use the configured browser session and proxy.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Compatibility and limitations&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;macOS Ventura 13 or later; Apple silicon only.&lt;/li&gt;
+&lt;li&gt;This build is unsigned and not notarized. macOS may require Control-click → Open or, after verifying the official app and confirming you trust it, removing its quarantine attribute with &lt;code&gt;xattr -cr /Applications/Surffish.app&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Surffish starts with a fresh profile and does not import legacy Sockfish profile or vault data.&lt;/li&gt;
+&lt;/ul&gt;</content>
+    <author>
+      <name>PylotLight</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/7006124?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1411723069/v0.2.0-beta.1</id>
+    <updated>2026-10-13T01:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/PylotLight/Surffish/releases/tag/v0.2.0-beta.1"/>
+    <title>Surffish v0.2.0 beta 1 (synthetic fixture entry)</title>
+    <content type="html"><![CDATA[<h2>Beta</h2><script>alert("x")</script><p>Try the <a href="javascript:alert(1)" onclick="evil()">new</a> stuff &amp; report back.</p>]]></content>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/1411723069/nightly</id>
+    <updated>2026-10-13T02:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/PylotLight/Surffish/releases/tag/nightly"/>
+    <title>Nightly (synthetic, not semver: ignored)</title>
+    <content type="html">&lt;p&gt;nightly&lt;/p&gt;</content>
+  </entry>
+</feed>
