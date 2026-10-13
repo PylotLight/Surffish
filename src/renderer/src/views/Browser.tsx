@@ -523,19 +523,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     ])].slice(0, 128),
     [addressSuggestions, newTabSites, bookmarkSuggestions]
   )
+  // The origin list is rebuilt on every tab/history update (new array, same origins); key the fetch
+  // on its content so a tab update doesn't re-ask main for every icon from all three surfaces.
+  const siteIconOriginsKey = siteIconOrigins.join('\n')
+  useEffect(() => window.api.browser.siteIcons.onChange(({ origin, faviconUrl }) => {
+    setCachedSiteIcons((current) => current[origin] === faviconUrl ? current : { ...current, [origin]: faviconUrl })
+  }), [])
   useEffect(() => {
+    if (!siteIconOriginsKey) return
     let cancelled = false
-    const unsubscribe = window.api.browser.siteIcons.onChange(({ origin, faviconUrl }) => {
-      setCachedSiteIcons((current) => ({ ...current, [origin]: faviconUrl }))
-    })
-    void window.api.browser.siteIcons.get(siteIconOrigins).then((icons) => {
+    void window.api.browser.siteIcons.get(siteIconOriginsKey.split('\n')).then((icons) => {
       if (!cancelled) setCachedSiteIcons((current) => ({ ...icons, ...current }))
     }).catch(() => undefined)
     return () => {
       cancelled = true
-      unsubscribe()
     }
-  }, [siteIconOrigins])
+  }, [siteIconOriginsKey])
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
   const hasInterstitial = browser.interstitial !== null
   // A main-frame load failure leaves an empty error page: show the in-page error over it instead.
