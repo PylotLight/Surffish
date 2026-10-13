@@ -21,7 +21,7 @@ const dirArg = process.argv.find((arg) => arg.startsWith('--user-data='))
 const userData = dirArg ? dirArg.slice('--user-data='.length) : join(tmpdir(), `surffish-tab-groups-smoke-${process.pid}`)
 const delay = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
 
-async function waitFor(predicate, description, timeout = 20000) {
+async function waitFor(predicate, description, timeout = Number(process.env.SMOKE_WAIT_MS || 20000)) {
   const deadline = Date.now() + timeout
   let lastError
   while (Date.now() < deadline) {
