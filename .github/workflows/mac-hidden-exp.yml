@@ -1,0 +1,102 @@
+name: mac-hidden-exp
+
+# TEMPORARY experiment for the ci/mac-hidden-v2 PR (removed before merge): compares hidden smoke mode
+# v1 (near-invisible windows on screen) with v2 (windows never shown) on the self-hosted Mac runner,
+# with an external window/focus watcher, and benches perf under both.
+on:
+  pull_request:
+    paths:
+      - 'scripts/smoke-hidden.cjs'
+      - 'scripts/ci/**'
+      - '.github/workflows/mac-hidden-exp.yml'
+
+concurrency:
+  group: mac-hidden-exp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: mac hidden v1 vs v2
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'ci/mac-hidden-v2'
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 50
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors"
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      - run: bun run build
+      - name: Window/focus watcher (swiftc; the experiment still runs without it)
+        run: |
+          swiftc -O -o "$RUNNER_TEMP/window-watch" scripts/ci/window-watch.swift || echo "::warning::window-watch did not compile; no external screen evidence"
+          mkdir -p "$RUNNER_TEMP/hidden"
+          printf '| phase | smoke | result | time | hidden-mode verdicts / watcher |\n|---|---|---|---|---|\n' > "$RUNNER_TEMP/hidden/results.md"
+      - name: Smokes, v2 (never shown, throttle=all)
+        env:
+          SURFFISH_SMOKE_HIDDEN: "2"
+        run: bash scripts/ci/hidden-phase.sh v2 "$TESTS"
+      - name: v2 failures again with focusable windows (diagnostic)
+        env:
+          SURFFISH_SMOKE_HIDDEN: "2"
+          SURFFISH_SMOKE_HIDDEN_FOCUSABLE: "1"
+        run: |
+          failed="$(cat "$RUNNER_TEMP/hidden/v2/_failed")"
+          if [ -n "${failed// /}" ]; then bash scripts/ci/hidden-phase.sh v2-focusable "$failed"; else echo "no v2 failures"; fi
+      - name: Smokes, v1 (near-invisible, all hidden incl. tab-groups)
+        env:
+          SURFFISH_SMOKE_HIDDEN: "1"
+        run: bash scripts/ci/hidden-phase.sh v1 "$TESTS"
+      - name: Perf, v1 vs v2 (throttle=visible) vs v2 (throttle=all), interleaved, 3 rounds
+        run: |
+          out="$RUNNER_TEMP/hidden/perf"; mkdir -p "$out"
+          watch="$RUNNER_TEMP/window-watch"
+          for round in 1 2 3; do
+            for m in v1 v2v v2a; do
+              case "$m" in
+                v1) e="SURFFISH_SMOKE_HIDDEN=1" ;;
+                v2v) e="SURFFISH_SMOKE_HIDDEN=2 SURFFISH_SMOKE_HIDDEN_THROTTLE=visible" ;;
+                v2a) e="SURFFISH_SMOKE_HIDDEN=2 SURFFISH_SMOKE_HIDDEN_THROTTLE=all" ;;
+              esac
+              wpid=""; [ -x "$watch" ] && { "$watch" Electron 200 >"$out/_watch-$m-$round.log" 2>&1 & wpid=$!; }
+              env $e bun scripts/perf/run.ts --app "$m=." --runs 1 --out "$out/$m-$round.json" >/dev/null || echo "::warning::perf $m round $round failed"
+              [ -n "$wpid" ] && { kill -TERM "$wpid"; wait "$wpid"; }
+              echo "window-watch perf $m round $round: $(grep -h 'window-watch-json' "$out/_watch-$m-$round.log" 2>/dev/null)" | tee -a "$out/watch-summary.txt"
+              grep -h 'ON SCREEN\|TOOK FOCUS' "$out/_watch-$m-$round.log" 2>/dev/null | head -5
+            done
+          done
+          bun scripts/ci/hidden-perf-merge.ts "$out/all.json" "$out"/v*-*.json | tee "$out/table.md"
+          bun run perf:compare "$out/all.json" --base v1 --head v2v --title "Perf (macOS): hidden v1 (base) vs v2 throttle=visible (head)" --markdown "$out/v2v.md" >/dev/null || true
+          bun run perf:compare "$out/all.json" --base v1 --head v2a --title "Perf (macOS): hidden v1 (base) vs v2 throttle=all (head)" --markdown "$out/v2a.md" >/dev/null || true
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Hidden smoke mode: v1 vs v2"; echo
+            cat "$RUNNER_TEMP/hidden/results.md" 2>/dev/null; echo
+            echo "### Perf medians per mode"; echo; cat "$RUNNER_TEMP/hidden/perf/table.md" 2>/dev/null; echo
+            cat "$RUNNER_TEMP/hidden/perf/v2v.md" 2>/dev/null; echo
+            cat "$RUNNER_TEMP/hidden/perf/v2a.md" 2>/dev/null
+            echo; echo '```'; cat "$RUNNER_TEMP/hidden/perf/watch-summary.txt" 2>/dev/null; echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
