@@ -291,6 +291,9 @@ jobs:
     timeout-minutes: 20
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # Hidden smoke mode (scripts/smoke-hidden.cjs): the runner is someone's laptop in use, so no
+      # Dock icon, no visible window, no focus stealing.
+      SURFFISH_SMOKE_HIDDEN: "1"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -343,6 +346,7 @@ jobs:
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       PERF_RUNS: 3
+      SURFFISH_SMOKE_HIDDEN: "1"
     steps:
       - name: Checkout PR and its base (plain git, no third-party actions needed)
         env:

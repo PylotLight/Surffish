@@ -13,6 +13,8 @@ const childProcess = require('node:child_process')
 const { basename } = require('node:path')
 const { app, BaseWindow } = require('electron')
 const { smokeChromiumArgs } = require('./smoke-chromium-args.cjs')
+// SURFFISH_SMOKE_HIDDEN=1 (Mac CI only): windows never show or take focus (no-op when unset)
+require('./smoke-hidden.cjs')
 
 /** Per-wait budget the smokes already honour (CI sets 90s for software rendering under xvfb). */
 const waitMs = Number(process.env.SMOKE_WAIT_MS) || 20000
