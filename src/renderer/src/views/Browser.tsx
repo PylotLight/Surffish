@@ -73,7 +73,7 @@ import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigat
 // Rarely opened views load on first use (lazy-views); the hooks the always-on UI needs stay eager.
 import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
-  DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, PrivacySettings,
+  DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, PrivacySettings,
   MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
@@ -82,6 +82,7 @@ import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
 import { usePageWatchersEnabled, useUnseenWatcherCount } from './settings/useWatchers'
 import { sidebarModeForWatchers, visibleWatcherSections } from '../../../shared/page-watchers-feature'
+import { useUnreadFeedCount } from './settings/useFeeds'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
 import './toolbar-popovers.css'
@@ -177,15 +178,26 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers' || mode === 'feeds'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers' | 'feeds'>
+
+/** Settings → Integrations has sub-areas; each is its own sidebar mode so links can land on one directly. */
+const INTEGRATIONS_TABS: ReadonlyArray<{ mode: Extract<SettingsSectionMode, 'integrations' | 'feeds'>; label: string }> = [
+  { mode: 'integrations', label: 'Extensions' },
+  { mode: 'feeds', label: 'Feeds' }
+]
+
+/** The top-level settings nav entry a mode belongs to (Feeds lives under Integrations). */
+function settingsNavMode(mode: SidebarMode): SidebarMode {
+  return mode === 'feeds' ? 'integrations' : mode
+}
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
   { mode: 'newtab', label: 'New Tab' },
-  { mode: 'integrations', label: 'Extensions' },
+  { mode: 'integrations', label: 'Integrations' },
   { mode: 'privacy', label: 'Privacy' },
   { mode: 'watchers', label: 'Watchers' },
   { mode: 'site', label: 'This site' },
@@ -381,6 +393,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Settings → General → "Enable page watchers": off hides the Watchers section and its badge.
   const watchersEnabled = usePageWatchersEnabled()
   const unseenWatchers = useUnseenWatcherCount(surface === 'content' && watchersEnabled === true)
+  // Only while Settings is open, so launch never loads the feeds module for a badge.
+  const unreadFeeds = useUnreadFeedCount(surface === 'content' && isSettingsSection(sidebarMode))
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
@@ -1728,10 +1742,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             </section>
           )}
-          {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
+          {SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(sidebarMode)) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
               {visibleWatcherSections(SETTINGS_SECTIONS, watchersEnabled !== false).filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
-                <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}</button>
+                <button key={section.mode} type="button" className={settingsNavMode(sidebarMode) === section.mode ? 'is-current' : ''} aria-current={settingsNavMode(sidebarMode) === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}{section.mode === 'integrations' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread feed items`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}</button>
               ))}
               <button
                 className="settings-subnav-close"
@@ -1751,13 +1765,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {sidebarMode === 'privacy' && <PrivacySettings />}
           {sidebarMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
           {sidebarMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
-          {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
+          {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' || sidebarMode === 'feeds') && (
             <div className={`settings-view settings-view-${sidebarMode}`}>
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>{sidebarMode === 'integrations' ? 'Extensions' : sidebarMode === 'newtab' ? 'New Tab' : 'General'}</h1>
-                  <p>{sidebarMode === 'integrations' ? 'Bramble and Chrome Web Store extensions.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
+                  <h1>{sidebarMode === 'integrations' || sidebarMode === 'feeds' ? 'Integrations' : sidebarMode === 'newtab' ? 'New Tab' : 'General'}</h1>
+                  <p>{sidebarMode === 'integrations' || sidebarMode === 'feeds' ? 'Extensions and feeds.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
+                {(sidebarMode === 'integrations' || sidebarMode === 'feeds') && (
+                  <div className="settings-segmented integrations-tabs" role="tablist" aria-label="Integrations">
+                    {INTEGRATIONS_TABS.map((tab) => (
+                      <button key={tab.mode} type="button" role="tab" aria-selected={sidebarMode === tab.mode} className={sidebarMode === tab.mode ? 'is-selected' : ''} onClick={() => selectSettingsSection(tab.mode)}>
+                        {tab.label}{tab.mode === 'feeds' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </header>
               <div className="settings-content" key={sidebarMode}>
                 {sidebarMode === 'settings' && <>
@@ -1955,6 +1978,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsGroup>
                 <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
                 </>}
+                {/* Lazy chunk: Integrations opening on Extensions never loads the Feeds view. */}
+                {sidebarMode === 'feeds' && <FeedsSettings />}
               </div>
             </div>
           )}

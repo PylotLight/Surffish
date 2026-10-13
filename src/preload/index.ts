@@ -51,6 +51,7 @@ import { sidebarBackdropApi } from './sidebar-backdrop'
 import { tabGroupsApi } from './tab-groups'
 import { tabSelectionApi } from './tab-selection'
 import { watchersApi } from './watchers'
+import { feedsApi } from './feeds'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 
@@ -146,6 +147,7 @@ const api = {
     tabArchive: tabArchiveApi,
     memorySaver: memorySaverApi,
     watchers: watchersApi,
+    feeds: feedsApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)

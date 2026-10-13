@@ -25,6 +25,7 @@ export const ProxyKillSwitchSetting = deferred(() => settings().then((m) => m.Pr
 export const PrivacySettings = deferred(() => settings().then((m) => m.PrivacySettings))
 export const PageWatchersSettings = deferred(() => settings().then((m) => m.PageWatchersSettings))
 export const PageWatchersToggle = deferred(() => settings().then((m) => m.PageWatchersToggle))
+export const FeedsSettings = deferred(() => settings().then((m) => m.FeedsSettings))
 export const SiteDataSettings = deferred(() => settings().then((m) => m.SiteDataSettings))
 export const NetworkRulesSettings = deferred(() => settings().then((m) => m.NetworkRulesSettings))
 export const SiteRouteSettings = deferred(() => settings().then((m) => m.SiteRouteSettings))

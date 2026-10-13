@@ -168,21 +168,21 @@ export function decodeXmlEntities(value: string): string {
   })
 }
 
-function unwrapCdata(value: string): string {
+export function unwrapCdata(value: string): string {
   return value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, (_whole, inner: string) => inner.replace(/[&<>]/g, (char) => (char === '&' ? '&amp;' : char === '<' ? '&lt;' : '&gt;')))
 }
 
-function elementText(block: string, name: string): string {
+export function elementText(block: string, name: string): string {
   const match = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i').exec(block)
   return match ? decodeXmlEntities(unwrapCdata(match[1] ?? '')).trim() : ''
 }
 
-function attribute(tag: string, name: string): string {
+export function attribute(tag: string, name: string): string {
   const match = new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, 'i').exec(tag)
   return match ? decodeXmlEntities(match[2] ?? match[3] ?? '') : ''
 }
 
-function httpUrlOrEmpty(value: string): string {
+export function httpUrlOrEmpty(value: string): string {
   try {
     const url = new URL(value)
     return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : ''
