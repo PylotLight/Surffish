@@ -141,7 +141,9 @@ async function run() {
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const origin = `http://127.0.0.1:${server.address().port}`
   counting = true // startup IPC
+  const tImport = performance.now()
   await import(pathToFileURL(join(APP_DIR, 'out/main/index.js')).href)
+  const mainImportMs = performance.now() - tImport
   await app.whenReady()
   win = await waitFor(() => BaseWindow.getAllWindows()[0], 'window', 30000)
   const tWindow = Date.now() - T_PROCESS_START - seedMs
@@ -150,7 +152,7 @@ async function run() {
   await waitFor(() => toolbar.webContents.executeJavaScript('document.readyState === "complete" && Boolean(window.api)'), 'toolbar api', 30000)
   // First contentful paint of the New Tab page (the toolbar surface never reports FCP).
   const contentFcp = await Promise.race([fcpOf(content.webContents), delay(10000).then(() => NaN)])
-  result.startup = { windowMs: Math.round(tWindow), firstPaintMs: Math.round(contentFcp - T_PROCESS_START - seedMs) }
+  result.startup = { windowMs: Math.round(tWindow), firstPaintMs: Math.round(contentFcp - T_PROCESS_START - seedMs), mainImportMs: round(mainImportMs) }
   step('first paint')
   // Warm-up launch (run.ts, discarded): only pays the first-launch costs, so stop here.
   if (process.env.PERF_WARMUP === '1') return result

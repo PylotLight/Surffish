@@ -83,8 +83,14 @@ export default defineConfig({
         // Custom inputs drop electron-vite's implicit externals; keep runtime
         // deps as real imports exactly like the single-entry build.
         external: ['electron', /^@ghostery\//, 'tldts-experimental'],
+        // Shared chunks sit next to app.js, not under chunks/: main resolves ../renderer, ../preload
+        // and ../native from import.meta.url, and the boot entry makes Rolldown split app code into one.
+        output: { format: 'es', chunkFileNames: '[name]-[hash].js' },
         input: {
-          index: resolve(projectDirectory, 'src/main/index.ts'),
+          // index.js is a tiny boot entry that enables Node's compile cache, then imports app.js
+          // (src/main/index.ts). app.js stays in out/main/: main resolves ../renderer etc. from import.meta.url.
+          index: resolve(projectDirectory, 'src/main/boot.ts'),
+          app: resolve(projectDirectory, 'src/main/index.ts'),
           // Standalone entry so Electron harnesses reuse the production engine wiring.
           'adblock-engine': resolve(projectDirectory, 'src/main/adblock-engine.ts')
         }

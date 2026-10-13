@@ -7,7 +7,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { aggregate, flatten, type Stat } from './metrics.ts'
 import { appPayload } from './app-payload.ts'
 
@@ -42,13 +42,32 @@ const filesUnder = (dir: string, re: RegExp): string[] => {
 }
 const total = (files: string[]) => files.reduce((n, f) => n + sizeOf(f), 0)
 
+/**
+ * Main-process JS evaluated at launch: index.js and everything it imports statically, plus a
+ * top-level `await import()` in index.js itself (the boot entry that turns on the compile cache
+ * before importing the app). Lazy `import()`s elsewhere (reader, sql.js, ...) don't count.
+ */
+export function mainStartupFiles(mainDir: string): string[] {
+  const seen = new Set<string>()
+  const visit = (file: string, entry: boolean) => {
+    if (seen.has(file) || !existsSync(file)) return
+    seen.add(file)
+    const src = readFileSync(file, 'utf8')
+    const specs = [...src.matchAll(/(?:^|[;\n])\s*(?:import|export)\s[^;\n]*?from\s*"(\.[^"]+)"|(?:^|[;\n])\s*import\s*"(\.[^"]+)"/g)].map((m) => m[1] ?? m[2]!)
+    if (entry) specs.push(...[...src.matchAll(/^await import\("(\.[^"]+)"\)/gm)].map((m) => m[1]!))
+    for (const spec of specs) visit(resolve(dirname(file), spec), false)
+  }
+  visit(join(mainDir, 'index.js'), true)
+  return [...seen]
+}
+
 /** Build output sizes in bytes. Deterministic, measured once per app. */
 export function bundleSizes(dir: string) {
   const out = join(dir, 'out')
   const html = existsSync(join(out, 'renderer/index.html')) ? readFileSync(join(out, 'renderer/index.html'), 'utf8') : ''
   const eager = [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*rel="modulepreload"[^>]*\shref)="\.\/([^"]+\.m?js)"/g)].map((m) => join(out, 'renderer', m[1]!))
   return {
-    mainJs: sizeOf(join(out, 'main/index.js')),
+    mainJs: total(mainStartupFiles(join(out, 'main'))),
     mainTotal: total(filesUnder(join(out, 'main'), /\.(c|m)?js$/)),
     preload: total(filesUnder(join(out, 'preload'), /\.(c|m)?js$/)),
     rendererEagerJs: total([...new Set(eager)]),

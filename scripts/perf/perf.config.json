@@ -20,7 +20,7 @@
     "darwin": { "noisyFail": false }
   },
   "metrics": {
-    "bundle.mainJs": { "kind": "deterministic", "label": "main bundle (index.js)", "unit": "KB" },
+    "bundle.mainJs": { "kind": "deterministic", "label": "main JS at startup (index.js + imports)", "unit": "KB" },
     "bundle.mainTotal": { "kind": "deterministic", "label": "main process JS, all chunks", "unit": "KB" },
     "bundle.preload": { "kind": "deterministic", "label": "preload scripts", "unit": "KB" },
     "bundle.rendererEagerJs": { "kind": "deterministic", "label": "renderer JS loaded at startup", "unit": "KB" },
@@ -30,6 +30,7 @@
     "bundle.appFiles": { "kind": "deterministic", "label": "files in app.asar", "unit": "", "abs": 10 },
     "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 150, "stat": "min", "$comment": "best of the runs: a busy pod stalls single cold starts by 0.5-3 s on identical code" },
     "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100, "stat": "min" },
+    "startup.mainImportMs": { "kind": "noisy", "label": "main process JS load (import of out/main/index.js)", "unit": "ms", "abs": 8, "stat": "min" },
     "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 12, "$comment": "batched broadcasts: 146-155 on identical code" },
     "mem1.totalMB": { "kind": "noisy", "label": "memory, 1 tab", "unit": "MB", "abs": 15 },
     "memMid.totalMB": { "kind": "noisy", "label": "memory, 10 tabs", "unit": "MB", "abs": 20 },

@@ -35,9 +35,10 @@ fixture site, then:
 
 | metric | how |
 |---|---|
-| main bundle, main JS (all chunks), preload, renderer JS at startup, renderer JS (all assets), renderer CSS | file sizes in `out/` ("at startup" = the scripts and modulepreloads `index.html` loads) |
+| main JS at startup, main JS (all chunks), preload, renderer JS at startup, renderer JS (all assets), renderer CSS | file sizes in `out/` (main "at startup" = `index.js`, its static imports and its top-level `await import()` of the app; renderer "at startup" = the scripts and modulepreloads `index.html` loads) |
 | packaged app payload, files in app.asar | what electron-builder packs into `app.asar`, approximated: `build.files` plus the production `dependencies` closure from `node_modules`, minus the `build.files` `!` patterns (`scripts/perf/app-payload.ts`). Renderer-only packages belong in `devDependencies`: Vite bundles them, and in `dependencies` they ship again as raw `node_modules` |
 | cold start to window / first paint | process start to the first window, and to the New Tab page's first contentful paint |
+| main process JS load | time to `import()` `out/main/index.js` (parse, compile and evaluate the main bundle; best of the runs) |
 | IPC during startup | every `ipcMain.handle`/`on` call and `webContents.send` until the first page has loaded |
 | memory at 1 / 10 / 30 tabs, GPU process memory, process count | sum over all Surffish processes: PSS on Linux, working set on macOS |
 | IPC messages / payload opening 20 tabs | count and JSON size of every IPC message while tabs 11–30 open |
@@ -49,6 +50,11 @@ fixture site, then:
 
 The tab counts, idle window and cycle count are in `perf.config.json` → `bench` (trim `tabsMax`
 if the job gets too slow).
+
+Since perf pass 3 `out/main/index.js` is a tiny boot entry: it turns on Node's on-disk compile cache
+(`module.enableCompileCache`, in the OS cache dir under `Surffish/node-compile-cache`) and then imports the
+app, so every launch after the first skips compiling the ~1 MB main bundle. `SURFFISH_NO_COMPILE_CACHE=1`
+turns it off. The bench's warm-up launch fills the cache, so the measured runs are warm, like a returning user.
 
 ## Thresholds
 
