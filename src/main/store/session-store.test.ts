@@ -27,7 +27,7 @@ function sampleWindows(): SessionWindowInput[] {
 }
 
 function liveTabIds(db: SurffishDatabase): string[] {
-  return db.all<{ id: string }>('SELECT id FROM session_tabs WHERE deleted_at IS NULL ORDER BY window_id, position').map((row) => row.id)
+  return db.all<{ id: string }>('SELECT t.id FROM session_tabs t JOIN session_windows w ON w.id = t.window_id WHERE t.deleted_at IS NULL ORDER BY w.position, t.position').map((row) => row.id)
 }
 
 test('round-trips windows, tabs, pins, groups, splits and spaces', () => {
@@ -59,6 +59,7 @@ test('saving again only writes rows that changed, and closed tabs become tombsto
   store.save(normalizeWindowsSession(windows, 0))
   const before = Number(db.get<{ seq: number }>('SELECT max(seq) AS seq FROM oplog')!.seq)
   const ids = liveTabIds(db)
+  const closedTabId = db.get<{ id: string }>("SELECT id FROM session_tabs WHERE url = 'https://e.test/'")!.id
 
   store.save(normalizeWindowsSession(windows, 0))
   assert.equal(Number(db.get<{ seq: number }>('SELECT max(seq) AS seq FROM oplog')!.seq), before, 'an unchanged session writes nothing')
@@ -73,7 +74,7 @@ test('saving again only writes rows that changed, and closed tabs become tombsto
 
   // Close window 2.
   store.save(normalizeWindowsSession([windows[0]!], 0))
-  const closed = db.all<{ deleted_at: number | null; url: string }>("SELECT deleted_at, url FROM session_tabs WHERE id = ?", ids[4]!)
+  const closed = db.all<{ deleted_at: number | null; url: string }>("SELECT deleted_at, url FROM session_tabs WHERE id = ?", closedTabId)
   assert.equal(closed.length, 1)
   assert.ok(closed[0]!.deleted_at, 'the closed tab is tombstoned, not deleted')
   assert.equal(closed[0]!.url, '', 'and its tombstone keeps no URL')
