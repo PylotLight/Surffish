@@ -9,6 +9,7 @@ import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
 import { onPageWatchersEnabledChange, pageWatchersEnabled, revealPageWatchers } from './page-watchers-feature'
+import { revealFeeds } from './feeds-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 
@@ -178,6 +179,7 @@ export function installAppMenu(): void {
         { type: 'separator' },
         tabItem('Downloads', 'downloads'),
         ...(pageWatchersEnabled() ? [{ label: 'Page Watchers', click: () => { revealPageWatchers() } }] : []),
+        { label: 'Feeds', click: () => { revealFeeds() } },
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
         ...windowListMenuItems()

@@ -390,17 +390,19 @@ async function run() {
     }
     return null
   }, 'the saved-session privacy control')
-  // Settings sections (#56 and later): Integrations became "Extensions" (Bramble + Web Store) and New Tab
-  // got its own section; site ad blocking lives under "This site".
+  // Settings sections (#56 and later): extensions live under "Integrations" (Extensions | Feeds tabs,
+  // opening on Extensions) and New Tab got its own section; site ad blocking lives under "This site".
   const subnavLabels = await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).map((button) => button.textContent.trim())`)
-  assert.ok(subnavLabels.includes('Extensions') && subnavLabels.includes('New Tab'), `Settings exposes separate Extensions and New Tab sections (${subnavLabels.join(', ')})`)
-  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'Extensions')?.click()`)
-  await waitFor(() => evaluate(settingsView, `document.querySelector('.settings-page-heading-copy h1')?.textContent === 'Extensions'`), 'the Extensions page heading')
+  assert.ok(subnavLabels.includes('Integrations') && subnavLabels.includes('New Tab') && !subnavLabels.includes('Feeds'), `Settings exposes separate Integrations and New Tab sections (${subnavLabels.join(', ')})`)
+  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'Integrations')?.click()`)
+  await waitFor(() => evaluate(settingsView, `document.querySelector('.settings-page-heading-copy h1')?.textContent === 'Integrations'`), 'the Integrations page heading')
   const extensionsControls = await evaluate(settingsView, `({
     bramble: Boolean(document.querySelector('.bramble-settings-section')),
-    generalOnly: Boolean(document.querySelector('[aria-label="Clear saved session"]'))
+    generalOnly: Boolean(document.querySelector('[aria-label="Clear saved session"]')),
+    tab: document.querySelector('.integrations-tabs [aria-selected="true"]')?.textContent.trim() ?? null,
+    feedsMounted: Boolean(document.querySelector('.feed-items-group'))
   })`)
-  assert.deepEqual(extensionsControls, { bramble: true, generalOnly: false }, 'Bramble configuration is grouped in Extensions, apart from General')
+  assert.deepEqual(extensionsControls, { bramble: true, generalOnly: false, tab: 'Extensions', feedsMounted: false }, 'Integrations opens on Extensions (Bramble), apart from General, without mounting Feeds')
   await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'New Tab')?.click()`)
   await waitFor(() => evaluate(settingsView, `Boolean(document.querySelector('[aria-label="Default new tab page"]') && document.querySelector('[aria-label="Show local clock"]'))`), 'the New Tab settings page')
   await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'General')?.click()`)

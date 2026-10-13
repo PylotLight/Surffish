@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Patch Notes &amp; News</title>
+    <link>https://games.example.com/</link>
+    <atom:link href="https://games.example.com/feed.xml" rel="self" type="application/rss+xml" />
+    <description>Game updates</description>
+    <item>
+      <title><![CDATA[Season 4 patch <b>1.2</b> is live]]></title>
+      <link>https://games.example.com/news/season-4</link>
+      <guid isPermaLink="false">games-news-1002</guid>
+      <pubDate>Tue, 13 Oct 2026 09:30:00 GMT</pubDate>
+      <dc:creator>Dev Team</dc:creator>
+      <description>&lt;p&gt;New maps, &lt;a href="https://x"&gt;balance&lt;/a&gt; changes.&lt;/p&gt;</description>
+    </item>
+    <item>
+      <title>Server maintenance</title>
+      <link>/news/maintenance</link>
+      <guid>https://games.example.com/news/maintenance</guid>
+      <pubDate>Mon, 12 Oct 2026 22:00:00 +0000</pubDate>
+      <content:encoded><![CDATA[<p>Down for two hours.</p><script>alert(1)</script>]]></content:encoded>
+    </item>
+    <item>
+      <description>An item with no title, link or guid</description>
+      <pubDate>not a date</pubDate>
+    </item>
+    <item>
+      <title>Server maintenance (duplicate guid)</title>
+      <guid>https://games.example.com/news/maintenance</guid>
+    </item>
+  </channel>
+</rss>

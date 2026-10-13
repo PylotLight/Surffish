@@ -30,6 +30,7 @@ import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
 import { disposePageWatchersFeature, initializePageWatchersFeature, registerPageWatcherIpc } from './page-watchers-feature'
 import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
+import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
 
 installIpcWindowScope()
 app.setName(APP_NAME)
@@ -91,6 +92,7 @@ app.whenReady().then(async () => {
   registerMemorySaverIpc()
   registerReaderIpc()
   registerPageWatcherIpc()
+  registerFeedIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {
@@ -143,6 +145,8 @@ app.whenReady().then(async () => {
   }
   finishDeferredStartup()
   traceStartup('extensions ready, page requests released')
+  // Feeds: the store and poller load now (not at launch); no feeds means no timer.
+  startFeedsAfterFirstPaint()
   try {
     await initializeBramblePoc()
   } catch (error) {
@@ -160,6 +164,7 @@ app.on('before-quit', () => {
   freezeBrowserSession()
   disposeUpdates()
   disposePageWatchersFeature()
+  disposeFeeds()
   disposeMemorySaver()
   disposeBramblePoc()
   disposeWebStoreExtensions()
