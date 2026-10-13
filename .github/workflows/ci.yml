@@ -6,7 +6,17 @@ name: ci
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'Casks/**'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'Casks/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
@@ -17,54 +27,11 @@ permissions:
   contents: read
 
 jobs:
-  quick:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
-    timeout-minutes: 20
-    steps:
-      - name: Checkout (plain git, no third-party actions needed)
-        env:
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          SHA: ${{ github.sha }}
-        run: |
-          git init -q .
-          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
-          git fetch -q --depth 1 origin "$SHA"
-          git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
-      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
-        run: |
-          want="$(tr -d ' \nv' < .bun-version)"
-          export PATH="$HOME/.bun/bin:$PATH"
-          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
-          "$HOME/.bun/bin/bun" --version
-      - run: bun install
-      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
-        run: |
-          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
-          if sudo -n true 2>/dev/null; then
-            sudo chown root:root "$helper" && sudo chmod 4755 "$helper"
-          else
-            echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
-            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
-          fi
-      - name: Check xvfb + system deps (baked into the runner image)
-        run: |
-          missing=""
-          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
-          for soname in libnspr4.so libnss3.so libatk-1.0.so.0 libatk-bridge-2.0.so.0 libcups.so.2 libdrm.so.2 libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3 libXrandr.so.2 libgbm.so.1 libpango-1.0.so.0 libcairo.so.2 libasound.so.2 libgtk-3.so.0 libXss.so.1 libXtst.so.6 libatspi.so.0; do ldconfig -p | grep -q "$soname" || missing="$missing $soname"; done
-          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
-      - name: Start D-Bus (silences Chromium bus spam in containers)
-        run: |
-          sudo mkdir -p /run/dbus
-          sudo dbus-daemon --system --fork 2>/dev/null || true
-          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
-          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
-      - run: bun run typecheck
-      - run: bun run test
-
-  electron:
+  # One Linux job per lane (was quick + overlay + 6 electron lanes = 8 pods). Each lane pays for
+  # checkout + bun + install + build once, then runs its smoke suites two at a time on separate
+  # Xvfb displays (every smoke uses its own temp profile and port 0, so they don't collide).
+  linux:
+    name: linux ${{ matrix.lane }}
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
     timeout-minutes: 30
@@ -75,18 +42,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+        # Longest suite first in each lane so it overlaps the short ones. electron-security alone is
+        # ~100s, so lane A gets the rest of its budget in short suites.
         - lane: A
-          tests: "test:electron-security test:electron-downloads test:electron-table-stakes"
+          unit: false
+          tests: "test:electron-security test:electron-downloads test:electron-table-stakes test:electron-safety test:electron-updates test:electron-command-palette test:electron-bookmarks"
         - lane: B
-          tests: "test:electron-safety test:electron-updates test:electron-command-palette test:electron-bookmarks"
+          unit: false
+          tests: "test:electron-spaces test:electron-split-view test:electron-multi-window test:electron-sidebar-overlay test:electron-tab-archive test:electron-reader-watchers test:electron-screenshot test:electron-network-tools"
         - lane: C
-          tests: "test:electron-multi-window test:electron-tab-archive test:electron-screenshot test:electron-network-tools"
-        - lane: D
-          tests: "test:electron-reader-watchers test:electron-split-view test:electron-spaces test:electron-tab-groups"
-        - lane: E
-          tests: "test:electron-nav-errors test:electron-perf test:electron-pdf-editor test:electron-adblock"
-        - lane: F
-          tests: "test:electron-extensions test:electron-host-bridge"
+          unit: true
+          tests: "test:electron-perf test:electron-extensions test:electron-tab-groups test:electron-pdf-editor test:electron-nav-errors test:electron-adblock test:electron-host-bridge"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -95,16 +61,33 @@ jobs:
         run: |
           git init -q .
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
-          git fetch -q --depth 1 origin "$SHA"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
           git clean -qffdx -e node_modules -e src/native/macos/.build
-      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+      # Set SURFFISH_CI_CACHE on the runner (or mount a writable /cache) to keep bun, its package
+      # cache and the Electron zip across ephemeral pods. Without it nothing changes.
+      - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
+        run: |
+          dir="${SURFFISH_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/surffish; fi
+          if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+            echo "using persistent cache at $dir"
+            {
+              echo "BUN_INSTALL=$dir/bun"
+              echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache"
+              echo "ELECTRON_CACHE=$dir/electron"
+            } >> "$GITHUB_ENV"
+          else
+            echo "no persistent cache mounted, everything downloads fresh"
+            echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
+          fi
+      - name: Bun (pinned to .bun-version, installed into $BUN_INSTALL if missing)
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
-          export PATH="$HOME/.bun/bin:$PATH"
+          export PATH="$BUN_INSTALL/bin:$PATH"
           if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
-          "$HOME/.bun/bin/bun" --version
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          "$BUN_INSTALL/bin/bun" --version
       - run: bun install
       - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
         run: |
@@ -118,9 +101,15 @@ jobs:
       - name: Check xvfb + system deps (baked into the runner image)
         run: |
           missing=""
-          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          for tool in xvfb-run xdotool dbus-daemon flock; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
           for soname in libnspr4.so libnss3.so libatk-1.0.so.0 libatk-bridge-2.0.so.0 libcups.so.2 libdrm.so.2 libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3 libXrandr.so.2 libgbm.so.1 libpango-1.0.so.0 libcairo.so.2 libasound.so.2 libgtk-3.so.0 libXss.so.1 libXtst.so.6 libatspi.so.0; do ldconfig -p | grep -q "$soname" || missing="$missing $soname"; done
           [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
+      - name: Typecheck
+        if: matrix.unit
+        run: bun run typecheck
+      - name: Unit tests
+        if: matrix.unit
+        run: bun run test
       - name: Start D-Bus (silences Chromium bus spam in containers)
         run: |
           sudo mkdir -p /run/dbus
@@ -128,63 +117,23 @@ jobs:
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
           echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
       - run: bun run build
-      - name: Run lane ${{ matrix.lane }} suites
-        run: |
-          for t in ${{ matrix.tests }}; do
-            echo "--- $t"
-            xvfb-run -a bun run "$t" || exit 1
-          done
-
-  overlay:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
-    timeout-minutes: 20
-    env:
-      # Software rendering under xvfb is slower than a real GPU; smoke scripts honor this.
-      SMOKE_WAIT_MS: 90000
-    steps:
-      - name: Checkout (plain git, no third-party actions needed)
+      - name: Run lane ${{ matrix.lane }} suites (2 at a time)
         env:
-          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
-          SHA: ${{ github.sha }}
+          TESTS: ${{ matrix.tests }}
         run: |
-          git init -q .
-          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
-          git fetch -q --depth 1 origin "$SHA"
-          git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
-      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
-        run: |
-          want="$(tr -d ' \nv' < .bun-version)"
-          export PATH="$HOME/.bun/bin:$PATH"
-          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
-          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
-          "$HOME/.bun/bin/bun" --version
-      - run: bun install
-      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
-        run: |
-          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
-          if sudo -n true 2>/dev/null; then
-            sudo chown root:root "$helper" && sudo chmod 4755 "$helper"
-          else
-            echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
-            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
-          fi
-      - name: Check xvfb + system deps (baked into the runner image)
-        run: |
-          missing=""
-          for tool in xvfb-run xdotool dbus-daemon; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
-          for soname in libnspr4.so libnss3.so libatk-1.0.so.0 libatk-bridge-2.0.so.0 libcups.so.2 libdrm.so.2 libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3 libXrandr.so.2 libgbm.so.1 libpango-1.0.so.0 libcairo.so.2 libasound.so.2 libgtk-3.so.0 libXss.so.1 libXtst.so.6 libatspi.so.0; do ldconfig -p | grep -q "$soname" || missing="$missing $soname"; done
-          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
-      - name: Start D-Bus (silences Chromium bus spam in containers)
-        run: |
-          sudo mkdir -p /run/dbus
-          sudo dbus-daemon --system --fork 2>/dev/null || true
-          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
-          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
-      - run: bun run build
-      - name: Probe native sidebar overlay bounds in the production Electron app
-        run: xvfb-run -a bun run test:electron-sidebar-overlay
+          mkdir -p "$RUNNER_TEMP/smoke-logs"
+          run_one() {
+            display="$1" t="$2" log="$RUNNER_TEMP/smoke-logs/$2.log"
+            start=$(date +%s)
+            if xvfb-run -n "$display" bun run "$t" >"$log" 2>&1; then status=ok; else status=FAILED; fi
+            # one suite's log at a time, so parallel output never interleaves
+            flock "$RUNNER_TEMP/smoke-logs/.print" sh -c "echo '::group::$status $t ($(( $(date +%s) - start ))s)'; cat '$log'; echo '::endgroup::'"
+            [ "$status" = ok ] || { echo "::error::$t failed"; return 1; }
+          }
+          export -f run_one
+          i=0
+          for t in $TESTS; do echo "$((100 + i)) $t"; i=$((i + 1)); done \
+            | xargs -P 2 -L 1 bash -c 'run_one "$0" "$1"'
 
   native-macos:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
