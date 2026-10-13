@@ -52,12 +52,14 @@ export function bundleSizes(dir: string) {
   }
 }
 
+// The Electron binary itself (what require('electron') returns), not node_modules/.bin/electron,
+// so no `#!/usr/bin/env node` wrapper process sits between the bench and the app.
 function electronFor(dir: string): string {
   for (const d of [dir, process.cwd()]) {
-    const bin = join(d, 'node_modules/.bin/electron')
-    if (existsSync(bin)) return bin
+    const pkg = join(d, 'node_modules/electron')
+    if (existsSync(join(pkg, 'path.txt'))) return join(pkg, 'dist', readFileSync(join(pkg, 'path.txt'), 'utf8').trim())
   }
-  throw new Error(`no Electron found in ${dir}/node_modules or ${process.cwd()}/node_modules (run bun install)`)
+  throw new Error(`no installed Electron in ${dir}/node_modules or ${process.cwd()}/node_modules (run bun install)`)
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'surffish-perf-'))
@@ -77,8 +79,8 @@ function sample(app: { label: string; dir: string }, n: number): Record<string, 
     })
     const secs = ((Date.now() - started) / 1000).toFixed(1)
     if (r.status === 0 && existsSync(out)) {
-      console.error(`[perf] ${app.label} run ${n} ok (${secs}s)`)
       const s = JSON.parse(readFileSync(out, 'utf8'))
+      console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms`)
       rmSync(out, { force: true })
       return s
     }

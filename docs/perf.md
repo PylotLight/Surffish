@@ -6,14 +6,17 @@ on a regression; timing and memory metrics mostly warn, because shared runners a
 
 - `perf (linux)`: k3s runner pod under xvfb (software rendering, ~2 vCPU). Writes the table to
   the job's step summary and keeps one sticky PR comment up to date.
-- `perf (macos)`: the self-hosted Mac (real GPU, macOS memory accounting). Timing and memory never
-  fail there (the machine is in use); deterministic metrics still can. Step summary always; PR
-  comment only when the runner has `SURFFISH_GH_PROXY` set (see below).
+- `perf (macos)`: opt-in, on the self-hosted Mac (real GPU, macOS memory accounting). Runs only on
+  PRs with the `perf-mac` label or from a manual *Run workflow*. Timing and memory never fail there
+  (the machine is in use); deterministic metrics still can. Step summary always; PR comment only
+  when the runner has `SURFFISH_GH_PROXY` set (see below). It never runs a second `bun install`:
+  the base build shares the PR's `node_modules` when the dependencies match (`bun.lock` and
+  `package.json` outside `scripts`), otherwise the Mac comparison is skipped and the summary says so.
 - `macos smoke`: the core Electron smokes on real macOS (security, table stakes, multi-window,
   tab groups, split view, adblock, nav errors). The sidebar-overlay smoke stays Linux-only because
   it moves the cursor with xdotool.
 
-On push to `main` the perf jobs compare the new commit against the previous `main`, so the step
+On push to `main` the Linux perf job compares the new commit against the previous `main`, so the step
 summary on main doubles as the running baseline. Docs-only changes skip CI (`paths-ignore`).
 
 ## What one bench run measures
@@ -77,11 +80,31 @@ busy laptop are only good for spotting big changes.
   (nothing else in the job uses the proxy) and posts a separate sticky "Perf check (macOS)" comment.
   If the variable is unset or the call fails, the job just logs a warning. The job also logs
   whether the variable is present and the HTTP status of a `GET /repos/…` through it.
-- `SURFFISH_MAC_CI` (repo variable, optional): set to `label` to run `macos smoke` and
-  `perf (macos)` on PRs only when they carry the `mac` label (pushes to `main` always run). Labels
-  are read when the run starts, so push a commit after adding the label.
+- `perf-mac` (PR label): runs `perf (macos)` on that PR. Labels are read when a run starts, so
+  push a commit (or re-open the PR) after adding it; *Run workflow* also runs it, against `main`.
+- `SURFFISH_MAC_CI` (repo variable, optional): set to `label` to run `macos smoke` on PRs only when
+  they carry the `mac` label (pushes to `main` always run).
 - The comment uses the job's `GITHUB_TOKEN` with `pull-requests: write`; a failed post never fails
   the job. Fork PRs don't run CI on these runners at all.
+
+## Bun only, no Node.js in CI
+
+The Mac runner is a managed laptop whose endpoint protection flagged Node.js spawned by Bun
+lifecycle scripts (electron's `install-electron`). Every CI job therefore:
+
+- runs `scripts/ci/bun-as-node.sh` right after installing Bun: it takes the runner's own
+  `externals/node*` directories off `PATH`, puts a `node` → `bun` symlink first, and fails unless
+  `node` resolves to that shim, so `#!/usr/bin/env node` tools (electron's `cli.js` and
+  `install-electron`, electron-vite) run under Bun's Node compatibility mode;
+- runs `bun install` through `scripts/ci/watch-node.sh`, which samples the process table during
+  the install and fails if any real Node.js process shows up (the log says so either way);
+- on the Mac also sets `ELECTRON_SKIP_BINARY_DOWNLOAD=1`. Electron 44's `install.js` doesn't read
+  it; what keeps it from downloading is that `node_modules/electron/dist` is already installed on
+  the persistent runner (the same `electronDist` that release builds package from).
+
+The perf bench launches the Electron binary directly (`require('electron')`), not through the
+`.bin/electron` wrapper. A repo-wide `bunfig.toml` `[run] bun = true` was left out on purpose: it
+would also change how local `bun run dev` executes tools.
 
 ## Limits
 
