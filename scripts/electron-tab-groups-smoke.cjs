@@ -80,12 +80,14 @@ dialog.showMessageBox = async (...args) => {
   return { response: 0, checkboxChecked: false }
 }
 
-// Record the last native menu so the tab context menu's group items can be checked.
-let lastMenu = null
+// Record the native menus built since the last reset, so the tab context menu's group items can be
+// checked. Every one, not just the last: the app menu is rebuilt too (focus/tab changes) and could
+// land right after the tab menu.
+let menus = []
 const buildFromTemplate = Menu.buildFromTemplate.bind(Menu)
 Menu.buildFromTemplate = (template) => {
   const menu = buildFromTemplate(template)
-  lastMenu = template
+  menus.push(template)
   menu.popup = () => undefined
   return menu
 }
@@ -189,7 +191,7 @@ async function mainPhase() {
   assert.equal(await api(win, `commands.run(${json(`group.add:${groupId}`)})`), true, 'Add Tab to Group from the palette')
   assert.equal((await tabsOf(win)).find((tab) => tab.id === id.f).group?.id, groupId)
   // The tab menu: main resolves the row under the right-click with elementFromPoint.
-  lastMenu = null
+  menus = []
   await api(win, 'chrome.set({ sidebarPinned: true })')
   // Wait until the row is really under its own centre (the pinned sidebar slides in), not a fixed delay:
   // under load (2 smokes at a time on the Mac runner) 500 ms wasn't always enough.
@@ -203,8 +205,8 @@ async function mainPhase() {
     throw new Error(`${error.message} Last: ${surfaceFor(sidebarView)} view ${JSON.stringify(sidebarView?.getBounds())}, row ${JSON.stringify(box)}`)
   })
   sidebarView.webContents.emit('context-menu', { preventDefault() {} }, { x: box.x, y: box.y })
-  await waitFor(() => lastMenu && lastMenu.some((item) => item.label === 'Remove from Group'), 'the tab menu with group items')
-  assert.ok(lastMenu.some((item) => item.label === 'Add Tab to New Group'))
+  const tabMenu = await waitFor(() => menus.find((template) => template.some((item) => item.label === 'Remove from Group')), 'the tab menu with group items')
+  assert.ok(tabMenu.some((item) => item.label === 'Add Tab to New Group'))
 
   // --- the archive keeps the group label
   assert.equal(await api(win, `tabArchive.archive(${json(id.f)})`), true)
