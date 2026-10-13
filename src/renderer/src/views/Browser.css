@@ -3538,3 +3538,33 @@
   width: 14px;
   height: 14px;
 }
+
+/* ---- GPU budget ----
+ * The toolbar and sidebar overlays are separate native views above the page. backdrop-filter
+ * can only sample its own view, which is transparent there, so these blurs were invisible but
+ * still re-ran a 20-38px blur over the whole toolbar/sidebar on every repaint (a loading spinner
+ * repainted the sidebar 60 times a second). The tint gradients stay; the look is unchanged. */
+.app-shell[data-surface='toolbar'] .browser-chrome,
+.app-shell[data-surface='sidebar'] .browser-sidebar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Settings cards sit on the flat shell gradient, so blurring it changed nothing but scroll cost. */
+.settings-group,
+.settings-content > .settings-section {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Nothing in a collapsed or off-screen sidebar may keep animating (audio pulse, spinners). */
+.browser-layout.is-sidebar-motion-paused .browser-sidebar *,
+.browser-layout:not(.is-sidebar-visible) .browser-sidebar * {
+  animation-play-state: paused !important;
+}
+/* One compositor layer per tab row (30+ layers over the glass sidebar) only pays off while a drag
+ * is moving rows; promote them for the drag alone. */
+.tab-item {
+  will-change: auto;
+}
+.tab-list.is-drag-sorting .tab-item {
+  will-change: transform;
+}

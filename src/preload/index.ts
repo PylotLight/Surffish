@@ -37,6 +37,9 @@ interface HttpsOnlyState { enabled: boolean; exceptions: string[] }
 import type { UpdateState } from '../shared/update-feed'
 import type { CommandPaletteOpenRequest, CommandPaletteSettings, CommandPaletteSnapshot } from '../shared/command-palette'
 import type { CustomSearchEngine } from '../shared/search-keywords'
+import type { DiagnosticsPayload } from '../shared/diagnostics'
+
+type DiagnosticsUpdate = DiagnosticsPayload | null
 
 const api = {
   platform: process.platform,
@@ -299,6 +302,19 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, engines: CustomSearchEngine[]): void => callback(engines)
         ipcRenderer.on('browser:search-keywords:changed', listener)
         return () => ipcRenderer.removeListener('browser:search-keywords:changed', listener)
+      }
+    },
+    diagnostics: {
+      /** Start (true) or stop (false) sampling; resolves with a first snapshot when starting. */
+      watch: (watching: boolean): Promise<DiagnosticsUpdate> => ipcRenderer.invoke('browser:diagnostics:watch', watching),
+      kill: (pid: number): Promise<boolean> => ipcRenderer.invoke('browser:diagnostics:kill', pid),
+      reloadTab: (tabId: string): Promise<boolean> => ipcRenderer.invoke('browser:diagnostics:reload-tab', tabId),
+      discardTab: (tabId: string): Promise<boolean> => ipcRenderer.invoke('browser:diagnostics:discard-tab', tabId),
+      /** Every 2 s while any Diagnostics view samples; null when sampling stops. */
+      onChange: (callback: (snapshot: DiagnosticsUpdate) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, snapshot: DiagnosticsUpdate): void => callback(snapshot)
+        ipcRenderer.on('browser:diagnostics', listener)
+        return () => ipcRenderer.removeListener('browser:diagnostics', listener)
       }
     },
     network: {

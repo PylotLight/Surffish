@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import type { BrowserTabSummary } from '../../../shared/types'
 
 /** Favicon / loading spinner, audio mute button and pinned-tab icon used by the tab sidebar. */
-export function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
+/**
+ * `animate` is false while this surface's sidebar is off screen: SMIL keeps ticking (and
+ * repainting the blurred sidebar) even under visibility:hidden, so the arc then sits still.
+ */
+export function TabFavicon({ tab, animate = true }: { tab: BrowserTabSummary; animate?: boolean }): React.JSX.Element {
   const [iconFailed, setIconFailed] = useState(false)
   useEffect(() => setIconFailed(false), [tab.faviconUrl])
   return (
@@ -14,7 +18,7 @@ export function TabFavicon({ tab }: { tab: BrowserTabSummary }): React.JSX.Eleme
               gets rasterised into a layer and wobbles into a lumpy squircle at favicon size. */}
           <g>
             <circle className="tab-spinner-arc" cx="12" cy="12" r="9" pathLength="100" />
-            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite" />
+            {animate && <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite" />}
           </g>
         </svg>
       ) : tab.faviconUrl && !iconFailed

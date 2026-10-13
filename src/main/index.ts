@@ -2,6 +2,7 @@ import { app, BaseWindow } from 'electron'
 import { dirname, join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
+import { registerDiagnosticsIpc } from './diagnostics'
 import { initializeBrowserProxy } from './proxy'
 import { createWindow, setMainWindowCloseHandler } from './window'
 import { setBrowserSearchEngine } from './browser'
@@ -73,6 +74,7 @@ app.whenReady().then(async () => {
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath)
   registerIpc()
   registerUpdateIpc()
+  registerDiagnosticsIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {

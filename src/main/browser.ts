@@ -35,6 +35,7 @@ import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitial
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
+import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -377,9 +378,14 @@ function toggleTabBookmark(id: string): void {
 }
 
 function applyTabBounds(): void {
+  const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0
   for (const tab of tabs) {
     if (!tab.view) continue
     const visible = tab.id === activeTabId
+    // Only the page on screen stays in the window. A zero-size view still counts as visible on
+    // macOS, so background tabs used to keep running rAF/timers at full speed and kept the GPU
+    // process waking up; detached + hidden, Chromium throttles them like Chrome's background tabs.
+    if (browserWindow && !browserWindow.isDestroyed()) setPageViewOnScreen(browserWindow, tab.view, visible && pageAreaShown)
     tab.view.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
   }
 }
@@ -428,7 +434,7 @@ function disposeTabView(tab: BrowserTab): void {
   // Clear the reference first so its destroyed event cannot remove the logical tab.
   tab.view = null
   detachNetworkInspector(view.webContents)
-  if (browserWindow && !browserWindow.isDestroyed()) browserWindow.contentView.removeChildView(view)
+  if (browserWindow && !browserWindow.isDestroyed()) setPageViewOnScreen(browserWindow, view, false)
   if (!view.webContents.isDestroyed()) view.webContents.close()
   applyTabBounds()
 }
@@ -487,6 +493,8 @@ function activateTabInternal(id: string): boolean {
   tab.pauseAutoplayUntilVisited = false
   activeTabId = id
   ensureTabLoaded(tab)
+  // Attach the view before focusing it; a detached view can't take focus.
+  applyTabBounds()
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
     contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
@@ -613,12 +621,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       nodeIntegrationInSubFrames: true,
       ...(tab.isPrivate ? { session: getPrivateSession() } : { partition: BROWSER_SESSION_PARTITION }),
       // On for every tab; the session decides (private tabs: off unless the user opts in).
-      spellcheck: true
+      spellcheck: true,
+      // Explicit: background tabs must be throttled (timers, rAF) once they leave the screen.
+      backgroundThrottling: true
     }
   })
   tab.view = view
-  // Site tabs are always below the local toolbar, sidebar, and full-app surfaces.
-  browserWindow.contentView.addChildView(view, 0)
+  // Site tabs are always below the local toolbar, sidebar, and full-app surfaces. applyTabBounds
+  // attaches the view (at index 0) only while it is the tab on screen.
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
@@ -648,6 +658,15 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (isCurrentContents()) zoomTab(tab, direction === 'in' ? 'in' : 'out')
   })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  // A background tab whose renderer died (crash, OOM, or "Kill process" in Task Manager) goes to
+  // sleep instead of holding a dead view; selecting it reloads it. The active tab keeps its view
+  // so Reload works in place.
+  contents.on('render-process-gone', (_event, details) => {
+    if (details.reason === 'clean-exit' || !isCurrentContents() || activeTabId === tab.id) return
+    setImmediate(() => {
+      if (isCurrentContents() && activeTabId !== tab.id) hibernateTab(tab)
+    })
+  })
   guardPageDragRegions(contents)
   contents.on('media-started-playing', () => {
     if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || tab.id === activeTabId || contents.isDestroyed()) return
@@ -849,11 +868,12 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
       webSecurity: true,
       allowRunningInsecureContent: false,
       nodeIntegrationInSubFrames: false,
-      spellcheck: !tab.isPrivate
+      spellcheck: !tab.isPrivate,
+      backgroundThrottling: true
     }
   })
   tab.view = view
-  browserWindow.contentView.addChildView(view, 0)
+  // Attached by applyTabBounds while on screen, like site views.
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
   const contents = view.webContents
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
@@ -1175,6 +1195,19 @@ export function getBrowserState(): BrowserState {
 
 export function getBrowserTabs(): BrowserTabSummary[] {
   return getTabSummaries()
+}
+
+/** Diagnostics: every tab with its live web contents (null while it sleeps). */
+export function getBrowserTabProcessEntries(): TabProcessEntry[] {
+  return tabs.map((tab) => ({
+    id: tab.id,
+    title: pageTitle(tab),
+    url: currentUrl(tab),
+    active: tab.id === activeTabId,
+    pdfEditor: tab.pdfEditor !== null,
+    extensionPage: tab.extensionPageOrigin !== null,
+    contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+  }))
 }
 
 export function getBrowserTabUrlByWebContentsId(webContentsId: number): string | null {
@@ -1930,7 +1963,7 @@ export function duplicateBrowserTab(id: string): string | null {
   return duplicateId
 }
 
-function reloadBrowserTab(id: string, ignoreCache = false): void {
+export function reloadBrowserTab(id: string, ignoreCache = false): void {
   const tab = getTab(id)
   if (!tab) return
   if (!allowLeavingPdfEditor(tab, 'Reload')) return
