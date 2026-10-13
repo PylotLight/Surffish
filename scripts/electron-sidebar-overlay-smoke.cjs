@@ -251,10 +251,6 @@ async function run() {
     const icon = tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl
     return typeof icon === 'string' && (icon === `${new URL(fixtureUrl).origin}/favicon.svg` || icon.startsWith('data:image/'))
   }, 'the page-declared favicon to appear in the active tab summary')
-    console.log('[overlay-smoke] DEBUG fixtureUrl:', fixtureUrl)
-    console.log('[overlay-smoke] DEBUG wait error:', error instanceof Error ? error.message : String(error))
-    throw error
-  }
   await waitFor(() => {
     fixturePageView = mainWindow.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL() === fixtureUrl)
     return fixturePageView && fixturePageView.getBounds().width > 0
