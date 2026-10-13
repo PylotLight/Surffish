@@ -31,6 +31,7 @@ jobs:
   # checkout + bun + install + build once, then runs its smoke suites two at a time on separate
   # Xvfb displays (every smoke uses its own temp profile and port 0, so they don't collide).
   linux:
+    name: linux ${{ matrix.lane }}
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
     timeout-minutes: 30
