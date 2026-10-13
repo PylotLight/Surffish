@@ -8,7 +8,8 @@ version = '0.1.0'
 
 // Mozilla GeckoView, release channel (https://maven.mozilla.org/maven2/org/mozilla/geckoview/).
 // arm64 only: that's every phone we care about and it keeps the APK ~half the size of the fat AAR.
-def geckoviewVersion = findProperty('surffish.geckoviewVersion') ?: '158.0.20261007201254'
+// 153 is the newest that builds with RN 0.86 (AGP 8.12 / compileSdk 36); 154+ need compileSdk 37.1 + AGP 9.1.
+def geckoviewVersion = findProperty('surffish.geckoviewVersion') ?: '153.0.20260810162159'
 
 android {
   namespace "expo.modules.geckoview"
@@ -21,7 +22,7 @@ android {
 
 dependencies {
   implementation("org.mozilla.geckoview:geckoview-arm64-v8a:${geckoviewVersion}") {
-    // GeckoView is pure Java; its POM asks for kotlin-stdlib 2.4 which RN's Kotlin 2.1 compiler can't read.
+    // GeckoView is pure Java; its POM asks for kotlin-stdlib 2.3 which RN's Kotlin 2.1 compiler can't read.
     exclude group: 'org.jetbrains.kotlin'
   }
   implementation "androidx.core:core-ktx:1.17.0"

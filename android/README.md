@@ -69,10 +69,12 @@ android/
   build/inject-signing.sh
 ```
 
-Engine: GeckoView `158.0.20261007201254` (release channel, `geckoview-arm64-v8a`). Its POM asks for
-androidx.core 1.19 (compileSdk 37 / AGP 9.1) and kotlin-stdlib 2.4; RN 0.86 is on AGP 8.12 / Kotlin
-2.1, so the config plugin pins androidx.core to 1.18 and the module excludes kotlin-stdlib (GeckoView
-is pure Java and only uses long-standing core APIs). Bump the version in
+Engine: GeckoView `153.0.20260810162159` (release channel, `geckoview-arm64-v8a`). That's the newest
+GeckoView that builds on RN 0.86's toolchain (AGP 8.12, compileSdk 36): from 154 on, the AAR metadata
+demands compileSdk 37.1+ and its POM pulls androidx.core 1.19 / lifecycle 2.11, which need AGP 9.1.
+Move to 154+ once Expo/RN ship AGP 9.1 + compileSdk 37. The module excludes kotlin-stdlib (GeckoView is
+pure Java; its POM asks for kotlin-stdlib 2.3 which RN's Kotlin compiler can't read), and the config plugin
+still pins androidx.core to 1.18 if anything asks for 1.19+. Bump the version in
 `modules/gecko-view/android/build.gradle` (or `-Psurffish.geckoviewVersion=`).
 
 Shared code: Metro watches `../src/shared`; only platform-free files are imported (never Electron/main).

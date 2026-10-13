@@ -3,7 +3,7 @@
  * - registers as a browser: VIEW http/https (so it can be the default browser), SEND text/plain
  *   (share a link/text to Surffish), WEB_SEARCH
  * - Mozilla's maven repo for GeckoView
- * - pins androidx.core to 1.18 (GeckoView 158's POM asks for 1.19, which needs compileSdk 37 / AGP 9.1;
+ * - pins androidx.core to 1.18 if anything asks for 1.19+ (needs compileSdk 37 / AGP 9.1; GeckoView 154+ does;
  *   GeckoView only uses long-standing core APIs)
  * - arm64-v8a only (GeckoView AAR is per-ABI; arm64 covers current phones)
  */
