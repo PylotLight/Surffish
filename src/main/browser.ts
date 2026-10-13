@@ -29,6 +29,8 @@ import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle,
 import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
+import { createBroadcastQueue } from '../shared/tab-broadcast'
+import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
 import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
@@ -492,10 +494,8 @@ function publishTabs(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
   keepSplitTabsTogether(w)
   keepTabGroupsTogether(w)
-  sendToWindowRenderers(w.window, 'browser:tabs', getTabSummaries(w))
-  // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
-  if (spacesEnabled()) publishSpaces(w)
-  noteWindowTitles()
+  // Sent once per frame at most, as a diff (see tab-broadcast).
+  broadcastQueue.mark(w, false)
 }
 
 function publishState(w = currentWindowState()): void {
@@ -503,9 +503,22 @@ function publishState(w = currentWindowState()): void {
   const state = getState(w)
   // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
   setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
-  sendToWindowRenderers(w.window, 'browser:state', state)
-  publishTabs(w)
+  broadcastQueue.mark(w, true)
 }
+
+/** A load, title or tab change burst becomes one `browser:state` + one `browser:tabs` diff per frame. */
+const broadcastQueue = createBroadcastQueue<BrowserWindowState>((w, stateChanged) => {
+  if (!isLiveWindow(w)) return
+  if (stateChanged) sendStateToWindowRenderers(w.window, getState(w))
+  sendTabsToWindowRenderers(w.window, getTabSummaries(w))
+  // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
+  if (spacesEnabled()) publishSpaces(w)
+  noteWindowTitles()
+})
+setTabResyncHandler((window) => {
+  const w = windowStateFor(window)
+  if (w) broadcastQueue.mark(w, true)
+})
 
 function publishAllWindows(): void {
   for (const w of [...windowStates]) publishState(w)

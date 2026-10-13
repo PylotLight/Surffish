@@ -217,9 +217,14 @@ async function run() {
   assert.ok(await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing")'), 'toolbar controls use distinct left and right groups')
   // Startup briefly holds a transient fourth view under load; settle instead of single-sampling.
   console.log('[overlay-smoke] initial children:', JSON.stringify(mainWindow.contentView.children.map((view) => { try { return view.webContents && !view.webContents.isDestroyed() ? view.webContents.getURL() || '(blank)' : '(no contents)' } catch { return '(gone)' } })))
-  await waitFor(() => mainWindow.contentView.children.length === 3, 'the initial New Tab to settle on three app surfaces')
+  // The hidden tab-overview view is preloaded ~1.5s after the window opens (a data: URL), so it is not
+  // counted as a page view; only the three shell surfaces may remain for New Tab.
+  const pageLevelChildren = () => mainWindow.contentView.children.filter((view) => {
+    try { return !(view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL().startsWith('data:text/html') && !view.getVisible()) } catch { return true }
+  })
+  await waitFor(() => pageLevelChildren().length === 3, 'the initial New Tab to settle on three app surfaces')
   const initialShell = nativeViewState()
-  assert.equal(mainWindow.contentView.children.length, 3, 'the initial New Tab has three app surfaces and no remote page view')
+  assert.equal(pageLevelChildren().length, 3, 'the initial New Tab has three app surfaces and no remote page view')
   assert.equal(rendererViews.content.getVisible(), true, 'the full React content surface remains visible for New Tab')
   assert.equal(rendererViews.toolbar.getVisible(), false)
   assert.equal(rendererViews.sidebar.getVisible(), false)
