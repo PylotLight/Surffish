@@ -74,3 +74,31 @@ export function writeLegacyJson(path: string, value: unknown): boolean {
     return false
   }
 }
+
+/**
+ * After saving a store to both surffish.db and its JSON file, record whether the JSON file can be
+ * trusted to match the database at the next start:
+ * - both landed: stamp the file as ours, so the next start reads the database;
+ * - the database write failed: drop the stamp, so the next start reads (and re-imports) the JSON;
+ * - only the JSON write failed: keep the old stamp. The file still matches it, so the next start
+ *   reads the database, which has the newer data.
+ */
+export function settleDualWrite(db: SurffishDatabase | null, filename: string, path: string, databaseSaved: boolean, jsonSaved: boolean): void {
+  if (!db) return
+  try {
+    if (databaseSaved && jsonSaved) markLegacyFileImported(db, filename, path)
+    else if (!databaseSaved) db.deleteMeta(metaKey(filename))
+  } catch (error) {
+    console.warn(`Could not update the ${filename} import stamp:`, error)
+  }
+}
+
+/**
+ * True when the database's copy of a store should be read at startup: it has one (`hasSavedCopy`)
+ * and the JSON file is gone or unchanged since Surffish last wrote/imported it. A JSON file changed
+ * by anything else (a `SURFFISH_STORE=json` run, an older build) wins and is imported instead.
+ */
+export function databaseCopyIsCurrent(db: SurffishDatabase, filename: string, path: string, hasSavedCopy: boolean): boolean {
+  if (!hasSavedCopy) return false
+  return !existsSync(path) || !legacyFileNeedsImport(db, filename, path)
+}
