@@ -32,7 +32,7 @@ import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { createBroadcastQueue } from '../shared/tab-broadcast'
 import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
-import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
@@ -502,6 +502,8 @@ function publishTabs(w = currentWindowState()): void {
 
 function publishState(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
+  // Synchronous, so it stays in order with Cmd+Y (the tab broadcast below is coalesced per frame).
+  noteActiveTabForHistoryPanel(w.activeTabId, w.window)
   const state = getState(w)
   // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
   setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
