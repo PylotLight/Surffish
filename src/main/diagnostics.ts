@@ -12,6 +12,7 @@ import { getBrowserSession } from './browser-session'
 import { getBrowserChromeState, getMainWindowRenderers, isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { getLinkStatusContentsId } from './link-status'
 import { getTabOverviewContentsId } from './tab-overview'
+import { getScreenshotContentsId } from './screenshot'
 
 /**
  * Diagnostics / Task Manager. Samples app.getAppMetrics() every 2 s, only while a Diagnostics
@@ -90,6 +91,7 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
   const shell = new Set(getMainWindowRenderers().map((contents) => contents.id))
   const linkStatusId = getLinkStatusContentsId()
   const overviewId = getTabOverviewContentsId()
+  const screenshotId = getScreenshotContentsId()
   for (const contents of allWebContents.getAllWebContents()) {
     if (contents.isDestroyed() || claimed.has(contents.id)) continue
     const pid = safeOsPid(contents)
@@ -112,6 +114,8 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
       occupants.push({ pid, kind: 'overlay', label: 'link status' })
     } else if (contents.id === overviewId) {
       occupants.push({ pid, kind: 'overlay', label: 'tab overview' })
+    } else if (contents.id === screenshotId) {
+      occupants.push({ pid, kind: 'overlay', label: 'screenshot' })
     } else if (url.startsWith('chrome-extension://')) {
       const id = hostOf(url)
       const what = contents.getType() === 'backgroundPage' ? 'background page' : url.includes('offscreen') ? 'offscreen page' : 'page'

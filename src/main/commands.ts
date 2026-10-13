@@ -28,6 +28,7 @@ import { APP_SHORTCUTS } from './app-shortcuts'
 import { getRecentCommandIds, noteCommandUsed, openCommandPalette } from './command-palette'
 import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canArchiveOtherBrowserTabs, closeDuplicateBrowserTabs, hasDuplicateBrowserTabs, restoreLastArchivedTab, runTabArchiveCheck } from './tab-archive'
 import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
+import { takeScreenshot } from './screenshot'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -121,6 +122,12 @@ const COMMANDS: BrowserCommand[] = [
     run: () => setBrowserChromeState({ sidebarPinned: !getBrowserChromeState().sidebarPinned })
   },
   { id: 'view.pip', title: 'Picture in Picture', section: 'View', keywords: ['video', 'pip', 'float'], enabled: activeIsWebPage, refocusPage: true, run: () => browserPictureInPicture() },
+  {
+    id: 'view.screenshot', title: 'Take Screenshot…', accelerator: TAB_COMMAND_SHORTCUTS.screenshot.accelerator, section: 'View',
+    keywords: ['capture', 'snapshot', 'region', 'annotate', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('choose')
+  },
+  { id: 'view.screenshotVisible', title: 'Screenshot Visible Area', section: 'View', keywords: ['capture', 'snapshot', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('visible') },
+  { id: 'view.screenshotFull', title: 'Screenshot Full Page', section: 'View', keywords: ['capture', 'snapshot', 'whole page', 'scrolling', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('full') },
   { id: 'view.history', title: 'Show History', accelerator: TAB_COMMAND_SHORTCUTS.history.accelerator, section: 'View', keywords: ['visited'], run: () => openPanel('history') },
   { id: 'view.downloads', title: 'Show Downloads', accelerator: TAB_COMMAND_SHORTCUTS.downloads.accelerator, section: 'View', run: () => openPanel('downloads') },
 

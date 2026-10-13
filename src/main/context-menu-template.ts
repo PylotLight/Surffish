@@ -19,6 +19,8 @@ export interface ContextMenuTemplateOptions {
   hasPrintPage?: boolean
   hasEditPdf?: boolean
   pdfEditor?: boolean
+  /** Offer Take Screenshot… next to Save Page As / Print. */
+  hasScreenshot?: boolean
   canGoBack: boolean
   canGoForward: boolean
 }
@@ -47,6 +49,7 @@ export interface ContextMenuActions {
   editPdf?(): void
   savePdfEditor?(): void
   backToViewer?(): void
+  takeScreenshot?(): void
 }
 
 /** Chrome shows a handful of guesses; more than this is noise in a context menu. */
@@ -193,6 +196,7 @@ export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, 
       items.push({ label: 'Save Page As…', click: () => actions.savePage() })
     }
     if (options.pdfDocument && options.hasEditPdf) items.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
+    if (options.hasScreenshot) items.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
     items.push(
       { label: 'Print…', click: () => actions.print() },
       { label: 'Inspect', click: () => actions.inspect(params.x, params.y) }

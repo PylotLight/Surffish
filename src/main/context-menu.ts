@@ -21,6 +21,8 @@ export interface BrowserContextMenuOptions {
   editPdf?: () => void
   /** The tab is the PDF editor: replace the page actions with Save / Back to Viewer. */
   pdfEditor?: { save: () => void; backToViewer: () => void }
+  /** Offer Take Screenshot… (the page is the active tab). */
+  takeScreenshot?: () => void
 }
 
 function runMenuTask(task: Promise<void>): void {
@@ -103,6 +105,7 @@ export function showBrowserContextMenu(
     hasPrintPage: Boolean(options.printPage),
     hasEditPdf: Boolean(options.editPdf),
     pdfEditor: Boolean(options.pdfEditor),
+    hasScreenshot: Boolean(options.takeScreenshot),
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward()
   }, {
@@ -128,7 +131,8 @@ export function showBrowserContextMenu(
     inspect: (x, y) => contents.inspectElement(x, y),
     editPdf: options.editPdf,
     savePdfEditor: options.pdfEditor?.save,
-    backToViewer: options.pdfEditor?.backToViewer
+    backToViewer: options.pdfEditor?.backToViewer,
+    takeScreenshot: options.takeScreenshot
   })
   if (items.length === 0) return false
 
