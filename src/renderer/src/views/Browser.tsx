@@ -67,7 +67,7 @@ import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigat
 import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
   DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, PrivacySettings,
-  ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
+  MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
@@ -1790,6 +1790,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <option value={60}>After 1 hour</option>
                     </select>
                   </SettingsRow>
+                  <MemorySaverSettings />
                   <SettingsRow label="Saved session" hint="Tabs restore on next launch. Tokens, codes and other credential-like URL parts are stripped before saving.">
                     <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear</button>
                   </SettingsRow>

@@ -43,6 +43,7 @@ import type { DiagnosticsPayload } from '../shared/diagnostics'
 type DiagnosticsUpdate = DiagnosticsPayload | null
 import { bookmarksApi } from './bookmarks'
 import { tabArchiveApi } from './tab-archive'
+import { memorySaverApi } from './memory-saver'
 import { networkToolsApi, proxyRoutingApi } from './network-tools'
 import { splitViewApi } from './split-view'
 import { spacesApi } from './spaces'
@@ -141,6 +142,7 @@ const api = {
     },
     bookmarks: bookmarksApi,
     tabArchive: tabArchiveApi,
+    memorySaver: memorySaverApi,
     watchers: watchersApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
