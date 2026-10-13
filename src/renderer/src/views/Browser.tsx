@@ -261,6 +261,22 @@ function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin }: { site: Pin
   )
 }
 
+function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: string; faviconUrl?: string | null }): React.JSX.Element {
+  const origin = httpOrigin(url)
+  const candidates = useMemo(
+    () => [...new Set([faviconUrl, origin ? `${origin}/favicon.ico` : null].filter((value): value is string => Boolean(value)))],
+    [faviconUrl, origin]
+  )
+  const [candidateIndex, setCandidateIndex] = useState(0)
+  useEffect(() => setCandidateIndex(0), [candidates])
+  const source = candidates[candidateIndex]
+  const host = origin ? new URL(origin).hostname.replace(/^www\./i, '') : ''
+  const letter = title.trim().slice(0, 1).toUpperCase() || host.slice(0, 1).toUpperCase() || '↗'
+  return source
+    ? <img src={source} alt="" referrerPolicy="no-referrer" onError={() => setCandidateIndex((index) => index + 1)} />
+    : <span>{letter}</span>
+}
+
 export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   const browserChromeRef = useRef<HTMLElement>(null)
@@ -430,10 +446,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const newTabSites = useMemo(() => [...favoriteSites, ...frequentlyVisitedSites], [favoriteSites, frequentlyVisitedSites])
   const siteIconOrigins = useMemo(
     () => [...new Set([
+      // Suggestion rows first, so the dropdown's icons are always inside the cap.
+      ...addressSuggestions.map((suggestion) => httpOrigin(suggestion.url)).filter((origin): origin is string => Boolean(origin)),
       ...newTabSites.map((site) => site.origin),
       ...bookmarkSuggestions.slice(0, 400).map((bookmark) => bookmarkOrigin(bookmark.url)).filter((origin): origin is string => Boolean(origin))
     ])].slice(0, 128),
-    [newTabSites, bookmarkSuggestions]
+    [addressSuggestions, newTabSites, bookmarkSuggestions]
   )
   useEffect(() => {
     let cancelled = false
@@ -1379,7 +1397,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => void navigateTo(suggestion.url)}
                     >
-                      <span className="suggestion-mark" aria-hidden="true">{suggestion.source === 'Pinned site' || suggestion.source === 'Bookmark' ? '★' : suggestion.source === 'Open tab' ? '▤' : '◷'}</span>
+                      <span className="suggestion-mark" aria-hidden="true"><SuggestionFavicon url={suggestion.url} title={suggestion.title} faviconUrl={(suggestion.source === 'Open tab' ? tabs.find((tab) => tab.url === suggestion.url)?.faviconUrl : null) ?? cachedSiteIcons[httpOrigin(suggestion.url) ?? '']} /></span>
                       <span className="suggestion-main"><strong>{suggestion.title || suggestion.url}</strong><small>{suggestion.url}</small></span>
                       <span className="suggestion-source">{suggestion.source}</span>
                     </button>
