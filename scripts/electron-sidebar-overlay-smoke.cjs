@@ -257,6 +257,16 @@ async function run() {
     } catch (dumpError) {
       console.log('[overlay-smoke] DEBUG tabs.get threw:', dumpError instanceof Error ? dumpError.message : String(dumpError))
     }
+    try {
+      console.log('[overlay-smoke] DEBUG content-tabs-get:', JSON.stringify(await evaluate(rendererViews.content, 'window.api.browser.tabs.get().length')))
+    } catch (dumpError2) {
+      console.log('[overlay-smoke] DEBUG content tabs.get threw:', dumpError2 instanceof Error ? dumpError2.message : String(dumpError2))
+    }
+    try {
+      console.log('[overlay-smoke] DEBUG toolbar-state-url:', (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url)
+    } catch (dumpError3) {
+      console.log('[overlay-smoke] DEBUG toolbar state threw:', dumpError3 instanceof Error ? dumpError3.message : String(dumpError3))
+    }
     throw error
   }
   await waitFor(() => {
