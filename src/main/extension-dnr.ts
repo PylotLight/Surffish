@@ -17,7 +17,7 @@
  * extension's worker has run.
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { join, resolve, sep } from 'node:path'
+import { resolve, sep } from 'node:path'
 import type { Session } from 'electron'
 import {
   applyDnrHeaderRules,
@@ -397,11 +397,6 @@ function headerHook(details: Electron.OnBeforeSendHeadersListenerDetails | Elect
 /** Drop per-tab allowAllRequests state for a closed tab. */
 export function forgetExtensionDnrTab(webContentsId: number): void {
   allowAllByContents.delete(webContentsId)
-}
-
-/** The state file next to an installed extension's versions. */
-export function extensionDnrStatePath(extensionRoot: string): string {
-  return join(extensionRoot, 'dnr-state.json')
 }
 
 // Smoke instrumentation only (scripts/electron-extension-dnr-smoke.cjs reads the per-request cost).

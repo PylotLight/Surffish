@@ -719,6 +719,12 @@ export function manifestDnrRulesets(manifest: unknown): DnrRulesetDeclaration[] 
   return result
 }
 
+/** Install-time summary of static rulesets (`rules: null` = unreadable), for the compatibility gate. */
+export function summarizeDnrRulesets(rulesets: ReadonlyArray<{ id: string; rules: unknown }>): { total: number; unsupported: number; reasons: string[]; unreadable: string[] } {
+  const unreadable = rulesets.filter((ruleset) => !Array.isArray(ruleset.rules)).map((ruleset) => ruleset.id)
+  return { ...unsupportedDnrRuleCount(rulesets.filter((ruleset) => Array.isArray(ruleset.rules))), unreadable }
+}
+
 /** Rules in a ruleset Surffish can't enforce, for the install compatibility summary. */
 export function unsupportedDnrRuleCount(rulesets: ReadonlyArray<{ rules: unknown }>): { total: number; unsupported: number; reasons: string[] } {
   let total = 0

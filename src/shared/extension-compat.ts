@@ -6,7 +6,6 @@
  * This never executes extension code. "Supported" means nothing the manifest declares or the code
  * references falls outside what Electron provides or Surffish shims; it is not a runtime guarantee.
  */
-import { unsupportedDnrRuleCount } from './dnr'
 import { findExtensionApiReferences, type ExtensionSourceFile } from './password-extension-compat'
 
 export type ExtensionCompatLevel = 'supported' | 'partial' | 'unsupported'
@@ -176,11 +175,11 @@ function hasPrefix(api: string, prefix: string): boolean {
   return api === prefix || api.startsWith(`${prefix}.`)
 }
 
-/** A static declarativeNetRequest ruleset as read from the package (`rules: null` when unreadable). */
-export interface ExtensionDnrRuleset { id: string; rules: unknown }
+/** What the static declarativeNetRequest rulesets hold (shared/dnr.ts summarizeDnrRulesets). */
+export interface ExtensionDnrSummary { total: number; unsupported: number; reasons: string[]; unreadable: string[] }
 
-/** Analyse a manifest plus the extension's JS sources (and its static DNR rulesets, when given). */
-export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFiles: readonly ExtensionSourceFile[] = [], dnrRulesets: readonly ExtensionDnrRuleset[] = []): ExtensionCompatibility {
+/** Analyse a manifest plus the extension's JS sources (and a summary of its static DNR rulesets, when given). */
+export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFiles: readonly ExtensionSourceFile[] = [], dnrSummary?: ExtensionDnrSummary): ExtensionCompatibility {
   const manifest = record(manifestInput)
   const gaps = new Set<string>()
   const blockers = new Set<string>()
@@ -221,9 +220,8 @@ export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFile
   const usesDnr = permissions.includes('declarativeNetRequest') || permissions.includes('declarativeNetRequestWithHostAccess') || record(manifest.declarative_net_request).rule_resources !== undefined
   if (usesDnr) {
     shimmed.add(DNR_SHIM_LABEL)
-    const unreadable = dnrRulesets.filter((ruleset) => !Array.isArray(ruleset.rules)).map((ruleset) => ruleset.id)
+    const { total, unsupported, reasons, unreadable } = dnrSummary ?? { total: 0, unsupported: 0, reasons: [], unreadable: [] }
     if (unreadable.length > 0) gaps.add(`declarativeNetRequest ruleset ${unreadable.join(', ')} could not be read, so its rules are not applied`)
-    const { total, unsupported, reasons } = unsupportedDnrRuleCount(dnrRulesets.filter((ruleset) => Array.isArray(ruleset.rules)))
     if (unsupported > 0) {
       const why = reasons.length > 0 ? ` (${reasons.slice(0, 2).join('; ')})` : ''
       gaps.add(`${unsupported} of ${total} declarativeNetRequest rules can’t be enforced by Surffish${why}`)

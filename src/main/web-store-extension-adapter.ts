@@ -9,7 +9,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, relative, resolve, sep } from 'node:path'
 import type { ExtensionSourceFile } from '../shared/extension-compat'
-import { manifestDnrRulesets } from '../shared/dnr'
 
 export const EXTENSION_SHIM_FILE = 'surffish-extension-shim.js'
 export const EXTENSION_BACKGROUND_WRAPPER_FILE = 'surffish-extension-background.js'
@@ -454,7 +453,10 @@ export function collectExtensionSources(directory: string): ExtensionSourceFile[
 export function collectDnrRulesets(directory: string, manifest: unknown): Array<{ id: string; rules: unknown }> {
   const root = resolve(directory)
   const result: Array<{ id: string; rules: unknown }> = []
-  for (const declaration of manifestDnrRulesets(manifest)) {
+  const dnr = isRecord(manifest) && isRecord(manifest.declarative_net_request) ? manifest.declarative_net_request : {}
+  const declarations = (Array.isArray(dnr.rule_resources) ? dnr.rule_resources : []).filter(isRecord)
+    .filter((entry): entry is { id: string; path: string } => typeof entry.id === 'string' && typeof entry.path === 'string')
+  for (const declaration of declarations) {
     const relativePath = safeRelativePath(declaration.path)
     if (!relativePath) continue
     const file = resolve(root, relativePath)

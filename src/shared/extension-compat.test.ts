@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { analyzeExtensionCompatibility } from './extension-compat.ts'
+import { summarizeDnrRulesets } from './dnr.ts'
 
 // Shaped like Modern for Hacker News 1.14 (manifest + the API calls it makes); no extension code is vendored.
 const MHN_LIKE_MANIFEST = {
@@ -80,7 +81,7 @@ const COOKIES_LIKE_SOURCES = [{
 
 test('declarativeNetRequest + webNavigation extensions install (Surffish enforces the rules)', () => {
   const rules = [{ id: 1, priority: 1, action: { type: 'block' }, condition: { urlFilter: '/iubenda_cs', resourceTypes: ['script'], excludedInitiatorDomains: ['skuola.net'] } }]
-  const result = analyzeExtensionCompatibility(COOKIES_LIKE_MANIFEST, COOKIES_LIKE_SOURCES, [{ id: 'ruleset_1', rules }])
+  const result = analyzeExtensionCompatibility(COOKIES_LIKE_MANIFEST, COOKIES_LIKE_SOURCES, summarizeDnrRulesets([{ id: 'ruleset_1', rules }]))
   assert.deepEqual(result.blockers, [])
   assert.equal(result.level, 'partial')
   assert.ok(result.shimmed.some((entry) => entry.startsWith('declarativeNetRequest')))
@@ -97,7 +98,7 @@ test('declarativeNetRequest gaps are precise: unenforceable rules and feedback A
   ]
   const result = analyzeExtensionCompatibility({ ...MHN_LIKE_MANIFEST, permissions: ['declarativeNetRequest', 'declarativeNetRequestFeedback'], declarative_net_request: { rule_resources: [{ id: 'r', enabled: true, path: 'r.json' }, { id: 'broken', path: 'b.json' }] } },
     [{ path: 'bg.js', content: 'chrome.declarativeNetRequest.getMatchedRules({}); chrome.declarativeNetRequest.updateSessionRules({})' }],
-    [{ id: 'r', rules }, { id: 'broken', rules: null }])
+    summarizeDnrRulesets([{ id: 'r', rules }, { id: 'broken', rules: null }]))
   assert.equal(result.level, 'partial')
   assert.ok(result.gaps.some((gap) => gap.startsWith('1 of 2 declarativeNetRequest rules')))
   assert.ok(result.gaps.some((gap) => gap.includes('ruleset broken could not be read')))
