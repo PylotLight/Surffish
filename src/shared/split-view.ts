@@ -229,6 +229,18 @@ export function pickLastUsedTab(recent: readonly string[], currentId: string | n
   return null
 }
 
+/**
+ * Which tab gets focus after moving `movedId` (alone, or with its split's `memberIds`) to another
+ * window: the pane that was focused in the old window when it moved along, else the moved tab, else
+ * the last member. Only this one tab is activated; focusing the other panes on the way would let
+ * their late focus events steal it (seen on macOS).
+ */
+export function splitMoveFocusId(memberIds: readonly string[], activeTabId: string | null, movedId: string): string | null {
+  if (activeTabId && memberIds.includes(activeTabId)) return activeTabId
+  if (memberIds.includes(movedId)) return movedId
+  return memberIds[memberIds.length - 1] ?? null
+}
+
 /** Move `id` to the front of a most-recent-first list, capped. */
 export function noteRecentTab(recent: readonly string[], id: string, cap = 50): string[] {
   return [id, ...recent.filter((candidate) => candidate !== id)].slice(0, cap)

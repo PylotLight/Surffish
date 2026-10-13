@@ -21,6 +21,7 @@ import {
   splitGroupOf,
   splitInfoFor,
   splitPaneAt,
+  splitMoveFocusId,
   splitPaneRects,
   swapSplitPanes
 } from './split-view'
@@ -167,6 +168,19 @@ describe('tab order and sidebar entries', () => {
     expect(pickLastUsedTab(recent, 'b', (id) => id !== 'c')).toBe('a')
     expect(pickLastUsedTab(recent, 'b', () => false)).toBeNull()
     expect(noteRecentTab(['a', 'b', 'c'], 'd', 2)).toEqual(['d', 'a'])
+  })
+})
+
+describe('split move focus', () => {
+  test('the pane you were on keeps focus when a split moves windows', () => {
+    expect(splitMoveFocusId(['a', 'b'], 'b', 'a')).toBe('b')
+    expect(splitMoveFocusId(['a', 'b'], 'a', 'b')).toBe('a')
+  })
+  test('falls back to the moved tab, then the last member', () => {
+    expect(splitMoveFocusId(['a', 'b'], 'x', 'a')).toBe('a')
+    expect(splitMoveFocusId(['a'], null, 'a')).toBe('a')
+    expect(splitMoveFocusId(['b'], 'x', 'a')).toBe('b')
+    expect(splitMoveFocusId([], 'x', 'a')).toBeNull()
   })
 })
 

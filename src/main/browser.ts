@@ -52,7 +52,7 @@ import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
 import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
 import { canWatchPage, watchPageFromTab } from './page-watchers'
-import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
+import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitMoveFocusId, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
@@ -1782,7 +1782,9 @@ function moveTabsWithSplit(tab: BrowserTab, to: BrowserWindowState, beforeId: st
   const members = group
     ? group.tabIds.map((id) => findTab(id)).filter((member): member is BrowserTab => member?.win === from && canMoveTabTo(member, to))
     : [tab]
-  const focusId = group && from.activeTabId && group.tabIds.includes(from.activeTabId) ? from.activeTabId : tab.id
+  // Activate only the pane that keeps focus: activating each pane in turn let the other pane's late
+  // focus event (async on macOS) switch the active pane in the new window.
+  const focusId = splitMoveFocusId(members.map((member) => member.id), from.activeTabId, tab.id)
   if (group) from.splits = from.splits.filter((candidate) => candidate !== group)
   // Never drop in between another split's panes.
   const before = beforeId ? findTab(beforeId) : undefined
@@ -1794,9 +1796,10 @@ function moveTabsWithSplit(tab: BrowserTab, to: BrowserWindowState, beforeId: st
     const moved = createSplitGroup(group.id, group.tabIds, group.sizes)
     if (moved) to.splits.push(moved)
   }
-  if (members.some((member) => member.id === focusId)) activateTabInternal(focusId)
+  if (focusId) activateTabInternal(focusId)
 }
 
+/** Put a detached tab into `to`'s list without activating it (the caller activates the one to focus). */
 function adoptTabIntoWindow(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
   tab.win = to
   const contents = tab.view?.webContents
@@ -1809,7 +1812,8 @@ function adoptTabIntoWindow(tab: BrowserTab, to: BrowserWindowState, beforeId: s
     at = tab.pinned ? last + 1 : (last < 0 ? to.tabs.length : last + 1)
   }
   to.tabs.splice(at, 0, tab)
-  activateTabInternal(tab.id)
+  // Off screen until activated; activating the focused pane wakes every pane of its split again.
+  if (tab.inactiveSince === null) markTabInactive(tab)
 }
 
 /** Move a tab (with its live page) into another open window, before `beforeId` or at the end. */
