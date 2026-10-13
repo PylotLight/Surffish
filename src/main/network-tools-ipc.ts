@@ -9,6 +9,10 @@ import {
   replayNetworkRequest,
   setNetworkOverrides
 } from './network-tools'
+import { getActiveTabWebContents } from './browser'
+
+/** The active tab's session, so the site panel shows the route its Space really uses. */
+const activeSession = (): Electron.Session | undefined => getActiveTabWebContents()?.session
 
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (!isMainWindowRenderer(event.sender, event.senderFrame)) {
@@ -28,8 +32,8 @@ export function registerNetworkToolsIpc(): void {
   initializeNetworkTools()
   handle('browser:proxy:routing:get', () => getProxyRoutingState())
   handle('browser:proxy:routing:set', (_event, routing) => setProxyRouting(routing))
-  handle('browser:proxy:route-for', (_event, url) => typeof url === 'string' ? getEffectiveRoute(url) : null)
-  handle('browser:proxy:site-route:get', (_event, url) => typeof url === 'string' ? getSiteRoute(url) : null)
+  handle('browser:proxy:route-for', (_event, url) => typeof url === 'string' ? getEffectiveRoute(url, activeSession()) : null)
+  handle('browser:proxy:site-route:get', (_event, url) => typeof url === 'string' ? getSiteRoute(url, activeSession()) : null)
   handle('browser:proxy:site-route:set', (_event, url, choice) => setSiteRoute(url, choice))
   handle('browser:network:export-har', (event, options) => exportNetworkHar(event.sender, options))
   handle('browser:network:copy-as', (_event, id, format) => copyNetworkRequestAs(id, format))

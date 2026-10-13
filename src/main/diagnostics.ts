@@ -8,7 +8,7 @@ import {
   type DiagnosticsSnapshot
 } from '../shared/diagnostics'
 import { getBrowserTabProcessEntries, reloadBrowserTab, suspendBrowserTab } from './browser'
-import { getBrowserSession } from './browser-session'
+import { getBrowserSession, listPageSessions } from './browser-session'
 import { getBrowserChromeState, getMainWindowRenderers, isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { getLinkStatusContentsIds } from './link-status'
 import { getTabOverviewContentsIds } from './tab-overview'
@@ -38,7 +38,7 @@ function safeOsPid(contents: WebContents): number {
 
 function extensionNames(): Map<string, string> {
   const names = new Map<string, string>()
-  const sessions = new Set<Electron.Session>([session.defaultSession, getBrowserSession()])
+  const sessions = new Set<Electron.Session>([session.defaultSession, getBrowserSession(), ...listPageSessions().filter(({ info }) => !info.isPrivate).map(({ session: page }) => page)])
   for (const contents of allWebContents.getAllWebContents()) {
     if (!contents.isDestroyed()) sessions.add(contents.session)
   }
@@ -75,7 +75,8 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
     claimed.add(contents.id)
     const { label, detail: tabDetail } = describeTabOccupant(tab.title, tab.url)
     // With several windows open, say which one the tab lives in.
-    const detail = tab.windowNumber ? `${tabDetail} · window ${tab.windowNumber}` : tabDetail
+    const withWindow = tab.windowNumber ? `${tabDetail} · window ${tab.windowNumber}` : tabDetail
+    const detail = tab.spaceName ? `${withWindow} · ${tab.spaceName}` : withWindow
     occupants.push({ pid, kind: tab.pdfEditor ? 'pdf-editor' : tab.extensionPage ? 'extension' : 'tab', label, detail, tabId: tab.id })
     try {
       internalToOs.set(contents.getProcessId(), pid)
@@ -132,7 +133,7 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
   // Service workers (extension backgrounds, site push workers) have no web contents. Name the ones
   // that share a process with something above; list the rest so the "no page" rows make sense.
   const unattributedWorkers: string[] = []
-  const sessions = new Set<Electron.Session>([session.defaultSession, getBrowserSession()])
+  const sessions = new Set<Electron.Session>([session.defaultSession, getBrowserSession(), ...listPageSessions().filter(({ info }) => !info.isPrivate).map(({ session: page }) => page)])
   for (const contents of allWebContents.getAllWebContents()) if (!contents.isDestroyed()) sessions.add(contents.session)
   for (const ses of sessions) {
     let running: Record<number, Electron.ServiceWorkerInfo> = {}

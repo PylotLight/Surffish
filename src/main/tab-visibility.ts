@@ -12,6 +12,8 @@ export interface TabProcessEntry {
   contents: WebContents | null
   /** Which window the tab is in (1-based), only set while more than one window is open. */
   windowNumber?: number
+  /** The tab's Space ("Work"), only set while Spaces are on. */
+  spaceName?: string
 }
 
 /**

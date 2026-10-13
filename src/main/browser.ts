@@ -13,7 +13,10 @@ import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES,
 import { cleanLinkUrl } from '../shared/clean-link'
 import { stepZoomFactor } from '../shared/zoom'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
-import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getPrivateSession, whenPrivateSessionReady } from './browser-session'
+import { BROWSER_SESSION_PARTITION, PRIVATE_SESSION_PARTITION as PRIVATE_PARTITION, clearPageSessionData, clearPrivateSession, getBrowserSession, getPageSession, getPrivateSession, whenPageSessionReady } from './browser-session'
+import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, spacesEnabled } from './spaces-store'
+import { forgetSessionCookieSnapshot } from './session-cookies'
+import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
 import { forgetPrivateDownloads } from './downloads'
 import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, saveBrowserSiteZoom, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
@@ -79,6 +82,8 @@ interface BrowserTab {
   pdfEditor: PdfEditorTabState | null
   /** Back/forward list to restore instead of a plain load (a tab brought back from the archive). */
   restoreHistory: { entries: Electron.NavigationEntry[]; index: number } | null
+  /** The Space the tab is in (shared/spaces.ts); always Default while Spaces are off. */
+  spaceId: string
 }
 
 interface PdfEditorTabState {
@@ -125,6 +130,10 @@ interface BrowserWindowState {
   splits: SplitGroup[]
   /** Tab ids, most recently activated first ("split with last used tab"). */
   recentTabIds: string[]
+  /** The Space this window shows; the sidebar lists only its tabs. */
+  activeSpaceId: string
+  /** Last active tab per Space, so switching back lands where you were. */
+  spaceActiveTabs: Map<string, string>
 }
 const windowStates: BrowserWindowState[] = []
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
@@ -185,6 +194,27 @@ function activeTabOf(w: BrowserWindowState | undefined): BrowserTab | undefined 
 
 function isActiveTab(tab: BrowserTab): boolean {
   return tab.win.activeTabId === tab.id
+}
+
+/** The window's tabs in one Space (the active one by default), in sidebar list order. */
+function spaceTabsOf(w: BrowserWindowState | undefined, spaceId = w?.activeSpaceId): BrowserTab[] {
+  return w ? w.tabs.filter((tab) => tab.spaceId === spaceId) : []
+}
+
+/** The session partition a tab's page runs in: private, its Space's own, or the profile one. */
+function partitionForTab(tab: BrowserTab): string {
+  return tab.isPrivate ? '' : partitionForSpaceId(tab.spaceId)
+}
+
+function pageSessionForTab(tab: BrowserTab): Electron.Session {
+  return tab.isPrivate ? getPrivateSession() : getPageSession(partitionForTab(tab))
+}
+
+/** After `index` was taken out of `tabs`: the tab now there (or the last before it) in the same Space. */
+function neighbourInSpace(tabs: readonly BrowserTab[], index: number, spaceId: string): BrowserTab | undefined {
+  for (let at = index; at < tabs.length; at += 1) if (tabs[at]!.spaceId === spaceId) return tabs[at]
+  for (let at = Math.min(index, tabs.length) - 1; at >= 0; at -= 1) if (tabs[at]!.spaceId === spaceId) return tabs[at]
+  return undefined
 }
 
 /** The split view `tab` is a pane of, if any. */
@@ -264,7 +294,7 @@ function getState(w = currentWindowState()): BrowserState {
 
 function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
   if (!w) return []
-  return w.tabs.map((tab) => {
+  return spaceTabsOf(w).map((tab) => {
     const split = splitInfoFor(w.splits, tab.id)
     return {
     id: tab.id,
@@ -449,6 +479,8 @@ function publishTabs(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
   keepSplitTabsTogether(w)
   sendToWindowRenderers(w.window, 'browser:tabs', getTabSummaries(w))
+  // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
+  if (spacesEnabled()) publishSpaces(w)
   noteWindowTitles()
 }
 
@@ -481,12 +513,14 @@ function persistOpenTabs(): void {
   const saved = windows.map((w) => {
     const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
+    const spaces = encodeWindowSpaces(w, kept)
     return {
       urls: kept.map(currentUrl),
       activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
       pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
       geometry: windowGeometry(w.window),
-      ...(splits.length > 0 ? { splits } : {})
+      ...(splits.length > 0 ? { splits } : {}),
+      ...(spaces ? { spaces } : {})
     }
   })
   const focused = windowStateFor(focusedBrowserWindow())
@@ -629,7 +663,9 @@ function ensureTabLoaded(tab: BrowserTab): void {
   applyTabBounds(tab.win)
   const contents = view.webContents
   // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
-  const ready = tab.isPrivate && !tab.pdfEditor ? whenPrivateSessionReady() : Promise.resolve()
+  const ready = !tab.pdfEditor && (tab.isPrivate || partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
+    ? whenPageSessionReady(tab.isPrivate ? PRIVATE_PARTITION : partitionForTab(tab))
+    : Promise.resolve()
   const restore = tab.restoreHistory
   tab.restoreHistory = null
   void ready.then(() => contents.isDestroyed() ? undefined : restore ? contents.navigationHistory.restore(restore) : contents.loadURL(target)).catch((error: unknown) => {
@@ -658,6 +694,13 @@ function activateTabInternal(id: string): boolean {
   if (!tab) return false
   const w = tab.win
   if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe()
+  // Opening a tab from another Space (palette, archive, extensions, a moved tab) shows that Space.
+  const spaceChanged = tab.spaceId !== w.activeSpaceId
+  if (spaceChanged) {
+    if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId)
+    w.activeSpaceId = tab.spaceId
+  }
+  w.spaceActiveTabs.set(tab.spaceId, id)
   const previous = activeTabOf(w)
   const wasOnScreen = onScreenTabIds(w)
   if (previous && previous.id !== id) {
@@ -697,6 +740,7 @@ function activateTabInternal(id: string): boolean {
   }
   applyTabBounds(w)
   publishState(w)
+  if (spaceChanged) publishSpaces(w)
   return true
 }
 
@@ -754,7 +798,8 @@ function tabMenuExtras(id: string): MenuItemConstructorOptions[] {
 function showBrowserTabContextMenu(id: string): void {
   const tab = getTab(id)
   if (!tab || !isLiveWindow(tab.win)) return
-  const { tabs, activeTabId } = tab.win
+  const { activeTabId } = tab.win
+  const tabs = spaceTabsOf(tab.win, tab.spaceId)
   const origin = normalizeHttpOrigin(currentUrl(tab))
   const bookmarked = Boolean(origin && isUrlBookmarked(currentUrl(tab)))
   const items: MenuItemConstructorOptions[] = [
@@ -777,6 +822,7 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') },
     { type: 'separator' },
     ...splitTabMenuItems(tab),
+    ...spaceTabMenuItems(tab),
     ...moveTabMenuItems(tab)
   ]
   Menu.buildFromTemplate(items).popup({ window: tab.win.window })
@@ -818,6 +864,8 @@ const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000
 const googleHandOffAt = new WeakMap<Electron.WebContents, number>()
 
 function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
+  // The WebKit sign-in imports into the profile session; a Space with its own logins signs in in the tab.
+  if (contents.session !== getBrowserSession()) return false
   if (!isWebKitGoogleSignInAvailable() || !shouldHandOffSignIn(url, hasGoogleSessionCookie())) return false
   // If Google sends us straight back to sign-in right after an import, it did
   // not accept the session in Electron; don't trap the user in a pop-up loop.
@@ -856,7 +904,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       // embedded players (YouTube embeds) and ad frames get scriptlets/CSS.
       // Remote pages still get no Node.js: sandbox stays on.
       nodeIntegrationInSubFrames: true,
-      ...(tab.isPrivate ? { session: getPrivateSession() } : { partition: BROWSER_SESSION_PARTITION }),
+      // Private tabs: the in-memory session. Otherwise the tab's Space partition (Default = the profile one).
+      ...(tab.isPrivate ? { session: getPrivateSession() } : { session: pageSessionForTab(tab) }),
       // On for every tab; the session decides (private tabs: off unless the user opts in).
       spellcheck: true,
       // Explicit: background tabs must be throttled (timers, rAF) once they leave the screen.
@@ -1105,7 +1154,7 @@ function removeDestroyedTab(tab: BrowserTab): void {
   w.tabs.splice(index, 1)
   if (w.activeTabId === tab.id) {
     w.activeTabId = null
-    const replacement = findTab(partners[0]) ?? w.tabs[Math.min(index, w.tabs.length - 1)]
+    const replacement = findTab(partners[0]) ?? neighbourInSpace(w.tabs, index, tab.spaceId)
     if (replacement) activateTabInternal(replacement.id)
     else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w)
   }
@@ -1298,7 +1347,7 @@ attachPdfEditor({
       sourceUrl: tab.pdfEditor.sourceUrl,
       name: tab.pdfEditor.name,
       isPrivate: tab.isPrivate,
-      sourceSession: tab.isPrivate ? getPrivateSession() : getBrowserSession()
+      sourceSession: pageSessionForTab(tab)
     }
   },
   setDirty: (contents, dirty) => {
@@ -1320,7 +1369,7 @@ export interface ExtensionPageTabOptions {
   owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false, targetWindow: BrowserWindowState | undefined = currentWindowState()): string | null {
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false, targetWindow: BrowserWindowState | undefined = currentWindowState(), spaceId?: string): string | null {
   const w = targetWindow
   if (!isLiveWindow(w)) return null
   const { tabs } = w
@@ -1358,7 +1407,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     isPrivate: makePrivate,
     showingPdf: false,
     pdfEditor: null,
-    restoreHistory: null
+    restoreHistory: null,
+    // Extension pages need the profile session (that's where extensions load), so they stay in Default.
+    spaceId: extensionPage ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId)
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -1366,6 +1417,12 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   if (shouldActivate) {
     // The new tab replaces whatever was on screen (a split's panes go off screen together).
     const wasOnScreen = previous ? onScreenTabIds(w) : []
+    if (tab.spaceId !== w.activeSpaceId) {
+      if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId)
+      w.activeSpaceId = tab.spaceId
+      setImmediate(() => publishSpaces(w))
+    }
+    w.spaceActiveTabs.set(tab.spaceId, tab.id)
     w.activeTabId = tab.id
     w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
     for (const goneId of wasOnScreen) {
@@ -1389,7 +1446,7 @@ export interface BrowserWindowInit {
   /** A private window: all of its tabs are private and it is never saved. */
   private?: boolean
   /** Tabs to restore (a saved window from the session file). */
-  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[] }
+  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null }
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string
 }
@@ -1407,7 +1464,10 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     confirmingWindowClose: false,
     isPrivate: init.private === true,
     splits: [],
-    recentTabIds: []
+    recentTabIds: [],
+    // A new window opens on the Space you're in (private windows have no Spaces).
+    activeSpaceId: init.private === true ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), (windowStateFor(focusedBrowserWindow()) ?? currentWindowState())?.activeSpaceId),
+    spaceActiveTabs: new Map()
   }
   windowStates.push(w)
   tabSleepMinutes = getBrowserTabSleepMinutes()
@@ -1440,8 +1500,11 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     const saved = init.session
     const restoredAt = Date.now()
     const restoredIds: (string | null)[] = []
+    // Old sessions (and Spaces off) put everything in Default; deleted Spaces fold into Default too.
+    const placement = placeRestoredTabs(getSpacesSettings(), saved.spaces, saved.urls.length)
+    w.activeSpaceId = placement.activeSpace
     saved.urls.forEach((url, index) => {
-      const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index), undefined, undefined, false, false, w)
+      const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index), undefined, undefined, false, false, w, placement.tabSpaces[index])
       restoredIds.push(id)
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
       const tab = id ? getTab(id) : undefined
@@ -1450,10 +1513,25 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     for (const split of saved.splits ?? []) {
       const ids = split.tabs.map((index) => restoredIds[index] ?? null)
       if (ids.some((id) => !id || !findTab(id) || findTab(id)?.pinned || splitGroupOf(w.splits, id))) continue
+      // A split's panes share a Space (an edited file could say otherwise).
+      if (new Set(ids.map((id) => findTab(id)?.spaceId)).size !== 1) continue
       const group = createSplitGroup(randomUUID(), ids as string[], split.sizes)
       if (group) w.splits.push(group)
     }
-    w.activeTabId = restoredIds[saved.activeIndex] ?? w.tabs[0]?.id ?? null
+    for (const [spaceId, index] of Object.entries(saved.spaces?.spaceActiveTabs ?? {})) {
+      const id = restoredIds[index]
+      if (id && findTab(id)?.spaceId === spaceId) w.spaceActiveTabs.set(spaceId, id)
+    }
+    // Creating the first tab showed its Space; the window goes back to the saved one.
+    w.activeSpaceId = placement.activeSpace
+    const savedActive = findTab(restoredIds[saved.activeIndex])
+    w.activeTabId = (savedActive?.spaceId === w.activeSpaceId ? savedActive.id : null)
+      ?? w.spaceActiveTabs.get(w.activeSpaceId) ?? spaceTabsOf(w)[0]?.id ?? null
+    // Nothing in the saved Space (all its tabs were dropped): show the first tab's Space instead.
+    if (!w.activeTabId && w.tabs[0]) {
+      w.activeSpaceId = w.tabs[0].spaceId
+      w.activeTabId = w.tabs[0].id
+    }
   }
   if (w.tabs.length === 0) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
   w.activeTabId ??= w.tabs[0]?.id ?? null
@@ -1637,8 +1715,10 @@ function detachTabFromWindow(tab: BrowserTab): void {
     return
   }
   if (wasActive) {
-    const replacement = findTab(partners[0]) ?? from.tabs[Math.min(index, from.tabs.length - 1)]
+    // Stay in the Space: its next tab, or a fresh New Tab when the move emptied it.
+    const replacement = findTab(partners[0]) ?? neighbourInSpace(from.tabs, index, tab.spaceId)
     if (replacement) activateTabInternal(replacement.id)
+    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
   } else {
     applyTabBounds(from)
     publishState(from)
@@ -1761,7 +1841,8 @@ export function getBrowserTabProcessEntries(): TabProcessEntry[] {
     pdfEditor: tab.pdfEditor !== null,
     extensionPage: tab.extensionPageOrigin !== null,
     contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
-    ...(several ? { windowNumber: browserWindowNumber(tab.win.window) } : {})
+    ...(several ? { windowNumber: browserWindowNumber(tab.win.window) } : {}),
+    ...(spacesEnabled() && !tab.win.isPrivate ? { spaceName: getSpace(tab.spaceId)?.name ?? 'Default' } : {})
   }))
 }
 
@@ -2201,6 +2282,12 @@ const CODE_KEYS: Record<string, string> = { BracketLeft: '[', BracketRight: ']',
 /** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
 export function handleBrowserShortcutInput(input: Electron.Input, tabId: string | null | undefined = getTab()?.id ?? null): boolean {
   if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
+  // Spaces: Ctrl+1..9 on macOS (Cmd+1..9 stays tab select), Ctrl+Shift+1..9 elsewhere. Only while Spaces are on.
+  const spaceDigit = /^Digit([1-9])$/.exec(input.code)
+  if (spaceDigit && spacesEnabled() && !input.alt && !input.meta && input.control && (IS_MAC ? !input.shift : input.shift)) {
+    selectBrowserSpaceByNumber(Number(spaceDigit[1]))
+    return true
+  }
   let key = input.key.toLowerCase()
   if (input.alt) {
     if (/^Key[A-Z]$/.test(input.code)) key = input.code.slice(3).toLowerCase()
@@ -2249,7 +2336,7 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
     toggleTabOverview()
     return true
   }
-  if (key === 'tab' && (currentWindowState()?.tabs.length ?? 0) > 1) {
+  if (key === 'tab' && spaceTabsOf(currentWindowState()).length > 1) {
     cycleBrowserTab(shift ? -1 : 1)
     return true
   }
@@ -2258,7 +2345,7 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
 
 /** Tabs in the order the sidebar shows them: pinned icons first, then the list. */
 function tabsInSidebarOrder(w = currentWindowState()): BrowserTab[] {
-  const tabs = w?.tabs ?? []
+  const tabs = spaceTabsOf(w)
   return [...tabs.filter((tab) => tab.pinned), ...tabs.filter((tab) => !tab.pinned)]
 }
 
@@ -2448,8 +2535,8 @@ export function activateBrowserTab(id: string): boolean {
 
 export function cycleBrowserTab(offset: number): void {
   const w = currentWindowState()
-  if (!w || w.tabs.length < 2) return
   const ordered = tabsInSidebarOrder(w)
+  if (!w || ordered.length < 2) return
   const activeIndex = ordered.findIndex((tab) => tab.id === w.activeTabId)
   const nextIndex = (activeIndex + offset + ordered.length) % ordered.length
   const next = ordered[nextIndex]
@@ -2528,8 +2615,10 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
     return
   }
   if (wasActive) {
-    const replacement = findTab(partners[0]) ?? tabs[Math.min(index, tabs.length - 1)]
+    const replacement = findTab(partners[0]) ?? neighbourInSpace(tabs, index, tab.spaceId)
     if (replacement) activateTabInternal(replacement.id)
+    // The Space's last tab closed while other Spaces still have tabs: the Space keeps a New Tab.
+    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
   } else {
     applyTabBounds(w)
   }
@@ -2662,7 +2751,9 @@ export function suspendOtherBrowserTabs(keepId: string): void {
 }
 
 function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'others'): void {
-  const tabs = findTab(id)?.win.tabs ?? []
+  // Within the tab's Space only (the list you're looking at).
+  const target = findTab(id)
+  const tabs = target ? spaceTabsOf(target.win, target.spaceId) : []
   const targetIndex = tabs.findIndex((tab) => tab.id === id)
   if (targetIndex < 0) return
   const idsToClose = tabs.flatMap((tab, index) => {
@@ -2699,7 +2790,8 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   if (!contents) return false
   publishState(tab.win)
   try {
-    if (tab.isPrivate) await whenPrivateSessionReady()
+    if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION)
+    else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION) await whenPageSessionReady(partitionForTab(tab))
     await contents.loadURL(url)
     return true
   } catch (error) {
@@ -2819,6 +2911,12 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
   // window rather than rejecting the swipe (a bad compare here used to reject every swipe).
   if ((request.direction !== 'back' && request.direction !== 'forward')
     || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return refuse('bad request')
+  const spaceSwipe = sidebarSwipeId(w, request)
+  if (spaceSwipe !== undefined) {
+    cancelActiveMacTrackpadSwipe()
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking Space switch', request.direction)
+    return spaceSwipe
+  }
   if (browserBounds.width <= 0 || browserBounds.height <= 0
     || request.x < browserBounds.x || request.y < browserBounds.y
     || request.x >= browserBounds.x + browserBounds.width
@@ -2876,6 +2974,7 @@ function finishMacTrackpadSwipe(
   _maxProgress: number
 ): void {
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
+  if (finishSidebarSwipe(contentsId, direction, committed)) return
   const overviewWindow = windowStates.find((w) => getTabOverviewContentsId(w.window) === contentsId)
   if (overviewWindow) {
     // Selection follows the fingers: swipe right moves right, swipe left moves left.
@@ -3173,13 +3272,18 @@ export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
 
 /** Ids of every tab in the same window as `id` (the tab included). */
 export function getBrowserTabIdsInSameWindow(id: string): string[] {
-  return findTab(id)?.win.tabs.map((tab) => tab.id) ?? []
+  // "Other tabs" means the ones in the same window and Space.
+  const tab = findTab(id)
+  return tab ? spaceTabsOf(tab.win, tab.spaceId).map((candidate) => candidate.id) : []
 }
 
 export interface BrowserTabArchiveCapture {
   url: string
   title: string
   faviconUrl: string | null
+  /** The tab's Space (only while Spaces are on); a restore goes back there if it still exists. */
+  spaceId?: string
+  spaceName?: string
   history?: { entries: Electron.NavigationEntry[]; index: number }
 }
 
@@ -3188,6 +3292,10 @@ export function captureBrowserTabForArchive(id: string): BrowserTabArchiveCaptur
   const tab = getTab(id)
   if (!tab || tab.isPrivate || tab.extensionPageOrigin) return null
   const capture: BrowserTabArchiveCapture = { url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl }
+  if (spacesEnabled()) {
+    capture.spaceId = tab.spaceId
+    capture.spaceName = getSpace(tab.spaceId)?.name ?? 'Default'
+  }
   const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
   if (contents && !tab.pdfEditor) {
     try {
@@ -3206,9 +3314,10 @@ export function closeBrowserTabForArchive(id: string): boolean {
 }
 
 /** Reopen an archived tab into the focused (or last focused) normal window; background tabs stay asleep until first opened. */
-export function openArchivedBrowserTab(url: string, history: { entries: Electron.NavigationEntry[]; index: number } | undefined, activate = true): string | null {
+export function openArchivedBrowserTab(url: string, history: { entries: Electron.NavigationEntry[]; index: number } | undefined, activate = true, spaceId?: string): string | null {
   const w = normalWindowState()
-  const id = createTab(url, selectedSearchEngine, activate, true, false, false, undefined, undefined, false, false, w)
+  // Back into its Space when that still exists (else the window's current Space).
+  const id = createTab(url, selectedSearchEngine, activate, true, false, false, undefined, undefined, false, false, w, spaceId && getSpace(spaceId) ? spaceId : undefined)
   const tab = id ? getTab(id) : undefined
   if (!tab) return null
   if (history && history.entries.length > 0) tab.restoreHistory = history
@@ -3250,7 +3359,7 @@ function canSplitTab(tab: BrowserTab | undefined): tab is BrowserTab {
 
 /** Same window, both splittable, and never a private tab next to a normal one. */
 function canSplitTogether(a: BrowserTab | undefined, b: BrowserTab | undefined): boolean {
-  return canSplitTab(a) && canSplitTab(b) && a !== b && a.win === b.win && a.isPrivate === b.isPrivate
+  return canSplitTab(a) && canSplitTab(b) && a !== b && a.win === b.win && a.isPrivate === b.isPrivate && a.spaceId === b.spaceId
 }
 
 function splitWith(ids: readonly string[], focusId: string, sizes?: readonly number[]): boolean {
@@ -3533,4 +3642,230 @@ export function getBrowserSplitState(): BrowserSplitSnapshot {
 export function getBrowserTabSplitStatus(id = getTab()?.id): { split: boolean; canSplit: boolean } {
   const tab = findTab(id)
   return { split: Boolean(splitOf(tab)), canSplit: Boolean(tab && canSplitTab(tab) && (splitOf(tab) || splitCandidates(tab).length > 0)) }
+}
+
+// ---------------------------------------------------------------------------
+// Spaces (shared/spaces.ts has the model; spaces-store.ts the definitions; spaces-ipc.ts the UI).
+// Every tab carries a space id and each window shows one Space: the sidebar, Cmd+1..9, tab cycling,
+// "close other tabs" and the palette's tab list only see that Space. With Spaces off every tab is
+// in Default, so all of this is the identity.
+
+const SPACE_SWIPE_ID_BASE = 2_000_000_000
+
+/** Per window in the session file; null while everything is in Default (so the file is unchanged). */
+function encodeWindowSpaces(w: BrowserWindowState, kept: readonly BrowserTab[]): SavedWindowSpaces | null {
+  if (!spacesEnabled()) return null
+  const tabSpaces = kept.map((tab) => tab.spaceId)
+  const spaceActiveTabs: Record<string, number> = {}
+  for (const [spaceId, tabId] of w.spaceActiveTabs) {
+    const index = kept.findIndex((tab) => tab.id === tabId)
+    if (index >= 0 && kept[index]!.spaceId === spaceId) spaceActiveTabs[spaceId] = index
+  }
+  if (tabSpaces.every((id) => id === DEFAULT_SPACE_ID) && w.activeSpaceId === DEFAULT_SPACE_ID) return null
+  return { tabSpaces, activeSpace: w.activeSpaceId, ...(Object.keys(spaceActiveTabs).length > 0 ? { spaceActiveTabs } : {}) }
+}
+
+export function getBrowserSpacesSnapshot(w = currentWindowState()): SpacesSnapshot {
+  const settings = getSpacesSettings()
+  const tabCounts: Record<string, number> = {}
+  for (const tab of w?.tabs ?? []) tabCounts[tab.spaceId] = (tabCounts[tab.spaceId] ?? 0) + 1
+  return {
+    // Private windows have no Spaces.
+    enabled: settings.enabled && !w?.isPrivate,
+    spaces: settings.spaces,
+    activeSpaceId: w?.activeSpaceId ?? DEFAULT_SPACE_ID,
+    tabCounts
+  }
+}
+
+function publishSpaces(w: BrowserWindowState): void {
+  if (!isLiveWindow(w)) return
+  sendToWindowRenderers(w.window, 'browser:spaces', getBrowserSpacesSnapshot(w))
+}
+
+export function publishBrowserSpaces(): void {
+  for (const w of windowStates) publishSpaces(w)
+}
+
+/** Show `spaceId` in a window: its last active tab, its first tab, or a fresh New Tab. */
+function switchSpaceIn(w: BrowserWindowState | undefined, spaceId: string): boolean {
+  if (!isLiveWindow(w) || w.isPrivate || !spacesEnabled() || !getSpace(spaceId)) return false
+  if (w.activeSpaceId === spaceId && activeTabOf(w)?.spaceId === spaceId) return true
+  const remembered = findTab(w.spaceActiveTabs.get(spaceId))
+  const target = remembered && remembered.win === w && remembered.spaceId === spaceId ? remembered : tabsInSidebarOrder({ ...w, activeSpaceId: spaceId } as BrowserWindowState)[0]
+  if (target) activateTabInternal(target.id)
+  else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, spaceId)
+  publishSpaces(w)
+  persistOpenTabs()
+  return true
+}
+
+export function switchBrowserSpace(spaceId: string, window?: BaseWindow): boolean {
+  return switchSpaceIn(window ? windowStateFor(window) : currentWindowState(), spaceId)
+}
+
+/** Next/previous Space (swipe, palette), no wrapping. */
+export function cycleBrowserSpace(offset: number, window?: BaseWindow): boolean {
+  const w = window ? windowStateFor(window) : currentWindowState()
+  if (!w) return false
+  const next = adjacentSpaceId(getSpacesSettings(), w.activeSpaceId, offset)
+  return next ? switchSpaceIn(w, next) : false
+}
+
+/** Ctrl+1..9 (macOS) / Ctrl+Shift+1..9: the Space at that position. */
+export function selectBrowserSpaceByNumber(number: number): boolean {
+  const id = spaceIdAtNumber(getSpacesSettings(), number)
+  return id ? switchBrowserSpace(id) : false
+}
+
+/** Tabs whose page runs in the wrong session after a partition change get a fresh view (reloads from the URL). */
+function resyncTabSessions(): void {
+  for (const w of windowStates) {
+    for (const tab of w.tabs) {
+      if (tab.isPrivate || !tab.view || tab.view.webContents.isDestroyed() || tab.pdfEditor) continue
+      if (tab.view.webContents.session === pageSessionForTab(tab)) continue
+      tab.lastUrl = currentUrl(tab)
+      tab.pendingUrl = tab.lastUrl
+      disposeTabView(tab)
+      if (isTabOnScreen(tab)) ensureTabLoaded(tab)
+    }
+    applyTabBounds(w)
+    publishState(w)
+  }
+}
+
+/** A Space's partition / proxy choice changed (spaces-ipc.ts): move its tabs onto the right session. */
+export function applyBrowserSpaceSessions(): void {
+  resyncTabSessions()
+  publishBrowserSpaces()
+  persistOpenTabs()
+}
+
+/**
+ * Move a tab (with its split partner) into another Space of the same window. You stay where you
+ * are; the tab is waiting there. Between partitions the page can't keep running (a page can't
+ * change session), so it reloads from its URL in the new Space's session.
+ */
+export function moveBrowserTabToSpace(id: string, spaceId: string): boolean {
+  const tab = findTab(id)
+  if (!tab || !spacesEnabled() || tab.win.isPrivate || !getSpace(spaceId) || tab.spaceId === spaceId) return false
+  const w = tab.win
+  const fromSpace = tab.spaceId
+  const group = splitOf(tab)
+  const members = group ? group.tabIds.map((memberId) => findTab(memberId)).filter((member): member is BrowserTab => member?.win === w) : [tab]
+  const crossesPartition = partitionForSpaceId(spaceId) !== partitionForSpaceId(fromSpace)
+  // Extension pages need the profile session; an unsaved PDF has to be dealt with first.
+  if (crossesPartition && members.some((member) => member.extensionPageOrigin && !member.isPrivate)) return false
+  if (crossesPartition && members.some((member) => member.pdfEditor && !allowLeavingPdfEditor(member, 'Move to Space'))) return false
+  const activeMoves = members.some((member) => member.id === w.activeTabId)
+  const firstIndex = Math.min(...members.map((member) => w.tabs.indexOf(member)))
+  for (const member of members) w.tabs.splice(w.tabs.indexOf(member), 1)
+  w.tabs.push(...members)
+  for (const member of members) {
+    member.spaceId = spaceId
+    if (!member.isPrivate && member.view && !member.view.webContents.isDestroyed() && member.view.webContents.session !== pageSessionForTab(member)) {
+      member.lastUrl = currentUrl(member)
+      member.pendingUrl = member.lastUrl
+      member.pdfEditor = null
+      disposeTabView(member)
+    }
+  }
+  w.spaceActiveTabs.set(spaceId, activeMoves && w.activeTabId ? w.activeTabId : tab.id)
+  if (activeMoves) {
+    const replacement = neighbourInSpace(w.tabs, firstIndex, fromSpace)
+    if (replacement) activateTabInternal(replacement.id)
+    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, fromSpace)
+    for (const member of members) markTabInactive(member)
+  }
+  applyTabBounds(w)
+  publishState(w)
+  publishSpaces(w)
+  persistOpenTabs()
+  return true
+}
+
+/** Tab context menu: "Move to Space ▸" (only while Spaces are on). */
+function spaceTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
+  const settings = getSpacesSettings()
+  if (!settings.enabled || tab.win.isPrivate || settings.spaces.length < 2) return []
+  return [{
+    label: splitOf(tab) ? 'Move Split to Space' : 'Move to Space',
+    submenu: settings.spaces.map((space): MenuItemConstructorOptions => ({
+      label: `${space.icon ? `${space.icon} ` : ''}${space.name}`,
+      type: 'checkbox',
+      checked: space.id === tab.spaceId,
+      enabled: space.id !== tab.spaceId,
+      click: () => { moveBrowserTabToSpace(tab.id, space.id) }
+    }))
+  }]
+}
+
+/** Tabs of a Space in every window (delete asks before closing them). */
+export function countBrowserTabsInSpace(spaceId: string): number {
+  return allTabs().filter((tab) => tab.spaceId === spaceId && !tab.win.isPrivate).length
+}
+
+/** Tabs outside Default in every window (turning Spaces off moves them into Default). */
+export function countBrowserTabsOutsideDefaultSpace(): number {
+  return allTabs().filter((tab) => tab.spaceId !== DEFAULT_SPACE_ID).length
+}
+
+/**
+ * Delete a Space after the user confirmed (spaces-ipc.ts): windows showing it move to a neighbour,
+ * its tabs close (not onto Reopen Closed Tab), the definition goes and a separate partition's
+ * data is wiped.
+ */
+export function deleteBrowserSpace(spaceId: string): boolean {
+  const settings = getSpacesSettings()
+  const space = getSpace(spaceId)
+  if (!space || spaceId === DEFAULT_SPACE_ID) return false
+  const partition = partitionForSpaceId(spaceId)
+  const fallback = adjacentSpaceId(settings, spaceId, -1) ?? adjacentSpaceId(settings, spaceId, 1) ?? DEFAULT_SPACE_ID
+  for (const w of [...windowStates]) {
+    if (w.activeSpaceId === spaceId) switchSpaceIn(w, fallback)
+    for (const tab of spaceTabsOf(w, spaceId)) closeBrowserTab(tab.id, false)
+    w.spaceActiveTabs.delete(spaceId)
+  }
+  // A refused close (unsaved PDF edits) keeps the tab: it moves to Default instead of vanishing.
+  for (const tab of allTabs()) if (tab.spaceId === spaceId) tab.spaceId = DEFAULT_SPACE_ID
+  saveSpacesSettings(removeSpace(getSpacesSettings(), spaceId))
+  if (partition !== BROWSER_SESSION_PARTITION) {
+    forgetSessionCookieSnapshot(partition)
+    void clearPageSessionData(partition)
+  }
+  resyncTabSessions()
+  publishBrowserSpaces()
+  persistOpenTabs()
+  return true
+}
+
+/**
+ * "Enable Spaces" off (after the confirm in spaces-ipc.ts): every tab in every window moves into
+ * Default (tabs from Spaces with separate logins reload in the profile session) and windows show
+ * Default. The Space definitions are kept, empty, for when Spaces are turned back on.
+ */
+export function mergeAllSpacesIntoDefault(): void {
+  for (const w of windowStates) {
+    for (const tab of w.tabs) tab.spaceId = DEFAULT_SPACE_ID
+    w.activeSpaceId = DEFAULT_SPACE_ID
+    w.spaceActiveTabs.clear()
+  }
+}
+
+/** Two-finger swipe over the sidebar steps through Spaces (macOS native swipe module). */
+function sidebarSwipeId(w: BrowserWindowState, request: MacTrackpadSwipeBeginRequest): number | undefined {
+  if (!spacesEnabled() || w.isPrivate || getSpacesSettings().spaces.length < 2) return undefined
+  if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) return undefined
+  const chrome = getBrowserChromeState(w.window)
+  if (chrome.sidebarMode !== 'tabs') return undefined
+  const overSidebar = request.x < w.browserBounds.x || (chrome.sidebarHovered && request.x < chrome.sidebarWidth)
+  return overSidebar ? SPACE_SWIPE_ID_BASE + windowStates.indexOf(w) : undefined
+}
+
+function finishSidebarSwipe(contentsId: number, direction: MacTrackpadSwipeDirection, committed: boolean): boolean {
+  if (contentsId < SPACE_SWIPE_ID_BASE) return false
+  const w = windowStates[contentsId - SPACE_SWIPE_ID_BASE]
+  // Content follows the fingers, like pages: swipe right = the Space to the left.
+  if (committed && w) cycleBrowserSpace(direction === 'back' ? -1 : 1, w.window)
+  return true
 }

@@ -1,4 +1,5 @@
 import { createConnection } from 'node:net'
+import { webContents as allWebContents } from 'electron'
 import {
   aggregateProxyHealthState,
   INITIAL_PROXY_HEALTH,
@@ -15,7 +16,7 @@ import {
 import { activeProxyEndpoints, effectiveRouteForUrl, endpointKey, type ActiveProxyEndpoint, type ProxyRoutingInput } from '../shared/proxy-routing'
 import { addRequestGate, onRequestError } from './request-gate'
 import { readSettingsFile, writeSettingsFile } from './safety-store'
-import { getProxyRoutingInput, onProxyRoutingChanged } from './proxy'
+import { getAllRoutingInputs, getProxyRoutingInput, onProxyRoutingChanged, routingInputForSession } from './proxy'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { setUpdateNetworkGuard } from './updates'
 import { setBackgroundNetworkGuard } from './background-network'
@@ -140,7 +141,9 @@ function runProbe(entry: Watched): void {
 
 /** Match the watched set to the proxies currently in use, starting fresh for any new one. */
 function syncEndpoints(): boolean {
-  const next = activeProxyEndpoints(routing)
+  // Settings' proxies plus any proxy a Space forces its partition through.
+  const seen = new Set<string>()
+  const next = getAllRoutingInputs().flatMap(activeProxyEndpoints).filter((endpoint) => !seen.has(endpoint.key) && seen.add(endpoint.key))
   const keys = new Set(next.map((endpoint) => endpoint.key))
   let changed = false
   for (const [key, entry] of watched) {
@@ -171,19 +174,26 @@ function rearm(): void {
   }
 }
 
+/** The routing a request uses: its page's session (a Space may force a proxy), else Settings. */
+function routingFor(webContentsId: number | undefined): ProxyRoutingInput {
+  if (typeof webContentsId !== 'number') return routing
+  const contents = allWebContents.fromId(webContentsId)
+  return contents && !contents.isDestroyed() ? routingInputForSession(contents.session) : routing
+}
+
 /** The watched proxy a URL's requests go through, or null when they go direct. */
-function entryForUrl(url: string): Watched | null {
-  const route = effectiveRouteForUrl(url, routing)
+function entryForUrl(url: string, input: ProxyRoutingInput = routing): Watched | null {
+  const route = effectiveRouteForUrl(url, input)
   if (!route || route.kind === 'direct') return null
   return watched.get(endpointKey(route.host, route.port)) ?? null
 }
 
 /** Should this request be cancelled right now? */
-function blocksUrl(url: string): boolean {
+function blocksUrl(url: string, input: ProxyRoutingInput = routing): boolean {
   if (!anyBlocking() || isKillSwitchExemptUrl(url)) return false
-  const entry = entryForUrl(url)
+  const entry = entryForUrl(url, input)
   if (entry) return proxyHealthBlocksTraffic(entry.health)
-  const route = effectiveRouteForUrl(url, routing)
+  const route = effectiveRouteForUrl(url, input)
   // Unroutable web URL while something is down: err on the blocking side.
   return route === null && /^(https?|wss?):/i.test(url)
 }
@@ -193,10 +203,10 @@ export function initializeProxyKillSwitch(): void {
   killSwitch = saved?.killSwitch === true
   routing = getProxyRoutingInput()
   syncEndpoints()
-  addRequestGate((details) => blocksUrl(details.url) ? { cancel: true } : null)
+  addRequestGate((details) => blocksUrl(details.url, routingFor(details.webContentsId)) ? { cancel: true } : null)
   onRequestError((details) => {
     if (!armed() || !isProxyConnectionError(details.error)) return
-    const entry = entryForUrl(details.url)
+    const entry = entryForUrl(details.url, routingFor(details.webContentsId))
     if (entry) dispatch(entry, { type: 'proxy-error' })
     else for (const candidate of watched.values()) dispatch(candidate, { type: 'proxy-error' })
   })

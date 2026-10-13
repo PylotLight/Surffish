@@ -1,13 +1,32 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getBrowserSession } from './browser-session'
+import { onPageSessionCreated, listPageSessions } from './browser-session'
+import { SPACE_PARTITION_PREFIX } from '../shared/spaces'
 
 const SESSION_COOKIE_FILE = 'session-cookies.enc'
 const COOKIE_SAVE_DELAY_MS = 400
-let saveTimer: ReturnType<typeof setTimeout> | undefined
 let quitFlushInstalled = false
-let persistQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Session (non-persistent) cookies survive a restart through an encrypted snapshot, one per
+ * persistent page session: the profile partition (session-cookies.enc) and each Space with
+ * separate logins (session-cookies-<space id>.enc). Private sessions are never snapshotted.
+ */
+interface CookieTarget {
+  session: Electron.Session
+  file: string
+  saveTimer: ReturnType<typeof setTimeout> | undefined
+  queue: Promise<void>
+}
+const targets = new Map<string, CookieTarget>()
+
+function cookieFileFor(partition: string): string | null {
+  if (!partition.startsWith('persist:')) return null
+  if (!partition.startsWith(SPACE_PARTITION_PREFIX)) return SESSION_COOKIE_FILE
+  const id = partition.slice(SPACE_PARTITION_PREFIX.length)
+  return /^[a-z0-9-]+$/.test(id) ? `session-cookies-${id}.enc` : null
+}
 
 interface StoredSessionCookie {
   url: string
@@ -20,8 +39,8 @@ interface StoredSessionCookie {
   sameSite: Electron.Cookie['sameSite']
 }
 
-function cookieFilePath(): string {
-  return join(app.getPath('userData'), SESSION_COOKIE_FILE)
+function cookieFilePath(file: string): string {
+  return join(app.getPath('userData'), file)
 }
 
 async function hasSecureStorage(): Promise<boolean> {
@@ -71,13 +90,13 @@ function parseStoredCookie(value: unknown): StoredSessionCookie | null {
   return cookie as StoredSessionCookie
 }
 
-async function persistSessionCookies(): Promise<void> {
+async function persistSessionCookies(target: CookieTarget): Promise<void> {
   const canEncrypt = await hasSecureStorage()
   if (!canEncrypt) return
 
-  const cookies = await getBrowserSession().cookies.get({})
+  const cookies = await target.session.cookies.get({})
   const snapshot = cookies.map(serializableCookie).filter((cookie): cookie is StoredSessionCookie => cookie !== null)
-  const path = cookieFilePath()
+  const path = cookieFilePath(target.file)
   if (snapshot.length === 0) {
     rmSync(path, { force: true })
     return
@@ -96,8 +115,8 @@ async function persistSessionCookies(): Promise<void> {
   }
 }
 
-async function restoreSessionCookies(): Promise<void> {
-  const path = cookieFilePath()
+async function restoreSessionCookies(target: CookieTarget): Promise<void> {
+  const path = cookieFilePath(target.file)
   if (!existsSync(path)) return
   if (!await hasSecureStorage()) {
     console.warn('Saved session cookies were not restored because OS-backed encryption is unavailable.')
@@ -109,35 +128,52 @@ async function restoreSessionCookies(): Promise<void> {
     const parsed: unknown = JSON.parse(decrypted.result)
     if (!Array.isArray(parsed)) throw new Error('Encrypted session-cookie snapshot has an invalid format.')
     const cookies = parsed.map(parseStoredCookie).filter((cookie): cookie is StoredSessionCookie => cookie !== null)
-    const store = getBrowserSession().cookies
+    const store = target.session.cookies
     for (const cookie of cookies) {
       const { url, ...details } = cookie
       await store.set({ url, ...details })
     }
-    if (decrypted.shouldReEncrypt) await persistSessionCookies()
+    if (decrypted.shouldReEncrypt) await persistSessionCookies(target)
   } catch (error) {
     console.error('Could not restore encrypted session cookies:', error)
   }
 }
 
-function queueSessionCookieSave(): Promise<void> {
-  persistQueue = persistQueue.then(persistSessionCookies).catch((error: unknown) => {
+function queueSessionCookieSave(target: CookieTarget): Promise<void> {
+  target.queue = target.queue.then(() => persistSessionCookies(target)).catch((error: unknown) => {
     console.error('Could not update encrypted session cookies:', error)
   })
-  return persistQueue
+  return target.queue
 }
 
-function scheduleSessionCookieSave(): void {
-  if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(() => {
-    saveTimer = undefined
-    void queueSessionCookieSave()
+function scheduleSessionCookieSave(target: CookieTarget): void {
+  if (target.saveTimer) clearTimeout(target.saveTimer)
+  target.saveTimer = setTimeout(() => {
+    target.saveTimer = undefined
+    void queueSessionCookieSave(target)
   }, COOKIE_SAVE_DELAY_MS)
 }
 
+async function attachCookieSnapshot(session: Electron.Session, partition: string): Promise<void> {
+  const file = cookieFileFor(partition)
+  if (!file || targets.has(partition)) return
+  const target: CookieTarget = { session, file, saveTimer: undefined, queue: Promise.resolve() }
+  targets.set(partition, target)
+  await restoreSessionCookies(target)
+  session.cookies.on('changed', () => scheduleSessionCookieSave(target))
+}
+
+/** A deleted Space: drop its snapshot file too. */
+export function forgetSessionCookieSnapshot(partition: string): void {
+  const file = cookieFileFor(partition)
+  const target = targets.get(partition)
+  if (target?.saveTimer) clearTimeout(target.saveTimer)
+  targets.delete(partition)
+  if (file && file !== SESSION_COOKIE_FILE) rmSync(cookieFilePath(file), { force: true })
+}
+
 export async function initializeSessionCookiePersistence(): Promise<void> {
-  await restoreSessionCookies()
-  getBrowserSession().cookies.on('changed', scheduleSessionCookieSave)
+  await onPageSessionCreated((session, info) => info.persistent ? attachCookieSnapshot(session, info.partition) : undefined)
 
   if (quitFlushInstalled) return
   quitFlushInstalled = true
@@ -148,10 +184,13 @@ export async function initializeSessionCookiePersistence(): Promise<void> {
     event.preventDefault()
     if (saving) return
     saving = true
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = undefined
-    void queueSessionCookieSave()
-      .then(() => getBrowserSession().cookies.flushStore())
+    const all = [...targets.values()]
+    for (const target of all) {
+      if (target.saveTimer) clearTimeout(target.saveTimer)
+      target.saveTimer = undefined
+    }
+    void Promise.all(all.map((target) => queueSessionCookieSave(target)))
+      .then(() => Promise.all(listPageSessions().filter(({ info }) => info.persistent).map(({ session }) => session.cookies.flushStore())))
       .catch((error: unknown) => console.error('Could not flush browser cookies on exit:', error))
       .finally(() => {
         proceedToQuit = true

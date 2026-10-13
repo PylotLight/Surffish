@@ -9,6 +9,7 @@ import { registerBookmarkIpc } from './bookmarks-ipc'
 import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { initializeBrowserProxy } from './proxy'
+import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
 import { freezeBrowserSession, setBrowserSearchEngine } from './browser'
 import { browserWindows } from './window-scope'
@@ -50,6 +51,8 @@ else registerExternalOpenHandlers()
 app.whenReady().then(async () => {
   if (!app.isPackaged) console.info('Surffish browser profile:', app.getPath('userData'))
   try {
+    // Space definitions first: the proxy reads each Space partition's forced route.
+    initializeSpacesStore()
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()
     // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.

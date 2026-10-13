@@ -1,6 +1,7 @@
 import { MAX_RESTORED_TABS, normalizeBrowserSession, parseBrowserSession } from './persistence'
 import { parseSavedWindowState, type SavedWindowState } from './window-geometry'
 import { parseSessionSplits, remapSessionSplits, type SavedSplit } from './split-view'
+import { parseSavedWindowSpaces, remapSavedWindowSpaces, type SavedWindowSpaces } from './spaces'
 
 /**
  * The saved session with several windows.
@@ -21,6 +22,8 @@ export interface SavedSessionWindow {
   geometry: SavedWindowState | null
   /** Split views (indexes into `urls`); left out when there are none, so older files read the same. */
   splits?: SavedSplit[]
+  /** Which Space each tab is in (spaces.ts); left out when everything is in Default. */
+  spaces?: SavedWindowSpaces
 }
 
 export interface SavedWindowsSession {
@@ -35,6 +38,7 @@ export interface SessionWindowInput {
   pinnedIndexes: readonly number[]
   geometry: SavedWindowState | null
   splits?: readonly SavedSplit[]
+  spaces?: SavedWindowSpaces | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,13 +54,26 @@ function clampFocused(index: number, count: number): number {
  * Splits re-pointed at the tabs normalizeBrowserSession kept (it drops unsafe URLs and caps the
  * list): a tab is kept when it survives normalisation on its own, in the same order.
  */
-function normalizeSplits(window: SessionWindowInput, keptCount: number, pinnedIndexes: readonly number[]): SavedSplit[] {
-  if (!window.splits || window.splits.length === 0) return []
+function keptIndexMap(window: SessionWindowInput, keptCount: number): Map<number, number> {
   const newIndex = new Map<number, number>()
   let next = 0
   window.urls.forEach((url, index) => {
     if (index < MAX_RESTORED_TABS && next < keptCount && normalizeBrowserSession([url], 0).urls.length === 1) newIndex.set(index, next++)
   })
+  return newIndex
+}
+
+/** Space ids re-pointed the same way as splits; null when every kept tab is in Default. */
+function normalizeSpaces(window: SessionWindowInput, keptCount: number): SavedWindowSpaces | null {
+  if (!window.spaces) return null
+  const valid = parseSavedWindowSpaces(window.spaces, window.urls.length)
+  const newIndex = keptIndexMap(window, keptCount)
+  return remapSavedWindowSpaces(valid, (index) => newIndex.get(index) ?? -1, keptCount)
+}
+
+function normalizeSplits(window: SessionWindowInput, keptCount: number, pinnedIndexes: readonly number[]): SavedSplit[] {
+  if (!window.splits || window.splits.length === 0) return []
+  const newIndex = keptIndexMap(window, keptCount)
   // Validate first (this also reads untrusted values from disk), then re-point.
   const valid = parseSessionSplits(window.splits, window.urls.length)
   const remapped = remapSessionSplits(valid, (index) => newIndex.get(index) ?? -1)
@@ -72,7 +89,8 @@ export function normalizeWindowsSession(windows: readonly SessionWindowInput[], 
     if (session.urls.length === 0) return
     if (index === focusedIndex) focused = kept.length
     const splits = normalizeSplits(window, session.urls.length, session.pinnedIndexes)
-    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}) })
+    const spaces = normalizeSpaces(window, session.urls.length)
+    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}) })
   })
   // A focused window that was dropped (or an out-of-range index) falls back to the last one.
   return { windows: kept, focusedIndex: clampFocused(focused, kept.length) }
@@ -92,6 +110,7 @@ export function serializeWindowsSession(session: SavedWindowsSession): Record<st
       activeIndex: window.activeIndex,
       pinnedTabs: window.pinnedIndexes,
       ...(window.splits && window.splits.length > 0 ? { splits: window.splits } : {}),
+      ...(window.spaces ? { spaces: window.spaces } : {}),
       ...(window.geometry ? { bounds: window.geometry.bounds, maximized: window.geometry.maximized, fullScreen: window.geometry.fullScreen } : {})
     }))
   }
@@ -108,7 +127,8 @@ export function parseWindowsSession(value: unknown, legacyGeometry: SavedWindowS
       activeIndex: typeof window.activeIndex === 'number' ? window.activeIndex : 0,
       pinnedIndexes: Array.isArray(window.pinnedTabs) ? window.pinnedTabs.filter((index): index is number => typeof index === 'number' && Number.isInteger(index)) : [],
       geometry: parseSavedWindowState(window),
-      splits: Array.isArray(window.splits) ? window.splits as SavedSplit[] : []
+      splits: Array.isArray(window.splits) ? window.splits as SavedSplit[] : [],
+      spaces: parseSavedWindowSpaces(window.spaces, Array.isArray(window.tabs) ? window.tabs.length : 0)
     }))
     const focused = typeof value.focusedWindow === 'number' ? value.focusedWindow : windows.length - 1
     const session = normalizeWindowsSession(windows, focused)
