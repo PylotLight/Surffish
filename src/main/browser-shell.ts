@@ -42,12 +42,12 @@ interface ShellState {
   syncPageBounds: BrowserShellLayoutSync | null
   layoutScheduled: boolean
   scheduleLayout: () => void
-  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
-  sidebarFrame: { inset: number; radius: number } | null
-  /** On screen (open, opening or still closing): 'hidden' is emitted once a close has landed. */
-  sidebarOverlayShown: boolean
+  /** Slides the overlay sidebar view along one open/close timeline (sidebar-motion.ts). */
   sidebarMotion: SidebarOverlayMotion
   lastOverlayMode: boolean | null
+  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
+  sidebarFrame: { inset: number; radius: number } | null
+  sidebarOverlayShown: boolean
 }
 
 export type SidebarOverlayEvent = 'shown' | 'hidden' | 'prefetch'
@@ -205,10 +205,10 @@ export function attachBrowserShell(
     syncPageBounds: syncPageBounds ?? null,
     layoutScheduled: false,
     scheduleLayout: () => scheduleShellLayout(shell),
-    sidebarFrame: null,
-    sidebarOverlayShown: false,
     sidebarMotion: null as unknown as SidebarOverlayMotion,
-    lastOverlayMode: null
+    lastOverlayMode: null,
+    sidebarFrame: null,
+    sidebarOverlayShown: false
   }
   shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
     onProgress: (progress) => sidebarMotionListener?.(window, progress),
