@@ -6,6 +6,7 @@
  * This never executes extension code. "Supported" means nothing the manifest declares or the code
  * references falls outside what Electron provides or Surffish shims; it is not a runtime guarantee.
  */
+import { unsupportedDnrRuleCount } from './dnr'
 import { findExtensionApiReferences, type ExtensionSourceFile } from './password-extension-compat'
 
 export type ExtensionCompatLevel = 'supported' | 'partial' | 'unsupported'
@@ -36,7 +37,12 @@ const SUPPORTED_PERMISSIONS = new Set([
   'clipboardWrite',
   'clipboardRead',
   'background',
-  'fontSettings'
+  'fontSettings',
+  // Enforced by Surffish itself (src/shared/dnr.ts, main/extension-dnr.ts).
+  'declarativeNetRequest',
+  'declarativeNetRequestWithHostAccess',
+  // Events forwarded by Surffish's extension bridge (main/extension-bridge.ts).
+  'webNavigation'
 ])
 
 /** Declared permissions whose API Electron lacks; the rest of the extension can still run. */
@@ -48,6 +54,7 @@ const GAP_PERMISSIONS: Record<string, string> = {
   contextMenus: 'Right-click menu entries (contextMenus) are not shown',
   cookies: 'chrome.cookies is not available',
   declarativeContent: 'declarativeContent rules are ignored',
+  declarativeNetRequestFeedback: 'Matched-rule feedback (declarativeNetRequest.getMatchedRules, onRuleMatchedDebug) is not available',
   downloads: 'chrome.downloads is not available',
   favicon: 'The favicon API is not available',
   history: 'chrome.history is not available',
@@ -62,7 +69,6 @@ const GAP_PERMISSIONS: Record<string, string> = {
   tabGroups: 'Tab groups are not available',
   topSites: 'chrome.topSites is not available',
   tts: 'Text-to-speech (tts) is not available',
-  webNavigation: 'chrome.webNavigation events are not available',
   webRequestBlocking: 'Blocking webRequest can conflict with Surffish’s ad blocker',
   geolocation: 'Extension geolocation is not granted',
   search: 'chrome.search is not available',
@@ -73,8 +79,6 @@ const GAP_PERMISSIONS: Record<string, string> = {
 const BLOCKER_PERMISSIONS: Record<string, string> = {
   debugger: 'needs chrome.debugger, which Surffish does not expose',
   proxy: 'needs chrome.proxy; Surffish manages its own SOCKS proxy',
-  declarativeNetRequest: 'blocks requests with declarativeNetRequest rules, which Electron does not run',
-  declarativeNetRequestWithHostAccess: 'blocks requests with declarativeNetRequest rules, which Electron does not run',
   vpnProvider: 'needs the ChromeOS VPN provider API',
   platformKeys: 'needs ChromeOS platform keys',
   enterprise: 'needs Chrome enterprise APIs',
@@ -120,7 +124,12 @@ const SUPPORTED_API_PREFIXES = [
   'tabs.TAB_ID_NONE'
 ] as const
 
+const DNR_SHIM_LABEL = 'declarativeNetRequest (Surffish enforces the extension’s rules)'
+const WEB_NAVIGATION_SHIM_LABEL = 'webNavigation (Surffish forwards tab navigation events)'
+
 const SHIMMED_APIS: ReadonlyArray<{ prefix: string; label: string }> = [
+  { prefix: 'declarativeNetRequest', label: DNR_SHIM_LABEL },
+  { prefix: 'webNavigation', label: WEB_NAVIGATION_SHIM_LABEL },
   { prefix: 'storage.sync', label: 'storage.sync (stored in storage.local on this device)' },
   { prefix: 'management.getSelf', label: 'management.getSelf (minimal self info)' },
   { prefix: 'management.get', label: 'management.get (self only)' },
@@ -134,6 +143,9 @@ const SHIMMED_APIS: ReadonlyArray<{ prefix: string; label: string }> = [
 ]
 
 const GAP_API_LABELS: Record<string, string> = {
+  'declarativeNetRequest.getMatchedRules': 'Matched-rule feedback (declarativeNetRequest.getMatchedRules, onRuleMatchedDebug) is not available',
+  'declarativeNetRequest.onRuleMatchedDebug': 'Matched-rule feedback (declarativeNetRequest.getMatchedRules, onRuleMatchedDebug) is not available',
+  'declarativeNetRequest.setExtensionActionOptions': 'Toolbar badge text is not displayed',
   'action.setBadgeText': 'Toolbar badge text is not displayed',
   'action.setBadgeBackgroundColor': 'Toolbar badge text is not displayed',
   'action.setIcon': 'Dynamic toolbar icons are not displayed',
@@ -164,8 +176,11 @@ function hasPrefix(api: string, prefix: string): boolean {
   return api === prefix || api.startsWith(`${prefix}.`)
 }
 
-/** Analyse a manifest plus the extension's JS sources. */
-export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFiles: readonly ExtensionSourceFile[] = []): ExtensionCompatibility {
+/** A static declarativeNetRequest ruleset as read from the package (`rules: null` when unreadable). */
+export interface ExtensionDnrRuleset { id: string; rules: unknown }
+
+/** Analyse a manifest plus the extension's JS sources (and its static DNR rulesets, when given). */
+export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFiles: readonly ExtensionSourceFile[] = [], dnrRulesets: readonly ExtensionDnrRuleset[] = []): ExtensionCompatibility {
   const manifest = record(manifestInput)
   const gaps = new Set<string>()
   const blockers = new Set<string>()
@@ -203,9 +218,18 @@ export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFile
   if (stringList(manifest.optional_permissions).length > 0 || stringList(manifest.optional_host_permissions).length > 0) {
     gaps.add('Optional permissions cannot be granted at runtime')
   }
-  if (record(manifest.declarative_net_request).rule_resources !== undefined) {
-    blockers.add('The extension blocks requests with declarativeNetRequest rules, which Electron does not run.')
+  const usesDnr = permissions.includes('declarativeNetRequest') || permissions.includes('declarativeNetRequestWithHostAccess') || record(manifest.declarative_net_request).rule_resources !== undefined
+  if (usesDnr) {
+    shimmed.add(DNR_SHIM_LABEL)
+    const unreadable = dnrRulesets.filter((ruleset) => !Array.isArray(ruleset.rules)).map((ruleset) => ruleset.id)
+    if (unreadable.length > 0) gaps.add(`declarativeNetRequest ruleset ${unreadable.join(', ')} could not be read, so its rules are not applied`)
+    const { total, unsupported, reasons } = unsupportedDnrRuleCount(dnrRulesets.filter((ruleset) => Array.isArray(ruleset.rules)))
+    if (unsupported > 0) {
+      const why = reasons.length > 0 ? ` (${reasons.slice(0, 2).join('; ')})` : ''
+      gaps.add(`${unsupported} of ${total} declarativeNetRequest rules can’t be enforced by Surffish${why}`)
+    }
   }
+  if (permissions.includes('webNavigation')) shimmed.add(WEB_NAVIGATION_SHIM_LABEL)
 
   if (Object.keys(record(manifest.commands)).length > 0) gaps.add(GAP_PERMISSIONS.commands as string)
   if (record(manifest.chrome_url_overrides).newtab !== undefined) gaps.add('New Tab page overrides are ignored')
@@ -223,6 +247,12 @@ export function analyzeExtensionCompatibility(manifestInput: unknown, sourceFile
     const api = reference.replace(/^(chrome|browser)\./, '')
     // Real API namespaces are lowerCamelCase; "browser.Backup" in prose or minified code is not one.
     if (!/^[a-z]/.test(api)) continue
+    // Parts of shimmed namespaces Surffish does not provide.
+    const missingMember = Object.keys(GAP_API_LABELS).find((prefix) => prefix.startsWith('declarativeNetRequest.') && hasPrefix(api, prefix))
+    if (missingMember) {
+      gaps.add(GAP_API_LABELS[missingMember] as string)
+      continue
+    }
     const shim = SHIMMED_APIS.find((entry) => hasPrefix(api, entry.prefix))
     if (shim) {
       shimmed.add(shim.label)

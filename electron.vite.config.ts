@@ -42,6 +42,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/web-store-page.cjs'),
       join(outputDirectory, 'web-store-page.cjs')
     )
+    // Hidden per-extension relay page (webNavigation events, declarativeNetRequest state).
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/extension-bridge.cjs'),
+      join(outputDirectory, 'extension-bridge.cjs')
+    )
     // Built-in PDF editor page bridge.
     copyFileSync(
       resolve(projectDirectory, 'src/preload/pdf-editor.cjs'),

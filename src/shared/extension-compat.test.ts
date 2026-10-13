@@ -47,7 +47,6 @@ test('missing APIs make an extension Partial with the gaps listed', () => {
 
 test('hard blockers make an extension Unsupported', () => {
   assert.equal(analyzeExtensionCompatibility({ manifest_version: 3, name: 'Dark', version: '1', theme: { colors: {} } }).level, 'unsupported')
-  assert.equal(analyzeExtensionCompatibility({ ...MHN_LIKE_MANIFEST, permissions: ['declarativeNetRequest'], declarative_net_request: { rule_resources: [] } }).level, 'unsupported')
   assert.equal(analyzeExtensionCompatibility({ ...MHN_LIKE_MANIFEST, permissions: ['proxy'] }).level, 'unsupported')
   assert.equal(analyzeExtensionCompatibility({ ...MHN_LIKE_MANIFEST, background: { scripts: ['bg.js'] } }).level, 'unsupported')
   assert.equal(analyzeExtensionCompatibility({ name: 'No version' }).level, 'unsupported')
@@ -60,4 +59,47 @@ test('MV2 extensions are allowed with a warning', () => {
   const result = analyzeExtensionCompatibility({ manifest_version: 2, name: 'Old', version: '1', background: { scripts: ['bg.js'] } })
   assert.equal(result.level, 'partial')
   assert.ok(result.gaps.some((gap) => gap.includes('Manifest V2')))
+})
+
+// Shaped like "I still don't care about cookies" 1.1.9 (manifest + the API calls it makes); no extension code is vendored.
+const COOKIES_LIKE_MANIFEST = {
+  manifest_version: 3,
+  name: '__MSG_extensionName__',
+  version: '1.1.9',
+  permissions: ['tabs', 'storage', 'notifications', 'webRequest', 'declarativeNetRequestWithHostAccess', 'webNavigation', 'scripting'],
+  host_permissions: ['http://*/*', 'https://*/*'],
+  background: { service_worker: 'data/background.js', type: 'module' },
+  options_ui: { page: 'data/options.html' },
+  action: { default_popup: 'data/menu/index.html' },
+  declarative_net_request: { rule_resources: [{ id: 'ruleset_1', enabled: true, path: 'rules.json' }] }
+}
+const COOKIES_LIKE_SOURCES = [{
+  path: 'data/background.js',
+  content: 'chrome.declarativeNetRequest.getDynamicRules(); chrome.declarativeNetRequest.updateDynamicRules({}); chrome.webNavigation.onCommitted.addListener(f); chrome.webNavigation.onCompleted.addListener(f); chrome.scripting.insertCSS({}); chrome.scripting.executeScript({}); chrome.tabs.onCreated.addListener(f); chrome.notifications.create("r", {}); chrome.runtime.onInstalled.addListener(f)'
+}]
+
+test('declarativeNetRequest + webNavigation extensions install (Surffish enforces the rules)', () => {
+  const rules = [{ id: 1, priority: 1, action: { type: 'block' }, condition: { urlFilter: '/iubenda_cs', resourceTypes: ['script'], excludedInitiatorDomains: ['skuola.net'] } }]
+  const result = analyzeExtensionCompatibility(COOKIES_LIKE_MANIFEST, COOKIES_LIKE_SOURCES, [{ id: 'ruleset_1', rules }])
+  assert.deepEqual(result.blockers, [])
+  assert.equal(result.level, 'partial')
+  assert.ok(result.shimmed.some((entry) => entry.startsWith('declarativeNetRequest')))
+  assert.ok(result.shimmed.some((entry) => entry.startsWith('webNavigation')))
+  assert.ok(!result.gaps.some((gap) => gap.includes('webNavigation') || gap.includes('declarativeNetRequest')))
+  // The only remaining gap: notifications are not shown.
+  assert.deepEqual(result.gaps, ['Desktop notifications from the extension are not shown'])
+})
+
+test('declarativeNetRequest gaps are precise: unenforceable rules and feedback APIs', () => {
+  const rules = [
+    { id: 1, action: { type: 'block' }, condition: { urlFilter: 'a' } },
+    { id: 2, action: { type: 'block' }, condition: { responseHeaders: [{ header: 'content-type', values: ['text/html'] }] } }
+  ]
+  const result = analyzeExtensionCompatibility({ ...MHN_LIKE_MANIFEST, permissions: ['declarativeNetRequest', 'declarativeNetRequestFeedback'], declarative_net_request: { rule_resources: [{ id: 'r', enabled: true, path: 'r.json' }, { id: 'broken', path: 'b.json' }] } },
+    [{ path: 'bg.js', content: 'chrome.declarativeNetRequest.getMatchedRules({}); chrome.declarativeNetRequest.updateSessionRules({})' }],
+    [{ id: 'r', rules }, { id: 'broken', rules: null }])
+  assert.equal(result.level, 'partial')
+  assert.ok(result.gaps.some((gap) => gap.startsWith('1 of 2 declarativeNetRequest rules')))
+  assert.ok(result.gaps.some((gap) => gap.includes('ruleset broken could not be read')))
+  assert.ok(result.gaps.some((gap) => gap.includes('getMatchedRules')))
 })

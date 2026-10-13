@@ -7,6 +7,10 @@ import { runInNewContext } from 'node:vm'
 import {
   adaptWebStoreManifest,
   EXTENSION_BACKGROUND_WRAPPER_FILE,
+  EXTENSION_BRIDGE_HTML,
+  EXTENSION_BRIDGE_PAGE,
+  EXTENSION_BRIDGE_SCRIPT,
+  EXTENSION_BRIDGE_SOURCE,
   EXTENSION_SHIM_FILE,
   EXTENSION_SHIM_SOURCE,
   extensionWorkerFiles,
@@ -178,3 +182,106 @@ test('shim: popup tabs calls route to the Surffish host bridge; content scripts 
   await content.chrome.storage.sync.set!({ a: 1 })
   assert.equal(content.store.a, 1)
 })
+
+/** A chrome.runtime.onMessage-like event plus a recorder for sendMessage. */
+function fakeRuntimeMessaging() {
+  const listeners: Array<(message: unknown, sender: unknown, sendResponse: (value: unknown) => void) => unknown> = []
+  const sent: unknown[] = []
+  const onMessage = {
+    addListener(listener: (typeof listeners)[number]) { listeners.push(listener) },
+    removeListener(listener: (typeof listeners)[number]) { const index = listeners.indexOf(listener); if (index >= 0) listeners.splice(index, 1) },
+    hasListener(listener: (typeof listeners)[number]) { return listeners.includes(listener) }
+  }
+  const deliver = (message: unknown) => listeners.map((listener) => listener(message, { id: ID }, () => {}))
+  return { onMessage, sendMessage: async (message: unknown) => { sent.push(message); return undefined }, sent, deliver, listeners }
+}
+
+test('shim (worker): webNavigation from bridge events, bridge messages hidden, DNR changes reported, bridge tab hidden', async () => {
+  const { chrome } = fakeChrome()
+  const messaging = fakeRuntimeMessaging()
+  const dnrCalls: unknown[] = []
+  const runtime = chrome.runtime as Record<string, unknown>
+  runtime.onMessage = messaging.onMessage
+  runtime.sendMessage = messaging.sendMessage
+  ;(chrome as Record<string, unknown>).declarativeNetRequest = { updateDynamicRules: async (options: unknown) => { dnrCalls.push(options) }, getDynamicRules: async () => [] }
+  ;(chrome as Record<string, unknown>).tabs = { query: async () => [{ id: 1, url: 'https://a.test/' }, { id: 2, url: `chrome-extension://${ID}/surffish-bridge.html` }] }
+  const globalObject: Record<string, unknown> = { chrome }
+  globalObject.globalThis = globalObject
+  runShim(globalObject)
+
+  const seen: unknown[] = []
+  const extensionListener = (message: unknown) => { seen.push(message) }
+  ;(chrome.runtime as unknown as { onMessage: typeof messaging.onMessage }).onMessage.addListener(extensionListener)
+  const webNavigation = (chrome as unknown as { webNavigation: Record<string, { addListener(fn: (details: Record<string, unknown>) => void, filter?: unknown): void }> }).webNavigation
+  const committed: unknown[] = []
+  const filtered: unknown[] = []
+  webNavigation.onCommitted!.addListener((details) => committed.push(details.url))
+  webNavigation.onCompleted!.addListener((details) => filtered.push(details.url), { url: [{ hostSuffix: 'b.test' }] })
+
+  messaging.deliver({ __surffishBridge: { type: 'event', name: 'onCommitted', details: { tabId: 1, frameId: 0, url: 'https://a.test/' } } })
+  messaging.deliver({ __surffishBridge: { type: 'event', name: 'onCompleted', details: { tabId: 1, frameId: 0, url: 'https://a.test/' } } })
+  messaging.deliver({ __surffishBridge: { type: 'event', name: 'onCompleted', details: { tabId: 1, frameId: 0, url: 'https://www.b.test/x' } } })
+  messaging.deliver({ command: 'get_active_tab' })
+  assert.deepEqual(committed, ['https://a.test/'])
+  assert.deepEqual(filtered, ['https://www.b.test/x'])
+  assert.deepEqual(plain(seen), [{ command: 'get_active_tab' }], 'the extension only sees its own messages')
+  assert.equal((chrome.runtime as unknown as { onMessage: typeof messaging.onMessage }).onMessage.hasListener(extensionListener), true)
+
+  await (chrome as unknown as { declarativeNetRequest: { updateDynamicRules(o: unknown): Promise<void> } }).declarativeNetRequest.updateDynamicRules({ addRules: [] })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(dnrCalls.length, 1, 'the native API still stores the rules')
+  assert.deepEqual(plain(messaging.sent), [{ __surffishBridge: { type: 'dnr-changed' } }])
+
+  const tabs = await (chrome.tabs as unknown as { query(info: unknown): Promise<Array<{ id: number }>> }).query({})
+  assert.deepEqual(plain(tabs.map((tab) => tab.id)), [1])
+  const notifications = (chrome as unknown as { notifications: { create(id: string, options: unknown): Promise<string> } }).notifications
+  assert.equal(await notifications.create('report', {}), 'report', 'notifications.create resolves instead of throwing')
+})
+
+test('bridge page files: no shim in the bridge page, and both scripts parse', () => {
+  assert.equal(injectExtensionShim(EXTENSION_BRIDGE_HTML), EXTENSION_BRIDGE_HTML, 'the shim (which hides bridge messages) is never injected into the bridge page')
+  assert.ok(EXTENSION_BRIDGE_HTML.includes(`/${EXTENSION_BRIDGE_SCRIPT}`))
+  assert.doesNotThrow(() => new Function(EXTENSION_SHIM_SOURCE))
+  assert.doesNotThrow(() => new Function(EXTENSION_BRIDGE_SOURCE))
+  const root = mkdtempSync(join(tmpdir(), 'surffish-bridge-'))
+  try {
+    writeExtensionShimFiles(root)
+    assert.ok(existsSync(join(root, EXTENSION_BRIDGE_PAGE)))
+    assert.equal(readFileSync(join(root, EXTENSION_BRIDGE_SCRIPT), 'utf8'), EXTENSION_BRIDGE_SOURCE)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('bridge page relays events to the worker and reports DNR state to Surffish', async () => {
+  const messaging = fakeRuntimeMessaging()
+  const toMain: unknown[] = []
+  let hostListener: ((message: unknown) => void) | null = null
+  const enabledCalls: unknown[] = []
+  let enabled: string[] = []
+  const chrome = {
+    runtime: { id: ID, onMessage: messaging.onMessage, sendMessage: messaging.sendMessage },
+    declarativeNetRequest: {
+      getEnabledRulesets: async () => enabled,
+      updateEnabledRulesets: async (options: { enableRulesetIds: string[]; disableRulesetIds: string[] }) => { enabledCalls.push(options); enabled = [...enabled.filter((id) => !options.disableRulesetIds.includes(id)), ...options.enableRulesetIds] },
+      getDynamicRules: async () => [{ id: 1, action: { type: 'allow' }, condition: { initiatorDomains: ['a.test'] } }],
+      getSessionRules: async () => [],
+      getDisabledRuleIds: async () => []
+    }
+  }
+  const host = { send: (message: unknown) => { toMain.push(message) }, call: async () => [], onMessage: (listener: (message: unknown) => void) => { hostListener = listener } }
+  const globalObject: Record<string, unknown> = { chrome, surffishExtensionBridge: host }
+  globalObject.globalThis = globalObject
+  runInNewContext(EXTENSION_BRIDGE_SOURCE, { console, Promise, setTimeout, ...globalObject })
+  assert.deepEqual(plain(toMain), [{ type: 'ready' }])
+  hostListener!({ type: 'init', enabledRulesets: ['ruleset_1'] })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.deepEqual(plain(enabledCalls), [{ enableRulesetIds: ['ruleset_1'], disableRulesetIds: [] }])
+  const state = toMain.at(-1) as Record<string, unknown>
+  assert.equal(state.type, 'dnr-state')
+  assert.deepEqual(plain(state.enabledRulesets), ['ruleset_1'])
+  assert.equal((state.dynamicRules as unknown[]).length, 1)
+  hostListener!({ type: 'event', name: 'onCommitted', details: { tabId: 3, frameId: 0, url: 'https://a.test/' } })
+  assert.deepEqual(plain(messaging.sent), [{ __surffishBridge: { type: 'event', name: 'onCommitted', details: { tabId: 3, frameId: 0, url: 'https://a.test/' } } }])
+})
+

@@ -9,10 +9,16 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, relative, resolve, sep } from 'node:path'
 import type { ExtensionSourceFile } from '../shared/extension-compat'
+import { manifestDnrRulesets } from '../shared/dnr'
 
 export const EXTENSION_SHIM_FILE = 'surffish-extension-shim.js'
 export const EXTENSION_BACKGROUND_WRAPPER_FILE = 'surffish-extension-background.js'
+/** Hidden relay page between Surffish and the extension's worker (see main/extension-bridge.ts). */
+export const EXTENSION_BRIDGE_PAGE = 'surffish-bridge.html'
+export const EXTENSION_BRIDGE_SCRIPT = 'surffish-bridge.js'
 const SHIM_MARKER = 'data-surffish-extension-shim'
+/** Messages between Surffish's bridge page and its worker shim carry this key; the extension never sees them. */
+export const EXTENSION_BRIDGE_KEY = '__surffishBridge'
 
 type JsonRecord = Record<string, unknown>
 
@@ -144,6 +150,212 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
       define(api.runtime, 'openOptionsPage', (callback) => settle(Promise.resolve(host.openOptionsPage()), callback));
     }
   }
+
+  // Surffish bridge messages (webNavigation events, DNR sync) travel over runtime messaging between
+  // Surffish's hidden bridge page and this shim; keep them away from the extension's own listeners.
+  const BRIDGE_KEY = '__surffishBridge';
+  const isBridgeMessage = (message) => !!message && typeof message === 'object' && Object.prototype.hasOwnProperty.call(message, BRIDGE_KEY);
+  const onMessage = api.runtime.onMessage;
+  const addRuntimeListener = onMessage && typeof onMessage.addListener === 'function' ? onMessage.addListener.bind(onMessage) : null;
+  if (addRuntimeListener) {
+    const removeRuntimeListener = onMessage.removeListener.bind(onMessage);
+    const hasRuntimeListener = onMessage.hasListener.bind(onMessage);
+    const wrapped = new WeakMap();
+    define(onMessage, 'addListener', (listener) => {
+      if (typeof listener !== 'function') return addRuntimeListener(listener);
+      let wrapper = wrapped.get(listener);
+      if (!wrapper) {
+        wrapper = function (message, sender, sendResponse) { return isBridgeMessage(message) ? undefined : listener.call(this, message, sender, sendResponse); };
+        wrapped.set(listener, wrapper);
+      }
+      return addRuntimeListener(wrapper);
+    });
+    define(onMessage, 'removeListener', (listener) => removeRuntimeListener(wrapped.get(listener) || listener));
+    define(onMessage, 'hasListener', (listener) => hasRuntimeListener(wrapped.get(listener) || listener));
+  }
+  const toBridge = (message) => {
+    try { return Promise.resolve(api.runtime.sendMessage({ [BRIDGE_KEY]: message })).catch(() => undefined); } catch { return Promise.resolve(undefined); }
+  };
+
+  // declarativeNetRequest: Electron stores the rules but never enforces them in Surffish (its own
+  // webRequest pipeline takes precedence), so Surffish enforces them itself. Tell the bridge after
+  // every change so it can read the new state back.
+  const dnr = api.declarativeNetRequest;
+  if (dnr && (isWorker || isExtensionPage)) {
+    for (const name of ['updateDynamicRules', 'updateSessionRules', 'updateEnabledRulesets', 'updateStaticRules']) {
+      const original = typeof dnr[name] === 'function' ? dnr[name].bind(dnr) : null;
+      if (!original) continue;
+      define(dnr, name, (options, callback) => {
+        const result = Promise.resolve().then(() => original(options));
+        result.then(() => toBridge({ type: 'dnr-changed' }), () => {});
+        if (typeof callback !== 'function') return result;
+        result.then(() => callback(), (error) => {
+          try { console.warn('[surffish] declarativeNetRequest.' + name + ' failed:', error && error.message ? error.message : error); } catch {}
+          callback();
+        });
+        return undefined;
+      });
+    }
+  }
+
+  // notifications: not shown in Surffish, but calls must not throw.
+  if (!api.notifications && (isWorker || isExtensionPage)) {
+    define(api, 'notifications', {
+      create: (...args) => { const id = typeof args[0] === 'string' ? args[0] : 'surffish-' + Date.now(); return settle(Promise.resolve(id), lastFunction(args)); },
+      update: (...args) => settle(Promise.resolve(false), lastFunction(args)),
+      clear: (...args) => settle(Promise.resolve(false), lastFunction(args)),
+      getAll: (...args) => settle(Promise.resolve({}), lastFunction(args)),
+      getPermissionLevel: (...args) => settle(Promise.resolve('denied'), lastFunction(args)),
+      onClicked: noopEvent(), onClosed: noopEvent(), onButtonClicked: noopEvent(), onShowSettings: noopEvent(), onPermissionLevelChanged: noopEvent(),
+      TemplateType: { BASIC: 'basic', IMAGE: 'image', LIST: 'list', PROGRESS: 'progress' }
+    });
+  }
+
+  if (isWorker) {
+    const bridgeUrl = api.runtime.getURL('/surffish-bridge.html');
+    // tabs.query in the worker sees Surffish's hidden bridge page as a tab; hide it.
+    const tabsApi = api.tabs;
+    if (tabsApi && typeof tabsApi.query === 'function') {
+      const query = tabsApi.query.bind(tabsApi);
+      define(tabsApi, 'query', (queryInfo, callback) => {
+        const result = Promise.resolve(query(queryInfo || {})).then((tabs) => (tabs || []).filter((tab) => !String(tab.url || tab.pendingUrl || '').startsWith(bridgeUrl)));
+        return settle(result, typeof callback === 'function' ? callback : undefined);
+      });
+    }
+
+    // webNavigation: Electron has no such API; Surffish forwards tab navigation events here.
+    const navigationEvents = {};
+    if (!api.webNavigation) {
+      const text = (value) => typeof value === 'string' ? value : '';
+      const urlFilterMatches = (filter, url) => {
+        let parsed;
+        try { parsed = new URL(url); } catch { return false; }
+        const host = parsed.hostname, path = parsed.pathname, query = parsed.search.replace(/^\\?/, ''), full = parsed.href.split('#')[0];
+        const checks = [
+          ['hostContains', (v) => ('.' + host).includes(v)], ['hostEquals', (v) => host === v], ['hostPrefix', (v) => host.startsWith(v)], ['hostSuffix', (v) => host.endsWith(v)],
+          ['pathContains', (v) => path.includes(v)], ['pathEquals', (v) => path === v], ['pathPrefix', (v) => path.startsWith(v)], ['pathSuffix', (v) => path.endsWith(v)],
+          ['queryContains', (v) => query.includes(v)], ['queryEquals', (v) => query === v], ['queryPrefix', (v) => query.startsWith(v)], ['querySuffix', (v) => query.endsWith(v)],
+          ['urlContains', (v) => full.includes(v)], ['urlEquals', (v) => full === v], ['urlPrefix', (v) => full.startsWith(v)], ['urlSuffix', (v) => full.endsWith(v)],
+          ['urlMatches', (v) => { try { return new RegExp(v).test(full); } catch { return false; } }],
+          ['originAndPathMatches', (v) => { try { return new RegExp(v).test(parsed.origin + path); } catch { return false; } }],
+          ['schemes', (v) => Array.isArray(v) && v.includes(parsed.protocol.slice(0, -1))],
+          ['ports', (v) => Array.isArray(v) && v.some((port) => { const actual = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : parsed.protocol === 'http:' ? 80 : 0)); return Array.isArray(port) ? actual >= port[0] && actual <= port[1] : actual === port; })]
+        ];
+        return checks.every(([key, test]) => filter[key] === undefined || test(typeof filter[key] === 'string' ? text(filter[key]) : filter[key]));
+      };
+      const makeEvent = () => {
+        const listeners = [];
+        return {
+          addListener(listener, filters) { if (typeof listener === 'function' && !listeners.some((entry) => entry.listener === listener)) listeners.push({ listener, filters: filters && Array.isArray(filters.url) ? filters.url : null }); },
+          removeListener(listener) { const index = listeners.findIndex((entry) => entry.listener === listener); if (index >= 0) listeners.splice(index, 1); },
+          hasListener(listener) { return listeners.some((entry) => entry.listener === listener); },
+          hasListeners() { return listeners.length > 0; },
+          dispatch(details) {
+            for (const entry of listeners.slice()) {
+              if (entry.filters && !entry.filters.some((filter) => filter && typeof filter === 'object' && urlFilterMatches(filter, details.url))) continue;
+              try { entry.listener(details); } catch (error) { console.error(error); }
+            }
+          }
+        };
+      };
+      for (const name of ['onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted', 'onErrorOccurred', 'onHistoryStateUpdated', 'onReferenceFragmentUpdated', 'onCreatedNavigationTarget', 'onTabReplaced']) {
+        navigationEvents[name] = makeEvent();
+      }
+      const call = (method, details, callback) => settle(toBridge({ type: 'call', method, args: details && typeof details === 'object' ? JSON.parse(JSON.stringify(details)) : {} }).then((response) => response && response.ok ? response.result : null), callback);
+      const webNavigation = {
+        getFrame: (details, callback) => call('webNavigation.getFrame', details, callback),
+        getAllFrames: (details, callback) => call('webNavigation.getAllFrames', details, callback)
+      };
+      for (const [name, event] of Object.entries(navigationEvents)) {
+        webNavigation[name] = { addListener: event.addListener, removeListener: event.removeListener, hasListener: event.hasListener, hasListeners: event.hasListeners };
+      }
+      define(api, 'webNavigation', webNavigation);
+    }
+
+    if (addRuntimeListener) {
+      addRuntimeListener((message, sender) => {
+        if (!isBridgeMessage(message) || !sender || sender.id !== api.runtime.id) return undefined;
+        const payload = message[BRIDGE_KEY];
+        if (payload && payload.type === 'event' && navigationEvents[payload.name]) navigationEvents[payload.name].dispatch(payload.details || {});
+        return undefined;
+      });
+    }
+  }
+})();
+`
+
+/** The bridge page: no shim (it must see the bridge messages the shim hides). */
+export const EXTENSION_BRIDGE_HTML = `<!doctype html>
+<!-- Surffish extension bridge (${SHIM_MARKER}: not injected here) -->
+<meta charset="utf-8">
+<script src="/${EXTENSION_BRIDGE_SCRIPT}"></script>
+`
+
+/**
+ * Runs in the hidden bridge page (extension origin, Surffish preload). Relays webNavigation events
+ * and bridge calls from/to the worker shim, and reports declarativeNetRequest state to Surffish.
+ */
+export const EXTENSION_BRIDGE_SOURCE = `(() => {
+  const host = globalThis.surffishExtensionBridge;
+  const api = globalThis.chrome;
+  if (!host || !api || !api.runtime) return;
+  const KEY = '${EXTENSION_BRIDGE_KEY}';
+  const dnr = api.declarativeNetRequest;
+  const safe = async (task, fallback) => { try { return await task(); } catch { return fallback; } };
+  const readDnr = async () => {
+    const enabledRulesets = await safe(() => dnr.getEnabledRulesets(), []);
+    const disabledStaticRuleIds = {};
+    if (typeof dnr.getDisabledRuleIds === 'function') {
+      for (const rulesetId of enabledRulesets) {
+        const ids = await safe(() => dnr.getDisabledRuleIds({ rulesetId }), []);
+        if (ids.length > 0) disabledStaticRuleIds[rulesetId] = ids;
+      }
+    }
+    return {
+      type: 'dnr-state',
+      dynamicRules: await safe(() => dnr.getDynamicRules(), []),
+      sessionRules: await safe(() => dnr.getSessionRules(), []),
+      enabledRulesets,
+      disabledStaticRuleIds
+    };
+  };
+  let syncing = Promise.resolve();
+  const syncDnr = () => {
+    if (!dnr) return syncing;
+    syncing = syncing.then(async () => host.send(await readDnr()));
+    return syncing;
+  };
+  api.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || typeof message !== 'object' || !Object.prototype.hasOwnProperty.call(message, KEY)) return undefined;
+    if (!sender || sender.id !== api.runtime.id) return undefined;
+    const payload = message[KEY] || {};
+    if (payload.type === 'dnr-changed') { syncDnr(); return undefined; }
+    if (payload.type === 'call') {
+      Promise.resolve(host.call(payload.method, payload.args)).then(
+        (result) => sendResponse({ ok: true, result }),
+        (error) => sendResponse({ ok: false, error: String(error && error.message ? error.message : error) })
+      );
+      return true;
+    }
+    return undefined;
+  });
+  host.onMessage(async (message) => {
+    if (!message || typeof message !== 'object') return;
+    if (message.type === 'init') {
+      // Electron never enables manifest rulesets itself: mirror Surffish's set into the native API
+      // so the extension's own getEnabledRulesets() is right.
+      if (dnr && Array.isArray(message.enabledRulesets)) {
+        const current = await safe(() => dnr.getEnabledRulesets(), []);
+        const enableRulesetIds = message.enabledRulesets.filter((id) => !current.includes(id));
+        const disableRulesetIds = current.filter((id) => !message.enabledRulesets.includes(id));
+        if (enableRulesetIds.length > 0 || disableRulesetIds.length > 0) await safe(() => dnr.updateEnabledRulesets({ enableRulesetIds, disableRulesetIds }));
+      }
+      syncDnr();
+    } else if (message.type === 'event') {
+      Promise.resolve(api.runtime.sendMessage({ [KEY]: { type: 'event', name: message.name, details: message.details } })).catch(() => {});
+    }
+  });
+  host.send({ type: 'ready' });
 })();
 `
 
@@ -229,7 +441,7 @@ export function collectExtensionSources(directory: string): ExtensionSourceFile[
   const root = resolve(directory)
   const files: ExtensionSourceFile[] = []
   let total = 0
-  for (const path of listFiles(root, (name) => /\.(m?js)$/i.test(name) && name !== EXTENSION_SHIM_FILE && name !== EXTENSION_BACKGROUND_WRAPPER_FILE)) {
+  for (const path of listFiles(root, (name) => /\.(m?js)$/i.test(name) && name !== EXTENSION_SHIM_FILE && name !== EXTENSION_BACKGROUND_WRAPPER_FILE && name !== EXTENSION_BRIDGE_SCRIPT)) {
     const size = statSync(path).size
     if (total + size > MAX_SCANNED_SOURCE_BYTES) break
     total += size
@@ -238,11 +450,31 @@ export function collectExtensionSources(directory: string): ExtensionSourceFile[
   return files
 }
 
+/** The extension's static declarativeNetRequest rulesets, for the install compatibility check (bounded). */
+export function collectDnrRulesets(directory: string, manifest: unknown): Array<{ id: string; rules: unknown }> {
+  const root = resolve(directory)
+  const result: Array<{ id: string; rules: unknown }> = []
+  for (const declaration of manifestDnrRulesets(manifest)) {
+    const relativePath = safeRelativePath(declaration.path)
+    if (!relativePath) continue
+    const file = resolve(root, relativePath)
+    if (!file.startsWith(`${root}${sep}`) || !existsSync(file) || statSync(file).size > MAX_SCANNED_SOURCE_BYTES) continue
+    try {
+      result.push({ id: declaration.id, rules: JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as unknown })
+    } catch {
+      result.push({ id: declaration.id, rules: null })
+    }
+  }
+  return result
+}
+
 export const EXTENSION_SIDECAR_FILE = 'surffish-extension.json'
 
 /** Write (or refresh) the shim and background wrapper inside a staged extension directory. */
 export function writeExtensionShimFiles(directory: string): void {
   writeFileSync(join(directory, EXTENSION_SHIM_FILE), EXTENSION_SHIM_SOURCE)
+  writeFileSync(join(directory, EXTENSION_BRIDGE_PAGE), EXTENSION_BRIDGE_HTML)
+  writeFileSync(join(directory, EXTENSION_BRIDGE_SCRIPT), EXTENSION_BRIDGE_SOURCE)
   const sidecarPath = join(directory, EXTENSION_SIDECAR_FILE)
   if (!existsSync(sidecarPath)) return
   const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8')) as unknown

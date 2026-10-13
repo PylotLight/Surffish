@@ -17,10 +17,11 @@ import { chromeWebStoreCrxUrl, isAllowedChromeWebStoreDownloadUrl, parseChromeWe
 import { analyzeExtensionCompatibility } from '../src/shared/extension-compat.ts'
 import { parseCrx } from '../src/main/crx.ts'
 import { extractExtensionZip } from '../src/main/bramble-release.ts'
-import { collectExtensionSources, stageWebStoreExtension } from '../src/main/web-store-extension-adapter.ts'
+import { collectDnrRulesets, collectExtensionSources, stageWebStoreExtension } from '../src/main/web-store-extension-adapter.ts'
 
 export const VERIFIED_WEB_STORE_EXTENSIONS: Record<string, string> = {
-  'modern-for-hn': 'dabkegjlekdcmefifaolmdhnhdcplklo'
+  'modern-for-hn': 'dabkegjlekdcmefifaolmdhnhdcplklo',
+  'i-still-dont-care-about-cookies': 'edibdbjcniadpccecjdfdjjppcpchdlm'
 }
 
 const args = process.argv.slice(2)
@@ -45,7 +46,8 @@ try {
   const source = args.includes('--raw') ? output : join(scratch, 'source')
   extractExtensionZip(crx.archive, source, { label: 'extension package', maxArchiveBytes: 64 * 1024 * 1024, skip: (path) => path === '_metadata' || path.startsWith('_metadata/') })
   const staged = args.includes('--raw') ? null : stageWebStoreExtension(source, output, crx.publicKey.toString('base64'))
-  const compatibility = analyzeExtensionCompatibility(staged?.manifest ?? JSON.parse(await Bun.file(join(output, 'manifest.json')).text()), collectExtensionSources(output))
+  const outputManifest = staged?.manifest ?? JSON.parse(await Bun.file(join(output, 'manifest.json')).text())
+  const compatibility = analyzeExtensionCompatibility(outputManifest, collectExtensionSources(output), collectDnrRulesets(output, outputManifest))
   console.log(JSON.stringify({ id, format: crx.format, signatureVerified: crx.signatureVerified, output, staged: staged !== null, compatibility: { level: compatibility.level, gaps: compatibility.gaps, blockers: compatibility.blockers, shimmed: compatibility.shimmed } }, null, 2))
 } finally {
   rmSync(scratch, { recursive: true, force: true })

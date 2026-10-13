@@ -26,6 +26,7 @@ import { getBrowserSession } from './browser-session'
 import {
   closeExtensionPageTabs,
   createExtensionTab,
+  getBrowserTabUrlByWebContentsId,
   getExtensionTab,
   isExtensionPageTab,
   listExtensionTabs,
@@ -41,7 +42,10 @@ import { extractExtensionZip } from './bramble-release'
 import { createRestrictedFetch } from './restricted-fetch'
 import { activateStagedDirectory, assertExtensionIdentity, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
 import { setExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
+import { extensionDnrStatePath, manifestUsesDnr, registerExtensionDnr, unregisterExtensionDnr } from './extension-dnr'
+import { disposeExtensionBridges, startExtensionBridge, stopExtensionBridge } from './extension-bridge'
 import {
+  collectDnrRulesets,
   collectExtensionSources,
   extensionWorkerFiles,
   manifestOptionsPath,
@@ -223,6 +227,32 @@ function refreshAdblockExemptions(): void {
   setExtensionAdblockExemptHosts(hosts)
 }
 
+/**
+ * Runtime support Surffish adds around a loaded extension: its declarativeNetRequest rules
+ * (enforced by Surffish) and the hidden bridge page (webNavigation events, DNR state).
+ */
+function startRuntimeSupport(id: string, entry: LoadedEntry): void {
+  const browserSession = getBrowserSession()
+  try {
+    registerExtensionDnr(browserSession, id, entry.directory, entry.manifest, extensionDnrStatePath(join(rootDirectory(), id)))
+    startExtensionBridge({
+      id,
+      extensionUrl: entry.extension.url,
+      session: browserSession,
+      webNavigation: stringList(entry.manifest.permissions).includes('webNavigation'),
+      dnr: manifestUsesDnr(entry.manifest),
+      isTab: (contents) => getBrowserTabUrlByWebContentsId(contents.id) !== null
+    })
+  } catch (error) {
+    console.warn(`[extensions] could not start runtime support for ${id}:`, errorMessage(error))
+  }
+}
+
+function stopRuntimeSupport(id: string): void {
+  stopExtensionBridge(id)
+  unregisterExtensionDnr(id)
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 
@@ -244,12 +274,14 @@ async function loadInstalled(record: InstalledRecord): Promise<LoadedEntry> {
   loaded.set(record.id, entry)
   loadErrors.delete(record.id)
   refreshAdblockExemptions()
+  startRuntimeSupport(record.id, entry)
   return entry
 }
 
 function unloadExtension(id: string): void {
   const entry = loaded.get(id)
   if (popup?.id === id) disposePopup()
+  stopRuntimeSupport(id)
   if (!entry) return
   closeExtensionPageTabs(entry.extension.url)
   try {
@@ -340,7 +372,7 @@ async function downloadPackage(id: string): Promise<PreparedPackage> {
       manifest,
       name: resolveManifestMessage(sourceDirectory, manifest, manifest.name) || id,
       version,
-      compatibility: analyzeExtensionCompatibility(manifest, collectExtensionSources(sourceDirectory)),
+      compatibility: analyzeExtensionCompatibility(manifest, collectExtensionSources(sourceDirectory), collectDnrRulesets(sourceDirectory, manifest)),
       publicKey: crx.publicKey.toString('base64')
     }
   } catch (error) {
@@ -420,9 +452,11 @@ async function activatePrepared(prepared: PreparedPackage): Promise<void> {
       browserSession.extensions.removeExtension(extension.id)
       throw error
     }
-    loaded.set(id, { extension, directory: finalDirectory, manifest: staged.manifest })
+    const entry = { extension, directory: finalDirectory, manifest: staged.manifest }
+    loaded.set(id, entry)
     loadErrors.delete(id)
     activation.commit()
+    startRuntimeSupport(id, entry)
     const now = Date.now()
     records.set(id, {
       id,
@@ -840,4 +874,5 @@ export async function installFromStorePage(sender: WebContents, senderFrame: Ele
 
 export function disposeWebStoreExtensions(): void {
   disposePopup()
+  disposeExtensionBridges()
 }
