@@ -90,5 +90,5 @@
 
 /* A thin rule in the active Space's colour along the sidebar's top edge. */
 .browser-sidebar.has-spaces {
-  box-shadow: inset 0 2px 0 var(--active-space-color, transparent);
+  box-shadow: inset 0 2px 0 var(--active-space-color, transparent), var(--sidebar-card-shadow);
 }

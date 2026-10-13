@@ -4,7 +4,6 @@
  * blur it would double-blur. Each path gets a background that reads on its own. */
 .app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-solid,
 .app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-snapshot {
-  border-color: rgba(255, 255, 255, 0.16);
   background: linear-gradient(160deg, rgba(31, 35, 41, 0.95), rgba(18, 21, 25, 0.96) 45%, rgba(12, 14, 17, 0.97));
 }
 .app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-solid.is-private-window,
@@ -12,13 +11,13 @@
   background: linear-gradient(160deg, rgba(38, 31, 54, 0.95), rgba(21, 18, 30, 0.96) 45%, rgba(13, 12, 18, 0.97));
 }
 /* Native compositor blur: the view itself is the tinted, blurred, rounded card (main sets it up
- * and insets the view), so the card only adds a faint sheen and its border. */
+ * and insets it by the same --sidebar-card-inset), so the card fills the view instead of insetting
+ * itself again, and only adds a faint sheen and its border. */
 .app-shell[data-surface='sidebar'] .browser-sidebar.is-view-framed {
-  top: 0 !important;
+  top: 0;
   bottom: 0;
 }
 .app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-native {
-  border-color: rgba(255, 255, 255, 0.16);
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 40%);
 }
 .app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-native.is-private-window {

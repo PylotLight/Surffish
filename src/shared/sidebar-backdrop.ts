@@ -13,6 +13,8 @@
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
+import { SIDEBAR_CARD } from './sidebar-card'
+
 export type SidebarBackdropMode = 'native' | 'snapshot' | 'solid'
 
 export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = ['native', 'snapshot', 'solid']
@@ -54,9 +56,9 @@ export const SIDEBAR_NATIVE_BLUR_RADIUS = 36
 export const SIDEBAR_NATIVE_TINT = '#C4131619'
 /** ARGB fill for a card-framed view after leaving the native path (blur off at runtime). */
 export const SIDEBAR_FRAMED_SOLID_TINT = '#F2131619'
-/** The sidebar card sits this far in from the top/bottom of the window (matches the CSS). */
-export const SIDEBAR_CARD_INSET = 10
-export const SIDEBAR_CARD_RADIUS = 28
+/** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
+export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset
+export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius
 /** Snapshots are downscaled this much before the one-off canvas blur (cheap to send and draw). */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25
 /** At most one snapshot per this many ms while the sidebar stays open. */
