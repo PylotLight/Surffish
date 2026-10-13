@@ -162,10 +162,17 @@ async function mainPhase() {
   assert.equal(await evaluate(toolbar1, `window.api.browser.tabs.move(${JSON.stringify(oneId)}, ${JSON.stringify(secretId)})`), false)
 
   // --- the session holds both normal windows (each with its own tabs), never the private one
+  // Poll on content, not just window count: the first 2-window snapshot can predate the
+  // latest debounced write under load.
   const saved = await waitFor(() => {
     const value = sessionFile()
-    return Array.isArray(value.windows) && value.windows.length === 2 ? value : null
-  }, 'the two-window session on disk', 8000)
+    if (!Array.isArray(value.windows) || value.windows.length !== 2) return null
+    const urls = value.windows.map((window) => window.tabs)
+    if (!urls.some((u) => u.length === 1 && u[0] === `${origin}/one`)) return null
+    if (!urls.some((u) => u[0] === `${origin}/two`)) return null
+    if (JSON.stringify(value).includes('/secret')) return null
+    return value
+  }, 'the two-window session on disk', 20000)
   const savedUrls = saved.windows.map((window) => window.tabs)
   assert.ok(savedUrls.some((urls) => urls.length === 1 && urls[0] === `${origin}/one`), 'window 1 saved')
   assert.ok(savedUrls.some((urls) => urls[0] === `${origin}/two`), 'window 2 saved with the moved tab')
