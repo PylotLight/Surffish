@@ -1,3 +1,4 @@
+import type { TabSplitInfo } from './split-view'
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
@@ -150,6 +151,8 @@ export interface BrowserTabSummary {
   private: boolean
   /** The tab's page process crashed; it reloads when the tab is next opened. */
   crashed?: boolean
+  /** The tab is a pane of a split view (the sidebar shows the split as one entry). */
+  split?: TabSplitInfo
 }
 export interface BrowsingHistoryEntry {
   id: string

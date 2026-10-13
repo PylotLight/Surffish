@@ -1,5 +1,6 @@
-import { normalizeBrowserSession, parseBrowserSession } from './persistence'
+import { MAX_RESTORED_TABS, normalizeBrowserSession, parseBrowserSession } from './persistence'
 import { parseSavedWindowState, type SavedWindowState } from './window-geometry'
+import { parseSessionSplits, remapSessionSplits, type SavedSplit } from './split-view'
 
 /**
  * The saved session with several windows.
@@ -18,6 +19,8 @@ export interface SavedSessionWindow {
   pinnedIndexes: number[]
   /** Size/position/maximized; null lets the window open at the default place. */
   geometry: SavedWindowState | null
+  /** Split views (indexes into `urls`); left out when there are none, so older files read the same. */
+  splits?: SavedSplit[]
 }
 
 export interface SavedWindowsSession {
@@ -31,6 +34,7 @@ export interface SessionWindowInput {
   activeIndex: number
   pinnedIndexes: readonly number[]
   geometry: SavedWindowState | null
+  splits?: readonly SavedSplit[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -42,6 +46,23 @@ function clampFocused(index: number, count: number): number {
   return Number.isInteger(index) && index >= 0 && index < count ? index : count - 1
 }
 
+/**
+ * Splits re-pointed at the tabs normalizeBrowserSession kept (it drops unsafe URLs and caps the
+ * list): a tab is kept when it survives normalisation on its own, in the same order.
+ */
+function normalizeSplits(window: SessionWindowInput, keptCount: number, pinnedIndexes: readonly number[]): SavedSplit[] {
+  if (!window.splits || window.splits.length === 0) return []
+  const newIndex = new Map<number, number>()
+  let next = 0
+  window.urls.forEach((url, index) => {
+    if (index < MAX_RESTORED_TABS && next < keptCount && normalizeBrowserSession([url], 0).urls.length === 1) newIndex.set(index, next++)
+  })
+  // Validate first (this also reads untrusted values from disk), then re-point.
+  const valid = parseSessionSplits(window.splits, window.urls.length)
+  const remapped = remapSessionSplits(valid, (index) => newIndex.get(index) ?? -1)
+  return parseSessionSplits(remapped, keptCount, pinnedIndexes)
+}
+
 /** Clean up windows to save: safe URLs only, windows left without tabs are dropped. */
 export function normalizeWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): SavedWindowsSession {
   const kept: SavedSessionWindow[] = []
@@ -50,7 +71,8 @@ export function normalizeWindowsSession(windows: readonly SessionWindowInput[], 
     const session = normalizeBrowserSession(window.urls, window.activeIndex, window.pinnedIndexes)
     if (session.urls.length === 0) return
     if (index === focusedIndex) focused = kept.length
-    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null })
+    const splits = normalizeSplits(window, session.urls.length, session.pinnedIndexes)
+    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}) })
   })
   // A focused window that was dropped (or an out-of-range index) falls back to the last one.
   return { windows: kept, focusedIndex: clampFocused(focused, kept.length) }
@@ -69,6 +91,7 @@ export function serializeWindowsSession(session: SavedWindowsSession): Record<st
       tabs: window.urls,
       activeIndex: window.activeIndex,
       pinnedTabs: window.pinnedIndexes,
+      ...(window.splits && window.splits.length > 0 ? { splits: window.splits } : {}),
       ...(window.geometry ? { bounds: window.geometry.bounds, maximized: window.geometry.maximized, fullScreen: window.geometry.fullScreen } : {})
     }))
   }
@@ -84,7 +107,8 @@ export function parseWindowsSession(value: unknown, legacyGeometry: SavedWindowS
       urls: Array.isArray(window.tabs) ? window.tabs.map((url) => typeof url === 'string' ? url : '') : [],
       activeIndex: typeof window.activeIndex === 'number' ? window.activeIndex : 0,
       pinnedIndexes: Array.isArray(window.pinnedTabs) ? window.pinnedTabs.filter((index): index is number => typeof index === 'number' && Number.isInteger(index)) : [],
-      geometry: parseSavedWindowState(window)
+      geometry: parseSavedWindowState(window),
+      splits: Array.isArray(window.splits) ? window.splits as SavedSplit[] : []
     }))
     const focused = typeof value.focusedWindow === 'number' ? value.focusedWindow : windows.length - 1
     const session = normalizeWindowsSession(windows, focused)

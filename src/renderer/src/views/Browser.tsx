@@ -61,6 +61,8 @@ import { UpdateSettings } from './settings/UpdateSettings'
 import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
 import { useTabDragSort } from './useTabDragSort'
+import { SplitTabEntry } from './SplitTabEntry'
+import { groupTabEntries } from '../../../shared/split-view'
 import TimeZonePicker from './TimeZonePicker'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { ExtensionsSettings } from './ExtensionsSettings'
@@ -298,9 +300,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
-  const unpinnedTabIds = useMemo(() => tabs.filter((tab) => !tab.pinned).map((tab) => tab.id), [tabs])
+  // A split view is one sidebar entry (keyed by its first tab), so it sorts and drags as one.
+  const tabEntries = useMemo(() => groupTabEntries(tabs.filter((tab) => !tab.pinned)), [tabs])
+  const tabEntriesByKey = useMemo(() => new Map(tabEntries.map((entry) => [entry.key, entry])), [tabEntries])
+  const unpinnedTabIds = useMemo(() => tabEntries.map((entry) => entry.key), [tabEntries])
   const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) }, (id) => { void window.api.browser.tabs.dropOutside(id) })
-  const tabsById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
@@ -1165,7 +1169,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         ) : (
           <div ref={tabDrag.listRef} className={`tab-list${tabDrag.draggingId ? ' is-drag-sorting' : ''}`} role="tablist" aria-label="Open tabs" onClickCapture={tabDrag.onClickCapture}>
-            {tabDrag.orderedIds.map((id) => tabsById.get(id)).filter((tab): tab is BrowserTabSummary => Boolean(tab)).map((tab) => (
+            {tabDrag.orderedIds.map((id) => tabEntriesByKey.get(id)).filter((entry) => entry !== undefined).map((entry) => entry.kind === 'split' ? (
+              <SplitTabEntry
+                key={entry.key}
+                entryId={entry.key}
+                tabs={entry.tabs}
+                dragging={tabDrag.draggingId === entry.key}
+                animate={sidebarOnScreen}
+                handlers={tabDrag.itemHandlers(entry.key)}
+                onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
+                titleFor={(tab) => withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
+                onActivate={(id) => {
+                  void window.api.browser.tabs.activate(id)
+                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
+                }}
+              />
+            ) : (({ tab }) => (
               <div
                 className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}`}
                 key={tab.id}
@@ -1211,7 +1230,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onClick={(event) => { event.stopPropagation(); void window.api.browser.tabs.close(tab.id) }}
                 >×</button>
               </div>
-            ))}
+            ))(entry))}
             {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
             <div className="sidebar-new-tab-actions">
               <button className="sidebar-new-tab-row" type="button" aria-label="New tab" title="New tab (Ctrl/⌘+T)" onClick={createNewTab}>

@@ -4,8 +4,13 @@ import type { CommandDescriptor, CommandPaletteSnapshot } from '../shared/comman
 import {
   TAB_COMMAND_SHORTCUTS,
   browserPictureInPicture,
+  focusAdjacentSplitPane,
   getActiveTabWebContents,
   getBrowserState,
+  getBrowserTabSplitStatus,
+  popOutBrowserSplitPane,
+  swapBrowserSplitPanes,
+  toggleBrowserSplitView,
   getBrowserTabs,
   hasRecentlyClosedBrowserTabs,
   newBrowserTab,
@@ -133,6 +138,16 @@ const COMMANDS: BrowserCommand[] = [
     id: 'view.reader', title: () => (readerStateFor(getActiveTabWebContents()) === 'active' ? 'Exit Reader View' : 'Reader View'), accelerator: APP_SHORTCUTS.readerView, section: 'View',
     keywords: ['reader mode', 'article', 'readability', 'distraction free', 'clean'], enabled: () => readerStateFor(getActiveTabWebContents()) !== null, run: () => toggleReaderMode()
   },
+  // Split view
+  {
+    id: 'view.splitView', title: () => (getBrowserTabSplitStatus().split ? 'Unsplit Tabs' : 'Split with Last Used Tab'), accelerator: TAB_COMMAND_SHORTCUTS.splitView.accelerator, section: 'View',
+    keywords: ['split view', 'side by side', 'two tabs', 'tile', 'unsplit'], refocusPage: true, enabled: () => getBrowserTabSplitStatus().canSplit, run: () => toggleBrowserSplitView()
+  },
+  { id: 'view.splitSwap', title: 'Swap Split Panes', section: 'View', keywords: ['split view', 'swap sides', 'flip'], refocusPage: true, enabled: () => getBrowserTabSplitStatus().split, run: () => swapBrowserSplitPanes() },
+  { id: 'view.splitPopOut', title: 'Open Pane as Its Own Tab', section: 'View', keywords: ['split view', 'pop out', 'separate', 'unsplit pane'], refocusPage: true, enabled: () => getBrowserTabSplitStatus().split, run: () => popOutBrowserSplitPane() },
+  tabCommand('view.splitClosePane', 'close', 'Close Focused Pane', { section: 'View', keywords: ['split view', 'close pane'], refocusPage: false, enabled: () => getBrowserTabSplitStatus().split }),
+  { id: 'view.splitFocusLeft', title: 'Focus Left Pane', accelerator: TAB_COMMAND_SHORTCUTS.focusPaneLeft.accelerator, section: 'View', keywords: ['split view', 'pane', 'switch pane'], enabled: () => getBrowserTabSplitStatus().split, run: () => focusAdjacentSplitPane(-1) },
+  { id: 'view.splitFocusRight', title: 'Focus Right Pane', accelerator: TAB_COMMAND_SHORTCUTS.focusPaneRight.accelerator, section: 'View', keywords: ['split view', 'pane', 'switch pane'], enabled: () => getBrowserTabSplitStatus().split, run: () => focusAdjacentSplitPane(1) },
   { id: 'view.history', title: 'Show History', accelerator: TAB_COMMAND_SHORTCUTS.history.accelerator, section: 'View', keywords: ['visited'], run: () => openPanel('history') },
   { id: 'view.downloads', title: 'Show Downloads', accelerator: TAB_COMMAND_SHORTCUTS.downloads.accelerator, section: 'View', run: () => openPanel('downloads') },
 
