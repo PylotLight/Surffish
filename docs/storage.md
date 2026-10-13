@@ -6,9 +6,10 @@ stable id, a clock stamp and a tombstone, and every write lands in a change log.
 
 Status: **history** lives in the database (PR 1); the **open-windows session** (windows, tabs,
 pins, groups, splits, each tab's Space) is saved to it too (PR 2), with browser-session.json still
-written alongside as the fallback. **Bookmarks** moved next, with bookmarks.json kept as the
-fallback copy. Spaces definitions and settings have tables already and move over next. Everything
-else is still JSON.
+written alongside as the fallback. **Bookmarks** and **browser preferences** moved next, with
+bookmarks.json / browser-preferences.json kept as fallback copies. Spaces definitions have a table
+already and move over next. Everything else (small settings files such as spellcheck, HTTPS-only,
+search keywords) is still JSON.
 
 ## Which SQLite
 
@@ -118,6 +119,25 @@ bookmarks was a 569 KB `bookmarks.json` rewrite (~1.2 ms); it is now a ~0.9 ms d
 of WAL, and the JSON copy follows at most every 30 s. Loading 2,000 bookmarks from the database is
 ~7.6 ms vs ~5.1 ms from JSON (~0.8 vs ~0.6 ms for 200). Importing 2,000 from JSON once: ~54 ms,
 1.5 s after startup.
+
+### Browser preferences
+
+`browser-preferences.json` becomes one `settings` row per preference (`store/preferences-store.ts`,
+glue in `preferences-persistence.ts`):
+
+| Key | Value | Scope |
+|---|---|---|
+| `pref.searchEngine`, `pref.tabSleepMinutes`, `pref.newTabPage`, `pref.newTabPreferences` | JSON value | synced |
+| `pref.sidebarWidth`, `pref.pinnedSites` (legacy copy for older builds) | JSON value | device |
+| `site:<sha256(origin)[0:32]>` | `{ origin, ...site settings }` | synced |
+| `zoom:<sha256(origin)[0:32]>` | `{ origin, factor }` | device (like Chrome/Safari) |
+
+A change writes the changed row right away (the JSON write used to be immediate too); the JSON copy
+follows on the 30 s timer and at quit. Per-site keys are hashes, so Forget this site / Clear
+browsing data hard-delete the rows and leave only a `delete` op carrying the hash; those privacy
+deletes also rewrite the JSON copy immediately and truncate the WAL. Rows are read back in write
+order, so site zoom keeps "most recently changed last" for its cap. Measured: a change with 100
+per-site entries ~0.17 ms (was a ~24 KB rewrite, ~0.10 ms); load ~0.5 ms vs ~0.17 ms from JSON.
 
 ## Session (windows / tabs / groups / splits)
 

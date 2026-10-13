@@ -136,6 +136,8 @@ async function runFallback() {
   await waitFor(() => readFileSync(legacyFile, 'utf8').includes('/fallback'), 'the visit to be written to browsing-history.json')
   await evaluate(toolbar, `window.api.browser.bookmarks.create({ parentId: 'favourites', title: 'Fallback mark', url: ${JSON.stringify(`${origin}/mark`)} })`)
   await waitFor(() => existsSync(join(userData, 'bookmarks.json')) && readFileSync(join(userData, 'bookmarks.json'), 'utf8').includes('Fallback mark'), 'the bookmark to be written to bookmarks.json')
+  await evaluate(toolbar, 'window.api.browser.setSearchEngine("bing")')
+  await waitFor(() => readFileSync(join(userData, 'browser-preferences.json'), 'utf8').includes('"bing"'), 'the preference to be written to browser-preferences.json right away')
   assert.ok(!existsSync(join(userData, 'surffish.db')), 'no database is created when switched off')
   console.log('[store-smoke] fallback phase passed')
 }
