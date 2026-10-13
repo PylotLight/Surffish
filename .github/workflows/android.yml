@@ -165,16 +165,18 @@ jobs:
           export PATH="$GRADLE_NODE_BIN:$PATH"
           node -e 'if (process.versions.bun) process.exit(1)' || { echo "::error::node is still bun"; exit 1; }
           echo "gradle node: $(command -v node) $(node --version)"
-          # Memory: the pod got OOM-killed (runner "lost communication") with Gradle on all 16 cpus + per-task ninja
+          # Memory: the runner pod is capped at 8 GB / 8 cpus and got OOM-killed (runner "lost communication") with Gradle on all 16 cpus + per-task ninja
           # running nproc clangs. Cap Gradle workers, keep Kotlin in-process, pin everything to 6 cpus (ninja sizes -j
           # from the affinity mask), and a watchdog that kills the build before the pod dies so the log survives.
           limit=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
           if [ "$limit" != max ]; then
             (
               while sleep 5; do
-                cur=$(cat /sys/fs/cgroup/memory.current 2>/dev/null) || break
-                if [ "$cur" -gt $((limit / 100 * 90)) ]; then
-                  echo "::error::memory watchdog: ${cur} of ${limit} bytes used, killing gradle so the log survives"
+                # anon only: memory.current also counts reclaimable page cache, which is what tripped the first version
+                cur=$(awk '$1=="anon"{print $2}' /sys/fs/cgroup/memory.stat 2>/dev/null) || break
+                [ -n "$cur" ] || break
+                if [ "$cur" -gt $((limit / 100 * 92)) ]; then
+                  echo "::error::memory watchdog: ${cur} anon of ${limit} bytes, killing gradle so the log survives"
                   ps -eo rss,comm --sort=-rss | head -15
                   pkill -9 -f 'GradleDaemon|GradleWrapperMain|KotlinCompileDaemon|clang|ninja' || true
                   break
@@ -185,7 +187,7 @@ jobs:
           cpus=$(( $(nproc) < 6 ? $(nproc) : 6 ))
           pin=""; command -v taskset >/dev/null && taskset -c 0-$((cpus - 1)) true 2>/dev/null && pin="taskset -c 0-$((cpus - 1))"
           $pin ./gradlew :app:assembleRelease --console=plain --no-daemon --max-workers=$cpus \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" -Pkotlin.compiler.execution.strategy=in-process
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=768m" -Pkotlin.compiler.execution.strategy=in-process
           apk=app/build/outputs/apk/release/app-release.apk
           ver=$(bun -p "require('../app.json').expo.version")
           out="$GITHUB_WORKSPACE/Surffish-android-$ver-${GITHUB_SHA::7}.apk"
