@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type {
   BrambleExtensionState,
   BrowserChromeState,
@@ -47,6 +47,7 @@ import DiagnosticsView, { useTabUsageHints, withTabUsageHint } from './Diagnosti
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
 import { SpellcheckSettings } from './settings/SpellcheckSettings'
+import { AppearanceSettings } from './settings/AppearanceSettings'
 import { ProxyKillSwitchSetting } from './settings/ProxyKillSwitchSetting'
 import { PrivacySettings } from './settings/PrivacySettings'
 import { PageWatchersSettings, useUnseenWatcherCount } from './settings/PageWatchersSettings'
@@ -73,7 +74,8 @@ import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { WORLD_CITIES } from '../../../shared/world-cities'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
-import { BookmarksSidebar } from './bookmarks/BookmarksSidebar'
+import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
+import { BookmarksBar } from './bookmarks/BookmarksBar'
 import { ArchivedTabsSidebar } from './tab-archive/ArchivedTabsSidebar'
 import { TabArchiveSettings } from './settings/TabArchiveSettings'
 import { SpacesSettings } from './settings/SpacesSettings'
@@ -85,6 +87,8 @@ import { BrowserNotice, LoadErrorNotice, LoadErrorPage } from './BrowserNotice'
 import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigation-errors'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
+import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from './SidebarBackdrop'
+import './SidebarBackdrop.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
@@ -352,6 +356,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     .map((node) => ({ title: node.title, url: node.url!, ...(node.faviconUrl ? { faviconUrl: node.faviconUrl } : {}) })), [bookmarks.index])
   const bookmarkSuggestions = useMemo(() => bookmarks.nodes.flatMap((node) => node.type === 'bookmark' && node.url ? [{ title: node.title, url: node.url }] : []), [bookmarks.nodes])
   const [bookmarkPopoverOpen, setBookmarkPopoverOpen] = useState(false)
+  // Bookmarks dropdown (next to the address bar) and the optional bookmarks bar (⌘⇧B, off by default).
+  const [bookmarksMenuOpen, setBookmarksMenuOpen] = useState(false)
+  const [bookmarksBarMenuOpen, setBookmarksBarMenuOpen] = useState(false)
+  const [bookmarksMenuLayout, setBookmarksMenuLayout] = useState(0)
+  const bumpBookmarksMenuLayout = useCallback(() => setBookmarksMenuLayout((value) => value + 1), [])
+  const [bookmarksBarVisible, setBookmarksBarVisible] = useState(false)
+  useEffect(() => {
+    if (surface === 'sidebar') return
+    let mounted = true
+    const unsubscribe = window.api.browser.bookmarks.bar.onChange((visible) => { if (mounted) setBookmarksBarVisible(visible) })
+    void window.api.browser.bookmarks.bar.get().then((visible) => { if (mounted) setBookmarksBarVisible(visible) }).catch(() => undefined)
+    return () => {
+      mounted = false
+      unsubscribe()
+    }
+  }, [surface])
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
@@ -476,6 +496,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [])
 
   const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
+  const sidebarBackdrop = useSidebarBackdrop(surface === 'sidebar', `${tabs.find((tab) => tab.active)?.id ?? ''}|${browser.url}|${browser.loading}`, sidebarVisible)
   // Only build suggestions while the dropdown is open, and never in the sidebar surface (it has no
   // address bar). Otherwise every tab/history update re-ran the matcher in all three renderers.
   const suggestionsActive = suggestionsOpen && surface !== 'sidebar'
@@ -959,7 +980,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const updateChromeHeight = (): void => {
       const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice, .bookmarks-menu-panel'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -967,14 +988,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     observer.observe(element)
     // Popups fill in after they mount (downloads load async); re-measure as they grow so the
     // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice').forEach((popup) => observer.observe(popup))
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette, #bookmark-popover, #browser-notice, .bookmarks-menu-panel').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, surface, navigationError !== '' || showLoadErrorNotice])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -1161,7 +1182,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }} onMouseLeave={surface === 'sidebar' ? handleSidebarPointerLeave : undefined}>
       <aside
         ref={sidebarRef}
-        className={`browser-sidebar${activeSpace ? ' has-spaces' : ''}`}
+        className={`browser-sidebar${activeSpace ? ' has-spaces' : ''}${sidebarBackdropClass(surface, sidebarBackdrop)}${browser.private ? ' is-private-window' : ''}`}
         style={activeSpace ? { '--active-space-color': SPACE_COLOR_VALUES[activeSpace.color] } as React.CSSProperties : undefined}
         data-space-id={activeSpace?.id}
         aria-label="Browser sidebar"
@@ -1170,6 +1191,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         onFocusCapture={keepSidebarVisibleForFocus}
         onBlurCapture={releaseSidebarFocus}
       >
+        {surface === 'sidebar' && <SidebarBackdropLayer state={sidebarBackdrop} cardRef={sidebarRef} />}
         {window.api.platform === 'darwin' && (
           <div className="sidebar-window-controls" aria-label="Window controls">
             <button className="sidebar-window-control is-close" type="button" aria-label="Close window" title="Close window" onClick={() => void window.api.browser.windowControl('close')} />
@@ -1298,7 +1320,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
           </div>
         )}
-        {sidebarMode === 'tabs' && <BookmarksSidebar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} onShowManager={() => setSidebarMode('bookmarks')} />}
         {sidebarMode === 'tabs' && <ArchivedTabsSidebar cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} />}
 
         {sidebarMode === 'tabs' && spaces?.enabled && <SpacesSwitcher snapshot={spaces} />}
@@ -1502,6 +1523,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             <div className="browser-toolbar-trailing">
               {surface === 'toolbar' && <NetworkOverridesBadge enabled={networkToolEnabled} onOpen={() => selectSettingsSection('network')} />}
               <div className="omnibox-actions" role="group" aria-label="Browser panels">
+                {surface !== 'sidebar' && <BookmarksMenuButton
+                  bookmarks={bookmarks}
+                  cachedIcons={cachedSiteIcons}
+                  barVisible={bookmarksBarVisible}
+                  onToggleBar={() => void window.api.browser.bookmarks.bar.set(!bookmarksBarVisible).then(setBookmarksBarVisible).catch(() => undefined)}
+                  onShowManager={() => setSidebarMode('bookmarks')}
+                  onOpenChange={setBookmarksMenuOpen}
+                  onLayout={bumpBookmarksMenuLayout}
+                />}
                 <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
                 </button>
@@ -1577,6 +1607,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
             </div>
           </form>
+          {surface !== 'sidebar' && bookmarksBarVisible && <BookmarksBar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onShowManager={() => setSidebarMode('bookmarks')} onOpenChange={setBookmarksBarMenuOpen} onLayout={bumpBookmarksMenuLayout} />}
           {surface === 'toolbar' && <FindBar onOpenChange={setFindOpen} />}
           {surface !== 'sidebar' && <ProxyDownBanner />}
           {surface !== 'sidebar' && <CommandPalette tabs={tabs} pinnedSites={pinnedSites} searchEngine={searchEngine} searchEngineLabel={SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label ?? 'the web'} onOpenChange={setPaletteOpen} />}
@@ -1741,6 +1772,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
+                <AppearanceSettings />
                 <SearchKeywordsSettings />
                 <CommandPaletteSettings />
                 <DefaultBrowserSettings />

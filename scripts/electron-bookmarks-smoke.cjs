@@ -164,13 +164,53 @@ async function run() {
   }, 'Cmd/Ctrl+Shift+D to bookmark both tabs into a folder')
   assert.equal(folder.parentId, 'root')
 
-  // --- sidebar tree lists the folders
+  // --- bookmarks left the sidebar: no BOOKMARKS section there any more
   const sidebar = surface('sidebar')
   await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarPinned: true })')
-  await waitFor(() => evaluate(sidebar, '[...document.querySelectorAll(".sidebar-bookmarks .bookmark-row-title")].map((node) => node.textContent).includes("Favourites")'), 'the sidebar bookmarks tree')
-  await evaluate(sidebar, `(() => { const row = [...document.querySelectorAll('.sidebar-bookmarks .bookmark-row')].find((node) => node.textContent.includes('Favourites')); row.click(); return true })()`)
-  await waitFor(() => evaluate(sidebar, '[...document.querySelectorAll(".sidebar-bookmarks .bookmark-row-title")].map((node) => node.textContent).includes("Renamed fixture")'), 'Favourites to expand in the sidebar')
-  await screenshot(sidebar, 'bookmarks-sidebar.png')
+  await waitFor(() => evaluate(sidebar, 'Boolean(document.querySelector(".browser-layout.is-sidebar-visible .tab-list, .browser-layout.is-sidebar-visible .tab-item"))'), 'the pinned sidebar')
+  assert.equal(await evaluate(sidebar, 'document.querySelector(".sidebar-bookmarks:not(.sidebar-archived)") === null'), true, 'the sidebar has no bookmarks tree')
+  await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarPinned: false })')
+
+  // --- the toolbar bookmarks dropdown: Favourites first, folders open as submenus
+  await evaluate(toolbar, 'document.querySelector(".bookmarks-menu-button").click()')
+  await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#bookmarks-menu"))'), 'the bookmarks dropdown')
+  const menuTitles = await evaluate(toolbar, '[...document.querySelectorAll("#bookmarks-menu > .bookmarks-menu-scroll > .bookmarks-menu-item .bookmarks-menu-title")].map((node) => node.textContent)')
+  assert.equal(menuTitles[0], 'Seed', 'Favourites contents lead the dropdown')
+  assert.ok(menuTitles.includes('Renamed fixture'), `the new bookmark is in the dropdown (got ${JSON.stringify(menuTitles)})`)
+  assert.ok(menuTitles.some((title) => title.startsWith('Tabs ·')), 'top-level folders are listed')
+  const footer = await evaluate(toolbar, '[...document.querySelectorAll("#bookmarks-menu .bookmarks-menu-footer .bookmarks-menu-title")].map((node) => node.textContent)')
+  assert.deepEqual(footer, ['Bookmark manager…', 'Import…', 'Show bookmarks bar'])
+  // The toolbar view grows to cover the dropdown, so the page can't clip it.
+  const menuBottom = await evaluate(toolbar, 'document.querySelector("#bookmarks-menu").getBoundingClientRect().bottom')
+  await waitFor(() => toolbar.getBounds().height >= Math.floor(menuBottom), 'the toolbar view to cover the dropdown')
+  await evaluate(toolbar, `(() => { const row = [...document.querySelectorAll('#bookmarks-menu .bookmarks-menu-item.is-folder')].find((node) => node.textContent.startsWith('Tabs ·')); row.click(); return true })()`)
+  await waitFor(async () => (await evaluate(toolbar, '[...document.querySelectorAll(".bookmarks-menu-submenu .bookmarks-menu-item .bookmarks-menu-title")].map((node) => node.textContent)')).length >= 2, 'the folder submenu')
+  const submenuOpenAll = await evaluate(toolbar, '[...document.querySelectorAll(".bookmarks-menu-submenu .bookmarks-menu-item.is-action")].map((node) => node.textContent).join("|")')
+  assert.match(submenuOpenAll, /Open all \(2\)/)
+  await screenshot(toolbar, 'bookmarks-toolbar-menu.png')
+  // Clicking a bookmark in a submenu opens it here and closes the menu.
+  await evaluate(toolbar, `(() => { const row = [...document.querySelectorAll('.bookmarks-menu-submenu .bookmarks-menu-item')].find((node) => node.title.includes('/second')); row.click(); return true })()`)
+  await waitFor(async () => !(await evaluate(toolbar, 'Boolean(document.querySelector("#bookmarks-menu"))')), 'the dropdown to close after opening a bookmark')
+
+  // --- ⌘/Ctrl+Shift+B: the optional bookmarks bar (off by default) shifts the page down
+  assert.equal(await evaluate(toolbar, 'window.api.browser.bookmarks.bar.get()'), false, 'the bar is off by default')
+  const pageTopBefore = second.getBounds().y
+  key(second, 'B', [primary, 'shift'])
+  await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector(".bookmarks-bar"))'), 'Cmd/Ctrl+Shift+B to show the bookmarks bar')
+  await waitFor(async () => (await evaluate(toolbar, '[...document.querySelectorAll(".bookmarks-bar > .bookmarks-bar-item span:last-child")].map((node) => node.textContent).join("|")')).includes('Renamed fixture'), 'Favourites on the bar')
+  await waitFor(() => second.getBounds().y > pageTopBefore, 'the page to move below the bar')
+  await screenshot(toolbar, 'bookmarks-bar.png')
+  key(second, 'B', [primary, 'shift'])
+  await waitFor(async () => !(await evaluate(toolbar, 'Boolean(document.querySelector(".bookmarks-bar"))')), 'Cmd/Ctrl+Shift+B to hide the bar')
+  await waitFor(() => second.getBounds().y === pageTopBefore, 'the page to move back up')
+
+  // --- Import… from the dropdown opens the manager with its import panel
+  await evaluate(toolbar, 'document.querySelector(".bookmarks-menu-button").click()')
+  await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#bookmarks-menu"))'), 'the dropdown again')
+  await evaluate(toolbar, `(() => { const row = [...document.querySelectorAll('#bookmarks-menu .bookmarks-menu-footer .bookmarks-menu-item')].find((node) => node.textContent.startsWith('Import')); row.click(); return true })()`)
+  await waitFor(() => evaluate(content, 'Boolean(document.querySelector(".bookmarks-manager-import"))'), 'the manager with its import panel')
+  await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "tabs" })')
+  await waitFor(() => second.getBounds().width > 0, 'the page back after closing the manager')
 
   // --- Chromium import (bookmarks + history) through the same API Settings uses
   const sources = await evaluate(toolbar, 'window.api.browser.bookmarks.importSources()')

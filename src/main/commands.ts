@@ -1,3 +1,4 @@
+import { isBookmarksBarVisible } from './bookmarks-bar'
 import { normalizeHttpOrigin } from '../shared/persistence'
 import type { BrowserSidebarMode } from '../shared/types'
 import type { CommandDescriptor, CommandPaletteSnapshot } from '../shared/command-palette'
@@ -97,6 +98,7 @@ const COMMANDS: BrowserCommand[] = [
     run: () => { const tab = activeTab(); if (tab) setBrowserTabMuted(tab.id, !tab.muted) }
   },
   tabCommand('tab.bookmark', 'bookmark', () => (activeIsBookmarked() ? 'Remove Bookmark' : 'Bookmark Tab'), { keywords: ['favorite', 'favourite', 'star'], enabled: activeIsWebPage }),
+  tabCommand('view.bookmarksBar', 'bookmarksBar', () => (isBookmarksBarVisible() ? 'Hide Bookmarks Bar' : 'Show Bookmarks Bar'), { section: 'View', keywords: ['favourites', 'favorites', 'toolbar'], refocusPage: false }),
   tabCommand('tab.copyLink', 'copyLink', 'Copy Link', { keywords: ['url', 'address'], enabled: activeIsWebPage }),
   tabCommand('tab.copyCleanLink', 'copyCleanLink', 'Copy Clean Link', { keywords: ['url', 'tracking', 'utm', 'strip'], enabled: activeIsWebPage }),
   tabCommand('tab.reload', 'reload', 'Reload Tab', { keywords: ['refresh'] }),

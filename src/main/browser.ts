@@ -20,6 +20,7 @@ import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, reso
 import { forgetPrivateDownloads } from './downloads'
 import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, saveBrowserSiteZoom, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
+import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
@@ -2164,7 +2165,7 @@ export type TabCommand =
   | 'find' | 'findNext' | 'findPrevious'
   | 'zoomIn' | 'zoomOut' | 'zoomReset'
   | 'history' | 'downloads'
-  | 'bookmarkAllTabs' | 'bookmarks'
+  | 'bookmarkAllTabs' | 'bookmarks' | 'bookmarksBar'
   | 'screenshot'
   | 'splitView' | 'focusPaneLeft' | 'focusPaneRight'
 
@@ -2189,6 +2190,8 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   duplicate: { key: '', accelerator: '' },
   bookmarkAllTabs: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
   bookmarks: { key: 'b', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+B' },
+  // Chrome's binding for Show/Hide Bookmarks Bar.
+  bookmarksBar: { key: 'b', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+B' },
   copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
   copyCleanLink: { key: 'c', shift: true, alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Shift+C' },
   reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
@@ -2266,6 +2269,9 @@ export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
       return
     case 'bookmarkAllTabs':
       bookmarkAllBrowserTabs()
+      return
+    case 'bookmarksBar':
+      toggleBookmarksBar()
       return
     case 'screenshot':
       void takeScreenshot('choose')

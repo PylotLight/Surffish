@@ -3,6 +3,8 @@ import type { BookmarkNode } from '../../../../shared/types'
 import { BOOKMARKS_ROOT_ID, bookmarkFolderPath, FAVOURITES_FOLDER_ID, isFixedBookmarkFolder, searchBookmarkNodes } from '../../../../shared/bookmarks'
 import { BookmarkFavicon, BookmarkFolderSelect, BookmarkInlineEditor, FolderGlyph, ipcErrorMessage } from './BookmarkParts'
 import { BookmarkImportPanel } from './BookmarkImportPanel'
+import { BOOKMARK_IMPORT_REQUEST_KEY } from './BookmarksMenu'
+import { useStoredState } from '../../lib/stored-state'
 import { bookmarkHost, bookmarksBelow, childrenOf, confirmDelete, openBookmarkUrl, openBookmarksInTabs, type BookmarksState } from './useBookmarks'
 import { BOOKMARK_DRAG_TYPE, dropPlacement, dropTargetFor, type DropPlacement } from './bookmark-drag'
 
@@ -39,6 +41,11 @@ export function BookmarksManager({ bookmarks, cachedIcons, onClose, onOpened }: 
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [moveTarget, setMoveTarget] = useState<string>(FAVOURITES_FOLDER_ID)
   const [importOpen, setImportOpen] = useState(false)
+  // The toolbar's Bookmarks → Import… opens the manager with the import panel showing.
+  const [importRequest] = useStoredState<number>(BOOKMARK_IMPORT_REQUEST_KEY, 0)
+  useEffect(() => {
+    if (importRequest && Date.now() - importRequest < 10_000) setImportOpen(true)
+  }, [importRequest])
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [dragIds, setDragIds] = useState<string[] | null>(null)

@@ -137,7 +137,8 @@ export function installAppMenu(): void {
         tabItem('Bookmark This Tab…', 'bookmark'),
         tabItem('Bookmark All Tabs…', 'bookmarkAllTabs'),
         { type: 'separator' },
-        tabItem('Bookmark Manager', 'bookmarks')
+        tabItem('Bookmark Manager', 'bookmarks'),
+        tabItem('Show/Hide Bookmarks Bar', 'bookmarksBar')
       ]
     },
     {

@@ -22,6 +22,16 @@ export const bookmarksApi = {
     ipcRenderer.on('browser:bookmarks-changed', listener)
     return () => ipcRenderer.removeListener('browser:bookmarks-changed', listener)
   },
+  /** The bookmarks bar under the toolbar (off by default; View menu / Cmd+Shift+B toggle it too). */
+  bar: {
+    get: (): Promise<boolean> => ipcRenderer.invoke('browser:bookmarks-bar:get'),
+    set: (visible: boolean): Promise<boolean> => ipcRenderer.invoke('browser:bookmarks-bar:set', visible),
+    onChange: (callback: (visible: boolean) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, visible: boolean): void => callback(visible)
+      ipcRenderer.on('browser:bookmarks-bar', listener)
+      return () => ipcRenderer.removeListener('browser:bookmarks-bar', listener)
+    }
+  },
   /** Cmd+D: main bookmarked the page; open the star popover to edit it. */
   onEditCurrent: (callback: (payload: { id: string; created: boolean }) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: { id: string; created: boolean }): void => callback(payload)
