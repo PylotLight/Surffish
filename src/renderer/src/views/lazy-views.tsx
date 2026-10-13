@@ -29,6 +29,7 @@ export const NetworkRulesSettings = deferred(() => settings().then((m) => m.Netw
 export const SiteRouteSettings = deferred(() => settings().then((m) => m.SiteRouteSettings))
 export const UpdateSettings = deferred(() => settings().then((m) => m.UpdateSettings))
 export const TabArchiveSettings = deferred(() => settings().then((m) => m.TabArchiveSettings))
+export const MemorySaverSettings = deferred(() => settings().then((m) => m.MemorySaverSettings))
 export const SpacesSettings = deferred(() => settings().then((m) => m.SpacesSettings))
 export const ExtensionsSettings = deferred(() => settings().then((m) => m.ExtensionsSettings))
 export const BookmarkImportPanel = deferred(() => settings().then((m) => m.BookmarkImportPanel))

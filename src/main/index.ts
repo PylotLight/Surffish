@@ -8,6 +8,7 @@ import { registerDiagnosticsIpc } from './diagnostics'
 import { registerBookmarkIpc } from './bookmarks-ipc'
 import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
+import { disposeMemorySaver, initializeMemorySaver, registerMemorySaverIpc } from './memory-saver'
 import { initializeBrowserProxy } from './proxy'
 import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
@@ -85,6 +86,7 @@ app.whenReady().then(async () => {
   registerBookmarkIpc()
   registerWindowIpc()
   registerTabArchiveIpc()
+  registerMemorySaverIpc()
   registerReaderIpc()
   registerPageWatcherIpc()
   installAppMenu()
@@ -98,6 +100,8 @@ app.whenReady().then(async () => {
   traceStartup('windows created')
   flushExternalOpens()
   initializeTabArchive()
+  // Discard least recently used background tabs when memory is tight (on by default).
+  initializeMemorySaver()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
   initializeUpdates()
   // Page watchers: checks run in main on their own schedule (never for private tabs).
@@ -153,6 +157,7 @@ app.on('before-quit', () => {
   freezeBrowserSession()
   disposeUpdates()
   disposePageWatchers()
+  disposeMemorySaver()
   disposeBramblePoc()
   disposeWebStoreExtensions()
 })
