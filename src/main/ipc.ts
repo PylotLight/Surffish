@@ -20,7 +20,12 @@ import {
   setBrowserTabSleepMinutes,
   setBrowserSearchEngine,
   setBrowserBounds,
-  shouldPauseBackgroundYouTubeAutoplay
+  shouldPauseBackgroundYouTubeAutoplay,
+  closeFindBar,
+  getBrowserFindState,
+  setBrowserFindQuery,
+  stepFind,
+  zoomActiveBrowserTab
 } from './browser'
 import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
@@ -404,6 +409,11 @@ export function registerIpc(): void {
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })
   ipcMain.handle('browser:reload', (event) => { assertMainRenderer(event); browserReload() })
   ipcMain.handle('browser:stop', (event) => { assertMainRenderer(event); browserStop() })
+  ipcMain.handle('browser:zoom', (event, action: unknown) => { assertMainRenderer(event); zoomActiveBrowserTab(action) })
+  ipcMain.handle('browser:find:get', (event) => { assertMainRenderer(event); return getBrowserFindState() })
+  ipcMain.handle('browser:find:query', (event, text: unknown) => { assertMainRenderer(event); setBrowserFindQuery(text) })
+  ipcMain.handle('browser:find:step', (event, forward: unknown) => { assertMainRenderer(event); stepFind(forward !== false) })
+  ipcMain.handle('browser:find:close', (event) => { assertMainRenderer(event); closeFindBar() })
   ipcMain.handle('browser:picture-in-picture', (event) => { assertMainRenderer(event); return browserPictureInPicture() })
   ipcMain.handle('browser:set-bounds', (event, bounds: unknown) => {
     assertMainRenderer(event)

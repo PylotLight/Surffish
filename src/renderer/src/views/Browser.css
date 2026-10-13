@@ -3420,3 +3420,107 @@
 .new-tab-private-icon .private-glyph { width: 30px; height: 30px; }
 .new-tab-private-hero strong { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
 .new-tab-private-hero p { margin: 0; color: rgba(230, 222, 255, 0.72); font-size: 13.5px; line-height: 1.55; }
+
+/* Page zoom pill in the omnibox (shown when the site isn't at 100%; click resets). */
+.omnibox-zoom-pill {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 22px;
+  margin-right: 2px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 247, 250, 0.86);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.omnibox-zoom-pill:hover,
+.omnibox-zoom-pill:focus-visible {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  outline: 0;
+}
+
+/* Find in page: floats under the toolbar on the right, over the page (toolbar overlay surface). */
+.find-bar {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  z-index: 13;
+  top: calc(100% + 6px);
+  right: 14px;
+  display: flex;
+  width: min(380px, calc(100% - 28px));
+  align-items: center;
+  gap: 4px;
+  padding: 5px 5px 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 11px;
+  background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+.find-bar input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: #f5f7fa;
+  font: inherit;
+  font-size: 12px;
+  outline: 0;
+}
+.find-bar input::placeholder { color: rgba(245, 247, 250, 0.42); }
+.find-bar.has-no-matches input { color: #ffb2b8; }
+.find-bar-count {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.55);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.find-bar.has-no-matches .find-bar-count { color: #ffb2b8; }
+.find-bar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.find-bar-button {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.82);
+  cursor: pointer;
+}
+.find-bar-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.find-bar-button:hover:not(:disabled),
+.find-bar-button:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  outline: 0;
+}
+.find-bar-button:disabled { color: rgba(245, 247, 250, 0.3); cursor: default; }

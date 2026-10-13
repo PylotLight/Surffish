@@ -6,21 +6,24 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
-import type { BrowserBounds, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import type { ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, MAX_PINNED_SITES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
+import { cleanLinkUrl } from '../shared/clean-link'
+import { stepZoomFactor } from '../shared/zoom'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getPrivateSession, whenPrivateSessionReady } from './browser-session'
 import { forgetPrivateDownloads } from './downloads'
-import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { guardPageDragRegions } from './page-drag-guard'
+import { avoidLinkStatusPointer, destroyLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
-import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
+import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
@@ -125,7 +128,8 @@ function getState(): BrowserState {
     canGoBack: contents?.navigationHistory.canGoBack() ?? false,
     canGoForward: contents?.navigationHistory.canGoForward() ?? false,
     error: tab?.error ?? null,
-    private: tab?.isPrivate ?? false
+    private: tab?.isPrivate ?? false,
+    zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1
   }
 }
 
@@ -439,6 +443,10 @@ function activateTabInternal(id: string): boolean {
   if (!tab) return false
   if (activeTabId !== id) cancelActiveMacTrackpadSwipe()
   const previous = getTab()
+  if (previous && previous.id !== id) {
+    hideLinkStatus()
+    if (findState.open) closeFindBar(false)
+  }
   // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
   if (previous && previous.id !== id) void captureTabThumbnail(previous)
   if (previous && previous.id !== id) markTabInactive(previous)
@@ -485,6 +493,7 @@ function showBrowserTabContextMenu(id: string): void {
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
+    { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
     { type: 'separator' },
     { label: 'Reload Tab', ...tabMenuAccelerator('reload'), click: () => reloadBrowserTab(id) },
     { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
@@ -572,7 +581,21 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   attachNetworkInspector(tab.id, contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
+    if (activeTabId !== tab.id || !isCurrentContents()) return
+    handleBrowserPageMouseEvent(mouseEvent)
+    if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y)
+  })
+  contents.on('update-target-url', (_event, url) => {
+    if (activeTabId === tab.id && isCurrentContents()) showLinkStatus(url, browserBounds)
+  })
+  contents.on('found-in-page', (_event, result) => {
+    if (!isCurrentContents() || findState.tabId !== tab.id || !findState.open) return
+    findState.result = { activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches, finalUpdate: result.finalUpdate }
+    publishFindState()
+  })
+  // Ctrl/Cmd + mouse wheel (and Windows precision-touchpad zoom) step the page zoom like Chrome.
+  contents.on('zoom-changed', (_event, direction) => {
+    if (isCurrentContents()) zoomTab(tab, direction === 'in' ? 'in' : 'out')
   })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   guardPageDragRegions(contents)
@@ -584,10 +607,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       }
     `).catch(() => undefined)
   })
-  if (process.platform === 'darwin') {
-    // Electron disables visual pinch-zoom by default; enable it for Mac trackpads.
-    void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
-  }
+  // Electron disables visual pinch-zoom by default; enable it for trackpads (macOS and Windows precision touchpads).
+  void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
   contents.setWindowOpenHandler((details) => {
     if (tab.extensionPageOrigin && tab.extensionPreloadPath && isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)) {
       openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
@@ -634,8 +655,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     tab.error = null
     publishState()
   })
-  contents.on('did-start-navigation', (_event, url, _isInPlace, isMainFrame) => {
+  contents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))) return
+    if (!isInPlace && tab.id === activeTabId) hideLinkStatus()
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
     tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
@@ -672,6 +694,13 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
+    applySavedZoom(tab, url)
+    if (findState.open && findState.tabId === tab.id) {
+      // A new document: the old matches are gone, so search the new page for the same text.
+      findState.result = null
+      if (findState.text) contents.findInPage(findState.text, { findNext: true })
+      publishFindState()
+    }
     tab.lastUrl = url
     persistOpenTabs()
     publishState()
@@ -868,6 +897,8 @@ export function attachBrowserView(win: BaseWindow): void {
     cancelActiveMacTrackpadSwipe()
     stopMacTrackpadSwipe()
     detachTabOverview()
+    destroyLinkStatus()
+    findState = { tabId: null, open: false, text: '', result: null }
     tabThumbnails.clear()
     newTabThumbnail = null
     const closingTabs = [...tabs]
@@ -1142,17 +1173,50 @@ export function getActiveTabWebContents(): WebContents | null {
   return contents && !contents.isDestroyed() ? contents : null
 }
 
-export type TabCommand = 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'reload' | 'close' | 'closeOthers'
+export type TabCommand =
+  | 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'copyCleanLink' | 'reload' | 'hardReload' | 'close' | 'closeOthers'
+  | 'back' | 'forward' | 'previousTab' | 'nextTab'
+  | 'find' | 'findNext' | 'findPrevious'
+  | 'zoomIn' | 'zoomOut' | 'zoomReset'
+  | 'history' | 'downloads'
 
-// One table for tab shortcuts: the key handler, the app menu and the tab context menu all read it.
-export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, { key: string, shift?: boolean, alt?: boolean, accelerator: string }> = {
+interface CommandShortcut {
+  key: string
+  shift?: boolean
+  /** Match with or without Shift (Cmd+= and Cmd++ both zoom in). */
+  anyShift?: boolean
+  alt?: boolean
+  /** Needs the platform's primary modifier (Cmd on macOS, where Ctrl+letter is text editing). */
+  primaryOnly?: boolean
+  accelerator: string
+}
+
+const IS_MAC = process.platform === 'darwin'
+
+// One table for browser shortcuts: the key handler, the app menu and the tab context menu all read it.
+export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   bookmark: { key: 'd', accelerator: 'CmdOrCtrl+D' },
   pin: { key: 'p', shift: true, accelerator: 'CmdOrCtrl+Shift+P' },
   duplicate: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
   copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
+  copyCleanLink: { key: 'c', shift: true, alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Shift+C' },
   reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
+  hardReload: { key: 'r', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+R' },
   close: { key: 'w', accelerator: 'CmdOrCtrl+W' },
-  closeOthers: { key: 'w', alt: true, accelerator: 'CmdOrCtrl+Alt+W' }
+  closeOthers: { key: 'w', alt: true, accelerator: 'CmdOrCtrl+Alt+W' },
+  back: { key: '[', primaryOnly: true, accelerator: 'CmdOrCtrl+[' },
+  forward: { key: ']', primaryOnly: true, accelerator: 'CmdOrCtrl+]' },
+  previousTab: { key: '[', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+[' },
+  nextTab: { key: ']', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+]' },
+  find: { key: 'f', primaryOnly: true, accelerator: 'CmdOrCtrl+F' },
+  findNext: { key: 'g', primaryOnly: true, accelerator: 'CmdOrCtrl+G' },
+  findPrevious: { key: 'g', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+G' },
+  zoomIn: { key: '=', anyShift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+=' },
+  zoomOut: { key: '-', primaryOnly: true, accelerator: 'CmdOrCtrl+-' },
+  zoomReset: { key: '0', primaryOnly: true, accelerator: 'CmdOrCtrl+0' },
+  // Chrome's bindings: Cmd+Y / Cmd+Shift+J on macOS, Ctrl+H / Ctrl+J elsewhere (Ctrl+Y is Redo there).
+  history: IS_MAC ? { key: 'y', primaryOnly: true, accelerator: 'Cmd+Y' } : { key: 'h', primaryOnly: true, accelerator: 'Ctrl+H' },
+  downloads: IS_MAC ? { key: 'j', shift: true, primaryOnly: true, accelerator: 'Cmd+Shift+J' } : { key: 'j', primaryOnly: true, accelerator: 'Ctrl+J' }
 }
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
@@ -1161,9 +1225,40 @@ function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOption
 }
 
 export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefined): void {
-  if (command === 'close') {
-    closeBrowserTabFromShortcut(tabId)
-    return
+  switch (command) {
+    case 'close':
+      closeBrowserTabFromShortcut(tabId)
+      return
+    case 'back':
+      browserBack()
+      return
+    case 'forward':
+      browserForward()
+      return
+    case 'previousTab':
+      cycleBrowserTab(-1)
+      return
+    case 'nextTab':
+      cycleBrowserTab(1)
+      return
+    case 'find':
+      openFindBar()
+      return
+    case 'findNext':
+      stepFind(true)
+      return
+    case 'findPrevious':
+      stepFind(false)
+      return
+    case 'zoomIn':
+    case 'zoomOut':
+    case 'zoomReset':
+      zoomActiveBrowserTab(command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset')
+      return
+    case 'history':
+    case 'downloads':
+      toggleBrowserPanel(command)
+      return
   }
   const tab = tabId ? getTab(tabId) : undefined
   if (!tab) return
@@ -1180,8 +1275,14 @@ export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefi
     case 'copyLink':
       if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(currentUrl(tab))
       break
+    case 'copyCleanLink':
+      if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(cleanLinkUrl(currentUrl(tab)))
+      break
     case 'reload':
       reloadBrowserTab(tab.id)
+      break
+    case 'hardReload':
+      reloadBrowserTab(tab.id, true)
       break
     case 'closeOthers':
       closeBrowserTabsRelative(tab.id, 'others')
@@ -1189,21 +1290,37 @@ export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefi
   }
 }
 
+// Shift turns these into other characters on most layouts ({ } + _); fold them back so Cmd+Shift+[ matches '['.
+const SHIFTED_KEY_ALIASES: Record<string, string> = { '{': '[', '}': ']', '+': '=', '_': '-' }
+const CODE_KEYS: Record<string, string> = { BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-' }
+
 /** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
 export function handleBrowserShortcutInput(input: Electron.Input, tabId = activeTabId): boolean {
   if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
-  const key = input.alt && /^Key[A-Z]$/.test(input.code) ? input.code.slice(3).toLowerCase() : input.key.toLowerCase()
-  return handleBrowserShortcut(key, input.shift, tabId, input.alt)
+  let key = input.key.toLowerCase()
+  if (input.alt) {
+    if (/^Key[A-Z]$/.test(input.code)) key = input.code.slice(3).toLowerCase()
+    else if (/^Digit\d$/.test(input.code)) key = input.code.slice(5)
+    else if (CODE_KEYS[input.code]) key = CODE_KEYS[input.code]!
+  }
+  key = SHIFTED_KEY_ALIASES[key] ?? key
+  const primary = IS_MAC ? input.meta : input.control
+  return handleBrowserShortcut(key, input.shift, tabId, input.alt, primary)
 }
 
-export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId, alt = false): boolean {
-  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, typeof TAB_COMMAND_SHORTCUTS[TabCommand]][]) {
-    if (shortcut.key === key && Boolean(shortcut.shift) === shift && Boolean(shortcut.alt) === alt) {
-      runTabCommand(command, tabId ?? undefined)
-      return true
-    }
+export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId, alt = false, primary = true): boolean {
+  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, CommandShortcut][]) {
+    if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue
+    if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue
+    if (shortcut.primaryOnly && !primary) continue
+    runTabCommand(command, tabId ?? undefined)
+    return true
   }
   if (alt) return false
+  if (primary && !shift && /^[1-9]$/.test(key)) {
+    selectBrowserTabByNumber(Number(key))
+    return true
+  }
   if (key === 'l' && !shift) {
     sendFocusAddressToVisibleRenderer()
     return true
@@ -1225,6 +1342,145 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     return true
   }
   return false
+}
+
+/** Tabs in the order the sidebar shows them: pinned icons first, then the list. */
+function tabsInSidebarOrder(): BrowserTab[] {
+  return [...tabs.filter((tab) => tab.pinned), ...tabs.filter((tab) => !tab.pinned)]
+}
+
+/** Cmd+1..8 selects that tab, Cmd+9 the last one (as in Chrome). */
+export function selectBrowserTabByNumber(number: number): void {
+  const ordered = tabsInSidebarOrder()
+  const target = number === 9 ? ordered[ordered.length - 1] : ordered[number - 1]
+  if (!target) return
+  if (target.id !== activeTabId) activateBrowserTab(target.id)
+  // From the tab overview, land on the chosen tab.
+  if (isTabOverviewOpen()) closeTabOverview(target.id)
+}
+
+function closeOverviewForPanel(): void {
+  if (isTabOverviewOpen()) closeTabOverview(activeTabId ?? undefined, false)
+}
+
+/** Cmd+Y / Cmd+Shift+J: toggle the history sidebar or the downloads panel. */
+function toggleBrowserPanel(mode: 'history' | 'downloads'): void {
+  closeOverviewForPanel()
+  const current = getBrowserChromeState().sidebarMode
+  setBrowserChromeState({ sidebarMode: current === mode ? 'tabs' : mode })
+}
+
+// ---------------------------------------------------------------------------
+// Find in page. The bar lives in the toolbar overlay renderer; main keeps the query so
+// Cmd+G works with focus anywhere (page, toolbar, tab overview).
+
+let findState: { tabId: string | null; open: boolean; text: string; result: BrowserFindState['result'] } = { tabId: null, open: false, text: '', result: null }
+
+function publishFindState(): void {
+  sendToMainWindowRenderers('browser:find', getBrowserFindState())
+}
+
+export function getBrowserFindState(): BrowserFindState {
+  return { open: findState.open, text: findState.text, result: findState.result ? { ...findState.result } : null }
+}
+
+function findContents(): WebContents | null {
+  const contents = findState.tabId ? getTab(findState.tabId)?.view?.webContents : null
+  return contents && !contents.isDestroyed() ? contents : null
+}
+
+/** Cmd+F: open (or refocus) the find bar for the active page. */
+export function openFindBar(): boolean {
+  closeOverviewForPanel()
+  const tab = getTab()
+  const contents = tab?.view?.webContents
+  if (!tab || !contents || contents.isDestroyed() || currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return false
+  if (findState.tabId !== tab.id) findState = { tabId: tab.id, open: true, text: findState.text, result: null }
+  findState.open = true
+  publishFindState()
+  // Focus the toolbar so typing goes to the find field; it selects the old query for retyping.
+  if (!sendToToolbarRenderer('browser:find:focus', true)) {
+    findState.open = false
+    publishFindState()
+    return false
+  }
+  if (findState.text && !findState.result) contents.findInPage(findState.text, { findNext: true })
+  return true
+}
+
+/** Typing in the find field: a new search for `text` (empty clears the highlight). */
+export function setBrowserFindQuery(input: unknown): void {
+  if (typeof input !== 'string' || !findState.open) return
+  const text = input.slice(0, 1_000)
+  const contents = findContents()
+  findState.text = text
+  findState.result = null
+  if (!contents) return publishFindState()
+  if (text) contents.findInPage(text, { findNext: true })
+  else contents.stopFindInPage('clearSelection')
+  publishFindState()
+}
+
+/** Enter / Cmd+G (forward) and Shift+Enter / Cmd+Shift+G (backward). */
+export function stepFind(forward: boolean): void {
+  if (!findState.open || !findState.text || findState.tabId !== activeTabId) {
+    openFindBar()
+    return
+  }
+  findContents()?.findInPage(findState.text, { forward, findNext: false })
+}
+
+/** Esc or the close button: clear the highlight, hide the bar, hand focus back to the page. */
+export function closeFindBar(focusPage = true): void {
+  const contents = findContents()
+  if (contents) contents.stopFindInPage('clearSelection')
+  const wasOpen = findState.open
+  findState = { tabId: null, open: false, text: findState.text, result: null }
+  if (wasOpen) publishFindState()
+  if (focusPage) {
+    const active = getTab()?.view?.webContents
+    if (active && !active.isDestroyed()) active.focus()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Page zoom, remembered per origin. Private tabs use saved levels but keep their own changes in
+// memory only (forgotten with the private session).
+
+const privateSiteZoom = new Map<string, number>()
+
+function savedZoomFor(tab: BrowserTab, url: string): number {
+  const origin = normalizeHttpOrigin(url)
+  if (!origin) return 1
+  return (tab.isPrivate ? privateSiteZoom.get(origin) : undefined) ?? getBrowserSiteZoom(origin)
+}
+
+function applySavedZoom(tab: BrowserTab, url: string): void {
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed() || !/^https?:\/\//i.test(url)) return
+  const factor = savedZoomFor(tab, url)
+  if (Math.abs(contents.getZoomFactor() - factor) > 0.001) contents.setZoomFactor(factor)
+}
+
+function zoomTab(tab: BrowserTab, action: 'in' | 'out' | 'reset'): void {
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed()) return
+  const current = contents.getZoomFactor()
+  const next = action === 'reset' ? 1 : stepZoomFactor(current, action === 'in' ? 1 : -1)
+  if (Math.abs(current - next) > 0.001) contents.setZoomFactor(next)
+  const origin = normalizeHttpOrigin(contents.getURL())
+  if (origin) {
+    if (tab.isPrivate) privateSiteZoom.set(origin, next)
+    else saveBrowserSiteZoom(origin, next)
+  }
+  if (tab.id === activeTabId) publishState()
+}
+
+/** Cmd + / Cmd - / Cmd 0 and the omnibox zoom pill. */
+export function zoomActiveBrowserTab(action: unknown): void {
+  if (action !== 'in' && action !== 'out' && action !== 'reset') return
+  const tab = getTab()
+  if (tab) zoomTab(tab, action)
 }
 
 export function setBrowserSearchEngine(engine: SearchEngineId): void {
@@ -1249,9 +1505,10 @@ export function activateBrowserTab(id: string): boolean {
 
 export function cycleBrowserTab(offset: number): void {
   if (tabs.length < 2) return
-  const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId)
-  const nextIndex = (activeIndex + offset + tabs.length) % tabs.length
-  const next = tabs[nextIndex]
+  const ordered = tabsInSidebarOrder()
+  const activeIndex = ordered.findIndex((tab) => tab.id === activeTabId)
+  const nextIndex = (activeIndex + offset + ordered.length) % ordered.length
+  const next = ordered[nextIndex]
   if (next) activateBrowserTab(next.id)
 }
 
@@ -1294,6 +1551,8 @@ export function closeBrowserTab(id: string): void {
   tabThumbnails.delete(id)
   const wasActive = activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
+  if (wasActive) hideLinkStatus()
+  if (findState.tabId === id) closeFindBar(false)
   rememberClosedTab(tab, index)
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
@@ -1318,6 +1577,7 @@ export function closeBrowserTab(id: string): void {
 
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
+  privateSiteZoom.clear()
   forgetPrivateDownloads()
   void clearPrivateSession()
 }
@@ -1388,10 +1648,13 @@ export function duplicateBrowserTab(id: string): string | null {
   return duplicateId
 }
 
-function reloadBrowserTab(id: string): void {
+function reloadBrowserTab(id: string, ignoreCache = false): void {
   const tab = getTab(id)
   if (!tab) return
-  if (tab.view && !tab.view.webContents.isDestroyed()) tab.view.webContents.reload()
+  if (tab.view && !tab.view.webContents.isDestroyed()) {
+    if (ignoreCache) tab.view.webContents.reloadIgnoringCache()
+    else tab.view.webContents.reload()
+  }
   else activateTabInternal(id)
 }
 
@@ -1472,6 +1735,8 @@ export function setBrowserBounds(input: unknown): void {
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!))
   }
+  // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
+  if (browserBounds.width === 0 || browserBounds.height === 0) hideLinkStatus()
   applyTabBounds()
 }
 

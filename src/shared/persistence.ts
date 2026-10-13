@@ -1,4 +1,5 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -52,6 +53,8 @@ export interface BrowserPreferences {
   pinnedSites: PinnedSite[]
   sidebarWidth: number
   siteSettings: Record<string, BrowserSiteSettings>
+  /** Per-origin page zoom factor; only non-100% values are kept. */
+  siteZoom: Record<string, number>
 }
 
 export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
@@ -262,7 +265,8 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     newTabPreferences: { ...DEFAULT_NEW_TAB_PREFERENCES, worldClocks: [] },
     pinnedSites: [],
     sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
-    siteSettings: {}
+    siteSettings: {},
+    siteZoom: {}
   }
   if (!isRecord(value) || value.version !== 1) return defaults
 
@@ -281,6 +285,18 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     newTabPreferences: parseNewTabPreferences(value.newTabPreferences),
     pinnedSites: normalizePinnedSites(value.pinnedSites),
     sidebarWidth: normalizeSidebarWidth(value.sidebarWidth),
-    siteSettings
+    siteSettings,
+    siteZoom: parseSiteZoom(value.siteZoom)
   }
+}
+
+export function parseSiteZoom(value: unknown): Record<string, number> {
+  const siteZoom: Record<string, number> = {}
+  if (!isRecord(value)) return siteZoom
+  for (const [key, factor] of Object.entries(value).slice(-MAX_SAVED_SITE_ZOOMS)) {
+    const origin = normalizeHttpOrigin(key)
+    const zoom = normalizeZoomFactor(factor)
+    if (origin && zoom !== null && !isDefaultZoom(zoom)) siteZoom[origin] = zoom
+  }
+  return siteZoom
 }

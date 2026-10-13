@@ -16,6 +16,7 @@ import {
   type BrowserPreferences,
   type SavedBrowserSession
 } from '../shared/persistence'
+import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
@@ -226,6 +227,31 @@ export function saveBrowserSiteSettings(origin: unknown, value: unknown): Browse
   preferences = { ...preferences, siteSettings: { ...preferences.siteSettings, [settings.origin]: settings } }
   savePreferences()
   return { ...settings }
+}
+
+/** Saved page zoom for a site (1 when none), applied when a tab navigates to that origin. */
+export function getBrowserSiteZoom(value: unknown): number {
+  const origin = normalizeHttpOrigin(value)
+  if (!origin) return 1
+  loadPreferencesIfNeeded()
+  return preferences.siteZoom[origin] ?? 1
+}
+
+export function saveBrowserSiteZoom(value: unknown, factorInput: unknown): number | null {
+  const origin = normalizeHttpOrigin(value)
+  const factor = normalizeZoomFactor(factorInput)
+  if (!origin || factor === null) return null
+  loadPreferencesIfNeeded()
+  const current = preferences.siteZoom[origin] ?? 1
+  if (current === factor) return factor
+  // Most recently changed last, so the oldest drop off first once the cap is reached.
+  const next = { ...preferences.siteZoom }
+  delete next[origin]
+  if (!isDefaultZoom(factor)) next[origin] = factor
+  const entries = Object.entries(next)
+  preferences = { ...preferences, siteZoom: Object.fromEntries(entries.slice(-MAX_SAVED_SITE_ZOOMS)) }
+  deferWrite('preferences:site-zoom', () => savePreferences(), 800)
+  return factor
 }
 
 function loadPreferencesIfNeeded(): void {
