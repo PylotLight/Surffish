@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { compare, flatten, markdownTable, median, verdict, type MetricSpec, type PerfConfig } from './metrics.ts'
+import { aggregate, compare, flatten, markdownTable, median, verdict, type MetricSpec, type PerfConfig } from './metrics.ts'
 
 const config = JSON.parse(readFileSync(join(import.meta.dir, 'perf.config.json'), 'utf8')) as PerfConfig
 const det: MetricSpec = { kind: 'deterministic', label: 'd', unit: '' }
@@ -16,6 +16,22 @@ test('median picks the lower middle sample', () => {
   expect(median([3, 1, 2])).toBe(2)
   expect(median([4, 1, 3, 2])).toBe(2)
   expect(median([])).toBeNaN()
+})
+
+test('aggregate: median by default, min for stall-prone latencies', () => {
+  // perf (linux) on main, identical code: one side's cold starts stalled on a busy pod.
+  expect(aggregate([1411, 3764, 292])).toBe(1411)
+  expect(aggregate([1411, 3764, 292], 'min')).toBe(292)
+  expect(aggregate([NaN, 5, 3], 'min')).toBe(3)
+  expect(aggregate([], 'min')).toBeNaN()
+})
+
+test('cold start uses the best run, so a stalled run is not a regression but a slower build is', () => {
+  const spec = config.metrics['startup.firstPaintMs']!
+  expect(spec.stat).toBe('min')
+  const main = aggregate([277, 367, 269], spec.stat)
+  expect(verdict(spec, config, main, aggregate([1411, 3764, 292], spec.stat), 'linux')).toBe('ok')
+  expect(verdict(spec, config, main, aggregate([520, 610, 480], spec.stat), 'linux')).toBe('fail')
 })
 
 test('deterministic metrics fail just past 5%', () => {

@@ -42,17 +42,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        # Longest suite first in each lane so it overlaps the short ones. electron-security alone is
-        # ~100s, so lane A gets the rest of its budget in short suites.
+        # Longest suite first in each lane so it overlaps the short ones. Balanced from measured times
+        # (Oct 2026: spinner-popover and the perf probe ~19 s each, the rest 1-10 s), ~55 suite-seconds
+        # per lane, so each lane's smokes finish in ~30 s at two at a time.
         - lane: A
           unit: false
-          tests: "test:electron-security test:electron-downloads test:electron-table-stakes test:electron-safety test:electron-updates test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync"
+          tests: "test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync"
         - lane: B
           unit: false
-          tests: "test:electron-spaces test:electron-split-view test:electron-multi-window test:electron-sidebar-overlay test:electron-tab-archive test:electron-reader-watchers test:electron-screenshot test:electron-network-tools"
+          tests: "test:electron-spaces test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-network-tools test:electron-tab-archive"
         - lane: C
           unit: true
-          tests: "test:electron-perf test:electron-extensions test:electron-tab-groups test:electron-tab-selection test:electron-pdf-editor test:electron-nav-errors test:electron-adblock test:electron-host-bridge test:electron-spinner-popover"
+          tests: "test:electron-perf test:electron-pdf-editor test:electron-tab-groups test:electron-extensions test:electron-tab-selection test:electron-nav-errors test:electron-host-bridge test:electron-adblock"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -125,18 +126,33 @@ jobs:
           TESTS: ${{ matrix.tests }}
         run: |
           mkdir -p "$RUNNER_TEMP/smoke-logs"
+          # The pod runs Chromium's user-namespace sandbox (the setuid helper can't work in it), and from
+          # inside that sandbox the browser may not lower a renderer's oom_score_adj, so Chromium logs
+          # "Failed to adjust OOM score of renderer" for every renderer (~260 lines a run). It is
+          # harmless here (it only affects which process the kernel kills first under memory pressure),
+          # and running the smokes unsandboxed to silence it would stop testing the real sandbox, so the
+          # lines are dropped from the printed logs and counted instead. Nothing else is filtered.
+          OOM_NOISE='zygote_host_impl_linux.cc:[0-9]*\] Failed to adjust OOM score of renderer'
+          export OOM_NOISE
           run_one() {
             display="$1" t="$2" log="$RUNNER_TEMP/smoke-logs/$2.log"
             start=$(date +%s)
             if xvfb-run -n "$display" bun run "$t" >"$log" 2>&1; then status=ok; else status=FAILED; fi
+            secs=$(( $(date +%s) - start ))
+            oom=$(grep -c "$OOM_NOISE" "$log" || true)
             # one suite's log at a time, so parallel output never interleaves
-            flock "$RUNNER_TEMP/smoke-logs/.print" sh -c "echo '::group::$status $t ($(( $(date +%s) - start ))s)'; cat '$log'; echo '::endgroup::'"
+            flock "$RUNNER_TEMP/smoke-logs/.print" sh -c "echo '::group::$status $t (${secs}s)'; grep -v \"\$OOM_NOISE\" '$log'; [ '$oom' = 0 ] || echo '($oom sandbox OOM-score lines hidden, see ci.yml)'; echo '::endgroup::'"
+            echo "$oom" >"$log.oom"
             [ "$status" = ok ] || { echo "::error::$t failed"; return 1; }
           }
           export -f run_one
           i=0
+          set +e
           for t in $TESTS; do echo "$((100 + i)) $t"; i=$((i + 1)); done \
             | xargs -P 2 -L 1 bash -c 'run_one "$0" "$1"'
+          status=$?
+          echo "hidden sandbox OOM-score lines this lane: $(cat "$RUNNER_TEMP"/smoke-logs/*.oom 2>/dev/null | awk '{ n += $1 } END { print n + 0 }')"
+          exit $status
 
   # Per-PR perf regression check (docs/perf.md). Builds the PR (merge commit) and its base on the
   # same pod, runs scripts/perf/bench.cjs on each, interleaved, and compares medians. Its own job,
@@ -189,10 +205,30 @@ jobs:
           echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
       - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
         run: bash scripts/ci/bun-as-node.sh
+      # Docs, CI config, smokes and unit tests can't move the numbers (both sides would bench identical
+      # code), so those changes skip the ~2 min bench. Anything else, or a manual run, benches.
+      - name: Skip the bench when nothing that reaches the app or the bench changed
+        if: env.PERF_BASE && github.event_name != 'workflow_dispatch'
+        env:
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if ! bun scripts/perf/app-changed.ts "$BASE_SHA" "$SHA"; then
+            echo "PERF_SKIP=1" >> "$GITHUB_ENV"
+            { echo "### Perf check (linux): skipped"; echo; echo "No change here reaches the built app, its dependencies or the bench (scripts/perf/app-changed.ts), so main and this commit would run identical code."; } > "$RUNNER_TEMP/perf.md"
+            cat "$RUNNER_TEMP/perf.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Sticky PR comment for a skipped bench
+        if: env.PERF_SKIP == '1' && github.event.pull_request.number
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bun scripts/perf/post-comment.ts linux "$RUNNER_TEMP/perf.md"
       - name: bun install (fails if any Node.js process runs)
+        if: env.PERF_SKIP != '1'
         run: bash scripts/ci/watch-node.sh bun install
       - name: Install base deps (reuses the PR's node_modules when the dependencies match)
-        if: env.PERF_BASE
+        if: env.PERF_BASE && env.PERF_SKIP != '1'
         run: |
           if bun scripts/perf/same-deps.ts . "$PERF_BASE"; then
             ln -s "$PWD/node_modules" "$PERF_BASE/node_modules"
@@ -200,18 +236,22 @@ jobs:
             (cd "$PERF_BASE" && bash "$GITHUB_WORKSPACE/scripts/ci/watch-node.sh" bun install)
           fi
       - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+        if: env.PERF_SKIP != '1'
         run: |
           helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
           if sudo -n true 2>/dev/null; then sudo chown root:root "$helper" && sudo chmod 4755 "$helper"; else echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"; fi
       - name: Start D-Bus (silences Chromium bus spam in containers)
+        if: env.PERF_SKIP != '1'
         run: |
           sudo mkdir -p /run/dbus
           sudo dbus-daemon --system --fork 2>/dev/null || true
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
           echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
       - name: Perf unit tests
+        if: env.PERF_SKIP != '1'
         run: bun run test:perf
       - name: Build PR and base
+        if: env.PERF_SKIP != '1'
         run: |
           bun run build >"$RUNNER_TEMP/build-pr.log" 2>&1 & pr=$!
           if [ -n "${PERF_BASE:-}" ]; then (cd "$PERF_BASE" && bun run build) >"$RUNNER_TEMP/build-base.log" 2>&1 & base=$!; fi
@@ -220,12 +260,13 @@ jobs:
           if [ -n "${base:-}" ]; then wait $base || { echo "::error::base build failed"; cat "$RUNNER_TEMP/build-base.log"; ok=1; }; fi
           exit $ok
       - name: Bench (PR vs base, interleaved)
+        if: env.PERF_SKIP != '1'
         run: |
           apps="--app pr=."
           [ -n "${PERF_BASE:-}" ] && apps="--app main=$PERF_BASE $apps"
           xvfb-run -a -s "-screen 0 1600x1000x24" bun run perf $apps --out "$RUNNER_TEMP/perf.json"
       - name: Compare, step summary and sticky PR comment
-        if: env.PERF_BASE
+        if: env.PERF_BASE && env.PERF_SKIP != '1'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -239,6 +280,9 @@ jobs:
           [ "$status" = 0 ] || echo "::error::perf regression beyond the thresholds in scripts/perf/perf.config.json (see the table above)"
           exit $status
 
+  # The Mac jobs keep out/native between runs (git clean -e out/native): the trackpad addon and the
+  # Google sign-in helper are fingerprinted (source, flags, toolchain; scripts/native-build-cache.ts),
+  # so an unchanged one is reused (~20 s of clang/swiftc per Mac job) and a changed one is rebuilt.
   native-macos:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS]
@@ -255,7 +299,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
+          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
@@ -305,7 +349,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
+          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
@@ -375,7 +419,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
+          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
           base="$RUNNER_TEMP/perf-base"
           git worktree prune; rm -rf "$base"
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != 0000000000000000000000000000000000000000 ] && git fetch -q --no-tags --depth 1 origin "$BASE_SHA"; then

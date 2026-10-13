@@ -3,7 +3,8 @@
 
 export type Kind = 'deterministic' | 'noisy' | 'leak'
 export type Status = 'ok' | 'better' | 'warn' | 'fail' | 'n/a'
-export interface MetricSpec { kind: Kind; label: string; unit: string; abs?: number; warnPct?: number; failPct?: number }
+export type Stat = 'median' | 'min'
+export interface MetricSpec { kind: Kind; label: string; unit: string; abs?: number; warnPct?: number; failPct?: number; stat?: Stat }
 export interface PerfConfig {
   defaults: Record<Kind, { abs?: number; warnPct?: number; failPct?: number }>
   platforms?: Record<string, { noisyFail?: boolean }>
@@ -24,6 +25,19 @@ export function flatten(value: unknown, prefix = '', out: Record<string, number>
 export function median(values: number[]): number {
   const s = values.filter(Number.isFinite).sort((a, b) => a - b)
   return s.length ? s[Math.floor((s.length - 1) / 2)]! : NaN
+}
+
+/**
+ * One number per metric from a side's samples. `min` is for latencies that machine noise only ever
+ * adds to (cold start): a slower build moves every sample, so it moves the minimum too, while a
+ * stall on a busy pod in one or two runs (277 ms -> 1411 ms on identical code) no longer flips the median.
+ */
+export function aggregate(values: number[], stat: Stat = 'median'): number {
+  if (stat === 'min') {
+    const s = values.filter(Number.isFinite)
+    return s.length ? Math.min(...s) : NaN
+  }
+  return median(values)
 }
 
 export function verdict(spec: MetricSpec, config: PerfConfig, base: number, head: number, platform: string): Status {

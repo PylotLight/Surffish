@@ -152,6 +152,8 @@ async function run() {
   const contentFcp = await Promise.race([fcpOf(content.webContents), delay(10000).then(() => NaN)])
   result.startup = { windowMs: Math.round(tWindow), firstPaintMs: Math.round(contentFcp - T_PROCESS_START - seedMs) }
   step('first paint')
+  // Warm-up launch (run.ts, discarded): only pays the first-launch costs, so stop here.
+  if (process.env.PERF_WARMUP === '1') return result
   const api = (expr) => toolbar.webContents.executeJavaScript(expr)
   const loadedTabs = () => webContents.getAllWebContents().filter((c) => !c.isDestroyed() && /\/p\d+$/.test(c.getURL()) && !c.isLoading()).length
   const openTabs = async (from, n) => {

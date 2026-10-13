@@ -223,8 +223,9 @@ function ensureView(overview: TabOverview): WebContentsView | null {
     }
   })
   bindContentsToWindow(view.webContents, overview.window)
-  // Appended last, so it sits above the shell surfaces and every site view.
-  overview.window.contentView.addChildView(view)
+  // Not attached to the window yet: openTabOverview adds it on top when it opens. A WebContentsView
+  // attached while its first page loads takes keyboard focus even when hidden (seen on Linux), so
+  // the 1.5 s preload used to steal focus from whatever the user was typing in (the address bar).
   overview.ready = view.webContents
     .loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(TAB_OVERVIEW_HTML)}`)
     .catch((error: unknown) => console.error('[tab overview] could not load:', error))
@@ -306,6 +307,9 @@ export async function openTabOverview(options: { interactive?: boolean } = {}, w
   if ((overview.state as TabOverviewState) === 'closed' || view.webContents.isDestroyed() || overviews.get(overview.window) !== overview) return
   overview.lastItems = items
   overview.selectedId = activeItemId(overview) ?? null
+  // (Re)appended on every open, so it sits above the shell surfaces and every site view, including
+  // ones added since it was loaded (adding an existing child moves it to the top).
+  overview.window.contentView.addChildView(view)
   view.setBounds(fullBounds(overview))
   view.setVisible(true)
   view.webContents.send('tab-overview:show', {

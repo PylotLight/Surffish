@@ -1,7 +1,8 @@
 # Perf check
 
 Every PR gets a perf comparison against its base: CI builds both, runs the same bench on each
-(interleaved, on the same machine), and compares medians. Deterministic metrics fail the check
+(interleaved, on the same machine, after one discarded warm-up launch per side), and compares
+medians (cold-start times use the best run, see below). Deterministic metrics fail the check
 on a regression; timing and memory metrics mostly warn, because shared runners are noisy.
 
 - `perf (linux)`: k3s runner pod under xvfb (software rendering, ~2 vCPU). Writes the table to
@@ -18,6 +19,13 @@ on a regression; timing and memory metrics mostly warn, because shared runners a
 
 On push to `main` the Linux perf job compares the new commit against the previous `main`, so the step
 summary on main doubles as the running baseline. Docs-only changes skip CI (`paths-ignore`).
+
+The Linux job skips the bench itself (and says so in the summary and the sticky comment) when no
+changed file can reach the built app, its dependencies or the bench: `.github/`, `docs/`, Markdown,
+`Casks/`, unit tests (`*.test.*`), and `scripts/` other than `scripts/perf/`, `scripts/smoke-hidden.cjs`,
+the `scripts/build-*` steps and `scripts/native-build-cache.ts`. A `package.json` change counts unless
+only test scripts changed. Rules and tests: `scripts/perf/app-changed.ts`. A manual *Run workflow*
+always benches.
 
 ## What one bench run measures
 
@@ -53,6 +61,14 @@ never trips anything.
 | deterministic | bundle sizes, IPC counts and payload, idle IPC and timer fires, process count | **fail** above 5% (+ floor); IPC while opening tabs 20% / payload 15%, since tab broadcasts are coalesced per frame and move ~10% run to run |
 | leak | processes / webContents left after window cycles | **fail** on any growth that main doesn't have |
 | noisy | timings, memory, CPU | **warn** above 10%, **fail** above 25% (+ floor) on Linux; never fail on macOS |
+
+Cold start to window / first paint compare the **best** of the runs (`"stat": "min"`), not the
+median: the pods share a node with the smoke lanes, and a busy moment stalls one or two cold starts by
+0.5–3 s on identical code (277 ms → 1411 ms on main once). Noise only ever adds to a start-up time,
+while a slower build is slower in every run, so the minimum still moves with a real regression. Before
+the measured runs, each side gets one discarded start-up-only launch (`warmup` in the config,
+`PERF_WARMUP` or `--warmup N`): the first Electron launch on a fresh pod also builds the font and
+shader caches.
 
 Improvements past the same margins show as "better". Per-metric overrides go on the metric entry
 (`"failPct"`, `"warnPct"`, `"abs"`); per-platform behaviour under `platforms`.

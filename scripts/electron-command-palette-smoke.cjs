@@ -79,12 +79,25 @@ async function run() {
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
   mainWindow = await waitFor(() => BaseWindow.getAllWindows()[0], 'the main window')
+  const windowOpenedAt = Date.now()
   mainWindow.setBounds({ x: 0, y: 0, width: 1100, height: 760 })
   await waitFor(() => surface('content') && surface('toolbar') && surface('sidebar'), 'the renderer surfaces')
   const toolbar = surface('toolbar')
   const content = surface('content')
   await waitFor(() => evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
   await waitFor(() => evaluate(content, 'document.readyState === "complete" && Boolean(window.api)'), 'the content renderer')
+
+  // --- focus put in the address bar right after launch stays there: the Tab Overview preload (1.5 s
+  // after a window opens) used to take keyboard focus, which closed the palette or ate typing.
+  toolbar.webContents.focus()
+  await evaluate(toolbar, 'document.querySelector("input[aria-label=\\"Search or enter address\\"]").focus()')
+  const addressFocused = () => evaluate(toolbar, 'document.hasFocus() && document.activeElement === document.querySelector("input[aria-label=\\"Search or enter address\\"]")')
+  await waitFor(addressFocused, 'the address bar to take focus')
+  while (Date.now() - windowOpenedAt < 2500) {
+    assert.ok(await addressFocused(), 'nothing takes focus away from the address bar while the window settles')
+    await delay(100)
+  }
+  await evaluate(toolbar, 'document.activeElement.blur()')
 
   // --- registry over IPC
   const snapshot = await evaluate(toolbar, 'window.api.browser.commands.list()')
@@ -153,6 +166,10 @@ async function run() {
   await waitFor(async () => (await evaluate(toolbar, 'document.querySelectorAll(".command-palette-item").length')) === 1, 'the query to filter tabs')
   key(toolbar, 'Enter')
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'Enter to switch to the matching tab')
+  // main knows about the switch before the toolbar renderer does (tab broadcasts are batched): wait
+  // until the switch has fully landed (page focused, bar showing the new tab) before typing in the bar.
+  await waitFor(() => page.webContents.isFocused(), 'focus to return to the switched-to page')
+  await waitFor(async () => (await evaluate(toolbar, 'document.querySelector("input[aria-label=\\"Search or enter address\\"]").value')) === fixtureUrl, 'the address bar to show the switched-to tab')
 
   // --- search keywords in the omnibox
   toolbar.webContents.focus()
@@ -172,6 +189,20 @@ async function run() {
   void evaluate(toolbar, 'window.api.browser.navigate("electron ipc !so")').catch(() => undefined)
   await waitFor(() => navigations.some((url) => url.startsWith('https://stackoverflow.com/search?q=electron%20ipc')), 'a !bang to route to the custom engine')
   page.webContents.stop()
+
+  // --- Tab Overview: its view is preloaded detached (attaching it while it loads stole keyboard focus
+  // from the toolbar ~1.5 s after a window opened) and goes on top of every view when it opens.
+  const overviewView = () => views().find((view) => view.webContents.getURL().startsWith('data:text/html'))
+  assert.equal(overviewView(), undefined, 'the preloaded overview is not attached until it opens')
+  await evaluate(toolbar, 'window.api.browser.commands.run("tab.overview")')
+  const overview = await waitFor(() => { const view = overviewView(); return view && view.getVisible() && view.getBounds().width > 0 && view }, 'the tab overview to open')
+  assert.equal(views().at(-1), overview, 'the overview sits above every other view')
+  await waitFor(() => overview.webContents.isFocused(), 'the overview to take focus')
+  // Esc is ignored while the open animation runs, so keep pressing it until the overview closes.
+  await waitFor(async () => {
+    if (overview.getVisible()) { key(overview, 'Escape'); await delay(250) }
+    return !overview.getVisible() && page.webContents.isFocused()
+  }, 'Esc to close the overview and refocus the page')
 
   // --- turning the palette off leaves Cmd/Ctrl+K to the page
   await evaluate(toolbar, 'window.api.browser.commandPalette.setSettings({ enabled: false })')
