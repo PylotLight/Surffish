@@ -696,7 +696,9 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
         if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab')) persistOpenTabs()
       } else if (details.disposition === 'background-tab') {
         openBackgroundTab(target, tab.isPrivate)
-      } else if (getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
+      } else if (details.disposition === 'foreground-tab' || getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
+        // target=_blank links (and window.open without popup features) are 'foreground-tab': open them
+        // like a normal new tab. Only real popups ('new-window', with size features) stay behind the site toggle.
         const popupTabId = createTab(target, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate)
         if (popupTabId) persistOpenTabs()
       }
