@@ -8,6 +8,7 @@ import { listPageSessions, onPageSessionCreated, pageSessionInfoFor, type PageSe
 import { spaceRoutingInput, type SpaceProxyChoice } from '../shared/spaces'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { isAlwaysAllowedPermission } from '../shared/site-permissions'
+import { screenShareAllowedFor } from '../shared/screen-share'
 import { sendToMainWindowRenderers } from './browser-shell'
 import {
   activeProxyEndpoints,
@@ -43,6 +44,8 @@ let routingError: string | null = null
 
 function siteAllowsPermission(origin: string, permission: string): boolean {
   if (isAlwaysAllowedPermission(permission)) return true
+  // Screen sharing: the picker (system or ours, see screen-share.ts) is the consent, as in Chrome.
+  if (permission === 'display-capture') return screenShareAllowedFor(origin)
   const settings = getBrowserSiteSettings(origin)
   if (!settings) return false
   if (permission === 'media') return settings.allowMedia

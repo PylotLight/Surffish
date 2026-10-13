@@ -10,6 +10,7 @@ import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { disposeMemorySaver, initializeMemorySaver, registerMemorySaverIpc } from './memory-saver'
 import { initializeBrowserProxy } from './proxy'
+import { initializeScreenSharing } from './screen-share'
 import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
 import { quietRetiredShellSenders } from './ipc-retired'
@@ -62,6 +63,7 @@ app.whenReady().then(async () => {
     initializeSpacesStore()
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()
+    void initializeScreenSharing()
     // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
     initializeBrowserSafety()
     await initializeSessionCookiePersistence()
