@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { basename, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { SqlJsStatic } from 'sql.js'
-import initSqlJs from 'sql.js/dist/sql-wasm-browser.js'
 import sqlWasmPath from 'sql.js/dist/sql-wasm-browser.wasm?asset'
 import {
   buildFirefoxBookmarkTree,
@@ -45,7 +44,8 @@ let sqlPromise: Promise<SqlJsStatic> | null = null
 function loadSql(): Promise<SqlJsStatic> {
   if (!sqlPromise) {
     const bytes = readFileSync(sqlWasmPath)
-    sqlPromise = initSqlJs({ wasmBinary: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer })
+    // sql.js only runs for a browser import; keep its glue code out of the launch bundle.
+    sqlPromise = import('sql.js/dist/sql-wasm-browser.js').then(({ default: initSqlJs }) => initSqlJs({ wasmBinary: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer }))
     sqlPromise.catch(() => { sqlPromise = null })
   }
   return sqlPromise

@@ -24,7 +24,7 @@ import { backgroundNetworkBlockedReason } from './background-network'
 import { getBrowserSession } from './browser-session'
 import { isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { deferWrite } from './deferred-writes'
-import { extractWatchText, isSupportedWatchSelector, type WatchTextResult } from './page-watcher-text'
+import type { WatchTextResult } from './page-watcher-text'
 import { readUserJson, writeUserJson } from './user-json'
 import { getMainWindow } from './window'
 
@@ -214,12 +214,21 @@ async function renderPage(url: string, selector: string | null): Promise<WatchTe
   }
 }
 
+type WatchTextModule = typeof import('./page-watcher-text')
+let watchTextModule: Promise<WatchTextModule> | null = null
+/** node-html-parser is the largest dependency in the main bundle; load it when a watcher first needs it, not at launch. */
+function loadWatchText(): Promise<WatchTextModule> {
+  watchTextModule ??= import('./page-watcher-text')
+  watchTextModule.catch(() => { watchTextModule = null })
+  return watchTextModule
+}
+
 async function readWatchedText(watcher: PageWatcher): Promise<WatchTextResult> {
   // Even for rendering, fetch first: it confirms the address is a web page (not a download).
   const page = await fetchPage(watcher.url)
   if (watcher.renderJs) return renderPage(watcher.url, watcher.selector)
   if (/text\/plain/i.test(page.type)) return watcher.selector ? { ok: false, error: 'This address is plain text; watch the whole page instead.' } : { ok: true, lines: normalizeWatchText(page.body) }
-  return extractWatchText(page.body, watcher.selector)
+  return (await loadWatchText()).extractWatchText(page.body, watcher.selector)
 }
 
 function notifyChange(watcher: PageWatcher): void {
@@ -299,7 +308,8 @@ export function canWatchPage(url: string): boolean {
   return normalizeWatchUrl(url) !== null
 }
 
-function addWatcher(input: NewWatcherInput): { ok: true; watcher: PageWatcherSummary } | { ok: false; error: string } {
+async function addWatcher(input: NewWatcherInput): Promise<{ ok: true; watcher: PageWatcherSummary } | { ok: false; error: string }> {
+  const { isSupportedWatchSelector } = await loadWatchText()
   load()
   if (input.selector && !isSupportedWatchSelector(input.selector)) return { ok: false, error: 'That CSS selector is not supported.' }
   const result = createWatcher(input, watchers, randomUUID(), Date.now())
@@ -403,7 +413,7 @@ export async function watchPageFromTab(contents: WebContents, mode: 'page' | 'pi
     }
     if (contents.isDestroyed() || contents.getURL() !== url) return
   }
-  const result = addWatcher({ url, title, selector })
+  const result = await addWatcher({ url, title, selector })
   if (!result.ok) {
     const window = getMainWindow()
     const options = { type: 'info' as const, message: 'Could not watch this page', detail: result.error, buttons: ['OK'] }
@@ -414,7 +424,8 @@ export async function watchPageFromTab(contents: WebContents, mode: 'page' | 'pi
   revealPageWatchers(result.watcher.id, 'edit')
 }
 
-function updateWatcher(id: unknown, patch: unknown): PageWatchersSnapshot {
+async function updateWatcher(id: unknown, patch: unknown): Promise<PageWatchersSnapshot> {
+  const { isSupportedWatchSelector } = await loadWatchText()
   load()
   const watcher = typeof id === 'string' ? watchers.find((candidate) => candidate.id === id) : undefined
   if (!watcher) throw new Error('That watcher no longer exists.')
