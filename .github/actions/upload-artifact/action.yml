@@ -16,5 +16,5 @@ outputs:
   artifact-url:
     description: web url of the artifact
 runs:
-  using: node20
-  main: index.js
+  using: node24
+  main: index.cjs

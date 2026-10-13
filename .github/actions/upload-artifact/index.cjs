@@ -1,3 +1,4 @@
+// .cjs: the repo root package.json is "type": "module", and this is a dependency-free CommonJS script.
 // Minimal artifact v4 uploader (CreateArtifact -> PUT blob -> FinalizeArtifact), no dependencies.
 // Same wire protocol as @actions/artifact. Single file, stored in a zip (artifacts download as zips).
 const fs = require('fs')

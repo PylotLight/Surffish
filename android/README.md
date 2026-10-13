@@ -14,7 +14,8 @@ Status: 0.1.0, first testable build. Sideload only.
 2. Unzip, tap `Surffish-android-0.1.0-<sha>.apk`, allow "install unknown apps" for whatever opened it.
 3. Optional: Settings → Set as default browser.
 
-arm64-v8a only (every current phone). Builds without the signing secrets use the Expo template's
+arm64-v8a only (every current phone). Native libs are stored compressed (`useLegacyPackaging`), which
+roughly halves the download (GeckoView's libxul is huge) at the cost of extracting them on install. Builds without the signing secrets use the Expo template's
 debug keystore, so they install over each other but **not** over a build signed with a real key
 (uninstall first if you switch).
 
