@@ -54,7 +54,7 @@ jobs:
       - name: Build Electron and the native AppKit trackpad bridge
         run: bun run build
       - name: Load the compiled native addon with Node
-        run: node -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function') throw new Error('Native trackpad addon exports are missing')"
+        run: bun -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function') throw new Error('Native trackpad addon exports are missing')"
       - name: Run native WebKit API tests
         working-directory: src/native/macos
         run: swift test
