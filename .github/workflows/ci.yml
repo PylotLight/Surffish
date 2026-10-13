@@ -15,7 +15,7 @@ jobs:
       - run: bun install
       - name: Configure Electron SUID sandbox helper
         run: |
-          helper="$(node -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
           test -f "$helper"
           sudo chown root:root "$helper"
           sudo chmod 4755 "$helper"
