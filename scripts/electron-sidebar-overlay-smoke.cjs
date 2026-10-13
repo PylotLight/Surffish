@@ -184,7 +184,7 @@ async function run() {
   }, 'all three trusted renderer surfaces', 45000)
   await waitFor(() => evaluate(rendererViews.content, 'Boolean(document.querySelector(".new-tab-page"))'), 'the renderer-owned New Tab page')
   assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-heading .sidebar-icon-button")'), null, 'the header New Tab plus button is removed')
-  assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-new-tab-button")?.getAttribute("aria-label")'), 'New tab', 'the bottom New Tab action is available in the sidebar')
+  assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-new-tab-row")?.getAttribute("aria-label")'), 'New tab', 'the bottom New Tab action is available in the sidebar')
   assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-collapse-button")'), null, 'the duplicate sidebar-header pin control is removed')
   assert.ok(await evaluate(rendererViews.content, 'document.querySelector(".toolbar-brand-icon")?.getBoundingClientRect().width >= 32'), 'the app brand mark is prominent in the top toolbar')
   const footerControls = await evaluate(rendererViews.content, `(() => [...document.querySelectorAll('.sidebar-footer-icon-button')].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })))()`)
@@ -378,9 +378,9 @@ async function run() {
   await fixturePageView.webContents.executeJavaScript('window.scrollTo(0, 0)')
   await waitFor(() => fixturePageView.webContents.executeJavaScript('window.scrollY === 0'), 'returning the synthetic page to its top before the remaining pointer checks')
 
-  // The toolbar Tabs button is the only pin toggle; it remains outside the panel and does not depend on sidebar hover.
-  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
-  await waitFor(() => evaluate(rendererViews.toolbar, 'document.querySelector(".tabs-sidebar-button")?.getAttribute("aria-pressed") === "false"'), 'the toolbar pin control to toggle off')
+  // The pin control now lives in the sidebar footer: ensure it is unpinned so the panel auto-hides on pointer exit.
+  await evaluate(rendererViews.sidebar, `(() => { const unpin = document.querySelector('[aria-label="Auto-hide sidebar"]'); if (unpin) { unpin.click(); return true; } return Boolean(document.querySelector('[aria-label="Keep sidebar open"]')); })()`)
+  await waitFor(() => evaluate(rendererViews.sidebar, 'Boolean(document.querySelector("[aria-label=\\"Keep sidebar open\\"]"))'), 'the sidebar pin control to show unpinned')
   pointerMove(mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350)
   const resetTargetRect = await fixturePageView.webContents.executeJavaScript(`(() => { const r = document.querySelector('#target').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
   const resetTargetPoint = screenPointForElement(fixturePageView, resetTargetRect)
@@ -398,26 +398,28 @@ async function run() {
   await waitFor(() => rendererViews.sidebar.getBounds().width === 0, 'the hover-only sidebar to hide again')
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
-  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
+  // Hover-reveal the panel (the old toolbar toggle is gone), then pin it open via the footer control.
+  assert.ok(await evaluate(rendererViews.content, '(() => { const layout = document.querySelector(".browser-layout"); if (!layout) return false; layout.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 200 })); return true; })()'), 'the browser layout should accept a hover at the reveal edge')
+  await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]')
   await waitFor(() => rendererViews.sidebar.getBounds().width === widthAfterResize, 'the sidebar to open for its bottom New Tab action')
   await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
     const layout = document.querySelector('.browser-layout')
     const sidebar = document.querySelector('.browser-sidebar')
-    const button = document.querySelector('.sidebar-new-tab-button')
+    const button = document.querySelector('.sidebar-new-tab-row')
     if (!layout?.classList.contains('is-sidebar-visible') || !sidebar || !button) return false
     const sidebarRect = sidebar.getBoundingClientRect()
     const buttonRect = button.getBoundingClientRect()
     if (Math.abs(sidebarRect.left) > 0.5 || buttonRect.top < 0 || buttonRect.bottom > innerHeight) return false
     const hitTarget = document.elementFromPoint(buttonRect.left + buttonRect.width / 2, buttonRect.top + buttonRect.height / 2)
-    return hitTarget?.closest('.sidebar-new-tab-button') === button
+    return hitTarget?.closest('.sidebar-new-tab-row') === button
   })()`), 'the sidebar slide-in to finish with the bottom New Tab button hit-testable')
   const priorTabIds = new Set((await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')).map((tab) => tab.id))
   await evaluate(rendererViews.sidebar, `(() => {
-    const button = document.querySelector('.sidebar-new-tab-button')
+    const button = document.querySelector('.sidebar-new-tab-row')
     window.__bottomNewTabClickCount = 0
     button?.addEventListener('click', () => { window.__bottomNewTabClickCount += 1 }, { once: true })
   })()`)
-  await clickElement(rendererViews.sidebar, '.sidebar-new-tab-button')
+  await clickElement(rendererViews.sidebar, '.sidebar-new-tab-row')
   await waitFor(() => evaluate(rendererViews.sidebar, 'window.__bottomNewTabClickCount === 1'), 'the native pointer click to reach the bottom New Tab button')
   const newTabId = await waitFor(async () => {
     const tabs = await evaluate(rendererViews.sidebar, 'window.api.browser.tabs.get()')
