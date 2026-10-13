@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
-import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, selectBrowserTabByNumber, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
+import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, savePdfEditor, togglePdfEditor, selectBrowserTabByNumber, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
 import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
@@ -40,6 +40,11 @@ export function installAppMenu(): void {
         // F6 (and Alt+D off macOS) also focus the address bar; hidden so the menu shows one entry.
         { label: 'Focus Address Bar', accelerator: 'F6', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } },
         ...(isMac ? [] : [{ label: 'Focus Address Bar', accelerator: 'Alt+D', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } } satisfies MenuItemConstructorOptions]),
+        { type: 'separator' },
+        // Both act only when the active tab is a PDF (viewer) or the PDF editor; otherwise no-ops.
+        { label: 'Edit PDF / Back to Viewer', accelerator: 'CmdOrCtrl+Shift+E', click: () => { togglePdfEditor() } },
+        { label: 'Save Edited PDF…', accelerator: 'CmdOrCtrl+S', click: () => { savePdfEditor() } },
+        { type: 'separator' },
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
         {

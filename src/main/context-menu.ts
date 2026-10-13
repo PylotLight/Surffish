@@ -18,6 +18,10 @@ export interface BrowserContextMenuOptions {
   /** The page is a PDF in the built-in viewer: offer Save PDF As… and print through the viewer. */
   pdfDocument?: boolean
   printPage?: () => void
+  /** Offer Edit PDF (the page is a PDF the editor can open). */
+  editPdf?: () => void
+  /** The tab is the PDF editor: replace the page actions with Save / Back to Viewer. */
+  pdfEditor?: { save: () => void; backToViewer: () => void }
 }
 
 function safeHttpUrl(value: string): string | null {
@@ -185,7 +189,16 @@ export function showBrowserContextMenu(
     items.push({ label: `Add “${params.misspelledWord}” to Dictionary`, click: () => { contents.session.addWordToSpellCheckerDictionary(params.misspelledWord) } })
   }
 
-  if (options.pageActions) {
+  if (options.pageActions && options.pdfEditor) {
+    const editor = options.pdfEditor
+    addSeparator(items)
+    items.push(
+      { label: 'Save PDF…', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: () => editor.save() },
+      { label: 'Back to Viewer', click: () => editor.backToViewer() },
+      { type: 'separator' },
+      { label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) }
+    )
+  } else if (options.pageActions) {
     addSeparator(items)
     items.push(
       { label: 'Back', enabled: contents.navigationHistory.canGoBack(), click: () => contents.navigationHistory.goBack() },
@@ -205,6 +218,7 @@ export function showBrowserContextMenu(
     } else if (!options.pdfDocument) {
       items.push({ label: 'Save Page As…', click: () => runMenuTask(savePage(contents, options.window, pageFilename(params.pageURL))) })
     }
+    if (options.pdfDocument && options.editPdf) items.push({ label: 'Edit PDF', click: options.editPdf })
     items.push(
       { label: 'Print…', click: () => options.printPage ? options.printPage() : contents.print() },
       { label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) }

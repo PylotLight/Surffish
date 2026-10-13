@@ -102,7 +102,8 @@ const EMPTY_BROWSER: BrowserState = {
   canGoForward: false,
   error: null,
   private: false,
-  zoomFactor: 1
+  zoomFactor: 1,
+  pdf: null
 }
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
@@ -1275,6 +1276,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     onClick={() => void window.api.browser.zoom('reset')}
                   >{formatZoomPercent(browser.zoomFactor)}</button>
                 )}
+                {browser.pdf && <button
+                  className={`omnibox-action-button pdf-edit-button${browser.pdf === 'editor' ? ' is-current' : ''}`}
+                  type="button"
+                  aria-label={browser.pdf === 'editor' ? 'Back to PDF viewer' : 'Edit PDF'}
+                  title={browser.pdf === 'editor' ? 'Back to viewer (⇧⌘E)' : 'Edit PDF: annotate, sign, fill forms, rotate or remove pages (⇧⌘E)'}
+                  onClick={() => void window.api.browser.togglePdfEditor()}
+                >
+                  {browser.pdf === 'editor'
+                    ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6 8.5 12l6 6" /></svg>
+                    : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10v4Z" /><path d="m13 7 4 4" /></svg>}
+                  <span>{browser.pdf === 'editor' ? 'Viewer' : 'Edit'}</span>
+                </button>}
                 <button
                   className={`toolbar-button favorite-button omnibox-favorite-button${currentOriginIsBookmarked ? ' is-favorite' : ''}`}
                   type="button"

@@ -25,7 +25,8 @@ import {
   getBrowserFindState,
   setBrowserFindQuery,
   stepFind,
-  zoomActiveBrowserTab
+  zoomActiveBrowserTab,
+  togglePdfEditor
 } from './browser'
 import { isSearchEngineId } from '../shared/navigation'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
@@ -423,6 +424,7 @@ export function registerIpc(): void {
   ipcMain.handle('browser:find:query', (event, text: unknown) => { assertMainRenderer(event); setBrowserFindQuery(text) })
   ipcMain.handle('browser:find:step', (event, forward: unknown) => { assertMainRenderer(event); stepFind(forward !== false) })
   ipcMain.handle('browser:find:close', (event) => { assertMainRenderer(event); closeFindBar() })
+  ipcMain.handle('browser:pdf-editor:toggle', (event) => { assertMainRenderer(event); return togglePdfEditor() })
   ipcMain.handle('browser:picture-in-picture', (event) => { assertMainRenderer(event); return browserPictureInPicture() })
   ipcMain.handle('browser:set-bounds', (event, bounds: unknown) => {
     assertMainRenderer(event)

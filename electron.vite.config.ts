@@ -1,5 +1,5 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
+import { copyFileSync, cpSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
@@ -38,6 +38,31 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/web-store-page.cjs'),
       join(outputDirectory, 'web-store-page.cjs')
     )
+    // Built-in PDF editor page bridge.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/pdf-editor.cjs'),
+      join(outputDirectory, 'pdf-editor.cjs')
+    )
+  }
+}
+
+// pdf.js data the editor loads at runtime (CJK cmaps, the 14 standard fonts, image decoders, the
+// CMYK profile) is bundled locally so the editor never fetches anything but the PDF itself.
+// Skipped: the scripting sandbox (quickjs; form JavaScript is not run) and no-wasm JS fallbacks.
+const PDFJS_DATA = ['cmaps', 'standard_fonts', 'iccs', 'wasm']
+const PDFJS_SKIPPED = /(?:quickjs|nowasm_fallback)/
+const pdfjsDataPlugin = {
+  name: 'surffish-pdfjs-data',
+  closeBundle() {
+    const source = resolve(projectDirectory, 'node_modules/pdfjs-dist')
+    const target = resolve(projectDirectory, 'out/renderer/pdfjs')
+    rmSync(target, { recursive: true, force: true })
+    for (const folder of PDFJS_DATA) {
+      cpSync(join(source, folder), join(target, folder), { recursive: true, filter: (path) => !PDFJS_SKIPPED.test(path) })
+    }
+    // Annotation icons pdf.js resolves through imageResourcesPath.
+    cpSync(join(source, 'web/images'), join(target, 'images'), { recursive: true })
+    copyFileSync(join(source, 'LICENSE'), join(target, 'LICENSE'))
   }
 }
 
@@ -71,8 +96,15 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
-    plugins: [react()],
+    plugins: [react(), pdfjsDataPlugin],
     build: {
+      rollupOptions: {
+        input: {
+          index: resolve(projectDirectory, 'src/renderer/index.html'),
+          // Built-in PDF editor (pdf.js + pdf-lib), served from surffish-pdf://editor/ only.
+          'pdf-editor': resolve(projectDirectory, 'src/renderer/pdf-editor.html')
+        }
+      },
       // Three renderer surfaces each parse this bundle at launch; ship it minified.
       minify: true,
       cssMinify: true
