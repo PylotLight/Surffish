@@ -2,7 +2,9 @@
 // still to browser-session.json), a restart restores from the database, and a browser-session.json
 // written by something else (a fallback run / older build) wins over the database. Three launches
 // on one profile. The bookmark tree gets the same three checks against bookmarks.json (import,
-// delta rows + blanked tombstones, restore from the database, a changed JSON file wins). Runs the production build:
+// delta rows + blanked tombstones, restore from the database, a changed JSON file wins), and so do
+// browser preferences against browser-preferences.json (plus Forget this site hard-deleting a
+// site's zoom row and scrubbing the JSON copy right away). Runs the production build:
 // `bun run build && bun run test:electron-sqlite-session` (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-sqlite-session-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
@@ -59,6 +61,8 @@ function sqlite(sql, ...params) {
 }
 const sessionFile = join(userData, 'browser-session.json')
 const bookmarksFile = join(userData, 'bookmarks.json')
+const preferencesFile = join(userData, 'browser-preferences.json')
+const settingValue = (key) => sqlite('SELECT value FROM settings WHERE key = ? AND deleted_at IS NULL', key)[0]?.value
 const bookmarkTitles = (toolbar) => evaluate(toolbar, 'window.api.browser.bookmarks.get().then((snapshot) => snapshot.nodes.filter((node) => node.type === "bookmark").map((node) => node.title).sort().join(","))')
 const liveBookmarkTitles = () => sqlite("SELECT title FROM bookmarks WHERE deleted_at IS NULL AND kind = 'url' ORDER BY title").map((row) => row.title).join(',')
 const legacyBookmarks = (titles) => JSON.stringify({
@@ -117,9 +121,24 @@ async function runSave() {
   const tombstone = sqlite("SELECT title, url, deleted_at FROM bookmarks WHERE id = 'legacy-Alpha'")[0]
   assert.ok(tombstone.deleted_at && tombstone.title === '' && tombstone.url === null, 'a deleted bookmark is a blank tombstone')
   assert.ok(!JSON.stringify(ops).includes('alpha.test'), 'the change log keeps no deleted URL')
+  // Preferences: the pre-database file is imported; a change is one settings row; Forget this site
+  // hard-deletes the site's zoom row (no origin left in the change log) and scrubs the JSON now.
+  assert.equal(await evaluate(toolbar, 'window.api.browser.getSearchEngine()'), 'bing', 'legacy preferences load')
+  await waitFor(() => settingValue('pref.searchEngine') === '"bing"', 'browser-preferences.json imported into settings')
+  assert.ok(sqlite("SELECT count(*) AS n FROM settings WHERE key LIKE 'zoom:%' AND deleted_at IS NULL")[0].n === 1, 'the saved zoom is a row')
+  const prefsBefore = Number(sqlite('SELECT max(seq) AS seq FROM oplog')[0].seq)
+  await evaluate(toolbar, 'window.api.browser.setSearchEngine("duckduckgo")')
+  await waitFor(() => settingValue('pref.searchEngine') === '"duckduckgo"', 'the search engine change in the database')
+  assert.equal(sqlite("SELECT count(*) AS n FROM oplog WHERE entity = 'setting' AND seq > ?", prefsBefore)[0].n, 1, 'one change = one settings op')
+  await evaluate(toolbar, 'window.api.browser.safety.siteData.forget("https://zoomed.test", true)')
+  assert.equal(sqlite("SELECT count(*) AS n FROM settings WHERE key LIKE 'zoom:%'")[0].n, 0, 'the zoom row is hard-deleted')
+  assert.ok(!JSON.stringify(sqlite('SELECT * FROM oplog')).includes('zoomed.test'), 'no forgotten origin in the change log')
+  assert.ok(!readFileSync(preferencesFile, 'utf8').includes('zoomed.test'), 'the JSON copy is scrubbed right away')
+
   // bookmarks.json is the fallback copy: rewritten on a slow timer and at quit (will-quit flushes).
   app.emit('will-quit', { preventDefault() {} })
   assert.ok(readFileSync(bookmarksFile, 'utf8').includes('Gamma'), 'bookmarks.json is still written alongside (at quit)')
+  assert.equal(JSON.parse(readFileSync(preferencesFile, 'utf8')).searchEngine, 'duckduckgo', 'browser-preferences.json too')
   console.log('[session-smoke] save phase passed')
 }
 
@@ -130,7 +149,9 @@ async function runRestore() {
   sqlite("UPDATE session_tabs SET url = ? WHERE url = ? AND deleted_at IS NULL", `${expectedOrigin}/edited`, `${expectedOrigin}/two`)
   // Same for bookmarks: a title changed only in the database shows up, so the database was read.
   sqlite("UPDATE bookmarks SET title = 'Gamma (db)' WHERE title = 'Gamma'")
+  sqlite(`UPDATE settings SET value = '"google"' WHERE key = 'pref.searchEngine'`)
   const { toolbar } = await launch()
+  assert.equal(await evaluate(toolbar, 'window.api.browser.getSearchEngine()'), 'google', 'preferences restored from the database')
   assert.equal(await bookmarkTitles(toolbar), 'Beta,Gamma (db)', 'bookmarks restored from the database')
   await waitFor(async () => (await tabUrls(toolbar)).join(' ') === `${expectedOrigin}/one ${expectedOrigin}/edited`, 'tabs restored from the database')
   await delay(1500)
@@ -144,7 +165,10 @@ async function runJsonWins() {
   const origin = `http://127.0.0.1:${port}`
   writeFileSync(sessionFile, JSON.stringify({ version: 1, tabs: [`${origin}/from-json`], activeIndex: 0, pinnedTabs: [] }))
   writeFileSync(bookmarksFile, legacyBookmarks(['Delta']))
+  writeFileSync(preferencesFile, JSON.stringify({ version: 1, searchEngine: 'brave' }))
   const { toolbar } = await launch()
+  assert.equal(await evaluate(toolbar, 'window.api.browser.getSearchEngine()'), 'brave', 'a changed browser-preferences.json wins')
+  await waitFor(() => settingValue('pref.searchEngine') === '"brave"', 'settings to take the JSON preferences')
   assert.equal(await bookmarkTitles(toolbar), 'Delta', 'a changed bookmarks.json wins')
   await waitFor(() => liveBookmarkTitles() === 'Delta', 'the bookmarks table to take the JSON tree')
   await waitFor(async () => (await tabUrls(toolbar)).join(' ') === `${origin}/from-json`, 'tabs restored from the changed JSON file')
@@ -161,6 +185,7 @@ async function main() {
   const serverPort = server.address().port
   mkdirSync(userData, { recursive: true, mode: 0o700 })
   writeFileSync(bookmarksFile, legacyBookmarks(['Alpha', 'Beta']), { mode: 0o600 })
+  writeFileSync(preferencesFile, JSON.stringify({ version: 1, searchEngine: 'bing', siteZoom: { 'https://zoomed.test': 1.25 } }), { mode: 0o600 })
   for (const next of ['save', 'restore', 'json-wins']) assert.equal(await runPhase(next, serverPort), 0, `the ${next} phase passed`)
   console.log('Electron SQLite session smoke passed.')
 }

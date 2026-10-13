@@ -24,6 +24,7 @@ import { createFileTextCache, isOwnerOnlyMode } from '../shared/write-skip'
 import { getProfileDatabase } from './store'
 import { SessionStore } from './store/session-store'
 import { legacyFileNeedsImport, markLegacyFileImported } from './store/legacy-json'
+import { loadPreferencesSource, savePreferencesCopies } from './preferences-persistence'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
@@ -248,10 +249,7 @@ export function clearSavedBrowserSession(): boolean {
 }
 
 export function getBrowserSearchEngine(): SearchEngineId {
-  if (!preferencesLoaded) {
-    preferences = parseBrowserPreferences(readJson(PREFERENCES_FILE))
-    preferencesLoaded = true
-  }
+  loadPreferencesIfNeeded()
   return preferences.searchEngine
 }
 
@@ -374,13 +372,15 @@ export function saveBrowserSiteZoom(value: unknown, factorInput: unknown): numbe
 
 function loadPreferencesIfNeeded(): void {
   if (preferencesLoaded) return
-  preferences = parseBrowserPreferences(readJson(PREFERENCES_FILE))
+  // surffish.db when its copy is current, else browser-preferences.json (see preferences-persistence.ts).
+  preferences = parseBrowserPreferences(loadPreferencesSource(() => readJson(PREFERENCES_FILE), () => preferences))
   preferencesLoaded = true
 }
 
-function savePreferences(): void {
+/** `privacy`: per-site entries were removed, so the JSON copy is rewritten now too (not on the slow timer). */
+function savePreferences(privacy = false): void {
   preferencesLoaded = true
-  writeJson(PREFERENCES_FILE, { version: 1, ...preferences })
+  savePreferencesCopies(() => preferences, () => writeJson(PREFERENCES_FILE, { version: 1, ...preferences }), privacy)
 }
 
 /** Reset site permissions and settings to defaults for these origins (null = every site). */
@@ -392,7 +392,7 @@ export function resetBrowserSiteSettings(origins: readonly string[] | null): num
   const next = { ...current }
   for (const origin of drop) delete next[origin]
   preferences = { ...preferences, siteSettings: next }
-  savePreferences()
+  savePreferences(true)
   return drop.length
 }
 
@@ -406,6 +406,6 @@ export function clearBrowserSiteZoom(origins: readonly string[] | null): number 
   for (const origin of drop) delete next[origin]
   cancelDeferredWrite('preferences:site-zoom')
   preferences = { ...preferences, siteZoom: next }
-  savePreferences()
+  savePreferences(true)
   return drop.length
 }
