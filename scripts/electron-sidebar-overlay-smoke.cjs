@@ -253,14 +253,9 @@ async function run() {
     console.log('[overlay-smoke] DEBUG fixtureUrl:', fixtureUrl)
     console.log('[overlay-smoke] DEBUG wait error:', error instanceof Error ? error.message : String(error))
     try {
-      console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get().map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl }))')))
+      console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, '(async () => (await window.api.browser.tabs.get()).map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl })))()')))
     } catch (dumpError) {
       console.log('[overlay-smoke] DEBUG tabs.get threw:', dumpError instanceof Error ? dumpError.message : String(dumpError))
-    }
-    try {
-      console.log('[overlay-smoke] DEBUG content-tabs-get:', JSON.stringify(await evaluate(rendererViews.content, 'window.api.browser.tabs.get().length')))
-    } catch (dumpError2) {
-      console.log('[overlay-smoke] DEBUG content tabs.get threw:', dumpError2 instanceof Error ? dumpError2.message : String(dumpError2))
     }
     try {
       console.log('[overlay-smoke] DEBUG toolbar-state-url:', (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url)
