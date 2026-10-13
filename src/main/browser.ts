@@ -549,6 +549,8 @@ function persistOpenTabs(): void {
       activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
       pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
       geometry: windowGeometry(w.window),
+      tabIds: kept.map((tab) => tab.id),
+      windowKey: String(w.window.id),
       ...(splits.length > 0 ? { splits } : {}),
       ...(spaces ? { spaces } : {}),
       ...(groups.length > 0 ? { groups } : {})

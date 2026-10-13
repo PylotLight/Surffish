@@ -122,6 +122,10 @@ async function run() {
   // --- clear browsing data (all time)
   page.webContents.reload()
   await waitFor(async () => (await page.webContents.session.cookies.get({})).length > 0, 'the cookie to be set again')
+  // Let the reload finish (the fixture sets the cookie on every response, favicon included), so a
+  // late response can't put it back after the clear below.
+  await waitFor(() => !page.webContents.isLoading(), 'the reload to finish')
+  await delay(500)
   const result = await evaluate(toolbar, 'window.api.browser.safety.privacy.clear({ range: "all", history: true, downloads: true, cookies: true, cache: true, permissions: true, zoom: true })')
   assert.equal(result.scopedOrigins, null)
   assert.equal((await page.webContents.session.cookies.get({})).length, 0, 'all cookies cleared')

@@ -112,7 +112,7 @@ async function runSqlite() {
   assert.equal((await evaluate(toolbar, 'window.api.browser.history.get()')).length, 0, 'history cleared')
   assert.equal(readDb('SELECT count(*) AS n FROM history_visits')[0].n, 0, 'database cleared')
   assert.equal(readFileSync(legacyFile, 'utf8'), '[]', 'legacy JSON cleared')
-  assert.ok(!JSON.stringify(readDb('SELECT * FROM oplog')).includes('127.0.0.1'), 'no visited URL left in the change log')
+  assert.ok(!JSON.stringify(readDb("SELECT * FROM oplog WHERE entity = 'history_visit'")).includes('127.0.0.1'), 'no visited URL left in the history change log')
 
   await visit(toolbar, `${origin}/two`)
   console.log('[store-smoke] sqlite phase passed; relaunching with SURFFISH_STORE=json')

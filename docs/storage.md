@@ -4,9 +4,10 @@ Surffish is moving its JSON stores into one SQLite database in the profile folde
 `surffish.db` (with `-wal`/`-shm` next to it). It's the groundwork for sync: every row has a
 stable id, a clock stamp and a tombstone, and every write lands in a change log.
 
-Status: **history** lives in the database (PR 1). The schema already has the tables for
-sessions/windows/tabs/groups/splits, Spaces, bookmarks and settings; those stores move over in
-follow-up PRs. Everything else is still JSON.
+Status: **history** lives in the database (PR 1); the **open-windows session** (windows, tabs,
+pins, groups, splits, each tab's Space) is saved to it too (PR 2), with browser-session.json still
+written alongside as the fallback. Spaces definitions, bookmarks and settings have tables already
+and move over next. Everything else is still JSON.
 
 ## Which SQLite
 
@@ -83,3 +84,17 @@ the log too.
 A peer asks for `changesSince(last_sent_seq)`, applies ops last-writer-wins by `hlc`
 (`HybridLogicalClock.receive()` keeps local stamps ahead of anything seen), and acknowledges the
 new `seq`. Transport (Inkfish-style LAN sealed HTTP with QR pairing) and the apply side come later.
+
+## Session (windows / tabs / groups / splits)
+
+- Saved on the same 600 ms debounce as before. Each save diffs against what was last written and
+  upserts only changed rows (a tab navigating = one row, one oplog op); closed tabs/windows are
+  tombstoned with their URL/title blanked, and tombstones older than 30 days are purged.
+- Row ids are stable: the browser passes runtime tab ids and the window id; after a restart the
+  restored tabs adopt the row at the same window/position/URL, so a tab keeps its id across
+  restarts (what sync needs for "tabs on other devices").
+- Restore reads the database when it has this device's session **and** browser-session.json is
+  unchanged since Surffish last wrote it (size+mtime in `meta`). If the JSON file changed (a
+  fallback run, an older build) or the database write failed, the JSON file wins and is imported.
+- browser-session.json keeps being written for now, so downgrading or `SURFFISH_STORE=json` still
+  restores the exact session. It can stop once sync ships.

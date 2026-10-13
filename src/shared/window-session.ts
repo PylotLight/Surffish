@@ -27,6 +27,10 @@ export interface SavedSessionWindow {
   spaces?: SavedWindowSpaces
   /** Tab groups (indexes into `urls`, tab-groups.ts); left out when there are none. */
   groups?: SavedTabGroup[]
+  /** Runtime tab ids, same order as `urls` (lets the profile database keep stable row ids). Not written to JSON. */
+  tabIds?: string[]
+  /** Runtime window key (BaseWindow id). Not written to JSON. */
+  windowKey?: string
 }
 
 export interface SavedWindowsSession {
@@ -43,6 +47,8 @@ export interface SessionWindowInput {
   splits?: readonly SavedSplit[]
   spaces?: SavedWindowSpaces | null
   groups?: readonly SavedTabGroup[]
+  tabIds?: readonly string[]
+  windowKey?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +97,18 @@ function normalizeSplits(window: SessionWindowInput, keptCount: number, pinnedIn
   return parseSessionSplits(remapped, keptCount, pinnedIndexes)
 }
 
+/** Runtime tab ids re-pointed at the kept tabs; null unless every kept tab has one. */
+function normalizeTabIds(window: SessionWindowInput, keptCount: number): string[] | null {
+  if (!window.tabIds || window.tabIds.length !== window.urls.length) return null
+  const out: string[] = []
+  for (const [index, at] of keptIndexMap(window, keptCount)) {
+    const id = window.tabIds[index]
+    if (typeof id !== 'string' || id === '') return null
+    out[at] = id
+  }
+  return out.length === keptCount ? out : null
+}
+
 /** Clean up windows to save: safe URLs only, windows left without tabs are dropped. */
 export function normalizeWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): SavedWindowsSession {
   const kept: SavedSessionWindow[] = []
@@ -102,7 +120,8 @@ export function normalizeWindowsSession(windows: readonly SessionWindowInput[], 
     const splits = normalizeSplits(window, session.urls.length, session.pinnedIndexes)
     const spaces = normalizeSpaces(window, session.urls.length)
     const groups = normalizeGroups(window, session.urls.length, session.pinnedIndexes)
-    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}), ...(groups.length > 0 ? { groups } : {}) })
+    const tabIds = normalizeTabIds(window, session.urls.length)
+    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}), ...(groups.length > 0 ? { groups } : {}), ...(tabIds ? { tabIds } : {}), ...(typeof window.windowKey === 'string' ? { windowKey: window.windowKey } : {}) })
   })
   // A focused window that was dropped (or an out-of-range index) falls back to the last one.
   return { windows: kept, focusedIndex: clampFocused(focused, kept.length) }
