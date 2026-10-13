@@ -34,9 +34,27 @@ export function normalizeDismissReason(value: unknown): PopoverDismissReason {
  */
 export type DismissibleKind = 'popover' | 'panel'
 
+/**
+ * Does a dismiss request close this kind? A `panel` (History) ignores presses on the sidebar it is
+ * drawn in, and ignores the renderer's `tab-switch` too: a renderer learns of a tab switch from the
+ * tab broadcast, which main coalesces to one per frame, so it can land *after* a History panel that
+ * was opened later (switch tab, then Cmd+Y right away) and close it. Main closes History on a real
+ * tab switch itself, in order with the shortcut (`sidebarModeAfterTabSwitch`).
+ */
 export function dismissReasonCloses(kind: DismissibleKind, reason: PopoverDismissReason): boolean {
-  if (kind === 'panel') return reason !== 'sidebar-press'
+  if (kind === 'panel') return reason !== 'sidebar-press' && reason !== 'tab-switch'
   return true
+}
+
+/**
+ * The sidebar mode once main switches the active tab: the History panel (it belonged to the old
+ * page's moment) closes back to the tab list; every other mode stays. Only a real switch (a
+ * different tab id) counts, and it is judged in main, so a History panel opened after the switch
+ * is never closed by it.
+ */
+export function sidebarModeAfterTabSwitch<Mode extends string>(mode: Mode, previousTabId: string | null | undefined, nextTabId: string): Mode | 'tabs' {
+  if (!previousTabId || previousTabId === nextTabId) return mode
+  return mode === 'history' ? 'tabs' : mode
 }
 
 export interface ToolbarPopoverState {

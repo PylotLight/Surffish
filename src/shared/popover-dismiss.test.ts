@@ -8,6 +8,7 @@ import {
   POPOVER_DISMISS_EVENT,
   POPOVER_SHADOW_ROOM,
   popoverRoom,
+  sidebarModeAfterTabSwitch,
   surfacePressDismissReason,
   toolbarExtentFor,
   windowBlurDismissesPopovers
@@ -59,8 +60,38 @@ describe('popover light-dismiss', () => {
   test('panels ignore sidebar presses; popovers close on every reason', () => {
     for (const reason of ['page-press', 'sidebar-press', 'window-blur', 'tab-switch', 'request'] as const) {
       expect(dismissReasonCloses('popover', reason)).toBe(true)
-      expect(dismissReasonCloses('panel', reason)).toBe(reason !== 'sidebar-press')
+      expect(dismissReasonCloses('panel', reason)).toBe(reason !== 'sidebar-press' && reason !== 'tab-switch')
     }
+  })
+
+  test('a late renderer tab-switch never closes the History panel (main closes it, in order)', () => {
+    // Switch tab, then Cmd+Y right away: the coalesced tab broadcast reaches the toolbar after the
+    // chrome state that opened History. That stale switch must not close the panel.
+    expect(dismissReasonCloses('panel', 'tab-switch')).toBe(false)
+    expect(dismissReasonCloses('popover', 'tab-switch')).toBe(true)
+  })
+
+  test('main closes History on a real tab switch only', () => {
+    expect(sidebarModeAfterTabSwitch('history', 'a', 'b')).toBe('tabs')
+    expect(sidebarModeAfterTabSwitch('history', 'a', 'a')).toBe('history')
+    expect(sidebarModeAfterTabSwitch('history', null, 'a')).toBe('history')
+    expect(sidebarModeAfterTabSwitch('history', undefined, 'a')).toBe('history')
+    for (const mode of ['tabs', 'settings', 'downloads', 'bookmarks', 'site', 'network'] as const) {
+      expect(sidebarModeAfterTabSwitch(mode, 'a', 'b')).toBe(mode)
+    }
+  })
+
+  test('the shortcut race: switch, open, then the stale switch arrives', () => {
+    // Main's order of events for the table-stakes smoke (Cmd+Shift+] then Cmd+Y twice).
+    let mode: string = 'tabs'
+    mode = sidebarModeAfterTabSwitch(mode, 'first', 'second') // switch while History is closed: no-op
+    expect(mode).toBe('tabs')
+    mode = mode === 'history' ? 'tabs' : 'history' // Cmd+Y
+    expect(mode).toBe('history')
+    if (dismissReasonCloses('panel', 'tab-switch')) mode = 'tabs' // the late broadcast in the toolbar
+    expect(mode).toBe('history')
+    mode = mode === 'history' ? 'tabs' : 'history' // Cmd+Y again toggles it closed
+    expect(mode).toBe('tabs')
   })
 
   test('reasons off the wire are normalised', () => {

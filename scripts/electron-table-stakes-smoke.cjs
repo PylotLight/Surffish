@@ -173,10 +173,26 @@ async function run() {
   await waitFor(async () => (await activeUrl()).endsWith('/second'), 'Cmd/Ctrl+Shift+] to select the next tab')
 
   // --- history / downloads panel shortcuts
-  key(second, process.platform === 'darwin' ? 'Y' : 'H', [primary])
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'history', 'the history shortcut to open history')
-  key(second, process.platform === 'darwin' ? 'Y' : 'H', [primary])
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the history shortcut to toggle history closed')
+  const historyKey = process.platform === 'darwin' ? 'Y' : 'H'
+  const sidebarMode = async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode
+  // A tab switch right before the shortcut: `tabs.activate` resolves once main has switched, before
+  // the (per-frame coalesced) tab broadcast reaches the toolbar, and Cmd+Y follows at once. That late
+  // broadcast used to close the History panel that opened after the switch, so the next Cmd+Y
+  // reopened it instead of closing it (flaky "toggle history closed" on the Mac runner).
+  const firstId = (await evaluate(toolbar, 'window.api.browser.tabs.get()')).find((tab) => !tab.url.endsWith('/second')).id
+  await evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify(firstId)})`)
+  key(page, historyKey, [primary])
+  await waitFor(async () => (await sidebarMode()) === 'history', 'the history shortcut to open history')
+  await delay(300)
+  assert.equal(await sidebarMode(), 'history', 'a tab switch from before History opened must not close it')
+  key(page, historyKey, [primary])
+  await waitFor(async () => (await sidebarMode()) === 'tabs', 'the history shortcut to toggle history closed')
+  // A tab switch while History is open still closes it.
+  key(page, historyKey, [primary])
+  await waitFor(async () => (await sidebarMode()) === 'history', 'the history shortcut to reopen history')
+  key(page, ']', [primary, 'shift'])
+  await waitFor(async () => (await activeUrl()).endsWith('/second'), 'Cmd/Ctrl+Shift+] to select the next tab with History open')
+  await waitFor(async () => (await sidebarMode()) === 'tabs', 'a tab switch to close the History panel')
 
   // --- middle-click a sidebar tab closes it
   const sidebar = surface('sidebar')

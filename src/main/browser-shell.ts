@@ -2,7 +2,7 @@ import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'ele
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
-import { POPOVER_DISMISS_CHANNEL, surfacePressDismissReason, windowBlurDismissesPopovers, type PopoverDismissReason, type ToolbarPopoverState } from '../shared/popover-dismiss'
+import { POPOVER_DISMISS_CHANNEL, sidebarModeAfterTabSwitch, surfacePressDismissReason, windowBlurDismissesPopovers, type PopoverDismissReason, type ToolbarPopoverState } from '../shared/popover-dismiss'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 import { SidebarOverlayMotion } from './sidebar-motion'
@@ -51,6 +51,8 @@ interface ShellState {
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
   dismissOnBlur: () => void
   dismissOnSidebarPress: (event: Electron.Event, mouseEvent: { type: string }) => void
+  /** Last active tab main published for this window (a change closes the History panel, in order). */
+  lastActiveTabId: string | null
 }
 
 export type SidebarOverlayEvent = 'shown' | 'hidden' | 'prefetch'
@@ -212,6 +214,7 @@ export function attachBrowserShell(
     lastOverlayMode: null,
     sidebarFrame: null,
     sidebarOverlayShown: false,
+    lastActiveTabId: null,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
     dismissOnSidebarPress: (_event, mouseEvent) => dismissToolbarPopoversOnPress(shell, 'sidebar', mouseEvent.type)
   }
@@ -326,6 +329,23 @@ export function setBrowserChromeState(input: unknown, window?: BaseWindow | null
   applyShellLayout(shell)
   sendToWindowRenderers(shell.window, 'browser:chrome-state', getBrowserChromeState(shell.window))
   return getBrowserChromeState(shell.window)
+}
+
+/**
+ * Main published the window's active tab: when it differs from the last one seen, close the History
+ * panel here, in order with the shortcut that toggles it, rather than in the toolbar when the
+ * (per-frame coalesced) tab broadcast lands. That broadcast can arrive after a History panel opened
+ * just after the switch (switch tab, Cmd+Y right away) and closed it again. A transient "no active
+ * tab" (mid-close) is skipped, so closing the active tab still counts as a switch.
+ */
+export function noteActiveTabForHistoryPanel(activeTabId: string | null | undefined, window?: BaseWindow | null): void {
+  const shell = shellFor(window)
+  if (!shell || !activeTabId) return
+  const previous = shell.lastActiveTabId
+  shell.lastActiveTabId = activeTabId
+  const mode = shell.chromeState.sidebarMode
+  const next = sidebarModeAfterTabSwitch(mode, previous, activeTabId)
+  if (next !== mode) setBrowserChromeState({ sidebarMode: next }, shell.window)
 }
 
 /** Track mouse input delivered to the full-width live page without placing a hit-test view above it. */
