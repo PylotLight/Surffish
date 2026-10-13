@@ -23,7 +23,7 @@ const input = join(work, 'smoke.pdf')
 const output = join(work, 'smoke-edited.pdf')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-async function until(label, check, timeout = 30_000) {
+async function until(label, check, timeout = Number(process.env.SMOKE_WAIT_MS || 30_000)) {
   const deadline = Date.now() + timeout
   let last
   while (Date.now() < deadline) {
