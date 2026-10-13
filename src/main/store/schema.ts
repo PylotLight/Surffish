@@ -37,8 +37,8 @@ export const SYNCED_TABLES: Record<string, { entity: string; columns: readonly s
   bookmarks: { entity: 'bookmark', columns: ['id', 'parent_id', 'kind', 'title', 'url', 'position', 'favicon_url', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   settings: { entity: 'setting', columns: ['key', 'value', 'scope', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   spaces: { entity: 'space', columns: ['id', 'name', 'icon', 'color', 'position', 'separate_storage', 'proxy', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_windows: { entity: 'session_window', columns: ['id', 'position', 'focused', 'geometry', 'active_space_id', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_tabs: { entity: 'session_tab', columns: ['id', 'window_id', 'position', 'url', 'title', 'favicon_url', 'pinned', 'active', 'space_id', 'group_id', 'last_active_at', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
+  session_windows: { entity: 'session_window', columns: ['id', 'position', 'focused', 'geometry', 'active_space_id', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
+  session_tabs: { entity: 'session_tab', columns: ['id', 'window_id', 'position', 'url', 'title', 'favicon_url', 'pinned', 'active', 'space_id', 'group_id', 'last_active_at', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   tab_groups: { entity: 'tab_group', columns: ['id', 'window_id', 'name', 'color', 'collapsed', 'position', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   session_splits: { entity: 'session_split', columns: ['id', 'window_id', 'tab_ids', 'sizes', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] }
 }
@@ -146,7 +146,8 @@ CREATE TABLE spaces (
   deleted_at INTEGER
 ) WITHOUT ROWID;
 
--- Open windows/tabs. Rows belong to the device in device_id; another device's rows are its
+-- Open windows/tabs. extra is JSON for per-window/per-tab state that doesn't need its own
+-- column (e.g. each Space's last active tab). Rows belong to the device in device_id; another device's rows are its
 -- "tabs on other devices". Closing a window/tab tombstones it (deleted_at) instead of deleting.
 CREATE TABLE session_windows (
   id TEXT PRIMARY KEY,
@@ -154,6 +155,7 @@ CREATE TABLE session_windows (
   focused INTEGER NOT NULL DEFAULT 0,
   geometry TEXT,
   active_space_id TEXT,
+  extra TEXT,
   ${SYNC_COLUMNS},
   deleted_at INTEGER
 ) WITHOUT ROWID;
@@ -171,6 +173,7 @@ CREATE TABLE session_tabs (
   space_id TEXT,
   group_id TEXT,
   last_active_at INTEGER,
+  extra TEXT,
   ${SYNC_COLUMNS},
   deleted_at INTEGER
 ) WITHOUT ROWID;
