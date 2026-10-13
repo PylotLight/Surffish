@@ -171,8 +171,13 @@ export function showBrowserContextMenu(
       { label: 'Copy Clean Link', toolTip: 'Copy without tracking parameters (utm_*, fbclid, gclid…)', click: () => clipboard.writeText(cleanLinkUrl(linkUrl)) }
     )
   }
-  if (mediaUrl && params.mediaType !== 'none') {
+  if (params.mediaType === 'image' && params.hasImageContents) {
+    // Works for blob:/data: images too, so it doesn't need an http src like the items below.
     addSeparator(items)
+    items.push({ label: 'Copy Image', toolTip: 'Shortcut: ⌥/Alt+click an image', click: () => contents.copyImageAt(params.x, params.y) })
+  }
+  if (mediaUrl && params.mediaType !== 'none') {
+    if (params.mediaType !== 'image' || !params.hasImageContents) addSeparator(items)
     const kind = params.mediaType === 'image' ? 'Image' : params.mediaType === 'video' || params.mediaType === 'audio' ? 'Media' : 'File'
     items.push(
       { label: `Open ${kind} in New Tab`, click: () => options.openInNewTab(mediaUrl) },

@@ -170,3 +170,10 @@ export function destroyLinkStatus(): void {
   ready = null
   if (closing && !closing.webContents.isDestroyed()) closing.webContents.close()
 }
+
+/** Briefly show a short message (not a url) in the status pill, e.g. "Image copied". */
+export function flashLinkStatus(message: string, bounds: BrowserBounds, durationMs = 1400): void {
+  showLinkStatus(message, bounds)
+  clearHideTimer()
+  hideTimer = setTimeout(() => { hideTimer = null; hideLinkStatus() }, durationMs)
+}
