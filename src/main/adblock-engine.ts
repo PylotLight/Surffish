@@ -16,7 +16,7 @@ import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type Session } fro
 import type { ElectronBlocker } from '@ghostery/adblocker-electron'
 import { isExtensionExemptRequest, isProtectedVideoDeliveryUrl } from './adblock-policy.ts'
 import { frameStartPayload, frameUpdateStyles, type FrameDomFeatures, type FrameStartPayload } from './adblock-filters.ts'
-import { afterStartupHold, gateRequest, installFallbackRequestGate, setSessionRequestHandler } from './request-gate.ts'
+import { afterStartupHold, applyResponseHeaderHooks, gateRequest, installFallbackRequestGate, setSessionRequestHandler } from './request-gate.ts'
 
 export { applyFilterEnvironment, buildFilterEngine, frameStartPayload, frameUpdateStyles } from './adblock-filters.ts'
 export type { BuiltFilterEngine, FrameDomFeatures, FrameStartPayload, ListFetch } from './adblock-filters.ts'
@@ -114,8 +114,8 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
   attachedSessions.set(session, hooks)
 
   const handleBeforeRequest = (details: BeforeRequestDetails, callback: (response: BeforeRequestResponse) => void): void => {
-    // Kill switch / HTTPS-only run first, whatever the ad blocker would do.
-    const gated = gateRequest(details)
+    // Kill switch / HTTPS-only (and the session's extension DNR rules) run first, whatever the ad blocker would do.
+    const gated = gateRequest(details, session)
     if (gated) return callback(gated)
     const engine = hooks.getEngine()
     const pageUrl = hooks.pageUrlForRequest(details)
@@ -142,7 +142,9 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
     afterStartupHold(details, () => handleBeforeRequest(details, callback))
   })
 
-  session.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
+  session.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, rawCallback) => {
+    // Response-header hooks (extension DNR modifyHeaders) apply on top of the ad blocker's changes.
+    const callback = (response: Electron.HeadersReceivedResponse): void => rawCallback(applyResponseHeaderHooks(session, details, response))
     const engine = hooks.getEngine()
     if (!engine) return callback({})
     const pageUrl = hooks.pageUrlForRequest(details)

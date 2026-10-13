@@ -19,13 +19,14 @@ import {
   isChromeExtensionId,
   parseChromeWebStoreInput
 } from '../shared/chrome-web-store'
-import { analyzeExtensionCompatibility, compatibilityLabel, type ExtensionCompatibility } from '../shared/extension-compat'
+import { analyzeExtensionCompatibility, compatibilityLabel, type ExtensionCompatibility, type ExtensionDnrSummary } from '../shared/extension-compat'
 import { filterTabsForQuery, isAllowedExtensionTabUrl, toChromeTab, type ExtensionAccess } from '../shared/extension-tabs'
 import { anchoredPopupBounds } from '../shared/window-geometry'
 import { getBrowserSession } from './browser-session'
 import {
   closeExtensionPageTabs,
   createExtensionTab,
+  getBrowserTabUrlByWebContentsId,
   getExtensionTab,
   isExtensionPageTab,
   listExtensionTabs,
@@ -42,6 +43,7 @@ import { createRestrictedFetch } from './restricted-fetch'
 import { activateStagedDirectory, assertExtensionIdentity, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
 import { setExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
 import {
+  collectDnrRulesets,
   collectExtensionSources,
   extensionWorkerFiles,
   manifestOptionsPath,
@@ -223,6 +225,46 @@ function refreshAdblockExemptions(): void {
   setExtensionAdblockExemptHosts(hosts)
 }
 
+/**
+ * Runtime support Surffish adds around a loaded extension: its declarativeNetRequest rules
+ * (enforced by Surffish) and the hidden bridge page (webNavigation events, DNR state). The modules
+ * load on demand, only once an extension needs them (keeps them out of the startup bundle).
+ */
+type RuntimeSupport = typeof import('./extension-runtime-support')
+let runtimeSupport: RuntimeSupport | null = null
+const runtimeSupportIds = new Set<string>()
+
+function needsRuntimeSupport(manifest: JsonRecord): boolean {
+  const permissions = stringList(manifest.permissions)
+  return permissions.includes('webNavigation') || permissions.includes('declarativeNetRequest') || permissions.includes('declarativeNetRequestWithHostAccess') ||
+    (isRecord(manifest.declarative_net_request) && Array.isArray(manifest.declarative_net_request.rule_resources))
+}
+
+async function startRuntimeSupport(id: string, entry: LoadedEntry): Promise<void> {
+  if (!needsRuntimeSupport(entry.manifest)) return
+  try {
+    runtimeSupport ??= await import('./extension-runtime-support')
+    if (loaded.get(id) !== entry) return
+    runtimeSupportIds.add(id)
+    runtimeSupport.startExtensionRuntimeSupport({
+      id,
+      directory: entry.directory,
+      manifest: entry.manifest,
+      extensionUrl: entry.extension.url,
+      session: getBrowserSession(),
+      statePath: join(rootDirectory(), id, 'dnr-state.json'),
+      isTab: (contents) => getBrowserTabUrlByWebContentsId(contents.id) !== null
+    })
+  } catch (error) {
+    console.warn(`[extensions] could not start runtime support for ${id}:`, errorMessage(error))
+  }
+}
+
+function stopRuntimeSupport(id: string): void {
+  if (!runtimeSupportIds.delete(id)) return
+  runtimeSupport?.stopExtensionRuntimeSupport(id)
+}
+
 // ---------------------------------------------------------------------------
 // Loading
 
@@ -244,12 +286,15 @@ async function loadInstalled(record: InstalledRecord): Promise<LoadedEntry> {
   loaded.set(record.id, entry)
   loadErrors.delete(record.id)
   refreshAdblockExemptions()
+  // Before page requests are released (the caller awaits loading): DNR rules apply to the first pages.
+  await startRuntimeSupport(record.id, entry)
   return entry
 }
 
 function unloadExtension(id: string): void {
   const entry = loaded.get(id)
   if (popup?.id === id) disposePopup()
+  stopRuntimeSupport(id)
   if (!entry) return
   closeExtensionPageTabs(entry.extension.url)
   try {
@@ -311,6 +356,14 @@ interface PreparedPackage {
   publicKey: string
 }
 
+/** Static DNR rules Surffish can't enforce, for the install dialog (the matcher loads only when needed). */
+async function dnrRulesetSummary(directory: string, manifest: JsonRecord): Promise<ExtensionDnrSummary | undefined> {
+  const rulesets = collectDnrRulesets(directory, manifest)
+  if (rulesets.length === 0) return undefined
+  const { summarizeDnrRulesets } = await import('../shared/dnr')
+  return summarizeDnrRulesets(rulesets)
+}
+
 async function downloadPackage(id: string): Promise<PreparedPackage> {
   const response = await webStoreFetch(chromeWebStoreCrxUrl(id, process.versions.chrome))
   if (response.status === 204 || response.status === 404) throw new Error('That extension was not found on the Chrome Web Store, or it is not offered for this Chrome version.')
@@ -340,7 +393,7 @@ async function downloadPackage(id: string): Promise<PreparedPackage> {
       manifest,
       name: resolveManifestMessage(sourceDirectory, manifest, manifest.name) || id,
       version,
-      compatibility: analyzeExtensionCompatibility(manifest, collectExtensionSources(sourceDirectory)),
+      compatibility: analyzeExtensionCompatibility(manifest, collectExtensionSources(sourceDirectory), await dnrRulesetSummary(sourceDirectory, manifest)),
       publicKey: crx.publicKey.toString('base64')
     }
   } catch (error) {
@@ -420,9 +473,11 @@ async function activatePrepared(prepared: PreparedPackage): Promise<void> {
       browserSession.extensions.removeExtension(extension.id)
       throw error
     }
-    loaded.set(id, { extension, directory: finalDirectory, manifest: staged.manifest })
+    const entry = { extension, directory: finalDirectory, manifest: staged.manifest }
+    loaded.set(id, entry)
     loadErrors.delete(id)
     activation.commit()
+    await startRuntimeSupport(id, entry)
     const now = Date.now()
     records.set(id, {
       id,
@@ -840,4 +895,5 @@ export async function installFromStorePage(sender: WebContents, senderFrame: Ele
 
 export function disposeWebStoreExtensions(): void {
   disposePopup()
+  runtimeSupport?.disposeExtensionRuntimeSupport()
 }

@@ -3,7 +3,9 @@
  * ad blocker sees them. Electron allows one webRequest listener per event and session: the ad
  * blocker owns onBeforeRequest and calls gateRequest() first; when it isn't attached (it failed
  * to load) installFallbackRequestGate() keeps the gates working on their own.
- * onErrorOccurred is owned here. No `app` imports, like adblock-engine.
+ * onErrorOccurred and onBeforeSendHeaders are owned here; onHeadersReceived belongs to the ad blocker,
+ * which runs the response-header hooks registered here after its own work. No `app` imports, like
+ * adblock-engine.
  */
 import type { Session } from 'electron'
 
@@ -23,9 +25,21 @@ export function addRequestGate(gate: RequestGate): () => void {
   }
 }
 
-/** The first gate that wants to cancel or redirect the request wins; null lets it continue. */
-export function gateRequest(details: RequestGateDetails): Electron.CallbackResponse | null {
-  for (const gate of gates) {
+const sessionGates = new WeakMap<Session, RequestGate[]>()
+
+/** A gate for one session only (e.g. extension declarativeNetRequest rules on the profile session). Runs after the global gates. */
+export function addSessionRequestGate(session: Session, gate: RequestGate): () => void {
+  const list = sessionGates.get(session) ?? []
+  list.push(gate)
+  sessionGates.set(session, list)
+  return () => {
+    const index = list.indexOf(gate)
+    if (index >= 0) list.splice(index, 1)
+  }
+}
+
+function runGates(list: readonly RequestGate[], details: RequestGateDetails): Electron.CallbackResponse | null {
+  for (const gate of list) {
     try {
       const response = gate(details)
       if (response) return response
@@ -34,6 +48,82 @@ export function gateRequest(details: RequestGateDetails): Electron.CallbackRespo
     }
   }
   return null
+}
+
+/** The first gate that wants to cancel or redirect the request wins; null lets it continue. */
+export function gateRequest(details: RequestGateDetails, session?: Session): Electron.CallbackResponse | null {
+  const response = runGates(gates, details)
+  if (response) return response
+  const forSession = session ? sessionGates.get(session) : undefined
+  return forSession && forSession.length > 0 ? runGates(forSession, details) : null
+}
+
+// ---------------------------------------------------------------------------
+// Header hooks. Each returns new headers or null for "unchanged"; hooks run in registration order.
+
+export type HeaderRecord = Record<string, string | string[]>
+export type RequestHeadersHook = (details: Electron.OnBeforeSendHeadersListenerDetails, headers: HeaderRecord) => HeaderRecord | null
+export type ResponseHeadersHook = (details: Electron.OnHeadersReceivedListenerDetails, headers: HeaderRecord) => HeaderRecord | null
+
+const requestHeaderHooks = new WeakMap<Session, RequestHeadersHook[]>()
+const responseHeaderHooks = new WeakMap<Session, ResponseHeadersHook[]>()
+
+function runHeaderHooks<D>(hooks: ReadonlyArray<(details: D, headers: HeaderRecord) => HeaderRecord | null>, details: D, headers: HeaderRecord): HeaderRecord | null {
+  let current = headers
+  let changed = false
+  for (const hook of hooks) {
+    try {
+      const next = hook(details, current)
+      if (next) {
+        current = next
+        changed = true
+      }
+    } catch (error) {
+      console.warn('Header hook failed:', error)
+    }
+  }
+  return changed ? current : null
+}
+
+/**
+ * Modify outgoing request headers on a session. The session's onBeforeSendHeaders listener exists
+ * only while at least one hook is registered (so requests pay nothing otherwise).
+ */
+export function addRequestHeadersHook(session: Session, hook: RequestHeadersHook): () => void {
+  const list = requestHeaderHooks.get(session) ?? []
+  requestHeaderHooks.set(session, list)
+  list.push(hook)
+  if (list.length === 1) {
+    session.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (details, callback) => {
+      const headers = runHeaderHooks(list, details, details.requestHeaders)
+      callback(headers ? { requestHeaders: headers as Record<string, string> } : {})
+    })
+  }
+  return () => {
+    const index = list.indexOf(hook)
+    if (index < 0) return
+    list.splice(index, 1)
+    if (list.length === 0) session.webRequest.onBeforeSendHeaders(null)
+  }
+}
+
+/** Modify response headers on a session; applied by the ad blocker's onHeadersReceived after its own changes. */
+export function addResponseHeadersHook(session: Session, hook: ResponseHeadersHook): () => void {
+  const list = responseHeaderHooks.get(session) ?? []
+  responseHeaderHooks.set(session, list)
+  list.push(hook)
+  return () => {
+    const index = list.indexOf(hook)
+    if (index >= 0) list.splice(index, 1)
+  }
+}
+
+/** Fold the session's response-header hooks into an onHeadersReceived response. */
+export function applyResponseHeaderHooks(session: Session, details: Electron.OnHeadersReceivedListenerDetails, response: Electron.HeadersReceivedResponse): Electron.HeadersReceivedResponse {
+  const hooks = responseHeaderHooks.get(session)
+  if (!hooks || hooks.length === 0 || response.cancel) return response
+  const headers = runHeaderHooks(hooks, details, response.responseHeaders ?? details.responseHeaders ?? {})
+  return headers ? { ...response, responseHeaders: headers } : response
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +187,7 @@ export function installFallbackRequestGate(session: Session): void {
     afterStartupHold(details, () => {
       const handler = sessionHandlers.get(session)
       if (handler) handler(details, callback)
-      else callback(gateRequest(details) ?? {})
+      else callback(gateRequest(details, session) ?? {})
     })
   })
 }
