@@ -296,11 +296,19 @@ export function focusVisibleShellPage(): boolean {
   return true
 }
 
+/** F6 everywhere, plus Alt+D on Windows/Linux (Chrome's bindings). Cmd/Ctrl+L goes through the tab shortcuts. */
+export function isFocusAddressShortcut(input: Pick<Electron.Input, 'type' | 'key' | 'code' | 'alt' | 'control' | 'meta' | 'shift'>): boolean {
+  if (input.type !== 'keyDown') return false
+  if (input.key === 'F6' && !input.alt && !input.control && !input.meta && !input.shift) return true
+  return process.platform !== 'darwin' && input.alt && !input.control && !input.meta && !input.shift && input.code === 'KeyD'
+}
+
 export function sendFocusAddressToVisibleRenderer(): void {
   if (!shellViews) return
   const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
-  if (!target.isDestroyed()) {
-    target.focus()
-    target.send('browser:focus-address')
-  }
+  if (target.isDestroyed()) return
+  // Bring the window forward first so focus lands even when an extension popup or devtools had it.
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.focus()
+  target.focus()
+  target.send('browser:focus-address')
 }

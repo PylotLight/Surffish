@@ -17,7 +17,8 @@ import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSi
 import { showBrowserContextMenu } from './context-menu'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { guardPageDragRegions } from './page-drag-guard'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -574,6 +575,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
   })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  guardPageDragRegions(contents)
   contents.on('media-started-playing', () => {
     if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || tab.id === activeTabId || contents.isDestroyed()) return
     void contents.executeJavaScript(`
@@ -606,6 +608,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     return { action: 'deny' }
   })
   contents.on('before-input-event', (event, inputEvent) => {
+    if (isFocusAddressShortcut(inputEvent)) {
+      event.preventDefault()
+      sendFocusAddressToVisibleRenderer()
+      return
+    }
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
     if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
   })

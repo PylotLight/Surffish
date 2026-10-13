@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { attachBrowserView, handleBrowserShortcutInput, syncBrowserBoundsToWindow } from './browser'
-import { attachBrowserShell, detachBrowserShell } from './browser-shell'
+import { attachBrowserShell, detachBrowserShell, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { isExpectedRendererDocument } from './renderer-security'
 import { APP_NAME, WINDOW } from '../shared/config'
 import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
@@ -131,6 +131,11 @@ function createRendererView(expectedDocumentUrl: string): WebContentsView {
     return { action: 'deny' }
   })
   view.webContents.on('before-input-event', (event, inputEvent) => {
+    if (isFocusAddressShortcut(inputEvent)) {
+      event.preventDefault()
+      sendFocusAddressToVisibleRenderer()
+      return
+    }
     if (handleBrowserShortcutInput(inputEvent)) event.preventDefault()
   })
   return view
