@@ -29,4 +29,7 @@ const probeEnvironment = {
   ...process.env,
   SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE: '1'
 }
-run('run loopback-only disposable profile', electronBinary, [probeEntry], probeEnvironment)
+// Same as scripts/smoke-harness.cjs: with the sandbox already off on Linux CI, skip the zygote so
+// Chromium doesn't log "Failed to adjust OOM score of renderer" for every renderer.
+const noZygote = process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX && process.env.SMOKE_KEEP_ZYGOTE !== '1' ? ['--no-sandbox', '--no-zygote'] : []
+run('run loopback-only disposable profile', electronBinary, [...noZygote, probeEntry], probeEnvironment)

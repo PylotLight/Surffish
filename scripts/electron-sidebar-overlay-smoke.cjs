@@ -1,3 +1,4 @@
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { execFileSync } = require('node:child_process')
@@ -11,15 +12,6 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 const userData = join(tmpdir(), `surffish-basewindow-overlay-smoke-${process.pid}`)
 const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR
 const fixtureTitle = 'Surffish BaseWindow overlay fixture'
-const NETWORK_ONLY_CONFIG = {
-  loadNetworkFilters: true,
-  loadCosmeticFilters: false,
-  loadCSPFilters: false,
-  enableHtmlFiltering: false,
-  enableMutationObserver: false,
-  loadExtendedSelectors: false,
-  loadGenericCosmeticsFilters: false
-}
 const server = createServer((request, response) => {
   if (request.url === '/favicon.svg') {
     response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' })
@@ -102,8 +94,8 @@ function captureFullWindow(name) {
 
 function seedIsolatedProfile() {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', NETWORK_ONLY_CONFIG)
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`, { mode: 0o600 })
 }

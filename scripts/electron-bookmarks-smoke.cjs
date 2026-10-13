@@ -3,6 +3,7 @@
 // Runs the production build: `bun run build && bun run test:electron-bookmarks`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-bookmarks-smoke.cjs`).
 // Set SURFFISH_SMOKE_SCREENSHOTS=<dir> to save screenshots of the sidebar and the manager.
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdirSync, readFileSync, writeFileSync, existsSync } = require('node:fs')
@@ -95,8 +96,8 @@ async function run() {
   process.env.XDG_CONFIG_HOME = configHome
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   // An older profile: the 12-site strip lives in preferences and there is no bookmarks.json yet.
@@ -194,6 +195,8 @@ async function run() {
 
   // --- ⌘/Ctrl+Shift+B: the optional bookmarks bar (off by default) shifts the page down
   assert.equal(await evaluate(toolbar, 'window.api.browser.bookmarks.bar.get()'), false, 'the bar is off by default')
+  // The bookmark click above reloads the page; a shortcut sent mid-navigation can be dropped.
+  await waitFor(() => !second.webContents.isLoading(), 'the bookmark to finish loading')
   const pageTopBefore = second.getBounds().y
   key(second, 'B', [primary, 'shift'])
   await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector(".bookmarks-bar"))'), 'Cmd/Ctrl+Shift+B to show the bookmarks bar')

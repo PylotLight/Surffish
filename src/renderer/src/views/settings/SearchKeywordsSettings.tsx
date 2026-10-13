@@ -27,10 +27,10 @@ export function SearchKeywordsSettings(): React.JSX.Element {
 
   async function save(next: CustomSearchEngine[], done: string): Promise<boolean> {
     try {
-      await window.api.browser.searchKeywords.set(next)
-      setIsError(false)
-      setMessage(done)
-      return true
+      const result = await window.api.browser.searchKeywords.set(next)
+      setIsError(!result.ok)
+      setMessage(result.ok ? done : result.error)
+      return result.ok
     } catch (error) {
       setIsError(true)
       // ipcRenderer.invoke prefixes "Error invoking remote method …: Error: ".

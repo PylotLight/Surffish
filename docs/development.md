@@ -33,6 +33,17 @@ The desktop app embeds Chromium/Blink through Electron. Electron extension suppo
 
 Network filtering uses uBlock Origin filter lists through `@ghostery/adblocker-electron`, including network, cosmetic, and scriptlet rules. A dedicated persistent Chromium session can use an optional local SOCKS5 proxy; it affects this browser session only. The saved proxy choice is off for fresh profiles. Surffish is not an audited privacy browser and does not promise DNS or WebRTC leak protection.
 
+## Electron smoke tests
+
+Every `scripts/electron-*-smoke.cjs` (and the perf / extension probes) requires `scripts/smoke-harness.cjs` first. It:
+
+- Fails a stuck smoke instead of letting it hang: a hard overall limit of `SMOKE_TIMEOUT_MS` (default 4 × `SMOKE_WAIT_MS`, at least 4 minutes; 6 minutes in CI) exits with code 124, the last line the smoke printed, and the open windows and views. Child phases (e.g. the multi-window relaunch) are killed with it.
+- Seeds the adblock engine under the app's real cache name and filter config (`scripts/smoke-adblock-config.cjs`, kept in sync by a unit test), so smokes never download the real filter lists at launch.
+- On Linux with the sandbox already off (`ELECTRON_DISABLE_SANDBOX=1` / `--no-sandbox`), adds `--no-zygote`. Zygote-forked renderers are non-dumpable, so an unprivileged browser process can't write their `/proc/<pid>/oom_score_adj` and Chromium logs `Failed to adjust OOM score of renderer … Permission denied (13)` for every renderer. Without a zygote, renderers are launched directly and no OOM-score write is attempted. Set `SMOKE_KEEP_ZYGOTE=1` to keep the zygote. The app itself never gets this switch.
+
+On the k3s runner the cleaner fix is passwordless `sudo` for the runner user (the CI step then installs Electron's setuid `chrome-sandbox` helper). The smokes then run with the real sandbox, Chromium adjusts OOM scores through the setuid helper, and the harness leaves the zygote alone. Adding Linux capabilities to the pod doesn't help: the runner is not root, so the kernel drops them.
+
+
 ## Further technical references
 
 - [Architecture](architecture.md)

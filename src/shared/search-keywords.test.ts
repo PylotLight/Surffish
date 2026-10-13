@@ -7,6 +7,7 @@ import {
   parseCustomSearchEngines,
   parseKeywordSearch,
   validateCustomSearchEngine,
+  validateCustomSearchEngineList,
   validateSearchKeyword,
   validateSearchTemplate
 } from './search-keywords.ts'
@@ -101,4 +102,18 @@ test('new ids are slugs that never collide', () => {
   assert.equal(makeSearchEngineId('Stack Overflow', []), 'stack-overflow')
   assert.equal(makeSearchEngineId('YouTube', engines), 'youtube-2')
   assert.equal(makeSearchEngineId('!!!', []), 'engine')
+})
+
+test('saving the whole list: a bad entry is a validation result naming it, never a throw', () => {
+  const good = { id: 'so', name: 'Stack Overflow', keyword: 'so', urlTemplate: 'https://stackoverflow.com/search?q=%s' }
+  assert.deepEqual(validateCustomSearchEngineList([good]), { ok: true, engines: [good] })
+  assert.deepEqual(validateCustomSearchEngineList([]), { ok: true, engines: [] })
+  const bad = validateCustomSearchEngineList([good, { id: 'x', name: 'Bad', keyword: 'x', urlTemplate: 'http://example.com/?q=%s' }])
+  assert.equal(bad.ok, false)
+  assert.match(bad.ok ? '' : bad.error, /^Bad: .*https/)
+  const duplicate = validateCustomSearchEngineList([good, { ...good, id: 'so-2', name: 'Again' }])
+  assert.match(duplicate.ok ? '' : duplicate.error, /^Again: /)
+  assert.deepEqual(validateCustomSearchEngineList('nope'), { ok: false, error: 'Expected a list of search engines.' })
+  assert.equal(validateCustomSearchEngineList(Array.from({ length: 51 }, (_, index) => ({ ...good, id: `e${index}`, keyword: `k${index}` }))).ok, false)
+  assert.equal(validateCustomSearchEngineList([null]).ok, false)
 })

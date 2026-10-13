@@ -5,6 +5,7 @@
 // `bun run build && bun run test:electron-nav-errors`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-nav-errors-smoke.cjs`).
 // Set SURFFISH_SMOKE_SCREENSHOTS=<dir> to save screenshots of the notice and the error page.
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdirSync, writeFileSync } = require('node:fs')
@@ -117,8 +118,8 @@ function recordLoadRejections() {
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))

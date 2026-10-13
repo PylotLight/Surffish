@@ -2,6 +2,7 @@
 // channel, a 404 feed and the Settings section. Runs the production build:
 // `bun run build && bun run test:electron-updates`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-updates-smoke.cjs`).
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
@@ -65,8 +66,8 @@ const readPrefs = () => JSON.parse(readFileSync(join(userData, 'update-preferenc
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
@@ -122,19 +123,37 @@ async function run() {
   assert.equal(readPrefs().skippedVersion, '9.9.9')
 
   // --- beta channel offers the pre-release (and it is not the skipped version)
-  const beta = await evaluate(toolbar, 'window.api.browser.updates.setSettings({ betaChannel: true })')
+  const beta = (await evaluate(toolbar, 'window.api.browser.updates.setSettings({ betaChannel: true })')).state
   assert.equal(beta.latest.version, '10.0.0-beta.1')
   assert.equal(beta.showBadge, true)
-  const stable = await evaluate(toolbar, 'window.api.browser.updates.setSettings({ betaChannel: false })')
+  const stable = (await evaluate(toolbar, 'window.api.browser.updates.setSettings({ betaChannel: false })')).state
   assert.equal(stable.latest.version, '9.9.9')
 
   // --- a missing feed is reported, not thrown
-  const missing = await evaluate(toolbar, `window.api.browser.updates.setSettings({ feedUrl: ${JSON.stringify(`${origin}/missing.atom`)} })`)
+  const missing = (await evaluate(toolbar, `window.api.browser.updates.setSettings({ feedUrl: ${JSON.stringify(`${origin}/missing.atom`)} })`)).state
   assert.equal(missing.status, 'unavailable')
   assert.match(missing.message, /feed not found/)
   assert.equal(missing.showBadge, false)
-  await assert.rejects(evaluate(toolbar, 'window.api.browser.updates.setSettings({ feedUrl: "file:///etc/passwd" })'), /http\(s\) feed URL/)
-  const reset = await evaluate(toolbar, 'window.api.browser.updates.setSettings({ feedUrl: "" })')
+  // --- a bad feed URL is a validation result (shown inline), not a thrown IPC error
+  const rejected = await evaluate(toolbar, 'window.api.browser.updates.setSettings({ feedUrl: "file:///etc/passwd" })')
+  assert.equal(rejected.ok, false)
+  assert.match(rejected.error, /http\(s\) feed URL/)
+  assert.equal(readPrefs().feedUrl, `${origin}/missing.atom`, 'a rejected feed URL is not saved')
+  // In Settings: type a bad URL and Save; the message shows inline under the form. Retyped and
+  // re-clicked until it sticks, since a late state broadcast can reset an untouched field.
+  await waitFor(() => evaluate(content, `(() => {
+    if (document.querySelector('.update-settings .settings-message.is-error')?.textContent.includes('http(s) feed URL')) return true
+    const input = document.querySelector('.update-feed-form input')
+    if (input.value !== 'ftp://example.com/feed.atom') {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'ftp://example.com/feed.atom')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    } else {
+      document.querySelector('.update-feed-form button[type=submit]:not(:disabled)')?.click()
+    }
+    return false
+  })()`), 'the inline feed URL error')
+  assert.equal(readPrefs().feedUrl, `${origin}/missing.atom`, 'the form did not save the rejected URL either')
+  const reset = (await evaluate(toolbar, 'window.api.browser.updates.setSettings({ feedUrl: "" })')).state
   assert.equal(reset.feedUrl, '')
   assert.equal(readPrefs().feedUrl, '')
 

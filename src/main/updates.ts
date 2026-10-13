@@ -8,10 +8,10 @@ import {
   UPDATE_FEED_MAX_BYTES,
   UPDATE_INITIAL_DELAY_MS,
   UPDATE_REMIND_LATER_MS,
+  applyUpdateSettings,
   decideUpdate,
   describeFeedHttpFailure,
   effectiveFeedUrl,
-  normalizeFeedUrl,
   parseReleaseFeed,
   parseUpdatePreferences,
   pickLatestRelease,
@@ -22,6 +22,7 @@ import {
   type UpdateDownloadState,
   type UpdatePreferences,
   type UpdateReleaseInfo,
+  type UpdateSettingsResult,
   type UpdateState
 } from '../shared/update-feed'
 import { APP_NAME } from '../shared/config'
@@ -258,27 +259,14 @@ export function remindUpdateLater(): UpdateState {
   return publish()
 }
 
-export interface UpdateSettingsInput {
-  feedUrl?: unknown
-  betaChannel?: unknown
-}
-
-export async function setUpdateSettings(input: unknown): Promise<UpdateState> {
-  if (typeof input !== 'object' || input === null) throw new Error('Update settings must be an object.')
-  const patch = input as UpdateSettingsInput
-  const next = { ...preferences }
-  if (patch.feedUrl !== undefined) {
-    const feedUrl = normalizeFeedUrl(patch.feedUrl)
-    if (feedUrl === null) throw new Error('Enter an http(s) feed URL, or leave it blank for the default GitHub releases feed.')
-    next.feedUrl = feedUrl
-  }
-  if (typeof patch.betaChannel === 'boolean') next.betaChannel = patch.betaChannel
-  const changed = next.feedUrl !== preferences.feedUrl || next.betaChannel !== preferences.betaChannel
-  preferences = next
+export async function setUpdateSettings(input: unknown): Promise<UpdateSettingsResult> {
+  const result = applyUpdateSettings(preferences, input)
+  if (!result.ok) return result
+  preferences = result.preferences
   savePreferences()
-  if (!changed) return publish()
+  if (!result.changed) return { ok: true, state: publish() }
   latest = null
-  return checkForUpdates(true)
+  return { ok: true, state: await checkForUpdates(true) }
 }
 
 /** Probe direct asset URLs (HEAD, through the proxy); null when none exists or the probe fails. */

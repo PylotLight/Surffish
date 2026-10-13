@@ -40,7 +40,7 @@ export function UpdateSettings(): React.JSX.Element {
     sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }), [])
 
-  async function run(action: () => Promise<UpdateState | boolean | void>): Promise<void> {
+  async function run(action: () => Promise<UpdateState | boolean | null | void>): Promise<void> {
     setError('')
     setBusy(true)
     try {
@@ -51,6 +51,14 @@ export function UpdateSettings(): React.JSX.Element {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** Save { feedUrl?, betaChannel? }; a rejected value (bad feed URL) shows inline and returns null. */
+  async function saveSettings(patch: { feedUrl?: string; betaChannel?: boolean }): Promise<UpdateState | null> {
+    const result = await window.api.browser.updates.setSettings(patch)
+    if (result.ok) return result.state
+    setError(result.error)
+    return null
   }
 
   if (!state) {
@@ -100,15 +108,15 @@ export function UpdateSettings(): React.JSX.Element {
         )}
 
         <SettingsRow label="Beta channel" hint="Also offer pre-releases (tags like v0.3.0-beta.1).">
-          <input type="checkbox" className="settings-switch" checked={state.betaChannel} disabled={busy} onChange={(event) => void run(() => window.api.browser.updates.setSettings({ betaChannel: event.target.checked }))} aria-label="Offer pre-release updates" />
+          <input type="checkbox" className="settings-switch" checked={state.betaChannel} disabled={busy} onChange={(event) => void run(() => saveSettings({ betaChannel: event.target.checked }))} aria-label="Offer pre-release updates" />
         </SettingsRow>
         <form
           className="update-feed-form"
           onSubmit={(event) => {
             event.preventDefault()
             void run(async () => {
-              const next = await window.api.browser.updates.setSettings({ feedUrl })
-              setFeedDirty(false)
+              const next = await saveSettings({ feedUrl })
+              if (next) setFeedDirty(false)
               return next
             })
           }}
@@ -127,8 +135,8 @@ export function UpdateSettings(): React.JSX.Element {
           </label>
           <button className="settings-action secondary" type="submit" disabled={busy || !feedDirty}>Save</button>
           {state.feedUrl && <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void run(async () => {
-            const next = await window.api.browser.updates.setSettings({ feedUrl: '' })
-            setFeedDirty(false)
+            const next = await saveSettings({ feedUrl: '' })
+            if (next) setFeedDirty(false)
             return next
           })}>Use default</button>}
         </form>

@@ -5,6 +5,7 @@
 //   SURFFISH_SIDEBAR_BACKDROP=solid|snapshot|native  path to test (default: the platform's own)
 //   SURFFISH_SCREENSHOT_DIR=…                        save window captures (needs ffmpeg + X11)
 //   SURFFISH_BACKDROP_LABEL=before                   only measure + capture (for an older build)
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { execFileSync } = require('node:child_process')
@@ -104,7 +105,7 @@ function minAlpha(backgroundImage, backgroundColor) {
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  writeFileSync(join(userData, 'adblock-engine.bin'), ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false }).serialize())
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG).serialize())
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))

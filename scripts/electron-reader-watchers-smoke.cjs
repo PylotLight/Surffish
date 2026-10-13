@@ -5,6 +5,7 @@
 // Runs the production build: `bun run build && bun run test:electron-reader-watchers`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-reader-watchers-smoke.cjs`).
 // Set SURFFISH_SMOKE_SCREENSHOTS=<dir> to save screenshots.
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdirSync, readFileSync, writeFileSync, existsSync } = require('node:fs')
@@ -92,8 +93,8 @@ async function screenshot(view, name) {
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
@@ -183,8 +184,9 @@ async function run() {
   await evaluate(content, `window.api.browser.watchers.update(${JSON.stringify(id)}, { selector: '#price' })`)
   await evaluate(content, `window.api.browser.watchers.checkNow(${JSON.stringify(id)})`)
   await waitFor(async () => (await watcherState()).snapshotLines === 1, 'the selector baseline')
-  const badSelector = await evaluate(content, `window.api.browser.watchers.update(${JSON.stringify(id)}, { selector: 'a[' }).then(() => 'saved', (error) => String(error))`)
-  assert.match(badSelector, /not supported|not valid/)
+  const badSelector = await evaluate(content, `window.api.browser.watchers.update(${JSON.stringify(id)}, { selector: 'a[' })`)
+  assert.equal(badSelector.ok, false, 'a bad selector is a validation result, not a thrown IPC error')
+  assert.match(badSelector.error, /not supported|not valid/)
   // Settings → Watchers renders the list with the badge.
   await evaluate(content, `window.api.browser.watchers.update(${JSON.stringify(id)}, { selector: null })`)
   await evaluate(content, `window.api.browser.watchers.checkNow(${JSON.stringify(id)})`)

@@ -9,6 +9,9 @@
  * scriptlets, so they must stay on. HTML filtering stays off because Electron
  * cannot rewrite response bodies.
  */
+/** Serialized engine in userData; anything else (older names, other configs) is ignored and re-downloaded. */
+export const ADBLOCK_CACHE_FILE = 'adblock-engine-v2.bin'
+
 export const FULL_FILTER_CONFIG = {
   loadNetworkFilters: true,
   loadCosmeticFilters: true,

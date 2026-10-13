@@ -1,3 +1,4 @@
+require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { mkdtempSync, rmSync } = require('node:fs')

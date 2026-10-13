@@ -3,6 +3,7 @@
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-network-tools-smoke.cjs`).
 // Two tiny SOCKS5 servers stand in for the main and a named proxy; they log which host each
 // CONNECT asked for and hand every connection to the local fixture server.
+const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { createServer: createTcpServer, connect } = require('node:net')
@@ -110,8 +111,8 @@ const listen = (target, port) => new Promise((resolvePromise) => target.listen(p
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', { loadNetworkFilters: true, loadCosmeticFilters: false })
-  writeFileSync(join(userData, 'adblock-engine.bin'), blocker.serialize(), { mode: 0o600 })
+  const blocker = ElectronBlocker.parse('||surffish-smoke-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   await listen(server, 0)

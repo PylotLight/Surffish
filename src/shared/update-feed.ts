@@ -330,6 +330,29 @@ export function normalizeFeedUrl(input: unknown): string | null {
   }
 }
 
+export const INVALID_FEED_URL_MESSAGE = 'Enter an http(s) feed URL, or leave it blank for the default GitHub releases feed.'
+
+/** What Settings → About & updates gets back from saving: a bad feed URL is an inline message, not a thrown error. */
+export type UpdateSettingsResult = { ok: true; state: UpdateState } | { ok: false; error: string }
+
+/**
+ * Apply a settings patch from the renderer ({ feedUrl?, betaChannel? }). Invalid input is a
+ * validation result for the form, never an exception.
+ */
+export function applyUpdateSettings(preferences: UpdatePreferences, input: unknown): { ok: true; preferences: UpdatePreferences; changed: boolean } | { ok: false; error: string } {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return { ok: false, error: 'Update settings must be an object.' }
+  const patch = input as { feedUrl?: unknown; betaChannel?: unknown }
+  const next = { ...preferences }
+  if (patch.feedUrl !== undefined) {
+    const feedUrl = normalizeFeedUrl(patch.feedUrl)
+    if (feedUrl === null) return { ok: false, error: INVALID_FEED_URL_MESSAGE }
+    next.feedUrl = feedUrl
+  }
+  if (typeof patch.betaChannel === 'boolean') next.betaChannel = patch.betaChannel
+  const changed = next.feedUrl !== preferences.feedUrl || next.betaChannel !== preferences.betaChannel
+  return { ok: true, preferences: next, changed }
+}
+
 export function effectiveFeedUrl(preferences: Pick<UpdatePreferences, 'feedUrl'>): string {
   return preferences.feedUrl || DEFAULT_UPDATE_FEED_URL
 }
