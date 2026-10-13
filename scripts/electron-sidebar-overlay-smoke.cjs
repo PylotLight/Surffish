@@ -244,10 +244,16 @@ async function run() {
 
   assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)}).then((result) => result.ok)`), true, 'the app should open a synthetic loopback page')
   await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'the synthetic page navigation')
-  await waitFor(async () => {
-    const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')
-    return tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl === `${new URL(fixtureUrl).origin}/favicon.svg`
-  }, 'the page-declared favicon to appear in the active tab summary')
+  try {
+    await waitFor(async () => {
+      const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')
+      return tabs.find((tab) => tab.url === fixtureUrl)?.faviconUrl === `${new URL(fixtureUrl).origin}/favicon.svg`
+    }, 'the page-declared favicon to appear in the active tab summary')
+  } catch (error) {
+    console.log('[overlay-smoke] DEBUG fixtureUrl:', fixtureUrl)
+    console.log('[overlay-smoke] DEBUG tabs:', JSON.stringify(await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get().map((tab) => ({ url: tab.url, faviconUrl: tab.faviconUrl }))')))
+    throw error
+  }
   await waitFor(() => {
     fixturePageView = mainWindow.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL() === fixtureUrl)
     return fixturePageView && fixturePageView.getBounds().width > 0
