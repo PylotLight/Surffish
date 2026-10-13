@@ -124,3 +124,25 @@ export function removeBrowsingHistory(predicate: (entry: BrowsingHistoryEntry) =
   }
   return removed
 }
+
+/**
+ * Merge visits imported from another browser. Exact (url, time) repeats are skipped, the list
+ * stays newest-first and capped, so a huge import only keeps the most recent visits.
+ */
+export function importBrowsingHistory(imported: ReadonlyArray<{ url: string; title: string; visitedAt: number }>): number {
+  loadHistory()
+  const seen = new Set(entries.map((entry) => `${entry.visitedAt}\n${entry.url}`))
+  const added: BrowsingHistoryEntry[] = []
+  for (const visit of imported) {
+    if (!/^https?:\/\//i.test(visit.url) || !Number.isFinite(visit.visitedAt)) continue
+    const key = `${visit.visitedAt}\n${visit.url}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    added.push({ id: randomUUID(), url: visit.url, title: visit.title.trim() || visit.url, visitedAt: visit.visitedAt })
+  }
+  if (added.length === 0) return 0
+  const addedIds = new Set(added.map((entry) => entry.id))
+  entries = [...entries, ...added].sort((a, b) => b.visitedAt - a.visitedAt).slice(0, MAX_HISTORY_ENTRIES)
+  persistHistory()
+  return entries.reduce((count, entry) => count + (addedIds.has(entry.id) ? 1 : 0), 0)
+}

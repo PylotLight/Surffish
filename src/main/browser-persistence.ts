@@ -17,6 +17,7 @@ import {
   type SavedBrowserSession
 } from '../shared/persistence'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
+import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
@@ -178,9 +179,9 @@ export function saveBrowserNewTabPreferences(value: unknown): NewTabPreferences 
   return getBrowserNewTabPreferences()
 }
 
+/** The pinned strip is now the first bookmarks of the Favourites folder (see bookmarks.ts). */
 export function getBrowserPinnedSites(): PinnedSite[] {
-  loadPreferencesIfNeeded()
-  return preferences.pinnedSites.map((site) => ({ ...site }))
+  return getFavouriteSites()
 }
 
 export function getBrowserSidebarWidth(): number {
@@ -207,10 +208,8 @@ export function getBrowserPreferencesSnapshot(): BrowserPreferencesSnapshot {
 }
 
 export function saveBrowserPinnedSites(value: unknown): PinnedSite[] {
-  loadPreferencesIfNeeded()
-  preferences = { ...preferences, pinnedSites: normalizePinnedSites(value) }
-  savePreferences()
-  return getBrowserPinnedSites()
+  // The legacy preferences copy is left as it was at migration, so an older build still has a strip.
+  return saveFavouriteSites(normalizePinnedSites(value))
 }
 
 export function getBrowserSiteSettings(value: unknown): BrowserSiteSettings | null {

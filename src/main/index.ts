@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { registerDiagnosticsIpc } from './diagnostics'
+import { registerBookmarkIpc } from './bookmarks-ipc'
 import { initializeBrowserProxy } from './proxy'
 import { createWindow, setMainWindowCloseHandler } from './window'
 import { setBrowserSearchEngine } from './browser'
@@ -75,6 +76,7 @@ app.whenReady().then(async () => {
   registerIpc()
   registerUpdateIpc()
   registerDiagnosticsIpc()
+  registerBookmarkIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {

@@ -59,6 +59,23 @@ export interface PinnedSite {
   faviconUrl?: string
 }
 
+/** One folder or bookmark in the bookmark tree; `parentId` is null only for the invisible root. */
+export interface BookmarkNode {
+  id: string
+  type: 'folder' | 'bookmark'
+  title: string
+  url?: string
+  parentId: string | null
+  index: number
+  dateAdded: number
+  faviconUrl?: string
+}
+
+/** Every node except the root, pre-ordered (parents before children, siblings by index). */
+export interface BookmarksSnapshot {
+  nodes: BookmarkNode[]
+}
+
 /** Effective per-origin privacy choices; permissions are denied unless explicitly allowed. */
 export interface BrowserSiteSettings {
   origin: string
@@ -146,7 +163,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics' | 'bookmarks'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {

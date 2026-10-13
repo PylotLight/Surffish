@@ -1,0 +1,81 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import initSqlJs from 'sql.js'
+import { openSqliteBytes, readChromiumHistory, readFirefoxBookmarks, readFirefoxHistory, readSafariHistory } from './bookmark-import-db.ts'
+import { buildFirefoxBookmarkTree } from '../shared/bookmark-import.ts'
+
+const SQL = await initSqlJs()
+const WINDOWS_EPOCH_OFFSET_MS = 11_644_473_600_000
+const day = (n: number): number => Date.UTC(2024, 0, n)
+
+function fixture(statements: string): Uint8Array {
+  const db = new SQL.Database()
+  db.exec(statements)
+  const bytes = db.export()
+  db.close()
+  return bytes
+}
+
+test('reads Chromium History (urls table), newest first, http(s) and visible only', () => {
+  const chrome = (ms: number): string => String((ms + WINDOWS_EPOCH_OFFSET_MS) * 1000)
+  const bytes = fixture(`
+    CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL);
+    INSERT INTO urls (url, title, last_visit_time, hidden) VALUES
+      ('https://old.test/', 'Old', ${chrome(day(1))}, 0),
+      ('https://new.test/', 'New', ${chrome(day(5))}, 0),
+      ('chrome://settings/', 'Settings', ${chrome(day(6))}, 0),
+      ('https://hidden.test/', 'Hidden', ${chrome(day(7))}, 1),
+      ('http://plain.test/', NULL, ${chrome(day(3))}, 0);
+  `)
+  const db = openSqliteBytes(SQL, bytes)
+  assert.deepEqual(readChromiumHistory(db), [
+    { url: 'https://new.test/', title: 'New', visitedAt: day(5) },
+    { url: 'http://plain.test/', title: '', visitedAt: day(3) },
+    { url: 'https://old.test/', title: 'Old', visitedAt: day(1) }
+  ])
+  assert.equal(readChromiumHistory(db, 1).length, 1)
+  db.close()
+})
+
+test('reads Firefox places.sqlite bookmarks and history, even from a WAL-mode file', () => {
+  const pr = (ms: number): number => ms * 1000
+  const bytes = fixture(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, last_visit_date INTEGER, hidden INTEGER DEFAULT 0 NOT NULL);
+    CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk INTEGER DEFAULT NULL, parent INTEGER, position INTEGER, title LONGVARCHAR, dateAdded INTEGER, guid TEXT);
+    INSERT INTO moz_places VALUES (1, 'https://firefox.test/', 'Firefox test', ${pr(day(2))}, 0), (2, 'https://unvisited.test/', 'Never', NULL, 0), (3, 'place:sort=8', 'Query', ${pr(day(9))}, 0);
+    INSERT INTO moz_bookmarks VALUES
+      (1, 2, NULL, 0, 0, '', ${pr(day(1))}, 'root________'),
+      (2, 2, NULL, 1, 0, 'toolbar', ${pr(day(1))}, 'toolbar_____'),
+      (3, 1, 1, 2, 0, 'FF', ${pr(day(1))}, 'aaaaaaaaaaaa'),
+      (4, 1, 2, 2, 1, 'Unvisited', ${pr(day(1))}, 'bbbbbbbbbbbb');
+  `)
+  // Make it look like a live WAL database (header bytes 18/19 = 2).
+  bytes[18] = 2
+  bytes[19] = 2
+  const db = openSqliteBytes(SQL, bytes)
+  assert.deepEqual(buildFirefoxBookmarkTree(readFirefoxBookmarks(db)), [
+    { title: 'Bookmarks Toolbar', dateAdded: day(1), children: [
+      { title: 'FF', url: 'https://firefox.test/', dateAdded: day(1) },
+      { title: 'Unvisited', url: 'https://unvisited.test/', dateAdded: day(1) }
+    ] }
+  ])
+  assert.deepEqual(readFirefoxHistory(db), [{ url: 'https://firefox.test/', title: 'Firefox test', visitedAt: day(2) }])
+  db.close()
+})
+
+test('reads Safari History.db with the latest visit title per item', () => {
+  const mac = (ms: number): number => (ms - Date.UTC(2001, 0, 1)) / 1000
+  const bytes = fixture(`
+    CREATE TABLE history_items (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, visit_count INTEGER);
+    CREATE TABLE history_visits (id INTEGER PRIMARY KEY, history_item INTEGER NOT NULL, visit_time REAL NOT NULL, title TEXT);
+    INSERT INTO history_items VALUES (1, 'https://apple.test/', 2), (2, 'https://swift.test/', 1), (3, 'file:///Users/x', 1);
+    INSERT INTO history_visits VALUES (1, 1, ${mac(day(1))}, 'Apple (old title)'), (2, 1, ${mac(day(4))}, 'Apple'), (3, 2, ${mac(day(2))}, 'Swift'), (4, 3, ${mac(day(8))}, 'Local');
+  `)
+  const db = openSqliteBytes(SQL, bytes)
+  assert.deepEqual(readSafariHistory(db), [
+    { url: 'https://apple.test/', title: 'Apple', visitedAt: day(4) },
+    { url: 'https://swift.test/', title: 'Swift', visitedAt: day(2) }
+  ])
+  db.close()
+})

@@ -9,13 +9,14 @@ import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type Co
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import type { ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
-import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, MAX_PINNED_SITES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
+import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { stepZoomFactor } from '../shared/zoom'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getPrivateSession, whenPrivateSessionReady } from './browser-session'
 import { forgetPrivateDownloads } from './downloads'
-import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
@@ -23,7 +24,7 @@ import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle,
 import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
@@ -186,17 +187,7 @@ function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
   if (!safeFaviconUrl || !origin) return
   updateLatestVisitFavicon(pageUrl, safeFaviconUrl)
 
-  const pinnedSites = getBrowserPinnedSites()
-  let pinnedSitesChanged = false
-  const nextPinnedSites = pinnedSites.map((site) => {
-    if (normalizeHttpOrigin(site.url) !== origin || site.faviconUrl === safeFaviconUrl) return site
-    pinnedSitesChanged = true
-    return { ...site, faviconUrl: safeFaviconUrl }
-  })
-  if (pinnedSitesChanged) {
-    saveBrowserPinnedSites(nextPinnedSites)
-    sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
-  }
+  recordBookmarkFavicon(pageUrl, safeFaviconUrl)
   notifyHistoryChanged()
 }
 
@@ -361,20 +352,34 @@ function persistOpenTabs(): void {
 function toggleTabBookmark(id: string): void {
   const tab = getTab(id)
   if (!tab) return
-  const origin = normalizeHttpOrigin(currentUrl(tab))
-  if (!origin) return
-  const bookmarks = getBrowserPinnedSites()
-  const isBookmarked = bookmarks.some((site) => normalizeHttpOrigin(site.url) === origin)
-  if (!isBookmarked && bookmarks.length >= MAX_PINNED_SITES) return
-  const next = isBookmarked
-    ? bookmarks.filter((site) => normalizeHttpOrigin(site.url) !== origin)
-    : [...bookmarks, {
-        title: pageTitle(tab).trim().slice(0, 80) || new URL(origin).hostname,
-        url: origin,
-        ...(tab.faviconUrl ? { faviconUrl: tab.faviconUrl } : {})
-      }]
-  saveBrowserPinnedSites(next)
-  sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+  const url = currentUrl(tab)
+  if (!normalizeHttpOrigin(url)) return
+  if (isUrlBookmarked(url)) removeBookmarksForUrl(url)
+  else bookmarkPage(url, pageTitle(tab), tab.faviconUrl, tab.isPrivate)
+}
+
+/** Cmd+D / the star: bookmark the page (into Favourites) and open the edit popover for it. */
+function bookmarkTabAndEdit(id: string): void {
+  const tab = getTab(id)
+  if (!tab) return
+  const result = bookmarkPage(currentUrl(tab), pageTitle(tab), tab.faviconUrl, tab.isPrivate)
+  if (!result) return
+  sendToVisibleToolbarSurface('browser:bookmarks:edit-current', { id: result.node.id, created: result.created })
+}
+
+/** Cmd+Shift+D: every regular (non-private) web tab into a new top-level folder. */
+export function bookmarkAllBrowserTabs(): { folderId: string; title: string; added: number } | null {
+  const pages = tabsInSidebarOrder()
+    .filter((tab) => !tab.isPrivate && normalizeHttpOrigin(currentUrl(tab)))
+    .map((tab) => ({ url: currentUrl(tab), title: pageTitle(tab) }))
+  const stamp = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())
+  const result = bookmarkPagesInNewFolder(pages, `Tabs · ${stamp}`)
+  if (!result) {
+    flashLinkStatus('No web tabs to bookmark', browserBounds)
+    return null
+  }
+  flashLinkStatus(`Bookmarked ${result.added} tab${result.added === 1 ? '' : 's'} in “${result.folder.title}”`, browserBounds, 2400)
+  return { folderId: result.folder.id, title: result.folder.title, added: result.added }
 }
 
 function applyTabBounds(): void {
@@ -537,9 +542,10 @@ function showBrowserTabContextMenu(id: string): void {
   const tab = getTab(id)
   if (!tab || !browserWindow || browserWindow.isDestroyed()) return
   const origin = normalizeHttpOrigin(currentUrl(tab))
-  const bookmarked = Boolean(origin && getBrowserPinnedSites().some((site) => normalizeHttpOrigin(site.url) === origin))
+  const bookmarked = Boolean(origin && isUrlBookmarked(currentUrl(tab)))
   const items: MenuItemConstructorOptions[] = [
-    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin) && (bookmarked || getBrowserPinnedSites().length < MAX_PINNED_SITES), click: () => toggleTabBookmark(id) },
+    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin), click: () => toggleTabBookmark(id) },
+    { label: 'Bookmark All Tabs…', ...tabMenuAccelerator('bookmarkAllTabs'), click: () => { bookmarkAllBrowserTabs() } },
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
@@ -1478,6 +1484,7 @@ export type TabCommand =
   | 'find' | 'findNext' | 'findPrevious'
   | 'zoomIn' | 'zoomOut' | 'zoomReset'
   | 'history' | 'downloads'
+  | 'bookmarkAllTabs' | 'bookmarks'
 
 interface CommandShortcut {
   key: string
@@ -1496,7 +1503,10 @@ const IS_MAC = process.platform === 'darwin'
 export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   bookmark: { key: 'd', accelerator: 'CmdOrCtrl+D' },
   pin: { key: 'p', shift: true, accelerator: 'CmdOrCtrl+Shift+P' },
-  duplicate: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
+  // Cmd+Shift+D is Chrome's "Bookmark all tabs"; Duplicate stays in the tab menu without a shortcut.
+  duplicate: { key: '', accelerator: '' },
+  bookmarkAllTabs: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
+  bookmarks: { key: 'b', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+B' },
   copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
   copyCleanLink: { key: 'c', shift: true, alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Shift+C' },
   reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
@@ -1520,7 +1530,8 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
   // Shown as a hint only; the app menu and before-input-event do the real handling.
-  return { accelerator: TAB_COMMAND_SHORTCUTS[command].accelerator, registerAccelerator: false }
+  const { accelerator } = TAB_COMMAND_SHORTCUTS[command]
+  return accelerator ? { accelerator, registerAccelerator: false } : {}
 }
 
 export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefined): void {
@@ -1556,14 +1567,18 @@ export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefi
       return
     case 'history':
     case 'downloads':
+    case 'bookmarks':
       toggleBrowserPanel(command)
+      return
+    case 'bookmarkAllTabs':
+      bookmarkAllBrowserTabs()
       return
   }
   const tab = tabId ? getTab(tabId) : undefined
   if (!tab) return
   switch (command) {
     case 'bookmark':
-      if (normalizeHttpOrigin(currentUrl(tab))) toggleTabBookmark(tab.id)
+      if (normalizeHttpOrigin(currentUrl(tab))) bookmarkTabAndEdit(tab.id)
       break
     case 'pin':
       setBrowserTabPinned(tab.id, !tab.pinned)
@@ -1670,8 +1685,8 @@ export function openClearBrowsingData(): void {
   setBrowserChromeState({ sidebarMode: 'privacy' })
 }
 
-/** Cmd+Y / Cmd+Shift+J: toggle the history sidebar or the downloads panel. */
-function toggleBrowserPanel(mode: 'history' | 'downloads'): void {
+/** Cmd+Y / Cmd+Shift+J / Cmd+Opt+B: toggle the history sidebar, downloads or the bookmarks manager. */
+function toggleBrowserPanel(mode: 'history' | 'downloads' | 'bookmarks'): void {
   closeOverviewForPanel()
   const current = getBrowserChromeState().sidebarMode
   setBrowserChromeState({ sidebarMode: current === mode ? 'tabs' : mode })
