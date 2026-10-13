@@ -40,6 +40,7 @@ import { cycleBrowserSpace, getBrowserSpacesSnapshot, moveBrowserTabToSpace, swi
 import { createBrowserSpace, deleteBrowserSpaceWithConfirm } from './spaces-ipc'
 import { activeBrowserTabGroupId, addBrowserTabsToGroup, createBrowserTabGroup, listBrowserTabGroups, newBrowserTabInGroup, removeBrowserTabsFromGroup, toggleBrowserTabGroupCollapsed, ungroupBrowserTabGroup } from './browser'
 import { closeBrowserTabGroupWithConfirm, renameBrowserTabGroup } from './tab-groups-ipc'
+import { groupSelectedBrowserTabs, getSelectedBrowserTabIds } from './tab-selection'
 import { DEFAULT_SPACE_ID } from '../shared/spaces'
 
 /**
@@ -231,6 +232,8 @@ function tabGroupCommands(): BrowserCommand[] {
   const inGroup = (): boolean => Boolean(groupId)
   const canGroup = (): boolean => Boolean(tab && !tab.pinned)
   return [
+    // Sidebar multi-select (Cmd/Ctrl-click, Shift-click): only offered while 2+ tabs are selected.
+    { id: 'group.selected', title: () => { const count = getSelectedBrowserTabIds().length; return count >= 2 ? `Group ${count} Selected Tabs` : 'Group Selected Tabs' }, section: 'Tab Group', accelerator: 'CmdOrCtrl+G', keywords: ['tab group', 'group tabs', 'group selected', 'multi-select', 'selection'], refocusPage: true, enabled: () => getSelectedBrowserTabIds().length >= 2, run: () => groupSelectedBrowserTabs() },
     { id: 'group.new', title: 'Add Tab to New Group', section: 'Tab Group', keywords: ['tab group', 'group tabs', 'create group'], refocusPage: true, enabled: canGroup, run: () => { if (tab) createBrowserTabGroup([tab.id]) } },
     { id: 'group.remove', title: 'Remove Tab from Group', section: 'Tab Group', keywords: ['tab group', 'ungroup tab'], refocusPage: true, enabled: inGroup, run: () => { if (tab) removeBrowserTabsFromGroup([tab.id]) } },
     { id: 'group.rename', title: 'Rename Group…', section: 'Tab Group', keywords: ['tab group', 'name group'], enabled: inGroup, run: () => { if (groupId) renameBrowserTabGroup(groupId) } },

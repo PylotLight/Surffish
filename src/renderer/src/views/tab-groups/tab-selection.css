@@ -1,0 +1,64 @@
+/* Sidebar multi-select: highlighted rows and the "N selected" bar. */
+.tab-item.is-multi-selected,
+.tab-item.is-multi-selected:hover {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: linear-gradient(120deg, rgba(59, 130, 246, 0.26), rgba(59, 130, 246, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.22);
+  color: #fff;
+}
+
+.tab-item.is-multi-selected.is-active {
+  border-color: rgba(147, 197, 253, 0.8);
+}
+
+.tab-selection-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  margin: 0 0 4px;
+  padding: 0 4px 0 10px;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 9px;
+  background: rgb(30, 52, 92);
+  color: #e6efff;
+  font-size: 12px;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.tab-selection-count {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-selection-bar button {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab-selection-bar button:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.tab-selection-bar .tab-selection-clear {
+  width: 22px;
+  padding: 0;
+  background: transparent;
+  color: rgba(230, 239, 255, 0.7);
+}
