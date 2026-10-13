@@ -28,6 +28,7 @@ import type {
   WebStoreExtensionsState
 } from '../shared/types'
 import type { DownloadEntry } from '../shared/downloads'
+import type { NavigateResult } from '../shared/navigation-errors'
 import type { SpellcheckSettings } from '../shared/spellcheck'
 import type { ProxyGuardStatus } from '../shared/proxy-guard'
 import type { ClearBrowsingDataOptions, ClearBrowsingDataResult, CookieSiteSummary, SiteDataSummary } from '../shared/browsing-data'
@@ -83,7 +84,7 @@ const api = {
         return () => ipcRenderer.removeListener('browser:chrome-state', listener)
       }
     },
-    navigate: (input: string, engine?: SearchEngineId): Promise<boolean> => ipcRenderer.invoke('browser:navigate', input, engine),
+    navigate: (input: string, engine?: SearchEngineId): Promise<NavigateResult> => ipcRenderer.invoke('browser:navigate', input, engine),
     setSearchEngine: (engine: SearchEngineId): Promise<void> => ipcRenderer.invoke('browser:search-engine:set', engine),
     getSearchEngine: (): Promise<SearchEngineId> => ipcRenderer.invoke('browser:search-engine:get'),
     defaultBrowser: {

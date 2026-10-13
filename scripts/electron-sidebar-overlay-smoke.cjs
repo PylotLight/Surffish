@@ -242,7 +242,7 @@ async function run() {
     return tabs.length === 1 && tabs[0]?.id === replacementTab.id
   }, 'Command-W closes the active tab without closing the window')
 
-  assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`), true, 'the app should open a synthetic loopback page')
+  assert.equal(await evaluate(rendererViews.content, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)}).then((result) => result.ok)`), true, 'the app should open a synthetic loopback page')
   await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.state()')).url === fixtureUrl, 'the synthetic page navigation')
   await waitFor(async () => {
     const tabs = await evaluate(rendererViews.toolbar, 'window.api.browser.tabs.get()')

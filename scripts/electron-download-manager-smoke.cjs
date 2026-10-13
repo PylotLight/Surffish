@@ -173,7 +173,7 @@ async function getHistory() {
 
 async function navigate(url) {
   const accepted = await evaluate(`window.api.browser.navigate(${JSON.stringify(url)})`)
-  if (accepted !== true) {
+  if (accepted !== true && accepted?.ok !== true) {
     const state = await evaluate('Promise.all([window.api.browser.state(), window.api.browser.tabs.get()]).then(([current, tabs]) => ({ current, tabs }))')
     const safeState = {
       url: state.current?.url ? `${new URL(state.current.url).origin}${new URL(state.current.url).pathname}` : null,
@@ -364,7 +364,7 @@ async function run() {
     return entry?.state === 'paused' ? entry : null
   }, 'the popup fixture transfer to pause')
   assert.equal(pausedActive.fileAvailable, false, 'a partial paused file must not appear ready to open or reveal')
-  await waitFor(async () => evaluate('!document.querySelector(".browser-error")'), 'direct attachment navigation to avoid a false page-error banner')
+  await waitFor(async () => evaluate('!document.querySelector("#browser-notice")'), 'direct attachment navigation to avoid a false page-error banner')
 
   if (screenshotDirectory) await captureDownloadViews()
 

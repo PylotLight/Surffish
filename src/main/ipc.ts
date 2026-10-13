@@ -191,7 +191,7 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:navigate', (event, input: string, engine?: unknown) => {
     assertMainRenderer(event)
-    return typeof input === 'string' ? navigateBrowser(input, isSearchEngineId(engine) ? engine : undefined) : false
+    return typeof input === 'string' ? navigateBrowser(input, isSearchEngineId(engine) ? engine : undefined) : { ok: false, reason: 'invalid' }
   })
   ipcMain.handle('browser:search-engine:set', (event, engine: unknown) => {
     assertMainRenderer(event)

@@ -1,3 +1,4 @@
+import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
 import type { TabGroupInfo } from './tab-groups'
 /** Shared type-only contracts between the main, preload, and renderer processes. */
@@ -115,6 +116,8 @@ export interface BrowserState {
   reader: 'available' | 'active' | null
   /** A full-page notice drawn over the active tab (crash, hang, HTTPS-only fallback). */
   interstitial: BrowserTabInterstitial | null
+  /** Details for `error` when it is a page-load failure (friendly copy, Retry, in-page error). */
+  loadError: BrowserLoadError | null
 }
 
 export type BrowserTabInterstitial =

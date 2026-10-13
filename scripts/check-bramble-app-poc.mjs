@@ -770,7 +770,7 @@ try {
     return !targets.some((target) => target.id === vaultPopupTarget.id)
   }, 10_000)
   const autofillNavigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(autofillUrl)})`)
-  assert.equal(autofillNavigated, true)
+  assert.equal(autofillNavigated?.ok ?? autofillNavigated, true)
   const autofillTarget = await waitFor('Surffish browser tab loaded the local-only password form', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith(autofillUrl))
@@ -1014,7 +1014,7 @@ try {
   }, 10_000)
 
   const navigated = await mainConnection.evaluate(`window.api.browser.navigate(${JSON.stringify(rpUrl)})`)
-  assert.equal(navigated, true)
+  assert.equal(navigated?.ok ?? navigated, true)
   const rpTarget = await waitFor('Surffish browser tab loaded the local WebAuthn relying party', async () => {
     const targets = await getTargets(port)
     return targets.find((target) => target.type === 'page' && target.url.startsWith(rpUrl))
