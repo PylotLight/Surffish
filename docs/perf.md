@@ -50,7 +50,7 @@ never trips anything.
 
 | kind | metrics | rule |
 |---|---|---|
-| deterministic | bundle sizes, IPC counts and payload, idle IPC and timer fires, process count | **fail** above 5% (+ floor) |
+| deterministic | bundle sizes, IPC counts and payload, idle IPC and timer fires, process count | **fail** above 5% (+ floor); IPC while opening tabs 20% / payload 15%, since tab broadcasts are coalesced per frame and move ~10% run to run |
 | leak | processes / webContents left after window cycles | **fail** on any growth that main doesn't have |
 | noisy | timings, memory, CPU | **warn** above 10%, **fail** above 25% (+ floor) on Linux; never fail on macOS |
 
