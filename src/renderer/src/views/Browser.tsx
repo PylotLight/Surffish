@@ -21,6 +21,8 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { addressDisplayValue } from '../../../shared/address-bar-sync'
+import { useAddressBarSync } from './useAddressBarSync'
 import { FAVOURITES_FOLDER_ID } from '../../../shared/bookmarks'
 import { formatZoomPercent, isDefaultZoom } from '../../../shared/zoom'
 import { dispatchBrambleToolbarAction, resolveBrambleToolbarAction } from '../../../shared/bramble-toolbar'
@@ -1019,9 +1021,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setNavigationError('')
   }, [activeTabId])
 
-  useEffect(() => {
-    if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
-  }, [browser.url, isLocalNewTab])
+  // The tab URL wins unless the user is really typing (activeElement alone sticks when focus moves to another view).
+  const addressSync = useAddressBarSync({ inputRef: addressRef, address, setAddress, displayUrl: addressDisplayValue(browser.url, isLocalNewTab), tabKey: activeTabId })
 
   async function navigateTo(valueInput: string): Promise<void> {
     const value = valueInput.trim()
@@ -1045,6 +1046,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       const current = await window.api.browser.state()
       setBrowser(current)
       setAddress(current.url)
+      addressSync.markSynced(current.url)
       addressRef.current?.blur()
     }
   }
@@ -1069,7 +1071,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       // Like Chrome: Esc drops the dropdown and any half-typed text, leaving the real URL selected.
       setSuggestionsOpen(false)
       setActiveSuggestionIndex(-1)
-      setAddress(isLocalNewTab ? '' : browser.url)
+      setAddress(addressDisplayValue(browser.url, isLocalNewTab))
+      addressSync.markSynced(addressDisplayValue(browser.url, isLocalNewTab))
       const input = event.currentTarget
       window.requestAnimationFrame(() => input.select())
       return
@@ -1424,7 +1427,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     setSuggestionsOpen(true)
                     if (historyStaleRef.current) void refreshHistory()
                   }}
-                  onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
+                  onBlur={() => {
+                    addressSync.onBlur()
+                    window.setTimeout(() => setSuggestionsOpen(false), 120)
+                  }}
                   onKeyDown={handleAddressKeyDown}
                   aria-label="Search or enter address"
                   aria-expanded={suggestionsOpen && addressSuggestions.length > 0}
