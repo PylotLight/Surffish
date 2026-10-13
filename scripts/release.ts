@@ -22,9 +22,10 @@ const spec = args.find((arg) => !arg.startsWith('-')) ?? 'patch'
 const yes = flag('--yes') || flag('-y')
 const dryRun = flag('--dry-run')
 const skipChecks = flag('--skip-checks')
+const resume = flag('--resume')
 
 if (flag('--help') || flag('-h')) {
-  console.log(`usage: bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks]
+  console.log(`usage: bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks] [--resume]
 
   patch (default)  bump X.Y.Z -> X.Y.(Z+1) from the latest tag / package.json
   minor, major     the usual
@@ -34,6 +35,9 @@ if (flag('--help') || flag('-h')) {
   --dry-run        bump + build + verify locally, publish nothing, then undo the bump commit
   --yes            don't ask before publishing
   --skip-checks    skip typecheck + tests
+  --resume         finish a release whose bump + tag already reached origin but whose GitHub
+                   release didn't (e.g. the gh upload failed): rebuilds package.json's version,
+                   then creates the release and updates the Cask
 
 release notes come from docs/releases/vX.Y.Z.md; if it's missing a draft is written from
 commits since the last tag and the script stops so you can edit it.
@@ -85,14 +89,24 @@ const packageJson = readFileSync(packagePath, 'utf8')
 const packageVersion = JSON.parse(packageJson).version as string
 const latestTag = latestVersionTag(git('tag', '-l', 'v*').split('\n'))
 let version: string
-try {
-  version = resolveReleaseVersion(spec, packageVersion, latestTag)
-} catch (error) {
-  fail(error instanceof Error ? error.message : String(error))
+if (resume) {
+  version = packageVersion
+} else {
+  try {
+    version = resolveReleaseVersion(spec, packageVersion, latestTag)
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
 }
 const tag = `v${version}`
-if (git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`)) fail(`${tag} already exists on origin`)
-log(`releasing ${tag} (package.json ${packageVersion}, latest tag ${latestTag ?? 'none'})${dryRun ? ' — dry run' : ''}`)
+const tagOnOrigin = Boolean(git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`))
+if (resume) {
+  if (!tagOnOrigin) fail(`--resume needs ${tag} on origin already (package.json says ${version})`)
+  if (spawnSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: root }).status !== 0) fail(`${tag} isn't on main`)
+} else if (tagOnOrigin) {
+  fail(`${tag} already exists on origin (finish it with --resume)`)
+}
+log(`releasing ${tag} (package.json ${packageVersion}, latest tag ${latestTag ?? 'none'})${resume ? ' — resuming' : ''}${dryRun ? ' — dry run' : ''}`)
 
 // ---- notes -----------------------------------------------------------------
 const notesPath = join(root, 'docs', 'releases', `${tag}.md`)
@@ -105,7 +119,7 @@ if (!existsSync(notesPath)) {
 }
 
 // ---- bump + checks + build ------------------------------------------------
-const bumped = version !== packageVersion
+const bumped = !resume && version !== packageVersion
 if (bumped) {
   writeFileSync(packagePath, setPackageVersion(packageJson, version))
   run('git', ['commit', '--quiet', '-m', `chore: release ${tag}`, '--', 'package.json'])
@@ -158,9 +172,11 @@ if (!(await confirm(`smoke test release/mac-arm64/Surffish.app if you want, then
 
 // ---- publish ---------------------------------------------------------------
 if (bumped) run('git', ['push', '--quiet', 'origin', 'main'])
-run('git', ['tag', '-a', tag, '-m', `Surffish ${tag}`])
-run('git', ['push', '--quiet', 'origin', tag])
-log(`pushed ${tag}`)
+if (!resume) {
+  run('git', ['tag', '-a', tag, '-m', `Surffish ${tag}`])
+  run('git', ['push', '--quiet', 'origin', tag])
+  log(`pushed ${tag}`)
+}
 
 gh(['release', 'create', tag, artifact, '--repo', REPO, '--title', `Surffish ${tag}`, '--notes-file', notesPath, '--verify-tag'])
 log('github release created')
