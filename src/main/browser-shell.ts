@@ -2,7 +2,7 @@ import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'ele
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
-import { pagePressDismissesPopovers, POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
+import { POPOVER_DISMISS_CHANNEL, surfacePressDismissReason, windowBlurDismissesPopovers, type PopoverDismissReason, type ToolbarPopoverState } from '../shared/popover-dismiss'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 import { SidebarOverlayMotion } from './sidebar-motion'
@@ -48,6 +48,9 @@ interface ShellState {
   /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
   sidebarFrame: { inset: number; radius: number } | null
   sidebarOverlayShown: boolean
+  /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
+  dismissOnBlur: () => void
+  dismissOnSidebarPress: (event: Electron.Event, mouseEvent: { type: string }) => void
 }
 
 export type SidebarOverlayEvent = 'shown' | 'hidden' | 'prefetch'
@@ -208,7 +211,9 @@ export function attachBrowserShell(
     sidebarMotion: null as unknown as SidebarOverlayMotion,
     lastOverlayMode: null,
     sidebarFrame: null,
-    sidebarOverlayShown: false
+    sidebarOverlayShown: false,
+    dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
+    dismissOnSidebarPress: (_event, mouseEvent) => dismissToolbarPopoversOnPress(shell, 'sidebar', mouseEvent.type)
   }
   shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
     onProgress: (progress) => sidebarMotionListener?.(window, progress),
@@ -221,6 +226,9 @@ export function attachBrowserShell(
   shells.set(window, shell)
   for (const contents of shell.renderers.keys()) bindContentsToWindow(contents, window)
   for (const event of WINDOW_LAYOUT_EVENTS) window.on(event as 'resize', shell.scheduleLayout)
+  window.on('blur', shell.dismissOnBlur)
+  // Main-process only: sends nothing unless a popover is open (shared/popover-dismiss.ts).
+  views.sidebar.webContents.on('before-mouse-event', shell.dismissOnSidebarPress)
   window.on('closed', () => detachBrowserShell(window))
   applyShellLayout(shell)
 }
@@ -238,7 +246,10 @@ export function detachBrowserShell(window?: BaseWindow): void {
   for (const shell of targets) {
     if (!shell.window.isDestroyed()) {
       for (const event of WINDOW_LAYOUT_EVENTS) shell.window.removeListener(event as 'resize', shell.scheduleLayout)
+      shell.window.removeListener('blur', shell.dismissOnBlur)
     }
+    const sidebarContents = shell.views.sidebar.webContents
+    if (!sidebarContents.isDestroyed()) sidebarContents.removeListener('before-mouse-event', shell.dismissOnSidebarPress)
     clearPointerTimers(shell)
     shell.sidebarMotion.dispose()
     shell.syncPageBounds = null
@@ -321,7 +332,7 @@ export function setBrowserChromeState(input: unknown, window?: BaseWindow | null
 export function handleBrowserPageMouseEvent(input: { type: string; x: number }, window?: BaseWindow | null): void {
   const shell = shellFor(window)
   if (!shell) return
-  dismissToolbarPopoversOnPagePress(shell, input.type)
+  dismissToolbarPopoversOnPress(shell, 'page', input.type)
   const { chromeState } = shell
   if (!shouldUseNativeOverlays(shell) || chromeState.sidebarMode !== 'tabs') {
     clearPointerTimers(shell)
@@ -369,11 +380,32 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
   }
 }
 
-/** A press on the page closes the toolbar's popovers: the toolbar's document never sees that click. */
-function dismissToolbarPopoversOnPagePress(shell: ShellState, mouseType: string): void {
-  if (!pagePressDismissesPopovers(mouseType, { overlayMode: shouldUseNativeOverlays(shell), ...shell.toolbarMetrics })) return
-  const toolbar = shell.views.toolbar.webContents
-  if (!toolbar.isDestroyed()) toolbar.send(POPOVER_DISMISS_CHANNEL)
+function popoverState(shell: ShellState): ToolbarPopoverState {
+  const { toolbarHeight, toolbarExtent, popoverOpen } = shell.toolbarMetrics
+  return { overlayMode: shouldUseNativeOverlays(shell), toolbarHeight, toolbarExtent, popoverOpen, historyOpen: shell.chromeState.sidebarMode === 'history' }
+}
+
+function sendPopoverDismiss(reason: PopoverDismissReason, targets: WebContents[]): void {
+  for (const contents of targets) if (!contents.isDestroyed()) contents.send(POPOVER_DISMISS_CHANNEL, reason)
+}
+
+/**
+ * A press on the page or the sidebar view closes the toolbar's popovers: the toolbar's document
+ * never sees those clicks (separate WebContentsViews), and the toolbar may not even have had focus
+ * to lose.
+ */
+function dismissToolbarPopoversOnPress(shell: ShellState, surface: 'page' | 'sidebar', mouseType: string): void {
+  const reason = surfacePressDismissReason(surface, mouseType, popoverState(shell))
+  if (reason) sendPopoverDismiss(reason, [shell.views.toolbar.webContents])
+}
+
+/** The window losing focus closes popovers in whichever surface draws the toolbar. */
+function dismissPopoversOnWindowBlur(shell: ShellState): void {
+  const state = popoverState(shell)
+  // Off overlay mode the content renderer draws the toolbar; its own document blur may not fire if
+  // focus was on the page, so tell it too.
+  if (!state.overlayMode) return sendPopoverDismiss('window-blur', [shell.views.content.webContents])
+  if (windowBlurDismissesPopovers(state)) sendPopoverDismiss('window-blur', [shell.views.toolbar.webContents])
 }
 
 export function setBrowserChromeMetrics(input: unknown, window?: BaseWindow | null): BrowserChromeMetrics {
@@ -386,11 +418,13 @@ export function setBrowserChromeMetrics(input: unknown, window?: BaseWindow | nu
       toolbarMetrics.toolbarHeight = Math.max(32, Math.min(180, Math.round(candidate.toolbarHeight)))
     }
     if (typeof candidate.toolbarExtent === 'number' && Number.isFinite(candidate.toolbarExtent)) {
-      toolbarMetrics.toolbarExtent = Math.max(toolbarMetrics.toolbarHeight, Math.min(800, Math.round(candidate.toolbarExtent)))
+      // Rounded up: a fractional popover bottom rounded down clipped its last pixel row.
+      toolbarMetrics.toolbarExtent = Math.max(toolbarMetrics.toolbarHeight, Math.min(2400, Math.ceil(candidate.toolbarExtent)))
     }
+    if (typeof candidate.popoverOpen === 'boolean') toolbarMetrics.popoverOpen = candidate.popoverOpen
   }
   applyShellLayout(shell)
-  return { ...toolbarMetrics }
+  return { ...toolbarMetrics, windowHeight: currentContentSize(shell).height }
 }
 
 export function setBrowserPageIsLocalNewTab(isLocalNewTab: boolean, window?: BaseWindow | null): void {
