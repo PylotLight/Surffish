@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, type WebContents } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { windowForContents } from './window-scope'
 import { buildHar, type HarSourceEntry } from '../shared/har'
 import {
   cdpFetchPatterns,
@@ -275,7 +276,8 @@ export async function exportNetworkHar(sender: WebContents, options: unknown): P
     entries.push({ request: details, responseBody })
   }
   const har = buildHar(entries, { creatorVersion: app.getVersion(), includeBodies })
-  const window = BrowserWindow.fromWebContents(sender) ?? BrowserWindow.getFocusedWindow()
+  // App surfaces live in BaseWindows, which fromWebContents doesn't know: ask the window registry first.
+  const window = windowForContents(sender) ?? BrowserWindow.fromWebContents(sender) ?? BrowserWindow.getFocusedWindow()
   const dialogOptions: Electron.SaveDialogOptions = {
     title: 'Export HAR',
     defaultPath: join(app.getPath('downloads'), `surffish-${tabId ? 'tab' : 'all'}-${timestampForFile()}.har`),
