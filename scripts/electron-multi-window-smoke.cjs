@@ -8,7 +8,7 @@ const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { spawn } = require('node:child_process')
 const { createServer } = require('node:http')
-const { mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs')
+const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -57,13 +57,16 @@ function windows() {
   return BaseWindow.getAllWindows().filter((win) => !win.isDestroyed() && surface(win, 'toolbar'))
 }
 
+// Bounded: a renderer that never answers fails this wait with the call it was stuck on, instead of
+// stalling the smoke silently until the 6 min hard limit (as it did on CI, twice in one run).
 async function evaluate(view, expression) {
   try {
-    return await view.webContents.executeJavaScript(expression)
+    return await smoke.evaluate(view.webContents, expression)
   } catch (error) {
     throw new Error(`${expression.slice(0, 120)}: ${error.message}`)
   }
 }
+const step = (message) => smoke.step(`${phase}: ${message}`)
 
 async function ready(win) {
   await waitFor(() => surface(win, 'content') && surface(win, 'toolbar') && surface(win, 'sidebar'), 'the renderer surfaces')
@@ -100,6 +103,7 @@ async function mainPhase() {
   // An old single-window session (no `windows` list) with a pinned tab, placed by window-state.json.
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [`${origin}/one`, `${origin}/two`], activeIndex: 1, pinnedTabs: [0] }))
   writeFileSync(join(userData, 'window-state.json'), JSON.stringify({ bounds: { x: 40, y: 40, width: 1000, height: 700 }, maximized: false, fullScreen: false }))
+  step('starting the app on an old single-window session')
   await startApp()
 
   // --- migration: one window with both tabs, the pinned one first, /two active
@@ -115,6 +119,7 @@ async function mainPhase() {
   const pageContentsId = page.webContents.id
 
   // --- a second window (Cmd+N path) opens with one New Tab and becomes the current window
+  step('migrated; opening a second window')
   await evaluate(toolbar1, 'window.api.browser.tabs.newWindow()')
   const second = await waitFor(() => windows().find((win) => win !== first), 'the second window')
   const toolbar2 = await ready(second)
@@ -126,6 +131,7 @@ async function mainPhase() {
   assert.equal((await tabsOf(first)).length, 2, 'window 1 is untouched')
 
   // --- move /two from window 1 into window 2 (drop before window 2's first tab): no reload
+  step('moving a tab between windows')
   const twoId = tabs1[1].id
   assert.equal(await evaluate(toolbar1, `window.api.browser.tabs.move(${JSON.stringify(twoId)}, ${JSON.stringify(tabs2[0].id)})`), true)
   await waitFor(async () => (await tabsOf(second)).some((tab) => tab.id === twoId && tab.active), 'the moved tab to be active in window 2')
@@ -139,6 +145,7 @@ async function mainPhase() {
   assert.deepEqual((await tabsOf(second)).map((tab) => tab.id)[0], twoId, 'the tab landed where it was dropped')
 
   // --- Move to New Window: /three tears out into a third window
+  step('tearing a tab out into a new window')
   const threeId = (await tabsOf(second)).find((tab) => tab.url === `${origin}/three`).id
   assert.equal(await evaluate(toolbar2, `window.api.browser.tabs.moveToNewWindow(${JSON.stringify(threeId)})`), true)
   const third = await waitFor(() => windows().find((win) => win !== first && win !== second), 'the torn-out window')
@@ -147,10 +154,12 @@ async function mainPhase() {
   assert.ok(!(await tabsOf(second)).some((tab) => tab.id === threeId), 'the tab left window 2')
 
   // --- closing the last tab of a window (not the final one) closes the window, no prompt
+  step('closing the torn-out window\'s last tab')
   await evaluate(surface(third, 'toolbar'), `window.api.browser.tabs.close(${JSON.stringify(threeId)})`)
   await waitFor(() => third.isDestroyed(), 'window 3 to close with its last tab')
 
   // --- a private window: its tabs are private, and it is never saved
+  step('opening a private window')
   await evaluate(toolbar1, 'window.api.browser.tabs.newWindow(true)')
   const privateWindow = await waitFor(() => windows().find((win) => win !== first && win !== second), 'the private window')
   const privateToolbar = await ready(privateWindow)
@@ -163,6 +172,7 @@ async function mainPhase() {
   assert.equal(await evaluate(toolbar1, `window.api.browser.tabs.move(${JSON.stringify(oneId)}, ${JSON.stringify(secretId)})`), false)
 
   // --- the session holds both normal windows (each with its own tabs), never the private one
+  step('waiting for the two-window session on disk')
   // Poll on content, not just window count: the first 2-window snapshot can predate the
   // latest debounced write under load.
   const saved = await waitFor(() => {
@@ -183,22 +193,26 @@ async function mainPhase() {
   assert.deepEqual(window1Saved.pinnedTabs, [0], 'the pinned tab stays pinned')
 
   // --- relaunch: both normal windows come back
+  step('relaunching (restore phase)')
   app.releaseSingleInstanceLock()
   const exitCode = await new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [...process.execArgv, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : []), __filename, '--phase=restore', `--user-data=${userData}`, `--origin=${origin}`], { stdio: 'inherit' })
-    child.on('exit', (code) => resolvePromise(code))
+    // childEnv: the child's hard limit ends before ours, so a hung restore reports its own state.
+    const child = spawn(process.execPath, [...process.execArgv, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : []), __filename, '--phase=restore', `--user-data=${userData}`, `--origin=${origin}`], { stdio: 'inherit', env: smoke.childEnv() })
+    child.on('exit', (code, signal) => resolvePromise(code ?? signal))
   })
   server.close()
   assert.equal(exitCode, 0, 'the restore phase passed')
-  rmSync(userData, { recursive: true, force: true })
+  smoke.removeProfile(userData)
   console.log('Electron multi-window smoke passed.')
 }
 
 async function restorePhase() {
   const origin = originArg.slice('--origin='.length)
   // The parent still has its windows; let it settle its writes first.
+  step('starting the app on the saved session')
   await startApp()
   const restored = await waitFor(() => windows().length === 2 ? windows() : null, 'two restored windows')
+  step('two windows restored; waiting for their tabs')
   for (const win of restored) await ready(win)
   const lists = await waitFor(async () => {
     const all = await Promise.all(restored.map((win) => tabsOf(win)))

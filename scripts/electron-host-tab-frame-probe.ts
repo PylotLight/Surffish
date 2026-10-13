@@ -682,13 +682,15 @@ async function main(): Promise<void> {
       report.cleanupError = error instanceof Error ? error.message : String(error)
       exitCode = 1
     }
+    // Chromium and the app can still be writing into the profile here, so a plain rm races them
+    // (ENOTEMPTY failed this probe on CI after every check passed). Retry like scripts/smoke-profile.cjs,
+    // and report a leftover temp profile without failing the probe for it.
     try {
-      rmSync(root, { recursive: true, force: true })
+      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
       report.temporaryProfileRemoved = true
     } catch (error) {
       report.temporaryProfileRemoved = false
-      report.cleanupError = error instanceof Error ? error.message : String(error)
-      exitCode = 1
+      report.profileCleanupWarning = error instanceof Error ? error.message : String(error)
     }
     report.exitCode = exitCode
     console.log(`SURFFISH_HOST_TAB_FRAME_PROBE_REPORT=${JSON.stringify(report)}`)

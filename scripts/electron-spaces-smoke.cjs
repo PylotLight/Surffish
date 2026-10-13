@@ -9,7 +9,7 @@ const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { spawn } = require('node:child_process')
 const { createServer } = require('node:http')
-const { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs')
+const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -239,7 +239,7 @@ async function mainPhase() {
   })
   server.close()
   assert.equal(exitCode, 0, 'the restore phase passed')
-  rmSync(userData, { recursive: true, force: true })
+  smoke.removeProfile(userData)
   console.log(`Electron Spaces smoke passed${viaShortcut ? '' : ' (Space shortcut checked through the API: synthetic keys had no DOM code)'}.`)
 }
 

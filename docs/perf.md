@@ -65,9 +65,19 @@ never trips anything.
 
 | kind | metrics | rule |
 |---|---|---|
-| deterministic | bundle sizes, IPC counts and payload, idle IPC and timer fires, process count | **fail** above 5% (+ floor); IPC while opening tabs 20% / payload 15%, since tab broadcasts are coalesced per frame and move ~10% run to run |
+| deterministic | bundle sizes, startup IPC count, idle IPC and timer fires, process count | **fail** above 5% (+ floor) |
 | leak | processes / webContents left after window cycles | **fail** on any growth that main doesn't have |
-| noisy | timings, memory, CPU | **warn** above 10%, **fail** above 25% (+ floor) on Linux; never fail on macOS |
+| noisy | timings, memory, CPU, IPC while opening tabs | **warn** above 10%, **fail** above 25% (+ floor) on Linux (IPC while opening tabs 20% / payload 15%); never fail on macOS. GPU process memory only warns on Linux too |
+
+**Confirmation pass (Linux).** When the only failures are noisy metrics (compare.ts exits 3), the job
+benches both builds again, interleaved, pools the samples with the first pass (`scripts/perf/merge.ts`)
+and judges the pooled numbers. A real regression is there in both passes; a busy stretch on the node
+is not. It costs ~2 min, only on those runs. Deterministic or leak failures fail straight away.
+
+IPC while opening tabs is timing-dependent (tab/state broadcasts are coalesced per frame): 115–151
+messages and 59–76 KB on identical code in Oct 2026, so it is a noisy metric. GPU process memory
+under SwiftShader is bimodal on the pods (~57–61 MB or ~92–103 MB on identical code), so on Linux it
+only warns; the Mac job is where it means something.
 
 Cold start to window / first paint compare the **best** of the runs (`"stat": "min"`), not the
 median: the pods share a node with the smoke lanes, and a busy moment stalls one or two cold starts by

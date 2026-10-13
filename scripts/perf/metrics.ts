@@ -4,7 +4,11 @@
 export type Kind = 'deterministic' | 'noisy' | 'leak'
 export type Status = 'ok' | 'better' | 'warn' | 'fail' | 'n/a'
 export type Stat = 'median' | 'min'
-export interface MetricSpec { kind: Kind; label: string; unit: string; abs?: number; warnPct?: number; failPct?: number; stat?: Stat }
+export interface MetricSpec {
+  kind: Kind; label: string; unit: string; abs?: number; warnPct?: number; failPct?: number; stat?: Stat
+  /** Per-platform override of the platform's noisyFail (e.g. a metric that only warns on linux). */
+  platforms?: Record<string, { noisyFail?: boolean }>
+}
 export interface PerfConfig {
   defaults: Record<Kind, { abs?: number; warnPct?: number; failPct?: number }>
   platforms?: Record<string, { noisyFail?: boolean }>
@@ -48,7 +52,7 @@ export function verdict(spec: MetricSpec, config: PerfConfig, base: number, head
   const abs = d.abs ?? 0
   const pct = base === 0 ? (delta === 0 ? 0 : Infinity) : (delta / Math.abs(base)) * 100
   const over = (limit: number | undefined) => limit !== undefined && delta > abs && pct > limit
-  const noisyFail = config.platforms?.[platform]?.noisyFail ?? true
+  const noisyFail = spec.platforms?.[platform]?.noisyFail ?? config.platforms?.[platform]?.noisyFail ?? true
   if (spec.kind === 'deterministic') {
     if (over(d.failPct)) return 'fail'
   } else {
@@ -84,4 +88,39 @@ export function markdownTable(rows: Row[]): string {
     lines.push(`| ${r.label}${r.kind === 'noisy' ? '' : ' ¹'} | ${formatValue(r.base, r.unit)} | ${formatValue(r.head, r.unit)} | ${d} | ${ICON[r.status]} |`)
   }
   return lines.join('\n')
+}
+
+/** Each metric's aggregate over a side's samples (median, or min where the spec says), plus its bundle sizes. */
+export function summarize(samples: Record<string, unknown>[], bundle: Record<string, number>, metrics: Record<string, Partial<MetricSpec>> = {}): Record<string, number> {
+  const out: Record<string, number> = {}
+  const flat = samples.map((s) => flatten(s))
+  const keys = new Set(flat.flatMap((f) => Object.keys(f)))
+  for (const k of keys) out[k] = aggregate(flat.map((f) => f[k]!).filter((v) => v !== undefined), metrics[k]?.stat)
+  for (const [k, v] of Object.entries(bundle)) out[`bundle.${k}`] = v
+  return out
+}
+
+interface AppReport { dir?: string; bundle: Record<string, number>; samples: Record<string, unknown>[]; failures: number; median: Record<string, number> }
+interface Report { runs: number; seconds: number; config: PerfConfig; apps: Record<string, AppReport>; confirmRuns?: number; [key: string]: unknown }
+
+/**
+ * A confirmation bench appended to the first one: samples are pooled per app and every aggregate is
+ * recomputed, so a timing "regression" from one noisy stretch of the runner has to show up again on a
+ * second interleaved pass before it can fail the check (a real slowdown moves both passes).
+ */
+export function mergeReports(first: Report, second: Report): Report {
+  const apps: Record<string, AppReport> = {}
+  for (const [label, a] of Object.entries(first.apps)) {
+    const b = second.apps[label]
+    const samples = [...a.samples, ...(b?.samples ?? [])]
+    apps[label] = { ...a, samples, failures: a.failures + (b?.failures ?? 0), median: summarize(samples, a.bundle, first.config.metrics) }
+  }
+  return { ...first, runs: first.runs + second.runs, seconds: first.seconds + second.seconds, confirmRuns: second.runs, apps }
+}
+
+/** Exit status for compare.ts: 0 clean, 1 a failure, 3 only timing/memory ("noisy") metrics failed. */
+export function compareExitCode(rows: Row[]): number {
+  const fails = rows.filter((r) => r.status === 'fail')
+  if (fails.length === 0) return 0
+  return fails.every((r) => r.kind === 'noisy') ? 3 : 1
 }

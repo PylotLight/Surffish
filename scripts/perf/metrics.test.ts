@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { aggregate, compare, flatten, markdownTable, median, verdict, type MetricSpec, type PerfConfig } from './metrics.ts'
+import { aggregate, compare, compareExitCode, flatten, markdownTable, median, mergeReports, verdict, type MetricSpec, type PerfConfig, type Row } from './metrics.ts'
 
 const config = JSON.parse(readFileSync(join(import.meta.dir, 'perf.config.json'), 'utf8')) as PerfConfig
 const det: MetricSpec = { kind: 'deterministic', label: 'd', unit: '' }
@@ -68,4 +68,44 @@ test('missing values are n/a and the table renders every configured metric', () 
   const md = markdownTable(rows)
   expect(md.split('\n')).toHaveLength(2 + Object.keys(config.metrics).length)
   expect(md).toContain('| main JS at startup (index.js + imports) ¹ | 2.0 KB | 2.0 KB | 0.0% | ✅ ok |')
+})
+
+test('GPU memory only warns on linux (bimodal under SwiftShader), per-metric override of noisyFail', () => {
+  const gpu = config.metrics['memMax.gpuMB']!
+  // Oct 2026 CI, identical code: 59 -> 77 MB and 66 -> 92 MB.
+  expect(verdict(gpu, config, 59, 77, 'linux')).toBe('warn')
+  expect(verdict(gpu, config, 66, 92, 'linux')).toBe('warn')
+  expect(verdict({ ...noisy, platforms: { darwin: { noisyFail: true } } }, config, 100, 130, 'darwin')).toBe('fail')
+  expect(verdict(noisy, config, 100, 130, 'linux')).toBe('fail') // other noisy metrics still fail on linux
+})
+
+test('IPC while opening tabs is timing-dependent, so a one-pass swing is noisy (confirmed before failing)', () => {
+  expect(config.metrics['openTabs.ipcBytes']!.kind).toBe('noisy')
+  expect(config.metrics['openTabs.ipcCount']!.kind).toBe('noisy')
+  expect(verdict(config.metrics['openTabs.ipcBytes']!, config, 59.1 * 1024, 73 * 1024, 'linux')).toBe('fail')
+})
+
+test('compare exits 3 when only noisy metrics fail, so CI benches again before failing', () => {
+  const row = (kind: Row['kind'], status: Row['status']): Row => ({ key: kind, label: kind, unit: '', kind, base: 1, head: 2, deltaPct: 100, status })
+  expect(compareExitCode([row('noisy', 'ok'), row('deterministic', 'warn')])).toBe(0)
+  expect(compareExitCode([row('noisy', 'fail'), row('noisy', 'fail')])).toBe(3)
+  expect(compareExitCode([row('noisy', 'fail'), row('deterministic', 'fail')])).toBe(1)
+  expect(compareExitCode([row('leak', 'fail')])).toBe(1)
+})
+
+test('a confirmation pass is pooled per app and every aggregate recomputed', () => {
+  const app = (windowMs: number[], failures = 0) => ({ bundle: { mainJs: 10 }, failures, median: {}, samples: windowMs.map((ms) => ({ startup: { windowMs: ms }, memMax: { totalMB: ms / 10 } })) })
+  const first = { runs: 3, seconds: 60, config, apps: { main: app([120, 125, 130]), pr: app([260, 250, 270]) } }
+  const second = { runs: 3, seconds: 55, config, apps: { main: app([121, 140, 150]), pr: app([118, 122, 900], 1) } }
+  const merged = mergeReports(first, second)
+  expect(merged.runs).toBe(6)
+  expect(merged.confirmRuns).toBe(3)
+  expect(merged.apps.pr!.samples).toHaveLength(6)
+  expect(merged.apps.pr!.failures).toBe(1)
+  // startup.windowMs is "stat": "min": a stall in pass one is outvoted by a clean run in pass two.
+  expect(merged.apps.pr!.median['startup.windowMs']).toBe(118)
+  expect(merged.apps.main!.median['startup.windowMs']).toBe(120)
+  expect(merged.apps.pr!.median['memMax.totalMB']).toBe(25) // median of 11.8 12.2 25 26 27 90
+  expect(merged.apps.pr!.median['bundle.mainJs']).toBe(10)
+  expect(verdict(config.metrics['startup.windowMs']!, config, 120, 118, 'linux')).toBe('ok')
 })

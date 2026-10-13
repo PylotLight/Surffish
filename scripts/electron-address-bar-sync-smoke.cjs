@@ -96,6 +96,19 @@ async function run() {
     await evaluate(toolbar, `(() => { ${INPUT}.focus(); ${INPUT}.select() })()`)
     await waitFor(() => evaluate(toolbar, `document.activeElement === ${INPUT} && document.hasFocus()`), 'the focused address bar')
   }
+  // Typing goes through insertText into whatever the toolbar has focused, so check the precondition
+  // first, and when the text doesn't show up say what the toolbar looked like instead of only timing
+  // out (CI hit "Timed out waiting for the typed text" ~1 in 10 runs with no way to tell why).
+  const toolbarState = () => evaluate(toolbar, `JSON.stringify({ value: ${INPUT}.value, inputFocused: document.activeElement === ${INPUT}, active: document.activeElement?.tagName ?? null, hasFocus: document.hasFocus(), selection: [${INPUT}.selectionStart, ${INPUT}.selectionEnd] })`).catch((error) => `unavailable (${error.message})`)
+  const typeInBar = async (text) => {
+    await waitFor(() => evaluate(toolbar, `document.activeElement === ${INPUT} && document.hasFocus()`), 'the address bar to have focus before typing', 10000).catch(async (error) => {
+      throw new Error(`${error.message} — toolbar ${await toolbarState()}, toolbar view focused: ${toolbar.isFocused()}, page focused: ${page.isFocused()}`)
+    })
+    await toolbar.insertText(text)
+    await waitFor(async () => (await bar()) === text, `the typed text ${JSON.stringify(text)}`).catch(async (error) => {
+      throw new Error(`${error.message} — toolbar ${await toolbarState()}, toolbar view focused: ${toolbar.isFocused()}, page focused: ${page.isFocused()}`)
+    })
+  }
   const focusPage = async () => {
     page.focus()
     await waitFor(() => evaluate(toolbar, '!document.hasFocus()'), 'focus to leave the toolbar view')
@@ -116,6 +129,9 @@ async function run() {
   await expectBar('/app/chat?tab=2#projects', 'hash change')
   await evaluate(page, 'location.href = "/login"; 1')
   await expectBar('/app/projects', 'server redirect')
+  // The bar follows the redirect at commit; let the new document finish loading before the next
+  // step moves focus to the bar, so nothing from that load lands in the middle of it.
+  await waitFor(() => !page.isLoading() && page.getURL() === `${origin}/app/projects`, 'the redirected page to finish loading')
 
   // --- the bar is focused (and its view too) but untouched: it still follows the tab
   await focusBar()
@@ -124,8 +140,7 @@ async function run() {
   assert.equal(await evaluate(toolbar, `${INPUT}.selectionStart === 0 && ${INPUT}.selectionEnd === ${INPUT}.value.length`), true, 'the new URL stays fully selected')
 
   // --- half-typed text survives navigations while typing; Esc goes back to the tab URL
-  toolbar.insertText('half typed')
-  await waitFor(async () => (await bar()) === 'half typed', 'the typed text')
+  await typeInBar('half typed')
   await evaluate(page, 'history.pushState(null, "", "/app/typing"); 1')
   await delay(400)
   assert.equal(await bar(), 'half typed', 'typing is not overwritten')
@@ -134,8 +149,7 @@ async function run() {
   await expectBar('/app/typing', 'Esc')
 
   // --- typed text left behind gives way to the next navigation once the user is in the page
-  toolbar.insertText('left behind')
-  await waitFor(async () => (await bar()) === 'left behind', 'the typed text')
+  await typeInBar('left behind')
   await focusPage()
   await delay(200)
   assert.equal(await bar(), 'left behind', 'clicking away keeps typed text (Chrome does too)')

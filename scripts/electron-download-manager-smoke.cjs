@@ -235,10 +235,15 @@ async function seedNewTabDemo(siteBases) {
   const newTabId = await evaluate('window.api.browser.tabs.create()')
   await delay(300)
   const fixtureStatus = await evaluate('Promise.all([window.api.browser.state(), window.api.browser.tabs.get(), window.api.browser.pinnedSites.get()]).then(([state, tabs, pins]) => ({ page: state.url, error: state.error, activeTabs: tabs.filter((tab) => tab.active).map((tab) => tab.url), pins: pins.map((pin) => ({ title: pin.title, origin: new URL(pin.url).origin })), localNewTab: Boolean(document.querySelector(".new-tab-page")), iconGrid: Boolean(document.querySelector(".new-tab-icon-grid")), emptyMessage: document.querySelector(".new-tab-empty")?.textContent ?? null }))')
+  let lastTileLabels = null
   const newTabTileLabels = await waitFor(async () => {
     const labels = await evaluateIn(rendererViews.content, 'Array.from(document.querySelectorAll(".new-tab-icon-grid .new-tab-icon-tile")).map((tile) => tile.getAttribute("aria-label"))')
+    lastTileLabels = labels
     return labels.some((label) => label?.startsWith('Open Alpha synthetic site')) && labels.some((label) => label?.startsWith('Open Beta synthetic site')) ? labels : null
-  }, 'pinned sites to synchronize into the separate New Tab renderer')
+  }, 'pinned sites to synchronize into the separate New Tab renderer').catch((error) => {
+    // Say what the New Tab renderer had and what main had, so a one-off CI miss can be told apart.
+    throw new Error(`${error.message} New Tab tiles: ${JSON.stringify(lastTileLabels)}; fixture: ${JSON.stringify(fixtureStatus)}`)
+  })
   assert.ok(newTabId, 'the app should create a synthetic Quick Links tab')
   assert.equal(fixtureStatus.localNewTab, true)
   assert.equal(fixtureStatus.iconGrid, true)

@@ -121,7 +121,7 @@ jobs:
           addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
           echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
       - run: bun run build
-      - name: Run lane ${{ matrix.lane }} suites (2 at a time)
+      - name: Run lane ${{ matrix.lane }} suites (up to 2 at a time, never more than the pod's CPUs)
         env:
           TESTS: ${{ matrix.tests }}
         run: |
@@ -146,10 +146,19 @@ jobs:
             [ "$status" = ok ] || { echo "::error::$t failed"; return 1; }
           }
           export -f run_one
+          # At most one Electron smoke per CPU the pod may use (its cgroup quota, else nproc), capped at
+          # 2: each smoke is a main + GPU + 3-4 renderer processes under software rendering, and running
+          # more than the quota allows only stretches every wait toward SMOKE_WAIT_MS.
+          cpus="$(nproc)"
+          if [ -r /sys/fs/cgroup/cpu.max ] && read -r quota period < /sys/fs/cgroup/cpu.max && [ "$quota" != max ]; then
+            cpus=$(( (quota + period - 1) / period ))
+          fi
+          jobs=$(( cpus < 2 ? cpus : 2 )); [ "$jobs" -ge 1 ] || jobs=1
+          echo "pod CPUs: nproc $(nproc), cgroup cpu.max $(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo n/a), load $(cut -d' ' -f1-3 /proc/loadavg) -> $jobs smoke(s) at a time"
           i=0
           set +e
           for t in $TESTS; do echo "$((100 + i)) $t"; i=$((i + 1)); done \
-            | xargs -P 2 -L 1 bash -c 'run_one "$0" "$1"'
+            | xargs -P "$jobs" -L 1 bash -c 'run_one "$0" "$1"'
           status=$?
           echo "hidden sandbox OOM-score lines this lane: $(cat "$RUNNER_TEMP"/smoke-logs/*.oom 2>/dev/null | awk '{ n += $1 } END { print n + 0 }')"
           exit $status
@@ -274,6 +283,21 @@ jobs:
           set +e
           bun run perf:compare "$RUNNER_TEMP/perf.json" --base main --head pr --title "Perf check (linux)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
           status=$?
+          # 3 = only timing/memory metrics failed. Those swing 2-3x on a busy node (other pods share it),
+          # so bench both builds again, interleaved, and judge the pooled runs: a real slowdown shows up
+          # in both passes, a noisy stretch doesn't. Deterministic failures never get a second pass.
+          if [ "$status" = 3 ]; then
+            echo "::notice::only timing/memory metrics failed the first pass; running a confirmation pass"
+            cat "$RUNNER_TEMP/perf.md"
+            if xvfb-run -a -s "-screen 0 1600x1000x24" bun run perf --app "main=$PERF_BASE" --app pr=. --warmup 0 --out "$RUNNER_TEMP/perf-confirm.json" \
+              && bun scripts/perf/merge.ts "$RUNNER_TEMP/perf.json" "$RUNNER_TEMP/perf-confirm.json" --out "$RUNNER_TEMP/perf-merged.json"; then
+              bun run perf:compare "$RUNNER_TEMP/perf-merged.json" --base main --head pr --title "Perf check (linux)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
+              status=$?
+            else
+              echo "::warning::the confirmation pass did not run; keeping the first pass's result"
+            fi
+            [ "$status" = 0 ] || status=1
+          fi
           cat "$RUNNER_TEMP/perf.md" >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/perf.md"
           if [ -n "$PR_NUMBER" ]; then bun scripts/perf/post-comment.ts linux "$RUNNER_TEMP/perf.md"; fi

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { aggregate, flatten, type Stat } from './metrics.ts'
+import { summarize } from './metrics.ts'
 import { appPayload } from './app-payload.ts'
 
 const here = import.meta.dir
@@ -128,13 +128,8 @@ for (let n = 0; n < runs; n++) {
     else results[app.label]!.failures++
   }
 }
-for (const r of Object.values(results)) {
-  const flat = r.samples.map((s) => flatten(s))
-  const keys = new Set(flat.flatMap((f) => Object.keys(f)))
-  // `median` holds each metric's aggregate: the median, or the minimum for metrics with "stat": "min".
-  for (const k of keys) r.median[k] = aggregate(flat.map((f) => f[k]!).filter((v) => v !== undefined), config.metrics?.[k]?.stat as Stat | undefined)
-  for (const [k, v] of Object.entries(r.bundle)) r.median[`bundle.${k}`] = v
-}
+// `median` holds each metric's aggregate: the median, or the minimum for metrics with "stat": "min".
+for (const r of Object.values(results)) r.median = summarize(r.samples, r.bundle, config.metrics)
 rmSync(tmp, { recursive: true, force: true })
 const report = { platform: process.platform, arch: process.arch, runs, warmup, seconds: Math.round((Date.now() - started) / 1000), config, apps: results }
 const json = JSON.stringify(report, null, 2)
