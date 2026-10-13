@@ -26,6 +26,8 @@
     "bundle.rendererEagerJs": { "kind": "deterministic", "label": "renderer JS loaded at startup", "unit": "KB" },
     "bundle.rendererJs": { "kind": "deterministic", "label": "renderer JS, all assets", "unit": "KB" },
     "bundle.rendererCss": { "kind": "deterministic", "label": "renderer CSS", "unit": "KB" },
+    "bundle.appPayload": { "kind": "deterministic", "label": "packaged app payload (app.asar contents)", "unit": "KB", "abs": 51200, "$comment": "build.files + production node_modules closure minus build.files exclusions (scripts/perf/app-payload.ts)" },
+    "bundle.appFiles": { "kind": "deterministic", "label": "files in app.asar", "unit": "", "abs": 10 },
     "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 150, "stat": "min", "$comment": "best of the runs: a busy pod stalls single cold starts by 0.5-3 s on identical code" },
     "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100, "stat": "min" },
     "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 12, "$comment": "batched broadcasts: 146-155 on identical code" },

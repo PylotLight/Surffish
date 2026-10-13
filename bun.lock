@@ -6,8 +6,6 @@
       "name": "surffish",
       "dependencies": {
         "@ghostery/adblocker-electron": "^2.20.1",
-        "react": "^19.3.0",
-        "react-dom": "^19.3.0",
         "tldts-experimental": "^7.4.10",
       },
       "devDependencies": {
@@ -26,6 +24,8 @@
         "node-html-parser": "^9.0.4",
         "pdf-lib": "1.17.1",
         "pdfjs-dist": "6.4.299",
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0",
         "sql.js": "^1.14.2",
         "vite": "^8.3.2",
       },
