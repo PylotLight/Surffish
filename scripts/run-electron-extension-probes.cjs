@@ -8,7 +8,7 @@ const caseNames = ['chromium-mv2', 'bitwarden-mv2', 'chromium-mv3', 'firefox-mv3
 const results = []
 
 for (const name of caseNames) {
-  const child = spawnSync(electronExecutable, [...smokeChromiumArgs(electronExecutable), probeScript, name], {
+  const child = spawnSync(electronExecutable, [...smokeChromiumArgs(), probeScript, name], {
     encoding: 'utf8',
     timeout: 60_000,
     maxBuffer: 8 * 1024 * 1024,

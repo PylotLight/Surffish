@@ -10,7 +10,6 @@
 'use strict'
 
 const childProcess = require('node:child_process')
-const { spawnSync } = childProcess
 const { basename } = require('node:path')
 const { app, BaseWindow } = require('electron')
 const { smokeChromiumArgs } = require('./smoke-chromium-args.cjs')
@@ -93,19 +92,9 @@ app.exit = (code = 0) => {
   originalExit(code)
 }
 
-// Smoke-only switches against the per-renderer "Failed to adjust OOM score" spam on Linux CI (see
-// smoke-chromium-args.cjs). --no-zygote still works when appended here (it is read per launch), but
-// the sandbox choice is made at start-up, so a missing --disable-namespace-sandbox means relaunching
-// this script with it, synchronously, and passing its exit code through.
-const chromiumArgs = smokeChromiumArgs(process.execPath, process.argv)
-const startupArgs = chromiumArgs.filter((arg) => arg === '--disable-namespace-sandbox' && !process.argv.includes(arg))
-if (startupArgs.length > 0) {
-  clearTimeout(watchdog)
-  const result = spawnSync(process.execPath, [...process.argv.slice(1), ...startupArgs], { stdio: 'inherit', timeout: overallMs + 30000, killSignal: 'SIGKILL' })
-  if (result.error || result.signal) process.stderr.write(`${script} relaunch with ${startupArgs.join(' ')} failed: ${result.error?.message ?? result.signal}\n`)
-  process.exit(result.status ?? 1)
-}
-for (const arg of chromiumArgs) app.commandLine.appendSwitch(arg.slice(2))
+// Smoke-only switches against the per-renderer "Failed to adjust OOM score" log spam on Linux
+// (see smoke-chromium-args.cjs). --no-zygote is read per renderer launch, so appending it here works.
+for (const arg of smokeChromiumArgs(process.argv)) app.commandLine.appendSwitch(arg.slice(2))
 
 const { ADBLOCK_CACHE_FILE, ADBLOCK_CONFIG } = require('./smoke-adblock-config.cjs')
 

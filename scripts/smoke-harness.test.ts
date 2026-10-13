@@ -13,10 +13,9 @@ test('the smokes seed an adblock engine the app accepts as its cache (no filter 
 
 test('smoke-only Chromium switches against the Linux OOM-score log spam', () => {
   const { smokeChromiumArgs } = createRequire(import.meta.url)('./smoke-chromium-args.cjs')
-  const missing = '/nonexistent/electron'
-  assert.deepEqual(smokeChromiumArgs(missing, [], {}, 'darwin'), [], 'never on macOS')
-  assert.deepEqual(smokeChromiumArgs(missing, [], { ELECTRON_DISABLE_SANDBOX: '1' }, 'linux'), ['--no-sandbox', '--no-zygote'])
-  assert.deepEqual(smokeChromiumArgs(missing, ['--no-sandbox'], {}, 'linux'), ['--no-sandbox', '--no-zygote'])
-  assert.deepEqual(smokeChromiumArgs(missing, [], { ELECTRON_DISABLE_SANDBOX: '1', SMOKE_KEEP_ZYGOTE: '1' }, 'linux'), [])
-  assert.deepEqual(smokeChromiumArgs(missing, [], {}, 'linux'), [], 'sandbox on without a setuid helper: leave the sandbox choice alone')
+  assert.deepEqual(smokeChromiumArgs([], { ELECTRON_DISABLE_SANDBOX: '1' }, 'darwin'), [], 'never on macOS')
+  assert.deepEqual(smokeChromiumArgs([], { ELECTRON_DISABLE_SANDBOX: '1' }, 'linux'), ['--no-sandbox', '--no-zygote'])
+  assert.deepEqual(smokeChromiumArgs(['--no-sandbox'], {}, 'linux'), ['--no-sandbox', '--no-zygote'])
+  assert.deepEqual(smokeChromiumArgs([], { ELECTRON_DISABLE_SANDBOX: '1', SMOKE_KEEP_ZYGOTE: '1' }, 'linux'), [])
+  assert.deepEqual(smokeChromiumArgs([], {}, 'linux'), [], 'sandboxed: the zygote is required, leave it alone')
 })

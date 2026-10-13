@@ -31,4 +31,4 @@ const probeEnvironment = {
   SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE: '1'
 }
 // Smoke-only switches against Chromium's per-renderer OOM-score log spam on Linux CI.
-run('run loopback-only disposable profile', electronBinary, [...smokeChromiumArgs(electronBinary), probeEntry], probeEnvironment)
+run('run loopback-only disposable profile', electronBinary, [...smokeChromiumArgs(), probeEntry], probeEnvironment)
