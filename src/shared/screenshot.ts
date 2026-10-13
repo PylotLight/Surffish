@@ -4,7 +4,7 @@
  * full-page clip / stitching plans. No Electron imports, so all of it is unit-testable.
  */
 
-export type ScreenshotMode = 'choose' | 'visible' | 'full'
+export type ScreenshotMode = 'choose' | 'visible' | 'full' | 'scrolling'
 
 export interface Rect {
   x: number

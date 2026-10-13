@@ -18,8 +18,16 @@ const savePath = join(userData, 'smoke-shot.png')
 process.env.SURFFISH_SCREENSHOT_SMOKE_SAVE_PATH = savePath
 const primary = process.platform === 'darwin' ? 'meta' : 'control'
 const PAGE_HEIGHT = 3000
-const server = createServer((_request, response) => {
+const server = createServer((request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+  if (request.url.startsWith('/inner')) {
+    // An app-style page: the document doesn't scroll, an inner container with a sticky header does.
+    response.end(`<!doctype html><meta charset="utf-8"><title>Inner scroller fixture</title>
+<style>html,body{margin:0;height:100%;overflow:hidden}#top{height:50px;background:rgb(80,80,80)}
+#s{position:absolute;top:50px;left:0;right:0;bottom:0;overflow:auto}#s>header{position:sticky;top:0;height:40px;background:rgb(255,255,0)}#s>div{height:1000px}</style>
+<div id="top"></div><div id="s"><header></header><div style="background:rgb(0,0,255)"></div><div style="background:rgb(0,255,0)"></div><div style="background:rgb(255,0,0)"></div></div>`)
+    return
+  }
   response.end(`<!doctype html><meta charset="utf-8"><title>Screenshot fixture</title>
 <style>html,body{margin:0}div{height:${PAGE_HEIGHT / 3}px}</style>
 <div style="background:rgb(0,0,255)"></div><div style="background:rgb(0,255,0)"></div><div style="background:rgb(255,0,0)"></div>`)
@@ -80,7 +88,7 @@ async function drag(view, from, to) {
   contents.sendInputEvent({ type: 'mouseUp', x: to.x, y: to.y, button: 'left', clickCount: 1 })
 }
 
-const mode = (overlay) => evaluate(overlay, `['select','busy','preview','annotate'].find((id) => !document.getElementById(id).hidden) ?? 'hidden'`)
+const mode = (overlay) => evaluate(overlay, `['select','busy','preview','annotate','scrolling'].find((id) => !document.getElementById(id).hidden) ?? 'hidden'`)
 const dims = (overlay) => evaluate(overlay, 'document.getElementById("dims").textContent')
 
 function savedImage() {
@@ -235,6 +243,142 @@ async function run() {
   assert.ok(sample(2900)[2] > 200, 'bottom band is red')
   assert.equal(await evaluate(page, 'scrollY'), 700, 'the page scroll position is restored')
   delete process.env.SURFFISH_SCREENSHOT_SMOKE_FORCE_STITCH
+  key(overlay, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- scrolling screenshot (palette): Enter starts at the top of the view, scroll, Done
+  assert.ok(snapshot.commands.some((entry) => entry.id === 'view.screenshotScrolling'), 'the palette lists Scrolling Screenshot')
+  const viewportHeight = await evaluate(page, 'innerHeight')
+  const sizeOf = async () => {
+    const match = /^(\d+) × (\d+)/.exec(await dims(overlay))
+    return match && { width: Number(match[1]), height: Number(match[2]) }
+  }
+  await evaluate(page, 'window.scrollTo(0, 0)')
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the scrolling picker')
+  assert.equal(await evaluate(overlay, 'document.getElementById("btn-scroll-top").hidden'), false, 'the picker offers Start at Top')
+  key(overlay, 'Return')
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'scrolling mode')
+  await waitFor(() => overlay.getBounds().height <= 60 && overlay.getBounds().width <= 600, 'the overlay to shrink to a bar')
+  await evaluate(page, 'window.scrollTo(0, 1600)')
+  await waitFor(async () => /× \d+/.test(await evaluate(overlay, 'document.getElementById("scroll-dims").textContent')), 'the live size readout')
+  await evaluate(overlay, 'document.getElementById("btn-scroll-done").click()')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the scrolling preview', 30000)
+  let size = await waitFor(sizeOf, 'the scrolling size label')
+  assert.ok(Math.abs(size.height - (1600 + viewportHeight) * scale) <= 2, `scrolling capture runs from the top to the bottom of the view (${size.width}×${size.height})`)
+  rmSync(savePath, { force: true })
+  await evaluate(overlay, 'document.getElementById("btn-save").click()')
+  await waitFor(() => existsSync(savePath) && readFileSync(savePath).length > 8, 'Save the scrolling capture')
+  let shot = savedImage().image
+  const at = (image, y, x = 10) => image.crop({ x: Math.round(x * scale), y: Math.round(y * scale), width: 1, height: 1 }).toBitmap()
+  assert.ok(at(shot, 500)[0] > 200 && at(shot, 1500)[1] > 200, 'scrolling capture has the blue then green bands')
+  assert.equal(await evaluate(page, 'scrollY'), 1600, 'the scroll position the user stopped at is kept')
+  assert.equal(await evaluate(page, 'Boolean(window.__surffishScrollShot)'), false, 'the page script is gone from the main world')
+  key(overlay, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- region band + click on the page to mark the end (the click must not reach the page)
+  await evaluate(page, 'window.scrollTo(0, 0); window.__clicks = 0; addEventListener("click", () => { window.__clicks += 1 })')
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the scrolling picker again')
+  await delay(150)
+  await drag(overlay, { x: 100, y: 100 }, { x: 400, y: 200 })
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'the band to start scrolling')
+  await delay(200)
+  await evaluate(page, 'window.scrollTo(0, 1000)')
+  await delay(200)
+  page.webContents.sendInputEvent({ type: 'mouseMove', x: 250, y: 300 })
+  page.webContents.sendInputEvent({ type: 'mouseDown', x: 250, y: 300, button: 'left', clickCount: 1 })
+  page.webContents.sendInputEvent({ type: 'mouseUp', x: 250, y: 300, button: 'left', clickCount: 1 })
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the click to end the capture', 30000)
+  size = await waitFor(sizeOf, 'the band size label')
+  assert.ok(Math.abs(size.width - 300 * scale) <= 2, `band keeps the dragged width (${size.width})`)
+  assert.ok(Math.abs(size.height - 1200 * scale) <= 2, `band runs from the drag's top to the clicked row (${size.height})`)
+  assert.equal(await evaluate(page, 'window.__clicks'), 0, 'the end-marking click never reached the page')
+  key(overlay, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- Esc while scrolling cancels and cleans up
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for cancel')
+  key(overlay, 'Return')
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'scrolling for cancel')
+  await delay(200)
+  key(page, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc on the page to cancel the scrolling capture')
+  await delay(200)
+  await evaluate(page, 'window.__clicks = 0; document.body.click()')
+  assert.equal(await evaluate(page, 'window.__clicks'), 1, 'clicks reach the page again after cancelling')
+
+  // --- auto-scroll moves the page, Done captures whatever it reached
+  await evaluate(page, 'window.scrollTo(0, 0)')
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for auto-scroll')
+  key(overlay, 'Return')
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'scrolling for auto-scroll')
+  await delay(200)
+  await evaluate(overlay, 'document.getElementById("btn-scroll-auto").click()')
+  await waitFor(async () => (await evaluate(page, 'scrollY')) > 300, 'auto-scroll to move the page')
+  await waitFor(async () => (await evaluate(overlay, 'document.getElementById("btn-scroll-auto").getAttribute("aria-pressed")')) === 'true', 'the Auto-scroll button to show it is running')
+  await evaluate(overlay, 'document.getElementById("btn-scroll-done").click()')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the auto-scrolled preview', 30000)
+  size = await waitFor(sizeOf, 'the auto-scrolled size label')
+  assert.ok(size.height > (300 + viewportHeight) * scale, `auto-scrolled capture is taller than the view (${size.height})`)
+  key(overlay, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- forced scroll-and-stitch on the document: same rows as CDP
+  process.env.SURFFISH_SCREENSHOT_SMOKE_FORCE_STITCH = '1'
+  await evaluate(page, 'window.scrollTo(0, 0)')
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for stitching')
+  key(overlay, 'Return')
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'scrolling for stitching')
+  await evaluate(page, 'window.scrollTo(0, 1600)')
+  await delay(200)
+  key(page, 'Return')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the stitched scrolling preview', 30000)
+  size = await waitFor(sizeOf, 'the stitched scrolling size label')
+  assert.ok(Math.abs(size.height - (1600 + viewportHeight) * scale) <= 2, `stitched scrolling capture has the same height (${size.height})`)
+  rmSync(savePath, { force: true })
+  await evaluate(overlay, 'document.getElementById("btn-save").click()')
+  await waitFor(() => existsSync(savePath) && readFileSync(savePath).length > 8, 'Save the stitched scrolling capture')
+  shot = savedImage().image
+  assert.ok(at(shot, 500)[0] > 200 && at(shot, 1500)[1] > 200, 'stitched scrolling capture has the bands in order')
+  assert.equal(await evaluate(page, 'scrollY'), 1600, 'stitching puts the scroll back')
+  delete process.env.SURFFISH_SCREENSHOT_SMOKE_FORCE_STITCH
+  key(overlay, 'Escape')
+  await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- inner scroll container with a sticky header: stitched, header only in the first frame
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(fixtureUrl.replace('/fixture', '/inner'))})`)
+  const inner = await waitFor(() => pageView('/inner'), 'the inner-scroller page view')
+  await waitFor(() => !inner.webContents.isLoading() && inner.webContents.getTitle() === 'Inner scroller fixture', 'the inner fixture to load')
+  await delay(300)
+  await evaluate(toolbar, 'window.api.browser.commands.run("view.screenshotScrolling")')
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker on the inner page')
+  await delay(150)
+  // Band across the scroller, starting at its top edge.
+  await drag(overlay, { x: 50, y: 50 }, { x: 450, y: 300 })
+  await waitFor(async () => (await mode(overlay)) === 'scrolling', 'scrolling on the inner page')
+  await evaluate(inner, 'document.getElementById("s").scrollTop = 1200')
+  await waitFor(async () => /× \d+/.test(await evaluate(overlay, 'document.getElementById("scroll-dims").textContent')), 'the inner readout')
+  const boxHeight = await evaluate(inner, 'document.getElementById("s").clientHeight')
+  await evaluate(overlay, 'document.getElementById("btn-scroll-done").click()')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the inner preview', 30000)
+  size = await waitFor(sizeOf, 'the inner size label')
+  assert.ok(Math.abs(size.height - (1200 + boxHeight) * scale) <= 2, `inner capture runs the scroller's content to the bottom of its box (${size.height}, box ${boxHeight})`)
+  assert.ok(Math.abs(size.width - 400 * scale) <= 2, `inner capture keeps the band width (${size.width})`)
+  rmSync(savePath, { force: true })
+  await evaluate(overlay, 'document.getElementById("btn-save").click()')
+  await waitFor(() => existsSync(savePath) && readFileSync(savePath).length > 8, 'Save the inner capture')
+  shot = savedImage().image
+  const yellow = (pixel) => pixel[0] < 60 && pixel[1] > 200 && pixel[2] > 200
+  assert.ok(yellow(at(shot, 20)), 'the sticky header is in the first frame')
+  assert.ok(!yellow(at(shot, boxHeight + 20)), 'the sticky header is not repeated in the next frame')
+  assert.ok(at(shot, 500)[0] > 200 && at(shot, 1100)[1] > 200, 'inner bands are stitched in order')
+  assert.equal(await evaluate(inner, 'document.getElementById("s").scrollTop'), 1200, 'the inner scroll position is put back')
+  assert.equal(await evaluate(inner, 'getComputedStyle(document.querySelector("#s > header")).visibility'), 'visible', 'the sticky header is shown again')
   key(overlay, 'Escape')
   await waitFor(() => !overlay.getVisible(), 'Esc to close')
 

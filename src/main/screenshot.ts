@@ -20,6 +20,8 @@ import {
 } from '../shared/screenshot'
 import { recordSavedFile } from './downloads'
 import { SCREENSHOT_PAGE_HTML } from './screenshot-page'
+import { scrollingBarBounds } from '../shared/screenshot-scrolling'
+import { finishScrollShot, readScrollShotState, setScrollShotAuto, startScrollShot, teardownScrollShot } from './screenshot-scrolling'
 
 /**
  * Screenshot tool: visible area, full page (CDP, falling back to scroll-and-stitch) and a dragged
@@ -54,7 +56,7 @@ interface PixelImage {
   height: number
 }
 
-type OverlayMode = 'select' | 'busy' | 'preview' | 'annotate'
+type OverlayMode = 'select' | 'busy' | 'preview' | 'annotate' | 'scrolling'
 
 interface Session {
   target: ScreenshotTarget
@@ -72,6 +74,8 @@ interface Session {
 }
 
 const POPOVER_SIZE = { width: 340, height: 292 }
+const SCROLL_BAR_SIZE = { width: 600, height: 52 }
+const SCROLL_POLL_MS = 150
 const ISOLATED_WORLD_ID = 2026
 const MAX_INCOMING_PNG_BYTES = 256 * 1024 * 1024
 const STITCH_SETTLE_MS = 90
@@ -285,7 +289,9 @@ function layout(): void {
     current.setVisible(false)
     return
   }
-  current.setBounds(session.mode === 'preview' ? previewPopoverBounds(page, POPOVER_SIZE) : page)
+  current.setBounds(session.mode === 'preview'
+    ? previewPopoverBounds(page, POPOVER_SIZE)
+    : session.mode === 'scrolling' ? scrollingBarBounds(page, SCROLL_BAR_SIZE) : page)
   current.setVisible(true)
 }
 
@@ -402,6 +408,18 @@ function registerIpc(): void {
   ipcMain.on('screenshot:full', (event) => {
     if (!fromOverlay(event) || session?.mode !== 'select') return
     void runFullPage()
+  })
+  ipcMain.on('screenshot:scrolling', (event, input: unknown) => {
+    if (!fromOverlay(event) || session?.mode !== 'select') return
+    void startScrolling(input === null || input === undefined ? null : parseRect(input))
+  })
+  ipcMain.on('screenshot:scroll-done', (event) => {
+    if (fromOverlay(event) && session?.mode === 'scrolling') void finishScrolling()
+  })
+  ipcMain.on('screenshot:scroll-auto', (event, on: unknown) => {
+    if (!fromOverlay(event) || session?.mode !== 'scrolling') return
+    const target = session.target
+    void setScrollShotAuto(target.contents, on === true).then(() => { if (session?.target === target) host?.focusPage() })
   })
   ipcMain.on('screenshot:annotate', (event, open: unknown) => {
     if (!fromOverlay(event) || !session?.shot) return
@@ -615,9 +633,9 @@ export async function takeScreenshot(mode: ScreenshotMode = 'choose'): Promise<b
   useWindow(currentBrowserWindow())
   if (!host || !ownerWindow || ownerWindow.isDestroyed()) return false
   if (session) {
-    const wasSelecting = session.mode === 'select'
+    const wasSelecting = session.mode === 'select' || session.mode === 'scrolling'
     endSession()
-    if (wasSelecting && mode === 'choose') return false
+    if (wasSelecting && (mode === 'choose' || mode === 'scrolling')) return false
   }
   const target = host.getTarget()
   if (!target || target.contents.isDestroyed()) {
@@ -658,8 +676,107 @@ export async function takeScreenshot(mode: ScreenshotMode = 'choose'): Promise<b
   send({
     mode: 'select',
     image: { url: dataUrl(frozen!), width: frozen!.width, height: frozen!.height, pixelRatio: current.ratio ?? 1 },
-    isPrivate: target.isPrivate
+    isPrivate: target.isPrivate,
+    scrolling: mode === 'scrolling'
   })
   return true
+}
+
+// ---------------------------------------------------------------------------
+// Scrolling capture (see screenshot-scrolling.ts): the overlay shrinks to a bar, the live page
+// scrolls underneath, and the capture is taken once the user picks the end.
+
+const scrollShotDeps = { captureVisible, pixelImageFromPng, withPageDebugger }
+
+async function startScrolling(rect: ReturnType<typeof parseRect>): Promise<void> {
+  const current = session
+  if (!current || busy) return
+  const { contents } = current.target
+  current.mode = 'scrolling'
+  current.frozen = null
+  layout()
+  send({ mode: 'scrolling', isPrivate: current.target.isPrivate, region: Boolean(rect) })
+  const started = await startScrollShot(contents, rect, current.viewSize.width, MAX_SCREENSHOT_SIDE_PX)
+  if (session !== current) {
+    void teardownScrollShot(contents)
+    return
+  }
+  if (!started) {
+    host?.flash('Could not start a scrolling screenshot on this page')
+    endSession()
+    return
+  }
+  // Enter / Esc while the page has focus (it does, so wheel, arrows and Space scroll it).
+  const onInput = (event: Electron.Event, input: Electron.Input): void => {
+    if (session !== current || current.mode !== 'scrolling' || input.type !== 'keyDown') return
+    if (input.control || input.meta || input.alt) return
+    if (input.key === 'Enter') {
+      event.preventDefault()
+      void finishScrolling()
+    } else if (input.key === 'Escape') {
+      event.preventDefault()
+      endSession()
+    }
+  }
+  contents.on('before-input-event', onInput)
+  let polling = false
+  const timer = setInterval(() => {
+    if (polling || session !== current || current.mode !== 'scrolling') return
+    // Switching tabs (or the tab going away) cancels: the bar would be over another page.
+    if (host?.getTarget()?.contents !== contents) {
+      endSession(false)
+      return
+    }
+    polling = true
+    void readScrollShotState(contents).then((state) => {
+      polling = false
+      if (!state || session !== current || current.mode !== 'scrolling') return
+      if (state.clickY !== null) {
+        void finishScrolling()
+        return
+      }
+      const cssHeight = Math.min(state.height, state.maxCss)
+      liveView()?.webContents.send('screenshot:scroll-state', {
+        width: Math.round(state.width * state.dpr),
+        height: Math.round(cssHeight * state.dpr),
+        atLimit: state.height >= state.maxCss,
+        auto: state.auto,
+        inner: state.inner
+      })
+    })
+  }, SCROLL_POLL_MS)
+  const previousDispose = current.dispose
+  current.dispose = () => {
+    clearInterval(timer)
+    if (!contents.isDestroyed()) {
+      contents.off('before-input-event', onInput)
+      // Cancelled mid-scroll: take the guides off the page. (After a capture it is already clean.)
+      if (current.mode === 'scrolling') void teardownScrollShot(contents)
+    }
+    previousDispose()
+  }
+  host?.focusPage()
+}
+
+async function finishScrolling(): Promise<void> {
+  const current = session
+  if (!current || current.mode !== 'scrolling' || busy) return
+  busy = true
+  current.mode = 'busy'
+  layout()
+  send({ mode: 'busy', message: 'Capturing…', isPrivate: current.target.isPrivate })
+  try {
+    const forceStitch = !app.isPackaged && process.env['SURFFISH_SCREENSHOT_SMOKE_FORCE_STITCH'] === '1'
+    const result = await finishScrollShot(current.target.contents, scrollShotDeps, MAX_SCREENSHOT_SIDE_PX, forceStitch)
+    if (session !== current) return
+    if (!result) {
+      host?.flash('Could not capture the scrolling screenshot')
+      endSession()
+      return
+    }
+    showPreview(result.image, result.truncated)
+  } finally {
+    busy = false
+  }
 }
 

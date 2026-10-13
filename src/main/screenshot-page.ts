@@ -2,7 +2,9 @@
 // stacked above every other layer (like the tab overview), so it never touches the React shell.
 //
 // Main drives it with one message, `show`, carrying the mode:
-//   select   – the visible page, frozen, dimmed; drag a region, or pick Visible area / Full page
+//   select   – the visible page, frozen, dimmed; drag a region, or pick Visible area / Full page /
+//              Scrolling (then drag a band to set the width and start line, or Enter for the top of the view)
+//   scrolling – the view shrinks to a bar over the live page: Auto-scroll, Done, Cancel and the size so far
 //   busy     – "Capturing full page…" while CDP (or the scroll-and-stitch fallback) runs
 //   preview  – the view shrinks to a small popover: Copy, Save…, Annotate, close
 //   annotate – full page area: arrow, box, pen, text, blur and redact on a canvas, then Copy/Save/Done
@@ -38,6 +40,13 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
     padding: 6px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0,0,0,.4); cursor: default; }
   #select-bar .hint { padding: 0 8px 0 6px; color: var(--muted); }
   .badge { padding: 2px 7px; border-radius: 99px; background: rgba(160, 110, 255, .22); color: #d6c4ff; font-size: 11px; }
+
+  /* scrolling bar: the view itself is sized to the bar */
+  #scrolling { position: fixed; inset: 0; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+  #scrolling .hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  #scroll-dims { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #scroll-dims.limit { color: #ff8a80; }
 
   /* busy */
   #busy { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.25); }
@@ -88,8 +97,19 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
     <span class="badge" id="select-private" hidden>Private</span>
     <button id="btn-visible" class="primary" title="Enter">Visible Area</button>
     <button id="btn-full" title="F">Full Page</button>
+    <button id="btn-scroll" title="S">Scrolling</button>
+    <button id="btn-scroll-top" class="primary" title="Enter" hidden>Start at Top</button>
     <button id="btn-cancel" title="Esc">Cancel</button>
   </div>
+</section>
+
+<section id="scrolling" hidden>
+  <span class="hint" id="scroll-hint" title="Scroll (wheel, keys or Auto-scroll) to where the capture should end, then press Done or Enter, or click the page at that spot">Scroll, then Done or click the end</span>
+  <span id="scroll-dims"></span>
+  <span class="badge" id="scroll-private" hidden>Private</span>
+  <button id="btn-scroll-auto" aria-pressed="false" title="A">Auto-scroll</button>
+  <button id="btn-scroll-done" class="primary" title="Enter">Done</button>
+  <button id="btn-scroll-cancel" title="Esc">Cancel</button>
 </section>
 
 <section id="busy" hidden><div id="busy-text">Capturing full page…</div></section>
@@ -146,7 +166,7 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
 (() => {
   const api = window.surffishScreenshot
   const $ = (id) => document.getElementById(id)
-  const sections = { select: $('select'), busy: $('busy'), preview: $('preview'), annotate: $('annotate') }
+  const sections = { select: $('select'), busy: $('busy'), preview: $('preview'), annotate: $('annotate'), scrolling: $('scrolling') }
   let mode = 'hidden'
   let image = null          // { url, width, height, pixelRatio }
   let baseImage = null      // HTMLImageElement of the current screenshot
@@ -176,6 +196,18 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
 
   // ---------- select ----------
   let dragStart = null
+  // Scrolling picked: the next drag sets the capture's width and start line instead of a region.
+  let scrollPick = false
+  const selectHint = document.querySelector('#select-bar .hint')
+  function setScrollPick(on) {
+    scrollPick = on
+    selectHint.textContent = on ? 'Drag to set the width and start line' : 'Drag to capture a region'
+    $('btn-visible').hidden = on
+    $('btn-full').hidden = on
+    $('btn-scroll').hidden = on
+    $('btn-scroll-top').hidden = !on
+    $('btn-cancel').textContent = on ? 'Back' : 'Cancel'
+  }
   const selection = $('selection')
   const sizeLabel = $('selection-size')
 
@@ -215,11 +247,32 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
     if (!dragStart) return
     const rect = dragRectFrom(dragStart, clampPoint(event))
     resetSelection()
-    if (rect.width >= 4 && rect.height >= 4) api.region(rect)
+    if (rect.width >= 4 && rect.height >= 4) {
+      if (scrollPick) api.scrolling(rect)
+      else api.region(rect)
+    }
   })
   $('btn-visible').addEventListener('click', () => api.visible())
   $('btn-full').addEventListener('click', () => api.full())
-  $('btn-cancel').addEventListener('click', () => api.cancel())
+  $('btn-cancel').addEventListener('click', () => { if (scrollPick) setScrollPick(false); else api.cancel() })
+  $('btn-scroll').addEventListener('click', () => setScrollPick(true))
+  $('btn-scroll-top').addEventListener('click', () => api.scrolling(null))
+
+  // ---------- scrolling ----------
+  let autoScrolling = false
+  function toggleAuto() { api.scrollAuto(!autoScrolling) }
+  $('btn-scroll-auto').addEventListener('click', toggleAuto)
+  $('btn-scroll-done').addEventListener('click', () => api.scrollDone())
+  $('btn-scroll-cancel').addEventListener('click', () => api.cancel())
+  api.onScrollState((state) => {
+    if (!state || typeof state !== 'object' || mode !== 'scrolling') return
+    const dims = $('scroll-dims')
+    dims.textContent = Number(state.width) + ' × ' + Number(state.height) + (state.atLimit ? ' · size limit' : '')
+    dims.className = state.atLimit ? 'limit' : ''
+    autoScrolling = state.auto === true
+    $('btn-scroll-auto').setAttribute('aria-pressed', String(autoScrolling))
+    $('btn-scroll-auto').textContent = autoScrolling ? 'Stop' : 'Auto-scroll'
+  })
 
   // ---------- preview ----------
   $('btn-close').addEventListener('click', () => api.cancel())
@@ -499,9 +552,14 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
   addEventListener('keydown', (event) => {
     if (event.metaKey || event.ctrlKey) return
     if (mode === 'select') {
-      if (event.key === 'Escape') { event.preventDefault(); if (dragStart) resetSelection(); else api.cancel() }
-      else if (event.key === 'Enter') { event.preventDefault(); api.visible() }
-      else if (event.key.toLowerCase() === 'f') { event.preventDefault(); api.full() }
+      if (event.key === 'Escape') { event.preventDefault(); if (dragStart) resetSelection(); else if (scrollPick) setScrollPick(false); else api.cancel() }
+      else if (event.key === 'Enter') { event.preventDefault(); if (scrollPick) api.scrolling(null); else api.visible() }
+      else if (event.key.toLowerCase() === 'f' && !scrollPick) { event.preventDefault(); api.full() }
+      else if (event.key.toLowerCase() === 's' && !scrollPick) { event.preventDefault(); setScrollPick(true) }
+    } else if (mode === 'scrolling') {
+      if (event.key === 'Escape') { event.preventDefault(); api.cancel() }
+      else if (event.key === 'Enter') { event.preventDefault(); api.scrollDone() }
+      else if (event.key.toLowerCase() === 'a') { event.preventDefault(); toggleAuto() }
     } else if (mode === 'preview' || mode === 'busy') {
       if (event.key === 'Escape') { event.preventDefault(); api.cancel() }
     } else if (mode === 'annotate') {
@@ -526,9 +584,18 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
     }
     $('select-private').hidden = !payload.isPrivate
     $('preview-private').hidden = !payload.isPrivate
+    $('scroll-private').hidden = !payload.isPrivate
     if (payload.mode === 'select') {
       resetSelection()
+      setScrollPick(payload.scrolling === true)
       show('select')
+    } else if (payload.mode === 'scrolling') {
+      autoScrolling = false
+      $('scroll-dims').textContent = ''
+      $('scroll-dims').className = ''
+      $('btn-scroll-auto').setAttribute('aria-pressed', 'false')
+      $('btn-scroll-auto').textContent = 'Auto-scroll'
+      show('scrolling')
     } else if (payload.mode === 'busy') {
       $('busy-text').textContent = payload.message || 'Capturing…'
       show('busy')

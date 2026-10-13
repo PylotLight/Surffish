@@ -141,6 +141,7 @@ const COMMANDS: BrowserCommand[] = [
   },
   { id: 'view.screenshotVisible', title: 'Screenshot Visible Area', section: 'View', keywords: ['capture', 'snapshot', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('visible') },
   { id: 'view.screenshotFull', title: 'Screenshot Full Page', section: 'View', keywords: ['capture', 'snapshot', 'whole page', 'scrolling', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('full') },
+  { id: 'view.screenshotScrolling', title: 'Scrolling Screenshot', section: 'View', keywords: ['capture', 'scroll', 'long', 'tall', 'stitch', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('scrolling') },
   {
     id: 'view.reader', title: () => (readerStateFor(getActiveTabWebContents()) === 'active' ? 'Exit Reader View' : 'Reader View'), accelerator: APP_SHORTCUTS.readerView, section: 'View',
     keywords: ['reader mode', 'article', 'readability', 'distraction free', 'clean'], enabled: () => readerStateFor(getActiveTabWebContents()) !== null, run: () => toggleReaderMode()
