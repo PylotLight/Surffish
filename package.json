@@ -44,7 +44,7 @@
     "test:electron-spinner-popover": "electron scripts/electron-spinner-popover-smoke.cjs",
     "perf": "bun scripts/perf/run.ts",
     "perf:compare": "bun scripts/perf/compare.ts",
-    "test:perf": "bun test scripts/perf/metrics.test.ts scripts/perf/app-changed.test.ts",
+    "test:perf": "bun test scripts/perf/metrics.test.ts scripts/perf/app-changed.test.ts scripts/perf/app-payload.test.ts",
     "test:electron-youtube": "electron scripts/electron-adblock-youtube.cjs",
     "test:electron-adblock-sites": "electron scripts/electron-adblock-youtube.cjs --sites",
     "test:electron-extensions": "bun scripts/run-electron-extension-probes.cjs",
@@ -67,7 +67,9 @@
     "electronDist": "node_modules/electron/dist",
     "files": [
       "out/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/**/*.map",
+      "!**/node_modules/**/*.umd.min.js"
     ],
     "asarUnpack": [
       "out/native/**/*.node",
@@ -137,13 +139,13 @@
     "node-html-parser": "^9.0.4",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.4.299",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "sql.js": "^1.14.2",
     "vite": "^8.3.2"
   },
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.20.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
     "tldts-experimental": "^7.4.10"
   }
 }

@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { aggregate, flatten, type Stat } from './metrics.ts'
+import { appPayload } from './app-payload.ts'
 
 const here = import.meta.dir
 const config = JSON.parse(readFileSync(join(here, 'perf.config.json'), 'utf8'))
@@ -52,7 +53,8 @@ export function bundleSizes(dir: string) {
     preload: total(filesUnder(join(out, 'preload'), /\.(c|m)?js$/)),
     rendererEagerJs: total([...new Set(eager)]),
     rendererJs: total(filesUnder(join(out, 'renderer/assets'), /\.m?js$/)),
-    rendererCss: total(filesUnder(join(out, 'renderer/assets'), /\.css$/))
+    rendererCss: total(filesUnder(join(out, 'renderer/assets'), /\.css$/)),
+    ...appPayload(dir)
   }
 }
 

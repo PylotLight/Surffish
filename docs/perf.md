@@ -36,6 +36,7 @@ fixture site, then:
 | metric | how |
 |---|---|
 | main bundle, main JS (all chunks), preload, renderer JS at startup, renderer JS (all assets), renderer CSS | file sizes in `out/` ("at startup" = the scripts and modulepreloads `index.html` loads) |
+| packaged app payload, files in app.asar | what electron-builder packs into `app.asar`, approximated: `build.files` plus the production `dependencies` closure from `node_modules`, minus the `build.files` `!` patterns (`scripts/perf/app-payload.ts`). Renderer-only packages belong in `devDependencies`: Vite bundles them, and in `dependencies` they ship again as raw `node_modules` |
 | cold start to window / first paint | process start to the first window, and to the New Tab page's first contentful paint |
 | IPC during startup | every `ipcMain.handle`/`on` call and `webContents.send` until the first page has loaded |
 | memory at 1 / 10 / 30 tabs, GPU process memory, process count | sum over all Surffish processes: PSS on Linux, working set on macOS |
