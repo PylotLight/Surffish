@@ -57,6 +57,7 @@
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "compression": "maximum",
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "out/**/*",
       "package.json"
