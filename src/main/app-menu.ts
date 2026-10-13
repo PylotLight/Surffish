@@ -7,6 +7,8 @@ import { checkForUpdatesFromMenu } from './updates'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
+import { toggleReaderMode } from './reader-mode'
+import { revealPageWatchers } from './page-watchers'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -132,6 +134,9 @@ export function installAppMenu(): void {
       submenu: [
         { label: 'Command Palette…', accelerator: APP_SHORTCUTS.commandPalette, click: () => { openCommandPalette('all') } },
         { type: 'separator' },
+        // No-op unless the page looks like an article (or Reader view is open).
+        { label: 'Reader View', accelerator: APP_SHORTCUTS.readerView, click: () => { void toggleReaderMode() } },
+        { type: 'separator' },
         tabItem('Zoom In', 'zoomIn'),
         // Cmd+Shift+= types "+"; keep the Plus accelerator working without a second visible item.
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, acceleratorWorksWhenHidden: true, click: () => runTabCommand('zoomIn') },
@@ -149,6 +154,7 @@ export function installAppMenu(): void {
         { role: 'zoom' },
         { type: 'separator' },
         tabItem('Downloads', 'downloads'),
+        { label: 'Page Watchers', click: () => { revealPageWatchers() } },
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : [])
       ]

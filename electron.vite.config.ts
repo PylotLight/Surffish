@@ -47,6 +47,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/pdf-editor.cjs'),
       join(outputDirectory, 'pdf-editor.cjs')
     )
+    // Built-in Reader view page bridge.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/reader.cjs'),
+      join(outputDirectory, 'reader.cjs')
+    )
   }
 }
 
@@ -106,7 +111,9 @@ export default defineConfig({
         input: {
           index: resolve(projectDirectory, 'src/renderer/index.html'),
           // Built-in PDF editor (pdf.js + pdf-lib), served from surffish-pdf://editor/ only.
-          'pdf-editor': resolve(projectDirectory, 'src/renderer/pdf-editor.html')
+          'pdf-editor': resolve(projectDirectory, 'src/renderer/pdf-editor.html'),
+          // Reader view (Readability article + DOMPurify), served from surffish-reader://reader/ only.
+          reader: resolve(projectDirectory, 'src/renderer/reader.html')
         }
       },
       // Three renderer surfaces each parse this bundle at launch; ship it minified.

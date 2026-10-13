@@ -13,5 +13,7 @@ export const APP_SHORTCUTS = {
   /** Handled in handleBrowserShortcut (Cmd/Ctrl+Shift+\); label only. */
   tabOverview: 'CmdOrCtrl+Shift+\\',
   commandPalette: 'CmdOrCtrl+K',
-  tabSearch: 'CmdOrCtrl+Shift+A'
+  tabSearch: 'CmdOrCtrl+Shift+A',
+  /** Cmd/Ctrl+Shift+R is Hard Reload, so Reader view takes Cmd/Ctrl+Alt+R (Safari's Shift+Cmd+R is taken). */
+  readerView: 'CmdOrCtrl+Alt+R'
 } as const

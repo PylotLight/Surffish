@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-font="serif" data-width="medium">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reader view</title>
+  </head>
+  <body>
+    <header id="toolbar" class="reader-toolbar" role="toolbar" aria-label="Reader view">
+      <button type="button" id="back" class="reader-back" title="Back to the page (Esc)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6 8.5 12l6 6" /></svg>
+        <span>Back to page</span>
+      </button>
+      <div class="reader-meta" id="meta" aria-live="polite"></div>
+      <div class="reader-settings-anchor">
+        <button type="button" id="settingsToggle" class="reader-settings-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings" title="Text and display settings">Aa</button>
+        <div id="settings" class="reader-settings" role="dialog" aria-label="Reader settings" hidden>
+          <div class="reader-setting">
+            <span class="reader-setting-label" id="fontLabel">Font</span>
+            <div class="reader-segmented" role="radiogroup" aria-labelledby="fontLabel">
+              <button type="button" role="radio" data-font="serif" class="font-serif">Serif</button>
+              <button type="button" role="radio" data-font="sans" class="font-sans">Sans</button>
+            </div>
+          </div>
+          <div class="reader-setting">
+            <span class="reader-setting-label" id="sizeLabel">Size</span>
+            <div class="reader-stepper" role="group" aria-labelledby="sizeLabel">
+              <button type="button" id="smaller" aria-label="Smaller text" title="Smaller text">A−</button>
+              <output id="sizeValue" aria-live="polite">19</output>
+              <button type="button" id="larger" aria-label="Larger text" title="Larger text">A+</button>
+            </div>
+          </div>
+          <div class="reader-setting">
+            <span class="reader-setting-label" id="widthLabel">Width</span>
+            <div class="reader-segmented" role="radiogroup" aria-labelledby="widthLabel">
+              <button type="button" role="radio" data-width="narrow">Narrow</button>
+              <button type="button" role="radio" data-width="medium">Medium</button>
+              <button type="button" role="radio" data-width="wide">Wide</button>
+            </div>
+          </div>
+          <div class="reader-setting">
+            <span class="reader-setting-label" id="themeLabel">Theme</span>
+            <div class="reader-segmented reader-themes" role="radiogroup" aria-labelledby="themeLabel">
+              <button type="button" role="radio" data-theme="light" class="theme-swatch theme-light">Light</button>
+              <button type="button" role="radio" data-theme="sepia" class="theme-swatch theme-sepia">Sepia</button>
+              <button type="button" role="radio" data-theme="dark" class="theme-swatch theme-dark">Dark</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main id="reader" class="reader-page">
+      <article id="article" class="reader-article" aria-busy="true">
+        <p class="reader-status" id="status">Loading article…</p>
+      </article>
+    </main>
+    <script type="module" src="./src/reader/main.ts"></script>
+  </body>
+</html>

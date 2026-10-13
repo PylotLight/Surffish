@@ -29,6 +29,7 @@ import { getRecentCommandIds, noteCommandUsed, openCommandPalette } from './comm
 import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canArchiveOtherBrowserTabs, closeDuplicateBrowserTabs, hasDuplicateBrowserTabs, restoreLastArchivedTab, runTabArchiveCheck } from './tab-archive'
 import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
 import { takeScreenshot } from './screenshot'
+import { readerStateFor, toggleReaderMode } from './reader-mode'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -128,6 +129,10 @@ const COMMANDS: BrowserCommand[] = [
   },
   { id: 'view.screenshotVisible', title: 'Screenshot Visible Area', section: 'View', keywords: ['capture', 'snapshot', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('visible') },
   { id: 'view.screenshotFull', title: 'Screenshot Full Page', section: 'View', keywords: ['capture', 'snapshot', 'whole page', 'scrolling', 'screen grab'], enabled: () => Boolean(getActiveTabWebContents()), run: () => takeScreenshot('full') },
+  {
+    id: 'view.reader', title: () => (readerStateFor(getActiveTabWebContents()) === 'active' ? 'Exit Reader View' : 'Reader View'), accelerator: APP_SHORTCUTS.readerView, section: 'View',
+    keywords: ['reader mode', 'article', 'readability', 'distraction free', 'clean'], enabled: () => readerStateFor(getActiveTabWebContents()) !== null, run: () => toggleReaderMode()
+  },
   { id: 'view.history', title: 'Show History', accelerator: TAB_COMMAND_SHORTCUTS.history.accelerator, section: 'View', keywords: ['visited'], run: () => openPanel('history') },
   { id: 'view.downloads', title: 'Show Downloads', accelerator: TAB_COMMAND_SHORTCUTS.downloads.accelerator, section: 'View', run: () => openPanel('downloads') },
 
@@ -143,6 +148,7 @@ const COMMANDS: BrowserCommand[] = [
   { id: 'settings.newTab', title: 'Settings: New Tab', section: 'Settings', keywords: ['preferences', 'clock', 'weather', 'background'], run: () => openPanel('newtab') },
   { id: 'settings.extensions', title: 'Settings: Extensions', section: 'Settings', keywords: ['preferences', 'chrome web store', 'bramble', 'addons'], run: () => openPanel('integrations') },
   { id: 'settings.site', title: 'Settings: This Site', section: 'Settings', keywords: ['permissions', 'adblock', 'clipboard', 'popups'], enabled: activeIsWebPage, run: () => openPanel('site') },
+  { id: 'settings.watchers', title: 'Page Watchers', section: 'Settings', keywords: ['watch', 'monitor', 'changes', 'diff', 'notify'], run: () => openPanel('watchers') },
   { id: 'tools.network', title: 'Network Inspector', section: 'Tools', keywords: ['requests', 'devtools', 'debug', 'har'], run: () => openPanel('network') },
   {
     id: 'settings.defaultBrowser', title: 'Make Surffish the Default Browser', section: 'Settings', keywords: ['default browser', 'open links'],

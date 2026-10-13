@@ -18,6 +18,7 @@ import { readSettingsFile, writeSettingsFile } from './safety-store'
 import { getProxyRoutingInput, onProxyRoutingChanged } from './proxy'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { setUpdateNetworkGuard } from './updates'
+import { setBackgroundNetworkGuard } from './background-network'
 
 /**
  * Proxy kill switch. With the switch on, a lightweight TCP probe watches every SOCKS5 proxy in
@@ -207,6 +208,8 @@ export function initializeProxyKillSwitch(): void {
     publish()
   })
   setUpdateNetworkGuard(() => blocksUrl(UPDATE_FEED_URL) ? 'The proxy kill switch is blocking traffic (proxy unreachable).' : null)
+  // Watchers/reader images are untargeted background work: hold them while any watched proxy is down.
+  setBackgroundNetworkGuard(() => armed() && anyBlocking() ? 'The proxy kill switch is blocking traffic (proxy unreachable).' : null)
   rearm()
 }
 

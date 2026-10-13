@@ -21,6 +21,8 @@ export interface ContextMenuTemplateOptions {
   pdfEditor?: boolean
   /** Offer Take Screenshot… next to Save Page As / Print. */
   hasScreenshot?: boolean
+  hasReaderView?: boolean
+  canWatchPage?: boolean
   canGoBack: boolean
   canGoForward: boolean
 }
@@ -50,6 +52,8 @@ export interface ContextMenuActions {
   savePdfEditor?(): void
   backToViewer?(): void
   takeScreenshot?(): void
+  readerView?(): void
+  watchPage?(mode: 'page' | 'pick'): void
 }
 
 /** Chrome shows a handful of guesses; more than this is noise in a context menu. */
@@ -197,6 +201,13 @@ export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, 
     }
     if (options.pdfDocument && options.hasEditPdf) items.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
     if (options.hasScreenshot) items.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
+    if (!options.pdfDocument && options.hasReaderView) items.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
+    if (!options.pdfDocument && options.canWatchPage && pageUrl) {
+      items.push(
+        { label: 'Watch This Page for Changes…', click: () => actions.watchPage?.('page') },
+        { label: 'Watch Part of This Page…', toolTip: 'Click the element to watch', click: () => actions.watchPage?.('pick') }
+      )
+    }
     items.push(
       { label: 'Print…', click: () => actions.print() },
       { label: 'Inspect', click: () => actions.inspect(params.x, params.y) }

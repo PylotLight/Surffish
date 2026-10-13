@@ -40,6 +40,8 @@ import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
 import { restoredTabInactiveSince } from './tab-archive-store'
 import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
+import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
+import { canWatchPage, watchPageFromTab } from './page-watchers'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -164,6 +166,7 @@ function getState(): BrowserState {
     private: tab?.isPrivate ?? false,
     zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
     pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
+    reader: tab?.pdfEditor ? null : readerStateFor(contents),
     interstitial: getTabInterstitial(contents)
   }
 }
@@ -392,11 +395,17 @@ function applyTabBounds(): void {
   for (const tab of tabs) {
     if (!tab.view) continue
     const visible = tab.id === activeTabId
+    // Reader view stands in for the page while it is open; the page stays loaded off screen.
+    const reader = readerViewFor(tab.view.webContents)
     // Only the page on screen stays in the window. A zero-size view still counts as visible on
     // macOS, so background tabs used to keep running rAF/timers at full speed and kept the GPU
     // process waking up; detached + hidden, Chromium throttles them like Chrome's background tabs.
-    if (browserWindow && !browserWindow.isDestroyed()) setPageViewOnScreen(browserWindow, tab.view, visible && pageAreaShown)
+    if (browserWindow && !browserWindow.isDestroyed()) {
+      setPageViewOnScreen(browserWindow, tab.view, visible && pageAreaShown && !reader)
+      if (reader) setPageViewOnScreen(browserWindow, reader, visible && pageAreaShown)
+    }
     tab.view.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
+    reader?.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
   }
 }
 
@@ -510,7 +519,9 @@ function activateTabInternal(id: string): boolean {
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
     contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
-    contents.focus()
+    // With Reader view open the keyboard belongs to the article, not the page under it.
+    const focusTarget = readerViewFor(contents)?.webContents ?? contents
+    focusTarget.focus()
     recoverCrashedTabOnActivate(contents)
   }
   applyTabBounds()
@@ -542,7 +553,12 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       save: () => sendPdfEditorCommand(contents, 'save'),
       backToViewer: () => { closePdfEditor(editorTab.id) }
     } : undefined,
-    takeScreenshot: isBrowserPage && tab.id === activeTabId ? () => { void takeScreenshot('choose') } : undefined
+    takeScreenshot: isBrowserPage && tab.id === activeTabId ? () => { void takeScreenshot('choose') } : undefined,
+    readerView: isBrowserPage && editorTab === undefined && readerStateFor(contents) !== null ? () => { void toggleReaderMode(contents) } : undefined,
+    // Never offered for private tabs: a watcher would re-fetch the page outside the private session.
+    watchPage: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate && canWatchPage(contents.getURL())
+      ? (mode) => { void watchPageFromTab(contents, mode, pageTitle(tab)) }
+      : undefined
   })
 }
 
@@ -667,6 +683,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   const contents = view.webContents
   attachNetworkInspector(tab.id, contents)
   attachTabSafety(contents)
+  if (!tab.extensionPageOrigin) attachReaderDetection(contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('before-mouse-event', (_event, mouseEvent) => {
     if (activeTabId !== tab.id || !isCurrentContents()) return
@@ -1035,6 +1052,32 @@ function hasUnsavedPdfEdits(): BrowserTab[] {
 function pdfEditorTabFor(contents: WebContents): BrowserTab | undefined {
   return tabs.find((tab) => tab.pdfEditor && tab.view?.webContents === contents)
 }
+
+function tabForPage(contents: WebContents): BrowserTab | undefined {
+  return tabs.find((tab) => tab.view?.webContents === contents)
+}
+
+attachReaderHost({
+  activePage: () => getActiveTabWebContents(),
+  isPrivate: (page) => tabForPage(page)?.isPrivate ?? false,
+  changed: (page) => {
+    const tab = tabForPage(page)
+    if (!tab) return
+    applyTabBounds()
+    if (tab.id === activeTabId) publishState()
+  },
+  handleShortcut: (page, input) => {
+    const tab = tabForPage(page)
+    return tab ? handleBrowserShortcutInput(input, tab.id) : false
+  },
+  openInNewTab: (page, url, background) => {
+    const isPrivate = tabForPage(page)?.isPrivate ?? false
+    if (background) openBackgroundTab(url, isPrivate)
+    else if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, isPrivate)) persistOpenTabs()
+  },
+  notify: (message) => flashLinkStatus(message, browserBounds, 2400),
+  window: () => browserWindow
+})
 
 attachPdfEditor({
   documentFor: (contents) => {
