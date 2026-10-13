@@ -176,7 +176,7 @@ test('accepts only HTTP(S) site settings and defaults each site to blocking and 
   assert.deepEqual(parsed.pinnedSites, [{ title: 'example.test', url: 'https://example.test/path' }])
   assert.deepEqual(parsed.siteSettings['https://example.test'], {
     origin: 'https://example.test', blockAds: false, openPopupsInTabs: false,
-    allowMedia: true, allowGeolocation: false, allowNotifications: true
+    allowMedia: true, allowGeolocation: false, allowNotifications: true, allowClipboardRead: false
   })
   assert.equal(Object.keys(parsed.siteSettings).length, 1)
 })

@@ -205,7 +205,8 @@ export function parseBrowserSiteSettings(originInput: unknown, value: unknown): 
     openPopupsInTabs: record.openPopupsInTabs === true,
     allowMedia: record.allowMedia === true,
     allowGeolocation: record.allowGeolocation === true,
-    allowNotifications: record.allowNotifications === true
+    allowNotifications: record.allowNotifications === true,
+    allowClipboardRead: record.allowClipboardRead === true
   }
 }
 

@@ -1756,7 +1756,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                         <span><strong>Notifications</strong><small>Allows notification requests for this origin.</small></span>
                         <input type="checkbox" className="settings-switch" checked={siteSettings.allowNotifications} onChange={(event) => void updateSiteSetting('allowNotifications', event.target.checked)} aria-label="Allow notifications on this site" />
                       </label>
-                      <p className="settings-help">All other web permissions stay denied. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
+                      <label className="site-setting-row">
+                        <span><strong>Read clipboard</strong><small>Lets this site read what you’ve copied (paste buttons). Copying to the clipboard is always allowed.</small></span>
+                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowClipboardRead} onChange={(event) => void updateSiteSetting('allowClipboardRead', event.target.checked)} aria-label="Allow this site to read the clipboard" />
+                      </label>
+                      <p className="settings-help">Copying, fullscreen and pointer lock work everywhere, like Chrome. All other web permissions stay denied, and you'll see a short notice when a site is blocked. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
                     </section>
                     <div className="settings-actions"><button className="settings-action primary" type="button" onClick={() => void window.api.browser.reload()}>Reload page to apply</button></div>
                   </>

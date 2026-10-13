@@ -27,6 +27,8 @@ import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, g
 import { guardPageDragRegions } from './page-drag-guard'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
+import { onPermissionDenied } from './proxy'
+import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -2377,3 +2379,18 @@ export async function browserPictureInPicture(): Promise<boolean> {
     return false
   }
 }
+
+// A blocked permission shouldn't look like a broken page: flash a short notice over the active tab.
+const shouldToastPermission = createPermissionToastThrottle()
+onPermissionDenied((contents, permission, requestingUrl) => {
+  const tab = activeTabId ? getTab(activeTabId) : undefined
+  if (!tab?.view || tab.view.webContents !== contents || contents.isDestroyed()) return
+  let origin = ''
+  try {
+    origin = new URL(requestingUrl).origin
+  } catch {
+    // Unknown origin: still say what was blocked.
+  }
+  if (!shouldToastPermission(permission, origin)) return
+  flashLinkStatus(permissionDeniedMessage(permission, origin), browserBounds, 3200)
+})
