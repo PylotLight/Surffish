@@ -6,10 +6,10 @@ stable id, a clock stamp and a tombstone, and every write lands in a change log.
 
 Status: **history** lives in the database (PR 1); the **open-windows session** (windows, tabs,
 pins, groups, splits, each tab's Space) is saved to it too (PR 2), with browser-session.json still
-written alongside as the fallback. **Bookmarks** and **browser preferences** moved next, with
-bookmarks.json / browser-preferences.json kept as fallback copies. Spaces definitions have a table
-already and move over next. Everything else (small settings files such as spellcheck, HTTPS-only,
-search keywords) is still JSON.
+written alongside as the fallback. **Bookmarks**, **browser preferences** and **Spaces** moved
+next, with bookmarks.json / browser-preferences.json / browser-spaces.json kept as fallback copies.
+Everything else (small settings files such as spellcheck, HTTPS-only, proxy routing, search
+keywords) is still JSON.
 
 ## Which SQLite
 
@@ -138,6 +138,15 @@ browsing data hard-delete the rows and leave only a `delete` op carrying the has
 deletes also rewrite the JSON copy immediately and truncate the WAL. Rows are read back in write
 order, so site zoom keeps "most recently changed last" for its cap. Measured: a change with 100
 per-site entries ~0.17 ms (was a ~24 KB rewrite, ~0.10 ms); load ~0.5 ms vs ~0.17 ms from JSON.
+
+### Spaces
+
+One `spaces` row per Space, keyed by its id (`default` is the same row everywhere), ordered by a
+fractional-index `position`; `separate_storage` is the "separate logins" switch and `proxy` the
+Space's route as JSON. The "Enable Spaces" switch is the `spaces.enabled` settings row (synced).
+Both copies are written on every change (browser-spaces.json is tiny and changes are rare); the
+database write only touches the Spaces that changed. A deleted Space is a tombstone with its name,
+icon and proxy blanked.
 
 ## Session (windows / tabs / groups / splits)
 
