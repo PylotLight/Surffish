@@ -124,7 +124,12 @@ export function saveBrowserSession(urls: readonly string[], activeIndex: number,
 
 /** Every window's tabs (multi-window session); the file stays readable as a one-window session by older builds. */
 export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | null): SavedWindowsSession {
-  return parseWindowsSession(readJson(SESSION_FILE), legacyGeometry)
+  const raw = readJson(SESSION_FILE)
+  const session = parseWindowsSession(raw, legacyGeometry)
+  // Rewrite the file at startup so a session saved by an older build (credential-like URL parts,
+  // world-readable mode) is sanitized and owner-only right away, not only after the next tab change.
+  if (raw !== null && raw !== undefined) writeJson(SESSION_FILE, serializeWindowsSession(normalizeWindowsSession(session.windows, session.focusedIndex)))
+  return session
 }
 
 export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): void {
