@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { cancelDeferredWrite, deferWrite } from './deferred-writes'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import {
@@ -20,6 +20,7 @@ import { normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, 
 import type { SavedWindowState } from '../shared/window-geometry'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
+import { createFileTextCache, isOwnerOnlyMode } from '../shared/write-skip'
 import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
@@ -32,11 +33,21 @@ let sessionPersistenceDisabled = false
 let siteIconsLoaded = false
 const cachedSiteIcons = new Map<string, string>()
 
+/**
+ * What each file last held (as read or written here). Start-up re-saves the session and
+ * preferences with what is already on disk, and tab bursts re-save an unchanged session; identical
+ * writes are skipped. A file read with group/other access is never skipped, so start-up still
+ * tightens a session left world-readable by an older build.
+ */
+const lastFileText = createFileTextCache()
+
 function readJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
   if (!existsSync(path)) return null
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as unknown
+    const text = readFileSync(path, 'utf8')
+    lastFileText.remember(path, text, isOwnerOnlyMode(statSync(path).mode, process.platform))
+    return JSON.parse(text) as unknown
   } catch (error) {
     console.warn(`Could not read ${filename}:`, error)
     return null
@@ -46,14 +57,18 @@ function readJson(filename: string): unknown {
 function writeJson(filename: string, value: unknown): boolean {
   const directory = app.getPath('userData')
   const path = join(directory, filename)
+  const text = JSON.stringify(value)
+  if (lastFileText.isUnchanged(path, text, existsSync)) return true
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
     mkdirSync(directory, { recursive: true })
-    writeFileSync(temporaryPath, JSON.stringify(value), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    writeFileSync(temporaryPath, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
     if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
     renameSync(temporaryPath, path)
+    lastFileText.remember(path, text)
     return true
   } catch (error) {
+    lastFileText.forget(path)
     try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
     console.error(`Could not save ${filename}:`, error)
     return false
