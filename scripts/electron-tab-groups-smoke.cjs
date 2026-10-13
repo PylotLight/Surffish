@@ -80,12 +80,14 @@ dialog.showMessageBox = async (...args) => {
   return { response: 0, checkboxChecked: false }
 }
 
-// Record the last native menu so the tab context menu's group items can be checked.
-let lastMenu = null
+// Record the native menus built since the last reset, so the tab context menu's group items can be
+// checked. Every one, not just the last: the app menu is rebuilt too (focus/tab changes) and could
+// land right after the tab menu.
+let menus = []
 const buildFromTemplate = Menu.buildFromTemplate.bind(Menu)
 Menu.buildFromTemplate = (template) => {
   const menu = buildFromTemplate(template)
-  lastMenu = template
+  menus.push(template)
   menu.popup = () => undefined
   return menu
 }
@@ -189,14 +191,22 @@ async function mainPhase() {
   assert.equal(await api(win, `commands.run(${json(`group.add:${groupId}`)})`), true, 'Add Tab to Group from the palette')
   assert.equal((await tabsOf(win)).find((tab) => tab.id === id.f).group?.id, groupId)
   // The tab menu: main resolves the row under the right-click with elementFromPoint.
-  lastMenu = null
+  menus = []
   await api(win, 'chrome.set({ sidebarPinned: true })')
-  await delay(500)
-  const sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
-  const box = await evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); return { x: Math.round(r.x + 20), y: Math.round(r.y + r.height / 2) } })()`)
+  // Wait until the row is really under its own centre (the pinned sidebar slides in), not a fixed delay:
+  // under load (2 smokes at a time on the Mac runner) 500 ms wasn't always enough.
+  let sidebarView
+  let box
+  await waitFor(async () => {
+    sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
+    box = await evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); const x = Math.round(r.x + 20); const y = Math.round(r.y + r.height / 2); return { x, y, hit: document.elementFromPoint(x, y)?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null } })()`)
+    return box.hit === id.f
+  }, 'the tab row under the pointer in the pinned sidebar').catch((error) => {
+    throw new Error(`${error.message} Last: ${surfaceFor(sidebarView)} view ${JSON.stringify(sidebarView?.getBounds())}, row ${JSON.stringify(box)}`)
+  })
   sidebarView.webContents.emit('context-menu', { preventDefault() {} }, { x: box.x, y: box.y })
-  await waitFor(() => lastMenu && lastMenu.some((item) => item.label === 'Remove from Group'), 'the tab menu with group items')
-  assert.ok(lastMenu.some((item) => item.label === 'Add Tab to New Group'))
+  const tabMenu = await waitFor(() => menus.find((template) => template.some((item) => item.label === 'Remove from Group')), 'the tab menu with group items')
+  assert.ok(tabMenu.some((item) => item.label === 'Add Tab to New Group'))
 
   // --- the archive keeps the group label
   assert.equal(await api(win, `tabArchive.archive(${json(id.f)})`), true)

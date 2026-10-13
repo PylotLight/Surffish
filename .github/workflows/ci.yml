@@ -291,9 +291,10 @@ jobs:
     timeout-minutes: 20
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      # Hidden smoke mode (scripts/smoke-hidden.cjs): the runner is someone's laptop in use, so no
-      # Dock icon, no visible window, no focus stealing.
-      SURFFISH_SMOKE_HIDDEN: "1"
+      # Hidden smoke mode v2 (scripts/smoke-hidden.cjs): the runner is someone's laptop in use, so no
+      # Dock icon and windows are never put on screen or focused (they keep rendering). "1" is the
+      # older near-invisible mode (windows on screen at 1% opacity), kept as a fallback.
+      SURFFISH_SMOKE_HIDDEN: "2"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -316,15 +317,25 @@ jobs:
       - name: bun install (fails if any Node.js process runs)
         run: bash scripts/ci/watch-node.sh bun install
       - run: bun run build
+      - name: Screen watcher (scripts/ci/window-watch.swift; the smokes run without it if it doesn't build)
+        run: swiftc -O -o "$RUNNER_TEMP/window-watch" scripts/ci/window-watch.swift || echo "::warning::window-watch did not build; no external on-screen check"
       - name: Core Electron smokes (2 at a time)
         env:
           TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors"
-          # TODO: run tab-groups hidden too. Hidden mode breaks the sidebar right-click hit-test it
-          # relies on (and it once stole focus anyway), so for now it runs with normal windows.
-          VISIBLE_TESTS: "test:electron-tab-groups"
+          # Smokes that need real windows (SURFFISH_SMOKE_HIDDEN=0). None at the moment.
+          VISIBLE_TESTS: ""
         run: |
           export logs="$RUNNER_TEMP/smoke-logs"; mkdir -p "$logs"
+          # Samples the screen while the smokes run: any on-screen window of an "Electron" process, or
+          # one becoming the frontmost app, is a warning (a dev Electron app of the user's counts too).
+          watch="$RUNNER_TEMP/window-watch"; wpid=""
+          if [ -x "$watch" ]; then "$watch" Electron 200 >"$logs/window-watch.log" 2>&1 & wpid=$!; fi
           printf '%s\n' $TESTS | xargs -P 2 -I{} sh -c 'case " $VISIBLE_TESTS " in *" $1 "*) export SURFFISH_SMOKE_HIDDEN=0;; esac; s=$(date +%s); bun run "$1" >"$logs/$1.log" 2>&1; echo "$? $(( $(date +%s) - s ))" >"$logs/$1.status"' _ {}
+          if [ -n "$wpid" ]; then
+            kill -TERM "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null || true
+            echo "::group::screen watcher"; cat "$logs/window-watch.log"; echo "::endgroup::"
+            if grep -q 'ON SCREEN\|TOOK FOCUS' "$logs/window-watch.log"; then echo "::warning::an Electron window was on screen or took focus during the smokes (see the screen watcher group)"; fi
+          fi
           failed=0
           for t in $TESTS; do
             read -r code secs < "$logs/$t.status"
@@ -349,7 +360,10 @@ jobs:
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       PERF_RUNS: 3
-      SURFFISH_SMOKE_HIDDEN: "1"
+      # Never-shown windows (v2), but only views that would be on screen are kept rendering, so
+      # background tabs are throttled like in a visible window and the idle/background CPU numbers hold.
+      SURFFISH_SMOKE_HIDDEN: "2"
+      SURFFISH_SMOKE_HIDDEN_THROTTLE: visible
     steps:
       - name: Checkout PR and its base (plain git, no third-party actions needed)
         env:
