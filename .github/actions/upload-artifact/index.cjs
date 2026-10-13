@@ -70,12 +70,15 @@ async function main() {
   const hash = crypto.createHash('sha256').update(zip).digest('hex')
   console.log(`zipped ${path.basename(file)}: ${zip.length} bytes, sha256 ${hash}`)
 
+  // the results service answers in proto field names (snake_case); accept camelCase too
+  const pick = (o, snake, camel) => (o[snake] !== undefined ? o[snake] : o[camel])
   const created = await twirp('CreateArtifact', { workflowRunBackendId, workflowJobRunBackendId, name, version: 4 }, token, base)
-  if (!created.ok || !created.signedUploadUrl) fail(`CreateArtifact: ${JSON.stringify(created)}`)
+  const uploadUrl = pick(created, 'signed_upload_url', 'signedUploadUrl')
+  if (!created.ok || !uploadUrl) fail(`CreateArtifact: ok=${created.ok}, keys=${Object.keys(created).join(',')}`)
 
   let uploaded = false
   for (let attempt = 1; attempt <= 3 && !uploaded; attempt++) {
-    const put = await fetch(created.signedUploadUrl, {
+    const put = await fetch(uploadUrl, {
       method: 'PUT',
       headers: { 'x-ms-blob-type': 'BlockBlob', 'x-ms-version': '2023-11-03', 'Content-Type': 'application/zip', 'Content-Length': String(zip.length) },
       body: zip
@@ -86,10 +89,11 @@ async function main() {
   if (!uploaded) fail('blob upload failed')
 
   const fin = await twirp('FinalizeArtifact', { workflowRunBackendId, workflowJobRunBackendId, name, size: String(zip.length), hash: `sha256:${hash}` }, token, base)
-  if (!fin.ok) fail(`FinalizeArtifact: ${JSON.stringify(fin)}`)
-  const url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/artifacts/${fin.artifactId}`
-  console.log(`artifact ${name} (#${fin.artifactId}): ${url}`)
-  setOutput('artifact-id', fin.artifactId)
+  const artifactId = pick(fin, 'artifact_id', 'artifactId')
+  if (!fin.ok || !artifactId) fail(`FinalizeArtifact: ${JSON.stringify(fin)}`)
+  const url = `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}/artifacts/${artifactId}`
+  console.log(`artifact ${name} (#${artifactId}): ${url}`)
+  setOutput('artifact-id', artifactId)
   setOutput('artifact-url', url)
 }
 
