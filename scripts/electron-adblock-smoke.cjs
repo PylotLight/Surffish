@@ -200,7 +200,11 @@ async function cleanup() {
     server.closeAllConnections?.()
     await new Promise((r) => server.close(r))
   }
-  if (app.isReady()) app.quit()
+  // app.quit() ends the process with code 0; keep a failure's exit code.
+  if (app.isReady()) {
+    if (process.exitCode) app.exit(process.exitCode)
+    else app.quit()
+  }
 }
 
 run().then(cleanup).catch(async (error) => {

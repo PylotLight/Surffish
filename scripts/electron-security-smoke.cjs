@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { createHash } = require('node:crypto')
+const { createHash, X509Certificate } = require('node:crypto')
 const { createServer: createHttpServer } = require('node:http')
 const { createServer: createTlsServer } = require('node:https')
 const { createServer: createSocksServer, connect } = require('node:net')
@@ -106,6 +106,13 @@ function startTlsReleaseFixture(profile) {
   chmodSync(keyPath, 0o600)
   const key = readFileSync(keyPath)
   const cert = readFileSync(certPath)
+  // Trust this one test certificate in Chromium itself. setCertificateVerifyProc alone is racy: when the
+  // app fetches two assets from one host in parallel, Chromium coalesces the two verifications and the
+  // joined request sometimes gets the raw ERR_CERT_AUTHORITY_INVALID instead of the proc's answer.
+  // (Chromium only honours the SPKI list when --user-data-dir is set too; this runs before app ready.)
+  const spki = createHash('sha256').update(new X509Certificate(cert).publicKey.export({ type: 'spki', format: 'der' })).digest('base64')
+  app.commandLine.appendSwitch('user-data-dir', profile)
+  app.commandLine.appendSwitch('ignore-certificate-errors-spki-list', spki)
   const fixture = makeReleaseFixture()
   const server = createTlsServer({ key, cert }, (request, response) => {
     requests.push({ host: request.headers.host, path: request.url })
@@ -290,12 +297,25 @@ async function run() {
   assert.match(siteActionsMenu, /Picture in Picture/)
   await evaluate(views.toolbar, `Array.from(document.querySelectorAll('#site-actions-menu [role="menuitem"]')).find((item) => item.textContent?.includes('Site settings'))?.click()`)
   await waitFor(async () => (await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'site', 'the Site settings menu action')
-  await evaluate(views.sidebar, `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]').click()`)
+  // Site settings is a settings section, so the gear closes settings first, then opens them.
+  // sidebarMode reaches the sidebar surface by broadcast, so main can report a mode a frame before the
+  // sidebar renders it; clicking the gear in that window toggles from the stale mode. Wait until the
+  // sidebar's gear shows the expected pressed state (what a person would see) before each click.
+  const gear = `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]')`
+  const clickGear = async (pressed, description) => {
+    await waitFor(() => evaluate(views.sidebar, `${gear}?.getAttribute('aria-pressed') === '${pressed}'`), `the sidebar Settings gear to show ${description}`)
+    await evaluate(views.sidebar, `${gear}.click()`)
+  }
+  await clickGear(true, 'Site settings open')
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the Settings gear closing Site settings')
+  await clickGear(false, 'settings closed')
   await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'the Settings gear action')
-  const doneButtonText = await waitFor(async () => evaluate(views.sidebar, `document.querySelector('.settings-done-button')?.innerText || null`), 'the Settings Done button')
-  assert.match(doneButtonText, /Done.*Back to web/)
-  await evaluate(views.sidebar, `document.querySelector('.settings-done-button').click()`)
-  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'Done returning to browser tabs')
+  // The Done button went away in #56; the gear (title "Close settings (Esc)") closes settings now.
+  await waitFor(() => evaluate(views.sidebar, `${gear}?.getAttribute('aria-pressed') === 'true'`), 'the sidebar Settings gear to show settings open')
+  const gearTitle = await evaluate(views.sidebar, `${gear}?.title || null`)
+  assert.match(gearTitle || '', /Close settings/)
+  await clickGear(true, 'settings open')
+  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the gear returning to browser tabs')
   await evaluate(views.toolbar, `window.api.browser.chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })`)
   const browserSession = session.fromPartition('persist:surffish-browser')
   const trustedReleaseHosts = new Set(['api.github.com', 'github.com', 'release-assets.githubusercontent.com'])
@@ -378,22 +398,24 @@ async function run() {
     }
     return null
   }, 'the saved-session privacy control')
-  const integrationsTab = await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).some((button) => button.textContent.trim() === 'Integrations')`)
-  assert.equal(integrationsTab, true, 'Settings exposes a separate Integrations tab')
-  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'Integrations')?.click()`)
-  await waitFor(() => evaluate(settingsView, `document.querySelector('.settings-page-heading-copy h1')?.textContent === 'Integrations & add-ons'`), 'the Integrations page heading')
-  const integrationsControls = await evaluate(settingsView, `({
-    newTab: Boolean(document.querySelector('[aria-label="Default new tab page"]') && document.querySelector('[aria-label="New Tab clocks"]')),
-    adblocking: Boolean(document.querySelector('[aria-label="Site ad blocking"]')),
-    bramble: Boolean(document.querySelector('[aria-label="Bramble extension settings"]')),
+  // Settings sections (#56 and later): Integrations became "Extensions" (Bramble + Web Store) and New Tab
+  // got its own section; site ad blocking lives under "This site".
+  const subnavLabels = await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).map((button) => button.textContent.trim())`)
+  assert.ok(subnavLabels.includes('Extensions') && subnavLabels.includes('New Tab'), `Settings exposes separate Extensions and New Tab sections (${subnavLabels.join(', ')})`)
+  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'Extensions')?.click()`)
+  await waitFor(() => evaluate(settingsView, `document.querySelector('.settings-page-heading-copy h1')?.textContent === 'Extensions'`), 'the Extensions page heading')
+  const extensionsControls = await evaluate(settingsView, `({
+    bramble: Boolean(document.querySelector('.bramble-settings-section')),
     generalOnly: Boolean(document.querySelector('[aria-label="Clear saved session"]'))
   })`)
-  assert.deepEqual(integrationsControls, { newTab: true, adblocking: true, bramble: true, generalOnly: false }, 'New Tab, ad blocking, and Bramble configuration are grouped in Integrations')
+  assert.deepEqual(extensionsControls, { bramble: true, generalOnly: false }, 'Bramble configuration is grouped in Extensions, apart from General')
+  await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'New Tab')?.click()`)
+  await waitFor(() => evaluate(settingsView, `Boolean(document.querySelector('[aria-label="Default new tab page"]') && document.querySelector('[aria-label="Show local clock"]'))`), 'the New Tab settings page')
   await evaluate(settingsView, `Array.from(document.querySelectorAll('.settings-subnav button')).find((button) => button.textContent.trim() === 'General')?.click()`)
   await waitFor(() => evaluate(settingsView, `Boolean(document.querySelector('[aria-label="Clear saved session"]'))`), 'the General settings page')
-  const disclosure = await evaluate(settingsView, `document.querySelector('[aria-label="Saved session privacy"]')?.innerText || ''`)
-  assert.match(disclosure, /stored locally/i, 'Settings disclose local session storage')
-  assert.match(disclosure, /ordinary query parameters/i, 'Settings explain that normal URL behavior is preserved')
+  const disclosure = await evaluate(settingsView, `document.querySelector('[aria-label="Clear saved session"]')?.closest('.settings-row')?.innerText || ''`)
+  assert.match(disclosure, /restore on next launch/i, 'Settings disclose that tabs are saved for the next launch')
+  assert.match(disclosure, /credential-like URL parts are stripped/i, 'Settings explain that credential-like URL data is stripped')
   await evaluate(settingsView, `window.confirm = () => true; document.querySelector('[aria-label="Clear saved session"]').click()`)
   await waitFor(() => {
     try { return JSON.parse(readFileSync(savedSessionPath, 'utf8')).tabs?.length === 0 } catch { return false }
@@ -423,7 +445,8 @@ async function cleanup() {
   openSockets.clear()
   for (const server of servers) server.closeAllConnections?.()
   await Promise.all(servers.map((server) => closeServer(server).catch(() => undefined)))
-  if (app.isReady()) {
+  // app.quit() ends the process with code 0, so a failed run must exit with its code instead.
+  if (app.isReady() && !process.exitCode) {
     app.quit()
     await delay(250)
   }
