@@ -7,7 +7,7 @@
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
-const { mkdirSync, rmSync, writeFileSync } = require('node:fs')
+const { mkdirSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -208,7 +208,7 @@ async function mainPhase() {
   await waitFor(async () => json((await tabsOf(win)).map(pathOf).sort()) === json(['/a', '/e', '/f']), 'three tabs closed')
 
   server.close()
-  rmSync(userData, { recursive: true, force: true })
+  smoke.removeProfile(userData)
   console.log('Electron tab selection smoke passed.')
 }
 

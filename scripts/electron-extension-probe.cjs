@@ -1,7 +1,8 @@
 require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
-const { mkdtempSync, rmSync } = require('node:fs')
+const { mkdtempSync } = require('node:fs')
+const { removeProfile } = require('./smoke-profile.cjs')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const { app, BrowserWindow, session } = require('electron')
@@ -229,7 +230,7 @@ async function cleanup() {
     await new Promise((resolve) => server.close(resolve))
   }
   if (app.isReady()) app.quit()
-  if (userDataDirectory) rmSync(userDataDirectory, { recursive: true, force: true })
+  if (userDataDirectory) removeProfile(userDataDirectory)
 }
 
 run().then(cleanup).catch(async (error) => {

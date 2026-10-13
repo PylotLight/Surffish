@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { SurffishDatabase } from './database.ts'
 import { HISTORY_ENTITY, HistoryStore } from './history-store.ts'
 import { importLegacyHistory, scrubLegacyHistory } from './history-legacy.ts'
+import { FILE_DB_TEST_TIMEOUT_MS, storeTestDir } from './test-temp-dir.ts'
 
 function memoryStore(max?: number): { db: SurffishDatabase; history: HistoryStore } {
   const db = SurffishDatabase.open({ path: ':memory:' })
@@ -61,8 +61,8 @@ test('bulk add skips known ids and exact url+time repeats, and prune keeps the n
   db.close()
 })
 
-test('imports browsing-history.json once, re-imports only when the file changes, and scrubs it on clear', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'surffish-hist-'))
+test('imports browsing-history.json once, re-imports only when the file changes, and scrubs it on clear', { timeout: FILE_DB_TEST_TIMEOUT_MS }, () => {
+  const dir = storeTestDir('surffish-hist-')
   try {
     const path = join(dir, 'browsing-history.json')
     writeFileSync(path, JSON.stringify([

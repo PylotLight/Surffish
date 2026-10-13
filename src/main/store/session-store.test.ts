@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { SurffishDatabase } from './database.ts'
 import { SessionStore } from './session-store.ts'
 import { normalizeWindowsSession, type SessionWindowInput } from '../../shared/window-session.ts'
+import { FILE_DB_TEST_TIMEOUT_MS, storeTestDir } from './test-temp-dir.ts'
 
 const geometry = { bounds: { x: 10, y: 20, width: 1200, height: 800 }, maximized: false, fullScreen: false }
 
@@ -83,8 +83,8 @@ test('saving again only writes rows that changed, and closed tabs become tombsto
   db.close()
 })
 
-test('restored tabs adopt their old rows after a restart (new runtime ids)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'surffish-session-'))
+test('restored tabs adopt their old rows after a restart (new runtime ids)', { timeout: FILE_DB_TEST_TIMEOUT_MS }, () => {
+  const dir = storeTestDir('surffish-session-')
   try {
     const path = join(dir, 'surffish.db')
     const first = SurffishDatabase.open({ path })

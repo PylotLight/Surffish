@@ -8,7 +8,7 @@ const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { spawn } = require('node:child_process')
 const { createServer } = require('node:http')
-const { mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs')
+const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
@@ -253,7 +253,7 @@ async function mainPhase() {
   })
   server.close()
   assert.equal(exitCode, 0, 'the restore phase passed')
-  rmSync(userData, { recursive: true, force: true })
+  smoke.removeProfile(userData)
   console.log('Electron split view smoke passed.')
 }
 

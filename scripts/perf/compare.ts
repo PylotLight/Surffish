@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 // Compares two apps from a run.ts report and prints a markdown table.
 //   bun scripts/perf/compare.ts perf.json --base main --head pr [--title "Perf (linux)"] [--markdown out.md]
-// Exit code 1 when any metric fails its threshold (scripts/perf/perf.config.json), 0 otherwise.
+// Exit code 0 when nothing fails its threshold (scripts/perf/perf.config.json), 3 when only timing/
+// memory ("noisy") metrics fail (CI then runs a confirmation pass, scripts/perf/merge.ts), 1 otherwise.
 import { readFileSync, writeFileSync } from 'node:fs'
-import { compare, markdownTable, type PerfConfig } from './metrics.ts'
+import { compare, compareExitCode, markdownTable, type PerfConfig } from './metrics.ts'
 
 const args = process.argv.slice(2)
 const file = args[0]?.startsWith('--') ? undefined : args[0]
@@ -27,7 +28,8 @@ const md = [
   `### ${opt('title', `Perf check (${report.platform})`)}: ${summary}`,
   '',
   `Median of ${base.samples.length} (main) / ${head.samples.length} (PR) cold runs each, interleaved on one runner (${report.platform} ${report.arch}, Electron ${sample.electron ?? '?'}, ${report.seconds}s).` +
-    (base.failures + head.failures ? ` ${base.failures + head.failures} run(s) failed and were skipped.` : ''),
+    (base.failures + head.failures ? ` ${base.failures + head.failures} run(s) failed and were skipped.` : '') +
+    (report.confirmRuns ? ` Includes a ${report.confirmRuns}-run confirmation pass: the first pass flagged only timing/memory metrics, so both passes are pooled before judging.` : ''),
   '',
   markdownTable(rows),
   '',
@@ -48,4 +50,4 @@ const md = [
 console.log(md)
 const out = opt('markdown')
 if (out) writeFileSync(out, md)
-process.exit(fails.length ? 1 : 0)
+process.exit(compareExitCode(rows))

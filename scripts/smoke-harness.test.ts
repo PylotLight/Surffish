@@ -32,3 +32,15 @@ test('hidden smoke mode: macOS only, v1 or v2, throttle mode for perf', () => {
   assert.equal(throttleMode({}), 'all')
   assert.equal(throttleMode({ SURFFISH_SMOKE_HIDDEN_THROTTLE: 'visible' }), 'visible')
 })
+
+test('smoke profiles are removed with retries, and a leftover profile only warns', () => {
+  const { removeProfile } = createRequire(import.meta.url)('./smoke-profile.cjs')
+  const calls: unknown[] = []
+  assert.equal(removeProfile('/tmp/p', { rm: (dir: string, options: unknown) => { calls.push([dir, options]) } }), true)
+  assert.deepEqual(calls, [['/tmp/p', { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }]], 'retries ENOTEMPTY/EBUSY from late Chromium writes')
+  const warnings: string[] = []
+  const busy = () => { throw Object.assign(new Error('Directory not empty'), { code: 'ENOTEMPTY' }) }
+  assert.equal(removeProfile('/tmp/p', { rm: busy, warn: (line: string) => warnings.push(line) }), false)
+  assert.match(warnings[0]!, /ENOTEMPTY.*not a test failure/)
+  assert.equal(removeProfile('', { rm: busy }), true, 'nothing to remove')
+})

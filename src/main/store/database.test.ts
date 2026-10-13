@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdtempSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { StoreOpenError, SurffishDatabase } from './database.ts'
 import { SCHEMA_VERSION } from './schema.ts'
+import { FILE_DB_TEST_TIMEOUT_MS, storeTestDir } from './test-temp-dir.ts'
 
-function tempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'surffish-db-'))
-}
+const tempDir = (): string => storeTestDir('surffish-db-')
+// Every test here opens real files (see test-temp-dir.ts for why they can be slow on CI disks).
+const fileDb = { timeout: FILE_DB_TEST_TIMEOUT_MS }
 
-test('opens a fresh file in WAL mode with the schema, a device id and owner-only permissions', () => {
+test('opens a fresh file in WAL mode with the schema, a device id and owner-only permissions', fileDb, () => {
   const dir = tempDir()
   try {
     const path = join(dir, 'surffish.db')
@@ -35,7 +35,7 @@ test('opens a fresh file in WAL mode with the schema, a device id and owner-only
   }
 })
 
-test('the clock resumes past the last stamp after reopening', () => {
+test('the clock resumes past the last stamp after reopening', fileDb, () => {
   const dir = tempDir()
   try {
     const path = join(dir, 'surffish.db')
@@ -52,7 +52,7 @@ test('the clock resumes past the last stamp after reopening', () => {
   }
 })
 
-test('refuses a database from a newer build and reports a corrupt file as corrupt', () => {
+test('refuses a database from a newer build and reports a corrupt file as corrupt', fileDb, () => {
   const dir = tempDir()
   try {
     const path = join(dir, 'surffish.db')
@@ -73,7 +73,7 @@ test('refuses a database from a newer build and reports a corrupt file as corrup
   }
 })
 
-test('migrations run in order, once, and a failing one rolls back', () => {
+test('migrations run in order, once, and a failing one rolls back', fileDb, () => {
   const dir = tempDir()
   try {
     const path = join(dir, 'surffish.db')
@@ -92,7 +92,7 @@ test('migrations run in order, once, and a failing one rolls back', () => {
   }
 })
 
-test('writes to synced tables land in the oplog, newest op per row, with the row as JSON', () => {
+test('writes to synced tables land in the oplog, newest op per row, with the row as JSON', fileDb, () => {
   const db = SurffishDatabase.open({ path: ':memory:' })
   const insert = (key: string, value: string): void => {
     const { now, hlc, deviceId } = db.stamp()
