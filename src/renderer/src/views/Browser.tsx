@@ -48,6 +48,7 @@ import { NetworkOverridesBadge } from './NetworkOverridesPanel'
 import { isInsecurePageUrl } from '../../../shared/https-only'
 import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
+import { dismissPopovers, usePopoverDismiss } from '../lib/popover-dismiss'
 import { useTabDragSort } from './useTabDragSort'
 import { SplitTabEntry } from './SplitTabEntry'
 import { groupTabEntries } from '../../../shared/split-view'
@@ -925,24 +926,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (surface === 'content' && searchEngineLoaded) void window.api.browser.setSearchEngine(searchEngine)
   }, [searchEngine, searchEngineLoaded, surface])
 
-  useEffect(() => {
-    if (!downloadsPopupOpen) return
-    const closeOnOutsideClick = (event: PointerEvent): void => {
-      if (!downloadsControlRef.current?.contains(event.target as Node)) setDownloadsPopupOpen(false)
-    }
-    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setDownloadsPopupOpen(false)
-        downloadsButtonRef.current?.focus()
-      }
-    }
-    window.addEventListener('pointerdown', closeOnOutsideClick)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      window.removeEventListener('pointerdown', closeOnOutsideClick)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [downloadsPopupOpen])
+  usePopoverDismiss(downloadsPopupOpen, downloadsControlRef, () => setDownloadsPopupOpen(false), { returnFocusRef: downloadsButtonRef })
 
   useEffect(() => {
     if (surface === 'sidebar' || (!isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks')) return
@@ -956,24 +940,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     return () => window.removeEventListener('keydown', exitOnEscape)
   }, [surface, sidebarMode, downloadsPopupOpen, siteActionsOpen, extensionsMenuOpen])
 
-  useEffect(() => {
-    if (!siteActionsOpen) return
-    const closeOnOutsideClick = (event: PointerEvent): void => {
-      if (!siteActionsControlRef.current?.contains(event.target as Node)) setSiteActionsOpen(false)
-    }
-    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setSiteActionsOpen(false)
-        siteActionsButtonRef.current?.focus()
-      }
-    }
-    window.addEventListener('pointerdown', closeOnOutsideClick)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      window.removeEventListener('pointerdown', closeOnOutsideClick)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [siteActionsOpen])
+  // Closes on any press outside it, the page view included (see usePopoverDismiss), not only the globe.
+  usePopoverDismiss(siteActionsOpen, siteActionsControlRef, () => setSiteActionsOpen(false), { returnFocusRef: siteActionsButtonRef })
+
+  // Main saw a press on the page view (a separate WebContentsView this document never hears).
+  useEffect(() => window.api.browser.onDismissPopovers(dismissPopovers), [])
 
   useEffect(() => {
     const element = browserChromeRef.current

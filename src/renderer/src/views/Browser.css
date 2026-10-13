@@ -149,6 +149,20 @@
   stroke-linecap: round;
   stroke-dasharray: 26 74;
 }
+/* The arc's dashes are laid out in its own units: with non-scaling-stroke Chromium dashes in device
+ * space and drops the arc for most dash offsets. 3.39 units is the same 2.4px at the 17px size. */
+.tab-spinner .tab-spinner-arc {
+  vector-effect: none;
+  stroke-width: 3.39;
+}
+/* Clockwise, one lap per 0.9 s (pathLength is 100, so -100 is one lap). Paint-only, no layer. */
+.tab-spinner-arc.is-turning {
+  animation: tab-spinner-lap 0.9s linear infinite;
+}
+@keyframes tab-spinner-lap {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -100; }
+}
 .tab-favicon.is-sleeping {
   background: rgba(154, 184, 223, 0.11);
   color: rgba(192, 213, 241, 0.75);

@@ -52,7 +52,7 @@ jobs:
           tests: "test:electron-spaces test:electron-split-view test:electron-multi-window test:electron-sidebar-overlay test:electron-tab-archive test:electron-reader-watchers test:electron-screenshot test:electron-network-tools"
         - lane: C
           unit: true
-          tests: "test:electron-perf test:electron-extensions test:electron-tab-groups test:electron-tab-selection test:electron-pdf-editor test:electron-nav-errors test:electron-adblock test:electron-host-bridge"
+          tests: "test:electron-perf test:electron-extensions test:electron-tab-groups test:electron-tab-selection test:electron-pdf-editor test:electron-nav-errors test:electron-adblock test:electron-host-bridge test:electron-spinner-popover"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:

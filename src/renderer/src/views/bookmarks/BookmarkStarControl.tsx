@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FAVOURITES_FOLDER_ID, normalizeBookmarkUrl } from '../../../../shared/bookmarks'
 import { BookmarkFolderSelect, ipcErrorMessage, StarGlyph } from './BookmarkParts'
 import type { BookmarksState } from './useBookmarks'
+import { usePopoverDismiss } from '../../lib/popover-dismiss'
 
 /**
  * The omnibox star. Click (or Cmd+D, which main handles) bookmarks the page into Favourites and
@@ -62,24 +63,7 @@ export function BookmarkStarControl({ bookmarks, url, title, faviconUrl, isPriva
     }
   }
 
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent): void => {
-      if (!controlRef.current?.contains(event.target as Node)) void close(true)
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      void close(true)
-      buttonRef.current?.focus()
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  })
+  usePopoverDismiss(open, controlRef, () => void close(true), { returnFocusRef: buttonRef, preventEscapeDefault: true })
 
   async function toggle(): Promise<void> {
     if (editingId) {

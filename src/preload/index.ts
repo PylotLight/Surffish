@@ -52,6 +52,7 @@ import { tabGroupsApi } from './tab-groups'
 import { tabSelectionApi } from './tab-selection'
 import { watchersApi } from './watchers'
 import { onTabsChange } from './tab-sync'
+import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 
 const api = {
   platform: process.platform,
@@ -150,6 +151,12 @@ const api = {
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
     },
     pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
+    /** Main saw a press on the page view: close toolbar popovers (shared/popover-dismiss.ts). */
+    onDismissPopovers: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on(POPOVER_DISMISS_CHANNEL, listener)
+      return () => ipcRenderer.removeListener(POPOVER_DISMISS_CHANNEL, listener)
+    },
     zoom: (action: 'in' | 'out' | 'reset'): Promise<void> => ipcRenderer.invoke('browser:zoom', action),
     find: {
       get: (): Promise<BrowserFindState> => ipcRenderer.invoke('browser:find:get'),

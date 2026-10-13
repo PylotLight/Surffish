@@ -3,7 +3,7 @@ import type { BrowserTabSummary } from '../../../shared/types'
 
 /** Favicon / loading spinner, audio mute button and pinned-tab icon used by the tab sidebar. */
 /**
- * `animate` is false while this surface's sidebar is off screen: SMIL keeps ticking (and
+ * `animate` is false while this surface's sidebar is off screen: an animation keeps ticking (and
  * repainting the blurred sidebar) even under visibility:hidden, so the arc then sits still.
  */
 export function TabFavicon({ tab, animate = true }: { tab: BrowserTabSummary; animate?: boolean }): React.JSX.Element {
@@ -14,12 +14,13 @@ export function TabFavicon({ tab, animate = true }: { tab: BrowserTabSummary; an
       {tab.loading ? (
         <svg className="tab-spinner" viewBox="0 0 24 24" shapeRendering="geometricPrecision">
           <circle className="tab-spinner-track" cx="12" cy="12" r="9" />
-          {/* SMIL rotation keeps the arc vector-drawn every frame; a CSS transform on the svg
-              gets rasterised into a layer and wobbles into a lumpy squircle at favicon size. */}
-          <g>
-            <circle className="tab-spinner-arc" cx="12" cy="12" r="9" pathLength="100" />
-            {animate && <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite" />}
-          </g>
+          {/* The arc travels round the ring by animating stroke-dashoffset (CSS, Browser.css), so it
+              is vector-drawn every frame and never handed to the compositor: a CSS transform (on the
+              svg or on a <g>) gets rasterised into a layer and wobbles into a lumpy squircle at
+              favicon size. It used to be a SMIL <animateTransform>, but Chromium held a freshly
+              mounted SMIL arc still for one whole cycle (0.9 s) before it turned, which is what
+              selecting a sleeping tab showed. A CSS animation moves from the first frame. */}
+          <circle className={`tab-spinner-arc${animate ? ' is-turning' : ''}`} cx="12" cy="12" r="9" pathLength="100" />
         </svg>
       ) : tab.faviconUrl && !iconFailed
         ? <img src={tab.faviconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setIconFailed(true)} />
