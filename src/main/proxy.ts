@@ -6,6 +6,7 @@ import type { BrowserProxySettings, BrowserProxyTestResult } from '../shared/typ
 import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../shared/persistence'
 import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
+import { isAlwaysAllowedPermission } from '../shared/site-permissions'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
@@ -13,11 +14,13 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let currentSettings: BrowserProxySettings = { ...DEFAULT_PROXY_SETTINGS }
 
 function siteAllowsPermission(origin: string, permission: string): boolean {
+  if (isAlwaysAllowedPermission(permission)) return true
   const settings = getBrowserSiteSettings(origin)
   if (!settings) return false
   if (permission === 'media') return settings.allowMedia
   if (permission === 'geolocation' || permission === 'geolocation-approximate') return settings.allowGeolocation
   if (permission === 'notifications') return settings.allowNotifications
+  if (permission === 'clipboard-read') return settings.allowClipboardRead
   return false
 }
 
@@ -105,8 +108,20 @@ function installWebRTCPolicyHook(): void {
 function applyPermissionPolicy(target: Electron.Session): void {
   target.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
   target.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    callback(siteAllowsPermission(details.requestingUrl || webContents.getURL(), permission))
+    const requestingUrl = details.requestingUrl || webContents.getURL()
+    const allowed = siteAllowsPermission(requestingUrl, permission)
+    callback(allowed)
+    if (!allowed) for (const listener of permissionDeniedListeners) listener(webContents, permission, requestingUrl)
   })
+}
+
+type PermissionDeniedListener = (contents: WebContents, permission: string, requestingUrl: string) => void
+const permissionDeniedListeners = new Set<PermissionDeniedListener>()
+
+/** Hear about permission requests the site policy turned down (not silent permission checks). */
+export function onPermissionDenied(listener: PermissionDeniedListener): () => void {
+  permissionDeniedListeners.add(listener)
+  return () => { permissionDeniedListeners.delete(listener) }
 }
 
 /** Called after app.whenReady and before any browser content is created. */

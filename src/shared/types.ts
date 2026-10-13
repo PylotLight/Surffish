@@ -67,6 +67,7 @@ export interface BrowserSiteSettings {
   allowMedia: boolean
   allowGeolocation: boolean
   allowNotifications: boolean
+  allowClipboardRead: boolean
 }
 
 export interface BrowserProxySettings {
