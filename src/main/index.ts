@@ -27,7 +27,7 @@ import { holdPageRequestsUntil } from './request-gate'
 import { afterFirstWindowPaint, traceStartup } from './startup-defer'
 import { registerPdfEditorScheme } from './pdf-editor'
 import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
-import { disposePageWatchers, initializePageWatchers, registerPageWatcherIpc } from './page-watchers'
+import { disposePageWatchersFeature, initializePageWatchersFeature, registerPageWatcherIpc } from './page-watchers-feature'
 import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
@@ -106,8 +106,9 @@ app.whenReady().then(async () => {
   initializeMemorySaver()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
   initializeUpdates()
-  // Page watchers: checks run in main on their own schedule (never for private tabs).
-  initializePageWatchers()
+  // Page watchers: checks run in main on their own schedule (never for private tabs). Off in
+  // Settings → General means the watcher module is never loaded.
+  initializePageWatchersFeature()
   // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
   app.on('activate', () => {
     if (browserWindows().length === 0) restoreWindows()
@@ -158,7 +159,7 @@ app.on('before-quit', () => {
   // Windows close one by one while quitting; keep all of them in the saved session.
   freezeBrowserSession()
   disposeUpdates()
-  disposePageWatchers()
+  disposePageWatchersFeature()
   disposeMemorySaver()
   disposeBramblePoc()
   disposeWebStoreExtensions()

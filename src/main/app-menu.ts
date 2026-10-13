@@ -8,7 +8,7 @@ import { APP_SHORTCUTS } from './app-shortcuts'
 import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
-import { revealPageWatchers } from './page-watchers'
+import { onPageWatchersEnabledChange, pageWatchersEnabled, revealPageWatchers } from './page-watchers-feature'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 
@@ -177,7 +177,7 @@ export function installAppMenu(): void {
         { role: 'zoom' },
         { type: 'separator' },
         tabItem('Downloads', 'downloads'),
-        { label: 'Page Watchers', click: () => { revealPageWatchers() } },
+        ...(pageWatchersEnabled() ? [{ label: 'Page Watchers', click: () => { revealPageWatchers() } }] : []),
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
         ...windowListMenuItems()
@@ -190,6 +190,7 @@ export function installAppMenu(): void {
   if (!windowMenuWatched) {
     windowMenuWatched = true
     keepWindowMenuCurrent(installAppMenu)
+    onPageWatchersEnabledChange(() => installAppMenu())
   }
 }
 
