@@ -16,7 +16,9 @@ import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const electron = createRequire(import.meta.url)('electron')
-const port = Number(process.env.SURFFISH_SMOKE_DEBUG_PORT ?? 9447)
+// Port 0 by default: Chromium picks a free port (printed as "DevTools listening on ws://..."), so this
+// smoke never collides with a running Surffish (9447 is a dev port) or another smoke in the same CI pod.
+let port = Number(process.env.SURFFISH_SMOKE_DEBUG_PORT ?? 0)
 const headless = process.argv.includes('--headless')
 const work = mkdtempSync(join(tmpdir(), 'surffish-pdf-editor-'))
 const input = join(work, 'smoke.pdf')
@@ -88,6 +90,7 @@ class Target {
 }
 
 async function targets() {
+  if (!port) throw new Error('no DevTools port yet')
   const response = await fetch(`http://127.0.0.1:${port}/json/list`)
   return response.json()
 }
@@ -108,7 +111,10 @@ const app = spawn(electron, args, {
 })
 let appLog = ''
 app.stdout.on('data', (chunk) => { appLog += chunk })
-app.stderr.on('data', (chunk) => { appLog += chunk })
+app.stderr.on('data', (chunk) => {
+  appLog += chunk
+  if (!port) port = Number(/DevTools listening on ws:\/\/[^:/]+:(\d+)\//.exec(appLog)?.[1] ?? 0)
+})
 
 let failed = false
 try {

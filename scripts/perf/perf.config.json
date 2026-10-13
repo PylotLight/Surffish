@@ -1,6 +1,7 @@
 {
   "$comment": "Perf check config. See docs/perf.md. Regression = PR worse than main by more than BOTH pct and abs. deterministic: fail above failPct. noisy: warn above warnPct, fail above failPct (never fails where noisyFail is false). leak: fail when PR leaves anything behind and more than main.",
   "runs": 3,
+  "warmup": 1,
   "bench": {
     "tabsMid": 10,
     "tabsMax": 30,
@@ -25,9 +26,9 @@
     "bundle.rendererEagerJs": { "kind": "deterministic", "label": "renderer JS loaded at startup", "unit": "KB" },
     "bundle.rendererJs": { "kind": "deterministic", "label": "renderer JS, all assets", "unit": "KB" },
     "bundle.rendererCss": { "kind": "deterministic", "label": "renderer CSS", "unit": "KB" },
-    "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 150 },
-    "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100 },
-    "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 5 },
+    "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 150, "stat": "min", "$comment": "best of the runs: a busy pod stalls single cold starts by 0.5-3 s on identical code" },
+    "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100, "stat": "min" },
+    "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 12, "$comment": "batched broadcasts: 146-155 on identical code" },
     "mem1.totalMB": { "kind": "noisy", "label": "memory, 1 tab", "unit": "MB", "abs": 15 },
     "memMid.totalMB": { "kind": "noisy", "label": "memory, 10 tabs", "unit": "MB", "abs": 20 },
     "memMax.totalMB": { "kind": "noisy", "label": "memory, 30 tabs", "unit": "MB", "abs": 30 },

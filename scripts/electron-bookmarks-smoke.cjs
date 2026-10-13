@@ -102,7 +102,10 @@ async function run() {
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   // An older profile: the 12-site strip lives in preferences and there is no bookmarks.json yet.
   writeFileSync(join(userData, 'browser-preferences.json'), JSON.stringify({ version: 1, pinnedSites: [{ title: 'Seed', url: 'https://seed.test/' }] }))
-  await seedChromeProfile()
+  // Not awaited here: sql.js init is async, and awaiting it before importing the app let Electron
+  // become ready first (then the app's registerSchemesAsPrivileged throws). The fixture is only read
+  // when the import below runs.
+  const chromeProfileSeeded = seedChromeProfile()
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const origin = `http://127.0.0.1:${server.address().port}`
   const fixtureUrl = `${origin}/article?id=7`
@@ -207,6 +210,7 @@ async function run() {
   await waitFor(async () => !(await evaluate(toolbar, 'Boolean(document.querySelector(".bookmarks-bar"))')), 'Cmd/Ctrl+Shift+B to hide the bar')
   await waitFor(() => second.getBounds().y === pageTopBefore, 'the page to move back up')
 
+  await chromeProfileSeeded
   // --- Import… from the dropdown opens the manager with its import panel
   await evaluate(toolbar, 'document.querySelector(".bookmarks-menu-button").click()')
   await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#bookmarks-menu"))'), 'the dropdown again')

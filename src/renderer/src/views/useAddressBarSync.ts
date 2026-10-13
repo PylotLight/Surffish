@@ -24,6 +24,7 @@ export function useAddressBarSync({
   const syncedRef = useRef(displayUrl)
   const valueRef = useRef(address)
   const displayRef = useRef(displayUrl)
+  const selectAllRef = useRef(false)
   useLayoutEffect(() => {
     valueRef.current = address
     displayRef.current = displayUrl
@@ -40,12 +41,20 @@ export function useAddressBarSync({
       return
     }
     // A focused bar with the whole URL selected stays fully selected, so typing still replaces it.
-    const wasAllSelected = typing && input !== null && input.selectionStart === 0 && input.selectionEnd === input.value.length
+    // Reselect as soon as React commits the new value (a rAF is too late: a keystroke that lands
+    // before the next frame would be appended to the new URL instead of replacing it).
+    selectAllRef.current = typing && input !== null && input.selectionStart === 0 && input.selectionEnd === input.value.length
     syncedRef.current = value
     valueRef.current = value
     setAddress(value)
-    if (wasAllSelected && input) window.requestAnimationFrame(() => { if (document.activeElement === input) input.select() })
   }, [inputRef, setAddress])
+
+  useLayoutEffect(() => {
+    if (!selectAllRef.current) return
+    selectAllRef.current = false
+    const input = inputRef.current
+    if (input && document.activeElement === input && input.value === address) input.select()
+  }, [address, inputRef])
 
   useEffect(() => { sync('url') }, [displayUrl, sync])
   useEffect(() => { sync('tab') }, [tabKey, sync])

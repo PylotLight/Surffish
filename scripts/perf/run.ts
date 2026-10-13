@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { flatten, median } from './metrics.ts'
+import { aggregate, flatten, type Stat } from './metrics.ts'
 
 const here = import.meta.dir
 const config = JSON.parse(readFileSync(join(here, 'perf.config.json'), 'utf8'))
@@ -16,6 +16,9 @@ const config = JSON.parse(readFileSync(join(here, 'perf.config.json'), 'utf8'))
 const args = process.argv.slice(2)
 const apps: { label: string; dir: string }[] = []
 let runs = Number(process.env.PERF_RUNS || config.runs || 3)
+// One discarded start-up-only launch per app first: the very first Electron launch on a fresh pod
+// pays for the font cache, the shader cache and a cold page cache (up to ~3 s of "first paint").
+let warmup = Number(process.env.PERF_WARMUP ?? config.warmup ?? 1)
 let outFile = ''
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!
@@ -23,6 +26,7 @@ for (let i = 0; i < args.length; i++) {
     const [label, dir] = args[++i]!.split('=')
     apps.push({ label: label!, dir: resolve(dir!) })
   } else if (a === '--runs') runs = Number(args[++i])
+  else if (a === '--warmup') warmup = Number(args[++i])
   else if (a === '--out') outFile = args[++i]!
   else throw new Error(`unknown argument ${a}`)
 }
@@ -64,15 +68,15 @@ function electronFor(dir: string): string {
 
 const tmp = mkdtempSync(join(tmpdir(), 'surffish-perf-'))
 const bench = join(here, 'bench.cjs')
-function sample(app: { label: string; dir: string }, n: number): Record<string, unknown> | null {
+function sample(app: { label: string; dir: string }, n: number, warm = false): Record<string, unknown> | null {
   if (!existsSync(join(app.dir, 'out/main/index.js'))) throw new Error(`${app.dir} has no out/main/index.js (run bun run build there)`)
-  const out = join(tmp, `${app.label}-${n}.json`)
+  const out = join(tmp, `${app.label}-${warm ? 'warmup' : n}.json`)
   const extra = process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX ? ['--no-sandbox'] : []
   for (let attempt = 1; attempt <= 2; attempt++) {
     const started = Date.now()
     const r = spawnSync(electronFor(app.dir), [...extra, bench], {
       cwd: app.dir,
-      env: { ...process.env, PERF_APP_DIR: app.dir, PERF_OUT: out, PERF_CONFIG: JSON.stringify(config.bench ?? {}) },
+      env: { ...process.env, PERF_APP_DIR: app.dir, PERF_OUT: out, PERF_CONFIG: JSON.stringify(config.bench ?? {}), PERF_WARMUP: warm ? '1' : '' },
       encoding: 'utf8',
       timeout: 150_000,
       maxBuffer: 64 * 1024 * 1024
@@ -80,6 +84,7 @@ function sample(app: { label: string; dir: string }, n: number): Record<string, 
     const secs = ((Date.now() - started) / 1000).toFixed(1)
     if (r.status === 0 && existsSync(out)) {
       const s = JSON.parse(readFileSync(out, 'utf8'))
+      if (warm) { console.error(`[perf] ${app.label} warm-up ok (${secs}s, first paint ${s.startup?.firstPaintMs}ms, discarded)`); rmSync(out, { force: true }); return s }
       console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms`)
       rmSync(out, { force: true })
       return s
@@ -93,6 +98,7 @@ function sample(app: { label: string; dir: string }, n: number): Record<string, 
 const results: Record<string, { dir: string; bundle: ReturnType<typeof bundleSizes>; samples: Record<string, unknown>[]; failures: number; median: Record<string, number> }> = {}
 for (const app of apps) results[app.label] = { dir: app.dir, bundle: bundleSizes(app.dir), samples: [], failures: 0, median: {} }
 const started = Date.now()
+for (let n = 0; n < warmup; n++) for (const app of apps) sample(app, n, true)
 for (let n = 0; n < runs; n++) {
   const order = n % 2 === 0 ? apps : [...apps].reverse()
   for (const app of order) {
@@ -104,11 +110,12 @@ for (let n = 0; n < runs; n++) {
 for (const r of Object.values(results)) {
   const flat = r.samples.map((s) => flatten(s))
   const keys = new Set(flat.flatMap((f) => Object.keys(f)))
-  for (const k of keys) r.median[k] = median(flat.map((f) => f[k]!).filter((v) => v !== undefined))
+  // `median` holds each metric's aggregate: the median, or the minimum for metrics with "stat": "min".
+  for (const k of keys) r.median[k] = aggregate(flat.map((f) => f[k]!).filter((v) => v !== undefined), config.metrics?.[k]?.stat as Stat | undefined)
   for (const [k, v] of Object.entries(r.bundle)) r.median[`bundle.${k}`] = v
 }
 rmSync(tmp, { recursive: true, force: true })
-const report = { platform: process.platform, arch: process.arch, runs, seconds: Math.round((Date.now() - started) / 1000), config, apps: results }
+const report = { platform: process.platform, arch: process.arch, runs, warmup, seconds: Math.round((Date.now() - started) / 1000), config, apps: results }
 const json = JSON.stringify(report, null, 2)
 if (outFile) writeFileSync(outFile, json)
 console.log(JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { failures: v.failures, median: v.median }])), null, 2))

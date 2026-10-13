@@ -117,8 +117,9 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
           await window.api.browser.commands.run(item.commandId)
           return
         case 'tab':
-          await window.api.browser.tabs.activate(item.tabId)
-          await window.api.browser.commandPalette.closed(true)
+          // Activating a tab already focuses its page; a second refocus after it lands late and
+          // can steal focus from wherever the user went next (e.g. straight into the address bar).
+          if (!(await window.api.browser.tabs.activate(item.tabId))) await window.api.browser.commandPalette.closed(true)
           return
         case 'archived':
           await window.api.browser.tabArchive.restore(item.archivedId)

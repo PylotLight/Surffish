@@ -43,7 +43,7 @@
     "test:electron-spinner-popover": "electron scripts/electron-spinner-popover-smoke.cjs",
     "perf": "bun scripts/perf/run.ts",
     "perf:compare": "bun scripts/perf/compare.ts",
-    "test:perf": "bun test scripts/perf/metrics.test.ts",
+    "test:perf": "bun test scripts/perf/metrics.test.ts scripts/perf/app-changed.test.ts",
     "test:electron-youtube": "electron scripts/electron-adblock-youtube.cjs",
     "test:electron-adblock-sites": "electron scripts/electron-adblock-youtube.cjs --sites",
     "test:electron-extensions": "bun scripts/run-electron-extension-probes.cjs",

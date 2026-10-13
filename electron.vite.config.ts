@@ -118,7 +118,11 @@ export default defineConfig({
       },
       // Three renderer surfaces each parse this bundle at launch; ship it minified.
       minify: true,
-      cssMinify: true
+      cssMinify: true,
+      // The only chunk past Vite's 500 kB default is the PDF editor entry (pdf.js + pdf-lib, ~1 MB),
+      // which loads on its own page and never at startup (the perf check tracks the startup JS).
+      // Warn again if anything grows past that.
+      chunkSizeWarningLimit: 1200
     }
   }
 })

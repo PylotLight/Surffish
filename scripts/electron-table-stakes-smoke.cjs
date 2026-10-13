@@ -138,8 +138,14 @@ async function run() {
   await waitFor(() => Math.abs(page.webContents.getZoomFactor() - 1.1) < 0.001, 'zoom back to 110%')
 
   // --- hover link status pill
-  page.webContents.sendInputEvent({ type: 'mouseMove', x: 400, y: 220 })
-  const statusView = await waitFor(() => views().find((view) => view.webContents.getURL().startsWith('data:text/html') && view.getVisible() && view.getBounds().width > 0), 'the link status pill')
+  // The zoom change just above re-lays the page out, and a single move that lands before that (or
+  // while a hidden Mac CI window is still settling) never hovers the link: keep nudging the pointer
+  // (1px back and forth, every ~250 ms) until the pill shows.
+  let moves = 0
+  const statusView = await waitFor(() => {
+    if (moves++ % 5 === 0) page.webContents.sendInputEvent({ type: 'mouseMove', x: 400 + (moves % 2), y: 220 })
+    return views().find((view) => view.webContents.getURL().startsWith('data:text/html') && view.getVisible() && view.getBounds().width > 0)
+  }, 'the link status pill')
   const statusText = await evaluate(statusView, 'document.getElementById("pill").textContent')
   assert.equal(statusText, 'example.com/target?utm_source=smoke')
   const statusBounds = statusView.getBounds()
