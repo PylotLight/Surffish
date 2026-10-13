@@ -4,7 +4,10 @@
  */
 export const APP_SHORTCUTS = {
   newTab: 'CmdOrCtrl+T',
-  newPrivateTab: 'CmdOrCtrl+Shift+N',
+  // Cmd/Ctrl+Shift+N is New Private Window (as in Chrome), so the private tab moved to Alt.
+  newPrivateTab: 'CmdOrCtrl+Alt+N',
+  newWindow: 'CmdOrCtrl+N',
+  newPrivateWindow: 'CmdOrCtrl+Shift+N',
   reopenClosedTab: 'CmdOrCtrl+Shift+T',
   openLocation: 'CmdOrCtrl+L',
   editPdf: 'CmdOrCtrl+Shift+E',

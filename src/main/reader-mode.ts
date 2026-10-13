@@ -91,7 +91,8 @@ export interface ReaderHost {
   openInNewTab(page: WebContents, url: string, background: boolean): void
   /** A short notice near the bottom of the page (e.g. "No article found"). */
   notify(message: string): void
-  window(): BaseWindow | null
+  /** The window `page`'s tab is in (the current window without a page). */
+  window(page?: WebContents): BaseWindow | null
 }
 
 interface ReaderDocument {
@@ -355,7 +356,7 @@ function disposeDocument(state: PageState): void {
   if (!document) return
   state.document = null
   documentsByToken.delete(document.token)
-  const window = host?.window()
+  const window = host?.window(document.page)
   if (window && !window.isDestroyed() && window.contentView.children.includes(document.view)) window.contentView.removeChildView(document.view)
   if (!document.view.webContents.isDestroyed()) document.view.webContents.close()
 }
@@ -366,7 +367,7 @@ function readerDocumentFor(contents: WebContents): ReaderDocument | null {
 }
 
 function showReaderContextMenu(document: ReaderDocument, params: Electron.ContextMenuParams): void {
-  const window = host?.window()
+  const window = host?.window(document.page)
   if (!window || window.isDestroyed()) return
   const contents = document.view.webContents
   const items: MenuItemConstructorOptions[] = []

@@ -23,7 +23,7 @@ import { getBrowserPinnedSites } from './browser-persistence'
 import { focusVisibleShellPage, getBrowserChromeState, isNativeOverlayMode, sendFocusAddressToVisibleRenderer, setBrowserChromeState } from './browser-shell'
 import { getDefaultBrowserStatus, makeDefaultBrowser } from './external-links'
 import { isTabOverviewOpen, toggleTabOverview } from './tab-overview'
-import { getMainWindow } from './window'
+import { createBrowserWindow, getMainWindow } from './window'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { getRecentCommandIds, noteCommandUsed, openCommandPalette } from './command-palette'
 import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canArchiveOtherBrowserTabs, closeDuplicateBrowserTabs, hasDuplicateBrowserTabs, restoreLastArchivedTab, runTabArchiveCheck } from './tab-archive'
@@ -157,6 +157,8 @@ const COMMANDS: BrowserCommand[] = [
   },
 
   // Window
+  { id: 'window.new', title: 'New Window', accelerator: APP_SHORTCUTS.newWindow, section: 'Window', keywords: ['open window'], run: () => createBrowserWindow(false) },
+  { id: 'window.newPrivate', title: 'New Private Window', accelerator: APP_SHORTCUTS.newPrivateWindow, section: 'Window', keywords: ['incognito', 'private', 'burner'], run: () => createBrowserWindow(true) },
   {
     id: 'window.close', title: 'Close Window', accelerator: APP_SHORTCUTS.closeWindow, section: 'Window', keywords: ['quit'],
     run: () => { const win = getMainWindow(); if (win && !win.isDestroyed()) win.close() }

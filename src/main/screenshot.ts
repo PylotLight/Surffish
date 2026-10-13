@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 import { app, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, WebContentsView, type BaseWindow, type IpcMainEvent, type NativeImage, type WebContents } from 'electron'
 import type { BrowserBounds } from '../shared/types'
 import {
@@ -75,8 +76,10 @@ const ISOLATED_WORLD_ID = 2026
 const MAX_INCOMING_PNG_BYTES = 256 * 1024 * 1024
 const STITCH_SETTLE_MS = 90
 
+// One overlay serves every window: it moves to whichever window takes a screenshot (one capture at a time).
 let ownerWindow: BaseWindow | null = null
 let host: ScreenshotHost | null = null
+const hosts = new Map<BaseWindow, { host: ScreenshotHost; onResize: () => void }>()
 let view: WebContentsView | null = null
 let pageReady = false
 let pendingShow: Record<string, unknown> | null = null
@@ -357,6 +360,7 @@ function ensureView(): WebContentsView | null {
     }
   })
   ownerWindow.contentView.addChildView(created)
+  bindContentsToWindow(created.webContents, ownerWindow)
   view = created
   pageReady = false
   void created.webContents
@@ -546,21 +550,46 @@ function watchTarget(target: ScreenshotTarget): () => void {
 // Public API
 
 export function attachScreenshots(win: BaseWindow, screenshotHost: ScreenshotHost): void {
-  ownerWindow = win
-  host = screenshotHost
+  detachScreenshots(win)
+  const onResize = (): void => { if (ownerWindow === win) scheduleLayout() }
+  hosts.set(win, { host: screenshotHost, onResize })
   registerIpc()
-  win.on('resize', scheduleLayout)
+  win.on('resize', onResize)
+  if (!ownerWindow) {
+    ownerWindow = win
+    host = screenshotHost
+  }
 }
 
-export function detachScreenshots(): void {
+export function detachScreenshots(win?: BaseWindow): void {
+  const target = win ?? ownerWindow
+  if (!target) return
+  const entry = hosts.get(target)
+  hosts.delete(target)
+  if (entry && !target.isDestroyed()) target.removeListener('resize', entry.onResize)
+  if (ownerWindow !== target) return
   endSession(false)
-  if (ownerWindow && !ownerWindow.isDestroyed()) ownerWindow.removeListener('resize', scheduleLayout)
   const closing = liveView()
   view = null
   pageReady = false
   if (closing) closing.webContents.close()
   ownerWindow = null
   host = null
+}
+
+/** Point the overlay at `win` (the window taking the screenshot), moving the view over if it exists. */
+function useWindow(win: BaseWindow | null): void {
+  if (!win || win === ownerWindow || win.isDestroyed()) return
+  const entry = hosts.get(win)
+  if (!entry) return
+  if (session) endSession(false)
+  const existing = liveView()
+  if (existing && ownerWindow && !ownerWindow.isDestroyed() && ownerWindow.contentView.children.includes(existing)) {
+    ownerWindow.contentView.removeChildView(existing)
+  }
+  ownerWindow = win
+  host = entry.host
+  if (existing) bindContentsToWindow(existing.webContents, win)
 }
 
 export function isScreenshotOpen(): boolean {
@@ -572,12 +601,18 @@ export function getScreenshotContentsId(): number | null {
   return liveView()?.webContents.id ?? null
 }
 
+export function getScreenshotContentsIds(): number[] {
+  const id = getScreenshotContentsId()
+  return id === null ? [] : [id]
+}
+
 /**
  * Cmd/Ctrl+Shift+S, the palette and the page context menu. `choose` opens the frozen-page
  * selector (drag a region, or Visible Area / Full Page); `visible` and `full` go straight to the
  * preview. Running it again while the selector is up closes it.
  */
 export async function takeScreenshot(mode: ScreenshotMode = 'choose'): Promise<boolean> {
+  useWindow(currentBrowserWindow())
   if (!host || !ownerWindow || ownerWindow.isDestroyed()) return false
   if (session) {
     const wasSelecting = session.mode === 'select'

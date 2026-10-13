@@ -1,13 +1,17 @@
-import { app, BaseWindow } from 'electron'
+// First: scopes every IPC handler registered after it to the sender's window (multi-window).
+import { installIpcWindowScope } from './ipc-window-scope'
+import { app } from 'electron'
 import { dirname, join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { registerDiagnosticsIpc } from './diagnostics'
 import { registerBookmarkIpc } from './bookmarks-ipc'
+import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { initializeBrowserProxy } from './proxy'
-import { createWindow, setMainWindowCloseHandler } from './window'
-import { setBrowserSearchEngine } from './browser'
+import { restoreWindows, setMainWindowCloseHandler } from './window'
+import { freezeBrowserSession, setBrowserSearchEngine } from './browser'
+import { browserWindows } from './window-scope'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
 import { disposeBramblePoc, initializeBramblePoc } from './bramble-poc'
@@ -21,6 +25,7 @@ import { disposePageWatchers, initializePageWatchers, registerPageWatcherIpc } f
 import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
+installIpcWindowScope()
 app.setName(APP_NAME)
 // Dev builds get their own profile, so they can run beside the installed release app.
 // The single-instance lock is per profile (userData), so each profile still has one window owner.
@@ -80,6 +85,7 @@ app.whenReady().then(async () => {
   registerUpdateIpc()
   registerDiagnosticsIpc()
   registerBookmarkIpc()
+  registerWindowIpc()
   registerTabArchiveIpc()
   registerReaderIpc()
   registerPageWatcherIpc()
@@ -95,7 +101,8 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Could not load Chrome Web Store extensions; continuing without them:', error)
   }
-  createWindow()
+  // Every saved window comes back (an older single-window session becomes one window).
+  restoreWindows()
   flushExternalOpens()
   initializeTabArchive()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
@@ -107,8 +114,9 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn('Could not initialize the Bramble extension; continuing without it:', error)
   }
+  // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
   app.on('activate', () => {
-    if (BaseWindow.getAllWindows().length === 0) createWindow()
+    if (browserWindows().length === 0) restoreWindows()
   })
 }).catch((error: unknown) => {
   console.error('App startup failed:', error)
@@ -118,6 +126,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 app.on('before-quit', () => {
+  // Windows close one by one while quitting; keep all of them in the saved session.
+  freezeBrowserSession()
   disposeUpdates()
   disposePageWatchers()
   disposeBramblePoc()

@@ -173,6 +173,10 @@ const api = {
       activate: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:activate', id),
       close: (id: string): Promise<void> => ipcRenderer.invoke('browser:tabs:close', id),
       move: (id: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move', id, beforeId),
+      /** A sidebar drag ended outside the list: main moves the tab to the window under the pointer, or a new one. */
+      dropOutside: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:drop-outside', id),
+      moveToNewWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move-to-new-window', id),
+      newWindow: (isPrivate = false): Promise<boolean> => ipcRenderer.invoke('browser:windows:new', isPrivate),
       setMuted: (id: string, muted: boolean): Promise<boolean> => ipcRenderer.invoke('browser:tabs:mute', id, muted),
       onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {
         const listener = (_event: Electron.IpcRendererEvent, tabs: BrowserTabSummary[]): void => callback(tabs)

@@ -10,9 +10,9 @@ import {
 import { getBrowserTabProcessEntries, reloadBrowserTab, suspendBrowserTab } from './browser'
 import { getBrowserSession } from './browser-session'
 import { getBrowserChromeState, getMainWindowRenderers, isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
-import { getLinkStatusContentsId } from './link-status'
-import { getTabOverviewContentsId } from './tab-overview'
-import { getScreenshotContentsId } from './screenshot'
+import { getLinkStatusContentsIds } from './link-status'
+import { getTabOverviewContentsIds } from './tab-overview'
+import { getScreenshotContentsIds } from './screenshot'
 
 /**
  * Diagnostics / Task Manager. Samples app.getAppMetrics() every 2 s, only while a Diagnostics
@@ -73,7 +73,9 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
     const pid = safeOsPid(contents)
     if (!pid) continue
     claimed.add(contents.id)
-    const { label, detail } = describeTabOccupant(tab.title, tab.url)
+    const { label, detail: tabDetail } = describeTabOccupant(tab.title, tab.url)
+    // With several windows open, say which one the tab lives in.
+    const detail = tab.windowNumber ? `${tabDetail} · window ${tab.windowNumber}` : tabDetail
     occupants.push({ pid, kind: tab.pdfEditor ? 'pdf-editor' : tab.extensionPage ? 'extension' : 'tab', label, detail, tabId: tab.id })
     try {
       internalToOs.set(contents.getProcessId(), pid)
@@ -89,9 +91,9 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
   }
 
   const shell = new Set(getMainWindowRenderers().map((contents) => contents.id))
-  const linkStatusId = getLinkStatusContentsId()
-  const overviewId = getTabOverviewContentsId()
-  const screenshotId = getScreenshotContentsId()
+  const linkStatusIds = new Set(getLinkStatusContentsIds())
+  const overviewIds = new Set(getTabOverviewContentsIds())
+  const screenshotIds = new Set(getScreenshotContentsIds())
   for (const contents of allWebContents.getAllWebContents()) {
     if (contents.isDestroyed() || claimed.has(contents.id)) continue
     const pid = safeOsPid(contents)
@@ -110,11 +112,11 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
         // keep the default
       }
       occupants.push({ pid, kind: 'shell', label: surface })
-    } else if (contents.id === linkStatusId) {
+    } else if (linkStatusIds.has(contents.id)) {
       occupants.push({ pid, kind: 'overlay', label: 'link status' })
-    } else if (contents.id === overviewId) {
+    } else if (overviewIds.has(contents.id)) {
       occupants.push({ pid, kind: 'overlay', label: 'tab overview' })
-    } else if (contents.id === screenshotId) {
+    } else if (screenshotIds.has(contents.id)) {
       occupants.push({ pid, kind: 'overlay', label: 'screenshot' })
     } else if (url.startsWith('chrome-extension://')) {
       const id = hostOf(url)

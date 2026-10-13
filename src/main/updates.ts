@@ -27,7 +27,7 @@ import {
 import { APP_NAME } from '../shared/config'
 import { getBrowserSession } from './browser-session'
 import { isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
-import { getActiveTabWebContents, openExternalBrowserTab } from './browser'
+import { getBrowserTabWebContents, openExternalBrowserTab } from './browser'
 import { getMainWindow } from './window'
 
 /**
@@ -304,7 +304,8 @@ export async function downloadUpdate(): Promise<UpdateState> {
   const asset = await findDownloadAsset(release)
   const tabId = openExternalBrowserTab(release.link)
   if (asset && tabId) {
-    const contents = getActiveTabWebContents()
+    // The release tab may open in another window than the one in front (e.g. a private one is focused).
+    const contents = getBrowserTabWebContents(tabId)
     if (contents) {
       pendingAssetUrl = asset
       downloadedPath = null

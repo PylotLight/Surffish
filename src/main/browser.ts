@@ -5,7 +5,7 @@ import { Buffer } from 'node:buffer'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, clipboard, dialog, Menu, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
+import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import type { ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
@@ -15,7 +15,8 @@ import { stepZoomFactor } from '../shared/zoom'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION, clearPrivateSession, getBrowserSession, getPrivateSession, whenPrivateSessionReady } from './browser-session'
 import { forgetPrivateDownloads } from './downloads'
-import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, saveBrowserSiteZoom, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
+import type { SavedWindowState } from '../shared/window-geometry'
 import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
@@ -24,7 +25,8 @@ import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle,
 import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
@@ -42,11 +44,13 @@ import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
 import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
 import { canWatchPage, watchPageFromTab } from './page-watchers'
-import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
+import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
 interface BrowserTab {
   id: string
+  /** The window the tab is in; changes when the tab is moved to another window. */
+  win: BrowserWindowState
   view: WebContentsView | null
   faviconUrl: string | null
   faviconRevision: number
@@ -102,10 +106,21 @@ const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
 export const BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
 const MAC_SWIPE_SETTLE_MS = 180
 const MAC_SWIPE_DEBUG = process.env.SURFFISH_SWIPE_DEBUG === '1'
-const tabs: BrowserTab[] = []
-let activeTabId: string | null = null
-let browserWindow: BaseWindow | null = null
-let browserBounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 }
+interface FindState { tabId: string | null; open: boolean; text: string; result: BrowserFindState['result'] }
+
+/** One browser window: its tabs (in sidebar order) and the per-window page state. */
+interface BrowserWindowState {
+  window: BaseWindow
+  tabs: BrowserTab[]
+  activeTabId: string | null
+  /** Page area in window coordinates (where the active site view sits). */
+  browserBounds: BrowserBounds
+  findState: FindState
+  confirmingWindowClose: boolean
+  /** Private window: every new tab in it is private, and it is never saved to the session. */
+  isPrivate: boolean
+}
+const windowStates: BrowserWindowState[] = []
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
 let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
 let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
@@ -123,8 +138,52 @@ function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): str
   return page === 'bonjourr' ? START_PAGE : SURFFISH_QUICK_LINKS_URL
 }
 
-function getTab(id: string | null = activeTabId): BrowserTab | undefined {
-  return tabs.find((tab) => tab.id === id)
+function isLiveWindow(w: BrowserWindowState | undefined): w is BrowserWindowState {
+  return Boolean(w && windowStates.includes(w) && !w.window.isDestroyed())
+}
+
+function windowStateFor(window: BaseWindow | null | undefined): BrowserWindowState | undefined {
+  return window ? windowStates.find((w) => w.window === window && !w.window.isDestroyed()) : undefined
+}
+
+/** The window an implicit call is for: the IPC sender's, else the focused / last focused one. */
+function currentWindowState(): BrowserWindowState | undefined {
+  return windowStateFor(currentBrowserWindow()) ?? (windowStates.length === 1 ? windowStates[0] : undefined)
+}
+
+/** Every tab in every window. */
+function allTabs(): BrowserTab[] {
+  return windowStates.flatMap((w) => w.tabs)
+}
+
+function findTab(id: string | null | undefined): BrowserTab | undefined {
+  if (!id) return undefined
+  for (const w of windowStates) {
+    const tab = w.tabs.find((candidate) => candidate.id === id)
+    if (tab) return tab
+  }
+  return undefined
+}
+
+function tabForContents(contents: WebContents): BrowserTab | undefined {
+  for (const w of windowStates) {
+    const tab = w.tabs.find((candidate) => candidate.view?.webContents === contents)
+    if (tab) return tab
+  }
+  return undefined
+}
+
+function activeTabOf(w: BrowserWindowState | undefined): BrowserTab | undefined {
+  return w ? w.tabs.find((tab) => tab.id === w.activeTabId) : undefined
+}
+
+function isActiveTab(tab: BrowserTab): boolean {
+  return tab.win.activeTabId === tab.id
+}
+
+/** No argument: the current window's active tab. With an id: that tab, in whichever window it is. */
+function getTab(id?: string | null): BrowserTab | undefined {
+  return id === undefined ? activeTabOf(currentWindowState()) : findTab(id)
 }
 
 function currentUrl(tab: BrowserTab): string {
@@ -137,8 +196,8 @@ function isExtensionPage(tab: BrowserTab, url: string): boolean {
 }
 export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
   if (contents.isDestroyed()) return false
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
-  return Boolean(tab?.pauseAutoplayUntilVisited && tab.id !== activeTabId)
+  const tab = tabForContents(contents)
+  return Boolean(tab?.pauseAutoplayUntilVisited && !isActiveTab(tab))
 }
 function pageTitle(tab: BrowserTab): string {
   if (tab.pdfEditor) return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty)
@@ -152,8 +211,8 @@ function pageTitle(tab: BrowserTab): string {
   }
 }
 
-function getState(): BrowserState {
-  const tab = getTab()
+function getState(w = currentWindowState()): BrowserState {
+  const tab = activeTabOf(w)
   const contents = tab?.view?.webContents
   return {
     url: tab ? currentUrl(tab) : configuredStartPage(),
@@ -163,7 +222,7 @@ function getState(): BrowserState {
     canGoBack: tab?.pdfEditor ? true : contents?.navigationHistory.canGoBack() ?? false,
     canGoForward: tab?.pdfEditor ? false : contents?.navigationHistory.canGoForward() ?? false,
     error: tab?.error ?? null,
-    private: tab?.isPrivate ?? false,
+    private: tab?.isPrivate ?? w?.isPrivate ?? false,
     zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
     pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
     reader: tab?.pdfEditor ? null : readerStateFor(contents),
@@ -171,14 +230,15 @@ function getState(): BrowserState {
   }
 }
 
-function getTabSummaries(): BrowserTabSummary[] {
-  return tabs.map((tab) => ({
+function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
+  if (!w) return []
+  return w.tabs.map((tab) => ({
     id: tab.id,
     url: currentUrl(tab),
     title: pageTitle(tab),
     faviconUrl: tab.faviconUrl,
     loading: tab.view?.webContents.isLoading() ?? false,
-    active: tab.id === activeTabId,
+    active: tab.id === w.activeTabId,
     pinned: tab.pinned,
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
     private: tab.isPrivate,
@@ -313,13 +373,13 @@ function refreshTabFavicon(tab: BrowserTab): void {
     if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
     if (tab.faviconUrl !== faviconUrl) {
       tab.faviconUrl = faviconUrl
-      publishTabs()
+      publishTabs(tab.win)
     }
     if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
       if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
       if (tab.faviconUrl !== cachedIcon) {
         tab.faviconUrl = cachedIcon
-        publishTabs()
+        publishTabs(tab.win)
       }
     })
   }).catch(() => undefined)
@@ -335,26 +395,72 @@ function notifyHistoryChanged(): void {
   }, 300)
 }
 
-function publishTabs(): void {
-  if (!browserWindow || browserWindow.isDestroyed()) return
-  sendToMainWindowRenderers('browser:tabs', getTabSummaries())
+let windowListTimer: ReturnType<typeof setTimeout> | null = null
+let lastWindowListKey = ''
+/** Active tab titles feed the Window menu; tell it (debounced) when one changes. */
+function noteWindowTitles(): void {
+  if (windowListTimer) return
+  windowListTimer = setTimeout(() => {
+    windowListTimer = null
+    const key = windowStates.map((w) => `${w.isPrivate}:${pageTitleOfWindow(w)}`).join('\n')
+    if (key === lastWindowListKey) return
+    lastWindowListKey = key
+    notifyBrowserWindowsChanged()
+  }, 250)
 }
 
-function publishState(): void {
-  if (!browserWindow || browserWindow.isDestroyed()) return
-  const state = getState()
+function publishTabs(w = currentWindowState()): void {
+  if (!isLiveWindow(w)) return
+  sendToWindowRenderers(w.window, 'browser:tabs', getTabSummaries(w))
+  noteWindowTitles()
+}
+
+function publishState(w = currentWindowState()): void {
+  if (!isLiveWindow(w)) return
+  const state = getState(w)
   // Crash / hang / HTTPS notices are drawn by the content renderer, like the local New Tab page.
-  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null)
-  sendToMainWindowRenderers('browser:state', state)
-  publishTabs()
+  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null, w.window)
+  sendToWindowRenderers(w.window, 'browser:state', state)
+  publishTabs(w)
+}
+
+function publishAllWindows(): void {
+  for (const w of [...windowStates]) publishState(w)
+}
+
+/** Freeze the saved session while the app quits, so windows closing one by one don't drop out of it. */
+let sessionFrozen = false
+export function freezeBrowserSession(): void {
+  persistOpenTabs()
+  sessionFrozen = true
 }
 
 function persistOpenTabs(): void {
+  if (sessionFrozen) return
+  // Private windows are never saved; private tabs in normal windows are skipped.
+  const windows = windowStates.filter((w) => !w.isPrivate && !w.window.isDestroyed())
+  if (windows.length === 0) return
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
-  const saved = tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
-  const urls = saved.map(currentUrl)
-  const pinnedIndexes = saved.flatMap((tab, index) => tab.pinned ? [index] : [])
-  saveBrowserSession(urls, saved.findIndex((tab) => tab.id === activeTabId), pinnedIndexes)
+  const saved = windows.map((w) => {
+    const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
+    return {
+      urls: kept.map(currentUrl),
+      activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
+      pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
+      geometry: windowGeometry(w.window)
+    }
+  })
+  const focused = windowStateFor(focusedBrowserWindow())
+  saveBrowserWindowsSession(saved, focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1)
+}
+
+function windowGeometry(window: BaseWindow): SavedWindowState | null {
+  if (window.isDestroyed()) return null
+  try {
+    return { bounds: window.getNormalBounds(), maximized: window.isMaximized(), fullScreen: window.isFullScreen() }
+  } catch {
+    return null
+  }
 }
 
 function toggleTabBookmark(id: string): void {
@@ -372,37 +478,40 @@ function bookmarkTabAndEdit(id: string): void {
   if (!tab) return
   const result = bookmarkPage(currentUrl(tab), pageTitle(tab), tab.faviconUrl, tab.isPrivate)
   if (!result) return
-  sendToVisibleToolbarSurface('browser:bookmarks:edit-current', { id: result.node.id, created: result.created })
+  runInWindow(tab.win.window, () => sendToVisibleToolbarSurface('browser:bookmarks:edit-current', { id: result.node.id, created: result.created }))
 }
 
 /** Cmd+Shift+D: every regular (non-private) web tab into a new top-level folder. */
-export function bookmarkAllBrowserTabs(): { folderId: string; title: string; added: number } | null {
-  const pages = tabsInSidebarOrder()
+export function bookmarkAllBrowserTabs(w = currentWindowState()): { folderId: string; title: string; added: number } | null {
+  if (!w) return null
+  const browserBounds = w.browserBounds
+  const pages = tabsInSidebarOrder(w)
     .filter((tab) => !tab.isPrivate && normalizeHttpOrigin(currentUrl(tab)))
     .map((tab) => ({ url: currentUrl(tab), title: pageTitle(tab) }))
   const stamp = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())
   const result = bookmarkPagesInNewFolder(pages, `Tabs · ${stamp}`)
   if (!result) {
-    flashLinkStatus('No web tabs to bookmark', browserBounds)
+    flashLinkStatus('No web tabs to bookmark', browserBounds, undefined, w.window)
     return null
   }
-  flashLinkStatus(`Bookmarked ${result.added} tab${result.added === 1 ? '' : 's'} in “${result.folder.title}”`, browserBounds, 2400)
+  flashLinkStatus(`Bookmarked ${result.added} tab${result.added === 1 ? '' : 's'} in “${result.folder.title}”`, browserBounds, 2400, w.window)
   return { folderId: result.folder.id, title: result.folder.title, added: result.added }
 }
 
-function applyTabBounds(): void {
+function applyTabBounds(w: BrowserWindowState): void {
+  const { browserBounds } = w
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0
-  for (const tab of tabs) {
+  for (const tab of w.tabs) {
     if (!tab.view) continue
-    const visible = tab.id === activeTabId
+    const visible = tab.id === w.activeTabId
     // Reader view stands in for the page while it is open; the page stays loaded off screen.
     const reader = readerViewFor(tab.view.webContents)
     // Only the page on screen stays in the window. A zero-size view still counts as visible on
     // macOS, so background tabs used to keep running rAF/timers at full speed and kept the GPU
     // process waking up; detached + hidden, Chromium throttles them like Chrome's background tabs.
-    if (browserWindow && !browserWindow.isDestroyed()) {
-      setPageViewOnScreen(browserWindow, tab.view, visible && pageAreaShown && !reader)
-      if (reader) setPageViewOnScreen(browserWindow, reader, visible && pageAreaShown)
+    if (!w.window.isDestroyed()) {
+      setPageViewOnScreen(w.window, tab.view, visible && pageAreaShown && !reader)
+      if (reader) setPageViewOnScreen(w.window, reader, visible && pageAreaShown)
     }
     tab.view.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
     reader?.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
@@ -415,7 +524,7 @@ function cancelSleepTimer(tab: BrowserTab): void {
 }
 
 function hibernateTab(tab: BrowserTab): void {
-  if (tab.id === activeTabId || !tab.view) return
+  if (isActiveTab(tab) || !tab.view) return
   const contents = tab.view.webContents
   if (!contents.isDestroyed() && contents.isCurrentlyAudible()) {
     tab.sleepTimer = setTimeout(() => hibernateTab(tab), 60_000)
@@ -425,13 +534,13 @@ function hibernateTab(tab: BrowserTab): void {
   tab.pendingUrl = tab.lastUrl
   disposeTabView(tab)
   persistOpenTabs()
-  publishState()
+  publishState(tab.win)
 }
 
 function scheduleTabSleep(tab: BrowserTab): void {
   cancelSleepTimer(tab)
   // An editor tab holds unsaved edits in memory, so it never sleeps.
-  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || tab.id === activeTabId || tab.inactiveSince === null) return
+  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || isActiveTab(tab) || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
   tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
 }
@@ -441,8 +550,8 @@ function markTabInactive(tab: BrowserTab): void {
   scheduleTabSleep(tab)
 }
 
-function openBackgroundTab(url: string, isPrivate = false): void {
-  const id = createTab(url, selectedSearchEngine, false, false, true, false, undefined, undefined, isPrivate)
+function openBackgroundTab(url: string, isPrivate = false, w = currentWindowState()): void {
+  const id = createTab(url, selectedSearchEngine, false, false, true, false, undefined, undefined, isPrivate, false, w)
   if (id) persistOpenTabs()
 }
 
@@ -453,13 +562,13 @@ function disposeTabView(tab: BrowserTab): void {
   // Clear the reference first so its destroyed event cannot remove the logical tab.
   tab.view = null
   detachNetworkInspector(view.webContents)
-  if (browserWindow && !browserWindow.isDestroyed()) setPageViewOnScreen(browserWindow, view, false)
+  if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, view, false)
   if (!view.webContents.isDestroyed()) view.webContents.close()
-  applyTabBounds()
+  applyTabBounds(tab.win)
 }
 
 function ensureTabLoaded(tab: BrowserTab): void {
-  if (tab.view || !browserWindow || browserWindow.isDestroyed()) return
+  if (tab.view || !isLiveWindow(tab.win)) return
   const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
   if (target === SURFFISH_QUICK_LINKS_URL) {
     tab.pendingUrl = ''
@@ -469,8 +578,8 @@ function ensureTabLoaded(tab: BrowserTab): void {
   const view = createTabView(tab)
   if (!view) return
   tab.pendingUrl = ''
-  if (tab.id === activeTabId) tab.inactiveSince = null
-  applyTabBounds()
+  if (isActiveTab(tab)) tab.inactiveSince = null
+  applyTabBounds(tab.win)
   const contents = view.webContents
   // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
   const ready = tab.isPrivate && !tab.pdfEditor ? whenPrivateSessionReady() : Promise.resolve()
@@ -484,27 +593,28 @@ function ensureTabLoaded(tab: BrowserTab): void {
         if (tab.view?.webContents !== contents) return
         if (tab.downloadStartedForCurrentLoad) tab.error = null
         else tab.error = message
-        publishState()
+        publishState(tab.win)
       })
     }
     if (tab.downloadStartedForCurrentLoad) {
       tab.error = null
-      publishState()
+      publishState(tab.win)
       return
     }
     tab.error = message
-    publishState()
+    publishState(tab.win)
   })
 }
 
 function activateTabInternal(id: string): boolean {
   const tab = getTab(id)
   if (!tab) return false
-  if (activeTabId !== id) cancelActiveMacTrackpadSwipe()
-  const previous = getTab()
+  const w = tab.win
+  if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe()
+  const previous = activeTabOf(w)
   if (previous && previous.id !== id) {
-    hideLinkStatus()
-    if (findState.open) closeFindBar(false)
+    hideLinkStatus(false, w.window)
+    if (w.findState.open) closeFindBar(false, w)
   }
   // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
   if (previous && previous.id !== id) void captureTabThumbnail(previous)
@@ -512,10 +622,10 @@ function activateTabInternal(id: string): boolean {
   cancelSleepTimer(tab)
   tab.inactiveSince = null
   tab.pauseAutoplayUntilVisited = false
-  activeTabId = id
+  w.activeTabId = id
   ensureTabLoaded(tab)
   // Attach the view before focusing it; a detached view can't take focus.
-  applyTabBounds()
+  applyTabBounds(w)
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
     contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
@@ -524,28 +634,29 @@ function activateTabInternal(id: string): boolean {
     focusTarget.focus()
     recoverCrashedTabOnActivate(contents)
   }
-  applyTabBounds()
-  publishState()
+  applyTabBounds(w)
+  publishState(w)
   return true
 }
 
 function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
-  if (!browserWindow || browserWindow.isDestroyed()) return
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const tab = tabForContents(contents)
+  const w = tab?.win ?? windowStateFor(getShellWindowFor(contents))
+  if (!isLiveWindow(w)) return
   const isBrowserPage = tab !== undefined
   const editorTab = tab?.pdfEditor ? tab : undefined
-  const origin = isBrowserPage ? { x: browserBounds.x, y: browserBounds.y } : getMainRendererOrigin(contents) ?? { x: 0, y: 0 }
+  const origin = isBrowserPage ? { x: w.browserBounds.x, y: w.browserBounds.y } : getMainRendererOrigin(contents) ?? { x: 0, y: 0 }
   showBrowserContextMenu(event, contents, params, {
-    window: browserWindow,
+    window: w.window,
     pageActions: isBrowserPage,
     offsetX: origin.x,
     offsetY: origin.y,
     searchEngine: selectedSearchEngine,
     openInNewTab: (url) => {
-      const id = createTab(url, selectedSearchEngine)
+      const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
       if (id) persistOpenTabs()
     },
-    openInBackgroundTab: openBackgroundTab,
+    openInBackgroundTab: (url) => openBackgroundTab(url, false, w),
     pdfDocument: isBrowserPage && isShowingPdf(contents),
     printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined,
     editPdf: isBrowserPage && editorTab === undefined ? () => { if (tab) openPdfEditor(tab.id) } : undefined,
@@ -553,7 +664,7 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       save: () => sendPdfEditorCommand(contents, 'save'),
       backToViewer: () => { closePdfEditor(editorTab.id) }
     } : undefined,
-    takeScreenshot: isBrowserPage && tab.id === activeTabId ? () => { void takeScreenshot('choose') } : undefined,
+    takeScreenshot: isBrowserPage && isActiveTab(tab) ? () => { void runInWindow(tab.win.window, () => takeScreenshot('choose')) } : undefined,
     readerView: isBrowserPage && editorTab === undefined && readerStateFor(contents) !== null ? () => { void toggleReaderMode(contents) } : undefined,
     // Never offered for private tabs: a watcher would re-fetch the page outside the private session.
     watchPage: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate && canWatchPage(contents.getURL())
@@ -581,7 +692,8 @@ function tabMenuExtras(id: string): MenuItemConstructorOptions[] {
 
 function showBrowserTabContextMenu(id: string): void {
   const tab = getTab(id)
-  if (!tab || !browserWindow || browserWindow.isDestroyed()) return
+  if (!tab || !isLiveWindow(tab.win)) return
+  const { tabs, activeTabId } = tab.win
   const origin = normalizeHttpOrigin(currentUrl(tab))
   const bookmarked = Boolean(origin && isUrlBookmarked(currentUrl(tab)))
   const items: MenuItemConstructorOptions[] = [
@@ -601,9 +713,23 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
     { label: 'Close Tabs Above', enabled: tabs.some((_candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
     { label: 'Close Tabs Below', enabled: tabs.some((_candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
-    { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') }
+    { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') },
+    { type: 'separator' },
+    ...moveTabMenuItems(tab)
   ]
-  Menu.buildFromTemplate(items).popup({ window: browserWindow })
+  Menu.buildFromTemplate(items).popup({ window: tab.win.window })
+}
+
+/** "Move to New Window" plus one "Move to <window>" per other window the tab may go to. */
+function moveTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
+  const targets = windowStates.filter((w) => w !== tab.win && isLiveWindow(w) && canMoveTabTo(tab, w))
+  return [
+    { label: 'Move to New Window', enabled: tab.win.tabs.length > 1, click: () => { moveBrowserTabToNewWindow(tab.id) } },
+    ...targets.map((w): MenuItemConstructorOptions => ({
+      label: `Move to ${browserWindowLabel(w.window)}`,
+      click: () => { moveBrowserTabToWindow(tab.id, w.window) }
+    }))
+  ]
 }
 
 function resolveBrowserViewPreload(): string | null {
@@ -651,7 +777,7 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
 }
 
 function createTabView(tab: BrowserTab): WebContentsView | null {
-  if (!browserWindow || browserWindow.isDestroyed()) return null
+  if (!isLiveWindow(tab.win)) return null
   if (tab.pdfEditor) return createPdfEditorView(tab)
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
@@ -681,27 +807,29 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
 
   const contents = view.webContents
+  bindContentsToWindow(contents, tab.win.window)
   attachNetworkInspector(tab.id, contents)
   attachTabSafety(contents)
   if (!tab.extensionPageOrigin) attachReaderDetection(contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (activeTabId !== tab.id || !isCurrentContents()) return
-    handleBrowserPageMouseEvent(mouseEvent)
-    if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y)
+    if (!isActiveTab(tab) || !isCurrentContents()) return
+    handleBrowserPageMouseEvent(mouseEvent, tab.win.window)
+    if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window)
     if (isCopyImageClick(mouseEvent)) {
       void copyImageAtPoint(contents, mouseEvent.x, mouseEvent.y).then((copied) => {
-        if (copied) flashLinkStatus('Image copied', browserBounds)
+        if (copied) flashLinkStatus('Image copied', tab.win.browserBounds, undefined, tab.win.window)
       })
     }
   })
   contents.on('update-target-url', (_event, url) => {
-    if (activeTabId === tab.id && isCurrentContents()) showLinkStatus(url, browserBounds)
+    if (isActiveTab(tab) && isCurrentContents()) showLinkStatus(url, tab.win.browserBounds, tab.win.window)
   })
   contents.on('found-in-page', (_event, result) => {
+    const { findState } = tab.win
     if (!isCurrentContents() || findState.tabId !== tab.id || !findState.open) return
     findState.result = { activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches, finalUpdate: result.finalUpdate }
-    publishFindState()
+    publishFindState(tab.win)
   })
   // Ctrl/Cmd + mouse wheel (and Windows precision-touchpad zoom) step the page zoom like Chrome.
   contents.on('zoom-changed', (_event, direction) => {
@@ -712,14 +840,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   // sleep instead of holding a dead view; selecting it reloads it. The active tab keeps its view
   // so Reload works in place.
   contents.on('render-process-gone', (_event, details) => {
-    if (details.reason === 'clean-exit' || !isCurrentContents() || activeTabId === tab.id) return
+    if (details.reason === 'clean-exit' || !isCurrentContents() || isActiveTab(tab)) return
     setImmediate(() => {
-      if (isCurrentContents() && activeTabId !== tab.id) hibernateTab(tab)
+      if (isCurrentContents() && !isActiveTab(tab)) hibernateTab(tab)
     })
   })
   guardPageDragRegions(contents)
   contents.on('media-started-playing', () => {
-    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || tab.id === activeTabId || contents.isDestroyed()) return
+    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isActiveTab(tab) || contents.isDestroyed()) return
     void contents.executeJavaScript(`
       for (const media of document.querySelectorAll('video, audio')) {
         if (!media.paused && !media.ended) media.pause()
@@ -737,13 +865,13 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (target && /^https?:\/\//i.test(target)) {
       if (tab.extensionPageOwner === 'web-store') {
         // Links from an extension's options page open as ordinary Surffish tabs.
-        if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab')) persistOpenTabs()
+        if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, false, false, tab.win)) persistOpenTabs()
       } else if (details.disposition === 'background-tab') {
-        openBackgroundTab(target, tab.isPrivate)
+        openBackgroundTab(target, tab.isPrivate, tab.win)
       } else if (details.disposition === 'foreground-tab' || getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
         // target=_blank links (and window.open without popup features) are 'foreground-tab': open them
         // like a normal new tab. Only real popups ('new-window', with size features) stay behind the site toggle.
-        const popupTabId = createTab(target, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate)
+        const popupTabId = createTab(target, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)
         if (popupTabId) persistOpenTabs()
       }
     }
@@ -752,7 +880,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('before-input-event', (event, inputEvent) => {
     if (isFocusAddressShortcut(inputEvent)) {
       event.preventDefault()
-      sendFocusAddressToVisibleRenderer()
+      sendFocusAddressToVisibleRenderer(tab.win.window)
       return
     }
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
@@ -769,23 +897,23 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('audio-state-changed', () => {
     if (!isCurrentContents()) return
-    publishTabs()
+    publishTabs(tab.win)
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
     tab.error = null
-    publishState()
+    publishState(tab.win)
   })
   contents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
     if (isCurrentContents() && isMainFrame && !isInPlace) tab.showingPdf = false
     if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))) return
-    if (!isInPlace && tab.id === activeTabId) hideLinkStatus()
+    if (!isInPlace && isActiveTab(tab)) hideLinkStatus(false, tab.win.window)
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
     tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
     tab.faviconRevision += 1
     persistOpenTabs()
-    publishTabs()
+    publishTabs(tab.win)
   })
   contents.on('page-favicon-updated', (_event, favicons) => {
     if (!isCurrentContents()) return
@@ -799,20 +927,20 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
     if (tab.faviconUrl !== faviconUrl) {
       tab.faviconUrl = faviconUrl
-      publishTabs()
+      publishTabs(tab.win)
     }
     if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
       if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
       if (tab.faviconUrl !== cachedIcon) {
         tab.faviconUrl = cachedIcon
-        publishTabs()
+        publishTabs(tab.win)
       }
     })
   })
   contents.on('did-stop-loading', () => {
     if (!isCurrentContents()) return
     tab.showingPdf = isShowingPdf(contents)
-    publishState()
+    publishState(tab.win)
     refreshTabFavicon(tab)
   })
   // The built-in PDF viewer is a child frame; notice it (and its absence) as soon as frames load.
@@ -821,20 +949,21 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     const showingPdf = isShowingPdf(contents)
     if (showingPdf === tab.showingPdf) return
     tab.showingPdf = showingPdf
-    if (tab.id === activeTabId) publishState()
+    if (isActiveTab(tab)) publishState(tab.win)
   })
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
     applySavedZoom(tab, url)
+    const { findState } = tab.win
     if (findState.open && findState.tabId === tab.id) {
       // A new document: the old matches are gone, so search the new page for the same text.
       findState.result = null
       if (findState.text) contents.findInPage(findState.text, { findNext: true })
-      publishFindState()
+      publishFindState(tab.win)
     }
     tab.lastUrl = url
     persistOpenTabs()
-    publishState()
+    publishState(tab.win)
     if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
       notifyHistoryChanged()
@@ -845,7 +974,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     resetMacTrackpadSwipeFor(contents)
     tab.lastUrl = url
     persistOpenTabs()
-    publishState()
+    publishState(tab.win)
     if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
       recordBrowsingVisit(url, pageTitle(tab))
       notifyHistoryChanged()
@@ -854,7 +983,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   contents.on('page-title-updated', (_event, title) => {
     if (!isCurrentContents()) return
     if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title)
-    publishState()
+    publishState(tab.win)
     refreshTabFavicon(tab)
     notifyHistoryChanged()
   })
@@ -864,17 +993,17 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     if (errorCode === -3) return
     if (tab.downloadStartedForCurrentLoad) {
       tab.error = null
-      publishState()
+      publishState(tab.win)
       return
     }
     tab.error = `${errorDescription} (${errorCode})`
-    publishState()
+    publishState(tab.win)
   })
   contents.on('did-stop-loading', () => {
     setTimeout(() => {
       // Overview open and tab switches capture fresh shots anyway; only seed tabs that have none,
       // so ordinary page loads don't pay for a full-page capture + JPEG encode on the main thread.
-      if (isCurrentContents() && tab.id === activeTabId && !isTabOverviewOpen() && !tabThumbnails.has(tab.id)) void captureTabThumbnail(tab)
+      if (isCurrentContents() && isActiveTab(tab) && !isTabOverviewOpen(tab.win.window) && !tabThumbnails.has(tab.id)) void captureTabThumbnail(tab)
     }, 700)
   })
   contents.on('destroyed', () => {
@@ -884,18 +1013,24 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     }
     detachNetworkInspector(contents)
     if (!isCurrentContents()) return
-    const index = tabs.findIndex((candidate) => candidate.id === tab.id)
-    if (index < 0) return
-    tabs.splice(index, 1)
-    if (activeTabId === tab.id) {
-      activeTabId = null
-      const replacement = tabs[Math.min(index, tabs.length - 1)]
-      if (replacement) activateTabInternal(replacement.id)
-      else if (browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
-    }
-    publishState()
+    removeDestroyedTab(tab)
   })
   return view
+}
+
+/** A tab's page went away underneath it (not through closeBrowserTab): drop the tab and pick another. */
+function removeDestroyedTab(tab: BrowserTab): void {
+  const w = tab.win
+  const index = w.tabs.findIndex((candidate) => candidate.id === tab.id)
+  if (index < 0) return
+  w.tabs.splice(index, 1)
+  if (w.activeTabId === tab.id) {
+    w.activeTabId = null
+    const replacement = w.tabs[Math.min(index, w.tabs.length - 1)]
+    if (replacement) activateTabInternal(replacement.id)
+    else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w)
+  }
+  publishState(w)
 }
 
 /**
@@ -904,7 +1039,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
  * swipe preload, network inspector). Only main ever navigates it.
  */
 function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
-  if (!browserWindow || browserWindow.isDestroyed()) return null
+  if (!isLiveWindow(tab.win)) return null
   const preload = pdfEditorPreloadPath()
   if (!preload) {
     console.warn('[pdf editor] preload missing; editor unavailable')
@@ -928,10 +1063,11 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   // Attached by applyTabBounds while on screen, like site views.
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
   const contents = view.webContents
+  bindContentsToWindow(contents, tab.win.window)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
+    if (isActiveTab(tab) && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent, tab.win.window)
   })
   contents.on('before-input-event', (event, inputEvent) => {
     if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
@@ -948,7 +1084,7 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   contents.setWindowOpenHandler((details) => {
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
-      const id = createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, tab.isPrivate)
+      const id = createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)
       if (id) persistOpenTabs()
     }
     return { action: 'deny' }
@@ -958,14 +1094,14 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
     tab.error = null
-    publishState()
+    publishState(tab.win)
   })
-  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState() })
-  contents.on('page-title-updated', () => { if (isCurrentContents()) publishState() })
+  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState(tab.win) })
+  contents.on('page-title-updated', () => { if (isCurrentContents()) publishState(tab.win) })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
     if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
     tab.error = `${errorDescription} (${errorCode})`
-    publishState()
+    publishState(tab.win)
   })
   contents.on('render-process-gone', () => {
     // A crashed editor has lost its edits either way; don't nag on close.
@@ -973,16 +1109,7 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('destroyed', () => {
     if (!isCurrentContents()) return
-    const index = tabs.findIndex((candidate) => candidate.id === tab.id)
-    if (index < 0) return
-    tabs.splice(index, 1)
-    if (activeTabId === tab.id) {
-      activeTabId = null
-      const replacement = tabs[Math.min(index, tabs.length - 1)]
-      if (replacement) activateTabInternal(replacement.id)
-      else if (browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
-    }
-    publishState()
+    removeDestroyedTab(tab)
   })
   return view
 }
@@ -995,18 +1122,18 @@ function replaceTabView(tab: BrowserTab, editor: PdfEditorTabState | null, url: 
   tab.error = null
   tab.lastUrl = editor ? editor.sourceUrl : url
   tab.pendingUrl = url
-  if (tab.id === activeTabId) {
+  if (isActiveTab(tab)) {
     ensureTabLoaded(tab)
-    applyTabBounds()
+    applyTabBounds(tab.win)
     const contents = tab.view?.webContents
     if (contents && !contents.isDestroyed()) contents.focus()
   }
   persistOpenTabs()
-  publishState()
+  publishState(tab.win)
 }
 
 /** Edit PDF: open the PDF the tab shows in the bundled pdf.js editor. */
-export function openPdfEditor(id = activeTabId ?? undefined): boolean {
+export function openPdfEditor(id = getTab()?.id): boolean {
   const tab = id ? getTab(id) : undefined
   const contents = tab?.view?.webContents
   if (!tab || tab.pdfEditor || tab.extensionPageOrigin || !contents || contents.isDestroyed() || !isShowingPdf(contents)) return false
@@ -1018,11 +1145,11 @@ export function openPdfEditor(id = activeTabId ?? undefined): boolean {
 
 function allowLeavingPdfEditor(tab: BrowserTab, action: string): boolean {
   if (!tab.pdfEditor?.dirty) return true
-  return confirmDiscardPdfEdits(browserWindow, tab.pdfEditor.name, action)
+  return confirmDiscardPdfEdits(tab.win.window, tab.pdfEditor.name, action)
 }
 
 /** Back to viewer: reload the original PDF in the built-in viewer (asks first if there are unsaved edits). */
-export function closePdfEditor(id = activeTabId ?? undefined): boolean {
+export function closePdfEditor(id = getTab()?.id): boolean {
   const tab = id ? getTab(id) : undefined
   if (!tab?.pdfEditor) return false
   if (!allowLeavingPdfEditor(tab, 'Discard Changes')) return false
@@ -1045,16 +1172,17 @@ export function savePdfEditor(): boolean {
   return true
 }
 
-function hasUnsavedPdfEdits(): BrowserTab[] {
-  return tabs.filter((tab) => tab.pdfEditor?.dirty)
+function hasUnsavedPdfEdits(w: BrowserWindowState): BrowserTab[] {
+  return w.tabs.filter((tab) => tab.pdfEditor?.dirty)
 }
 
 function pdfEditorTabFor(contents: WebContents): BrowserTab | undefined {
-  return tabs.find((tab) => tab.pdfEditor && tab.view?.webContents === contents)
+  const tab = tabForContents(contents)
+  return tab?.pdfEditor ? tab : undefined
 }
 
 function tabForPage(contents: WebContents): BrowserTab | undefined {
-  return tabs.find((tab) => tab.view?.webContents === contents)
+  return tabForContents(contents)
 }
 
 attachReaderHost({
@@ -1063,20 +1191,24 @@ attachReaderHost({
   changed: (page) => {
     const tab = tabForPage(page)
     if (!tab) return
-    applyTabBounds()
-    if (tab.id === activeTabId) publishState()
+    applyTabBounds(tab.win)
+    if (isActiveTab(tab)) publishState(tab.win)
   },
   handleShortcut: (page, input) => {
     const tab = tabForPage(page)
     return tab ? handleBrowserShortcutInput(input, tab.id) : false
   },
   openInNewTab: (page, url, background) => {
-    const isPrivate = tabForPage(page)?.isPrivate ?? false
-    if (background) openBackgroundTab(url, isPrivate)
-    else if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, isPrivate)) persistOpenTabs()
+    const tab = tabForPage(page)
+    const isPrivate = tab?.isPrivate ?? false
+    if (background) openBackgroundTab(url, isPrivate, tab?.win)
+    else if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, isPrivate, false, tab?.win ?? currentWindowState())) persistOpenTabs()
   },
-  notify: (message) => flashLinkStatus(message, browserBounds, 2400),
-  window: () => browserWindow
+  notify: (message) => {
+    const w = currentWindowState()
+    if (w) flashLinkStatus(message, w.browserBounds, 2400, w.window)
+  },
+  window: (page) => (page ? tabForPage(page)?.win.window : currentWindowState()?.window) ?? null
 })
 
 attachPdfEditor({
@@ -1094,13 +1226,13 @@ attachPdfEditor({
     const tab = pdfEditorTabFor(contents)
     if (!tab?.pdfEditor || tab.pdfEditor.dirty === dirty) return
     tab.pdfEditor.dirty = dirty
-    publishState()
+    publishState(tab.win)
   },
   backToViewer: (contents) => {
     const tab = pdfEditorTabFor(contents)
     if (tab) closePdfEditor(tab.id)
   },
-  window: () => browserWindow
+  window: () => currentWindowState()?.window ?? null
 })
 
 export interface ExtensionPageTabOptions {
@@ -1109,19 +1241,25 @@ export interface ExtensionPageTabOptions {
   owner: ExtensionPageOwner
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false): string | null {
-  if (!browserWindow || browserWindow.isDestroyed()) return null
-  const target = extensionPage && input
-    ? input
-    : allowLocalDocument && input && isLocalDocumentUrl(input)
-    ? input
-    : input === SURFFISH_QUICK_LINKS_URL
+function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false, targetWindow: BrowserWindowState | undefined = currentWindowState()): string | null {
+  const w = targetWindow
+  if (!isLiveWindow(w)) return null
+  const { tabs } = w
+  // Every page tab in a private window is private; with no address it opens the private New Tab.
+  const makePrivate = (isPrivate || w.isPrivate) && !extensionPage
+  const requested = input ?? (w.isPrivate && !extensionPage ? SURFFISH_QUICK_LINKS_URL : undefined)
+  const target = extensionPage && requested
+    ? requested
+    : allowLocalDocument && requested && isLocalDocumentUrl(requested)
+    ? requested
+    : requested === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
-    : input ? resolveAddressInput(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
-  const previous = getTab()
-  const shouldActivate = activate || activeTabId === null
+    : requested ? resolveAddressInput(requested, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
+  const previous = activeTabOf(w)
+  const shouldActivate = activate || w.activeTabId === null
   const tab: BrowserTab = {
     id: randomUUID(),
+    win: w,
     view: null,
     faviconUrl: getCachedBrowserSiteFavicon(target),
     faviconRevision: 0,
@@ -1138,7 +1276,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     extensionPageOrigin: extensionPage?.extensionUrl ?? null,
     extensionPreloadPath: extensionPage?.preloadPath ?? null,
     extensionPageOwner: extensionPage?.owner ?? null,
-    isPrivate: isPrivate && !extensionPage,
+    isPrivate: makePrivate,
     showingPdf: false,
     pdfEditor: null,
     restoreHistory: null
@@ -1148,30 +1286,45 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   else tabs.push(tab)
   if (shouldActivate) {
     if (previous && previous.id !== tab.id) markTabInactive(previous)
-    activeTabId = tab.id
+    w.activeTabId = tab.id
     tab.inactiveSince = null
   } else {
     tab.inactiveSince = Date.now()
   }
   if (!deferLoad) ensureTabLoaded(tab)
-  applyTabBounds()
+  applyTabBounds(w)
   if (!shouldActivate) scheduleTabSleep(tab)
   else tab.view?.webContents.focus()
-  publishState()
+  publishState(w)
   return tab.id
 }
 
-export function attachBrowserView(win: BaseWindow): void {
-  for (const tab of [...tabs]) {
-    cancelSleepTimer(tab)
-    disposeTabView(tab)
+/** What a new window starts with. */
+export interface BrowserWindowInit {
+  /** A private window: all of its tabs are private and it is never saved. */
+  private?: boolean
+  /** Tabs to restore (a saved window from the session file). */
+  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[] }
+  /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
+  adoptTabId?: string
+}
+
+let macSwipeStarted = false
+
+export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {}): void {
+  if (windowStateFor(win)) return
+  const w: BrowserWindowState = {
+    window: win,
+    tabs: [],
+    activeTabId: null,
+    browserBounds: { x: 0, y: 0, width: 0, height: 0 },
+    findState: { tabId: null, open: false, text: '', result: null },
+    confirmingWindowClose: false,
+    isPrivate: init.private === true
   }
-  tabs.length = 0
-  activeTabId = null
-  browserWindow = win
-  browserBounds = { x: 0, y: 0, width: 0, height: 0 }
+  windowStates.push(w)
   tabSleepMinutes = getBrowserTabSleepMinutes()
-  for (const contents of getMainWindowRenderers()) {
+  for (const contents of getWindowRenderers(win)) {
     contents.on('context-menu', (event, params) => {
       event.preventDefault()
       const x = Number.isFinite(params.x) ? Math.round(params.x) : 0
@@ -1185,40 +1338,46 @@ export function attachBrowserView(win: BaseWindow): void {
   }
   if (process.platform === 'darwin') {
     win.on('swipe', (_event, direction) => {
-      const contents = getTab()?.view?.webContents
+      const contents = activeTabOf(w)?.view?.webContents
       if (!contents) return
       if (direction === 'right' && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
       else if (direction === 'left' && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
     })
   }
-  const saved = loadBrowserSession()
-  const restoredAt = Date.now()
-  saved.urls.forEach((url, index) => {
-    const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index))
-    // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
-    const tab = id ? getTab(id) : undefined
-    if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
-  })
-  if (tabs.length === 0) createTab()
-  activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
-  if (activeTabId) {
-    const activeTab = getTab(activeTabId)
-    if (activeTab) ensureTabLoaded(activeTab)
+  const adopted = init.adoptTabId ? findTab(init.adoptTabId) : undefined
+  if (adopted && adopted.win !== w && canMoveTabTo(adopted, w)) {
+    detachTabFromWindow(adopted)
+    adoptTabIntoWindow(adopted, w, null)
+  } else if (init.session && !w.isPrivate) {
+    const saved = init.session
+    const restoredAt = Date.now()
+    saved.urls.forEach((url, index) => {
+      const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index), undefined, undefined, false, false, w)
+      // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
+      const tab = id ? getTab(id) : undefined
+      if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
+    })
+    w.activeTabId = w.tabs[saved.activeIndex]?.id ?? w.tabs[0]?.id ?? null
   }
+  if (w.tabs.length === 0) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
+  w.activeTabId ??= w.tabs[0]?.id ?? null
+  const activeTab = activeTabOf(w)
+  if (activeTab) ensureTabLoaded(activeTab)
   const now = Date.now()
-  for (const tab of tabs) {
-    if (tab.id !== activeTabId) {
+  for (const tab of w.tabs) {
+    if (tab.id !== w.activeTabId) {
       tab.inactiveSince ??= now
       scheduleTabSleep(tab)
     } else {
       tab.inactiveSince = null
     }
   }
-  applyTabBounds()
-  publishState()
+  applyTabBounds(w)
+  publishState(w)
   persistOpenTabs()
-  if (process.platform === 'darwin') {
-    startMacTrackpadSwipe(win, {
+  if (process.platform === 'darwin' && !macSwipeStarted) {
+    // One native monitor serves every window; each gesture names the window it landed in.
+    macSwipeStarted = startMacTrackpadSwipe(win, {
       onBegin: beginMacTrackpadSwipe,
       onProgress: reportMacTrackpadSwipeProgress,
       onEnd: finishMacTrackpadSwipe,
@@ -1226,40 +1385,50 @@ export function attachBrowserView(win: BaseWindow): void {
     })
   }
   attachTabOverview(win, {
-    getItems: getTabOverviewItems,
-    getPageBounds: () => ({ ...browserBounds }),
+    getItems: () => getTabOverviewItems(w),
+    getPageBounds: () => ({ ...w.browserBounds }),
     activate: (id) => { activateBrowserTab(id) },
     closeTab: (id) => { closeBrowserTab(id) },
-    newTab: () => { newBrowserTab() },
+    newTab: () => { newBrowserTab(undefined, undefined, w) },
     focusPage: () => {
-      const contents = getTab()?.view?.webContents
+      const contents = activeTabOf(w)?.view?.webContents
       if (contents && !contents.isDestroyed()) contents.focus()
-      else focusVisibleShellPage()
+      else focusVisibleShellPage(win)
     },
-    handleShortcut: (input) => handleBrowserShortcutInput(input)
+    handleShortcut: (input) => runInWindow(win, () => handleBrowserShortcutInput(input))
   })
   attachScreenshots(win, {
     getTarget: () => {
-      const tab = getTab()
+      const tab = activeTabOf(w)
       const contents = tab?.view?.webContents
       if (!tab || !contents || contents.isDestroyed() || isLocalNewTab(tab)) return null
       return { contents, isPrivate: tab.isPrivate, url: currentUrl(tab) }
     },
-    getPageBounds: () => ({ ...browserBounds }),
+    getPageBounds: () => ({ ...w.browserBounds }),
     focusPage: () => {
-      const contents = getTab()?.view?.webContents
+      const contents = activeTabOf(w)?.view?.webContents
       if (contents && !contents.isDestroyed()) contents.focus()
-      else focusVisibleShellPage()
+      else focusVisibleShellPage(win)
     },
-    flash: (message) => flashLinkStatus(message, browserBounds, 2000),
-    handleShortcut: (input) => handleBrowserShortcutInput(input)
+    flash: (message) => flashLinkStatus(message, w.browserBounds, 2000, win),
+    handleShortcut: (input) => runInWindow(win, () => handleBrowserShortcutInput(input))
   })
+  // Window moves and resizes go into the saved session too (debounced; the write itself is deferred).
+  let geometryTimer: ReturnType<typeof setTimeout> | null = null
+  const persistGeometry = (): void => {
+    if (geometryTimer) clearTimeout(geometryTimer)
+    geometryTimer = setTimeout(() => { geometryTimer = null; persistOpenTabs() }, 400)
+  }
+  for (const event of ['resize', 'move', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const) win.on(event as 'resize', persistGeometry)
   win.on('close', (event) => {
-    const unsaved = hasUnsavedPdfEdits()
+    if (geometryTimer) clearTimeout(geometryTimer)
+    const unsaved = hasUnsavedPdfEdits(w)
     if (unsaved.length > 0) {
       const name = unsaved.length === 1 ? unsaved[0]!.pdfEditor!.name : `${unsaved.length} PDFs`
       if (!confirmDiscardPdfEdits(win, name, 'Close Window')) {
         event.preventDefault()
+        // A cancelled close also cancels a quit, so keep saving the session.
+        sessionFrozen = false
         return
       }
       for (const tab of unsaved) tab.pdfEditor!.dirty = false
@@ -1267,21 +1436,19 @@ export function attachBrowserView(win: BaseWindow): void {
     persistOpenTabs()
   })
   win.on('closed', () => {
-    if (browserWindow !== win) return
-    cancelActiveMacTrackpadSwipe()
-    stopMacTrackpadSwipe()
-    detachTabOverview()
-    detachScreenshots()
-    destroyLinkStatus()
-    findState = { tabId: null, open: false, text: '', result: null }
-    tabThumbnails.clear()
-    newTabThumbnail = null
-    const closingTabs = [...tabs]
-    tabs.length = 0
-    activeTabId = null
-    browserWindow = null
+    const index = windowStates.indexOf(w)
+    if (index < 0) return
+    if (activeMacTrackpadSwipe && w.tabs.some((tab) => tab.view?.webContents === activeMacTrackpadSwipe?.contents)) cancelActiveMacTrackpadSwipe()
+    detachTabOverview(win)
+    detachScreenshots(win)
+    destroyLinkStatus(win)
+    windowStates.splice(index, 1)
+    const closingTabs = [...w.tabs]
+    w.tabs.length = 0
+    w.activeTabId = null
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
+      tabThumbnails.delete(tab.id)
       const view = tab.view
       tab.view = null
       if (view) {
@@ -1289,7 +1456,157 @@ export function attachBrowserView(win: BaseWindow): void {
         if (!view.webContents.isDestroyed()) view.webContents.close()
       }
     }
+    if (windowStates.length === 0) {
+      cancelActiveMacTrackpadSwipe()
+      if (macSwipeStarted) stopMacTrackpadSwipe()
+      macSwipeStarted = false
+      newTabThumbnail = null
+    }
+    if (closingTabs.some((tab) => tab.isPrivate) && !allTabs().some((tab) => tab.isPrivate)) endPrivateSession()
+    // Drop the window from the saved session; the last window's tabs stay saved for the next launch.
+    persistOpenTabs()
+    noteWindowTitles()
   })
+}
+
+// ---------------------------------------------------------------------------
+// Windows: labels for menus, and moving tabs between windows (the view moves, the page never reloads).
+
+type BrowserWindowFactory = (init: BrowserWindowInit & { position?: { x: number; y: number }; size?: { width: number; height: number } }) => BaseWindow | null
+let browserWindowFactory: BrowserWindowFactory | null = null
+
+/** window.ts registers how to open a window, so tab moves can tear a tab out into one. */
+export function setBrowserWindowFactory(factory: BrowserWindowFactory | null): void {
+  browserWindowFactory = factory
+}
+
+function pageTitleOfWindow(w: BrowserWindowState): string {
+  const tab = activeTabOf(w)
+  return tab ? pageTitle(tab) : 'New Tab'
+}
+
+/** "Window 2 — Example Domain" (private windows say so). */
+export function browserWindowLabel(window: BaseWindow): string {
+  const w = windowStateFor(window)
+  const number = browserWindowNumber(window)
+  const title = w ? pageTitleOfWindow(w) : 'Surffish'
+  const short = title.length > 48 ? `${title.slice(0, 47)}…` : title
+  return `${w?.isPrivate ? 'Private ' : ''}Window ${number > 0 ? number : ''} — ${short}`.replace('Window  —', 'Window —')
+}
+
+export function isPrivateBrowserWindow(window: BaseWindow | null | undefined): boolean {
+  return Boolean(windowStateFor(window)?.isPrivate)
+}
+
+/** Private windows only take private tabs (a normal tab can't switch to the private session). */
+function canMoveTabTo(tab: BrowserTab, w: BrowserWindowState): boolean {
+  return !w.isPrivate || tab.isPrivate
+}
+
+/** Take a tab out of its window without closing it. The window picks another tab, or closes when it was the last. */
+function detachTabFromWindow(tab: BrowserTab): void {
+  const from = tab.win
+  const index = from.tabs.indexOf(tab)
+  if (index < 0) return
+  const wasActive = from.activeTabId === tab.id
+  if (wasActive) {
+    cancelActiveMacTrackpadSwipe()
+    hideLinkStatus(false, from.window)
+  }
+  if (from.findState.tabId === tab.id) closeFindBar(false, from)
+  from.tabs.splice(index, 1)
+  if (tab.view) {
+    const reader = readerViewFor(tab.view.webContents)
+    if (!from.window.isDestroyed()) {
+      setPageViewOnScreen(from.window, tab.view, false)
+      if (reader) setPageViewOnScreen(from.window, reader, false)
+    }
+    tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  }
+  if (wasActive) from.activeTabId = null
+  if (from.tabs.length === 0) {
+    // Emptied by the move: close it once the move has finished.
+    setImmediate(() => { if (!from.window.isDestroyed() && from.tabs.length === 0) from.window.close() })
+    return
+  }
+  if (wasActive) {
+    const replacement = from.tabs[Math.min(index, from.tabs.length - 1)]
+    if (replacement) activateTabInternal(replacement.id)
+  } else {
+    applyTabBounds(from)
+    publishState(from)
+  }
+}
+
+function adoptTabIntoWindow(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
+  tab.win = to
+  const contents = tab.view?.webContents
+  if (contents && !contents.isDestroyed()) bindContentsToWindow(contents, to.window)
+  let at = beforeId ? to.tabs.findIndex((candidate) => candidate.id === beforeId) : -1
+  if (at < 0 || to.tabs[at]?.pinned !== tab.pinned) {
+    // End of the tab's own group (pinned icons or the list).
+    let last = -1
+    to.tabs.forEach((candidate, index) => { if (candidate.pinned === tab.pinned) last = index })
+    at = tab.pinned ? last + 1 : (last < 0 ? to.tabs.length : last + 1)
+  }
+  to.tabs.splice(at, 0, tab)
+  activateTabInternal(tab.id)
+}
+
+/** Move a tab (with its live page) into another open window, before `beforeId` or at the end. */
+export function moveBrowserTabToWindow(id: string, target: BaseWindow, beforeId: string | null = null): boolean {
+  const tab = findTab(id)
+  const to = windowStateFor(target)
+  if (!tab || !isLiveWindow(to) || to === tab.win || !canMoveTabTo(tab, to)) return false
+  detachTabFromWindow(tab)
+  adoptTabIntoWindow(tab, to, beforeId)
+  persistOpenTabs()
+  if (!to.window.isDestroyed()) {
+    to.window.show()
+    to.window.focus()
+  }
+  return true
+}
+
+/** "Move to New Window" / tearing a tab out: a new window (of the same kind) that takes the tab over. */
+export function moveBrowserTabToNewWindow(id: string, position?: { x: number; y: number }): boolean {
+  const tab = findTab(id)
+  if (!tab || tab.win.tabs.length < 2 || !browserWindowFactory) return false
+  let size: { width: number; height: number } | undefined
+  try {
+    const [width = 0, height = 0] = tab.win.window.getSize()
+    if (width > 0 && height > 0) size = { width, height }
+  } catch {
+    // Use the default size.
+  }
+  const created = browserWindowFactory({ private: tab.win.isPrivate, adoptTabId: id, position, size })
+  return Boolean(created && findTab(id)?.win.window === created)
+}
+
+/**
+ * A sidebar drag ended outside the tab list. Over another window: move the tab there. Outside every
+ * window: tear it out into a new window under the pointer. Back over its own window: nothing.
+ */
+export function dropBrowserTabOutside(id: string): boolean {
+  const tab = findTab(id)
+  if (!tab) return false
+  const point = screen.getCursorScreenPoint()
+  const contains = (window: BaseWindow): boolean => {
+    if (window.isDestroyed() || window.isMinimized()) return false
+    const bounds = window.getBounds()
+    return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
+  }
+  if (contains(tab.win.window)) return false
+  const target = windowStates.find((w) => w !== tab.win && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
+  if (target) return moveBrowserTabToWindow(id, target.window)
+  if (windowStates.some((w) => w !== tab.win && isLiveWindow(w) && contains(w.window))) return false
+  return moveBrowserTabToNewWindow(id, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
+}
+
+/** Window menu / palette: every window with its label, in creation order. */
+export function listBrowserWindows(): { window: BaseWindow; label: string; private: boolean; focused: boolean }[] {
+  const focused = focusedBrowserWindow()
+  return windowStates.filter(isLiveWindow).map((w) => ({ window: w.window, label: browserWindowLabel(w.window), private: w.isPrivate, focused: w.window === focused }))
 }
 
 export function getBrowserState(): BrowserState {
@@ -1302,30 +1619,32 @@ export function getBrowserTabs(): BrowserTabSummary[] {
 
 /** Diagnostics: every tab with its live web contents (null while it sleeps). */
 export function getBrowserTabProcessEntries(): TabProcessEntry[] {
-  return tabs.map((tab) => ({
+  const several = windowStates.length > 1
+  return allTabs().map((tab) => ({
     id: tab.id,
     title: pageTitle(tab),
     url: currentUrl(tab),
-    active: tab.id === activeTabId,
+    active: isActiveTab(tab),
     pdfEditor: tab.pdfEditor !== null,
     extensionPage: tab.extensionPageOrigin !== null,
-    contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
+    ...(several ? { windowNumber: browserWindowNumber(tab.win.window) } : {})
   }))
 }
 
 export function getBrowserTabUrlByWebContentsId(webContentsId: number): string | null {
-  const tab = tabs.find((candidate) => candidate.view?.webContents.id === webContentsId)
+  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
   const contents = tab?.view?.webContents
   return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null
 }
 
 export function markBrowserDownloadStarted(webContentsId: number): void {
-  const tab = tabs.find((candidate) => candidate.view?.webContents.id === webContentsId)
+  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
   if (!tab) return
   tab.downloadStartedForCurrentLoad = true
   if (tab.error !== null) {
     tab.error = null
-    publishState()
+    publishState(tab.win)
   }
 }
 
@@ -1344,7 +1663,7 @@ export function getExperimentalExtensionFrames(electronTabId: number): Experimen
   if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') return null
   if (!Number.isSafeInteger(electronTabId) || electronTabId < 0) return null
 
-  const tab = tabs.find((candidate) => candidate.view?.webContents.id === electronTabId)
+  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === electronTabId)
   const contents = tab?.view?.webContents
   if (!contents || contents.isDestroyed()) return null
 
@@ -1368,9 +1687,17 @@ export function getExperimentalExtensionFrames(electronTabId: number): Experimen
 
 /** Private tab: opens on the local New Tab (private variant) unless given a URL. */
 export function newPrivateBrowserTab(input?: string): string | null {
-  const id = createTab(input ?? SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, true)
-  if (id) setImmediate(sendFocusAddressToVisibleRenderer)
+  const w = currentWindowState()
+  const id = createTab(input ?? SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, true, false, w)
+  if (id && w) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
   return id
+}
+
+/** Links from outside (the OS, update downloads) go to the current window, or the last normal one if that is private. */
+function normalWindowState(): BrowserWindowState | undefined {
+  const current = currentWindowState()
+  if (!current?.isPrivate) return current
+  return [...windowStates].reverse().find((w) => !w.isPrivate && isLiveWindow(w)) ?? current
 }
 
 /**
@@ -1382,16 +1709,18 @@ export function openExternalBrowserTab(target: string): string | null {
   const localDocument = isLocalDocumentUrl(target)
   const url = localDocument ? target : resolveNavigationTarget(target)
   if (!url || (!localDocument && !/^https?:\/\//i.test(url))) return null
-  const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, localDocument)
+  const w = normalWindowState()
+  const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, localDocument, w)
   if (id) persistOpenTabs()
+  if (id && w && !w.window.isDestroyed() && w.window !== currentBrowserWindow()) w.window.focus()
   return id
 }
 
-export function newBrowserTab(input?: string, engine?: SearchEngineId): string | null {
-  const id = createTab(input, engine ?? selectedSearchEngine)
-  if (id) {
+export function newBrowserTab(input?: string, engine?: SearchEngineId, w = currentWindowState()): string | null {
+  const id = createTab(input, engine ?? selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
+  if (id && w) {
     persistOpenTabs()
-    setImmediate(sendFocusAddressToVisibleRenderer)
+    setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
   }
   return id
 }
@@ -1399,9 +1728,9 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId): string |
 /** Open extension UI only through this main-process-only path, never through address-bar navigation. */
 export function openExtensionPageTab(url: string, extensionUrl: string, preloadPath: string, owner: ExtensionPageOwner): string | null {
   if (!preloadPath || !isBrambleExtensionUrl(url, extensionUrl)) return null
-  let tab = tabs.find((candidate) => candidate.extensionPageOrigin === extensionUrl && isExtensionPage(candidate, currentUrl(candidate)))
+  let tab = allTabs().find((candidate) => candidate.extensionPageOrigin === extensionUrl && isExtensionPage(candidate, currentUrl(candidate)))
   if (!tab) {
-    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath, owner })
+    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath, owner }, undefined, false, false, normalWindowState())
     if (!id) return null
     tab = getTab(id)
   } else {
@@ -1416,7 +1745,7 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
         void contents.loadURL(url).catch((error: unknown) => {
           if (tab?.view?.webContents !== contents) return
           tab.error = error instanceof Error ? error.message : String(error)
-          publishState()
+          publishState(tab.win)
         })
       } else {
         ensureTabLoaded(tab)
@@ -1426,13 +1755,14 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
   }
   if (!tab) return null
   persistOpenTabs()
-  if (browserWindow && !browserWindow.isDestroyed()) {
-    browserWindow.show()
-    browserWindow.focus()
-    const contents = getTab()?.view?.webContents
+  const home = tab.win
+  if (isLiveWindow(home)) {
+    home.window.show()
+    home.window.focus()
+    const contents = activeTabOf(home)?.view?.webContents
     if (contents && !contents.isDestroyed()) contents.focus()
   }
-  publishState()
+  publishState(home)
   return tab.id
 }
 
@@ -1442,26 +1772,26 @@ export function openBrambleExtensionTab(url: string, extensionUrl: string, prelo
 }
 
 export function isBrambleExtensionTab(contents: WebContents): boolean {
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const tab = tabForContents(contents)
   return Boolean(tab && tab.extensionPageOwner === 'bramble' && isExtensionPage(tab, currentUrl(tab)))
 }
 
 /** True when `contents` is a Surffish tab showing a page of the extension at `extensionUrl`. */
 export function isExtensionPageTab(contents: WebContents, extensionUrl: string, owner: ExtensionPageOwner): boolean {
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const tab = tabForContents(contents)
   return Boolean(tab && tab.extensionPageOwner === owner && tab.extensionPageOrigin === extensionUrl && isExtensionPage(tab, currentUrl(tab)))
 }
 
 /** Close extension-host tabs before replacing or unloading Bramble's extension build. */
 export function closeBrambleExtensionTabs(): void {
-  for (const tab of [...tabs]) {
+  for (const tab of allTabs()) {
     if (tab.extensionPageOrigin && tab.extensionPageOwner === 'bramble') closeBrowserTab(tab.id)
   }
 }
 
 /** Close tabs showing pages of one extension (before disabling, updating, or uninstalling it). */
 export function closeExtensionPageTabs(extensionUrl: string): void {
-  for (const tab of [...tabs]) {
+  for (const tab of allTabs()) {
     if (tab.extensionPageOrigin === extensionUrl) closeBrowserTab(tab.id)
   }
 }
@@ -1491,7 +1821,7 @@ function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord 
   return {
     id: extensionTabId(tab),
     index,
-    active: tab.id === activeTabId,
+    active: isActiveTab(tab),
     pinned: tab.pinned,
     url: currentUrl(tab),
     title: pageTitle(tab),
@@ -1506,17 +1836,17 @@ function findTabByExtensionId(id: number | undefined): BrowserTab | undefined {
     const active = getTab()
     return active?.isPrivate ? undefined : active
   }
-  return tabs.find((tab) => !tab.isPrivate && extensionTabId(tab) === id)
+  return allTabs().find((tab) => !tab.isPrivate && extensionTabId(tab) === id)
 }
 
 /** Extensions never see private tabs (like Chrome's default "not allowed in Incognito"). */
 export function listExtensionTabs(): ExtensionTabRecord[] {
-  return tabs.filter((tab) => !tab.isPrivate).map((tab, index) => extensionTabRecord(tab, index))
+  return windowStates.flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab, index) => extensionTabRecord(tab, index)))
 }
 
 export function getExtensionTab(id: number | undefined): ExtensionTabRecord | null {
   const tab = findTabByExtensionId(id)
-  return tab ? extensionTabRecord(tab, tabs.indexOf(tab)) : null
+  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
 }
 
 export function reloadExtensionTab(id: number | undefined, bypassCache: boolean): boolean {
@@ -1543,23 +1873,23 @@ export function updateExtensionTab(id: number | undefined, update: { url?: strin
     tab.error = null
     const contents = tab.view?.webContents
     if (contents && !contents.isDestroyed()) void contents.loadURL(update.url).catch(() => {})
-    else if (tab.id === activeTabId || update.active) ensureTabLoaded(tab)
+    else if (isActiveTab(tab) || update.active) ensureTabLoaded(tab)
   }
   if (update.active) activateTabInternal(tab.id)
   persistOpenTabs()
-  publishState()
-  return extensionTabRecord(tab, tabs.indexOf(tab))
+  publishState(tab.win)
+  return extensionTabRecord(tab, tab.win.tabs.indexOf(tab))
 }
 
 /** Open a tab for an extension (http(s) or that extension's own page, checked by the caller). */
 export function createExtensionTab(url: string | undefined, active: boolean, extensionPage?: ExtensionPageTabOptions): ExtensionTabRecord | null {
   const id = extensionPage && url
     ? openExtensionPageTab(url, extensionPage.extensionUrl, extensionPage.preloadPath, extensionPage.owner)
-    : createTab(url, selectedSearchEngine, active)
+    : createTab(url, selectedSearchEngine, active, false, false, false, undefined, undefined, false, false, normalWindowState())
   if (!id) return null
   persistOpenTabs()
   const tab = getTab(id)
-  return tab ? extensionTabRecord(tab, tabs.indexOf(tab)) : null
+  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
 }
 
 export function removeExtensionTabs(ids: readonly number[]): void {
@@ -1567,6 +1897,12 @@ export function removeExtensionTabs(ids: readonly number[]): void {
     const tab = findTabByExtensionId(id)
     if (tab) closeBrowserTab(tab.id)
   }
+}
+
+/** A tab's live WebContents (null while it sleeps), in whichever window it is. */
+export function getBrowserTabWebContents(id: string | null | undefined): WebContents | null {
+  const contents = findTab(id)?.view?.webContents
+  return contents && !contents.isDestroyed() ? contents : null
 }
 
 /** Main-frame WebContents of the active tab, when it is loaded. */
@@ -1634,7 +1970,12 @@ function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOption
   return accelerator ? { accelerator, registerAccelerator: false } : {}
 }
 
-export function runTabCommand(command: TabCommand, tabId = activeTabId ?? undefined): void {
+export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
+  const owner = findTab(tabId)?.win.window
+  if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
+    runInWindow(owner, () => runTabCommand(command, tabId))
+    return
+  }
   switch (command) {
     case 'close':
       closeBrowserTabFromShortcut(tabId)
@@ -1712,7 +2053,7 @@ const SHIFTED_KEY_ALIASES: Record<string, string> = { '{': '[', '}': ']', '+': '
 const CODE_KEYS: Record<string, string> = { BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-' }
 
 /** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
-export function handleBrowserShortcutInput(input: Electron.Input, tabId = activeTabId): boolean {
+export function handleBrowserShortcutInput(input: Electron.Input, tabId: string | null | undefined = getTab()?.id ?? null): boolean {
   if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
   let key = input.key.toLowerCase()
   if (input.alt) {
@@ -1725,7 +2066,11 @@ export function handleBrowserShortcutInput(input: Electron.Input, tabId = active
   return handleBrowserShortcut(key, input.shift, tabId, input.alt, primary)
 }
 
-export function handleBrowserShortcut(key: string, shift: boolean, tabId = activeTabId, alt = false, primary = true): boolean {
+export function handleBrowserShortcut(key: string, shift: boolean, tabId: string | null | undefined = getTab()?.id ?? null, alt = false, primary = true): boolean {
+  const owner = findTab(tabId)?.win.window
+  if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
+    return runInWindow(owner, () => handleBrowserShortcut(key, shift, tabId, alt, primary))
+  }
   for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, CommandShortcut][]) {
     if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue
     if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue
@@ -1756,7 +2101,7 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     toggleTabOverview()
     return true
   }
-  if (key === 'tab' && tabs.length > 1) {
+  if (key === 'tab' && (currentWindowState()?.tabs.length ?? 0) > 1) {
     cycleBrowserTab(shift ? -1 : 1)
     return true
   }
@@ -1764,7 +2109,8 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
 }
 
 /** Tabs in the order the sidebar shows them: pinned icons first, then the list. */
-function tabsInSidebarOrder(): BrowserTab[] {
+function tabsInSidebarOrder(w = currentWindowState()): BrowserTab[] {
+  const tabs = w?.tabs ?? []
   return [...tabs.filter((tab) => tab.pinned), ...tabs.filter((tab) => !tab.pinned)]
 }
 
@@ -1773,13 +2119,13 @@ export function selectBrowserTabByNumber(number: number): void {
   const ordered = tabsInSidebarOrder()
   const target = number === 9 ? ordered[ordered.length - 1] : ordered[number - 1]
   if (!target) return
-  if (target.id !== activeTabId) activateBrowserTab(target.id)
+  if (!isActiveTab(target)) activateBrowserTab(target.id)
   // From the tab overview, land on the chosen tab.
   if (isTabOverviewOpen()) closeTabOverview(target.id)
 }
 
 function closeOverviewForPanel(): void {
-  if (isTabOverviewOpen()) closeTabOverview(activeTabId ?? undefined, false)
+  if (isTabOverviewOpen()) closeTabOverview(getTab()?.id, false)
 }
 
 /** Cmd+Shift+Backspace: Settings → Privacy (Clear browsing data). */
@@ -1799,73 +2145,82 @@ function toggleBrowserPanel(mode: 'history' | 'downloads' | 'bookmarks'): void {
 // Find in page. The bar lives in the toolbar overlay renderer; main keeps the query so
 // Cmd+G works with focus anywhere (page, toolbar, tab overview).
 
-onTabInterstitialChanged(() => publishState())
+onTabInterstitialChanged(() => publishAllWindows())
 
-let findState: { tabId: string | null; open: boolean; text: string; result: BrowserFindState['result'] } = { tabId: null, open: false, text: '', result: null }
+const CLOSED_FIND_STATE: FindState = { tabId: null, open: false, text: '', result: null }
 
-function publishFindState(): void {
-  sendToMainWindowRenderers('browser:find', getBrowserFindState())
+function publishFindState(w = currentWindowState()): void {
+  if (isLiveWindow(w)) sendToWindowRenderers(w.window, 'browser:find', getBrowserFindState(w))
 }
 
-export function getBrowserFindState(): BrowserFindState {
+export function getBrowserFindState(w = currentWindowState()): BrowserFindState {
+  const findState = w?.findState ?? CLOSED_FIND_STATE
   return { open: findState.open, text: findState.text, result: findState.result ? { ...findState.result } : null }
 }
 
-function findContents(): WebContents | null {
-  const contents = findState.tabId ? getTab(findState.tabId)?.view?.webContents : null
+function findContents(w: BrowserWindowState): WebContents | null {
+  const tab = w.findState.tabId ? getTab(w.findState.tabId) : undefined
+  const contents = tab?.win === w ? tab.view?.webContents : null
   return contents && !contents.isDestroyed() ? contents : null
 }
 
 /** Cmd+F: open (or refocus) the find bar for the active page. */
 export function openFindBar(): boolean {
+  const w = currentWindowState()
+  if (!w) return false
   closeOverviewForPanel()
-  const tab = getTab()
+  const tab = activeTabOf(w)
   const contents = tab?.view?.webContents
   if (!tab || !contents || contents.isDestroyed() || currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return false
-  if (findState.tabId !== tab.id) findState = { tabId: tab.id, open: true, text: findState.text, result: null }
-  findState.open = true
-  publishFindState()
+  if (w.findState.tabId !== tab.id) w.findState = { tabId: tab.id, open: true, text: w.findState.text, result: null }
+  w.findState.open = true
+  publishFindState(w)
   // Focus the toolbar so typing goes to the find field; it selects the old query for retyping.
-  if (!sendToToolbarRenderer('browser:find:focus', true)) {
-    findState.open = false
-    publishFindState()
+  if (!runInWindow(w.window, () => sendToToolbarRenderer('browser:find:focus', true))) {
+    w.findState.open = false
+    publishFindState(w)
     return false
   }
-  if (findState.text && !findState.result) contents.findInPage(findState.text, { findNext: true })
+  if (w.findState.text && !w.findState.result) contents.findInPage(w.findState.text, { findNext: true })
   return true
 }
 
 /** Typing in the find field: a new search for `text` (empty clears the highlight). */
 export function setBrowserFindQuery(input: unknown): void {
-  if (typeof input !== 'string' || !findState.open) return
+  const w = currentWindowState()
+  if (!w || typeof input !== 'string' || !w.findState.open) return
   const text = input.slice(0, 1_000)
-  const contents = findContents()
-  findState.text = text
-  findState.result = null
-  if (!contents) return publishFindState()
+  const contents = findContents(w)
+  w.findState.text = text
+  w.findState.result = null
+  if (!contents) return publishFindState(w)
   if (text) contents.findInPage(text, { findNext: true })
   else contents.stopFindInPage('clearSelection')
-  publishFindState()
+  publishFindState(w)
 }
 
 /** Enter / Cmd+G (forward) and Shift+Enter / Cmd+Shift+G (backward). */
 export function stepFind(forward: boolean): void {
-  if (!findState.open || !findState.text || findState.tabId !== activeTabId) {
+  const w = currentWindowState()
+  if (!w) return
+  const { findState } = w
+  if (!findState.open || !findState.text || findState.tabId !== w.activeTabId) {
     openFindBar()
     return
   }
-  findContents()?.findInPage(findState.text, { forward, findNext: false })
+  findContents(w)?.findInPage(findState.text, { forward, findNext: false })
 }
 
 /** Esc or the close button: clear the highlight, hide the bar, hand focus back to the page. */
-export function closeFindBar(focusPage = true): void {
-  const contents = findContents()
+export function closeFindBar(focusPage = true, w = currentWindowState()): void {
+  if (!w) return
+  const contents = findContents(w)
   if (contents) contents.stopFindInPage('clearSelection')
-  const wasOpen = findState.open
-  findState = { tabId: null, open: false, text: findState.text, result: null }
-  if (wasOpen) publishFindState()
+  const wasOpen = w.findState.open
+  w.findState = { tabId: null, open: false, text: w.findState.text, result: null }
+  if (wasOpen) publishFindState(w)
   if (focusPage) {
-    const active = getTab()?.view?.webContents
+    const active = activeTabOf(w)?.view?.webContents
     if (active && !active.isDestroyed()) active.focus()
   }
 }
@@ -1900,7 +2255,7 @@ function zoomTab(tab: BrowserTab, action: 'in' | 'out' | 'reset'): void {
     if (tab.isPrivate) privateSiteZoom.set(origin, next)
     else saveBrowserSiteZoom(origin, next)
   }
-  if (tab.id === activeTabId) publishState()
+  if (isActiveTab(tab)) publishState(tab.win)
 }
 
 /** Cmd + / Cmd - / Cmd 0 and the omnibox zoom pill. */
@@ -1917,8 +2272,8 @@ export function setBrowserSearchEngine(engine: SearchEngineId): void {
 export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | null {
   if (!isTabSleepMinutes(value)) return null
   tabSleepMinutes = value
-  for (const tab of tabs) {
-    if (tab.id === activeTabId) continue
+  for (const tab of allTabs()) {
+    if (isActiveTab(tab)) continue
     scheduleTabSleep(tab)
   }
   return tabSleepMinutes
@@ -1926,14 +2281,20 @@ export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | nul
 
 export function activateBrowserTab(id: string): boolean {
   const activated = activateTabInternal(id)
-  if (activated) persistOpenTabs()
+  if (activated) {
+    persistOpenTabs()
+    // Switching to a tab that lives in another window (archive restore, extensions) brings that window forward.
+    const window = findTab(id)?.win.window
+    if (window && !window.isDestroyed() && window !== currentBrowserWindow()) window.focus()
+  }
   return activated
 }
 
 export function cycleBrowserTab(offset: number): void {
-  if (tabs.length < 2) return
-  const ordered = tabsInSidebarOrder()
-  const activeIndex = ordered.findIndex((tab) => tab.id === activeTabId)
+  const w = currentWindowState()
+  if (!w || w.tabs.length < 2) return
+  const ordered = tabsInSidebarOrder(w)
+  const activeIndex = ordered.findIndex((tab) => tab.id === w.activeTabId)
   const nextIndex = (activeIndex + offset + ordered.length) % ordered.length
   const next = ordered[nextIndex]
   if (next) activateBrowserTab(next.id)
@@ -1970,31 +2331,39 @@ export function setBrowserTabMuted(id: string, muted: boolean): boolean {
   const contents = getTab(id)?.view?.webContents
   if (!contents || contents.isDestroyed()) return false
   contents.setAudioMuted(muted)
-  publishTabs()
+  const tab = getTab(id)
+  if (tab) publishTabs(tab.win)
   return true
 }
 
 export function closeBrowserTab(id: string, rememberClosed = true): void {
-  const index = tabs.findIndex((tab) => tab.id === id)
-  if (index < 0) return
-  const tab = tabs[index]
+  const tab = findTab(id)
   if (!tab) return
+  const w = tab.win
+  const { tabs } = w
+  const index = tabs.indexOf(tab)
+  if (index < 0) return
   if (!allowLeavingPdfEditor(tab, 'Close Tab')) return
   if (tab.pdfEditor) tab.pdfEditor.dirty = false
   tabThumbnails.delete(id)
-  const wasActive = activeTabId === id
+  const wasActive = w.activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
-  if (wasActive) hideLinkStatus()
-  if (findState.tabId === id) closeFindBar(false)
+  if (wasActive) hideLinkStatus(false, w.window)
+  if (w.findState.tabId === id) closeFindBar(false, w)
   if (rememberClosed) rememberClosedTab(tab, index)
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
-  if (wasActive) activeTabId = null
+  if (wasActive) w.activeTabId = null
   disposeTabView(tab)
-  if (tab.isPrivate && !tabs.some((candidate) => candidate.isPrivate)) endPrivateSession()
+  if (tab.isPrivate && !allTabs().some((candidate) => candidate.isPrivate)) endPrivateSession()
   if (tabs.length === 0) {
-    activeTabId = null
-    createTab()
+    w.activeTabId = null
+    // The last tab of one of several windows closes that window; the final window keeps a fresh New Tab.
+    if (hasOtherWindows(w)) {
+      setImmediate(() => { if (!w.window.isDestroyed() && w.tabs.length === 0) w.window.close() })
+      return
+    }
+    createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
     persistOpenTabs()
     return
   }
@@ -2002,10 +2371,14 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
     const replacement = tabs[Math.min(index, tabs.length - 1)]
     if (replacement) activateTabInternal(replacement.id)
   } else {
-    applyTabBounds()
+    applyTabBounds(w)
   }
   persistOpenTabs()
-  publishState()
+  publishState(w)
+}
+
+function hasOtherWindows(w: BrowserWindowState): boolean {
+  return windowStates.some((other) => other !== w && isLiveWindow(other))
 }
 
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
@@ -2015,20 +2388,21 @@ function endPrivateSession(): void {
   void clearPrivateSession()
 }
 
-let confirmingWindowClose = false
-
 /**
- * Cmd+W: close the tab. On the last tab, ask before closing the whole window instead of
- * silently swapping in a fresh New Tab or letting the menu close the window.
+ * Cmd+W: close the tab. On the last tab of the only window, ask before closing it instead of
+ * silently swapping in a fresh New Tab or letting the menu close the window. With other windows
+ * open, the last tab just closes its window (like Chrome).
  */
-export function closeBrowserTabFromShortcut(tabId = activeTabId ?? undefined): void {
-  if (tabs.length > 1) {
+export function closeBrowserTabFromShortcut(tabId = getTab()?.id): void {
+  const w = findTab(tabId)?.win ?? currentWindowState()
+  if (!w) return
+  if (w.tabs.length > 1 || hasOtherWindows(w)) {
     if (tabId) closeBrowserTab(tabId)
     return
   }
-  const win = browserWindow
-  if (!win || win.isDestroyed() || confirmingWindowClose) return
-  confirmingWindowClose = true
+  const win = w.window
+  if (win.isDestroyed() || w.confirmingWindowClose) return
+  w.confirmingWindowClose = true
   void dialog.showMessageBox(win, {
     type: 'question',
     buttons: ['Close Window', 'Cancel'],
@@ -2039,7 +2413,7 @@ export function closeBrowserTabFromShortcut(tabId = activeTabId ?? undefined): v
   }).then(({ response }) => {
     if (response === 0 && !win.isDestroyed()) win.close()
   }).finally(() => {
-    confirmingWindowClose = false
+    w.confirmingWindowClose = false
   })
 }
 
@@ -2049,14 +2423,22 @@ export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
   if (tab.pinned === pinned) return true
   tab.pinned = pinned
   persistOpenTabs()
-  publishTabs()
+  publishTabs(tab.win)
   return true
 }
 
-/** Move a tab so it lands before `beforeId` (or at the end when null). Pinned and unpinned tabs keep their own groups. */
+/**
+ * Move a tab so it lands before `beforeId` (or at the end when null). Pinned and unpinned tabs keep
+ * their own groups. A `beforeId` in another window moves the tab into that window.
+ */
 export function moveBrowserTab(id: string, beforeId: string | null): boolean {
-  const from = tabs.findIndex((tab) => tab.id === id)
-  if (from < 0 || id === beforeId) return false
+  const moving = findTab(id)
+  if (!moving || id === beforeId) return false
+  const before = beforeId ? findTab(beforeId) : undefined
+  if (before && before.win !== moving.win) return moveBrowserTabToWindow(id, before.win.window, beforeId)
+  const { tabs } = moving.win
+  const from = tabs.indexOf(moving)
+  if (from < 0) return false
   const [tab] = tabs.splice(from, 1)
   if (!tab) return false
   let to = beforeId ? tabs.findIndex((item) => item.id === beforeId) : -1
@@ -2069,14 +2451,14 @@ export function moveBrowserTab(id: string, beforeId: string | null): boolean {
   tabs.splice(to, 0, tab)
   if (to === from) return false
   persistOpenTabs()
-  publishTabs()
+  publishTabs(tab.win)
   return true
 }
 
 export function duplicateBrowserTab(id: string): string | null {
   const tab = getTab(id)
   if (!tab) return null
-  const duplicateId = createTab(currentUrl(tab), selectedSearchEngine)
+  const duplicateId = createTab(currentUrl(tab), selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, tab.win)
   if (duplicateId) persistOpenTabs()
   return duplicateId
 }
@@ -2095,16 +2477,19 @@ export function reloadBrowserTab(id: string, ignoreCache = false): void {
 
 export function suspendBrowserTab(id: string): void {
   const tab = getTab(id)
-  if (tab && tab.id !== activeTabId) hibernateTab(tab)
+  if (tab && !isActiveTab(tab)) hibernateTab(tab)
 }
 
+/** Suspend every other tab in the same window (the active one stays awake). */
 export function suspendOtherBrowserTabs(keepId: string): void {
-  for (const tab of [...tabs]) {
-    if (tab.id !== keepId && tab.id !== activeTabId) hibernateTab(tab)
+  const w = findTab(keepId)?.win ?? currentWindowState()
+  for (const tab of [...(w?.tabs ?? [])]) {
+    if (tab.id !== keepId && !isActiveTab(tab)) hibernateTab(tab)
   }
 }
 
 function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'others'): void {
+  const tabs = findTab(id)?.win.tabs ?? []
   const targetIndex = tabs.findIndex((tab) => tab.id === id)
   if (targetIndex < 0) return
   const idsToClose = tabs.flatMap((tab, index) => {
@@ -2132,14 +2517,14 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     tab.error = null
     ensureTabLoaded(tab)
     if (!tab.view) return false
-    publishState()
+    publishState(tab.win)
     return true
   }
   tab.error = null
   ensureTabLoaded(tab)
   const contents = tab.view?.webContents
   if (!contents) return false
-  publishState()
+  publishState(tab.win)
   try {
     if (tab.isPrivate) await whenPrivateSessionReady()
     await contents.loadURL(url)
@@ -2151,38 +2536,41 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     }
     if (tab.downloadStartedForCurrentLoad) {
       tab.error = null
-      publishState()
+      publishState(tab.win)
       return true
     }
     if (message.includes('ERR_ABORTED') && Date.now() - (googleHandOffAt.get(contents) ?? 0) < 5000) {
       tab.error = null
-      publishState()
+      publishState(tab.win)
       return true
     }
     tab.error = message
-    publishState()
+    publishState(tab.win)
     return false
   }
 }
 
 export function setBrowserBounds(input: unknown): void {
-  if (!browserWindow || typeof input !== 'object' || input === null) return
+  const w = currentWindowState()
+  if (!w || typeof input !== 'object' || input === null) return
   const bounds = input as Partial<BrowserBounds>
   const values = [bounds.x, bounds.y, bounds.width, bounds.height]
   if (values.some((value) => typeof value !== 'number' || !Number.isFinite(value))) return
-  browserBounds = {
+  const browserBounds = w.browserBounds = {
     x: Math.max(0, Math.round(bounds.x!)),
     y: Math.max(0, Math.round(bounds.y!)),
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!))
   }
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
-  if (browserBounds.width === 0 || browserBounds.height === 0) hideLinkStatus()
-  applyTabBounds()
+  if (browserBounds.width === 0 || browserBounds.height === 0) hideLinkStatus(false, w.window)
+  applyTabBounds(w)
 }
 
-export function syncBrowserBoundsToWindow(width: number, height: number, overlayMode: boolean): void {
-  if (!browserWindow || browserWindow.isDestroyed() || !overlayMode || width <= 0 || height <= 0) return
+export function syncBrowserBoundsToWindow(width: number, height: number, overlayMode: boolean, window?: BaseWindow): void {
+  const w = window ? windowStateFor(window) : currentWindowState()
+  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return
+  const { browserBounds } = w
   if (browserBounds.width <= 0 || browserBounds.height <= 0) return
   const y = Math.min(browserBounds.y, height)
   const nextBounds: BrowserBounds = {
@@ -2193,8 +2581,8 @@ export function syncBrowserBoundsToWindow(width: number, height: number, overlay
   }
   if (nextBounds.x === browserBounds.x && nextBounds.y === browserBounds.y
     && nextBounds.width === browserBounds.width && nextBounds.height === browserBounds.height) return
-  browserBounds = nextBounds
-  applyTabBounds()
+  w.browserBounds = nextBounds
+  applyTabBounds(w)
 }
 
 function cancelActiveMacTrackpadSwipe(): void {
@@ -2222,28 +2610,40 @@ function resetMacTrackpadSwipeFor(contents: WebContents): void {
   }
 }
 
+/** The window a native gesture landed in (its NSWindow handle), else the focused one. */
+function windowForGesture(handle: unknown): BrowserWindowState | undefined {
+  if (Buffer.isBuffer(handle)) {
+    const match = windowStates.find((w) => {
+      try {
+        return isLiveWindow(w) && w.window.getNativeWindowHandle().equals(handle)
+      } catch {
+        return false
+      }
+    })
+    if (match) return match
+  }
+  return windowStateFor(focusedBrowserWindow()) ?? currentWindowState()
+}
+
 function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | undefined {
+  const w = windowForGesture(request.windowHandle)
   const refuse = (reason: string): undefined => {
-    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] refused:', reason, { direction: request.direction, x: request.x, y: request.y, bounds: browserBounds })
+    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] refused:', reason, { direction: request.direction, x: request.x, y: request.y, bounds: w?.browserBounds })
     return undefined
   }
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return refuse('no browser window')
-  if (isTabOverviewOpen()) {
+  if (process.platform !== 'darwin' || !isLiveWindow(w)) return refuse('no browser window')
+  const browserBounds = w.browserBounds
+  if (isTabOverviewOpen(w.window)) {
     // In the grid, horizontal swipes step the selection instead of navigating history.
-    const overviewId = getTabOverviewContentsId()
-    if (getTabOverviewState() !== 'open' || overviewId === null) return refuse('tab overview animating')
+    const overviewId = getTabOverviewContentsId(w.window)
+    if (getTabOverviewState(w.window) !== 'open' || overviewId === null) return refuse('tab overview animating')
     if (request.direction !== 'back' && request.direction !== 'forward') return refuse('bad request')
     cancelActiveMacTrackpadSwipe()
     if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking overview selection', request.direction)
     return overviewId
   }
-  // The handle only tells us which NSWindow the gesture landed in. Surffish drives one browser
-  // window, so a mismatch is logged rather than treated as fatal (a bad compare here used to
-  // reject every swipe).
-  if (MAC_SWIPE_DEBUG && Buffer.isBuffer(request.windowHandle)
-    && !browserWindow.getNativeWindowHandle().equals(request.windowHandle)) {
-    console.info('[trackpad swipe] window handle differs from getNativeWindowHandle(); continuing')
-  }
+  // The handle picks the window (windowForGesture); an unmatched handle falls back to the focused
+  // window rather than rejecting the swipe (a bad compare here used to reject every swipe).
   if ((request.direction !== 'back' && request.direction !== 'forward')
     || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return refuse('bad request')
   if (browserBounds.width <= 0 || browserBounds.height <= 0
@@ -2251,7 +2651,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     || request.x >= browserBounds.x + browserBounds.width
     || request.y >= browserBounds.y + browserBounds.height) return refuse('outside page bounds')
 
-  const tab = getTab()
+  const tab = activeTabOf(w)
   const contents = tab?.view?.webContents
   if (!tab || !contents || contents.isDestroyed()) return refuse('no active tab')
   const canPageConsume = request.direction === 'back'
@@ -2283,7 +2683,7 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
 }
 
 function reportMacTrackpadSwipeProgress(contentsId: number, progress: number): void {
-  if (contentsId === getTabOverviewContentsId()) return
+  if (getTabOverviewContentsIds().includes(contentsId)) return
   const swipe = activeMacTrackpadSwipe
   if (!swipe || swipe.contents.id !== contentsId || swipe.contents.isDestroyed()) return
   try {
@@ -2302,9 +2702,10 @@ function finishMacTrackpadSwipe(
   _maxProgress: number
 ): void {
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
-  if (contentsId === getTabOverviewContentsId()) {
+  const overviewWindow = windowStates.find((w) => getTabOverviewContentsId(w.window) === contentsId)
+  if (overviewWindow) {
     // Selection follows the fingers: swipe right moves right, swipe left moves left.
-    if (committed) moveTabOverviewSelection(direction === 'back' ? 1 : -1)
+    if (committed) moveTabOverviewSelection(direction === 'back' ? 1 : -1, overviewWindow.window)
     return
   }
   const swipe = activeMacTrackpadSwipe
@@ -2333,8 +2734,8 @@ function finishMacTrackpadSwipe(
     activeMacTrackpadSwipe = null
     nextMacTrackpadSwipeToken += 1
     const currentTab = getTab(swipe.tabId)
-    if (!currentTab || currentTab.id !== activeTabId || currentTab.view?.webContents !== swipe.contents
-      || swipe.contents.isDestroyed() || !browserWindow || browserWindow.isDestroyed()) {
+    if (!currentTab || !isActiveTab(currentTab) || currentTab.view?.webContents !== swipe.contents
+      || swipe.contents.isDestroyed() || !isLiveWindow(currentTab.win)) {
       resetMacTrackpadSwipeFor(swipe.contents)
       return
     }
@@ -2361,13 +2762,13 @@ export function updateBrowserTrackpadScrollEdges(contents: WebContents, input: u
   if (process.platform !== 'darwin' || contents.isDestroyed() || typeof input !== 'object' || input === null) return
   const edges = input as Partial<BrowserPageScrollEdges>
   if (typeof edges.canScrollLeft !== 'boolean' || typeof edges.canScrollRight !== 'boolean') return
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const tab = tabForContents(contents)
   if (tab) tab.pageScrollEdges = { canScrollLeft: edges.canScrollLeft, canScrollRight: edges.canScrollRight }
 }
 
 export function updateBrowserPageScale(contents: WebContents, input: unknown): void {
   if (contents.isDestroyed() || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) return
-  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const tab = tabForContents(contents)
   if (tab) tab.pageScale = input
 }
 
@@ -2382,10 +2783,11 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
 }
 
 async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
-  if (tab.id !== activeTabId || browserBounds.width <= 0 || browserBounds.height <= 0) return
+  const { browserBounds } = tab.win
+  if (!isActiveTab(tab) || browserBounds.width <= 0 || browserBounds.height <= 0) return
   if (isLocalNewTab(tab)) {
-    const image = await captureLocalNewTabPage({ ...browserBounds })
-    if (!image || !tabs.includes(tab)) return
+    const image = await captureLocalNewTabPage({ ...browserBounds }, tab.win.window)
+    if (!image || !allTabs().includes(tab)) return
     const shot = thumbnailDataUrl(image)
     tabThumbnails.set(tab.id, shot)
     newTabThumbnail = shot
@@ -2395,20 +2797,20 @@ async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
   if (!contents || contents.isDestroyed()) return
   try {
     const image = await contents.capturePage()
-    if (image.isEmpty() || contents.isDestroyed() || !tabs.includes(tab)) return
+    if (image.isEmpty() || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabThumbnails.set(tab.id, thumbnailDataUrl(image))
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.
   }
 }
 
-async function getTabOverviewItems(): Promise<TabOverviewItem[]> {
-  const active = getTab()
+async function getTabOverviewItems(w: BrowserWindowState): Promise<TabOverviewItem[]> {
+  const active = activeTabOf(w)
   if (active) {
     // Fresh shot of what is on screen right now; don't hold the gesture up for a slow page.
     await Promise.race([captureTabThumbnail(active), new Promise((resolve) => setTimeout(resolve, 120))])
   }
-  return getTabSummaries().map((summary) => ({
+  return getTabSummaries(w).map((summary) => ({
     id: summary.id,
     url: summary.url,
     title: summary.title,
@@ -2426,6 +2828,7 @@ const PINCH_FULL_TRAVEL = 0.55
 // Progress per second at release that counts as a flick, whatever the distance travelled.
 const PINCH_FLICK_SPEED = 1.6
 let pinchMode: 'none' | 'open' | 'close' | 'swallow' = 'none'
+let pinchWindow: BaseWindow | null = null
 let pinchSamples: { at: number; progress: number }[] = []
 
 function pinchProgress(magnification: number): number {
@@ -2439,7 +2842,7 @@ function trackPinchProgress(magnification: number): number {
   const now = Date.now()
   pinchSamples.push({ at: now, progress })
   while (pinchSamples.length > 2 && now - pinchSamples[0]!.at > 120) pinchSamples.shift()
-  setTabOverviewProgress(progress)
+  setTabOverviewProgress(progress, pinchWindow)
   return progress
 }
 
@@ -2452,12 +2855,14 @@ function pinchVelocity(): number {
 
 function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: number): boolean {
   if (MAC_SWIPE_DEBUG && phase !== 'change') {
-    console.info('[trackpad swipe] pinch', phase, { magnification, mode: pinchMode, overview: getTabOverviewState(), pageScale: getTab()?.pageScale })
+    console.info('[trackpad swipe] pinch', phase, { magnification, mode: pinchMode, overview: getTabOverviewState(pinchWindow), pageScale: getTab()?.pageScale })
   }
   if (phase === 'begin') {
     pinchSamples = []
     pinchMode = 'none'
-    const overview = getTabOverviewState()
+    const w = windowStateFor(focusedBrowserWindow()) ?? currentWindowState()
+    pinchWindow = w?.window ?? null
+    const overview = getTabOverviewState(pinchWindow)
     if (overview === 'opening' || overview === 'closing') {
       // Mid-animation: eat the pinch so the page underneath doesn't zoom.
       pinchMode = 'swallow'
@@ -2467,19 +2872,19 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
       pinchMode = magnification > 0 ? 'close' : 'swallow'
       if (pinchMode === 'close') {
         // Swap the page underneath now so it is already there as the selected card grows into it.
-        const selected = getTabOverviewSelectedId()
-        if (selected && selected !== activeTabId) activateBrowserTab(selected)
+        const selected = getTabOverviewSelectedId(pinchWindow)
+        if (selected && selected !== w?.activeTabId) activateBrowserTab(selected)
         trackPinchProgress(magnification)
       }
       return true
     }
     if (magnification > 0) return false
-    if (!browserWindow || browserWindow.isDestroyed() || !browserWindow.isFocused()) return false
-    const tab = getTab()
+    if (!isLiveWindow(w) || !w.window.isFocused()) return false
+    const tab = activeTabOf(w)
     // Pinching in on a zoomed-in page should zoom it back out, not open the overview.
     if (!tab || tab.pageScale > 1.01) return false
     pinchMode = 'open'
-    void openTabOverview({ interactive: true })
+    void openTabOverview({ interactive: true }, w.window)
     trackPinchProgress(magnification)
     return true
   }
@@ -2499,7 +2904,7 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
   pinchMode = 'none'
   pinchSamples = []
   if (phase === 'cancel') {
-    settleTabOverview(mode === 'close')
+    settleTabOverview(mode === 'close', undefined, true, pinchWindow)
     return true
   }
   // Released: a flick wins, otherwise go wherever it is closer to.
@@ -2507,7 +2912,7 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
     : velocity < -PINCH_FLICK_SPEED ? false
       : mode === 'open' ? progress > 0.4 : progress > 0.6
   if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] pinch released', { mode, progress, velocity, open })
-  settleTabOverview(open, open ? undefined : activeTabId ?? undefined)
+  settleTabOverview(open, open ? undefined : windowStateFor(pinchWindow)?.activeTabId ?? undefined, true, pinchWindow)
   return true
 }
 
@@ -2559,8 +2964,8 @@ export async function browserPictureInPicture(): Promise<boolean> {
 // A blocked permission shouldn't look like a broken page: flash a short notice over the active tab.
 const shouldToastPermission = createPermissionToastThrottle()
 onPermissionDenied((contents, permission, requestingUrl) => {
-  const tab = activeTabId ? getTab(activeTabId) : undefined
-  if (!tab?.view || tab.view.webContents !== contents || contents.isDestroyed()) return
+  const tab = tabForContents(contents)
+  if (!tab?.view || !isActiveTab(tab) || contents.isDestroyed()) return
   let origin = ''
   try {
     origin = new URL(requestingUrl).origin
@@ -2568,27 +2973,32 @@ onPermissionDenied((contents, permission, requestingUrl) => {
     // Unknown origin: still say what was blocked.
   }
   if (!shouldToastPermission(permission, origin)) return
-  flashLinkStatus(permissionDeniedMessage(permission, origin), browserBounds, 3200)
+  flashLinkStatus(permissionDeniedMessage(permission, origin), tab.win.browserBounds, 3200, tab.win.window)
 })
 
 // ---------------------------------------------------------------------------
 // Tab archive hooks (the feature itself lives in tab-archive.ts)
 
 export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
-  return tabs.map((tab) => {
+  return allTabs().map((tab) => {
     const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
     return {
       id: tab.id,
       url: currentUrl(tab),
       pinned: tab.pinned,
-      active: tab.id === activeTabId,
+      active: isActiveTab(tab),
       audible: Boolean(contents?.isCurrentlyAudible()),
       private: tab.isPrivate,
       extensionPage: Boolean(tab.extensionPageOrigin),
       unsavedPdfEdits: Boolean(tab.pdfEditor?.dirty),
-      inactiveSince: tab.id === activeTabId ? null : tab.inactiveSince
+      inactiveSince: isActiveTab(tab) ? null : tab.inactiveSince
     }
   })
+}
+
+/** Ids of every tab in the same window as `id` (the tab included). */
+export function getBrowserTabIdsInSameWindow(id: string): string[] {
+  return findTab(id)?.win.tabs.map((tab) => tab.id) ?? []
 }
 
 export interface BrowserTabArchiveCapture {
@@ -2620,18 +3030,20 @@ export function closeBrowserTabForArchive(id: string): boolean {
   return !getTab(id)
 }
 
-/** Reopen an archived tab; background tabs stay asleep until first opened. */
+/** Reopen an archived tab into the focused (or last focused) normal window; background tabs stay asleep until first opened. */
 export function openArchivedBrowserTab(url: string, history: { entries: Electron.NavigationEntry[]; index: number } | undefined, activate = true): string | null {
-  const id = createTab(url, selectedSearchEngine, activate, true)
+  const w = normalWindowState()
+  const id = createTab(url, selectedSearchEngine, activate, true, false, false, undefined, undefined, false, false, w)
   const tab = id ? getTab(id) : undefined
   if (!tab) return null
   if (history && history.entries.length > 0) tab.restoreHistory = history
   if (activate) activateTabInternal(tab.id)
-  else publishState()
+  else publishState(tab.win)
   persistOpenTabs()
   return id
 }
 
 export function flashBrowserStatus(message: string, durationMs = 2000): void {
-  flashLinkStatus(message, browserBounds, durationMs)
+  const w = currentWindowState()
+  if (w) flashLinkStatus(message, w.browserBounds, durationMs, w.window)
 }

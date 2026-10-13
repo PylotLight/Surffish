@@ -299,7 +299,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
   const [tabs, setTabs] = useState<BrowserTabSummary[]>([])
   const unpinnedTabIds = useMemo(() => tabs.filter((tab) => !tab.pinned).map((tab) => tab.id), [tabs])
-  const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) })
+  const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) }, (id) => { void window.api.browser.tabs.dropOutside(id) })
   const tabsById = useMemo(() => new Map(tabs.map((tab) => [tab.id, tab])), [tabs])
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
@@ -1218,7 +1218,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <span className="sidebar-new-tab-row-icon" aria-hidden="true">＋</span>
                 <span className="sidebar-new-tab-row-label">New Tab</span>
               </button>
-              <button className="sidebar-new-private-tab" type="button" aria-label="New private tab" title="New private tab (Ctrl/⌘+Shift+N)" onClick={() => void window.api.browser.tabs.createPrivate()}>
+              <button className="sidebar-new-private-tab" type="button" aria-label="New private tab" title="New private tab (Ctrl/⌘+Alt+N)" onClick={() => void window.api.browser.tabs.createPrivate()}>
                 <PrivateGlyph />
               </button>
             </div>

@@ -2,7 +2,9 @@ import { BaseWindow, WebContentsView, app, nativeImage, screen, shell } from 'el
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { attachBrowserView, handleBrowserShortcutInput, syncBrowserBoundsToWindow } from './browser'
+import { attachBrowserView, handleBrowserShortcutInput, setBrowserWindowFactory, syncBrowserBoundsToWindow, type BrowserWindowInit } from './browser'
+import { loadBrowserWindowsSession } from './browser-persistence'
+import { browserWindows, currentBrowserWindow, registerBrowserWindow, runInWindow } from './window-scope'
 import { attachBrowserShell, detachBrowserShell, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { isExpectedRendererDocument } from './renderer-security'
 import { APP_NAME, WINDOW } from '../shared/config'
@@ -81,13 +83,17 @@ const isMac = process.platform === 'darwin'
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 const rendererFile = join(mainDirectory, '../renderer/index.html')
 const appIconPath = join(mainDirectory, '../../src/resources/icons/surffish-512.png')
-let mainWindow: BaseWindow | null = null
 let onMainWindowClosed: () => void = () => {}
 
+/**
+ * The window "the window" means: the one whose renderer sent the IPC being handled, else the
+ * focused, else the last focused (see window-scope.ts). Null with none open.
+ */
 export function getMainWindow(): BaseWindow | null {
-  return mainWindow
+  return currentBrowserWindow()
 }
 
+/** Runs when the last browser window has closed. */
 export function setMainWindowCloseHandler(handler: () => void): void {
   onMainWindowClosed = handler
 }
@@ -99,7 +105,7 @@ function resolvePreload(): string {
   return `${base}.mjs`
 }
 
-function createRendererView(expectedDocumentUrl: string): WebContentsView {
+function createRendererView(expectedDocumentUrl: string, owner: () => BaseWindow | null): WebContentsView {
   const view = new WebContentsView({
     webPreferences: {
       preload: resolvePreload(),
@@ -131,12 +137,15 @@ function createRendererView(expectedDocumentUrl: string): WebContentsView {
     return { action: 'deny' }
   })
   view.webContents.on('before-input-event', (event, inputEvent) => {
-    if (isFocusAddressShortcut(inputEvent)) {
-      event.preventDefault()
-      sendFocusAddressToVisibleRenderer()
-      return
-    }
-    if (handleBrowserShortcutInput(inputEvent)) event.preventDefault()
+    // Shortcuts typed in this window's surfaces act on this window.
+    runInWindow(owner(), () => {
+      if (isFocusAddressShortcut(inputEvent)) {
+        event.preventDefault()
+        sendFocusAddressToVisibleRenderer()
+        return
+      }
+      if (handleBrowserShortcutInput(inputEvent)) event.preventDefault()
+    })
   })
   return view
 }
@@ -156,12 +165,42 @@ async function loadRenderer(view: WebContentsView, documentUrl: string): Promise
   await view.webContents.loadURL(documentUrl)
 }
 
-export function createWindow(): BaseWindow {
+export interface CreateWindowOptions extends BrowserWindowInit {
+  /** Saved size/position; falls back to window-state.json (the last window moved or resized). */
+  geometry?: SavedWindowState | null
+  /** Top-left on screen (tearing a tab out under the pointer). */
+  position?: { x: number; y: number }
+  size?: { width: number; height: number }
+}
+
+function initialBounds(options: CreateWindowOptions, fallback: SavedWindowState | null): Partial<Rect> {
+  if (options.position) {
+    const size = options.size ?? { width: fallback?.bounds.width ?? WINDOW.width, height: fallback?.bounds.height ?? WINDOW.height }
+    const fitted = fitBoundsToDisplays({ ...options.position, ...size }, screen.getAllDisplays().map((display) => display.workArea), {
+      width: WINDOW.minWidth,
+      height: WINDOW.minHeight
+    })
+    return fitted ?? size
+  }
+  const saved = options.geometry ?? fallback
+  // A second window over the first one would hide it; cascade new windows a little.
+  const bounds = restoredBounds(saved)
+  if (!options.geometry && browserWindows().length > 0 && bounds.x !== undefined && bounds.y !== undefined) {
+    const offset = 28 * browserWindows().length
+    return { ...bounds, x: bounds.x + offset, y: bounds.y + offset }
+  }
+  return bounds
+}
+
+export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
+  // Registered here, not at import time: browser.ts and this module import each other.
+  setBrowserWindowFactory((init) => createWindow(init))
   const savedState = readWindowState()
+  const geometry = options.position ? null : options.geometry ?? (browserWindows().length === 0 ? savedState : null)
   const win = new BaseWindow({
     title: APP_NAME,
     icon: appIconPath,
-    ...restoredBounds(savedState),
+    ...initialBounds(options, savedState),
     minWidth: WINDOW.minWidth,
     minHeight: WINDOW.minHeight,
     show: false,
@@ -174,46 +213,66 @@ export function createWindow(): BaseWindow {
     backgroundColor: isMac ? '#00000000' : '#101418'
   })
   if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath))
-  mainWindow = win
-  if (savedState?.maximized) win.maximize()
-  trackWindowState(win, savedState)
+  registerBrowserWindow(win)
+  if (geometry?.maximized) win.maximize()
+  trackWindowState(win, geometry ?? null)
 
   const rendererDocuments = {
     content: expectedRendererDocumentUrl('content'),
     toolbar: expectedRendererDocumentUrl('toolbar'),
     sidebar: expectedRendererDocumentUrl('sidebar')
   }
-  const contentView = createRendererView(rendererDocuments.content)
-  const toolbarView = createRendererView(rendererDocuments.toolbar)
-  const sidebarView = createRendererView(rendererDocuments.sidebar)
+  const owner = (): BaseWindow | null => (win.isDestroyed() ? null : win)
+  const contentView = createRendererView(rendererDocuments.content, owner)
+  const toolbarView = createRendererView(rendererDocuments.toolbar, owner)
+  const sidebarView = createRendererView(rendererDocuments.sidebar, owner)
   // Site WebContentsViews are inserted at index 0, so every trusted local layer stays above the page.
   win.contentView.addChildView(contentView)
   win.contentView.addChildView(toolbarView)
   win.contentView.addChildView(sidebarView)
   attachBrowserShell(win, { content: contentView, toolbar: toolbarView, sidebar: sidebarView }, rendererDocuments, syncBrowserBoundsToWindow)
-  attachBrowserView(win)
+  attachBrowserView(win, { private: options.private, session: options.session, adoptTabId: options.adoptTabId })
 
-  const close = (): void => {
-    if (mainWindow !== win) return
-    mainWindow = null
-    detachBrowserShell()
-    onMainWindowClosed()
-  }
-  win.on('closed', close)
+  win.on('closed', () => {
+    detachBrowserShell(win)
+    if (browserWindows().length === 0) onMainWindowClosed()
+  })
 
   void Promise.all([
     loadRenderer(contentView, rendererDocuments.content),
     loadRenderer(toolbarView, rendererDocuments.toolbar),
     loadRenderer(sidebarView, rendererDocuments.sidebar)
   ]).then(() => {
-    showRestored(win, savedState)
+    showRestored(win, geometry ?? null)
   }).catch((error: unknown) => {
     console.error('Could not load Surffish browser surfaces:', error)
-    showRestored(win, savedState)
+    showRestored(win, geometry ?? null)
   })
 
   return win
 }
+
+/** Cmd+N / Cmd+Shift+N: a new (private) window with one New Tab. */
+export function createBrowserWindow(isPrivate = false): BaseWindow {
+  return createWindow({ private: isPrivate })
+}
+
+/** Start-up and dock reopen: every window from the saved session (an older single-window file becomes one window). */
+export function restoreWindows(): BaseWindow[] {
+  const session = loadBrowserWindowsSession(readWindowState())
+  const order = session.windows.map((_window, index) => index).filter((index) => index !== session.focusedIndex)
+  order.push(session.focusedIndex)
+  const created: BaseWindow[] = []
+  // The focused one is created last, so it is the last focused window and shows on top.
+  for (const index of order) {
+    const saved = session.windows[index]
+    if (!saved) continue
+    created.push(createWindow({ session: saved, geometry: saved.geometry }))
+  }
+  if (created.length === 0) created.push(createWindow())
+  return created
+}
+
 
 function showRestored(win: BaseWindow, saved: SavedWindowState | null): void {
   if (win.isDestroyed()) return
@@ -223,9 +282,9 @@ function showRestored(win: BaseWindow, saved: SavedWindowState | null): void {
 
 export function showWindow(): void {
   if (isMac) app.show()
-  const win = mainWindow
+  const win = getMainWindow()
   if (!win) {
-    createWindow()
+    restoreWindows()
     return
   }
   if (win.isMinimized()) win.restore()
