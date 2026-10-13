@@ -13,6 +13,7 @@ import {
 } from '../src/main/browser'
 import { BROWSER_SESSION_PARTITION } from '../src/main/browser-session'
 import { saveBrowserSession } from '../src/main/browser-persistence'
+import { flushDeferredWrites } from '../src/main/deferred-writes'
 
 interface ProbeTab {
   id: number
@@ -444,6 +445,7 @@ async function run(): Promise<void> {
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
   })
   saveBrowserSession([probePageUrl], 0)
+  flushDeferredWrites()
   attachBrowserView(hostWindow)
   setBrowserBounds({ x: 0, y: 0, width: 1000, height: 700 })
   const registryTab = getBrowserTabs()[0]
