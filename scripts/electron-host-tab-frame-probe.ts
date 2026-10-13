@@ -130,7 +130,7 @@ function writeProbeExtension(directory: string): void {
     manifest_version: 3,
     name: 'Surffish Local Tab and Frame Probe',
     version: '1.0.0',
-    permissions: ['tabs', 'scripting', 'webNavigation'],
+    permissions: ['tabs', 'scripting'],
     host_permissions: ['http://127.0.0.1/*'],
     background: { service_worker: 'background.js' }
   }, null, 2)}\n`)
