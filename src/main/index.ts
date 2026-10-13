@@ -1,4 +1,5 @@
 import { app, BaseWindow } from 'electron'
+import { join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { initializeBrowserProxy } from './proxy'
@@ -15,6 +16,15 @@ import { registerPdfEditorScheme } from './pdf-editor'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
 app.setName(APP_NAME)
+// Dev builds get their own profile, so they can run beside the installed release app.
+// The single-instance lock is per profile (userData), so each profile still has one window owner.
+// SURFFISH_PROFILE=<name> picks another isolated profile (e.g. a second dev instance).
+const profileOverride = process.env['SURFFISH_PROFILE']?.trim().replace(/[^\w.-]/g, '')
+if (profileOverride || !app.isPackaged) {
+  const profileName = profileOverride ? `${APP_NAME} ${profileOverride}` : `${APP_NAME} Dev`
+  app.setName(profileName)
+  app.setPath('userData', join(app.getPath('appData'), profileName))
+}
 // Privileged schemes must be registered before ready.
 registerPdfEditorScheme()
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
