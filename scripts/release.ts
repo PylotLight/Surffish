@@ -2,6 +2,8 @@
 /**
  * bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks]
  *
+ * bun run release X.Y.Z --resume --from-tag [--yes] [--dry-run]
+ *
  * One-shot local macOS release: bump version -> checks -> ZIP -> verify -> confirm ->
  * push + tag -> GitHub release (REST via curl over SURFFISH_GH_PROXY, else `ghp`) -> render + push the Cask.
  * Runs on an Apple-silicon Mac (GitHub macOS runner minutes are used up).
@@ -12,7 +14,7 @@ import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
-import { draftReleaseNotes, latestVersionTag, resolveReleaseVersion, setPackageVersion } from './release-version.ts'
+import { dependencyDifferences, draftReleaseNotes, latestVersionTag, plistString, resolveFromTagVersion, resolveReleaseVersion, setPackageVersion } from './release-version.ts'
 import { checkGitHubApi, createGitHubRelease, githubApiConfigFromEnv, type GitHubApiConfig } from './github-api.ts'
 
 const REPO = 'PylotLight/Surffish'
@@ -23,7 +25,8 @@ const spec = args.find((arg) => !arg.startsWith('-')) ?? 'patch'
 const yes = flag('--yes') || flag('-y')
 const dryRun = flag('--dry-run')
 const skipChecks = flag('--skip-checks')
-const resume = flag('--resume')
+const fromTag = flag('--from-tag')
+const resume = flag('--resume') || fromTag
 
 if (flag('--help') || flag('-h')) {
   console.log(`usage: bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks] [--resume]
@@ -39,6 +42,9 @@ if (flag('--help') || flag('-h')) {
   --resume         finish a release whose bump + tag already reached origin but whose GitHub
                    release didn't (e.g. the gh upload failed): rebuilds package.json's version,
                    then creates the release and updates the Cask
+  --from-tag       with --resume (implied) and an explicit X.Y.Z: build the code at the existing
+                   vX.Y.Z tag (detached checkout, reusing main's node_modules, no second install),
+                   publish its release with main's docs/releases/vX.Y.Z.md, then update the Cask on main
 
 release notes come from docs/releases/vX.Y.Z.md; if it's missing a draft is written from
 commits since the last tag and the script stops so you can edit it.
@@ -109,7 +115,13 @@ const packageJson = readFileSync(packagePath, 'utf8')
 const packageVersion = JSON.parse(packageJson).version as string
 const latestTag = latestVersionTag(git('tag', '-l', 'v*').split('\n'))
 let version: string
-if (resume) {
+if (fromTag) {
+  try {
+    version = resolveFromTagVersion(spec, git('tag', '-l', 'v*').split('\n'))
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+} else if (resume) {
   version = packageVersion
 } else {
   try {
@@ -129,7 +141,7 @@ if (resume) {
 } else if (tagOnOrigin) {
   fail(`${tag} already exists on origin (finish it with --resume)`)
 }
-log(`releasing ${tag} (package.json ${packageVersion}, latest tag ${latestTag ?? 'none'})${resume ? ' — resuming' : ''}${dryRun ? ' — dry run' : ''}`)
+log(`releasing ${tag} (package.json ${packageVersion}, latest tag ${latestTag ?? 'none'})${fromTag ? ' — from the tag' : resume ? ' — resuming' : ''}${dryRun ? ' — dry run' : ''}`)
 
 // ---- notes -----------------------------------------------------------------
 const notesPath = join(root, 'docs', 'releases', `${tag}.md`)
@@ -140,6 +152,7 @@ if (!existsSync(notesPath)) {
   log(`wrote a draft at docs/releases/${tag}.md — tidy it up, commit + push it, then run this again`)
   process.exit(1)
 }
+const notes = readFileSync(notesPath, 'utf8')
 
 // ---- bump + checks + build ------------------------------------------------
 const bumped = !resume && version !== packageVersion
@@ -165,6 +178,27 @@ const step = (label: string, cmd: string, cmdArgs: string[]): void => {
 }
 
 step('bun install', 'bun', ['install'])
+
+// --from-tag: build the tag's own code. node_modules (ignored) stays from main's install above, so the
+// tag's dependencies must match main's; switching back to main happens on any exit.
+let builtCommit = git('rev-parse', 'HEAD')
+if (fromTag) {
+  const tagCommit = git('rev-parse', `${tag}^{commit}`)
+  const lockChanged = spawnSync('git', ['diff', '--quiet', tag, 'HEAD', '--', 'bun.lock', '.bun-version'], { cwd: root }).status !== 0
+  const depFields = dependencyDifferences(git('show', `${tag}:package.json`), packageJson)
+  if (lockChanged || depFields.length) {
+    fail(`${tag}'s dependencies differ from main's (${[lockChanged ? 'bun.lock/.bun-version' : '', ...depFields].filter(Boolean).join(', ')}); can't reuse main's node_modules`)
+  }
+  process.on('exit', () => {
+    spawnSync('git', ['checkout', '--quiet', '--force', 'main'], { cwd: root, stdio: 'inherit' })
+  })
+  run('git', ['checkout', '--quiet', '--detach', tag])
+  builtCommit = git('rev-parse', 'HEAD')
+  if (builtCommit !== tagCommit) fail(`checked out ${builtCommit}, expected ${tag} = ${tagCommit}`)
+  const tagPackageVersion = JSON.parse(readFileSync(packagePath, 'utf8')).version as string
+  if (tagPackageVersion !== version) fail(`${tag}'s package.json says ${tagPackageVersion}, expected ${version}`)
+  log(`building ${tag} from ${builtCommit} (detached, main's node_modules)`)
+}
 if (!skipChecks) {
   step('typecheck', 'bun', ['run', 'typecheck'])
   step('tests', 'bun', ['run', 'test'])
@@ -178,8 +212,20 @@ if (!existsSync(artifact)) {
   fail(`expected ${artifact} after dist:mac`)
 }
 step('zip integrity', 'unzip', ['-tq', artifact])
+const infoPlist = spawnSync('unzip', ['-p', artifact, 'Surffish.app/Contents/Info.plist'], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }).stdout ?? ''
+const bundleVersion = plistString(infoPlist, 'CFBundleShortVersionString')
+if (bundleVersion === null) log('warning: no CFBundleShortVersionString in the zip\'s Info.plist (binary plist?), skipping the version check')
+else if (bundleVersion !== version) {
+  undoBump()
+  fail(`the zip's Info.plist says ${bundleVersion}, expected ${version}`)
+} else log(`zip's Surffish.app is ${bundleVersion}, built from ${builtCommit}`)
 const sha256 = createHash('sha256').update(readFileSync(artifact)).digest('hex')
 log(`${artifactName}\n          sha256 ${sha256}`)
+
+if (fromTag) {
+  run('git', ['checkout', '--quiet', '--force', 'main'])
+  log('back on main')
+}
 
 if (dryRun) {
   undoBump()
@@ -203,7 +249,7 @@ if (!resume) {
 
 if (githubApi) {
   try {
-    const created = createGitHubRelease(githubApi, { tag, title: `Surffish ${tag}`, notes: readFileSync(notesPath, 'utf8'), assetPath: artifact, log })
+    const created = createGitHubRelease(githubApi, { tag, title: `Surffish ${tag}`, notes, assetPath: artifact, log })
     log(`github release published: ${created.url} (assets: ${created.assets.join(', ')})`)
   } catch (error) {
     fail(`github release: ${error instanceof Error ? error.message : String(error)} — fix it, then run with --resume`)
