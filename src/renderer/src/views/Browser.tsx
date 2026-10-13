@@ -377,9 +377,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     return () => window.clearInterval(rotationTimer)
   }, [surface])
   const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
+  // Only build suggestions while the dropdown is open, and never in the sidebar surface (it has no
+  // address bar). Otherwise every tab/history update re-ran the matcher in all three renderers.
+  const suggestionsActive = suggestionsOpen && surface !== 'sidebar'
   const addressSuggestions = useMemo(
-    () => buildAddressSuggestions(address, pinnedSites, tabs, history),
-    [address, pinnedSites, tabs, history]
+    () => suggestionsActive ? buildAddressSuggestions(address, pinnedSites, tabs, history) : [],
+    [suggestionsActive, address, pinnedSites, tabs, history]
   )
   const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
@@ -916,8 +919,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (event.key === 'Escape') {
+      // Like Chrome: Esc drops the dropdown and any half-typed text, leaving the real URL selected.
       setSuggestionsOpen(false)
       setActiveSuggestionIndex(-1)
+      setAddress(isLocalNewTab ? '' : browser.url)
+      const input = event.currentTarget
+      window.requestAnimationFrame(() => input.select())
       return
     }
     if (addressSuggestions.length === 0) return
@@ -1222,6 +1229,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     setNavigationError('')
                     setSuggestionsOpen(true)
                     setActiveSuggestionIndex(-1)
+                  }}
+                  onMouseDown={(event) => {
+                    // First click selects the whole URL (select() in onFocus alone gets undone by
+                    // the mouseup that follows); later clicks place the caret as normal.
+                    if (event.button !== 0 || document.activeElement === event.currentTarget) return
+                    event.preventDefault()
+                    event.currentTarget.focus()
                   }}
                   onFocus={(event) => {
                     event.currentTarget.select()

@@ -1,6 +1,7 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
 import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
 import { getMainWindow } from './window'
+import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
@@ -35,6 +36,10 @@ export function installAppMenu(): void {
         { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => { newBrowserTab() } },
         { label: 'New Private Tab', accelerator: 'CmdOrCtrl+Shift+N', click: () => { newPrivateBrowserTab() } },
         { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: () => { reopenClosedBrowserTab() } },
+        { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: () => { sendFocusAddressToVisibleRenderer() } },
+        // F6 (and Alt+D off macOS) also focus the address bar; hidden so the menu shows one entry.
+        { label: 'Focus Address Bar', accelerator: 'F6', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } },
+        ...(isMac ? [] : [{ label: 'Focus Address Bar', accelerator: 'Alt+D', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } } satisfies MenuItemConstructorOptions]),
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
         {
