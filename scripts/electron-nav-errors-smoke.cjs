@@ -204,8 +204,11 @@ async function run() {
   const before = loadCalls.length
   await evaluate(content, '[...document.querySelectorAll(".tab-interstitial.is-load-error button")].find((button) => button.textContent === "Retry").click()')
   await waitFor(() => loadCalls.slice(before).includes(`http://${UNRESOLVABLE}/page`), 'Retry to reload the failed address')
+  // Tab state is broadcast once per frame, so the previous error page can still be on screen for a
+  // frame after Retry: wait for main to settle on the new failure, then click Go back once it renders.
+  await waitFor(async () => { const current = await state(); return current.loadError && !current.loading ? current : null }, 'the load error state after Retry')
   await waitFor(() => errorPage(), 'the in-page error after Retry')
-  await evaluate(content, '[...document.querySelectorAll(".tab-interstitial.is-load-error button")].find((button) => button.textContent === "Go back").click()')
+  await waitFor(() => evaluate(content, '(() => { const button = [...document.querySelectorAll(".tab-interstitial.is-load-error button")].find((item) => item.textContent === "Go back"); button?.click(); return Boolean(button) })()'), 'the Go back button on the in-page error')
   await waitFor(async () => { const current = await state(); return current.url.endsWith('from=second-tab') && current.error === null && !current.loading }, 'Go back to recover')
   assert.equal(await errorPage(), null, 'the in-page error clears once the tab loads again')
 
