@@ -26,6 +26,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y xdotool
           command -v xdotool
+      - name: Start D-Bus (silences Chromium bus spam)
+        run: |
+          sudo apt-get install --no-install-recommends -y dbus
+          sudo mkdir -p /run/dbus
+          sudo dbus-daemon --system --fork 2>/dev/null || true
+          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
       - run: bun run test
       - run: bun run build
       - name: Smoke-test the Electron Downloads manager with synthetic transfers
