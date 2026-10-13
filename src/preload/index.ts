@@ -43,6 +43,7 @@ type DiagnosticsUpdate = DiagnosticsPayload | null
 import { bookmarksApi } from './bookmarks'
 import { tabArchiveApi } from './tab-archive'
 import { networkToolsApi, proxyRoutingApi } from './network-tools'
+import { splitViewApi } from './split-view'
 import { watchersApi } from './watchers'
 
 const api = {
@@ -184,6 +185,7 @@ const api = {
         return () => ipcRenderer.removeListener('browser:tabs', listener)
       }
     },
+    split: splitViewApi,
     session: {
       clear: (): Promise<boolean> => ipcRenderer.invoke('browser:session:clear')
     },

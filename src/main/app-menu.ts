@@ -10,6 +10,7 @@ import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
 import { revealPageWatchers } from './page-watchers'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
+import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -17,6 +18,24 @@ import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from '
 function tabItem(label: string, command: TabCommand): MenuItemConstructorOptions {
   const { accelerator } = TAB_COMMAND_SHORTCUTS[command]
   return { label, ...(accelerator ? { accelerator } : {}), click: () => runTabCommand(command) }
+}
+
+/** View → Split View. Items no-op when there is nothing to split / no split on screen. */
+function splitViewMenu(): MenuItemConstructorOptions {
+  return {
+    label: 'Split View',
+    submenu: [
+      tabItem('Split with Last Used Tab / Unsplit', 'splitView'),
+      { label: 'Swap Panes', click: () => { swapBrowserSplitPanes() } },
+      { label: 'Open Pane as Its Own Tab', click: () => { popOutBrowserSplitPane() } },
+      { label: 'Close Focused Pane', click: () => runTabCommand('close') },
+      { label: 'Unsplit Tabs', click: () => { unsplitBrowserTab() } },
+      { type: 'separator' },
+      // Hints only: the key handler takes these just while a split is on screen, so pages keep them otherwise.
+      { ...tabItem('Focus Left Pane', 'focusPaneLeft'), registerAccelerator: false },
+      { ...tabItem('Focus Right Pane', 'focusPaneRight'), registerAccelerator: false }
+    ]
+  }
 }
 
 export function installAppMenu(): void {
@@ -139,11 +158,12 @@ export function installAppMenu(): void {
         // No-op unless the page looks like an article (or Reader view is open).
         { label: 'Reader View', accelerator: APP_SHORTCUTS.readerView, click: () => { void toggleReaderMode() } },
         { type: 'separator' },
+        // Cmd/Ctrl+Shift+= (which types "+") is Split View now, so there is no hidden Cmd+Plus zoom item.
         tabItem('Zoom In', 'zoomIn'),
-        // Cmd+Shift+= types "+"; keep the Plus accelerator working without a second visible item.
-        { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, acceleratorWorksWhenHidden: true, click: () => runTabCommand('zoomIn') },
         tabItem('Zoom Out', 'zoomOut'),
         tabItem('Actual Size', 'zoomReset'),
+        { type: 'separator' },
+        splitViewMenu(),
         { type: 'separator' },
         ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const, { type: 'separator' } as const]),
         { role: 'togglefullscreen' }

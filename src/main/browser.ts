@@ -44,6 +44,8 @@ import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
 import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
 import { canWatchPage, watchPageFromTab } from './page-watchers'
+import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
+import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -119,6 +121,10 @@ interface BrowserWindowState {
   confirmingWindowClose: boolean
   /** Private window: every new tab in it is private, and it is never saved to the session. */
   isPrivate: boolean
+  /** Split views in this window; the active tab is the focused pane of the one on screen (see split-view.ts). */
+  splits: SplitGroup[]
+  /** Tab ids, most recently activated first ("split with last used tab"). */
+  recentTabIds: string[]
 }
 const windowStates: BrowserWindowState[] = []
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
@@ -181,6 +187,32 @@ function isActiveTab(tab: BrowserTab): boolean {
   return tab.win.activeTabId === tab.id
 }
 
+/** The split view `tab` is a pane of, if any. */
+function splitOf(tab: BrowserTab | undefined): SplitGroup | undefined {
+  return tab ? splitGroupOf(tab.win.splits, tab.id) : undefined
+}
+
+/** Tabs whose pages are on screen: the active tab, or every pane of its split. */
+function onScreenTabIds(w: BrowserWindowState | undefined): string[] {
+  const active = activeTabOf(w)
+  if (!active) return []
+  return splitOf(active)?.tabIds.slice() ?? [active.id]
+}
+
+/** On screen = the active tab or another pane of its split (never slept, throttled or archived). */
+function isTabOnScreen(tab: BrowserTab): boolean {
+  return isActiveTab(tab) || Boolean(splitOf(activeTabOf(tab.win))?.tabIds.includes(tab.id))
+}
+
+/** Where a tab's page is drawn (window coordinates): its pane in a split on screen, else the page area. */
+function pageBoundsOf(tab: BrowserTab): BrowserBounds {
+  const w = tab.win
+  const split = splitOf(activeTabOf(w))
+  const index = split ? split.tabIds.indexOf(tab.id) : -1
+  if (!split || index < 0 || w.browserBounds.width <= 0 || w.browserBounds.height <= 0) return { ...w.browserBounds }
+  return splitPaneRects(w.browserBounds, split.sizes).panes[index] ?? { ...w.browserBounds }
+}
+
 /** No argument: the current window's active tab. With an id: that tab, in whichever window it is. */
 function getTab(id?: string | null): BrowserTab | undefined {
   return id === undefined ? activeTabOf(currentWindowState()) : findTab(id)
@@ -197,7 +229,7 @@ function isExtensionPage(tab: BrowserTab, url: string): boolean {
 export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
   if (contents.isDestroyed()) return false
   const tab = tabForContents(contents)
-  return Boolean(tab?.pauseAutoplayUntilVisited && !isActiveTab(tab))
+  return Boolean(tab?.pauseAutoplayUntilVisited && !isTabOnScreen(tab))
 }
 function pageTitle(tab: BrowserTab): string {
   if (tab.pdfEditor) return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty)
@@ -232,7 +264,9 @@ function getState(w = currentWindowState()): BrowserState {
 
 function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
   if (!w) return []
-  return w.tabs.map((tab) => ({
+  return w.tabs.map((tab) => {
+    const split = splitInfoFor(w.splits, tab.id)
+    return {
     id: tab.id,
     url: currentUrl(tab),
     title: pageTitle(tab),
@@ -244,8 +278,10 @@ function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
     private: tab.isPrivate,
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
-    crashed: isTabCrashed(tab.view?.webContents)
-  }))
+    crashed: isTabCrashed(tab.view?.webContents),
+    ...(split ? { split } : {})
+  }
+  })
 }
 
 function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
@@ -411,6 +447,7 @@ function noteWindowTitles(): void {
 
 function publishTabs(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
+  keepSplitTabsTogether(w)
   sendToWindowRenderers(w.window, 'browser:tabs', getTabSummaries(w))
   noteWindowTitles()
 }
@@ -443,11 +480,13 @@ function persistOpenTabs(): void {
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
   const saved = windows.map((w) => {
     const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
+    const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     return {
       urls: kept.map(currentUrl),
       activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
       pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
-      geometry: windowGeometry(w.window)
+      geometry: windowGeometry(w.window),
+      ...(splits.length > 0 ? { splits } : {})
     }
   })
   const focused = windowStateFor(focusedBrowserWindow())
@@ -501,9 +540,14 @@ export function bookmarkAllBrowserTabs(w = currentWindowState()): { folderId: st
 function applyTabBounds(w: BrowserWindowState): void {
   const { browserBounds } = w
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0
+  // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
+  const split = splitOf(activeTabOf(w))
+  const layout = split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null
   for (const tab of w.tabs) {
     if (!tab.view) continue
-    const visible = tab.id === w.activeTabId
+    const pane = split ? split.tabIds.indexOf(tab.id) : -1
+    const visible = tab.id === w.activeTabId || pane >= 0
+    const bounds = layout && pane >= 0 ? layout.panes[pane] ?? browserBounds : browserBounds
     // Reader view stands in for the page while it is open; the page stays loaded off screen.
     const reader = readerViewFor(tab.view.webContents)
     // Only the page on screen stays in the window. A zero-size view still counts as visible on
@@ -513,8 +557,11 @@ function applyTabBounds(w: BrowserWindowState): void {
       setPageViewOnScreen(w.window, tab.view, visible && pageAreaShown && !reader)
       if (reader) setPageViewOnScreen(w.window, reader, visible && pageAreaShown)
     }
-    tab.view.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
-    reader?.setBounds(visible ? browserBounds : { x: 0, y: 0, width: 0, height: 0 })
+    tab.view.setBounds(visible ? bounds : { x: 0, y: 0, width: 0, height: 0 })
+    reader?.setBounds(visible ? bounds : { x: 0, y: 0, width: 0, height: 0 })
+  }
+  if (!w.window.isDestroyed()) {
+    updateSplitSurface(w.window, split && layout ? { bounds: { ...browserBounds }, layout, focusedIndex: split.tabIds.indexOf(w.activeTabId ?? '') } : null)
   }
 }
 
@@ -524,7 +571,7 @@ function cancelSleepTimer(tab: BrowserTab): void {
 }
 
 function hibernateTab(tab: BrowserTab): void {
-  if (isActiveTab(tab) || !tab.view) return
+  if (isTabOnScreen(tab) || !tab.view) return
   const contents = tab.view.webContents
   if (!contents.isDestroyed() && contents.isCurrentlyAudible()) {
     tab.sleepTimer = setTimeout(() => hibernateTab(tab), 60_000)
@@ -540,7 +587,7 @@ function hibernateTab(tab: BrowserTab): void {
 function scheduleTabSleep(tab: BrowserTab): void {
   cancelSleepTimer(tab)
   // An editor tab holds unsaved edits in memory, so it never sleeps.
-  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || isActiveTab(tab) || tab.inactiveSince === null) return
+  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || isTabOnScreen(tab) || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
   tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
 }
@@ -612,20 +659,34 @@ function activateTabInternal(id: string): boolean {
   const w = tab.win
   if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe()
   const previous = activeTabOf(w)
+  const wasOnScreen = onScreenTabIds(w)
   if (previous && previous.id !== id) {
     hideLinkStatus(false, w.window)
     if (w.findState.open) closeFindBar(false, w)
   }
   // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
   if (previous && previous.id !== id) void captureTabThumbnail(previous)
-  if (previous && previous.id !== id) markTabInactive(previous)
-  cancelSleepTimer(tab)
-  tab.inactiveSince = null
-  tab.pauseAutoplayUntilVisited = false
   w.activeTabId = id
-  ensureTabLoaded(tab)
+  w.recentTabIds = noteRecentTab(w.recentTabIds, id)
+  // Everything that left the screen starts its sleep clock; everything on it (both panes of a split) wakes.
+  const nowOnScreen = onScreenTabIds(w)
+  for (const goneId of wasOnScreen) {
+    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId)
+    if (gone && gone.win === w) markTabInactive(gone)
+  }
+  const shown = nowOnScreen.map((shownId) => findTab(shownId)).filter((candidate): candidate is BrowserTab => candidate?.win === w)
+  for (const pane of shown) {
+    cancelSleepTimer(pane)
+    pane.inactiveSince = null
+    pane.pauseAutoplayUntilVisited = false
+    ensureTabLoaded(pane)
+  }
   // Attach the view before focusing it; a detached view can't take focus.
   applyTabBounds(w)
+  for (const pane of shown) {
+    const paneContents = pane.view?.webContents
+    if (pane !== tab && paneContents && !paneContents.isDestroyed()) paneContents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
+  }
   const contents = tab.view?.webContents
   if (contents && !contents.isDestroyed()) {
     contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
@@ -705,8 +766,8 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
     { type: 'separator' },
     { label: 'Reload Tab', ...tabMenuAccelerator('reload'), click: () => reloadBrowserTab(id) },
-    { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
-    { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
+    { label: 'Suspend Tab', enabled: !isTabOnScreen(tab) && tab.view !== null, click: () => { suspendBrowserTab(id) } },
+    { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && !isTabOnScreen(candidate) && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
     { type: 'separator' },
     // Feature items bring their own trailing separator.
     ...tabMenuExtras(id),
@@ -715,6 +776,7 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Close Tabs Below', enabled: tabs.some((_candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
     { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') },
     { type: 'separator' },
+    ...splitTabMenuItems(tab),
     ...moveTabMenuItems(tab)
   ]
   Menu.buildFromTemplate(items).popup({ window: tab.win.window })
@@ -813,17 +875,32 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!tab.extensionPageOrigin) attachReaderDetection(contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (!isActiveTab(tab) || !isCurrentContents()) return
-    handleBrowserPageMouseEvent(mouseEvent, tab.win.window)
+    if (!isCurrentContents()) return
+    if (tab.win.splits.length > 0) {
+      notifySplitPagePointer(tab.win.window, mouseEvent)
+      // Clicking the other pane of a split focuses it.
+      if (mouseEvent.type === 'mouseDown' && !isActiveTab(tab) && isTabOnScreen(tab)) focusSplitPane(tab.id, false)
+    }
+    if (!isActiveTab(tab)) {
+      if (mouseEvent.type === 'mouseMove' && isTabOnScreen(tab)) avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window)
+      return
+    }
+    // The sidebar reveal reads window x; a split pane's view doesn't start at the page area's left edge.
+    const offsetX = pageBoundsOf(tab).x - tab.win.browserBounds.x
+    handleBrowserPageMouseEvent(offsetX ? { type: mouseEvent.type, x: mouseEvent.x + offsetX } : mouseEvent, tab.win.window)
     if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window)
     if (isCopyImageClick(mouseEvent)) {
       void copyImageAtPoint(contents, mouseEvent.x, mouseEvent.y).then((copied) => {
-        if (copied) flashLinkStatus('Image copied', tab.win.browserBounds, undefined, tab.win.window)
+        if (copied) flashLinkStatus('Image copied', pageBoundsOf(tab), undefined, tab.win.window)
       })
     }
   })
+  // Keyboard focus landing in the other pane (Tab key, a page focusing itself on click) focuses that pane.
+  contents.on('focus', () => {
+    if (isCurrentContents() && !isActiveTab(tab) && isTabOnScreen(tab)) focusSplitPane(tab.id, false)
+  })
   contents.on('update-target-url', (_event, url) => {
-    if (isActiveTab(tab) && isCurrentContents()) showLinkStatus(url, tab.win.browserBounds, tab.win.window)
+    if (isTabOnScreen(tab) && isCurrentContents()) showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
   })
   contents.on('found-in-page', (_event, result) => {
     const { findState } = tab.win
@@ -840,14 +917,14 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   // sleep instead of holding a dead view; selecting it reloads it. The active tab keeps its view
   // so Reload works in place.
   contents.on('render-process-gone', (_event, details) => {
-    if (details.reason === 'clean-exit' || !isCurrentContents() || isActiveTab(tab)) return
+    if (details.reason === 'clean-exit' || !isCurrentContents() || isTabOnScreen(tab)) return
     setImmediate(() => {
-      if (isCurrentContents() && !isActiveTab(tab)) hibernateTab(tab)
+      if (isCurrentContents() && !isTabOnScreen(tab)) hibernateTab(tab)
     })
   })
   guardPageDragRegions(contents)
   contents.on('media-started-playing', () => {
-    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isActiveTab(tab) || contents.isDestroyed()) return
+    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isTabOnScreen(tab) || contents.isDestroyed()) return
     void contents.executeJavaScript(`
       for (const media of document.querySelectorAll('video, audio')) {
         if (!media.paused && !media.ended) media.pause()
@@ -1023,10 +1100,12 @@ function removeDestroyedTab(tab: BrowserTab): void {
   const w = tab.win
   const index = w.tabs.findIndex((candidate) => candidate.id === tab.id)
   if (index < 0) return
+  const { groups, partners } = removeTabFromSplits(w.splits, tab.id)
+  w.splits = groups
   w.tabs.splice(index, 1)
   if (w.activeTabId === tab.id) {
     w.activeTabId = null
-    const replacement = w.tabs[Math.min(index, w.tabs.length - 1)]
+    const replacement = findTab(partners[0]) ?? w.tabs[Math.min(index, w.tabs.length - 1)]
     if (replacement) activateTabInternal(replacement.id)
     else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w)
   }
@@ -1285,8 +1364,14 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
   else tabs.push(tab)
   if (shouldActivate) {
-    if (previous && previous.id !== tab.id) markTabInactive(previous)
+    // The new tab replaces whatever was on screen (a split's panes go off screen together).
+    const wasOnScreen = previous ? onScreenTabIds(w) : []
     w.activeTabId = tab.id
+    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
+    for (const goneId of wasOnScreen) {
+      const gone = findTab(goneId)
+      if (gone && gone !== tab && gone.win === w) markTabInactive(gone)
+    }
     tab.inactiveSince = null
   } else {
     tab.inactiveSince = Date.now()
@@ -1304,7 +1389,7 @@ export interface BrowserWindowInit {
   /** A private window: all of its tabs are private and it is never saved. */
   private?: boolean
   /** Tabs to restore (a saved window from the session file). */
-  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[] }
+  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[] }
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string
 }
@@ -1320,7 +1405,9 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     browserBounds: { x: 0, y: 0, width: 0, height: 0 },
     findState: { tabId: null, open: false, text: '', result: null },
     confirmingWindowClose: false,
-    isPrivate: init.private === true
+    isPrivate: init.private === true,
+    splits: [],
+    recentTabIds: []
   }
   windowStates.push(w)
   tabSleepMinutes = getBrowserTabSleepMinutes()
@@ -1329,7 +1416,8 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
       event.preventDefault()
       const x = Number.isFinite(params.x) ? Math.round(params.x) : 0
       const y = Number.isFinite(params.y) ? Math.round(params.y) : 0
-      const script = `(() => document.elementFromPoint(${x}, ${y})?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null)()`
+      // A split entry's halves carry their own tab id (data-browser-pane-id) inside the row's.
+      const script = `(() => { const el = document.elementFromPoint(${x}, ${y})?.closest('[data-browser-pane-id],[data-browser-tab-id]'); return el?.getAttribute('data-browser-pane-id') ?? el?.getAttribute('data-browser-tab-id') ?? null })()`
       void contents.executeJavaScript(script, true).then((id: unknown) => {
         if (typeof id === 'string' && getTab(id)) showBrowserTabContextMenu(id)
         else showTabContextMenu(contents, event, params)
@@ -1346,26 +1434,39 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
   }
   const adopted = init.adoptTabId ? findTab(init.adoptTabId) : undefined
   if (adopted && adopted.win !== w && canMoveTabTo(adopted, w)) {
-    detachTabFromWindow(adopted)
-    adoptTabIntoWindow(adopted, w, null)
+    // A split pane brings its whole split along (tear-out / Move to New Window of a split entry).
+    moveTabsWithSplit(adopted, w, null)
   } else if (init.session && !w.isPrivate) {
     const saved = init.session
     const restoredAt = Date.now()
+    const restoredIds: (string | null)[] = []
     saved.urls.forEach((url, index) => {
       const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index), undefined, undefined, false, false, w)
+      restoredIds.push(id)
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
       const tab = id ? getTab(id) : undefined
       if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
     })
-    w.activeTabId = w.tabs[saved.activeIndex]?.id ?? w.tabs[0]?.id ?? null
+    for (const split of saved.splits ?? []) {
+      const ids = split.tabs.map((index) => restoredIds[index] ?? null)
+      if (ids.some((id) => !id || !findTab(id) || findTab(id)?.pinned || splitGroupOf(w.splits, id))) continue
+      const group = createSplitGroup(randomUUID(), ids as string[], split.sizes)
+      if (group) w.splits.push(group)
+    }
+    w.activeTabId = restoredIds[saved.activeIndex] ?? w.tabs[0]?.id ?? null
   }
   if (w.tabs.length === 0) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
   w.activeTabId ??= w.tabs[0]?.id ?? null
-  const activeTab = activeTabOf(w)
-  if (activeTab) ensureTabLoaded(activeTab)
+  if (w.activeTabId) w.recentTabIds = noteRecentTab(w.recentTabIds, w.activeTabId)
+  // A restored split on screen loads every pane, not just the focused one.
+  for (const id of onScreenTabIds(w)) {
+    const pane = findTab(id)
+    if (pane) ensureTabLoaded(pane)
+  }
+  const visibleAtStart = new Set(onScreenTabIds(w))
   const now = Date.now()
   for (const tab of w.tabs) {
-    if (tab.id !== w.activeTabId) {
+    if (!visibleAtStart.has(tab.id)) {
       tab.inactiveSince ??= now
       scheduleTabSleep(tab)
     } else {
@@ -1404,15 +1505,17 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
       if (!tab || !contents || contents.isDestroyed() || isLocalNewTab(tab)) return null
       return { contents, isPrivate: tab.isPrivate, url: currentUrl(tab) }
     },
-    getPageBounds: () => ({ ...w.browserBounds }),
+    // In a split: the focused pane only.
+    getPageBounds: () => { const tab = activeTabOf(w); return tab ? pageBoundsOf(tab) : { ...w.browserBounds } },
     focusPage: () => {
       const contents = activeTabOf(w)?.view?.webContents
       if (contents && !contents.isDestroyed()) contents.focus()
       else focusVisibleShellPage(win)
     },
-    flash: (message) => flashLinkStatus(message, w.browserBounds, 2000, win),
+    flash: (message) => { const tab = activeTabOf(w); flashLinkStatus(message, tab ? pageBoundsOf(tab) : w.browserBounds, 2000, win) },
     handleShortcut: (input) => runInWindow(win, () => handleBrowserShortcutInput(input))
   })
+  attachSplitSurface(w)
   // Window moves and resizes go into the saved session too (debounced; the write itself is deferred).
   let geometryTimer: ReturnType<typeof setTimeout> | null = null
   const persistGeometry = (): void => {
@@ -1445,6 +1548,7 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     windowStates.splice(index, 1)
     const closingTabs = [...w.tabs]
     w.tabs.length = 0
+    w.splits = []
     w.activeTabId = null
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
@@ -1514,6 +1618,9 @@ function detachTabFromWindow(tab: BrowserTab): void {
     hideLinkStatus(false, from.window)
   }
   if (from.findState.tabId === tab.id) closeFindBar(false, from)
+  const { groups, partners } = removeTabFromSplits(from.splits, tab.id)
+  from.splits = groups
+  from.recentTabIds = from.recentTabIds.filter((id) => id !== tab.id)
   from.tabs.splice(index, 1)
   if (tab.view) {
     const reader = readerViewFor(tab.view.webContents)
@@ -1530,12 +1637,37 @@ function detachTabFromWindow(tab: BrowserTab): void {
     return
   }
   if (wasActive) {
-    const replacement = from.tabs[Math.min(index, from.tabs.length - 1)]
+    const replacement = findTab(partners[0]) ?? from.tabs[Math.min(index, from.tabs.length - 1)]
     if (replacement) activateTabInternal(replacement.id)
   } else {
     applyTabBounds(from)
     publishState(from)
   }
+}
+
+/**
+ * Move a tab into another window; a split pane takes its whole split along (same panes, sizes and
+ * focused pane), so a split entry moves as one. Pages keep running: only the views move.
+ */
+function moveTabsWithSplit(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
+  const from = tab.win
+  const group = splitOf(tab)
+  const members = group
+    ? group.tabIds.map((id) => findTab(id)).filter((member): member is BrowserTab => member?.win === from && canMoveTabTo(member, to))
+    : [tab]
+  const focusId = group && from.activeTabId && group.tabIds.includes(from.activeTabId) ? from.activeTabId : tab.id
+  if (group) from.splits = from.splits.filter((candidate) => candidate !== group)
+  // Never drop in between another split's panes.
+  const before = beforeId ? findTab(beforeId) : undefined
+  const beforeGroup = before ? splitOf(before) : undefined
+  const anchor = beforeGroup ? to.tabs.find((candidate) => beforeGroup.tabIds.includes(candidate.id))?.id ?? beforeId : beforeId
+  for (const member of members) detachTabFromWindow(member)
+  for (const member of members) adoptTabIntoWindow(member, to, anchor)
+  if (group && members.length === group.tabIds.length) {
+    const moved = createSplitGroup(group.id, group.tabIds, group.sizes)
+    if (moved) to.splits.push(moved)
+  }
+  if (members.some((member) => member.id === focusId)) activateTabInternal(focusId)
 }
 
 function adoptTabIntoWindow(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
@@ -1558,8 +1690,7 @@ export function moveBrowserTabToWindow(id: string, target: BaseWindow, beforeId:
   const tab = findTab(id)
   const to = windowStateFor(target)
   if (!tab || !isLiveWindow(to) || to === tab.win || !canMoveTabTo(tab, to)) return false
-  detachTabFromWindow(tab)
-  adoptTabIntoWindow(tab, to, beforeId)
+  moveTabsWithSplit(tab, to, beforeId)
   persistOpenTabs()
   if (!to.window.isDestroyed()) {
     to.window.show()
@@ -1571,7 +1702,8 @@ export function moveBrowserTabToWindow(id: string, target: BaseWindow, beforeId:
 /** "Move to New Window" / tearing a tab out: a new window (of the same kind) that takes the tab over. */
 export function moveBrowserTabToNewWindow(id: string, position?: { x: number; y: number }): boolean {
   const tab = findTab(id)
-  if (!tab || tab.win.tabs.length < 2 || !browserWindowFactory) return false
+  // Something has to stay behind: a window's only tab (or only split) can't tear out.
+  if (!tab || tab.win.tabs.length <= (splitOf(tab)?.tabIds.length ?? 1) || !browserWindowFactory) return false
   let size: { width: number; height: number } | undefined
   try {
     const [width = 0, height = 0] = tab.win.window.getSize()
@@ -1596,7 +1728,8 @@ export function dropBrowserTabOutside(id: string): boolean {
     const bounds = window.getBounds()
     return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
   }
-  if (contains(tab.win.window)) return false
+  // Back over its own window: the left/right edge of the page area splits the page with the tab.
+  if (contains(tab.win.window)) return dropTabOnPageEdge(tab, point)
   const target = windowStates.find((w) => w !== tab.win && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
   if (target) return moveBrowserTabToWindow(id, target.window)
   if (windowStates.some((w) => w !== tab.win && isLiveWindow(w) && contains(w.window))) return false
@@ -1919,6 +2052,7 @@ export type TabCommand =
   | 'history' | 'downloads'
   | 'bookmarkAllTabs' | 'bookmarks'
   | 'screenshot'
+  | 'splitView' | 'focusPaneLeft' | 'focusPaneRight'
 
 interface CommandShortcut {
   key: string
@@ -1954,14 +2088,19 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   find: { key: 'f', primaryOnly: true, accelerator: 'CmdOrCtrl+F' },
   findNext: { key: 'g', primaryOnly: true, accelerator: 'CmdOrCtrl+G' },
   findPrevious: { key: 'g', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+G' },
-  zoomIn: { key: '=', anyShift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+=' },
+  // Cmd/Ctrl+Shift+= is Split View, so Zoom In is Cmd/Ctrl+= only (a layout's unshifted "+" still folds to "=").
+  zoomIn: { key: '=', primaryOnly: true, accelerator: 'CmdOrCtrl+=' },
   zoomOut: { key: '-', primaryOnly: true, accelerator: 'CmdOrCtrl+-' },
   zoomReset: { key: '0', primaryOnly: true, accelerator: 'CmdOrCtrl+0' },
   // Chrome's bindings: Cmd+Y / Cmd+Shift+J on macOS, Ctrl+H / Ctrl+J elsewhere (Ctrl+Y is Redo there).
   history: IS_MAC ? { key: 'y', primaryOnly: true, accelerator: 'Cmd+Y' } : { key: 'h', primaryOnly: true, accelerator: 'Ctrl+H' },
   downloads: IS_MAC ? { key: 'j', shift: true, primaryOnly: true, accelerator: 'Cmd+Shift+J' } : { key: 'j', primaryOnly: true, accelerator: 'Ctrl+J' },
   // Free in Chrome on every platform (it has no screenshot binding); Cmd+Shift+3/4/5 stay with macOS.
-  screenshot: { key: 's', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+S' }
+  screenshot: { key: 's', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+S' },
+  // Split the tab with the last used one (or unsplit); the arrows move focus between panes.
+  splitView: { key: '=', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+=' },
+  focusPaneLeft: { key: 'arrowleft', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Left' },
+  focusPaneRight: { key: 'arrowright', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Right' }
 }
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
@@ -2016,6 +2155,13 @@ export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
       return
     case 'screenshot':
       void takeScreenshot('choose')
+      return
+    case 'splitView':
+      toggleBrowserSplitView()
+      return
+    case 'focusPaneLeft':
+    case 'focusPaneRight':
+      focusAdjacentSplitPane(command === 'focusPaneLeft' ? -1 : 1)
       return
   }
   const tab = tabId ? getTab(tabId) : undefined
@@ -2075,6 +2221,8 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
     if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue
     if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue
     if (shortcut.primaryOnly && !primary) continue
+    // Pane focus keys are only taken while a split is on screen; otherwise the page gets them.
+    if ((command === 'focusPaneLeft' || command === 'focusPaneRight') && !splitOf(findTab(tabId) ?? getTab())) continue
     runTabCommand(command, tabId ?? undefined)
     return true
   }
@@ -2116,7 +2264,15 @@ function tabsInSidebarOrder(w = currentWindowState()): BrowserTab[] {
 
 /** Cmd+1..8 selects that tab, Cmd+9 the last one (as in Chrome). */
 export function selectBrowserTabByNumber(number: number): void {
-  const ordered = tabsInSidebarOrder()
+  // Sidebar entries: a split counts once, and selecting it lands on its last used pane.
+  const w = currentWindowState()
+  const ordered = tabsInSidebarOrder().flatMap((tab) => {
+    const group = splitOf(tab)
+    if (!group || !w) return [tab]
+    if (w.tabs.find((candidate) => group.tabIds.includes(candidate.id)) !== tab) return []
+    const recent = pickLastUsedTab(w.recentTabIds, null, (id) => group.tabIds.includes(id))
+    return [findTab(recent) ?? tab]
+  })
   const target = number === 9 ? ordered[ordered.length - 1] : ordered[number - 1]
   if (!target) return
   if (!isActiveTab(target)) activateBrowserTab(target.id)
@@ -2273,7 +2429,7 @@ export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | nul
   if (!isTabSleepMinutes(value)) return null
   tabSleepMinutes = value
   for (const tab of allTabs()) {
-    if (isActiveTab(tab)) continue
+    if (isTabOnScreen(tab)) continue
     scheduleTabSleep(tab)
   }
   return tabSleepMinutes
@@ -2351,6 +2507,10 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (wasActive) hideLinkStatus(false, w.window)
   if (w.findState.tabId === id) closeFindBar(false, w)
   if (rememberClosed) rememberClosedTab(tab, index)
+  // Closing a pane leaves its partner on screen (and focused, when the closed pane was).
+  const { groups, partners } = removeTabFromSplits(w.splits, id)
+  w.splits = groups
+  w.recentTabIds = w.recentTabIds.filter((recent) => recent !== id)
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
   if (wasActive) w.activeTabId = null
@@ -2368,7 +2528,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
     return
   }
   if (wasActive) {
-    const replacement = tabs[Math.min(index, tabs.length - 1)]
+    const replacement = findTab(partners[0]) ?? tabs[Math.min(index, tabs.length - 1)]
     if (replacement) activateTabInternal(replacement.id)
   } else {
     applyTabBounds(w)
@@ -2421,6 +2581,12 @@ export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
   const tab = getTab(id)
   if (!tab) return false
   if (tab.pinned === pinned) return true
+  // Pinned tabs live in the Favourites strip, which has no split entries: pinning unsplits first.
+  if (pinned && splitOf(tab)) {
+    tab.win.splits = removeTabFromSplits(tab.win.splits, tab.id).groups
+    applyTabBounds(tab.win)
+    publishState(tab.win)
+  }
   tab.pinned = pinned
   persistOpenTabs()
   publishTabs(tab.win)
@@ -2439,17 +2605,24 @@ export function moveBrowserTab(id: string, beforeId: string | null): boolean {
   const { tabs } = moving.win
   const from = tabs.indexOf(moving)
   if (from < 0) return false
-  const [tab] = tabs.splice(from, 1)
-  if (!tab) return false
-  let to = beforeId ? tabs.findIndex((item) => item.id === beforeId) : -1
+  // A split moves as one block, and nothing lands in between another split's panes.
+  const group = splitOf(moving)
+  if (group && beforeId && group.tabIds.includes(beforeId)) return false
+  const beforeGroup = before ? splitOf(before) : undefined
+  const anchorId = beforeGroup ? tabs.find((item) => beforeGroup.tabIds.includes(item.id))?.id ?? beforeId : beforeId
+  const orderBefore = tabs.map((item) => item.id).join('|')
+  const block = group ? tabs.filter((item) => group.tabIds.includes(item.id)) : [moving]
+  for (const item of block) tabs.splice(tabs.indexOf(item), 1)
+  const tab = moving
+  let to = anchorId ? tabs.findIndex((item) => item.id === anchorId) : -1
   if (to < 0) {
     // append after the last tab in the same pinned group
     let last = -1
     tabs.forEach((item, index) => { if (item.pinned === tab.pinned) last = index })
     to = last + 1
   }
-  tabs.splice(to, 0, tab)
-  if (to === from) return false
+  tabs.splice(to, 0, ...block)
+  if (tabs.map((item) => item.id).join('|') === orderBefore) return false
   persistOpenTabs()
   publishTabs(tab.win)
   return true
@@ -2477,14 +2650,14 @@ export function reloadBrowserTab(id: string, ignoreCache = false): void {
 
 export function suspendBrowserTab(id: string): void {
   const tab = getTab(id)
-  if (tab && !isActiveTab(tab)) hibernateTab(tab)
+  if (tab && !isTabOnScreen(tab)) hibernateTab(tab)
 }
 
 /** Suspend every other tab in the same window (the active one stays awake). */
 export function suspendOtherBrowserTabs(keepId: string): void {
   const w = findTab(keepId)?.win ?? currentWindowState()
   for (const tab of [...(w?.tabs ?? [])]) {
-    if (tab.id !== keepId && !isActiveTab(tab)) hibernateTab(tab)
+    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab)
   }
 }
 
@@ -2651,7 +2824,8 @@ function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | 
     || request.x >= browserBounds.x + browserBounds.width
     || request.y >= browserBounds.y + browserBounds.height) return refuse('outside page bounds')
 
-  const tab = activeTabOf(w)
+  // In a split, the pane under the fingers navigates (focused or not).
+  const tab = tabAtWindowPoint(w, request.x, request.y) ?? activeTabOf(w)
   const contents = tab?.view?.webContents
   if (!tab || !contents || contents.isDestroyed()) return refuse('no active tab')
   const canPageConsume = request.direction === 'back'
@@ -2734,7 +2908,7 @@ function finishMacTrackpadSwipe(
     activeMacTrackpadSwipe = null
     nextMacTrackpadSwipeToken += 1
     const currentTab = getTab(swipe.tabId)
-    if (!currentTab || !isActiveTab(currentTab) || currentTab.view?.webContents !== swipe.contents
+    if (!currentTab || !isTabOnScreen(currentTab) || currentTab.view?.webContents !== swipe.contents
       || swipe.contents.isDestroyed() || !isLiveWindow(currentTab.win)) {
       resetMacTrackpadSwipeFor(swipe.contents)
       return
@@ -2965,7 +3139,7 @@ export async function browserPictureInPicture(): Promise<boolean> {
 const shouldToastPermission = createPermissionToastThrottle()
 onPermissionDenied((contents, permission, requestingUrl) => {
   const tab = tabForContents(contents)
-  if (!tab?.view || !isActiveTab(tab) || contents.isDestroyed()) return
+  if (!tab?.view || !isTabOnScreen(tab) || contents.isDestroyed()) return
   let origin = ''
   try {
     origin = new URL(requestingUrl).origin
@@ -2973,7 +3147,7 @@ onPermissionDenied((contents, permission, requestingUrl) => {
     // Unknown origin: still say what was blocked.
   }
   if (!shouldToastPermission(permission, origin)) return
-  flashLinkStatus(permissionDeniedMessage(permission, origin), tab.win.browserBounds, 3200, tab.win.window)
+  flashLinkStatus(permissionDeniedMessage(permission, origin), pageBoundsOf(tab), 3200, tab.win.window)
 })
 
 // ---------------------------------------------------------------------------
@@ -2986,12 +3160,13 @@ export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
       id: tab.id,
       url: currentUrl(tab),
       pinned: tab.pinned,
-      active: isActiveTab(tab),
+      // Both panes of a split on screen count as in use.
+      active: isTabOnScreen(tab),
       audible: Boolean(contents?.isCurrentlyAudible()),
       private: tab.isPrivate,
       extensionPage: Boolean(tab.extensionPageOrigin),
       unsavedPdfEdits: Boolean(tab.pdfEditor?.dirty),
-      inactiveSince: isActiveTab(tab) ? null : tab.inactiveSince
+      inactiveSince: isTabOnScreen(tab) ? null : tab.inactiveSince
     }
   })
 }
@@ -3046,4 +3221,316 @@ export function openArchivedBrowserTab(url: string, history: { entries: Electron
 export function flashBrowserStatus(message: string, durationMs = 2000): void {
   const w = currentWindowState()
   if (w) flashLinkStatus(message, w.browserBounds, durationMs, w.window)
+}
+
+// ---------------------------------------------------------------------------
+// Split view: two tabs' pages side by side (state and layout math live in ../shared/split-view).
+// The window's active tab is the focused pane, so everything that acts on "the active tab" (find,
+// zoom, reader, screenshots, the address bar, Cmd+W) acts on the focused pane.
+
+/** Keep each split's tabs adjacent in the tab list (the sidebar draws them as one entry) and drop stale splits. */
+function keepSplitTabsTogether(w: BrowserWindowState): void {
+  if (w.splits.length === 0) return
+  const present = new Set(w.tabs.map((tab) => tab.id))
+  for (const group of [...w.splits]) {
+    for (const id of group.tabIds) {
+      if (!present.has(id) || findTab(id)?.pinned) w.splits = removeTabFromSplits(w.splits, id).groups
+    }
+  }
+  const order = orderTabsForSplits(w.tabs.map((tab) => tab.id), w.splits)
+  if (order.every((id, index) => w.tabs[index]?.id === id)) return
+  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]))
+  w.tabs.splice(0, w.tabs.length, ...order.map((id) => byId.get(id)!))
+}
+
+/** Can this tab be a pane? Not pinned (Favourites strip), and not the local New Tab page (it has no page view). */
+function canSplitTab(tab: BrowserTab | undefined): tab is BrowserTab {
+  return Boolean(tab && isLiveWindow(tab.win) && !tab.pinned && currentUrl(tab) !== SURFFISH_QUICK_LINKS_URL)
+}
+
+/** Same window, both splittable, and never a private tab next to a normal one. */
+function canSplitTogether(a: BrowserTab | undefined, b: BrowserTab | undefined): boolean {
+  return canSplitTab(a) && canSplitTab(b) && a !== b && a.win === b.win && a.isPrivate === b.isPrivate
+}
+
+function splitWith(ids: readonly string[], focusId: string, sizes?: readonly number[]): boolean {
+  const tabs = ids.map((id) => findTab(id))
+  const first = tabs[0]
+  if (!first || tabs.length < 2 || tabs.length > MAX_SPLIT_PANES || tabs.some((tab) => tab === first ? !canSplitTab(tab) : !canSplitTogether(first, tab))) return false
+  const w = first.win
+  // A tab can only be in one split: take the tabs out of the ones they were in.
+  for (const tab of tabs) w.splits = removeTabFromSplits(w.splits, tab!.id).groups
+  const group = createSplitGroup(randomUUID(), ids, sizes)
+  if (!group) return false
+  w.splits.push(group)
+  keepSplitTabsTogether(w)
+  if (isTabOverviewOpen(w.window)) closeTabOverview(focusId, false)
+  activateTabInternal(focusId)
+  persistOpenTabs()
+  return true
+}
+
+/** "Split with…": `id` on the left, `otherId` on the right, `id` focused. */
+export function splitBrowserTabWith(id: string, otherId: string): boolean {
+  return splitWith([id, otherId], id)
+}
+
+/**
+ * "Open in Split View": show `id` next to the active tab. When a split is already on screen, `id`
+ * takes the place of the pane that isn't focused.
+ */
+export function openBrowserTabInSplitView(id: string): boolean {
+  const tab = findTab(id)
+  const active = tab ? activeTabOf(tab.win) : undefined
+  if (!tab || !active || active === tab) return false
+  const group = splitOf(active)
+  if (!group) return splitWith([active.id, id], id)
+  if (group.tabIds.includes(id) || !canSplitTogether(active, tab)) return false
+  const replaced = group.tabIds.find((paneId) => paneId !== active.id)
+  if (!replaced) return false
+  const w = tab.win
+  w.splits = removeTabFromSplits(w.splits, id).groups
+  w.splits = w.splits.map((candidate) => candidate.id === group.id ? replaceSplitPane(candidate, replaced, id) : candidate)
+  keepSplitTabsTogether(w)
+  activateTabInternal(id)
+  const left = findTab(replaced)
+  if (left && !isTabOnScreen(left)) markTabInactive(left)
+  persistOpenTabs()
+  publishState(w)
+  return true
+}
+
+/** Tabs the "Split with…" menu offers for `id`: the window's other splittable tabs, most recently used first. */
+function splitCandidates(tab: BrowserTab): BrowserTab[] {
+  const w = tab.win
+  const rank = (candidate: BrowserTab): number => {
+    const index = w.recentTabIds.indexOf(candidate.id)
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index
+  }
+  return w.tabs.filter((candidate) => canSplitTogether(tab, candidate) && !splitOf(candidate)).sort((a, b) => rank(a) - rank(b))
+}
+
+/** Cmd/Ctrl+Shift+=: split the active tab with the last used one (active on the left), or unsplit. */
+export function toggleBrowserSplitView(): boolean {
+  const w = currentWindowState()
+  const active = activeTabOf(w)
+  if (!w || !active) return false
+  if (splitOf(active)) return unsplitBrowserTab(active.id)
+  const other = pickLastUsedTab(w.recentTabIds, active.id, (id) => canSplitTogether(active, findTab(id)) && !splitOf(findTab(id)))
+    ?? splitCandidates(active)[0]?.id
+  if (!other || !canSplitTab(active)) {
+    const message = canSplitTab(active) ? 'Open another tab to split with' : (active as BrowserTab).pinned ? 'Unpin the tab to split it' : 'Open a page to split it'
+    flashLinkStatus(message, w.browserBounds, 2200, w.window)
+    return false
+  }
+  return splitWith([active.id, other], active.id)
+}
+
+/** Unsplit the split `id` is in; the focused pane stays on screen. */
+export function unsplitBrowserTab(id = getTab()?.id): boolean {
+  const tab = findTab(id)
+  const group = splitOf(tab)
+  if (!tab || !group) return false
+  const w = tab.win
+  const wasOnScreen = onScreenTabIds(w)
+  w.splits = w.splits.filter((candidate) => candidate !== group)
+  const nowOnScreen = onScreenTabIds(w)
+  for (const goneId of wasOnScreen) {
+    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId)
+    if (gone) markTabInactive(gone)
+  }
+  applyTabBounds(w)
+  persistOpenTabs()
+  publishState(w)
+  return true
+}
+
+/** Swap the panes of the split `id` is in (the layout stays, the pages trade places). */
+export function swapBrowserSplitPanes(id = getTab()?.id): boolean {
+  const tab = findTab(id)
+  const group = splitOf(tab)
+  if (!tab || !group) return false
+  const w = tab.win
+  w.splits = w.splits.map((candidate) => candidate === group ? swapSplitPanes(candidate) : candidate)
+  keepSplitTabsTogether(w)
+  applyTabBounds(w)
+  persistOpenTabs()
+  publishState(w)
+  return true
+}
+
+/** Pop a pane out into its own tab (placed right after the split) and show it on its own. */
+export function popOutBrowserSplitPane(id = getTab()?.id): boolean {
+  const tab = findTab(id)
+  const group = splitOf(tab)
+  if (!tab || !group) return false
+  const w = tab.win
+  w.splits = removeTabFromSplits(w.splits, tab.id).groups
+  const from = w.tabs.indexOf(tab)
+  const lastMember = Math.max(...group.tabIds.map((memberId) => w.tabs.findIndex((candidate) => candidate.id === memberId)))
+  if (from >= 0 && lastMember > from) {
+    w.tabs.splice(from, 1)
+    w.tabs.splice(lastMember, 0, tab)
+  }
+  activateTabInternal(tab.id)
+  persistOpenTabs()
+  return true
+}
+
+/** Make the pane showing `id` the focused one (the active tab), optionally moving keyboard focus into it. */
+function focusSplitPane(id: string | undefined, focusContents = true): boolean {
+  const tab = findTab(id)
+  if (!tab || !isTabOnScreen(tab)) return false
+  if (isActiveTab(tab)) {
+    if (focusContents) tab.view?.webContents.focus()
+    return true
+  }
+  const w = tab.win
+  if (focusContents) {
+    activateTabInternal(tab.id)
+  } else {
+    // A click already put the keyboard there; just move the active tab without refocusing.
+    cancelActiveMacTrackpadSwipe()
+    hideLinkStatus(false, w.window)
+    if (w.findState.open) closeFindBar(false, w)
+    w.activeTabId = tab.id
+    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
+    applyTabBounds(w)
+    publishState(w)
+  }
+  persistOpenTabs()
+  return true
+}
+
+/** Cmd/Ctrl+Alt+Left/Right: focus the pane to the left/right of the focused one. */
+export function focusAdjacentSplitPane(offset: number): boolean {
+  const active = getTab()
+  const group = splitOf(active)
+  if (!active || !group) return false
+  const index = group.tabIds.indexOf(active.id)
+  const next = group.tabIds[Math.max(0, Math.min(group.tabIds.length - 1, index + offset))]
+  return next !== active.id && focusSplitPane(next, true)
+}
+
+/** Even out the split on screen (double-click on the divider). */
+export function resetBrowserSplitSizes(): boolean {
+  const w = currentWindowState()
+  const group = splitOf(activeTabOf(w))
+  if (!w || !group) return false
+  w.splits = w.splits.map((candidate) => candidate === group ? { ...candidate, sizes: group.tabIds.map(() => 1 / group.tabIds.length) } : candidate)
+  applyTabBounds(w)
+  persistOpenTabs()
+  return true
+}
+
+/** The tab whose pane is under a window-coordinate point (null when no split is on screen). */
+function tabAtWindowPoint(w: BrowserWindowState, x: number, y: number): BrowserTab | undefined {
+  const group = splitOf(activeTabOf(w))
+  if (!group || !Number.isFinite(x) || !Number.isFinite(y)) return undefined
+  const layout = splitPaneRects(w.browserBounds, group.sizes)
+  const index = layout.cells.findIndex((cell) => x >= cell.x && x < cell.x + cell.width && y >= cell.y && y < cell.y + cell.height)
+  return index >= 0 ? findTab(group.tabIds[index]) : undefined
+}
+
+/** A sidebar tab dropped over its own window's page area: the outer left/right edge splits it with the page. */
+function dropTabOnPageEdge(tab: BrowserTab, screenPoint: { x: number; y: number }): boolean {
+  const w = tab.win
+  let content: Electron.Rectangle
+  try {
+    content = w.window.getContentBounds()
+  } catch {
+    return false
+  }
+  const side = splitDropSide(w.browserBounds, screenPoint.x - content.x, screenPoint.y - content.y)
+  return side ? dropTabIntoSplit(tab.id, side) : false
+}
+
+/**
+ * Put `id` on the `side` of the page on screen: a new split with the active tab, or (when a split is
+ * already on screen) in place of the pane on that side.
+ */
+export function dropTabIntoSplit(id: string, side: 'left' | 'right'): boolean {
+  const tab = findTab(id)
+  const w = tab?.win
+  const active = activeTabOf(w)
+  if (!tab || !w || !active || tab === active || splitOf(tab)) return false
+  const group = splitOf(active)
+  if (!group) return splitWith(side === 'left' ? [tab.id, active.id] : [active.id, tab.id], tab.id)
+  if (!canSplitTogether(active, tab)) return false
+  const replaced = side === 'left' ? group.tabIds[0]! : group.tabIds[group.tabIds.length - 1]!
+  w.splits = w.splits.map((candidate) => candidate === group ? replaceSplitPane(candidate, replaced, tab.id) : candidate)
+  keepSplitTabsTogether(w)
+  activateTabInternal(tab.id)
+  const gone = findTab(replaced)
+  if (gone && !isTabOnScreen(gone)) markTabInactive(gone)
+  persistOpenTabs()
+  publishState(w)
+  return true
+}
+
+/** Tab context-menu items: split actions for a pane, or the ways to split a plain tab. */
+function splitTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
+  const group = splitOf(tab)
+  if (group) {
+    return [
+      { label: 'Swap Split Panes', click: () => { swapBrowserSplitPanes(tab.id) } },
+      { label: 'Open Pane as Its Own Tab', click: () => { popOutBrowserSplitPane(tab.id) } },
+      { label: 'Unsplit Tabs', ...tabMenuAccelerator('splitView'), click: () => { unsplitBrowserTab(tab.id) } },
+      { type: 'separator' }
+    ]
+  }
+  const active = activeTabOf(tab.win)
+  const candidates = canSplitTab(tab) ? splitCandidates(tab).slice(0, 20) : []
+  const short = (title: string): string => title.length > 48 ? `${title.slice(0, 47)}…` : title
+  return [
+    { label: 'Open in Split View', enabled: Boolean(active && active !== tab && canSplitTogether(active, tab)), click: () => { openBrowserTabInSplitView(tab.id) } },
+    {
+      label: 'Split with…',
+      enabled: candidates.length > 0,
+      submenu: candidates.length > 0
+        ? candidates.map((candidate): MenuItemConstructorOptions => ({ label: short(pageTitle(candidate)), click: () => { splitBrowserTabWith(tab.id, candidate.id) } }))
+        : [{ label: 'No other tabs to split with', enabled: false }]
+    },
+    { type: 'separator' }
+  ]
+}
+
+/** The divider and pane-margin input from the split surface behind the panes. */
+function attachSplitSurface(w: BrowserWindowState): void {
+  const group = (): SplitGroup | undefined => splitOf(activeTabOf(w))
+  setSplitSurfaceHandlers(w.window, {
+    resize: (index, x) => {
+      const current = group()
+      if (!current) return
+      const sizes = resizeSplitAt(w.browserBounds, current.sizes, index, x)
+      w.splits = w.splits.map((candidate) => candidate === current ? { ...candidate, sizes } : candidate)
+      applyTabBounds(w)
+    },
+    resizeEnd: () => persistOpenTabs(),
+    reset: () => { runInWindow(w.window, () => resetBrowserSplitSizes()) },
+    focusPane: (index) => { focusSplitPane(group()?.tabIds[index], true) }
+  })
+}
+
+/** Split views of the current window, for the renderer and smoke tests. */
+export interface BrowserSplitSnapshot {
+  splits: { id: string; tabIds: string[]; sizes: number[] }[]
+  /** The split on screen, with each pane's view bounds (window coordinates). */
+  visible: { id: string; focusedTabId: string; panes: BrowserBounds[]; dividers: BrowserBounds[] } | null
+}
+
+export function getBrowserSplitState(): BrowserSplitSnapshot {
+  const w = currentWindowState()
+  const group = splitOf(activeTabOf(w))
+  const layout = w && group ? splitPaneRects(w.browserBounds, group.sizes) : null
+  return {
+    splits: (w?.splits ?? []).map((candidate) => ({ id: candidate.id, tabIds: candidate.tabIds.slice(), sizes: candidate.sizes.slice() })),
+    visible: w && group && layout ? { id: group.id, focusedTabId: w.activeTabId ?? '', panes: layout.panes, dividers: layout.dividers } : null
+  }
+}
+
+/** Whether `id` (default: the active tab) can be split, and whether it already is. */
+export function getBrowserTabSplitStatus(id = getTab()?.id): { split: boolean; canSplit: boolean } {
+  const tab = findTab(id)
+  return { split: Boolean(splitOf(tab)), canSplit: Boolean(tab && canSplitTab(tab) && (splitOf(tab) || splitCandidates(tab).length > 0)) }
 }

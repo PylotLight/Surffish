@@ -60,6 +60,7 @@ import {
   webStoreExtensionForSender
 } from './web-store-extensions'
 import { registerNetworkToolsIpc } from './network-tools-ipc'
+import { registerSplitViewIpc } from './split-view-ipc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -105,6 +106,7 @@ export function registerIpc(): void {
   registerSafetyIpc()
   registerCommandIpc()
   registerNetworkToolsIpc()
+  registerSplitViewIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })

@@ -1,0 +1,48 @@
+/* A split view in the sidebar: one row, one half per pane (left to right). */
+.tab-item.tab-split-entry {
+  gap: 0;
+  padding: 0 3px;
+}
+.tab-split-pane {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 30px;
+  padding: 0 2px 0 6px;
+  border-radius: 7px;
+}
+.tab-split-pane:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+.tab-split-pane.is-focused {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+.tab-split-pane.is-sleeping {
+  color: rgba(245, 247, 250, 0.48);
+}
+.tab-split-pane .tab-favicon {
+  width: 18px;
+  height: 18px;
+}
+.tab-split-pane .tab-close {
+  width: 18px;
+  height: 18px;
+  font-size: 15px;
+  opacity: 0;
+}
+.tab-split-pane:hover .tab-close,
+.tab-split-pane.is-focused .tab-close {
+  opacity: 1;
+}
+.tab-split-divider {
+  position: absolute;
+  left: -1px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.16);
+}
