@@ -5,9 +5,7 @@ import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, ipcMain, Menu, net, session, WebContentsView, type BaseWindow, type CustomScheme, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type WebContents } from 'electron'
 import readerableSource from '@mozilla/readability/Readability-readerable.js?raw'
-import readabilitySource from '@mozilla/readability/Readability.js?raw'
 import {
-  buildExtractScript,
   buildReaderableScript,
   DEFAULT_READER_SETTINGS,
   isArticleImageAllowed,
@@ -46,7 +44,6 @@ import { readUserJson, writeUserJson } from './user-json'
 export const READER_PARTITION = 'surffish-reader'
 const SETTINGS_FILE = 'reader-settings.json'
 const READERABLE_SCRIPT = buildReaderableScript(readerableSource)
-const EXTRACT_SCRIPT = buildExtractScript(readabilitySource)
 const CHECK_DELAY_MS = 600
 const IN_PAGE_CHECK_DELAY_MS = 1_500
 const IMAGE_TIMEOUT_MS = 20_000
@@ -452,7 +449,7 @@ export async function openReaderMode(page: WebContents | null = host?.activePage
   try {
     let raw: unknown
     try {
-      raw = await page.executeJavaScriptInIsolatedWorld(READER_WORLD_ID, [{ code: EXTRACT_SCRIPT }])
+      raw = await page.executeJavaScriptInIsolatedWorld(READER_WORLD_ID, [{ code: (await import('./reader-extract-script')).EXTRACT_SCRIPT }])
     } catch {
       raw = { error: 'script failed' }
     }
