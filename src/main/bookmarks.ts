@@ -33,18 +33,35 @@ import {
 import { MAX_PINNED_SITES, parseBrowserPreferences } from '../shared/persistence'
 import { exportNetscapeBookmarks } from '../shared/bookmark-import'
 import type { BookmarkNode, BookmarksSnapshot, PinnedSite } from '../shared/types'
+import { getProfileDatabase } from './store'
+import { BookmarkTable } from './store/bookmark-store'
+import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
 
 /**
- * The bookmark tree lives in its own file (bookmarks.json), written through the coalesced
- * deferred-write helper. On first run it is seeded from the old 12-site pinned strip, which
- * stays untouched in browser-preferences.json so an older build still finds it.
+ * The bookmark tree lives in surffish.db (`bookmarks`, see store/bookmark-store.ts) and in
+ * bookmarks.json, both written through the coalesced deferred-write helper. The database write is
+ * a diff (one row per changed node) after each burst of edits; the JSON file is kept alongside as
+ * the fallback and for older builds, rewritten at most every 30 s and at quit. Startup reads the database when it has the tree and bookmarks.json is unchanged since
+ * Surffish wrote it; otherwise the JSON wins and is imported into the database off the startup path.
+ * `SURFFISH_STORE=json` (or a database that won't open) keeps the JSON-only behaviour.
+ *
+ * On first run the tree is seeded from the old 12-site pinned strip, which stays untouched in
+ * browser-preferences.json so an older build still finds it.
  */
 
 const BOOKMARKS_FILE = 'bookmarks.json'
 const LEGACY_PREFERENCES_FILE = 'browser-preferences.json'
 const WRITE_DELAY_MS = 800
+/**
+ * With the database in use, bookmarks.json is only the fallback/downgrade copy, so it is rewritten
+ * at most this often (and at quit) instead of after every edit. If Surffish dies in between, the
+ * file is merely older than the database: its import stamp still matches, so the next start reads
+ * the database, which has every edit.
+ */
+const JSON_MIRROR_DELAY_MS = 30_000
 
 let store: BookmarkStore | null = null
+let table: BookmarkTable | null | undefined
 let snapshotCache: BookmarksSnapshot | null = null
 let notifyScheduled = false
 
@@ -80,16 +97,76 @@ function writeJsonFile(filename: string, value: unknown): boolean {
   }
 }
 
+/** The bookmarks table, or null (no database, or it failed this run: bookmarks.json only). */
+function sqlTable(): BookmarkTable | null {
+  if (table !== undefined) return table
+  const db = getProfileDatabase()
+  table = db ? new BookmarkTable(db) : null
+  return table
+}
+
+/** The tree from the database when its copy is current (see the header), else null. */
+function loadFromDatabase(): BookmarkStore | null {
+  const db = getProfileDatabase()
+  const target = sqlTable()
+  if (!db || !target) return null
+  try {
+    if (!databaseCopyIsCurrent(db, BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), target.hasSavedTree())) return null
+    const saved = target.load()
+    return saved ? parseBookmarkStore(saved) : null
+  } catch (error) {
+    console.error('Could not read bookmarks from the database; using bookmarks.json:', error)
+    return null
+  }
+}
+
+/** True when the database now holds `current`. A failure leaves bookmarks.json as the only copy for this run. */
+function saveToDatabase(current: BookmarkStore): boolean {
+  const target = sqlTable()
+  if (!target) return false
+  try {
+    target.save(current)
+    return true
+  } catch (error) {
+    console.error('Could not save bookmarks to the database (bookmarks.json still has them):', error)
+    table = null
+    return false
+  }
+}
+
+/** Database-only write for an edit burst (bookmarks.json follows on the slower mirror timer). */
+function saveEdit(current: BookmarkStore): void {
+  if (saveToDatabase(current)) return
+  // The database just failed: bookmarks.json becomes the only copy, so bring it up to date now.
+  settleDualWrite(getProfileDatabase(), BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), false, false)
+  cancelDeferredWrite('bookmarks-json')
+  writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(current))
+}
+
+/** Write both copies, then record whether bookmarks.json matches the database. */
+function writeStore(current: BookmarkStore): void {
+  const jsonSaved = writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(current))
+  const hadTable = sqlTable() !== null
+  const databaseSaved = saveToDatabase(current)
+  if (hadTable) settleDualWrite(getProfileDatabase(), BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), databaseSaved, jsonSaved)
+}
+
 function legacyPinnedSites(): PinnedSite[] {
   return parseBrowserPreferences(readJsonFile(LEGACY_PREFERENCES_FILE).value).pinnedSites
 }
 
 function loadStore(): BookmarkStore {
   if (store) return store
+  const fromDatabase = loadFromDatabase()
+  if (fromDatabase) {
+    store = fromDatabase
+    return store
+  }
   const saved = readJsonFile(BOOKMARKS_FILE)
   const parsed = saved.exists ? parseBookmarkStore(saved.value) : null
   if (parsed) {
     store = parsed
+    scheduleImport()
     return store
   }
   if (saved.exists) {
@@ -102,14 +179,34 @@ function loadStore(): BookmarkStore {
   }
   store = migratePinnedSitesToBookmarks(legacyPinnedSites())
   writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(store))
+  scheduleImport()
   return store
+}
+
+/** The tree came from bookmarks.json: copy it into the database once startup has settled. */
+function scheduleImport(): void {
+  if (!sqlTable()) return
+  deferWrite('bookmarks-import', () => {
+    const current = store
+    if (!current) return
+    const databaseSaved = saveToDatabase(current)
+    // The JSON file already holds this tree (it is what was just read), so stamp it as matching.
+    settleDualWrite(getProfileDatabase(), BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), databaseSaved, databaseSaved)
+  }, 1500)
 }
 
 function persist(): void {
   snapshotCache = null
   const current = store
   if (!current) return
-  deferWrite('bookmarks', () => writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(current)), WRITE_DELAY_MS)
+  // A pending import is superseded: this write saves the current tree to both copies.
+  cancelDeferredWrite('bookmarks-import')
+  if (sqlTable()) {
+    deferWrite('bookmarks', () => saveEdit(current), WRITE_DELAY_MS)
+    deferWrite('bookmarks-json', () => { if (store) writeStore(store) }, JSON_MIRROR_DELAY_MS)
+  } else {
+    deferWrite('bookmarks', () => writeStore(current), WRITE_DELAY_MS)
+  }
   scheduleNotify()
 }
 
@@ -255,5 +352,7 @@ export function exportBookmarksHtml(): string {
 /** Flush now (tests / quit paths); normal edits go through deferWrite. */
 export function flushBookmarks(): void {
   cancelDeferredWrite('bookmarks')
-  if (store) writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(store))
+  cancelDeferredWrite('bookmarks-import')
+  cancelDeferredWrite('bookmarks-json')
+  if (store) writeStore(store)
 }

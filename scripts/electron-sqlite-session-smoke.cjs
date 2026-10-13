@@ -1,7 +1,8 @@
 // Integration smoke for the session tables in surffish.db: open tabs are saved to the database (and
 // still to browser-session.json), a restart restores from the database, and a browser-session.json
 // written by something else (a fallback run / older build) wins over the database. Three launches
-// on one profile. Runs the production build:
+// on one profile. The bookmark tree gets the same three checks against bookmarks.json (import,
+// delta rows + blanked tombstones, restore from the database, a changed JSON file wins). Runs the production build:
 // `bun run build && bun run test:electron-sqlite-session` (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-sqlite-session-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
@@ -57,6 +58,16 @@ function sqlite(sql, ...params) {
   }
 }
 const sessionFile = join(userData, 'browser-session.json')
+const bookmarksFile = join(userData, 'bookmarks.json')
+const bookmarkTitles = (toolbar) => evaluate(toolbar, 'window.api.browser.bookmarks.get().then((snapshot) => snapshot.nodes.filter((node) => node.type === "bookmark").map((node) => node.title).sort().join(","))')
+const liveBookmarkTitles = () => sqlite("SELECT title FROM bookmarks WHERE deleted_at IS NULL AND kind = 'url' ORDER BY title").map((row) => row.title).join(',')
+const legacyBookmarks = (titles) => JSON.stringify({
+  version: 1,
+  nodes: [
+    { id: 'favourites', type: 'folder', title: 'Favourites', parentId: 'root', index: 0, dateAdded: 1 },
+    ...titles.map((title, index) => ({ id: `legacy-${title}`, type: 'bookmark', title, url: `https://${title.toLowerCase()}.test/`, parentId: 'favourites', index, dateAdded: 2 }))
+  ]
+})
 
 async function launch() {
   app.setPath('userData', userData)
@@ -93,6 +104,22 @@ async function runSave() {
   assert.ok(readFileSync(sessionFile, 'utf8').includes(`${origin}/two`), 'browser-session.json is still written')
   const ids = sqlite('SELECT id FROM session_tabs WHERE deleted_at IS NULL ORDER BY position').map((row) => row.id)
   writeFileSync(join(userData, 'ids.json'), JSON.stringify(ids))
+
+  // Bookmarks: bookmarks.json from before the database is imported (off the startup path).
+  assert.equal(await bookmarkTitles(toolbar), 'Alpha,Beta', 'legacy bookmarks load')
+  await waitFor(() => liveBookmarkTitles() === 'Alpha,Beta', 'bookmarks.json imported into the bookmarks table')
+  const before = Number(sqlite('SELECT max(seq) AS seq FROM oplog')[0].seq)
+  await evaluate(toolbar, `window.api.browser.bookmarks.create({ parentId: 'favourites', title: 'Gamma', url: ${JSON.stringify(`${origin}/gamma`)} })`)
+  await evaluate(toolbar, 'window.api.browser.bookmarks.remove(["legacy-Alpha"])')
+  await waitFor(() => liveBookmarkTitles() === 'Beta,Gamma', 'the new bookmark and the delete in the database')
+  const ops = sqlite("SELECT entity_id, payload FROM oplog WHERE entity = 'bookmark' AND seq > ?", before)
+  assert.equal(ops.length, 2, 'two edits = two change-log ops (only changed rows are written)')
+  const tombstone = sqlite("SELECT title, url, deleted_at FROM bookmarks WHERE id = 'legacy-Alpha'")[0]
+  assert.ok(tombstone.deleted_at && tombstone.title === '' && tombstone.url === null, 'a deleted bookmark is a blank tombstone')
+  assert.ok(!JSON.stringify(ops).includes('alpha.test'), 'the change log keeps no deleted URL')
+  // bookmarks.json is the fallback copy: rewritten on a slow timer and at quit (will-quit flushes).
+  app.emit('will-quit', { preventDefault() {} })
+  assert.ok(readFileSync(bookmarksFile, 'utf8').includes('Gamma'), 'bookmarks.json is still written alongside (at quit)')
   console.log('[session-smoke] save phase passed')
 }
 
@@ -101,7 +128,10 @@ async function runRestore() {
   // restoring /edited proves the database was the source.
   const { origin: expectedOrigin } = { origin: `http://127.0.0.1:${port}` }
   sqlite("UPDATE session_tabs SET url = ? WHERE url = ? AND deleted_at IS NULL", `${expectedOrigin}/edited`, `${expectedOrigin}/two`)
+  // Same for bookmarks: a title changed only in the database shows up, so the database was read.
+  sqlite("UPDATE bookmarks SET title = 'Gamma (db)' WHERE title = 'Gamma'")
   const { toolbar } = await launch()
+  assert.equal(await bookmarkTitles(toolbar), 'Beta,Gamma (db)', 'bookmarks restored from the database')
   await waitFor(async () => (await tabUrls(toolbar)).join(' ') === `${expectedOrigin}/one ${expectedOrigin}/edited`, 'tabs restored from the database')
   await delay(1500)
   const ids = sqlite('SELECT id FROM session_tabs WHERE deleted_at IS NULL ORDER BY position').map((row) => row.id)
@@ -113,7 +143,10 @@ async function runJsonWins() {
   // Something else (a fallback run, an older build) rewrote browser-session.json: it wins.
   const origin = `http://127.0.0.1:${port}`
   writeFileSync(sessionFile, JSON.stringify({ version: 1, tabs: [`${origin}/from-json`], activeIndex: 0, pinnedTabs: [] }))
+  writeFileSync(bookmarksFile, legacyBookmarks(['Delta']))
   const { toolbar } = await launch()
+  assert.equal(await bookmarkTitles(toolbar), 'Delta', 'a changed bookmarks.json wins')
+  await waitFor(() => liveBookmarkTitles() === 'Delta', 'the bookmarks table to take the JSON tree')
   await waitFor(async () => (await tabUrls(toolbar)).join(' ') === `${origin}/from-json`, 'tabs restored from the changed JSON file')
   await waitFor(() => sqlite('SELECT url FROM session_tabs WHERE deleted_at IS NULL').map((row) => row.url).join(' ') === `${origin}/from-json`, 'the database to take the JSON session')
   console.log('[session-smoke] json-wins phase passed')
@@ -127,6 +160,7 @@ async function main() {
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const serverPort = server.address().port
   mkdirSync(userData, { recursive: true, mode: 0o700 })
+  writeFileSync(bookmarksFile, legacyBookmarks(['Alpha', 'Beta']), { mode: 0o600 })
   for (const next of ['save', 'restore', 'json-wins']) assert.equal(await runPhase(next, serverPort), 0, `the ${next} phase passed`)
   console.log('Electron SQLite session smoke passed.')
 }

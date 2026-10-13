@@ -134,6 +134,8 @@ async function runFallback() {
   assert.deepEqual((await evaluate(toolbar, 'window.api.browser.history.get()')).map((entry) => entry.id), ['json-1'])
   await visit(toolbar, `${origin}/fallback`)
   await waitFor(() => readFileSync(legacyFile, 'utf8').includes('/fallback'), 'the visit to be written to browsing-history.json')
+  await evaluate(toolbar, `window.api.browser.bookmarks.create({ parentId: 'favourites', title: 'Fallback mark', url: ${JSON.stringify(`${origin}/mark`)} })`)
+  await waitFor(() => existsSync(join(userData, 'bookmarks.json')) && readFileSync(join(userData, 'bookmarks.json'), 'utf8').includes('Fallback mark'), 'the bookmark to be written to bookmarks.json')
   assert.ok(!existsSync(join(userData, 'surffish.db')), 'no database is created when switched off')
   console.log('[store-smoke] fallback phase passed')
 }

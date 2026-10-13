@@ -6,8 +6,9 @@ stable id, a clock stamp and a tombstone, and every write lands in a change log.
 
 Status: **history** lives in the database (PR 1); the **open-windows session** (windows, tabs,
 pins, groups, splits, each tab's Space) is saved to it too (PR 2), with browser-session.json still
-written alongside as the fallback. Spaces definitions, bookmarks and settings have tables already
-and move over next. Everything else is still JSON.
+written alongside as the fallback. **Bookmarks** moved next, with bookmarks.json kept as the
+fallback copy. Spaces definitions and settings have tables already and move over next. Everything
+else is still JSON.
 
 ## Which SQLite
 
@@ -84,6 +85,39 @@ the log too.
 A peer asks for `changesSince(last_sent_seq)`, applies ops last-writer-wins by `hlc`
 (`HybridLogicalClock.receive()` keeps local stamps ahead of anything seen), and acknowledges the
 new `seq`. Transport (Inkfish-style LAN sealed HTTP with QR pairing) and the apply side come later.
+
+## Bookmarks, settings and Spaces: the shared pattern
+
+`store/row-mirror.ts` keeps a synced table equal to the in-memory model with the fewest row writes:
+the store hands it the rows it wants, it upserts only the rows whose columns changed and
+tombstones the rest (hard-deletes with a content-free `delete` op where the store asks, for privacy
+deletes). Tombstones older than 30 days are purged at the first write of a run (not at startup).
+
+- **Startup** reads the database when it has a saved copy and the JSON file is gone or unchanged
+  since Surffish last wrote/imported it (size+mtime stamp in `meta`, `legacy:<file>`). Otherwise
+  the JSON file wins (a `SURFFISH_STORE=json` run or an older build edited it) and is imported
+  into the database ~1.5 s after startup, unless a real edit saves first.
+- **Edits** write the database diff after the usual debounce. The JSON file is kept as the
+  fallback/downgrade copy but rewritten at most every 30 s and at quit. If Surffish dies in
+  between, the file is just older than the database; its stamp still matches, so the next start
+  reads the database, which has every edit.
+- **Stamps** (`settleDualWrite`): both copies written → stamp the file; database write failed →
+  drop the stamp (and write the JSON now) so the next start reads the JSON; only the JSON write
+  failed → keep the old stamp, so the newer database still wins.
+- Order (bookmark siblings, Spaces) is a fractional-index `position` (`shared/fractional-index.ts`):
+  moving or inserting one item rewrites one row; long runs of appends are respaced once if keys get
+  long.
+
+### Bookmarks
+
+One row per folder/bookmark, keyed by the node's existing id (`favourites` is the fixed
+Favourites folder on every device), top level `parent_id` NULL, `created_at` = date added. A
+deleted bookmark is a tombstone with title, URL and favicon blanked, so neither the table nor the
+change log keeps the page. Measured (Electron 44 as Node, Linux arm64, medians): an edit with 2,000
+bookmarks was a 569 KB `bookmarks.json` rewrite (~1.2 ms); it is now a ~0.9 ms diff writing ~33 KB
+of WAL, and the JSON copy follows at most every 30 s. Loading 2,000 bookmarks from the database is
+~7.6 ms vs ~5.1 ms from JSON (~0.8 vs ~0.6 ms for 200). Importing 2,000 from JSON once: ~54 ms,
+1.5 s after startup.
 
 ## Session (windows / tabs / groups / splits)
 

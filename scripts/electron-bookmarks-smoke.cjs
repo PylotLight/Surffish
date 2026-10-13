@@ -252,11 +252,20 @@ async function run() {
   key(content, 'B', [primary, 'alt'])
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the shortcut to close the manager')
 
-  // --- persisted through the deferred writer
+  // --- persisted through the deferred writer: surffish.db after the edit burst, bookmarks.json
+  // (the fallback copy, rewritten on a slow timer) at the latest when the app quits.
   await waitFor(() => {
-    const saved = JSON.parse(readFileSync(join(userData, 'bookmarks.json'), 'utf8'))
-    return saved.version === 1 && saved.nodes.some((node) => node.url === 'https://imported-two.test/')
-  }, 'bookmarks.json to be written', 5000)
+    const { DatabaseSync } = process.getBuiltinModule('node:sqlite')
+    const db = new DatabaseSync(join(userData, 'surffish.db'), { readOnly: true })
+    try {
+      return db.prepare("SELECT count(*) AS n FROM bookmarks WHERE url = 'https://imported-two.test/' AND deleted_at IS NULL").get().n === 1
+    } finally {
+      db.close()
+    }
+  }, 'the bookmarks table to be written', 5000)
+  app.emit('will-quit', { preventDefault() {} })
+  const saved = JSON.parse(readFileSync(join(userData, 'bookmarks.json'), 'utf8'))
+  assert.ok(saved.version === 1 && saved.nodes.some((node) => node.url === 'https://imported-two.test/'), 'bookmarks.json is written at quit')
 
   console.log('Electron bookmarks smoke passed.')
 }
