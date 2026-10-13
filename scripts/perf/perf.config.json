@@ -1,0 +1,50 @@
+{
+  "$comment": "Perf check config. See docs/perf.md. Regression = PR worse than main by more than BOTH pct and abs. deterministic: fail above failPct. noisy: warn above warnPct, fail above failPct (never fails where noisyFail is false). leak: fail when PR leaves anything behind and more than main.",
+  "runs": 3,
+  "bench": {
+    "tabsMid": 10,
+    "tabsMax": 30,
+    "idleSeconds": 5,
+    "tabSwitches": 12,
+    "newTabs": 5,
+    "windowCycles": 3
+  },
+  "defaults": {
+    "deterministic": { "failPct": 5, "abs": 0 },
+    "noisy": { "warnPct": 10, "failPct": 25, "abs": 0 },
+    "leak": {}
+  },
+  "platforms": {
+    "linux": { "noisyFail": true },
+    "darwin": { "noisyFail": false }
+  },
+  "metrics": {
+    "bundle.mainJs": { "kind": "deterministic", "label": "main bundle (index.js)", "unit": "KB" },
+    "bundle.mainTotal": { "kind": "deterministic", "label": "main process JS, all chunks", "unit": "KB" },
+    "bundle.preload": { "kind": "deterministic", "label": "preload scripts", "unit": "KB" },
+    "bundle.rendererEagerJs": { "kind": "deterministic", "label": "renderer JS loaded at startup", "unit": "KB" },
+    "bundle.rendererJs": { "kind": "deterministic", "label": "renderer JS, all assets", "unit": "KB" },
+    "bundle.rendererCss": { "kind": "deterministic", "label": "renderer CSS", "unit": "KB" },
+    "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 100 },
+    "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100 },
+    "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 5 },
+    "mem1.totalMB": { "kind": "noisy", "label": "memory, 1 tab", "unit": "MB", "abs": 15 },
+    "memMid.totalMB": { "kind": "noisy", "label": "memory, 10 tabs", "unit": "MB", "abs": 20 },
+    "memMax.totalMB": { "kind": "noisy", "label": "memory, 30 tabs", "unit": "MB", "abs": 30 },
+    "memMax.gpuMB": { "kind": "noisy", "label": "GPU process memory, 30 tabs", "unit": "MB", "abs": 15 },
+    "memMax.processes": { "kind": "deterministic", "label": "processes, 30 tabs", "unit": "" },
+    "openTabs.ipcCount": { "kind": "deterministic", "label": "IPC messages opening 20 tabs", "unit": "", "abs": 10 },
+    "openTabs.ipcBytes": { "kind": "deterministic", "label": "IPC payload opening 20 tabs", "unit": "KB", "abs": 20480 },
+    "openTabs.mainCpuMs": { "kind": "noisy", "label": "main CPU opening 20 tabs", "unit": "ms", "abs": 100 },
+    "tabSwitch.medianMs": { "kind": "noisy", "label": "tab switch to painted", "unit": "ms", "abs": 10 },
+    "newTab.siteFirstPaintMs": { "kind": "noisy", "label": "new site tab first paint", "unit": "ms", "abs": 25 },
+    "newTab.newTabPageMs": { "kind": "noisy", "label": "New Tab page shown", "unit": "ms", "abs": 15 },
+    "idle.ipcCount": { "kind": "deterministic", "label": "idle IPC messages (5s, 30 tabs)", "unit": "", "abs": 2 },
+    "idle.timerFires": { "kind": "deterministic", "label": "idle main-process timer fires (5s)", "unit": "", "abs": 3 },
+    "idle.backgroundTabsCpuMsPerSec": { "kind": "noisy", "label": "background tabs CPU, idle", "unit": "ms/s", "abs": 10 },
+    "idle.mainCpuMsPerSec": { "kind": "noisy", "label": "main process CPU, idle", "unit": "ms/s", "abs": 10 },
+    "windowCycles.processesGrowth": { "kind": "leak", "label": "processes left after 3 window open/close", "unit": "" },
+    "windowCycles.webContentsGrowth": { "kind": "leak", "label": "webContents left after 3 window open/close", "unit": "" },
+    "windowCycles.memGrowthMB": { "kind": "noisy", "label": "memory growth after 3 window open/close", "unit": "MB", "abs": 40 }
+  }
+}
