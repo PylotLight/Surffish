@@ -13,6 +13,7 @@ import { installAppMenu } from './app-menu'
 import { flushExternalOpens, registerExternalOpenHandlers } from './external-links'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 import { registerPdfEditorScheme } from './pdf-editor'
+import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
 app.setName(APP_NAME)
@@ -39,6 +40,8 @@ app.whenReady().then(async () => {
   try {
     // Set the browser session's proxy before any remote page is created.
     await initializeBrowserProxy()
+    // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
+    initializeBrowserSafety()
     await initializeSessionCookiePersistence()
     initializeDownloads()
   } catch (error) {

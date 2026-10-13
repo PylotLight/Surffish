@@ -1,5 +1,5 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
-import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabCommand, savePdfEditor, togglePdfEditor, selectBrowserTabByNumber, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
+import { newBrowserTab, newPrivateBrowserTab, openClearBrowsingData, reopenClosedBrowserTab, runTabCommand, savePdfEditor, togglePdfEditor, selectBrowserTabByNumber, TAB_COMMAND_SHORTCUTS, type TabCommand } from './browser'
 import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
@@ -107,7 +107,8 @@ export function installAppMenu(): void {
         tabItem('Back', 'back'),
         tabItem('Forward', 'forward'),
         { type: 'separator' },
-        tabItem('Show History', 'history')
+        tabItem('Show History', 'history'),
+        { label: 'Clear Browsing Data…', accelerator: 'CmdOrCtrl+Shift+Backspace', click: () => openClearBrowsingData() }
       ]
     },
     {

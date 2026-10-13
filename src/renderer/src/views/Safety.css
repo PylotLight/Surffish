@@ -1,0 +1,198 @@
+/* Safety pack: tab interstitials (crash / hang / HTTPS-only), Not secure chip, proxy-down banner, privacy settings. */
+.tab-interstitial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 32px;
+  background: #101419;
+  color: #f2f4f6;
+}
+.tab-interstitial-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 460px;
+}
+.tab-interstitial-icon {
+  width: 40px;
+  height: 40px;
+  color: rgba(255, 178, 184, 0.9);
+}
+.tab-interstitial.is-hang .tab-interstitial-icon { color: rgba(255, 214, 140, 0.9); }
+.tab-interstitial.is-https .tab-interstitial-icon { color: rgba(255, 196, 120, 0.95); }
+.tab-interstitial h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.tab-interstitial p {
+  margin: 0;
+  color: rgba(235, 240, 245, 0.68);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tab-interstitial code {
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 11.5px;
+}
+.tab-interstitial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.omnibox-insecure-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 120, 120, 0.16);
+  color: #ffc2c6;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.omnibox-insecure-pill svg { width: 13px; height: 13px; }
+.proxy-down-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 120, 120, 0.35);
+  border-radius: 8px;
+  background: rgba(120, 20, 28, 0.55);
+  color: #ffd4d7;
+  font-size: 11.5px;
+  -webkit-app-region: no-drag;
+}
+.proxy-down-banner strong { color: #fff; font-weight: 600; }
+.proxy-down-banner span { flex: 1 1 auto; min-width: 0; }
+.proxy-down-banner button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.tab-crashed-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: #ffb2b8;
+}
+.tab-crashed-badge svg { width: 13px; height: 13px; }
+.privacy-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px 16px;
+  padding: 4px 0;
+}
+.privacy-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: rgba(242, 244, 246, 0.9);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.privacy-check small {
+  display: block;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 11px;
+}
+.privacy-check input { margin-top: 2px; }
+.privacy-search {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  outline: 0;
+  background: rgba(0, 0, 0, 0.24);
+  color: #f2f4f6;
+  font: inherit;
+  font-size: 12px;
+}
+.privacy-search:focus { border-color: rgba(117, 167, 255, 0.65); }
+.privacy-cookie-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 340px;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.privacy-cookie-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+}
+.privacy-cookie-list li:first-child { border-top: 0; }
+.privacy-cookie-site {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.privacy-cookie-site small {
+  overflow: hidden;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.privacy-icon-button {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 178, 184, 0.85);
+  cursor: pointer;
+}
+.privacy-icon-button:hover { background: rgba(255, 120, 120, 0.14); }
+.privacy-icon-button svg { width: 18px; height: 18px; }
+.privacy-language-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.privacy-language-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  background: rgba(117, 167, 255, 0.16);
+  color: #dbe7ff;
+  font-size: 11.5px;
+}
+.privacy-language-chip button {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}

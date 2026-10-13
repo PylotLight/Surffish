@@ -264,3 +264,30 @@ function savePreferences(): void {
   preferencesLoaded = true
   writeJson(PREFERENCES_FILE, { version: 1, ...preferences })
 }
+
+/** Reset site permissions and settings to defaults for these origins (null = every site). */
+export function resetBrowserSiteSettings(origins: readonly string[] | null): number {
+  loadPreferencesIfNeeded()
+  const current = preferences.siteSettings
+  const drop = origins === null ? Object.keys(current) : origins.map(normalizeHttpOrigin).filter((origin): origin is string => origin !== null && origin in current)
+  if (drop.length === 0) return 0
+  const next = { ...current }
+  for (const origin of drop) delete next[origin]
+  preferences = { ...preferences, siteSettings: next }
+  savePreferences()
+  return drop.length
+}
+
+/** Forget saved page zoom for these origins (null = every site). */
+export function clearBrowserSiteZoom(origins: readonly string[] | null): number {
+  loadPreferencesIfNeeded()
+  const current = preferences.siteZoom
+  const drop = origins === null ? Object.keys(current) : origins.map(normalizeHttpOrigin).filter((origin): origin is string => origin !== null && origin in current)
+  if (drop.length === 0) return 0
+  const next = { ...current }
+  for (const origin of drop) delete next[origin]
+  cancelDeferredWrite('preferences:site-zoom')
+  preferences = { ...preferences, siteZoom: next }
+  savePreferences()
+  return drop.length
+}

@@ -92,7 +92,14 @@ export interface BrowserState {
   zoomFactor: number
   /** The active tab shows a PDF in the built-in viewer, or the PDF editor. */
   pdf: 'viewer' | 'editor' | null
+  /** A full-page notice drawn over the active tab (crash, hang, HTTPS-only fallback). */
+  interstitial: BrowserTabInterstitial | null
 }
+
+export type BrowserTabInterstitial =
+  | { kind: 'crashed'; reason: string; label: string; /** Crashed again right after auto-reloading; we stopped retrying. */ repeated: boolean }
+  | { kind: 'unresponsive' }
+  | { kind: 'https-unavailable'; /** The http:// URL the user asked for. */ url: string; host: string; error: string }
 
 /** Find-in-page result for the active tab, from Electron's `found-in-page`. */
 export interface BrowserFindResult {
@@ -122,6 +129,8 @@ export interface BrowserTabSummary {
   muted: boolean
   /** Private tab: in-memory session, nothing saved. */
   private: boolean
+  /** The tab's page process crashed; it reloads when the tab is next opened. */
+  crashed?: boolean
 }
 export interface BrowsingHistoryEntry {
   id: string
@@ -137,7 +146,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {

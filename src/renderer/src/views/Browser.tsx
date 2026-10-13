@@ -39,6 +39,13 @@ import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
+import { SpellcheckSettings } from './settings/SpellcheckSettings'
+import { ProxyKillSwitchSetting } from './settings/ProxyKillSwitchSetting'
+import { PrivacySettings } from './settings/PrivacySettings'
+import { SiteDataSettings } from './settings/SiteDataSettings'
+import { TabInterstitial } from './TabInterstitial'
+import { ProxyDownBanner } from './ProxyDownBanner'
+import { isInsecurePageUrl } from '../../../shared/https-only'
 import { UpdateSettings } from './settings/UpdateSettings'
 import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
@@ -105,7 +112,8 @@ const EMPTY_BROWSER: BrowserState = {
   error: null,
   private: false,
   zoomFactor: 1,
-  pdf: null
+  pdf: null,
+  interstitial: null
 }
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   installed: false,
@@ -134,15 +142,16 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy'>
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
   { mode: 'newtab', label: 'New Tab' },
   { mode: 'integrations', label: 'Extensions' },
+  { mode: 'privacy', label: 'Privacy' },
   { mode: 'site', label: 'This site' },
   { mode: 'network', label: 'Network' }
 ]
@@ -413,6 +422,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }, [siteIconOrigins])
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
+  const hasInterstitial = browser.interstitial !== null
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   useEffect(() => {
     if (surface !== 'content' || !isLocalNewTab) return
@@ -871,7 +881,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && !isLocalNewTab && rect.width > 0 && rect.height > 0
+      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && !isLocalNewTab && !hasInterstitial && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -885,7 +895,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [surface, sidebarMode, isLocalNewTab])
+  }, [surface, sidebarMode, isLocalNewTab, hasInterstitial])
 
   useEffect(() => {
     if (document.activeElement !== addressRef.current) setAddress(isLocalNewTab ? '' : browser.url)
@@ -1126,6 +1136,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <TabFavicon tab={tab} />
                 <span className="tab-title">{tab.title}</span>
                 {tab.private && <span className="tab-private-badge" title="Private tab" aria-label="Private tab"><PrivateGlyph /></span>}
+                {tab.crashed && <span className="tab-crashed-badge" title="This tab crashed · it reloads when you open it" aria-label="Crashed tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg></span>}
                 <TabAudioButton tab={tab} />
                 {tab.sleeping && <span className="tab-sleep-indicator" title="Sleeping tab" aria-label="Sleeping tab">☾</span>}
                 <button
@@ -1206,6 +1217,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
               <div className="omnibox">
                 {browser.private && <span className="omnibox-private-pill" title="Private tab: nothing from this tab is saved"><PrivateGlyph /><span>Private</span></span>}
+                {!isLocalNewTab && isInsecurePageUrl(browser.url) && <span className="omnibox-insecure-pill" title="Not secure: this page uses plain HTTP, so it can be read or changed on the way"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg><span>Not secure</span></span>}
                 <div className="site-actions-control" ref={siteActionsControlRef}>
                   <button
                     className={`omnibox-action-button site-actions-button${siteActionsOpen ? ' is-current' : ''}`}
@@ -1399,9 +1411,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
           </form>
           {surface === 'toolbar' && <FindBar onOpenChange={setFindOpen} />}
-          {(browser.error || navigationError) && (
+          {surface !== 'sidebar' && <ProxyDownBanner />}
+          {((browser.error && !hasInterstitial) || navigationError) && (
             <p className="browser-error" role="status">
-              {browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
+              {browser.error && !hasInterstitial ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
             </p>
           )}
         </header>
@@ -1531,7 +1544,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </button>
             </nav>
           )}
+          {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
+          {sidebarMode === 'privacy' && <PrivacySettings />}
           {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
             <div className={`settings-view settings-view-${sidebarMode}`}>
               <header className="settings-page-header">
@@ -1575,6 +1590,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </SettingsRow>
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </SettingsGroup>
+                <SpellcheckSettings />
                 <SettingsGroup
                   title="SOCKS5 proxy"
                   status={appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}
@@ -1592,6 +1608,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
                     </label>
                   </div>
+                  <ProxyKillSwitchSetting />
                   <div className="settings-actions">
                     <p className="settings-help">Start a tunnel first: <code>ssh -N -D 127.0.0.1:1080 user@host</code></p>
                     <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void testProxy()}>Test port</button>
@@ -1766,6 +1783,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       </label>
                       <p className="settings-help">Copying, fullscreen and pointer lock work everywhere, like Chrome. All other web permissions stay denied, and you'll see a short notice when a site is blocked. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
                     </section>
+                    {activeOrigin && <SiteDataSettings origin={activeOrigin} onForgotten={() => {
+                      void window.api.browser.siteSettings.get(activeOrigin).then(setSiteSettings).catch(() => undefined)
+                    }} />}
                     <div className="settings-actions"><button className="settings-action primary" type="button" onClick={() => void window.api.browser.reload()}>Reload page to apply</button></div>
                   </>
                 ) : <section className="settings-section"><p className="settings-help">Select an HTTP or HTTPS page to manage its privacy controls.</p></section>}

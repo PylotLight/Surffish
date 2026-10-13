@@ -7,6 +7,7 @@ import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../sh
 import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { isAlwaysAllowedPermission } from '../shared/site-permissions'
+import { buildProxyConfig } from '../shared/proxy-guard'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
@@ -54,13 +55,21 @@ function persistSettings(settings: BrowserProxySettings): void {
 }
 
 function proxyConfig(settings: BrowserProxySettings): Electron.ProxyConfig {
-  return settings.enabled
-    ? {
-        mode: 'fixed_servers',
-        proxyRules: `socks5://${settings.host.includes(':') ? `[${settings.host}]` : settings.host}:${settings.port}`,
-        proxyBypassRules: '<local>'
-      }
-    : { mode: 'direct' }
+  // One socks5:// server and no DIRECT entry: Chromium never falls back to a direct connection.
+  return buildProxyConfig(settings)
+}
+
+type ProxySettingsListener = (settings: BrowserProxySettings) => void
+const proxySettingsListeners = new Set<ProxySettingsListener>()
+
+/** Hear about the applied proxy settings (at startup and after every change). */
+export function onProxySettingsChanged(listener: ProxySettingsListener): () => void {
+  proxySettingsListeners.add(listener)
+  return () => { proxySettingsListeners.delete(listener) }
+}
+
+function notifyProxySettings(): void {
+  for (const listener of proxySettingsListeners) listener({ ...currentSettings })
 }
 
 async function applyToSession(target: Electron.Session, settings: BrowserProxySettings): Promise<void> {
@@ -151,6 +160,7 @@ export async function setBrowserProxySettings(input: unknown): Promise<BrowserPr
   persistSettings(settings)
   currentSettings = settings
   applyWebRTCPolicyToAll(settings)
+  notifyProxySettings()
   return { ...currentSettings }
 }
 

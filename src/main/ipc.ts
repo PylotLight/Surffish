@@ -60,6 +60,7 @@ import {
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
+import { registerSafetyIpc } from './safety'
 import {
   clearSavedBrowserSession,
   getBrowserNewTabPage,
@@ -98,6 +99,7 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 }
 
 export function registerIpc(): void {
+  registerSafetyIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })

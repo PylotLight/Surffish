@@ -28,6 +28,9 @@ import { guardPageDragRegions } from './page-drag-guard'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
 import { onPermissionDenied } from './proxy'
+import { attachTabSafety } from './safety'
+import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitials'
+import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
@@ -151,7 +154,8 @@ function getState(): BrowserState {
     error: tab?.error ?? null,
     private: tab?.isPrivate ?? false,
     zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
-    pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null
+    pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
+    interstitial: getTabInterstitial(contents)
   }
 }
 
@@ -167,7 +171,8 @@ function getTabSummaries(): BrowserTabSummary[] {
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
     private: tab.isPrivate,
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
-    muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted())
+    muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
+    crashed: isTabCrashed(tab.view?.webContents)
   }))
 }
 
@@ -336,7 +341,8 @@ function publishTabs(): void {
 function publishState(): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
   const state = getState()
-  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL)
+  // Crash / hang / HTTPS notices are drawn by the content renderer, like the local New Tab page.
+  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null)
   sendToMainWindowRenderers('browser:state', state)
   publishTabs()
 }
@@ -483,6 +489,7 @@ function activateTabInternal(id: string): boolean {
   if (contents && !contents.isDestroyed()) {
     contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
     contents.focus()
+    recoverCrashedTabOnActivate(contents)
   }
   applyTabBounds()
   publishState()
@@ -603,7 +610,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       // Remote pages still get no Node.js: sandbox stays on.
       nodeIntegrationInSubFrames: true,
       ...(tab.isPrivate ? { session: getPrivateSession() } : { partition: BROWSER_SESSION_PARTITION }),
-      spellcheck: !tab.isPrivate
+      // On for every tab; the session decides (private tabs: off unless the user opts in).
+      spellcheck: true
     }
   })
   tab.view = view
@@ -613,6 +621,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
 
   const contents = view.webContents
   attachNetworkInspector(tab.id, contents)
+  attachTabSafety(contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
   contents.on('before-mouse-event', (_event, mouseEvent) => {
     if (activeTabId !== tab.id || !isCurrentContents()) return
@@ -1618,6 +1627,12 @@ function closeOverviewForPanel(): void {
   if (isTabOverviewOpen()) closeTabOverview(activeTabId ?? undefined, false)
 }
 
+/** Cmd+Shift+Backspace: Settings → Privacy (Clear browsing data). */
+export function openClearBrowsingData(): void {
+  closeOverviewForPanel()
+  setBrowserChromeState({ sidebarMode: 'privacy' })
+}
+
 /** Cmd+Y / Cmd+Shift+J: toggle the history sidebar or the downloads panel. */
 function toggleBrowserPanel(mode: 'history' | 'downloads'): void {
   closeOverviewForPanel()
@@ -1628,6 +1643,8 @@ function toggleBrowserPanel(mode: 'history' | 'downloads'): void {
 // ---------------------------------------------------------------------------
 // Find in page. The bar lives in the toolbar overlay renderer; main keeps the query so
 // Cmd+G works with focus anywhere (page, toolbar, tab overview).
+
+onTabInterstitialChanged(() => publishState())
 
 let findState: { tabId: string | null; open: boolean; text: string; result: BrowserFindState['result'] } = { tabId: null, open: false, text: '', result: null }
 
