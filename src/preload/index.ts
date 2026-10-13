@@ -35,6 +35,8 @@ import type { ClearBrowsingDataOptions, ClearBrowsingDataResult, CookieSiteSumma
 interface SpellcheckState { settings: SpellcheckSettings; available: string[]; active: string[]; osManagedLanguages: boolean }
 interface HttpsOnlyState { enabled: boolean; exceptions: string[] }
 import type { UpdateState } from '../shared/update-feed'
+import type { CommandPaletteOpenRequest, CommandPaletteSettings, CommandPaletteSnapshot } from '../shared/command-palette'
+import type { CustomSearchEngine } from '../shared/search-keywords'
 
 const api = {
   platform: process.platform,
@@ -268,6 +270,35 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, state: WebStoreExtensionsState): void => callback(state)
         ipcRenderer.on('browser:extensions:changed', listener)
         return () => ipcRenderer.removeListener('browser:extensions:changed', listener)
+      }
+    },
+    commands: {
+      list: (): Promise<CommandPaletteSnapshot> => ipcRenderer.invoke('browser:commands:list'),
+      run: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:commands:run', id)
+    },
+    commandPalette: {
+      /** Tell main the palette closed; `refocusPage` hands the keyboard back to the page. */
+      closed: (refocusPage: boolean): Promise<void> => ipcRenderer.invoke('browser:command-palette:closed', refocusPage),
+      getSettings: (): Promise<CommandPaletteSettings> => ipcRenderer.invoke('browser:command-palette:settings:get'),
+      setSettings: (settings: CommandPaletteSettings): Promise<CommandPaletteSettings> => ipcRenderer.invoke('browser:command-palette:settings:set', settings),
+      onOpen: (callback: (request: CommandPaletteOpenRequest) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, request: CommandPaletteOpenRequest): void => callback(request)
+        ipcRenderer.on('browser:command-palette:open', listener)
+        return () => ipcRenderer.removeListener('browser:command-palette:open', listener)
+      },
+      onSettingsChange: (callback: (settings: CommandPaletteSettings) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, settings: CommandPaletteSettings): void => callback(settings)
+        ipcRenderer.on('browser:command-palette:settings-changed', listener)
+        return () => ipcRenderer.removeListener('browser:command-palette:settings-changed', listener)
+      }
+    },
+    searchKeywords: {
+      get: (): Promise<CustomSearchEngine[]> => ipcRenderer.invoke('browser:search-keywords:get'),
+      set: (engines: CustomSearchEngine[]): Promise<CustomSearchEngine[]> => ipcRenderer.invoke('browser:search-keywords:set', engines),
+      onChange: (callback: (engines: CustomSearchEngine[]) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, engines: CustomSearchEngine[]): void => callback(engines)
+        ipcRenderer.on('browser:search-keywords:changed', listener)
+        return () => ipcRenderer.removeListener('browser:search-keywords:changed', listener)
       }
     },
     network: {
