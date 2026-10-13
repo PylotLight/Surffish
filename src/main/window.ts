@@ -11,6 +11,7 @@ import { isExpectedRendererDocument } from './renderer-security'
 import { APP_NAME, WINDOW } from '../shared/config'
 import { retryOnce } from '../shared/retry'
 import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
+import { createFileTextCache } from '../shared/write-skip'
 
 const WINDOW_STATE_FILE = 'window-state.json'
 const SAVE_DELAY_MS = 400
@@ -19,11 +20,16 @@ function windowStatePath(): string {
   return join(app.getPath('userData'), WINDOW_STATE_FILE)
 }
 
+/** window-state.json as last read or written: re-saving the same geometry (e.g. the move/resize events of a restore, or quit) is skipped. */
+const lastWindowStateText = createFileTextCache()
+
 function readWindowState(): SavedWindowState | null {
   try {
     const path = windowStatePath()
     if (!existsSync(path)) return null
-    return parseSavedWindowState(JSON.parse(readFileSync(path, 'utf8')))
+    const text = readFileSync(path, 'utf8')
+    lastWindowStateText.remember(path, text)
+    return parseSavedWindowState(JSON.parse(text))
   } catch (error) {
     console.warn('Could not read window state:', error)
     return null
@@ -33,10 +39,14 @@ function readWindowState(): SavedWindowState | null {
 function writeWindowState(state: SavedWindowState): void {
   try {
     const path = windowStatePath()
+    const text = JSON.stringify(state)
+    if (lastWindowStateText.isUnchanged(path, text, existsSync)) return
     mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(`${path}.tmp`, JSON.stringify(state), 'utf8')
+    writeFileSync(`${path}.tmp`, text, 'utf8')
     renameSync(`${path}.tmp`, path)
+    lastWindowStateText.remember(path, text)
   } catch (error) {
+    lastWindowStateText.forget(windowStatePath())
     console.warn('Could not save window state:', error)
   }
 }
