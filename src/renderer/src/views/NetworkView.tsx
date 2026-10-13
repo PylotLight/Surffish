@@ -3,16 +3,8 @@ import type { BrowserTabSummary, NetworkRequestDetails, NetworkRequestSummary, N
 import type { NetworkOverrideRule, NetworkReplayResult } from '../../../shared/network-overrides'
 import { NetworkOverridesPanel, newOverrideId, useNetworkOverrides } from './NetworkOverridesPanel'
 import { formatVisitedAt } from '../lib/format'
-import { useStoredState } from '../lib/stored-state'
 
-/** The Network inspector is a debug tool: off by default, opt in from Settings → General → Developer. */
-export function useNetworkToolEnabled(): [boolean, (enabled: boolean) => void] {
-  const [enabled, setEnabled] = useStoredState('surffish.devtools.networkInspectorEnabled', false)
-  return [enabled, (next) => {
-    setEnabled(next)
-    if (!next) void window.api.browser.network.disable()
-  }]
-}
+export { useNetworkToolEnabled } from './useNetworkToolEnabled'
 
 type NetworkDetailsTab = 'headers' | 'payload' | 'response' | 'timing'
 
