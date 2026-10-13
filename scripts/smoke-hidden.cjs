@@ -8,8 +8,9 @@
 //   - app.setActivationPolicy('accessory'): no Dock icon, not in Cmd+Tab, no menu bar takeover
 //   - win.show() becomes showInactive(), and every shown window is near-invisible (opacity 0.01) and
 //     click-through, so it keeps its real size/position and keeps rendering, but nobody sees or hits it.
-//     Not opacity 0: macOS stops vsync for a fully transparent window and Chromium drops to ~1 frame/s
-//     (seen on the runner: tab switch to painted 22 ms -> 1014 ms, the sidebar pin transition stalled)
+//     It also floats above other apps' windows on every Space: an inactive app's window ends up behind
+//     the user's windows, macOS then treats it as occluded (no vsync, ~1 frame/s: tab switch to painted
+//     went 22 ms -> 1014 ms on the runner) and can App Nap the process, so prevent-app-suspension is held
 //   - win.focus(), app.focus() (incl. { steal: true }) and app.show() never touch the OS. Window focus
 //     is virtual instead: focus() marks that window focused, emits its 'focus' event (and 'blur' on the
 //     previous one), and isFocused() / BrowserWindow.getFocusedWindow() answer from that, so the app's
@@ -34,7 +35,11 @@ function install() {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows')
   const accessory = () => { try { app.setActivationPolicy('accessory') } catch { /* not available yet */ } }
   accessory()
-  app.whenReady().then(() => { accessory(); try { app.dock?.hide() } catch { /* ignore */ } })
+  app.whenReady().then(() => {
+    accessory()
+    try { app.dock?.hide() } catch { /* ignore */ }
+    try { require('electron').powerSaveBlocker.start('prevent-app-suspension') } catch { /* ignore */ }
+  })
 
   const live = (win) => win && !win.isDestroyed()
   function setVirtualFocus(win) {
@@ -53,6 +58,8 @@ function install() {
     prepared.add(win)
     try { win.setOpacity(OPACITY) } catch { /* ignore */ }
     try { win.setIgnoreMouseEvents(true) } catch { /* ignore */ }
+    try { win.setAlwaysOnTop(true, 'floating') } catch { /* ignore */ }
+    try { win.setVisibleOnAllWorkspaces(true) } catch { /* ignore */ }
     win.on('focus', () => {
       if (emitting) return
       stats.realKey++
@@ -102,7 +109,7 @@ function install() {
 
   process.once('exit', () => {
     const stole = stats.activations > 0 || stats.fullScreen > 0
-    const line = `[smoke-hidden] ${stats.shown} window show(s) (inactive, opacity ${OPACITY}, click-through), ` +
+    const line = `[smoke-hidden] ${stats.shown} window show(s) (inactive, opacity ${OPACITY}, click-through, floating), ` +
       `${stats.virtualFocus} virtual focus call(s), app.focus blocked ${stats.blocked.appFocus}x, app.show blocked ${stats.blocked.appShow}x; ` +
       `app activated ${stats.activations}x, full screen entered ${stats.fullScreen}x, a window became key inside the (inactive) app ${stats.realKey}x` +
       (stole ? ' -> STOLE FOCUS' : ' -> never took focus')
