@@ -13,6 +13,10 @@ on:
         description: 'build + verify only, publish nothing'
         type: boolean
         default: true
+      resume:
+        description: 'finish a release whose tag is already on origin (bun run release --resume)'
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -49,17 +53,24 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Check gh is installed
-        run: command -v gh || { echo "::error::install the GitHub CLI on the Mac runner (brew install gh)"; exit 1; }
+      - name: Check gh, fish and ghp
+        # GitHub calls go through the user's fish `ghp` (personal gh over their SOCKS proxy):
+        # the Mac's network blocks non-enterprise GitHub API tokens on the direct route.
+        run: |
+          command -v gh || { echo "::error::install the GitHub CLI on the Mac runner (brew install gh)"; exit 1; }
+          command -v fish || { echo "::error::fish is needed for ghp"; exit 1; }
+          fish -c 'functions -q ghp' || { echo "::error::no ghp fish function for the runner user ($HOME/.config/fish)"; exit 1; }
       - name: bun run release
         env:
-          SURFFISH_GH: gh
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
           DRY_RUN: ${{ inputs.dry_run }}
+          RESUME: ${{ inputs.resume }}
         run: |
+          # no GH_TOKEN / SURFFISH_GH here, so release.ts goes through ghp with its own auth + proxy
+          unset GH_TOKEN GITHUB_TOKEN
           flags="--yes"
           [ "$DRY_RUN" = "true" ] && flags="$flags --dry-run"
+          [ "$RESUME" = "true" ] && flags="$flags --resume"
           bun scripts/release.ts "$VERSION" $flags
       - name: Where the zip is
         if: always()
