@@ -196,14 +196,19 @@ export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | nul
     }
   }
   const normalized = normalizeWindowsSession(session.windows, session.focusedIndex)
-  // Read from JSON (first run with the database, or the file changed): import it now.
-  const inDatabase = fromDatabase !== null || saveSessionToDatabase(normalized)
   // Rewrite the file at startup so a session saved by an older build (credential-like URL parts,
   // world-readable mode) is sanitized and owner-only right away, not only after the next tab change.
-  if ((raw !== null && raw !== undefined) || fromDatabase) {
-    if (writeJson(SESSION_FILE, serializeWindowsSession(normalized)) && inDatabase) markSessionFileOurs()
-  } else if (inDatabase) {
-    markSessionFileOurs()
+  const rewrite = (raw !== null && raw !== undefined) || fromDatabase !== null
+  const wroteJson = rewrite && writeJson(SESSION_FILE, serializeWindowsSession(normalized))
+  if (fromDatabase !== null) {
+    if (wroteJson) markSessionFileOurs()
+  } else if (store) {
+    // Read from JSON (first run with the database, or the file changed): import it off the startup
+    // path. A real save before then cancels this and writes the current session instead.
+    deferWrite('session-import', () => {
+      if (sessionPersistenceDisabled) return
+      if (saveSessionToDatabase(normalized) && (wroteJson || !rewrite)) markSessionFileOurs()
+    }, 1500)
   }
   return session
 }
@@ -211,6 +216,8 @@ export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | nul
 export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): void {
   if (sessionPersistenceDisabled) return
   const saved = normalizeWindowsSession(windows, focusedIndex)
+  // The startup import is stale now; this save writes the current session instead.
+  cancelDeferredWrite('session-import')
   deferWrite('session', () => {
     if (sessionPersistenceDisabled) return
     const wroteJson = writeJson(SESSION_FILE, serializeWindowsSession(saved))
@@ -223,6 +230,7 @@ export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[]
 /** Clear the on-disk restore list without closing current tabs or re-saving them during this run. */
 export function clearSavedBrowserSession(): boolean {
   cancelDeferredWrite('session')
+  cancelDeferredWrite('session-import')
   const cleared = writeJson(SESSION_FILE, { version: 1, tabs: [], activeIndex: 0, pinnedTabs: [] })
   const store = sqlSessions()
   if (store) {
