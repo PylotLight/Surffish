@@ -338,3 +338,14 @@ export function sendFocusAddressToVisibleRenderer(): void {
   target.focus()
   target.send('browser:focus-address')
 }
+
+/** Focus the shell surface over the page area (toolbar overlay on live pages, else the content renderer) and message it. */
+export function sendToVisibleShellRenderer(channel: string, ...args: unknown[]): boolean {
+  if (!shellViews) return false
+  const target = shouldUseNativeOverlays() ? shellViews.toolbar.webContents : shellViews.content.webContents
+  if (target.isDestroyed()) return false
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) mainWindow.focus()
+  target.focus()
+  target.send(channel, ...args)
+  return true
+}

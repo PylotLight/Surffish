@@ -25,6 +25,8 @@ import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getMainWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { guardPageDragRegions } from './page-drag-guard'
+import { handleCommandPaletteShortcut } from './command-palette'
+import { resolveAddressInput } from './search-keywords'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
 import { onPermissionDenied } from './proxy'
@@ -1016,7 +1018,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     ? input
     : input === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
-    : input ? resolveNavigationTarget(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
+    : input ? resolveAddressInput(input, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const previous = getTab()
   const shouldActivate = activate || activeTabId === null
   const tab: BrowserTab = {
@@ -1580,6 +1582,8 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId = activ
     runTabCommand(command, tabId ?? undefined)
     return true
   }
+  // Cmd/Ctrl+K and Cmd/Ctrl+Shift+A: the command palette wins over the page unless turned off in Settings.
+  if (handleCommandPaletteShortcut(key, shift, alt, primary)) return true
   if (alt) return false
   if (primary && !shift && /^[1-9]$/.test(key)) {
     selectBrowserTabByNumber(Number(key))
@@ -1799,6 +1803,10 @@ function rememberClosedTab(tab: BrowserTab, index: number): void {
 }
 
 /** Cmd+Shift+T: bring back the most recently closed tab at its old position. */
+export function hasRecentlyClosedBrowserTabs(): boolean {
+  return recentlyClosedTabs.length > 0
+}
+
 export function reopenClosedBrowserTab(): string | null {
   const entry = recentlyClosedTabs.pop()
   if (!entry) return null
@@ -1934,12 +1942,12 @@ function reloadBrowserTab(id: string, ignoreCache = false): void {
   else activateTabInternal(id)
 }
 
-function suspendBrowserTab(id: string): void {
+export function suspendBrowserTab(id: string): void {
   const tab = getTab(id)
   if (tab && tab.id !== activeTabId) hibernateTab(tab)
 }
 
-function suspendOtherBrowserTabs(keepId: string): void {
+export function suspendOtherBrowserTabs(keepId: string): void {
   for (const tab of [...tabs]) {
     if (tab.id !== keepId && tab.id !== activeTabId) hibernateTab(tab)
   }
@@ -1958,7 +1966,7 @@ function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'oth
 }
 
 export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<boolean> {
-  const url = resolveNavigationTarget(input, engine)
+  const url = resolveAddressInput(input, engine)
   const tab = getTab()
   if (!url || !tab) return false
   if (tab.pdfEditor) {

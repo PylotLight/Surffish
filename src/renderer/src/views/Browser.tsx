@@ -35,6 +35,11 @@ import mountainLake from '../assets/quick-links-backgrounds/tranquil-mountain-la
 import brambleExtensionIcon from '../assets/bramble-extension-icon.png'
 import DownloadsPanel from './DownloadsPanel'
 import { FindBar } from './FindBar'
+import { CommandPalette } from './CommandPalette'
+import { useSearchKeywords } from './useSearchKeywords'
+import { SearchKeywordsSettings } from './settings/SearchKeywordsSettings'
+import { CommandPaletteSettings } from './settings/CommandPaletteSettings'
+import { parseKeywordSearch } from '../../../shared/search-keywords'
 import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
@@ -294,6 +299,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const extensionPins = useExtensionPins()
   const [networkToolEnabled, setNetworkToolEnabled] = useNetworkToolEnabled()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -400,6 +406,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const addressSuggestions = useMemo(
     () => suggestionsActive ? buildAddressSuggestions(address, pinnedSites, tabs, history) : [],
     [suggestionsActive, address, pinnedSites, tabs, history]
+  )
+  // "yt cats" / "cats !yt": show which engine the address bar will use.
+  const searchKeywordEngines = useSearchKeywords(surface !== 'sidebar')
+  const keywordMatch = useMemo(
+    () => suggestionsActive ? parseKeywordSearch(address, searchKeywordEngines) : null,
+    [suggestionsActive, address, searchKeywordEngines]
   )
   const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
@@ -854,7 +866,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     const updateChromeHeight = (): void => {
       const toolbarHeight = element.getBoundingClientRect().height
       if (surface !== 'toolbar') return
-      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar'))
+      const overlayBottom = Array.from(element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette'))
         .reduce((bottom, popup) => Math.max(bottom, popup.getBoundingClientRect().bottom), toolbarHeight)
       void window.api.browser.chrome.reportMetrics({ toolbarHeight, toolbarExtent: Math.max(toolbarHeight, overlayBottom) }).catch(() => undefined)
     }
@@ -862,14 +874,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     observer.observe(element)
     // Popups fill in after they mount (downloads load async); re-measure as they grow so the
     // toolbar view isn't left too short and clips them against the page view.
-    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar').forEach((popup) => observer.observe(popup))
+    element.querySelectorAll<HTMLElement>('.address-suggestions, #downloads-popup, #site-actions-menu, #extensions-menu, #find-bar, #command-palette').forEach((popup) => observer.observe(popup))
     window.addEventListener('resize', updateChromeHeight)
     updateChromeHeight()
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', updateChromeHeight)
     }
-  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, siteActionsOpen, extensionsMenuOpen, findOpen, surface])
+  }, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, surface])
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -1313,8 +1325,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onClick={() => void toggleCurrentSiteBookmark()}
                 ><span aria-hidden="true">{currentOriginIsBookmarked ? '★' : '☆'}</span></button>
               </div>
-              {suggestionsOpen && addressSuggestions.length > 0 && (
+              {suggestionsOpen && (addressSuggestions.length > 0 || keywordMatch) && (
                 <div id="address-suggestions" className="address-suggestions" role="listbox" aria-label="Local address suggestions">
+                  {keywordMatch && (
+                    <button
+                      className="address-suggestion keyword-suggestion"
+                      type="button"
+                      role="option"
+                      aria-selected={activeSuggestionIndex < 0}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => void navigateTo(address)}
+                    >
+                      <span className="suggestion-mark" aria-hidden="true">⌕</span>
+                      <span className="suggestion-main"><strong>{keywordMatch.query ? `Search ${keywordMatch.engine.name} for “${keywordMatch.query}”` : `Open ${keywordMatch.engine.name}`}</strong><small>Press Enter</small></span>
+                      <span className="keyword-suggestion-chip">{keywordMatch.via === 'bang' ? `!${keywordMatch.engine.keyword}` : keywordMatch.engine.keyword}</span>
+                    </button>
+                  )}
                   {addressSuggestions.map((suggestion, index) => (
                     <button
                       className={`address-suggestion${index === activeSuggestionIndex ? ' is-selected' : ''}`}
@@ -1412,6 +1438,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </form>
           {surface === 'toolbar' && <FindBar onOpenChange={setFindOpen} />}
           {surface !== 'sidebar' && <ProxyDownBanner />}
+          {surface !== 'sidebar' && <CommandPalette tabs={tabs} pinnedSites={pinnedSites} searchEngine={searchEngine} searchEngineLabel={SEARCH_ENGINES.find((engine) => engine.id === searchEngine)?.label ?? 'the web'} onOpenChange={setPaletteOpen} />}
           {((browser.error && !hasInterstitial) || navigationError) && (
             <p className="browser-error" role="status">
               {browser.error && !hasInterstitial ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : navigationError}
@@ -1564,6 +1591,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
+                <SearchKeywordsSettings />
+                <CommandPaletteSettings />
                 <DefaultBrowserSettings />
                 <SettingsGroup title="Tabs">
                   <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake. Hibernated tabs reload their last page; unsaved form state is lost.">

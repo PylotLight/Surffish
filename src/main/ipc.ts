@@ -29,6 +29,7 @@ import {
   togglePdfEditor
 } from './browser'
 import { isSearchEngineId } from '../shared/navigation'
+import { registerCommandIpc } from './command-ipc'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getDefaultBrowserStatus, makeDefaultBrowser } from './external-links'
@@ -100,6 +101,7 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 
 export function registerIpc(): void {
   registerSafetyIpc()
+  registerCommandIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })

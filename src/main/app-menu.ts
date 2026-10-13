@@ -4,6 +4,8 @@ import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
 import { checkForUpdatesFromMenu } from './updates'
+import { APP_SHORTCUTS } from './app-shortcuts'
+import { openCommandPalette } from './command-palette'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -35,23 +37,23 @@ export function installAppMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Tab', accelerator: 'CmdOrCtrl+T', click: () => { newBrowserTab() } },
-        { label: 'New Private Tab', accelerator: 'CmdOrCtrl+Shift+N', click: () => { newPrivateBrowserTab() } },
-        { label: 'Reopen Closed Tab', accelerator: 'CmdOrCtrl+Shift+T', click: () => { reopenClosedBrowserTab() } },
-        { label: 'Open Location…', accelerator: 'CmdOrCtrl+L', click: () => { sendFocusAddressToVisibleRenderer() } },
+        { label: 'New Tab', accelerator: APP_SHORTCUTS.newTab, click: () => { newBrowserTab() } },
+        { label: 'New Private Tab', accelerator: APP_SHORTCUTS.newPrivateTab, click: () => { newPrivateBrowserTab() } },
+        { label: 'Reopen Closed Tab', accelerator: APP_SHORTCUTS.reopenClosedTab, click: () => { reopenClosedBrowserTab() } },
+        { label: 'Open Location…', accelerator: APP_SHORTCUTS.openLocation, click: () => { sendFocusAddressToVisibleRenderer() } },
         // F6 (and Alt+D off macOS) also focus the address bar; hidden so the menu shows one entry.
         { label: 'Focus Address Bar', accelerator: 'F6', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } },
         ...(isMac ? [] : [{ label: 'Focus Address Bar', accelerator: 'Alt+D', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } } satisfies MenuItemConstructorOptions]),
         { type: 'separator' },
         // Both act only when the active tab is a PDF (viewer) or the PDF editor; otherwise no-ops.
-        { label: 'Edit PDF / Back to Viewer', accelerator: 'CmdOrCtrl+Shift+E', click: () => { togglePdfEditor() } },
-        { label: 'Save Edited PDF…', accelerator: 'CmdOrCtrl+S', click: () => { savePdfEditor() } },
+        { label: 'Edit PDF / Back to Viewer', accelerator: APP_SHORTCUTS.editPdf, click: () => { togglePdfEditor() } },
+        { label: 'Save Edited PDF…', accelerator: APP_SHORTCUTS.savePdf, click: () => { savePdfEditor() } },
         { type: 'separator' },
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
         {
           label: 'Close Window',
-          accelerator: 'CmdOrCtrl+Shift+W',
+          accelerator: APP_SHORTCUTS.closeWindow,
           click: () => {
             const win = getMainWindow()
             if (win && !win.isDestroyed()) win.close()
@@ -89,6 +91,8 @@ export function installAppMenu(): void {
         tabItem('Copy Link', 'copyLink'),
         tabItem('Copy Clean Link', 'copyCleanLink'),
         { type: 'separator' },
+        // No-ops when the palette is turned off in Settings (pages then get Cmd/Ctrl+K themselves).
+        { label: 'Search Tabs…', accelerator: APP_SHORTCUTS.tabSearch, click: () => { openCommandPalette('tabs') } },
         tabItem('Select Next Tab', 'nextTab'),
         tabItem('Select Previous Tab', 'previousTab'),
         // Cmd+1..8 / Cmd+9: hidden like Chrome's, but registered so they work with no page focused.
@@ -114,6 +118,8 @@ export function installAppMenu(): void {
     {
       label: 'View',
       submenu: [
+        { label: 'Command Palette…', accelerator: APP_SHORTCUTS.commandPalette, click: () => { openCommandPalette('all') } },
+        { type: 'separator' },
         tabItem('Zoom In', 'zoomIn'),
         // Cmd+Shift+= types "+"; keep the Plus accelerator working without a second visible item.
         { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', visible: false, acceleratorWorksWhenHidden: true, click: () => runTabCommand('zoomIn') },

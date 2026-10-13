@@ -1,0 +1,202 @@
+/* Cmd/Ctrl+K command palette. Anchored under the toolbar, centred; lives inside .browser-chrome so
+   the toolbar overlay's measured extent grows to fit it over live pages. */
+.command-palette {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 10px);
+  left: 50%;
+  display: flex;
+  width: min(640px, calc(100vw - 40px));
+  /* Not vh: in the toolbar overlay the viewport is only as tall as the palette makes it. */
+  max-height: 520px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.17);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(46, 54, 64, 0.97), rgba(15, 19, 24, 0.985));
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), inset 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  color: rgba(248, 250, 252, 0.92);
+  transform: translateX(-50%);
+  animation: command-palette-in 120ms ease-out;
+}
+@keyframes command-palette-in {
+  from { opacity: 0; transform: translate(-50%, -4px) scale(0.99); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .command-palette { animation: none; }
+}
+.command-palette-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+.command-palette-field input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: #f5f7fa;
+  font: inherit;
+  font-size: 14px;
+  outline: 0;
+}
+.command-palette-field input::placeholder { color: rgba(245, 247, 250, 0.4); }
+.command-palette-scope {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(184, 233, 202, 0.16);
+  color: #b8e9ca;
+  font-size: 11px;
+  font-weight: 600;
+}
+.command-palette kbd {
+  display: inline-flex;
+  align-items: center;
+  min-width: 18px;
+  justify-content: center;
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 247, 250, 0.62);
+  font: inherit;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.command-palette-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  padding: 6px;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-width: thin;
+}
+.command-palette-empty {
+  margin: 0;
+  padding: 18px 12px;
+  color: rgba(245, 247, 250, 0.45);
+  font-size: 12px;
+  text-align: center;
+}
+.command-palette-item {
+  display: flex;
+  min-width: 0;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.command-palette-item.is-selected {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.1);
+}
+.palette-item-icon {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #b8e9ca;
+  font-size: 13px;
+}
+.palette-item-icon img { width: 16px; height: 16px; object-fit: contain; }
+.palette-item-icon.is-command { color: rgba(245, 247, 250, 0.7); font-size: 16px; }
+.command-palette-item-main {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+.command-palette-item-main strong,
+.command-palette-item-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-palette-item-main strong { font-size: 12.5px; font-weight: 550; }
+.command-palette-item-main small { color: rgba(245, 247, 250, 0.45); font-size: 10.5px; }
+.command-palette-shortcut { flex: 0 0 auto; }
+.command-palette-tag {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.4);
+  font-size: 10.5px;
+}
+.command-palette-item:not(.is-selected) .command-palette-tag { visibility: hidden; }
+.command-palette-footer {
+  display: flex;
+  gap: 14px;
+  padding: 7px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(245, 247, 250, 0.42);
+  font-size: 10.5px;
+}
+.command-palette-footer span { display: inline-flex; align-items: center; gap: 3px; }
+
+/* Omnibox keyword chip ("Search YouTube for …"). */
+.address-suggestion.keyword-suggestion .suggestion-mark { background: rgba(184, 233, 202, 0.16); }
+.keyword-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(184, 233, 202, 0.18);
+  color: #b8e9ca;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Settings: search keywords. */
+.search-keyword-list { display: flex; flex-direction: column; gap: 2px; }
+.search-keyword-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) auto minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+}
+.search-keyword-row:last-child { border-bottom: 0; }
+.search-keyword-row code {
+  overflow: hidden;
+  color: rgba(245, 247, 250, 0.5);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-keyword-actions { display: flex; gap: 6px; }
+.search-keyword-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px minmax(0, 2fr);
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+.search-keyword-form input { min-width: 0; width: 100%; }
+.search-keyword-form-actions { display: flex; grid-column: 1 / -1; align-items: center; gap: 8px; }
+.search-keyword-form-actions .settings-message { margin: 0; flex: 1 1 auto; }
