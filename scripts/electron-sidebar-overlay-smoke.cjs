@@ -188,7 +188,7 @@ async function run() {
   assert.equal(await evaluate(rendererViews.content, 'document.querySelector(".sidebar-collapse-button")'), null, 'the duplicate sidebar-header pin control is removed')
   assert.ok(await evaluate(rendererViews.content, 'document.querySelector(".toolbar-brand-icon")?.getBoundingClientRect().width >= 32'), 'the app brand mark is prominent in the top toolbar')
   const footerControls = await evaluate(rendererViews.content, `(() => [...document.querySelectorAll('.sidebar-footer-icon-button')].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })))()`)
-  assert.deepEqual(footerControls.map(({ label }) => label), ['Settings', 'Quit Surffish'], 'Settings and Quit are compact footer actions')
+  assert.deepEqual(footerControls.map(({ label }) => label), ['Keep sidebar open', 'Settings', 'Quit Surffish'], 'pin, Settings and Quit are compact footer actions')
   assert.ok(footerControls.every(({ width, height }) => width <= 36 && height <= 36), 'the footer controls do not consume full-width rows')
   assert.ok(await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing")'), 'toolbar controls use distinct left and right groups')
   const initialShell = nativeViewState()
