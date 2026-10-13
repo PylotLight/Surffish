@@ -4,7 +4,8 @@ name: android
 # workflow artifact. No release, no tag: shipping an APK somewhere public is a separate, approved step.
 #
 # Same rules as ci.yml: self-hosted k3s runner, no marketplace actions (repo only allows PylotLight
-# actions, so the artifact upload is the local .github/actions/upload-artifact), Bun instead of Node.
+# actions, so the artifact upload is the local .github/actions/upload-artifact), Bun instead of Node
+# everywhere except Gradle, which gets a real Node 22 (its expo-autolinking/RN CLI calls break under bun).
 # JDK 17 + Android SDK/NDK are downloaded on first use and kept in the runner cache when one is mounted.
 #
 # Signing: if ANDROID_KEYSTORE_BASE64 (+ ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS)
@@ -77,8 +78,25 @@ jobs:
           echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
           "$BUN_INSTALL/bin/bun" --version
 
-      - name: Bun only, no Node.js (node -> bun shim; Gradle's settings script calls `node`)
+      - name: Bun as node for install/prebuild (node -> bun shim)
         run: bash scripts/ci/bun-as-node.sh
+
+      - name: Node 22 LTS (Gradle only)
+        # Gradle's settings/build scripts shell out to `node --eval "require('expo/bin/autolinking')" ...` and the
+        # RN CLI; under the bun shim commander's argv parsing breaks there. So Gradle (and only Gradle) gets a real
+        # Node from the official nodejs.org tarball; it is NOT put on GITHUB_PATH, the Gradle step prepends it itself.
+        run: |
+          case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) echo "::error::unsupported arch"; exit 1 ;; esac
+          base=https://nodejs.org/dist/latest-v22.x
+          file="$(curl -fsSL "$base/SHASUMS256.txt" | awk '{print $2}' | grep -E "^node-v22\.[0-9.]+-linux-$arch\.tar\.gz$" | head -1)"
+          [ -n "$file" ] || { echo "::error::could not resolve a node 22 tarball"; exit 1; }
+          dir="$CACHE_DIR/${file%.tar.gz}"
+          if [ ! -x "$dir/bin/node" ]; then
+            rm -rf "$dir" && mkdir -p "$dir"
+            curl -fsSL "$base/$file" | tar xz -C "$dir" --strip-components=1
+          fi
+          "$dir/bin/node" --version
+          echo "GRADLE_NODE_BIN=$dir/bin" >> "$GITHUB_ENV"
 
       - name: JDK 17 (Temurin)
         run: |
@@ -142,6 +160,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          # real node for autolinking + RN CLI calls Gradle makes (see the Node 22 step); bun stays for everything else
+          export PATH="$GRADLE_NODE_BIN:$PATH"
+          node -e 'if (process.versions.bun) process.exit(1)' || { echo "::error::node is still bun"; exit 1; }
+          echo "gradle node: $(command -v node) $(node --version)"
           ./gradlew :app:assembleRelease --console=plain --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
           apk=app/build/outputs/apk/release/app-release.apk
           ver=$(bun -p "require('../app.json').expo.version")

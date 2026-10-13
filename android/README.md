@@ -20,7 +20,10 @@ debug keystore, so they install over each other but **not** over a build signed 
 
 ## Build
 
-Bun everywhere (no npm, no package-lock). Gradle/JDK obviously stay.
+Bun everywhere (no npm, no package-lock) except one spot: **Gradle needs a real `node`** on PATH.
+The RN/Expo Gradle scripts shell out to `node --eval "require('expo/bin/autolinking')" ...` and the RN CLI,
+and those break when `node` is Bun (commander argv parsing). Install, prebuild, typecheck, tests and scripts
+are all Bun. CI downloads Node 22 LTS from nodejs.org just for the Gradle step. Gradle/JDK obviously stay.
 
 ```sh
 cd android
