@@ -23,7 +23,7 @@ const argValue = (name) => process.argv.find((arg) => arg.startsWith(`--${name}=
 const delay = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
 const IS_MAC = process.platform === 'darwin'
 
-async function waitFor(predicate, description, timeout = 20000) {
+async function waitFor(predicate, description, timeout = Number(process.env.SMOKE_WAIT_MS || 20000)) {
   const deadline = Date.now() + timeout
   let lastError
   while (Date.now() < deadline) {
