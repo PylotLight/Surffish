@@ -64,3 +64,30 @@ export function draftReleaseNotes(version: string, subjects: string[]): string {
     .map((subject) => `- ${subject}`)
   return `# Surffish v${version}\n\n## Changes\n${lines.length ? lines.join('\n') : '- '}\n\n## Packaging\n- Still unsigned and not notarized. If macOS says it's damaged, run \`xattr -cr /Applications/Surffish.app\` on a copy you got from the official release\n`
 }
+
+/** `--from-tag` takes the version to rebuild explicitly (X.Y.Z or vX.Y.Z); it must already be tagged. */
+export function resolveFromTagVersion(spec: string, tags: string[]): string {
+  const version = spec.trim().replace(/^v/, '')
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`--from-tag needs the tag's version as X.Y.Z, got '${spec}'`)
+  if (!tags.map((tag) => tag.trim()).includes(`v${version}`)) throw new Error(`--from-tag: there's no v${version} tag`)
+  return version
+}
+
+const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides', 'resolutions', 'trustedDependencies', 'patchedDependencies'] as const
+
+/**
+ * Dependency fields of two package.json files that differ (empty = same). `--from-tag` builds an old
+ * tag with main's node_modules (no second `bun install`), so it only does that when these match.
+ */
+export function dependencyDifferences(packageJsonA: string, packageJsonB: string): string[] {
+  const a = JSON.parse(packageJsonA)
+  const b = JSON.parse(packageJsonB)
+  return DEPENDENCY_FIELDS.filter((field) => JSON.stringify(a[field] ?? null) !== JSON.stringify(b[field] ?? null))
+}
+
+/** A <string> value from an XML plist (e.g. CFBundleShortVersionString), or null if it's not there. */
+export function plistString(xml: string, key: string): string | null {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`<key>\\s*${escaped}\\s*</key>\\s*<string>([^<]*)</string>`).exec(xml)
+  return match ? match[1]!.trim() : null
+}
