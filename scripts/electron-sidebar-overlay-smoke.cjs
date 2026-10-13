@@ -139,6 +139,30 @@ function screenPointForElement(view, rect) {
   }
 }
 
+async function waitForStableScroll(accept, description) {
+  let last = null
+  let stableSince = 0
+  await waitFor(async () => {
+    const y = await fixturePageView.webContents.executeJavaScript('window.scrollY')
+    if (y !== last) {
+      last = y
+      stableSince = Date.now()
+      return false
+    }
+    return accept(y) && Date.now() - stableSince >= 300
+  }, description)
+}
+
+async function waitForSidebarPinControl() {
+  await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
+    const button = document.querySelector('[aria-label="Keep sidebar open"]')
+    if (!button) return false
+    const r = button.getBoundingClientRect()
+    if (r.left < 0 || r.right > innerWidth || r.top < 0 || r.bottom > innerHeight) return false
+    return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[aria-label="Keep sidebar open"]') === button
+  })()`), 'the sidebar slide-in to finish with the footer pin control hit-testable')
+}
+
 async function clickElement(view, selector) {
   const rect = await evaluate(view, `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
   assert.ok(rect, `the ${selector} control must exist`)
@@ -312,7 +336,8 @@ async function run() {
   assert.ok(sidebarHiddenState.find((view) => view.surface === 'sidebar').index > sidebarHiddenState.find((view) => view.url === fixtureUrl).index, 'the sidebar is layered above the live page')
   captureFullWindow('sidebar-overlay-live-page-hidden.png')
 
-  for (const selector of ['.tabs-sidebar-button', '.toolbar-brand']) {
+  // The old toolbar Tabs toggle is gone; the leftmost toolbar control (Back) and the brand mark must stay inert on hover.
+  for (const selector of ['.browser-nav-buttons [aria-label="Back"]', '.toolbar-brand']) {
     const hoverRect = await evaluate(rendererViews.toolbar, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
     const hoverPoint = screenPointForElement(rendererViews.toolbar, hoverRect)
     pointerMove(hoverPoint.x, hoverPoint.y)
@@ -328,8 +353,13 @@ async function run() {
   assert.equal(await fixturePageView.webContents.executeJavaScript('window.edgeClickCount'), 1, 'the hidden sidebar must not intercept a click at x=5')
   assert.equal(rendererViews.sidebar.getBounds().width, 0, 'a click cancels the delayed hover reveal and leaves the page unobstructed')
 
-  // The single top-toolbar Tabs control opens and pins the glass sidebar with native mouse input.
-  await clickElement(rendererViews.toolbar, '.tabs-sidebar-button')
+  // The toolbar Tabs toggle is gone: hover the left reveal edge with the real pointer, then pin the
+  // glass sidebar open from its footer control, all with native mouse input.
+  pointerMove(mainWindow.getContentBounds().x + 5, mainWindow.getContentBounds().y + pageHiddenSidebar.y + 150)
+  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'hover over the live-page edge to reveal the sidebar before pinning')
+  await waitForSidebarPinControl()
+  await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]')
+  await waitFor(() => evaluate(rendererViews.sidebar, 'Boolean(document.querySelector("[aria-label=\\"Auto-hide sidebar\\"]"))'), 'the sidebar pin control to show pinned')
   await waitFor(() => rendererViews.sidebar.getBounds().width === Math.min(320, contentSize[0]), 'the pinned sidebar overlay to expand')
   await waitFor(() => evaluate(rendererViews.toolbar, 'document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'shared visible sidebar state on the toolbar')
   await delay(300)
@@ -378,8 +408,12 @@ async function run() {
   const scrollPoint = { x: mainWindow.getContentBounds().x + contentSize[0] - 80, y: mainWindow.getContentBounds().y + scrollBounds.y + Math.floor(scrollBounds.height * 0.7) }
   pointerScrollDown(scrollPoint.x, scrollPoint.y)
   await waitFor(() => fixturePageView.webContents.executeJavaScript('window.scrollY > 0'), 'real mouse-wheel scrolling through the overlay')
+  // Chromium animates wheel scrolls, so a scrollTo(0, 0) issued mid-animation can be overtaken by the
+  // rest of the wheel delta and leave the page scrolled (moving #target out from under the next click).
+  // Let the wheel animation settle first, then reset and require the top position to hold.
+  await waitForStableScroll((y) => y > 0, 'the wheel scroll animation to settle')
   await fixturePageView.webContents.executeJavaScript('window.scrollTo(0, 0)')
-  await waitFor(() => fixturePageView.webContents.executeJavaScript('window.scrollY === 0'), 'returning the synthetic page to its top before the remaining pointer checks')
+  await waitForStableScroll((y) => y === 0, 'returning the synthetic page to its top before the remaining pointer checks')
 
   // The pin control now lives in the sidebar footer: ensure it is unpinned so the panel auto-hides on pointer exit.
   await evaluate(rendererViews.sidebar, `(() => { const unpin = document.querySelector('[aria-label="Auto-hide sidebar"]'); if (unpin) { unpin.click(); return true; } return Boolean(document.querySelector('[aria-label="Keep sidebar open"]')); })()`)
@@ -403,6 +437,7 @@ async function run() {
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
   // Hover-reveal the panel (the old toolbar toggle is gone), then pin it open via the footer control.
   assert.ok(await evaluate(rendererViews.content, '(() => { const layout = document.querySelector(".browser-layout"); if (!layout) return false; layout.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 200 })); return true; })()'), 'the browser layout should accept a hover at the reveal edge')
+  await waitForSidebarPinControl()
   await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]')
   await waitFor(() => rendererViews.sidebar.getBounds().width === widthAfterResize, 'the sidebar to open for its bottom New Tab action')
   await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
