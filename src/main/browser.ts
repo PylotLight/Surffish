@@ -24,6 +24,7 @@ import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
+import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
 import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
 import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
 import { isLocalDocumentUrl } from '../shared/external-links'
@@ -633,11 +634,13 @@ function cancelSleepTimer(tab: BrowserTab): void {
   tab.sleepTimer = null
 }
 
-function hibernateTab(tab: BrowserTab): void {
+/** `keepPausedMedia`: timed sleep leaves a paused media session (Now Playing / media keys) alone; Hibernate Tab doesn't. */
+function hibernateTab(tab: BrowserTab, keepPausedMedia = true): void {
   if (isTabOnScreen(tab) || !tab.view) return
   const contents = tab.view.webContents
-  if (!contents.isDestroyed() && contents.isCurrentlyAudible()) {
-    tab.sleepTimer = setTimeout(() => hibernateTab(tab), 60_000)
+  if (!contents.isDestroyed() && (contents.isCurrentlyAudible() || (keepPausedMedia && tabHoldsMediaSession(contents)))) {
+    cancelSleepTimer(tab)
+    tab.sleepTimer = setTimeout(() => hibernateTab(tab), contents.isCurrentlyAudible() ? 60_000 : tabMediaHoldRecheckMs(contents))
     return
   }
   tab.lastUrl = currentUrl(tab)
@@ -1007,6 +1010,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     })
   })
   guardPageDragRegions(contents)
+  trackTabMediaSession(contents)
   contents.on('media-started-playing', () => {
     if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isTabOnScreen(tab) || contents.isDestroyed()) return
     void contents.executeJavaScript(`
@@ -2808,14 +2812,14 @@ export function reloadBrowserTab(id: string, ignoreCache = false): void {
 
 export function suspendBrowserTab(id: string): void {
   const tab = getTab(id)
-  if (tab && !isTabOnScreen(tab)) hibernateTab(tab)
+  if (tab && !isTabOnScreen(tab)) hibernateTab(tab, false)
 }
 
 /** Suspend every other tab in the same window (the active one stays awake). */
 export function suspendOtherBrowserTabs(keepId: string): void {
   const w = findTab(keepId)?.win ?? currentWindowState()
   for (const tab of [...(w?.tabs ?? [])]) {
-    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab)
+    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab, false)
   }
 }
 
@@ -3339,7 +3343,8 @@ export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
       pinned: tab.pinned,
       // Both panes of a split on screen count as in use.
       active: isTabOnScreen(tab),
-      audible: Boolean(contents?.isCurrentlyAudible()),
+      // Playing, or paused recently: auto-archive and the memory saver keep its media session.
+      audible: tabHoldsMediaSession(contents),
       private: tab.isPrivate,
       extensionPage: Boolean(tab.extensionPageOrigin),
       unsavedPdfEdits: Boolean(tab.pdfEditor?.dirty),
