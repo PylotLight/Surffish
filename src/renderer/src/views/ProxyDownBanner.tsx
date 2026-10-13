@@ -17,7 +17,7 @@ export function ProxyDownBanner(): React.JSX.Element | null {
   if (!status?.blocking) return null
   return (
     <div className="proxy-down-banner" role="alert">
-      <span><strong>Proxy down – traffic blocked.</strong> {status.endpoint ? `Can’t reach ${status.endpoint}. ` : ''}Pages stay offline until the proxy is back (kill switch).</span>
+      <span><strong>Proxy down – traffic blocked.</strong> {status.endpoint ? `Can’t reach ${status.endpoint}. ` : ''}Sites routed through it stay offline until it’s back (kill switch); sites with a Direct rule still load.</span>
       <button type="button" onClick={() => void window.api.browser.safety.proxyGuard.check().then(setStatus)}>Retry</button>
     </div>
   )

@@ -7,12 +7,38 @@ import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../sh
 import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { isAlwaysAllowedPermission } from '../shared/site-permissions'
-import { buildProxyConfig } from '../shared/proxy-guard'
+import { sendToMainWindowRenderers } from './browser-shell'
+import {
+  activeProxyEndpoints,
+  anyProxyActive,
+  buildRoutingProxyConfig,
+  effectiveRouteForUrl,
+  isProxyRoute,
+  parseProxyRouting,
+  resolutionMatches,
+  routingSelfTestCases,
+  siteRouteState,
+  validateProxyRouting,
+  withRuleForPattern,
+  type EffectiveRoute,
+  type ProxyRoutingInput,
+  type ProxyRoutingSettings,
+  type ProxyRoutingState,
+  type RoutingProxyConfig,
+  type SiteRouteState
+} from '../shared/proxy-routing'
+import { getDomain } from 'tldts-experimental'
+import { readSettingsFile, writeSettingsFile } from './safety-store'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let currentSettings: BrowserProxySettings = { ...DEFAULT_PROXY_SETTINGS }
+/** Per-site rules and extra named proxies (Settings → Network rules). */
+const ROUTING_FILE = 'browser-proxy-routes.json'
+let currentRouting: ProxyRoutingSettings = { proxies: [], rules: [] }
+/** Set when the rules couldn't be applied and the fail-closed config is in force instead. */
+let routingError: string | null = null
 
 function siteAllowsPermission(origin: string, permission: string): boolean {
   if (isAlwaysAllowedPermission(permission)) return true
@@ -54,9 +80,35 @@ function persistSettings(settings: BrowserProxySettings): void {
   writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 })
 }
 
-function proxyConfig(settings: BrowserProxySettings): Electron.ProxyConfig {
-  // One socks5:// server and no DIRECT entry: Chromium never falls back to a direct connection.
-  return buildProxyConfig(settings)
+function routingInput(settings: BrowserProxySettings = currentSettings, routing: ProxyRoutingSettings = currentRouting): ProxyRoutingInput {
+  return { primary: { ...settings }, proxies: routing.proxies.map((proxy) => ({ ...proxy })), rules: routing.rules.map((rule) => ({ ...rule })) }
+}
+
+/**
+ * Used when a rules config can't be verified: everything through one proxy (the main one if it's
+ * on, else the first proxy a rule uses). Direct rules are lost until it's fixed; nothing leaks.
+ */
+function failClosedConfig(input: ProxyRoutingInput): RoutingProxyConfig {
+  const proxied = activeProxyEndpoints(input)[0]
+  if (!proxied) return { mode: 'direct' }
+  return buildRoutingProxyConfig({ primary: { enabled: true, host: proxied.host, port: proxied.port }, proxies: [], rules: [] })
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then((value) => { clearTimeout(timer); resolve(value) }, (error: unknown) => { clearTimeout(timer); reject(error) })
+  })
+}
+
+/** Ask Chromium how it will route a few hosts; a PAC it didn't load would answer DIRECT. */
+async function verifyRouting(target: Electron.Session, input: ProxyRoutingInput): Promise<void> {
+  for (const check of routingSelfTestCases(input)) {
+    const actual = await withTimeout(target.resolveProxy(check.url), 5000, 'Chromium did not answer the proxy self-check in time.')
+    if (!resolutionMatches(check.expected, actual)) {
+      throw new Error(`Network rules self-check failed for ${new URL(check.url).hostname}: expected “${check.expected}”, Chromium said “${actual}”.`)
+    }
+  }
 }
 
 type ProxySettingsListener = (settings: BrowserProxySettings) => void
@@ -70,17 +122,54 @@ export function onProxySettingsChanged(listener: ProxySettingsListener): () => v
 
 function notifyProxySettings(): void {
   for (const listener of proxySettingsListeners) listener({ ...currentSettings })
+  notifyRouting()
 }
 
-async function applyToSession(target: Electron.Session, settings: BrowserProxySettings): Promise<void> {
-  await target.setProxy(proxyConfig(settings))
+type ProxyRoutingListener = (input: ProxyRoutingInput) => void
+const routingListeners = new Set<ProxyRoutingListener>()
+
+/** Hear about the applied main proxy + rules together (the kill switch watches every proxy in use). */
+export function onProxyRoutingChanged(listener: ProxyRoutingListener): () => void {
+  routingListeners.add(listener)
+  return () => { routingListeners.delete(listener) }
+}
+
+function notifyRouting(): void {
+  const input = routingInput()
+  for (const listener of routingListeners) listener(input)
+  sendToMainWindowRenderers('browser:proxy:routing-changed', getProxyRoutingState())
+}
+
+async function applyToSession(target: Electron.Session, input: ProxyRoutingInput): Promise<void> {
+  const config = buildRoutingProxyConfig(input)
+  await target.setProxy(config as Electron.ProxyConfig)
+  if (config.mode === 'pac_script') {
+    try {
+      await verifyRouting(target, input)
+    } catch (error) {
+      // Never leave an unverified PAC in place: switch to the leak-free config before reporting.
+      await target.setProxy(failClosedConfig(input) as Electron.ProxyConfig)
+      await target.closeAllConnections()
+      throw error
+    }
+  }
   await target.closeAllConnections()
 }
 
-async function configureSession(settings: BrowserProxySettings): Promise<void> {
-  await applyToSession(getBrowserSession(), settings)
+async function configureSession(input: ProxyRoutingInput): Promise<void> {
+  await applyToSession(getBrowserSession(), input)
   // Private tabs must never bypass the user's proxy.
-  if (hasPrivateSession()) await applyToSession(getPrivateSession(), settings)
+  if (hasPrivateSession()) await applyToSession(getPrivateSession(), input)
+}
+
+/** Apply at startup / for a new session; a rules config that fails its self-check falls back closed. */
+async function configureSessionFailClosed(target: Electron.Session, input: ProxyRoutingInput): Promise<void> {
+  try {
+    await applyToSession(target, input)
+  } catch (error) {
+    routingError = error instanceof Error ? error.message : String(error)
+    console.error('[proxy] network rules could not be applied; using the fail-closed config:', error)
+  }
 }
 
 /**
@@ -89,21 +178,22 @@ async function configureSession(settings: BrowserProxySettings): Promise<void> {
  * restore the default when it is off. Applied to every WebContents (tabs, extension pages, popups);
  * the local shell surfaces never use WebRTC, so the policy is harmless there.
  */
-function webRTCPolicy(settings: BrowserProxySettings): 'default' | 'disable_non_proxied_udp' {
-  return settings.enabled ? 'disable_non_proxied_udp' : 'default'
+function webRTCPolicy(input: ProxyRoutingInput): 'default' | 'disable_non_proxied_udp' {
+  // Any proxied route at all (main proxy on, or a rule sending some site through a proxy).
+  return anyProxyActive(input) ? 'disable_non_proxied_udp' : 'default'
 }
 
-function applyWebRTCPolicy(contents: WebContents, settings: BrowserProxySettings = currentSettings): void {
+function applyWebRTCPolicy(contents: WebContents, input: ProxyRoutingInput = routingInput()): void {
   if (contents.isDestroyed()) return
   try {
-    contents.setWebRTCIPHandlingPolicy(webRTCPolicy(settings))
+    contents.setWebRTCIPHandlingPolicy(webRTCPolicy(input))
   } catch (error) {
     console.warn('Could not apply the WebRTC IP handling policy:', error)
   }
 }
 
-function applyWebRTCPolicyToAll(settings: BrowserProxySettings): void {
-  for (const contents of allWebContents.getAllWebContents()) applyWebRTCPolicy(contents, settings)
+function applyWebRTCPolicyToAll(input: ProxyRoutingInput): void {
+  for (const contents of allWebContents.getAllWebContents()) applyWebRTCPolicy(contents, input)
 }
 
 let webRTCHookInstalled = false
@@ -136,14 +226,15 @@ export function onPermissionDenied(listener: PermissionDeniedListener): () => vo
 /** Called after app.whenReady and before any browser content is created. */
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
+  currentRouting = parseProxyRouting(readSettingsFile(ROUTING_FILE))
   installWebRTCPolicyHook()
-  applyWebRTCPolicyToAll(currentSettings)
-  await configureSession(currentSettings)
+  applyWebRTCPolicyToAll(routingInput())
+  await configureSessionFailClosed(getBrowserSession(), routingInput())
   applyPermissionPolicy(getBrowserSession())
   onPrivateSessionCreated((privateSession) => {
     applyPermissionPolicy(privateSession)
     // Private tabs wait on this (whenPrivateSessionReady) before their first load.
-    return applyToSession(privateSession, currentSettings)
+    return configureSessionFailClosed(privateSession, routingInput())
   })
   return { ...currentSettings }
 }
@@ -154,14 +245,55 @@ export function getBrowserProxySettings(): BrowserProxySettings {
 
 export async function setBrowserProxySettings(input: unknown): Promise<BrowserProxySettings> {
   const settings = validateSettings(input)
-  // Tighten WebRTC before the proxy switches on (and only relax it once the proxy is really off).
-  if (settings.enabled) applyWebRTCPolicyToAll(settings)
-  await configureSession(settings)
+  await applyRouting(routingInput(settings, currentRouting))
   persistSettings(settings)
   currentSettings = settings
-  applyWebRTCPolicyToAll(settings)
+  applyWebRTCPolicyToAll(routingInput())
   notifyProxySettings()
   return { ...currentSettings }
+}
+
+/** Apply a new main proxy / rules combination; on failure put the previous one back and rethrow. */
+async function applyRouting(next: ProxyRoutingInput): Promise<void> {
+  // Tighten WebRTC before any proxy switches on (and only relax it once it's really off).
+  if (anyProxyActive(next)) applyWebRTCPolicyToAll(next)
+  try {
+    await configureSession(next)
+    routingError = null
+  } catch (error) {
+    const previous = routingInput()
+    try {
+      await configureSession(previous)
+    } catch (restoreError) {
+      // applyToSession already left the fail-closed config in place.
+      routingError = restoreError instanceof Error ? restoreError.message : String(restoreError)
+    }
+    applyWebRTCPolicyToAll(previous)
+    throw error
+  }
+}
+
+export function getProxyRoutingState(): ProxyRoutingState {
+  return { ...routingInput(), error: routingError }
+}
+
+export function getProxyRoutingInput(): ProxyRoutingInput {
+  return routingInput()
+}
+
+export async function setProxyRouting(input: unknown): Promise<ProxyRoutingState> {
+  const routing = validateProxyRouting(input)
+  await applyRouting(routingInput(currentSettings, routing))
+  writeSettingsFile(ROUTING_FILE, routing)
+  currentRouting = routing
+  applyWebRTCPolicyToAll(routingInput())
+  notifyRouting()
+  return getProxyRoutingState()
+}
+
+/** Where a URL's requests go right now (site panel). Null for non-web URLs. */
+export function getEffectiveRoute(url: string): EffectiveRoute | null {
+  return effectiveRouteForUrl(url, routingInput())
 }
 
 export function testLocalProxy(input: unknown): Promise<BrowserProxyTestResult> {
@@ -188,4 +320,23 @@ export function testLocalProxy(input: unknown): Promise<BrowserProxyTestResult> 
       resolve({ reachable: false, message: `${error.code ?? 'Connection error'}: ${error.message}` })
     })
   })
+}
+
+function registrableDomain(host: string): string | null {
+  return getDomain(host, { allowPrivateDomains: true }) ?? null
+}
+
+/** Site panel: the "Route this site" choice and the effective route for a page URL. */
+export function getSiteRoute(url: string): SiteRouteState | null {
+  return siteRouteState(url, routingInput(), registrableDomain)
+}
+
+/** Site panel quick toggle: Default removes this site's rule; anything else sets it. */
+export async function setSiteRoute(url: unknown, choice: unknown): Promise<SiteRouteState | null> {
+  if (typeof url !== 'string') throw new Error('Open a web page to route it.')
+  const state = getSiteRoute(url)
+  if (!state) throw new Error('Only web pages (not local addresses) can have a route.')
+  if (choice !== 'default' && !isProxyRoute(choice)) throw new Error('Choose Default, Direct or a proxy.')
+  await setProxyRouting(withRuleForPattern(currentRouting, state.pattern, choice === 'default' ? null : choice))
+  return getSiteRoute(url)
 }

@@ -14,9 +14,9 @@ export function ProxyKillSwitchSetting(): React.JSX.Element {
       unsubscribe()
     }
   }, [])
-  const state = !status?.killSwitch ? '' : !status.armed ? ' Turns on when the proxy is enabled.' : status.blocking ? ' Proxy unreachable: traffic is blocked now.' : status.state === 'up' ? ' Watching: proxy reachable.' : ' Checking the proxy…'
+  const state = !status?.killSwitch ? '' : !status.armed ? ' Turns on when the proxy (or a proxied site rule) is enabled.' : status.blocking ? ' Proxy unreachable: traffic is blocked now.' : status.state === 'up' ? ' Watching: proxy reachable.' : ' Checking the proxy…'
   return (
-    <SettingsRow label="Kill switch" hint={`If the proxy stops answering, block all page traffic instead of risking anything going out directly. Resumes automatically when it’s back.${state}`}>
+    <SettingsRow label="Kill switch" hint={`If a proxy stops answering, block all traffic routed through it instead of risking anything going out directly (sites with a Direct rule are unaffected). Resumes automatically when it’s back.${state}`}>
       <input type="checkbox" className="settings-switch" disabled={!status} checked={status?.killSwitch ?? false} onChange={(event) => void window.api.browser.safety.proxyGuard.set(event.target.checked).then(setStatus)} aria-label="Proxy kill switch" />
     </SettingsRow>
   )

@@ -1,0 +1,166 @@
+/* Network inspector tools: export, copy as, replay, overrides, and the toolbar badge. */
+.network-export-bodies {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(245, 247, 250, 0.6);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.network-export-bodies input { accent-color: #7ee2a8; }
+.network-clear.is-current { border-color: rgba(131, 219, 165, 0.6); color: #b8f0cd; }
+.network-tool-note {
+  margin: 0;
+  color: rgba(245, 247, 250, 0.55);
+  font-size: 9px;
+}
+.network-tool-note.is-error { color: #ff9ba4; }
+.network-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: auto;
+}
+.network-detail-actions button {
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(248, 250, 252, 0.82);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+.network-detail-actions button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.11); }
+.network-detail-actions button:disabled { opacity: 0.45; cursor: default; }
+.network-replay-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(245, 247, 250, 0.66);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.network-replay-result strong { color: #9ad8ad; font-weight: 600; }
+.network-replay-result.is-error strong { color: #ff9ba4; }
+
+.network-overrides {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 42%;
+  min-height: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid rgba(255, 196, 120, 0.22);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.16);
+  color: rgba(245, 247, 250, 0.72);
+  font-size: 9px;
+}
+.network-overrides-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.network-overrides-heading > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.network-overrides-heading strong { color: rgba(248, 250, 252, 0.88); font-size: 10px; font-weight: 600; }
+.network-overrides-heading span { color: rgba(245, 247, 250, 0.47); }
+.network-overrides-actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.network-overrides-list { display: flex; flex-direction: column; gap: 6px; }
+.network-override {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+}
+.network-override.is-off { opacity: 0.6; }
+.network-override-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.network-override-row input[type='checkbox'] { accent-color: #ffc478; }
+.network-override-method { width: 74px; min-width: 64px; }
+.network-override-pattern,
+.network-override-status,
+.network-override-response textarea {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(248, 250, 252, 0.88);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+}
+.network-override-pattern { flex: 1 1 auto; }
+.network-override-status { width: 58px; flex: 0 0 auto; }
+.network-override-hits { flex: 0 0 auto; color: rgba(245, 247, 250, 0.45); font-variant-numeric: tabular-nums; }
+.network-override-remove {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.55);
+  font-size: 14px;
+  cursor: pointer;
+}
+.network-override-remove:hover { background: rgba(255, 99, 99, 0.14); color: #ffb3b3; }
+.network-override-response {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 5px;
+}
+.network-override-response textarea {
+  height: auto;
+  min-height: 46px;
+  padding: 5px 7px;
+  resize: vertical;
+}
+
+.network-overrides-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 196, 120, 0.5);
+  border-radius: 999px;
+  background: rgba(255, 176, 80, 0.16);
+  color: #ffd69a;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.network-overrides-badge:hover { background: rgba(255, 176, 80, 0.26); }
+.network-overrides-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffb050;
+  box-shadow: 0 0 0 3px rgba(255, 176, 80, 0.2);
+}
+
+/* The extra toolbar buttons wrap instead of squeezing the filter box. */
+.network-page-header { flex-wrap: wrap; }
+.network-toolbar-actions { flex-wrap: wrap; }
+.network-page-header > div:first-child { flex: 1 1 220px; min-width: 0; }
+.network-overrides { flex: 0 0 auto; max-height: 38%; }

@@ -59,6 +59,44 @@ let captureEnabled = false
 let watchers = 0
 let lastResponseBody: { id: string; value: NetworkResponseBody } | null = null
 
+/** Network tools (overrides) hook into the inspector's own CDP attachment instead of attaching again. */
+export type NetworkTrackerEvent =
+  | { type: 'attached'; tabId: string; contents: WebContents }
+  | { type: 'detached'; tabId: string; contents: WebContents }
+  | { type: 'capture-disabled' }
+const trackerListeners = new Set<(event: NetworkTrackerEvent) => void>()
+
+export function onNetworkTrackerEvent(listener: (event: NetworkTrackerEvent) => void): () => void {
+  trackerListeners.add(listener)
+  return () => { trackerListeners.delete(listener) }
+}
+
+function emitTrackerEvent(event: NetworkTrackerEvent): void {
+  for (const listener of trackerListeners) {
+    try {
+      listener(event)
+    } catch (error) {
+      console.warn('Network tracker listener failed:', error)
+    }
+  }
+}
+
+export function isNetworkCaptureEnabled(): boolean {
+  return captureEnabled
+}
+
+/** Tabs the inspector currently has CDP attached to. */
+export function getTrackedNetworkContents(): Array<{ tabId: string; contents: WebContents }> {
+  return [...trackers.values()].filter((tracker) => !tracker.contents.isDestroyed()).map(({ tabId, contents }) => ({ tabId, contents }))
+}
+
+/** A tab's WebContents (tracked or not), e.g. to replay a request through its session. */
+export function getNetworkTabContents(tabId: string): WebContents | null {
+  for (const candidate of candidates.values()) if (candidate.tabId === tabId && !candidate.contents.isDestroyed()) return candidate.contents
+  for (const tracker of trackers.values()) if (tracker.tabId === tabId && !tracker.contents.isDestroyed()) return tracker.contents
+  return null
+}
+
 function stringValue(value: unknown): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
@@ -314,6 +352,7 @@ export function disableNetworkCapture(): void {
   for (const tracker of [...trackers.values()]) detachNetworkInspector(tracker.contents, false)
   records.clear()
   lastResponseBody = null
+  emitTrackerEvent({ type: 'capture-disabled' })
 }
 
 function startTracking(tabId: string, contents: WebContents): void {
@@ -331,6 +370,7 @@ function startTracking(tabId: string, contents: WebContents): void {
     detachListener: (_event, reason) => {
       trackers.delete(contents.id)
       markInFlightFailed(tracker, `Network capture detached (${reason || 'unknown reason'}).`)
+      emitTrackerEvent({ type: 'detached', tabId, contents })
     }
   }
   try {
@@ -344,6 +384,7 @@ function startTracking(tabId: string, contents: WebContents): void {
     }).catch((error: unknown) => {
       console.warn(`Could not enable network capture for tab ${tabId}:`, error)
     })
+    emitTrackerEvent({ type: 'attached', tabId, contents })
   } catch (error) {
     console.warn(`Could not attach network capture for tab ${tabId}:`, error)
   }
@@ -358,6 +399,7 @@ export function detachNetworkInspector(contents: WebContents, forget = true): vo
   contents.debugger.off('message', tracker.messageListener)
   contents.debugger.off('detach', tracker.detachListener)
   markInFlightFailed(tracker, 'Tab view was unloaded before the request finished.')
+  emitTrackerEvent({ type: 'detached', tabId: tracker.tabId, contents })
   if (!contents.isDestroyed() && contents.debugger.isAttached()) {
     try {
       contents.debugger.detach()

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildProxyConfig, FAILURES_BEFORE_DOWN, INITIAL_PROXY_HEALTH, isKillSwitchExemptUrl, isProxyConnectionError, nextProxyHealth, probeIntervalFor, PROBE_INTERVAL_DOWN_MS, PROBE_INTERVAL_UP_MS, proxyHealthBlocksTraffic, proxyRulesHaveDirectFallback, type ProxyHealth, type ProxyHealthEvent } from './proxy-guard.ts'
+import { aggregateProxyHealthState, buildProxyConfig, FAILURES_BEFORE_DOWN, INITIAL_PROXY_HEALTH, isKillSwitchExemptUrl, isProxyConnectionError, nextProxyHealth, probeIntervalFor, PROBE_INTERVAL_DOWN_MS, PROBE_INTERVAL_UP_MS, proxyHealthBlocksTraffic, proxyRulesHaveDirectFallback, type ProxyHealth, type ProxyHealthEvent } from './proxy-guard.ts'
 
 function run(events: ProxyHealthEvent[], start: ProxyHealth = INITIAL_PROXY_HEALTH): ProxyHealth {
   return events.reduce((health, event) => nextProxyHealth(health, event).health, start)
@@ -73,5 +73,15 @@ describe('helpers', () => {
     expect(isKillSwitchExemptUrl('http://localhost:5173/')).toBe(true)
     expect(isKillSwitchExemptUrl('chrome-extension://abc/popup.html')).toBe(true)
     expect(isKillSwitchExemptUrl('data:text/plain,hi')).toBe(true)
+  })
+})
+
+describe('several proxies', () => {
+  test('aggregate state: any down blocks, up only when all are up', () => {
+    expect(aggregateProxyHealthState([])).toBe('off')
+    expect(aggregateProxyHealthState(['up', 'up'])).toBe('up')
+    expect(aggregateProxyHealthState(['up', 'checking'])).toBe('checking')
+    expect(aggregateProxyHealthState(['up', 'down', 'checking'])).toBe('down')
+    expect(aggregateProxyHealthState(['off', 'up'])).toBe('checking')
   })
 })

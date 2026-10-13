@@ -52,6 +52,9 @@ import { PrivacySettings } from './settings/PrivacySettings'
 import { SiteDataSettings } from './settings/SiteDataSettings'
 import { TabInterstitial } from './TabInterstitial'
 import { ProxyDownBanner } from './ProxyDownBanner'
+import { NetworkOverridesBadge } from './NetworkOverridesPanel'
+import { NetworkRulesSettings } from './settings/NetworkRulesSettings'
+import { SiteRouteSettings } from './settings/SiteRouteSettings'
 import { isInsecurePageUrl } from '../../../shared/https-only'
 import { UpdateSettings } from './settings/UpdateSettings'
 import { UpdateBadge } from './settings/UpdateBadge'
@@ -1406,6 +1409,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               )}
             </div>
             <div className="browser-toolbar-trailing">
+              {surface === 'toolbar' && <NetworkOverridesBadge enabled={networkToolEnabled} onOpen={() => selectSettingsSection('network')} />}
               <div className="omnibox-actions" role="group" aria-label="Browser panels">
                 <button className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
@@ -1696,6 +1700,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </div>
                   {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? `Page load issue: ${browser.error}. Check the tunnel or turn the proxy off.` : proxyMessage}</p>}
                 </SettingsGroup>
+                <NetworkRulesSettings />
                 <SettingsGroup title="Developer">
                   <SettingsRow label="Network inspector" hint="Adds a Network tab that records requests from every tab. Off saves CPU and memory; turning it off also stops capture and clears recorded requests.">
                     <input type="checkbox" className="settings-switch" checked={networkToolEnabled} onChange={(event) => setNetworkToolEnabled(event.target.checked)} aria-label="Enable network inspector" />
@@ -1863,6 +1868,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       </label>
                       <p className="settings-help">Copying, fullscreen and pointer lock work everywhere, like Chrome. All other web permissions stay denied, and you'll see a short notice when a site is blocked. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
                     </section>
+                    {activeOrigin && <SiteRouteSettings url={browser.url} />}
                     {activeOrigin && <SiteDataSettings origin={activeOrigin} onForgotten={() => {
                       void window.api.browser.siteSettings.get(activeOrigin).then(setSiteSettings).catch(() => undefined)
                     }} />}

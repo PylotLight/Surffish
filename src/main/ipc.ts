@@ -59,6 +59,7 @@ import {
   uninstallWebStoreExtension,
   webStoreExtensionForSender
 } from './web-store-extensions'
+import { registerNetworkToolsIpc } from './network-tools-ipc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -103,6 +104,7 @@ function parseBramblePopupAnchor(value: unknown): BramblePopupAnchor | undefined
 export function registerIpc(): void {
   registerSafetyIpc()
   registerCommandIpc()
+  registerNetworkToolsIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })
