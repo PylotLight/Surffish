@@ -1,0 +1,90 @@
+/* Tab group header + the coloured rail on its tabs. */
+.tab-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 28px;
+  margin: 4px 0 1px;
+  padding: 0 8px 0 6px;
+  border-radius: 8px;
+  color: rgba(245, 247, 250, 0.82);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  outline: 0;
+  -webkit-app-region: no-drag;
+}
+
+.tab-group-header:hover,
+.tab-group-header:focus-visible {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-group-chevron {
+  display: inline-block;
+  width: 10px;
+  color: rgba(245, 247, 250, 0.5);
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.tab-group-header.is-collapsed .tab-group-chevron {
+  transform: rotate(0deg);
+}
+
+.tab-group-chip {
+  min-width: 14px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--group-color);
+  color: #fff;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+}
+
+.tab-group-chip.is-unnamed {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.tab-group-count {
+  margin-left: auto;
+  color: rgba(245, 247, 250, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-group-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--group-color);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  font: inherit;
+}
+
+/* Tabs in a group: indented, with the group's colour as a rail on the left. */
+.tab-item.is-grouped {
+  position: relative;
+  margin-left: 10px;
+}
+
+.tab-item.is-grouped::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--group-color);
+}

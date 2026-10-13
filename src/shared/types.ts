@@ -1,4 +1,5 @@
 import type { TabSplitInfo } from './split-view'
+import type { TabGroupInfo } from './tab-groups'
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
@@ -153,6 +154,8 @@ export interface BrowserTabSummary {
   crashed?: boolean
   /** The tab is a pane of a split view (the sidebar shows the split as one entry). */
   split?: TabSplitInfo
+  /** The tab is in a tab group (the sidebar draws a header above the group's run). */
+  group?: TabGroupInfo
 }
 export interface BrowsingHistoryEntry {
   id: string

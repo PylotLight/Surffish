@@ -16,8 +16,10 @@ interface DragHandlers {
  * pane, left to right. Clicking a half shows the split with that pane focused; each half has its
  * own close button and right-click menu (data-browser-pane-id).
  */
-export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onActivate, onMoveBy, titleFor }: {
+export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onActivate, onMoveBy, titleFor, groupColor }: {
   entryId: string
+  /** The split's tab group colour (it sits in the group's run with the coloured rail). */
+  groupColor?: string
   tabs: BrowserTabSummary[]
   dragging: boolean
   animate: boolean
@@ -30,7 +32,8 @@ export function SplitTabEntry({ entryId, tabs, dragging, animate, handlers, onAc
   const label = tabs.map((tab) => tab.title).join(' | ')
   return (
     <div
-      className={`tab-item tab-split-entry${active ? ' is-active' : ''}${tabs.some((tab) => tab.private) ? ' is-private' : ''}${dragging ? ' is-dragging' : ''}`}
+      className={`tab-item tab-split-entry${active ? ' is-active' : ''}${tabs.some((tab) => tab.private) ? ' is-private' : ''}${dragging ? ' is-dragging' : ''}${groupColor ? ' is-grouped' : ''}`}
+      style={groupColor ? { '--group-color': groupColor } as React.CSSProperties : undefined}
       data-browser-tab-id={entryId}
       role="tab"
       aria-selected={active}

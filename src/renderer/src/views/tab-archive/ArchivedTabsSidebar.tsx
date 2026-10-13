@@ -75,7 +75,7 @@ export function ArchivedTabsSidebar({ cachedIcons, onOpened }: { cachedIcons: Re
               className="bookmark-row sidebar-archived-row"
               role="listitem"
               tabIndex={0}
-              title={`${tab.title}\n${tab.url}\nArchived ${new Date(tab.archivedAt).toLocaleString()}${tab.reason === 'auto' ? ' (auto)' : ''}${tab.spaceName ? ` · from ${tab.spaceName}` : ''} · click to restore`}
+              title={`${tab.title}\n${tab.url}\nArchived ${new Date(tab.archivedAt).toLocaleString()}${tab.reason === 'auto' ? ' (auto)' : ''}${tab.spaceName ? ` · from ${tab.spaceName}` : ''}${tab.groupName ? ` · group “${tab.groupName}”` : ''} · click to restore`}
               onClick={() => restore(tab)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') { event.preventDefault(); restore(tab) }

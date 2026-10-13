@@ -62,6 +62,7 @@ import {
 import { registerNetworkToolsIpc } from './network-tools-ipc'
 import { registerSplitViewIpc } from './split-view-ipc'
 import { registerSpacesIpc } from './spaces-ipc'
+import { registerTabGroupsIpc } from './tab-groups-ipc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -109,6 +110,7 @@ export function registerIpc(): void {
   registerNetworkToolsIpc()
   registerSplitViewIpc()
   registerSpacesIpc()
+  registerTabGroupsIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })
