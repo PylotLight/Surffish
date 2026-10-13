@@ -1,0 +1,7 @@
+{
+  "name": "gecko-view",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Expo module: Mozilla GeckoView engine for Surffish Android",
+  "main": "index.ts"
+}

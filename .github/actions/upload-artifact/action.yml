@@ -1,0 +1,20 @@
+name: upload-artifact (surffish)
+description: >
+  Uploads one file as a workflow artifact using the artifact v4 API directly. The repo only allows
+  PylotLight-owned actions, so this replaces actions/upload-artifact. It has to be a JavaScript
+  action: the runtime token the artifact service needs is only handed to actions, never to run steps.
+inputs:
+  name:
+    description: artifact name
+    required: true
+  path:
+    description: file to upload (zipped, stored without recompression)
+    required: true
+outputs:
+  artifact-id:
+    description: id of the uploaded artifact
+  artifact-url:
+    description: web url of the artifact
+runs:
+  using: node20
+  main: index.js

@@ -1,0 +1,168 @@
+name: android
+
+# Builds the Android client (android/, Expo + GeckoView) as a release-mode APK and uploads it as a
+# workflow artifact. No release, no tag: shipping an APK somewhere public is a separate, approved step.
+#
+# Same rules as ci.yml: self-hosted k3s runner, no marketplace actions (repo only allows PylotLight
+# actions, so the artifact upload is the local .github/actions/upload-artifact), Bun instead of Node.
+# JDK 17 + Android SDK/NDK are downloaded on first use and kept in the runner cache when one is mounted.
+#
+# Signing: if ANDROID_KEYSTORE_BASE64 (+ ANDROID_STORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS)
+# are set, the APK is release-signed with them; otherwise with the Expo template's debug keystore,
+# which is fine for sideloading and stays the same across builds (updates install over each other).
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'src/shared/**'
+      - '.github/workflows/android.yml'
+      - '.github/actions/upload-artifact/**'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: apk (arm64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 75
+    env:
+      ANDROID_PLATFORM: android-36
+      ANDROID_BUILD_TOOLS: 36.0.0
+      ANDROID_NDK: 27.1.12297006
+      ANDROID_CMDLINE_TOOLS: commandlinetools-linux-13114758_latest.zip
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules
+
+      - name: Persistent caches (bun, JDK, Android SDK, Gradle), only if the runner mounts one
+        run: |
+          dir="${SURFFISH_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/surffish; fi
+          if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+            echo "using persistent cache at $dir"
+          else
+            dir="$HOME/.surffish-ci"; mkdir -p "$dir"
+            echo "no persistent cache mounted, everything downloads fresh"
+          fi
+          {
+            echo "CACHE_DIR=$dir"
+            echo "BUN_INSTALL=$dir/bun"
+            echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache"
+            echo "GRADLE_USER_HOME=$dir/gradle"
+            echo "ANDROID_HOME=$dir/android-sdk"
+            echo "ANDROID_SDK_ROOT=$dir/android-sdk"
+          } >> "$GITHUB_ENV"
+          echo "runner: $(uname -m), $(nproc) cpus, $(free -g | awk '/Mem:/{print $2}') GB RAM, $(df -h "$dir" | awk 'NR==2{print $4}') free"
+
+      - name: Bun (pinned to .bun-version)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          "$BUN_INSTALL/bin/bun" --version
+
+      - name: Bun only, no Node.js (node -> bun shim; Gradle's settings script calls `node`)
+        run: bash scripts/ci/bun-as-node.sh
+
+      - name: JDK 17 (Temurin)
+        run: |
+          case "$(uname -m)" in x86_64) arch=x64 ;; aarch64|arm64) arch=aarch64 ;; *) echo "::error::unsupported arch"; exit 1 ;; esac
+          jdk="$CACHE_DIR/jdk-17-$arch"
+          if [ ! -x "$jdk/bin/java" ]; then
+            rm -rf "$jdk" && mkdir -p "$jdk"
+            curl -fsSL "https://api.adoptium.net/v3/binary/latest/17/ga/linux/$arch/jdk/hotspot/normal/eclipse" | tar xz -C "$jdk" --strip-components=1
+          fi
+          echo "JAVA_HOME=$jdk" >> "$GITHUB_ENV"
+          echo "$jdk/bin" >> "$GITHUB_PATH"
+          "$jdk/bin/java" -version
+
+      - name: Android SDK (platform, build-tools, NDK)
+        run: |
+          sdk="$ANDROID_HOME"
+          if [ ! -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+            mkdir -p "$sdk/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline.zip "https://dl.google.com/android/repository/$ANDROID_CMDLINE_TOOLS"
+            # no `unzip` guaranteed on the runner image; the JDK's jar tool extracts zips
+            (cd "$sdk/cmdline-tools" && jar xf /tmp/cmdline.zip && rm -rf latest && mv cmdline-tools latest && chmod +x latest/bin/*)
+            rm -f /tmp/cmdline.zip
+          fi
+          sm="$sdk/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sm" --licenses >/dev/null || true
+          "$sm" --install "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROID_BUILD_TOOLS" "platform-tools" "ndk;$ANDROID_NDK" "cmake;3.22.1" | grep -v '^\[' || true
+          ls "$sdk"
+
+      - name: bun install (android/)
+        working-directory: android
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck (android/)
+        working-directory: android
+        run: bun run typecheck
+
+      - name: expo prebuild
+        working-directory: android
+        run: bunx expo prebuild --platform android --clean --no-install
+
+      - name: Release signing (only if the keystore secret is set)
+        working-directory: android
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$KS" ]; then
+            echo "::notice::ANDROID_KEYSTORE_BASE64 not set: APK is signed with the debug keystore (sideload only)"
+            exit 0
+          fi
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/surffish.keystore"
+          KEYSTORE_FILE="$RUNNER_TEMP/surffish.keystore" ./build/inject-signing.sh
+          echo "KEYSTORE_FILE=$RUNNER_TEMP/surffish.keystore" >> "$GITHUB_ENV"
+
+      - name: Gradle assembleRelease
+        working-directory: android/android
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          ./gradlew :app:assembleRelease --console=plain --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+          apk=app/build/outputs/apk/release/app-release.apk
+          ver=$(bun -p "require('../app.json').expo.version")
+          out="$GITHUB_WORKSPACE/Surffish-android-$ver-${GITHUB_SHA::7}.apk"
+          cp "$apk" "$out"
+          "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner" verify --print-certs "$out" | head -3
+          ls -la "$out"
+          echo "APK_PATH=$out" >> "$GITHUB_ENV"
+          {
+            echo "### Surffish Android $ver"
+            echo "- APK: \`$(basename "$out")\` ($(du -h "$out" | cut -f1))"
+            echo "- GeckoView: $(grep -o "geckoviewVersion') ?: '[^']*" ../modules/gecko-view/android/build.gradle | sed "s/.*'//")"
+            echo "- Download the **surffish-android-apk** artifact below (zip with the APK inside)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK artifact
+        id: upload
+        uses: ./.github/actions/upload-artifact
+        with:
+          name: surffish-android-apk
+          path: ${{ env.APK_PATH }}
+
+      - name: Artifact link
+        run: echo "::notice::APK artifact ${{ steps.upload.outputs.artifact-url }}"

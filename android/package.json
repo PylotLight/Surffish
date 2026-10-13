@@ -1,0 +1,42 @@
+{
+  "name": "surffish-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Surffish for Android (Expo + GeckoView)",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "bunx expo start",
+    "prebuild": "bunx expo prebuild --platform android --clean --no-install",
+    "apk": "bunx expo prebuild --platform android --clean --no-install && cd android && ./gradlew :app:assembleRelease --console=plain",
+    "android": "bunx expo prebuild --platform android --clean --no-install && bunx expo run:android",
+    "typecheck": "bun check",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "expo": "^57.0.0",
+    "expo-build-properties": "~57.0.22",
+    "expo-clipboard": "~57.0.2",
+    "expo-constants": "~57.0.21",
+    "expo-font": "~57.0.4",
+    "expo-haptics": "~57.0.3",
+    "expo-linking": "~57.0.12",
+    "expo-router": "~57.0.26",
+    "expo-splash-screen": "~57.0.10",
+    "expo-sqlite": "~57.0.4",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.4",
+    "lucide-react-native": "^1.56.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.4",
+    "babel-preset-expo": "^57.0.15",
+    "typescript": "~6.0.3"
+  }
+}

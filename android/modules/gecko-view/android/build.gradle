@@ -1,0 +1,28 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.pylotlight.surffish'
+version = '0.1.0'
+
+// Mozilla GeckoView, release channel (https://maven.mozilla.org/maven2/org/mozilla/geckoview/).
+// arm64 only: that's every phone we care about and it keeps the APK ~half the size of the fat AAR.
+def geckoviewVersion = findProperty('surffish.geckoviewVersion') ?: '158.0.20261007201254'
+
+android {
+  namespace "expo.modules.geckoview"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+    minSdkVersion 26
+  }
+}
+
+dependencies {
+  implementation("org.mozilla.geckoview:geckoview-arm64-v8a:${geckoviewVersion}") {
+    // GeckoView is pure Java; its POM asks for kotlin-stdlib 2.4 which RN's Kotlin 2.1 compiler can't read.
+    exclude group: 'org.jetbrains.kotlin'
+  }
+  implementation "androidx.core:core-ktx:1.17.0"
+}
