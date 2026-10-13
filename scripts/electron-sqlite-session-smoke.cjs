@@ -4,7 +4,7 @@
 // on one profile. The bookmark tree gets the same three checks against bookmarks.json (import,
 // delta rows + blanked tombstones, restore from the database, a changed JSON file wins), and so do
 // browser preferences against browser-preferences.json (plus Forget this site hard-deleting a
-// site's zoom row and scrubbing the JSON copy right away). Runs the production build:
+// site's zoom row and scrubbing the JSON copy right away), and Spaces against browser-spaces.json. Runs the production build:
 // `bun run build && bun run test:electron-sqlite-session` (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-sqlite-session-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
@@ -62,6 +62,9 @@ function sqlite(sql, ...params) {
 const sessionFile = join(userData, 'browser-session.json')
 const bookmarksFile = join(userData, 'bookmarks.json')
 const preferencesFile = join(userData, 'browser-preferences.json')
+const spacesFile = join(userData, 'browser-spaces.json')
+const spaceNames = (toolbar) => evaluate(toolbar, 'window.api.browser.spaces.get().then((snapshot) => snapshot.spaces.map((space) => space.name).join(","))')
+const liveSpaceNames = () => sqlite('SELECT name FROM spaces WHERE deleted_at IS NULL ORDER BY position').map((row) => row.name).join(',')
 const settingValue = (key) => sqlite('SELECT value FROM settings WHERE key = ? AND deleted_at IS NULL', key)[0]?.value
 const bookmarkTitles = (toolbar) => evaluate(toolbar, 'window.api.browser.bookmarks.get().then((snapshot) => snapshot.nodes.filter((node) => node.type === "bookmark").map((node) => node.title).sort().join(","))')
 const liveBookmarkTitles = () => sqlite("SELECT title FROM bookmarks WHERE deleted_at IS NULL AND kind = 'url' ORDER BY title").map((row) => row.title).join(',')
@@ -106,8 +109,6 @@ async function runSave() {
   await waitFor(async () => (await tabUrls(toolbar)).includes(`${origin}/two`), 'the second tab')
   await waitFor(() => sqlite('SELECT url FROM session_tabs WHERE deleted_at IS NULL ORDER BY position').map((row) => row.url).join(' ') === `${origin}/one ${origin}/two`, 'both tabs in session_tabs')
   assert.ok(readFileSync(sessionFile, 'utf8').includes(`${origin}/two`), 'browser-session.json is still written')
-  const ids = sqlite('SELECT id FROM session_tabs WHERE deleted_at IS NULL ORDER BY position').map((row) => row.id)
-  writeFileSync(join(userData, 'ids.json'), JSON.stringify(ids))
 
   // Bookmarks: bookmarks.json from before the database is imported (off the startup path).
   assert.equal(await bookmarkTitles(toolbar), 'Alpha,Beta', 'legacy bookmarks load')
@@ -135,6 +136,22 @@ async function runSave() {
   assert.ok(!JSON.stringify(sqlite('SELECT * FROM oplog')).includes('zoomed.test'), 'no forgotten origin in the change log')
   assert.ok(!readFileSync(preferencesFile, 'utf8').includes('zoomed.test'), 'the JSON copy is scrubbed right away')
 
+  // Spaces: browser-spaces.json is imported; a new Space is one row, written to the JSON file too.
+  assert.equal(await spaceNames(toolbar), 'Default,Research', 'legacy Spaces load')
+  await waitFor(() => liveSpaceNames() === 'Default,Research', 'browser-spaces.json imported into spaces')
+  assert.equal(sqlite("SELECT value FROM settings WHERE key = 'spaces.enabled'")[0]?.value, 'true')
+  await evaluate(toolbar, 'window.api.browser.spaces.create({ name: "Created" })')
+  await waitFor(() => liveSpaceNames() === 'Default,Research,Created', 'the new Space in the database')
+  assert.ok(readFileSync(spacesFile, 'utf8').includes('Created'), 'browser-spaces.json is written alongside')
+  // Creating a Space switches to it; go back so the restore phase sees the same tabs.
+  await evaluate(toolbar, 'window.api.browser.spaces.switch("default")')
+  await waitFor(() => sqlite("SELECT active_space_id FROM session_windows WHERE deleted_at IS NULL")[0]?.active_space_id === 'default', 'the Default Space to be active again in the saved session')
+
+  // Row ids the restore phase must see again (taken last: creating a Space above opened a tab in it).
+  await delay(800)
+  const ids = sqlite('SELECT id FROM session_tabs WHERE deleted_at IS NULL ORDER BY position').map((row) => row.id)
+  writeFileSync(join(userData, 'ids.json'), JSON.stringify(ids))
+
   // bookmarks.json is the fallback copy: rewritten on a slow timer and at quit (will-quit flushes).
   app.emit('will-quit', { preventDefault() {} })
   assert.ok(readFileSync(bookmarksFile, 'utf8').includes('Gamma'), 'bookmarks.json is still written alongside (at quit)')
@@ -150,7 +167,9 @@ async function runRestore() {
   // Same for bookmarks: a title changed only in the database shows up, so the database was read.
   sqlite("UPDATE bookmarks SET title = 'Gamma (db)' WHERE title = 'Gamma'")
   sqlite(`UPDATE settings SET value = '"google"' WHERE key = 'pref.searchEngine'`)
+  sqlite("UPDATE spaces SET name = 'Created (db)' WHERE name = 'Created'")
   const { toolbar } = await launch()
+  assert.equal(await spaceNames(toolbar), 'Default,Research,Created (db)', 'Spaces restored from the database')
   assert.equal(await evaluate(toolbar, 'window.api.browser.getSearchEngine()'), 'google', 'preferences restored from the database')
   assert.equal(await bookmarkTitles(toolbar), 'Beta,Gamma (db)', 'bookmarks restored from the database')
   await waitFor(async () => (await tabUrls(toolbar)).join(' ') === `${expectedOrigin}/one ${expectedOrigin}/edited`, 'tabs restored from the database')
@@ -166,7 +185,10 @@ async function runJsonWins() {
   writeFileSync(sessionFile, JSON.stringify({ version: 1, tabs: [`${origin}/from-json`], activeIndex: 0, pinnedTabs: [] }))
   writeFileSync(bookmarksFile, legacyBookmarks(['Delta']))
   writeFileSync(preferencesFile, JSON.stringify({ version: 1, searchEngine: 'brave' }))
+  writeFileSync(spacesFile, JSON.stringify({ version: 1, enabled: true, spaces: [{ id: 'default', name: 'Default', icon: '', color: 'blue' }, { id: 'sjson02', name: 'From JSON', icon: '', color: 'red' }] }))
   const { toolbar } = await launch()
+  assert.equal(await spaceNames(toolbar), 'Default,From JSON', 'a changed browser-spaces.json wins')
+  await waitFor(() => liveSpaceNames() === 'Default,From JSON', 'spaces to take the JSON file')
   assert.equal(await evaluate(toolbar, 'window.api.browser.getSearchEngine()'), 'brave', 'a changed browser-preferences.json wins')
   await waitFor(() => settingValue('pref.searchEngine') === '"brave"', 'settings to take the JSON preferences')
   assert.equal(await bookmarkTitles(toolbar), 'Delta', 'a changed bookmarks.json wins')
@@ -186,6 +208,7 @@ async function main() {
   mkdirSync(userData, { recursive: true, mode: 0o700 })
   writeFileSync(bookmarksFile, legacyBookmarks(['Alpha', 'Beta']), { mode: 0o600 })
   writeFileSync(preferencesFile, JSON.stringify({ version: 1, searchEngine: 'bing', siteZoom: { 'https://zoomed.test': 1.25 } }), { mode: 0o600 })
+  writeFileSync(spacesFile, JSON.stringify({ version: 1, enabled: true, spaces: [{ id: 'default', name: 'Default', icon: '', color: 'blue' }, { id: 'sjson01', name: 'Research', icon: '', color: 'green' }] }), { mode: 0o600 })
   for (const next of ['save', 'restore', 'json-wins']) assert.equal(await runPhase(next, serverPort), 0, `the ${next} phase passed`)
   console.log('Electron SQLite session smoke passed.')
 }

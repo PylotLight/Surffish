@@ -15,7 +15,8 @@ export function readSettingsFile(filename: string): unknown {
   }
 }
 
-export function writeSettingsFile(filename: string, value: unknown): void {
+/** Atomic owner-only write; true when the file was saved. */
+export function writeSettingsFile(filename: string, value: unknown): boolean {
   const directory = app.getPath('userData')
   const path = join(directory, filename)
   const temporaryPath = `${path}.${randomUUID()}.tmp`
@@ -24,8 +25,10 @@ export function writeSettingsFile(filename: string, value: unknown): void {
     writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
     if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
     renameSync(temporaryPath, path)
+    return true
   } catch (error) {
     try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
     console.error(`Could not save ${filename}:`, error)
+    return false
   }
 }
