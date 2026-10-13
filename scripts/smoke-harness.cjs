@@ -3,14 +3,17 @@
 // It only ever runs inside a smoke (never in the app), and does three things:
 //   1. A hard overall timeout, so a smoke stuck on a hung renderer or a promise that never settles
 //      fails fast with a useful message instead of eating the CI job budget.
-//   2. Smoke-only Chromium switches that cut known-harmless log noise on the Linux CI runners.
+//   2. Smoke-only Chromium switches that cut known-harmless log noise on the Linux CI runners
+//      (smoke-chromium-args.cjs).
 //   3. The file name + filter config for the pre-seeded adblock engine, so the app accepts it as its
 //      cache and a smoke never downloads the real filter lists from the internet at launch.
 'use strict'
 
 const childProcess = require('node:child_process')
+const { spawnSync } = childProcess
 const { basename } = require('node:path')
 const { app, BaseWindow } = require('electron')
+const { smokeChromiumArgs } = require('./smoke-chromium-args.cjs')
 
 /** Per-wait budget the smokes already honour (CI sets 90s for software rendering under xvfb). */
 const waitMs = Number(process.env.SMOKE_WAIT_MS) || 20000
@@ -90,17 +93,19 @@ app.exit = (code = 0) => {
   originalExit(code)
 }
 
-// With the sandbox off (no passwordless sudo on the k3s runner, so CI sets ELECTRON_DISABLE_SANDBOX),
-// Chromium forks renderers from its zygote, which makes them non-dumpable, so the browser process
-// can't write their /proc/<pid>/oom_score_adj and logs "Failed to adjust OOM score of renderer"
-// for every renderer. Without a zygote, renderers are launched directly and no OOM-score write is
-// attempted at all. The zygote is a Linux start-up optimisation the smokes don't exercise, and
-// Chromium only allows disabling it when the sandbox is already off. The app itself never sees this.
-const sandboxOff = Boolean(process.env.ELECTRON_DISABLE_SANDBOX) || process.argv.includes('--no-sandbox') || app.commandLine.hasSwitch('no-sandbox')
-if (process.platform === 'linux' && sandboxOff && process.env.SMOKE_KEEP_ZYGOTE !== '1') {
-  app.commandLine.appendSwitch('no-sandbox')
-  app.commandLine.appendSwitch('no-zygote')
+// Smoke-only switches against the per-renderer "Failed to adjust OOM score" spam on Linux CI (see
+// smoke-chromium-args.cjs). --no-zygote still works when appended here (it is read per launch), but
+// the sandbox choice is made at start-up, so a missing --disable-namespace-sandbox means relaunching
+// this script with it, synchronously, and passing its exit code through.
+const chromiumArgs = smokeChromiumArgs(process.execPath, process.argv)
+const startupArgs = chromiumArgs.filter((arg) => arg === '--disable-namespace-sandbox' && !process.argv.includes(arg))
+if (startupArgs.length > 0) {
+  clearTimeout(watchdog)
+  const result = spawnSync(process.execPath, [...process.argv.slice(1), ...startupArgs], { stdio: 'inherit', timeout: overallMs + 30000, killSignal: 'SIGKILL' })
+  if (result.error || result.signal) process.stderr.write(`${script} relaunch with ${startupArgs.join(' ')} failed: ${result.error?.message ?? result.signal}\n`)
+  process.exit(result.status ?? 1)
 }
+for (const arg of chromiumArgs) app.commandLine.appendSwitch(arg.slice(2))
 
 const { ADBLOCK_CACHE_FILE, ADBLOCK_CONFIG } = require('./smoke-adblock-config.cjs')
 

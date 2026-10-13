@@ -2,7 +2,7 @@
 // throwaway profile. Both must match what the app reads as its cache (src/main/adblock-policy.ts:
 // ADBLOCK_CACHE_FILE, isFullFilterConfig) or the app ignores the seed and downloads the real filter
 // lists at launch (slow, flaky, network-dependent, and noisy through the smokes' fake proxies).
-// smoke-adblock-config.test.ts keeps them in sync.
+// smoke-harness.test.ts keeps them in sync.
 'use strict'
 
 module.exports = {
