@@ -35,6 +35,9 @@ bool g_pinchAsked = false;
 bool g_pinchTaken = false;
 
 NSSize g_pendingDelta = NSZeroSize;
+// When the current gesture's fingers went down (NSEvent timestamp): JavaScript's intent check
+// (src/shared/swipe-intent.ts) reads the running totals and how long they took.
+NSTimeInterval g_pendingBeganAt = 0.0;
 bool g_pendingRefused = false;
 bool g_tracking = false;
 bool g_releaseReported = false;
@@ -109,11 +112,14 @@ void ReportEnd(bool committed) {
   napi_close_handle_scope(g_env, scope);
 }
 
-bool AskJavaScript(NSWindow* window, NSPoint point, Direction direction, int32_t* contentsId) {
-  if (!g_env || !g_begin || !window.contentView) return false;
+// JavaScript's answer to a begin request: start tracking, keep watching this gesture, or refuse it.
+enum class BeginAnswer { Allow, Wait, Refuse };
+
+BeginAnswer AskJavaScript(NSWindow* window, NSPoint point, Direction direction, NSSize delta, double elapsedMs, int32_t* contentsId) {
+  if (!g_env || !g_begin || !window.contentView) return BeginAnswer::Refuse;
 
   napi_handle_scope scope = nullptr;
-  if (napi_open_handle_scope(g_env, &scope) != napi_ok) return false;
+  if (napi_open_handle_scope(g_env, &scope) != napi_ok) return BeginAnswer::Refuse;
 
   napi_value request = nullptr;
   napi_create_object(g_env, &request);
@@ -129,22 +135,32 @@ bool AskJavaScript(NSWindow* window, NSPoint point, Direction direction, int32_t
   napi_value directionValue = nullptr;
   napi_create_string_utf8(g_env, Name(direction), NAPI_AUTO_LENGTH, &directionValue);
   napi_set_named_property(g_env, request, "direction", directionValue);
+  napi_set_named_property(g_env, request, "dx", Number(delta.width));
+  napi_set_named_property(g_env, request, "dy", Number(delta.height));
+  napi_set_named_property(g_env, request, "elapsedMs", Number(elapsedMs));
 
   napi_value response = nullptr;
   const bool called = Invoke(g_begin, 1, &request, &response);
-  bool allowed = false;
+  BeginAnswer answer = BeginAnswer::Refuse;
   if (called && response) {
     napi_valuetype type = napi_undefined;
     napi_typeof(g_env, response, &type);
     if (type == napi_number) {
       int32_t value = 0;
-      allowed = napi_get_value_int32(g_env, response, &value) == napi_ok && value > 0;
-      if (allowed) *contentsId = value;
+      if (napi_get_value_int32(g_env, response, &value) == napi_ok) {
+        if (value > 0) {
+          answer = BeginAnswer::Allow;
+          *contentsId = value;
+        } else if (value == -1) {
+          // MAC_SWIPE_KEEP_WATCHING: not enough intent yet (deadzone / too slow); ask again next event.
+          answer = BeginAnswer::Wait;
+        }
+      }
     }
   }
 
   napi_close_handle_scope(g_env, scope);
-  return allowed;
+  return answer;
 }
 
 void ClearTracking(bool reportCancellation) {
@@ -178,6 +194,7 @@ bool MonitorScrollWheel(NSEvent* event) {
   if (began) {
     g_pendingDelta = NSZeroSize;
     g_pendingRefused = false;
+    g_pendingBeganAt = event.timestamp;
     return false;
   }
 
@@ -213,7 +230,10 @@ bool MonitorScrollWheel(NSEvent* event) {
                                  ? localPoint.y
                                  : NSHeight(contentView.bounds) - localPoint.y;
   int32_t contentsId = 0;
-  if (!AskJavaScript(window, NSMakePoint(localPoint.x, topOriginY), direction, &contentsId)) {
+  const double elapsedMs = g_pendingBeganAt > 0.0 ? std::max(0.0, (event.timestamp - g_pendingBeganAt) * 1000.0) : 0.0;
+  const BeginAnswer answer = AskJavaScript(window, NSMakePoint(localPoint.x, topOriginY), direction, g_pendingDelta, elapsedMs, &contentsId);
+  if (answer == BeginAnswer::Wait) return false;
+  if (answer != BeginAnswer::Allow) {
     g_pendingRefused = true;
     return false;
   }

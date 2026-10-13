@@ -105,10 +105,10 @@ async function run() {
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).interstitial?.kind === 'crashed', 'the crash interstitial state')
   assert.equal((await evaluate(toolbar, 'window.api.browser.tabs.get()')).find((tab) => tab.active).crashed, true, 'the tab is marked crashed')
   await waitFor(() => evaluate(content, 'document.querySelector(".tab-interstitial h1")?.textContent === "This page crashed"'), 'the crash screen in the content surface')
-  await waitFor(() => page.getBounds().width === 0, 'the dead page view to be hidden')
+  await waitFor(() => !page.getVisible(), 'the dead page view to be hidden')
   await evaluate(toolbar, 'window.api.browser.safety.tabRecovery("reload")')
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).interstitial === null, 'Reload to clear the crash screen')
-  await waitFor(() => !page.webContents.isLoading() && page.webContents.getTitle() === 'Safety fixture' && page.getBounds().width > 0, 'the page to come back')
+  await waitFor(() => !page.webContents.isLoading() && page.webContents.getTitle() === 'Safety fixture' && page.getVisible(), 'the page to come back')
 
   // --- site data: cookie count, Forget this site
   await waitFor(async () => (await evaluate(toolbar, `window.api.browser.safety.siteData.get(${JSON.stringify(origin)})`))?.cookies >= 1, 'the fixture cookie to be counted')

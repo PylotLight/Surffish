@@ -130,7 +130,7 @@ async function run() {
   // --- Cmd/Ctrl+D on a page: bookmark the exact URL and open the popover
   await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`)
   const page = await waitFor(() => pageView('/article'), 'the fixture page view')
-  await waitFor(() => !page.webContents.isLoading() && page.getBounds().width > 0, 'the fixture to load')
+  await waitFor(() => !page.webContents.isLoading() && page.getVisible(), 'the fixture to load')
   page.webContents.focus()
   key(page, 'D', [primary])
   await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#bookmark-popover"))'), 'the bookmark popover to open from Cmd/Ctrl+D')
@@ -159,7 +159,7 @@ async function run() {
   // --- Cmd/Ctrl+Shift+D: all tabs into a new folder
   await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/second`)})`)
   const second = await waitFor(() => pageView('/second'), 'the second tab')
-  await waitFor(() => second.getBounds().width > 0 && !second.webContents.isLoading(), 'the second tab to load')
+  await waitFor(() => second.getVisible() && !second.webContents.isLoading(), 'the second tab to load')
   key(second, 'D', [primary, 'shift'])
   const folder = await waitFor(async () => {
     const nodes = (await evaluate(toolbar, 'window.api.browser.bookmarks.get()')).nodes
@@ -217,7 +217,7 @@ async function run() {
   await evaluate(toolbar, `(() => { const row = [...document.querySelectorAll('#bookmarks-menu .bookmarks-menu-footer .bookmarks-menu-item')].find((node) => node.textContent.startsWith('Import')); row.click(); return true })()`)
   await waitFor(() => evaluate(content, 'Boolean(document.querySelector(".bookmarks-manager-import"))'), 'the manager with its import panel')
   await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "tabs" })')
-  await waitFor(() => second.getBounds().width > 0, 'the page back after closing the manager')
+  await waitFor(() => second.getVisible(), 'the page back after closing the manager')
 
   // --- Chromium import (bookmarks + history) through the same API Settings uses
   const sources = await evaluate(toolbar, 'window.api.browser.bookmarks.importSources()')
@@ -237,7 +237,7 @@ async function run() {
   key(second, 'B', [primary, 'alt'])
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'bookmarks', 'Cmd/Ctrl+Opt+B to open the manager')
   await waitFor(() => evaluate(content, 'Boolean(document.querySelector(".bookmarks-manager"))'), 'the manager page to render')
-  await waitFor(() => second.getBounds().width === 0, 'the page view to hide behind the manager')
+  await waitFor(() => !second.getVisible(), 'the page view to hide behind the manager')
   await evaluate(content, `(() => { const row = [...document.querySelectorAll('.bookmarks-folder-row')].find((node) => node.textContent.includes('Imported from Chrome')); row.click(); return true })()`)
   await waitFor(() => evaluate(content, '[...document.querySelectorAll(".bookmarks-manager-row strong")].map((node) => node.textContent).includes("Bookmarks bar")'), 'the imported folder in the manager')
   await screenshot(content, 'bookmarks-manager.png')

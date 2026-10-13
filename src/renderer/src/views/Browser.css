@@ -1046,10 +1046,11 @@
 .browser-sidebar {
   background: linear-gradient(145deg, rgba(36, 40, 46, 0.7), rgba(23, 27, 32, 0.76) 38%, rgba(10, 13, 16, 0.82));
   backdrop-filter: blur(38px) saturate(185%);
-  transition: transform 230ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 230ms;
+  /* Open and close share one duration + curve (shared/sidebar-motion.ts, also driving the overlay view). */
+  transition: transform var(--sidebar-motion-duration, 200ms) var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)), visibility 0s linear var(--sidebar-motion-duration, 200ms);
 }
 .browser-layout.is-sidebar-visible .browser-sidebar {
-  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s;
+  transition: transform var(--sidebar-motion-duration, 200ms) var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)), visibility 0s;
 }
 .sidebar-heading {
   min-height: 42px;

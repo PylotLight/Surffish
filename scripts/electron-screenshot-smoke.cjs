@@ -132,7 +132,7 @@ async function run() {
   await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`)
   const page = await waitFor(() => pageView('/fixture'), 'the fixture page view')
   await waitFor(() => !page.webContents.isLoading() && page.webContents.getTitle() === 'Screenshot fixture', 'the fixture to load')
-  await waitFor(() => page.getBounds().width > 0, 'the page to be on screen')
+  await waitFor(() => page.getVisible(), 'the page to be on screen')
   await delay(300)
   const pageBounds = page.getBounds()
 

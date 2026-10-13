@@ -146,6 +146,8 @@ async function waitForStableScroll(accept, description) {
 }
 
 async function waitForSidebarPinControl() {
+  // The overlay view itself slides in (src/main/sidebar-motion.ts): wait for it to land at x=0 first.
+  await waitFor(() => rendererViews.sidebar.getVisible() && rendererViews.sidebar.getBounds().x === 0, 'the overlay sidebar view to finish sliding in')
   await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
     const button = document.querySelector('[aria-label="Keep sidebar open"]')
     if (!button) return false
@@ -329,16 +331,18 @@ async function run() {
   }, 'native shell layers and the live page match the size after maximize')
   const contentSize = mainWindow.getContentSize()
   pointerMove(mainWindow.getContentBounds().x + Math.floor(contentSize[0] / 2), mainWindow.getContentBounds().y + Math.floor(contentSize[1] / 2))
-  await waitFor(() => nativeViewState().find((view) => view.surface === 'sidebar').bounds.width === 0, 'the full-height sidebar to hide after the pointer leaves the left reveal edge')
+  await waitFor(() => !nativeViewState().find((view) => view.surface === 'sidebar').visible, 'the full-height sidebar to hide after the pointer leaves the left reveal edge')
   const pageHiddenSidebar = fixturePageView.getBounds()
   const sidebarHiddenState = nativeViewState()
   assert.equal(pageHiddenSidebar.x, 0, 'a live page starts at the left edge without a reveal-strip inset')
   assert.equal(pageHiddenSidebar.width, contentSize[0], 'the live page spans the entire native content width')
   assert.equal(rendererViews.content.getVisible(), false, 'the full React renderer is hidden above the page and cannot intercept its input')
   assert.equal(rendererViews.toolbar.getVisible(), true)
-  // Collapsed: zero-width *and* hidden, so nothing in it keeps painting over the page.
+  // Collapsed: slid fully out *and* hidden (it keeps its card size so a reveal never resizes the
+  // renderer, see src/main/sidebar-motion.ts), so nothing in it paints or hit-tests over the page.
   assert.equal(rendererViews.sidebar.getVisible(), false, 'the collapsed sidebar overlay is hidden')
-  assert.equal(sidebarHiddenState.find((view) => view.surface === 'sidebar').bounds.width, 0, 'the hidden sidebar has no native hit-test strip')
+  const hiddenSidebarBounds = sidebarHiddenState.find((view) => view.surface === 'sidebar').bounds
+  assert.ok(hiddenSidebarBounds.x + hiddenSidebarBounds.width <= 0, `the hidden sidebar is slid off the left edge (${JSON.stringify(hiddenSidebarBounds)})`)
   assert.ok(sidebarHiddenState.find((view) => view.surface === 'toolbar').index > sidebarHiddenState.find((view) => view.url === fixtureUrl).index, 'the toolbar is layered above the live page')
   assert.ok(sidebarHiddenState.find((view) => view.surface === 'sidebar').index > sidebarHiddenState.find((view) => view.url === fixtureUrl).index, 'the sidebar is layered above the live page')
   captureFullWindow('sidebar-overlay-live-page-hidden.png')
@@ -349,7 +353,7 @@ async function run() {
     const hoverPoint = screenPointForElement(rendererViews.toolbar, hoverRect)
     pointerMove(hoverPoint.x, hoverPoint.y)
     await delay(350)
-    assert.equal(rendererViews.sidebar.getBounds().width, 0, `hovering ${selector} must not open or reset the sidebar`)
+    assert.equal(rendererViews.sidebar.getVisible(), false, `hovering ${selector} must not open or reset the sidebar`)
   }
 
   // A click inside the former 14px reveal strip must still reach the full-width live page.
@@ -358,12 +362,12 @@ async function run() {
   await waitFor(() => fixturePageView.webContents.executeJavaScript('window.edgeClickCount || 0'), 'the page click at the leftmost edge')
   await delay(250)
   assert.equal(await fixturePageView.webContents.executeJavaScript('window.edgeClickCount'), 1, 'the hidden sidebar must not intercept a click at x=5')
-  assert.equal(rendererViews.sidebar.getBounds().width, 0, 'a click cancels the delayed hover reveal and leaves the page unobstructed')
+  assert.equal(rendererViews.sidebar.getVisible(), false, 'a click cancels the delayed hover reveal and leaves the page unobstructed')
 
   // The toolbar Tabs toggle is gone: hover the left reveal edge with the real pointer, then pin the
   // glass sidebar open from its footer control, all with native mouse input.
   pointerMove(mainWindow.getContentBounds().x + 5, mainWindow.getContentBounds().y + pageHiddenSidebar.y + 150)
-  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'hover over the live-page edge to reveal the sidebar before pinning')
+  await waitFor(() => rendererViews.sidebar.getVisible() && rendererViews.sidebar.getBounds().width >= 300 && rendererViews.sidebar.getBounds().x === 0, 'hover over the live-page edge to reveal (and finish sliding in) the sidebar before pinning')
   await waitForSidebarPinControl()
   await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]')
   await waitFor(() => evaluate(rendererViews.sidebar, 'Boolean(document.querySelector("[aria-label=\\"Auto-hide sidebar\\"]"))'), 'the sidebar pin control to show pinned')
@@ -431,22 +435,22 @@ async function run() {
   pointerClick(resetTargetPoint.x, resetTargetPoint.y)
   await waitFor(async () => (await fixturePageView.webContents.executeJavaScript('window.clickCount || 0')) >= 2, 'the live page to receive a click after the sidebar releases focus')
   assert.equal(await fixturePageView.webContents.executeJavaScript('window.clickCount || 0'), 2)
-  await waitFor(() => rendererViews.sidebar.getBounds().width === 0, 'the sidebar to auto-hide after pointer exit and focus release')
+  await waitFor(() => !rendererViews.sidebar.getVisible(), 'the sidebar to auto-hide after pointer exit and focus release')
 
   // Hover over the leftmost 14px of the live page; delayed reveal must not reserve or occlude that area while hidden.
   const pageAfterHide = fixturePageView.getBounds()
   pointerMove(mainWindow.getContentBounds().x + 5, mainWindow.getContentBounds().y + pageAfterHide.y + 150)
-  await waitFor(() => rendererViews.sidebar.getBounds().width >= 300, 'hover over the live-page edge to reopen the sidebar')
+  await waitFor(() => rendererViews.sidebar.getVisible() && rendererViews.sidebar.getBounds().width >= 300 && rendererViews.sidebar.getBounds().x === 0, 'hover over the live-page edge to reopen the sidebar')
   assert.equal(fixturePageView.getBounds().width, contentSize[0], 'hover reveal keeps the live page full width')
   pointerMove(mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350)
-  await waitFor(() => rendererViews.sidebar.getBounds().width === 0, 'the hover-only sidebar to hide again')
+  await waitFor(() => !rendererViews.sidebar.getVisible(), 'the hover-only sidebar to hide again')
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
   // Hover-reveal the panel (the old toolbar toggle is gone), then pin it open via the footer control.
   assert.ok(await evaluate(rendererViews.content, '(() => { const layout = document.querySelector(".browser-layout"); if (!layout) return false; layout.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 200 })); return true; })()'), 'the browser layout should accept a hover at the reveal edge')
   await waitForSidebarPinControl()
   await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]')
-  await waitFor(() => rendererViews.sidebar.getBounds().width === widthAfterResize, 'the sidebar to open for its bottom New Tab action')
+  await waitFor(() => rendererViews.sidebar.getVisible() && rendererViews.sidebar.getBounds().width === widthAfterResize && rendererViews.sidebar.getBounds().x === 0, 'the sidebar to open for its bottom New Tab action')
   await waitFor(() => evaluate(rendererViews.sidebar, `(() => {
     const layout = document.querySelector('.browser-layout')
     const sidebar = document.querySelector('.browser-sidebar')

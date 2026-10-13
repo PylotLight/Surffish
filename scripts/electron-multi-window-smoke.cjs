@@ -110,7 +110,7 @@ async function mainPhase() {
   assert.deepEqual(tabs1.map((tab) => tab.url), [`${origin}/one`, `${origin}/two`])
   assert.ok(tabs1[0].pinned && !tabs1[1].pinned && tabs1[1].active, 'pinned and active state survive the migration')
   const page = await waitFor(() => viewsOf(first).find((view) => view.webContents.getURL() === `${origin}/two`), 'the active page')
-  await waitFor(() => !page.webContents.isLoading() && page.getBounds().width > 0, 'the page to load on screen')
+  await waitFor(() => !page.webContents.isLoading() && page.getVisible(), 'the page to load on screen')
   await evaluate(page, 'window.__notReloaded = "kept"; true')
   const pageContentsId = page.webContents.id
 
@@ -129,7 +129,7 @@ async function mainPhase() {
   const twoId = tabs1[1].id
   assert.equal(await evaluate(toolbar1, `window.api.browser.tabs.move(${JSON.stringify(twoId)}, ${JSON.stringify(tabs2[0].id)})`), true)
   await waitFor(async () => (await tabsOf(second)).some((tab) => tab.id === twoId && tab.active), 'the moved tab to be active in window 2')
-  await waitFor(() => viewsOf(second).includes(page) && page.getBounds().width > 0, 'the moved page view to be on screen in window 2')
+  await waitFor(() => viewsOf(second).includes(page) && page.getVisible(), 'the moved page view to be on screen in window 2')
   assert.ok(!viewsOf(first).includes(page), 'the view left window 1')
   assert.equal(page.webContents.id, pageContentsId, 'same web contents')
   assert.equal(await evaluate(page, 'window.__notReloaded'), 'kept', 'the page did not reload')
