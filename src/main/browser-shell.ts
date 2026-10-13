@@ -2,6 +2,7 @@ import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'ele
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
+import { pagePressDismissesPopovers, POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 
@@ -297,6 +298,7 @@ export function setBrowserChromeState(input: unknown, window?: BaseWindow | null
 export function handleBrowserPageMouseEvent(input: { type: string; x: number }, window?: BaseWindow | null): void {
   const shell = shellFor(window)
   if (!shell) return
+  dismissToolbarPopoversOnPagePress(shell, input.type)
   const { chromeState } = shell
   if (!shouldUseNativeOverlays(shell) || chromeState.sidebarMode !== 'tabs') {
     clearPointerTimers(shell)
@@ -342,6 +344,13 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
   } else {
     clearPageExitTimer(shell)
   }
+}
+
+/** A press on the page closes the toolbar's popovers: the toolbar's document never sees that click. */
+function dismissToolbarPopoversOnPagePress(shell: ShellState, mouseType: string): void {
+  if (!pagePressDismissesPopovers(mouseType, { overlayMode: shouldUseNativeOverlays(shell), ...shell.toolbarMetrics })) return
+  const toolbar = shell.views.toolbar.webContents
+  if (!toolbar.isDestroyed()) toolbar.send(POPOVER_DISMISS_CHANNEL)
 }
 
 export function setBrowserChromeMetrics(input: unknown, window?: BaseWindow | null): BrowserChromeMetrics {

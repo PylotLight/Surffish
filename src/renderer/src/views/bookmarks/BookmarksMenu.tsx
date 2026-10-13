@@ -3,6 +3,7 @@ import type { BookmarkNode } from '../../../../shared/types'
 import { BOOKMARKS_ROOT_ID } from '../../../../shared/bookmarks'
 import { bookmarkMenuRows, submenuSide } from '../../../../shared/bookmarks-menu'
 import { BookmarkFavicon, FolderGlyph } from './BookmarkParts'
+import { usePopoverDismiss } from '../../lib/popover-dismiss'
 import { bookmarkHost, bookmarksBelow, openBookmarkUrl, openBookmarksInTabs, type BookmarksState } from './useBookmarks'
 
 const SUBMENU_WIDTH = 280
@@ -136,26 +137,9 @@ export function BookmarksMenuPanel({ bookmarks, cachedIcons, folderId, onClose, 
   )
 }
 
-/** Close a menu on outside click / Escape. */
+/** Close a menu on outside click, Escape, focus leaving, or a press on the page (usePopoverDismiss). */
 export function useDismiss(open: boolean, containerRef: React.RefObject<HTMLElement | null>, close: () => void, returnFocus?: React.RefObject<HTMLElement | null>): void {
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: PointerEvent): void => {
-      if (!containerRef.current?.contains(event.target as Node)) close()
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      close()
-      returnFocus?.current?.focus()
-    }
-    window.addEventListener('pointerdown', onPointerDown)
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
+  usePopoverDismiss(open, containerRef, close, { returnFocusRef: returnFocus, preventEscapeDefault: true })
 }
 
 /** The toolbar's bookmarks button (next to the address bar): the whole tree as a dropdown. */

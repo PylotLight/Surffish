@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStoredState } from '../lib/stored-state'
+import { usePopoverDismiss } from '../lib/popover-dismiss'
 import type { WebStoreExtensionsState, WebStoreExtensionSummary } from '../../../shared/types'
 import { runExtensionAction } from './useWebStoreExtensions'
 
@@ -63,24 +64,7 @@ export function ExtensionToolbarButtons({ state, setState, pins, bramble, onMana
 
   useEffect(() => { onMenuOpenChange?.(menuOpen) }, [menuOpen])
 
-  useEffect(() => {
-    if (!menuOpen) return
-    const closeOnOutside = (event: PointerEvent): void => {
-      if (!controlRef.current?.contains(event.target as Node)) setMenuOpen(false)
-    }
-    const closeOnEscape = (event: globalThis.KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      setMenuOpen(false)
-      menuButtonRef.current?.focus()
-    }
-    window.addEventListener('pointerdown', closeOnOutside)
-    window.addEventListener('keydown', closeOnEscape)
-    return () => {
-      window.removeEventListener('pointerdown', closeOnOutside)
-      window.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [menuOpen])
+  usePopoverDismiss(menuOpen, controlRef, () => setMenuOpen(false), { returnFocusRef: menuButtonRef, preventEscapeDefault: true })
 
   const openExtension = (extension: WebStoreExtensionSummary, anchorEl: HTMLElement): void => {
     if (!extension.hasPopup) {
