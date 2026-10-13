@@ -1,0 +1,102 @@
+/* Archived tabs section (reuses the sidebar bookmark section/row styles). */
+.sidebar-archived {
+  max-height: 40%;
+}
+.sidebar-archived-count {
+  margin-left: 2px;
+  color: rgba(245, 247, 250, 0.36);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.sidebar-archived-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  margin: 2px 0 4px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(20, 22, 26, 0.92);
+  color: rgba(245, 247, 250, 0.46);
+  font-size: 13px;
+  -webkit-app-region: no-drag;
+}
+.sidebar-archived-search:focus-within {
+  border-color: rgba(117, 167, 255, 0.6);
+}
+.sidebar-archived-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f4f6f8;
+  font-size: 11px;
+}
+.sidebar-archived-search input::placeholder {
+  color: rgba(245, 247, 250, 0.4);
+}
+.sidebar-archived-row {
+  padding-left: 6px;
+}
+.sidebar-archived-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-archived-age {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.34);
+  font-size: 10.5px;
+}
+.sidebar-archived-delete {
+  display: none;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.6);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sidebar-archived-row:hover .sidebar-archived-delete,
+.sidebar-archived-row:focus-within .sidebar-archived-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sidebar-archived-row:hover .sidebar-archived-age,
+.sidebar-archived-row:focus-within .sidebar-archived-age {
+  display: none;
+}
+.sidebar-archived-delete:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.tab-archive-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(117, 167, 255, 0.35);
+  border-radius: 10px;
+  background: rgba(117, 167, 255, 0.08);
+  font-size: 12.5px;
+}
+.tab-archive-prompt p {
+  flex: 1 1 220px;
+  margin: 0;
+}

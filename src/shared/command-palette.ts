@@ -4,6 +4,7 @@
  */
 import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './types'
 import { parseKeywordSearch, type CustomSearchEngine } from './search-keywords'
+import type { ArchivedTab } from './tab-archive'
 
 export type PaletteMode = 'all' | 'tabs'
 
@@ -39,10 +40,13 @@ export type PaletteItem =
   | { kind: 'tab'; key: string; title: string; subtitle: string; tabId: string; faviconUrl: string | null; score: number }
   | { kind: 'site'; key: string; title: string; subtitle: string; url: string; faviconUrl: string | null; source: 'favorite' | 'history'; score: number }
   | { kind: 'search'; key: string; title: string; subtitle: string; input: string; score: number }
+  | { kind: 'archived'; key: string; title: string; subtitle: string; archivedId: string; url: string; faviconUrl: string | null; score: number }
 
 export const MAX_RECENT_COMMANDS = 20
 const MAX_RESULTS = 40
 const MAX_HISTORY_RESULTS = 8
+const MAX_ARCHIVED_RESULTS = 6
+const MAX_ARCHIVED_TAB_SEARCH_RESULTS = 15
 
 // ---------------------------------------------------------------------------
 // Shortcut labels
@@ -188,12 +192,41 @@ export interface PaletteSources {
   searchEngines: readonly CustomSearchEngine[]
   defaultSearchLabel: string
   platform: string
+  /** Archived tabs (newest first); they show as an "Archived" group after open tabs. */
+  archivedTabs?: readonly ArchivedTab[]
+  /** For the "3h ago" label; defaults to Date.now(). */
+  now?: number
 }
 
 /** Recent commands get this added per rank (most recent = full boost). */
 const RECENT_BOOST = 40
 // Kinds are interleaved by score, with a small nudge so a command beats a history row on a tie.
-const KIND_WEIGHT = { command: 1.1, tab: 1.05, favorite: 1, history: 0.85 }
+const KIND_WEIGHT = { command: 1.1, tab: 1.05, favorite: 1, history: 0.85, archived: 0.8 }
+
+function withoutHash(url: string): string {
+  return url.replace(/#.*$/, '')
+}
+
+function archivedAge(archivedAt: number, now: number): string {
+  const minutes = Math.max(0, Math.round((now - archivedAt) / 60_000))
+  if (minutes < 60) return minutes < 1 ? 'just now' : `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`
+}
+
+/** Archived tabs matching `query` (all of them, newest first, when empty), skipping URLs already open. */
+function archivedItems(sources: PaletteSources, query: string, limit: number, weight: number): PaletteItem[] {
+  const openUrls = new Set(sources.tabs.map((tab) => withoutHash(tab.url)))
+  const now = sources.now ?? Date.now()
+  const items: PaletteItem[] = []
+  ;(sources.archivedTabs ?? []).forEach((tab, index) => {
+    if (openUrls.has(withoutHash(tab.url))) return
+    const score = query ? matchFields(query, [tab.title, hostOf(tab.url), tab.url], [1, 0.9, 0.5]) : 500 - index
+    if (score === null) return
+    items.push({ kind: 'archived', key: `archived:${tab.id}`, title: tab.title || tab.url, subtitle: `Archived ${archivedAge(tab.archivedAt, now)} · ${hostOf(tab.url)}`, archivedId: tab.id, url: tab.url, faviconUrl: tab.faviconUrl, score: score * weight })
+  })
+  return items.sort((a, b) => b.score - a.score).slice(0, limit)
+}
 
 export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
   const query = sources.query.trim()
@@ -210,7 +243,9 @@ export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
       if (score === null) return
       items.push({ kind: 'tab', key: `tab:${tab.id}`, title: tab.title || tab.url, subtitle: tab.active ? `Current tab · ${hostOf(tab.url)}` : hostOf(tab.url), tabId: tab.id, faviconUrl: tab.faviconUrl, score })
     })
-    return query ? items.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS) : items.slice(0, MAX_RESULTS)
+    const open = query ? items.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS) : items.slice(0, MAX_RESULTS)
+    // Archived tabs form their own group after the open ones.
+    return [...open, ...archivedItems(sources, query, query ? MAX_ARCHIVED_TAB_SEARCH_RESULTS : 10, 1)]
   }
 
   const commands = sources.commands.filter((command) => command.enabled)
@@ -245,6 +280,13 @@ export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
     if (score === null) continue
     seenUrls.add(site.url)
     items.push({ kind: 'site', key: `site:${site.url}`, title: site.title || hostOf(site.url), subtitle: `Favorite · ${hostOf(site.url)}`, url: site.url, faviconUrl: site.faviconUrl ?? null, source: 'favorite', score: score * KIND_WEIGHT.favorite })
+  }
+
+  // Before history, so a page that was archived shows as Archived (restores its back list) rather than History.
+  for (const item of archivedItems(sources, query, MAX_ARCHIVED_RESULTS, KIND_WEIGHT.archived)) {
+    if (item.kind !== 'archived' || seenUrls.has(item.url)) continue
+    seenUrls.add(item.url)
+    items.push(item)
   }
 
   let historyCount = 0

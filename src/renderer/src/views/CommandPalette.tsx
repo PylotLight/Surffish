@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite, SearchEngineId } from '../../../shared/types'
 import { buildPaletteItems, formatAccelerator, type CommandPaletteSnapshot, type PaletteItem, type PaletteMode } from '../../../shared/command-palette'
 import { useSearchKeywords } from './useSearchKeywords'
+import type { ArchivedTab } from '../../../shared/tab-archive'
 import './CommandPalette.css'
 
 const EMPTY_SNAPSHOT: CommandPaletteSnapshot = { commands: [], recentCommandIds: [] }
@@ -17,9 +18,9 @@ interface CommandPaletteProps {
 
 function ItemIcon({ item }: { item: PaletteItem }): React.JSX.Element {
   const [failed, setFailed] = useState(false)
-  const favicon = item.kind === 'tab' || item.kind === 'site' ? item.faviconUrl : null
+  const favicon = item.kind === 'tab' || item.kind === 'site' || item.kind === 'archived' ? item.faviconUrl : null
   if (favicon && !failed) return <span className="palette-item-icon"><img src={favicon} alt="" onError={() => setFailed(true)} /></span>
-  const glyph = item.kind === 'command' ? '›' : item.kind === 'tab' ? '▤' : item.kind === 'search' ? '⌕' : item.source === 'favorite' ? '★' : '◷'
+  const glyph = item.kind === 'command' ? '›' : item.kind === 'tab' ? '▤' : item.kind === 'search' ? '⌕' : item.kind === 'archived' ? '⤓' : item.source === 'favorite' ? '★' : '◷'
   return <span className={`palette-item-icon is-${item.kind}`} aria-hidden="true">{glyph}</span>
 }
 
@@ -35,6 +36,7 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
   const [selected, setSelected] = useState(0)
   const [snapshot, setSnapshot] = useState<CommandPaletteSnapshot>(EMPTY_SNAPSHOT)
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
+  const [archivedTabs, setArchivedTabs] = useState<ArchivedTab[]>([])
   const [openRequest, setOpenRequest] = useState(0)
   const searchEngines = useSearchKeywords()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -66,6 +68,7 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
     setSelected(0)
     setOpen(true)
     void window.api.browser.commands.list().then(setSnapshot).catch(() => undefined)
+    void window.api.browser.tabArchive.get().then((archive) => setArchivedTabs(archive.tabs)).catch(() => undefined)
     if (requested === 'all') {
       void window.api.browser.history.get().then((entries) => setHistory(entries.slice(0, MAX_HISTORY))).catch(() => undefined)
     }
@@ -91,8 +94,9 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
     history,
     searchEngines,
     defaultSearchLabel: searchEngineLabel,
-    platform: window.api.platform
-  }) : [], [open, query, mode, snapshot, tabs, pinnedSites, history, searchEngines, searchEngineLabel])
+    platform: window.api.platform,
+    archivedTabs
+  }) : [], [open, query, mode, snapshot, tabs, pinnedSites, history, searchEngines, searchEngineLabel, archivedTabs])
 
   useEffect(() => {
     setSelected((index) => (items.length === 0 ? 0 : Math.min(index, items.length - 1)))
@@ -114,6 +118,10 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
           return
         case 'tab':
           await window.api.browser.tabs.activate(item.tabId)
+          await window.api.browser.commandPalette.closed(true)
+          return
+        case 'archived':
+          await window.api.browser.tabArchive.restore(item.archivedId)
           await window.api.browser.commandPalette.closed(true)
           return
         case 'site':
@@ -186,7 +194,7 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
             // Clicking an item keeps focus (mousedown is prevented); anything else closes it.
             if (!closingRef.current && document.activeElement !== inputRef.current) close(false)
           }, 0)}
-          placeholder={mode === 'tabs' ? 'Search open tabs' : 'Search commands, tabs, favourites, history or the web'}
+          placeholder={mode === 'tabs' ? 'Search open and archived tabs' : 'Search commands, tabs, favourites, history or the web'}
           aria-label={mode === 'tabs' ? 'Search open tabs' : 'Search commands, tabs and the web'}
           role="combobox"
           aria-expanded="true"
@@ -201,8 +209,9 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
       <div id="command-palette-list" className="command-palette-list" role="listbox" ref={listRef}>
         {items.length === 0 && <p className="command-palette-empty">{mode === 'tabs' ? 'No matching tabs' : 'No matches'}</p>}
         {items.map((item, index) => (
+          <Fragment key={item.key}>
+          {mode === 'tabs' && item.kind === 'archived' && items[index - 1]?.kind !== 'archived' && <p className="command-palette-group" role="presentation">Archived</p>}
           <button
-            key={item.key}
             id={`palette-item-${index}`}
             data-index={index}
             type="button"
@@ -220,7 +229,9 @@ export function CommandPalette({ tabs, pinnedSites, searchEngine, searchEngineLa
             </span>
             {item.kind === 'command' && item.shortcut && <kbd className="command-palette-shortcut">{item.shortcut}</kbd>}
             {item.kind === 'tab' && <span className="command-palette-tag">Switch</span>}
+            {item.kind === 'archived' && <span className="command-palette-tag">Restore</span>}
           </button>
+          </Fragment>
         ))}
       </div>
       <footer className="command-palette-footer" aria-hidden="true">

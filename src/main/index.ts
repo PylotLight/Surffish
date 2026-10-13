@@ -4,6 +4,7 @@ import { APP_ID, APP_NAME } from '../shared/config'
 import { registerIpc } from './ipc'
 import { registerDiagnosticsIpc } from './diagnostics'
 import { registerBookmarkIpc } from './bookmarks-ipc'
+import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { initializeBrowserProxy } from './proxy'
 import { createWindow, setMainWindowCloseHandler } from './window'
 import { setBrowserSearchEngine } from './browser'
@@ -77,6 +78,7 @@ app.whenReady().then(async () => {
   registerUpdateIpc()
   registerDiagnosticsIpc()
   registerBookmarkIpc()
+  registerTabArchiveIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {
@@ -91,6 +93,7 @@ app.whenReady().then(async () => {
   }
   createWindow()
   flushExternalOpens()
+  initializeTabArchive()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
   initializeUpdates()
   try {

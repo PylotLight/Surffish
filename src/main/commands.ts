@@ -26,6 +26,8 @@ import { isTabOverviewOpen, toggleTabOverview } from './tab-overview'
 import { getMainWindow } from './window'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { getRecentCommandIds, noteCommandUsed, openCommandPalette } from './command-palette'
+import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canArchiveOtherBrowserTabs, closeDuplicateBrowserTabs, hasDuplicateBrowserTabs, restoreLastArchivedTab, runTabArchiveCheck } from './tab-archive'
+import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -94,6 +96,13 @@ const COMMANDS: BrowserCommand[] = [
     id: 'tab.suspendOthers', title: 'Hibernate Other Tabs', section: 'Tab', keywords: ['suspend', 'sleep', 'memory', 'discard'], refocusPage: true,
     run: () => { const tab = activeTab(); if (tab) suspendOtherBrowserTabs(tab.id) }
   },
+  // Tab archive and tidying
+  { id: 'tab.archive', title: 'Archive Tab', section: 'Tab', keywords: ['tidy', 'declutter', 'put away'], refocusPage: true, enabled: () => canArchiveBrowserTab(activeTab()?.id), run: () => archiveBrowserTab(activeTab()?.id) },
+  { id: 'tab.archiveOthers', title: 'Archive Other Tabs', section: 'Tab', keywords: ['tidy', 'declutter', 'clean up'], refocusPage: true, enabled: () => canArchiveOtherBrowserTabs(activeTab()?.id), run: () => archiveOtherBrowserTabs(activeTab()?.id) },
+  { id: 'tab.archiveIdle', title: 'Archive Idle Tabs Now', section: 'Tab', keywords: ['auto archive', 'tidy', 'unused'], refocusPage: true, enabled: () => getTabArchiveSettings().archiveAfter !== 'off', run: () => runTabArchiveCheck() },
+  { id: 'tab.restoreArchived', title: 'Restore Last Archived Tab', section: 'Tab', keywords: ['unarchive', 'archived', 'bring back'], enabled: () => getArchivedTabs().length > 0, run: () => restoreLastArchivedTab() },
+  { id: 'tab.searchArchived', title: 'Search Open and Archived Tabs…', section: 'Tab', keywords: ['archived', 'find tab', 'unarchive'], run: () => openCommandPalette('tabs') },
+  { id: 'tab.closeDuplicates', title: 'Close Duplicate Tabs', section: 'Tab', keywords: ['dedupe', 'duplicates', 'tidy', 'same url'], refocusPage: true, enabled: hasDuplicateBrowserTabs, run: () => closeDuplicateBrowserTabs() },
   { id: 'tab.search', title: 'Search Tabs…', accelerator: APP_SHORTCUTS.tabSearch, section: 'Tab', keywords: ['find tab', 'switch', 'go to tab'], run: () => openCommandPalette('tabs') },
   { id: 'tab.overview', title: 'Tab Overview', accelerator: APP_SHORTCUTS.tabOverview, section: 'Tab', keywords: ['expose', 'grid', 'all tabs'], run: () => toggleTabOverview() },
 

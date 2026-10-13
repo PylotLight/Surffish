@@ -33,6 +33,7 @@ import { registerCommandIpc } from './command-ipc'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getDefaultBrowserStatus, makeDefaultBrowser } from './external-links'
+import { forgetArchivedTabsSince } from './tab-archive-store'
 import {
   getBrowserChromeState,
   isMainWindowRenderer,
@@ -441,6 +442,7 @@ export function registerIpc(): void {
   ipcMain.handle('browser:history:clear', (event) => {
     assertMainRenderer(event)
     clearBrowsingHistory()
+    forgetArchivedTabsSince(0)
     sendToMainWindowRenderers('browser:history-changed')
   })
   ipcMain.handle('browser:proxy:get', (event) => {

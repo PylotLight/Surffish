@@ -66,6 +66,8 @@ import { WORLD_CITIES } from '../../../shared/world-cities'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksSidebar } from './bookmarks/BookmarksSidebar'
+import { ArchivedTabsSidebar } from './tab-archive/ArchivedTabsSidebar'
+import { TabArchiveSettings } from './settings/TabArchiveSettings'
 import { BookmarksManager } from './bookmarks/BookmarksManager'
 import { BookmarkImportPanel } from './bookmarks/BookmarkImportPanel'
 import './Browser.css'
@@ -937,6 +939,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setSuggestionsOpen(false)
     setActiveSuggestionIndex(-1)
     setSidebarMode('tabs')
+    // "Switch to open tabs" (Settings → Tab archive): main switches instead of loading a duplicate.
+    if (await window.api.browser.tabArchive.switchToOpenTab(value, searchEngine).catch(() => false)) {
+      setNavigationError('')
+      addressRef.current?.blur()
+      return
+    }
     const ok = await window.api.browser.navigate(value, searchEngine)
     if (!ok) {
       setNavigationError('That address could not be opened. Use an HTTP(S) address or search terms.')
@@ -1191,6 +1199,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         )}
         {sidebarMode === 'tabs' && <BookmarksSidebar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} onShowManager={() => setSidebarMode('bookmarks')} />}
+        {sidebarMode === 'tabs' && <ArchivedTabsSidebar cachedIcons={cachedSiteIcons} onOpened={() => setSidebarMode('tabs')} />}
 
         <div className="sidebar-footer">
           {sidebarMode === 'tabs' && (
@@ -1642,6 +1651,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </SettingsRow>
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </SettingsGroup>
+                <TabArchiveSettings />
                 <SpellcheckSettings />
                 <SettingsGroup
                   title="SOCKS5 proxy"
