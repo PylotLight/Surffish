@@ -1,6 +1,7 @@
 import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'electron'
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
+import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 
@@ -140,14 +141,16 @@ function applyShellLayout(shell: ShellState): void {
   shellViews.toolbar.setBounds({ x: 0, y: 0, width, height: toolbarExtent })
   shellViews.toolbar.setVisible(overlayMode)
 
-  // With the native blur on, the view is cut to the card itself (the blur covers the whole view).
-  const inset = shell.sidebarFrame ? Math.min(shell.sidebarFrame.inset, Math.floor(height / 4)) : 0
+  // With the native blur on, the view is cut to the card itself (the blur covers the whole view);
+  // otherwise it is the full-height strip and the CSS insets the card. Either way the card lands on
+  // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts).
+  const inset = shell.sidebarFrame ? sidebarCardInset(height, { ...SIDEBAR_CARD, inset: shell.sidebarFrame.inset }) : 0
   shellViews.sidebar.setBounds({
     x: 0,
     y: inset,
-    // The visible sidebar covers the complete window; a zero-width hidden layer leaves page pixels interactive.
+    // A zero-width hidden layer leaves page pixels interactive. Never wider than the card may get.
     width: sidebarVisible
-      ? Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, width)
+      ? Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, sidebarCardMaxWidth(width))
       : 0,
     height: Math.max(0, height - inset * 2)
   })
