@@ -160,6 +160,11 @@ export function avoidLinkStatusPointer(x: number, y: number): void {
   if (pointerNearLeftPill(Math.min(pillWidth, PILL_MAX_WIDTH)) !== before) layout()
 }
 
+/** Diagnostics: the pill's web contents id (it runs in its own small renderer once created). */
+export function getLinkStatusContentsId(): number | null {
+  return view && !view.webContents.isDestroyed() ? view.webContents.id : null
+}
+
 export function destroyLinkStatus(): void {
   clearHideTimer()
   generation += 1

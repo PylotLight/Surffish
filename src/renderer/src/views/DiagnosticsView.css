@@ -1,0 +1,154 @@
+/* Settings → Diagnostics (Task Manager). Layout reuses .network-view / .network-page-header. */
+.diagnostics-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.diagnostics-totals > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.diagnostics-totals span {
+  color: rgba(245, 247, 250, 0.5);
+  font-size: 10px;
+}
+.diagnostics-totals strong {
+  overflow: hidden;
+  color: rgba(248, 250, 252, 0.95);
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diagnostics-table-wrap {
+  flex: 1 1 auto;
+  background: rgba(10, 13, 16, 0.35);
+}
+.diagnostics-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: rgba(245, 247, 250, 0.78);
+  font-size: 11px;
+}
+.diagnostics-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  padding: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(27, 32, 38, 0.97);
+  text-align: left;
+}
+.diagnostics-table th:first-child { width: 34%; }
+.diagnostics-table th:nth-child(2) { width: 9%; }
+.diagnostics-table th:nth-child(3) { width: 11%; }
+.diagnostics-table th:nth-child(4) { width: 12%; }
+.diagnostics-table th:nth-child(5) { width: 8%; }
+.diagnostics-table th.diagnostics-actions-heading { width: 26%; }
+.diagnostics-table th button {
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.62);
+  font: inherit;
+  font-weight: 600;
+  text-align: inherit;
+  cursor: pointer;
+}
+.diagnostics-table th.is-numeric,
+.diagnostics-table td.is-numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.diagnostics-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  vertical-align: top;
+}
+.diagnostics-row.is-hot td.is-numeric:nth-child(2) {
+  color: #ffb27a;
+  font-weight: 650;
+}
+.diagnostics-name-button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.diagnostics-badge {
+  flex: 0 0 auto;
+  min-width: 52px;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 247, 250, 0.66);
+  font-size: 9px;
+  font-weight: 650;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.diagnostics-kind-tab .diagnostics-badge { background: rgba(126, 226, 168, 0.14); color: #a8efc5; }
+.diagnostics-kind-gpu .diagnostics-badge { background: rgba(255, 178, 122, 0.14); color: #ffc9a0; }
+.diagnostics-kind-extension .diagnostics-badge { background: rgba(154, 184, 223, 0.16); color: #c0d5f1; }
+.diagnostics-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diagnostics-members {
+  margin: 4px 0 2px 59px;
+  padding: 0;
+  list-style: none;
+  color: rgba(245, 247, 250, 0.55);
+  font-size: 10px;
+}
+.diagnostics-members li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diagnostics-members span {
+  color: rgba(245, 247, 250, 0.38);
+}
+.diagnostics-actions > div {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.diagnostics-actions .settings-action {
+  flex: 0 0 auto;
+  min-height: 22px;
+  padding: 0 7px;
+  font-size: 10px;
+}
+.diagnostics-actions .settings-action.is-danger {
+  border-color: rgba(255, 120, 120, 0.3);
+  color: #ffb4b4;
+}
+.diagnostics-footnote {
+  flex: 0 0 auto;
+  margin: 0;
+  color: rgba(245, 247, 250, 0.42);
+}

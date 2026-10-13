@@ -42,6 +42,7 @@ import { CommandPaletteSettings } from './settings/CommandPaletteSettings'
 import { parseKeywordSearch } from '../../../shared/search-keywords'
 import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
+import DiagnosticsView, { useTabUsageHints, withTabUsageHint } from './DiagnosticsView'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
 import { SpellcheckSettings } from './settings/SpellcheckSettings'
@@ -147,10 +148,10 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics'>
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
@@ -158,7 +159,8 @@ const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: strin
   { mode: 'integrations', label: 'Extensions' },
   { mode: 'privacy', label: 'Privacy' },
   { mode: 'site', label: 'This site' },
-  { mode: 'network', label: 'Network' }
+  { mode: 'network', label: 'Network' },
+  { mode: 'diagnostics', label: 'Diagnostics' }
 ]
 
 function httpOrigin(value: string): string | null {
@@ -392,13 +394,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     return unsubscribe
   }, [])
 
-  useEffect(() => {
-    if (surface !== 'content') return
-    const rotationTimer = window.setInterval(() => {
-      setNewTabBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, FALLBACK_NEW_TAB_BACKGROUNDS.length))
-    }, QUICK_LINK_BACKGROUND_ROTATION_MS)
-    return () => window.clearInterval(rotationTimer)
-  }, [surface])
   const sidebarVisible = sidebarPinned || sidebarHovered || sidebarFocused || sidebarMode !== 'tabs'
   // Only build suggestions while the dropdown is open, and never in the sidebar surface (it has no
   // address bar). Otherwise every tab/history update re-ran the matcher in all three renderers.
@@ -436,6 +431,21 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
   const hasInterstitial = browser.interstitial !== null
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
+  // The New Tab page (clock, photos) is only on screen in the content surface, on a New Tab,
+  // with no settings/downloads panel over it. Nothing behind it needs to tick otherwise.
+  const newTabOnScreen = surface === 'content' && isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads'
+  // Whether this surface's own sidebar is actually painted: the sidebar overlay while it is
+  // revealed, the content surface only when it is the visible layer (New Tab or a full panel).
+  // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
+  const tabUsage = useTabUsageHints(surface !== 'toolbar')
+  const sidebarOnScreen = sidebarVisible && (surface === 'sidebar' || (surface === 'content' && (isLocalNewTab || (sidebarMode !== 'tabs' && sidebarMode !== 'history'))))
+  useEffect(() => {
+    if (surface !== 'content' || !isLocalNewTab) return
+    const rotationTimer = window.setInterval(() => {
+      setNewTabBackgroundIndex((index) => nextQuickLinkBackgroundIndex(index, FALLBACK_NEW_TAB_BACKGROUNDS.length))
+    }, QUICK_LINK_BACKGROUND_ROTATION_MS)
+    return () => window.clearInterval(rotationTimer)
+  }, [surface, isLocalNewTab])
   useEffect(() => {
     if (surface !== 'content' || !isLocalNewTab) return
     let mounted = true
@@ -457,11 +467,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }, [surface, isLocalNewTab])
   useEffect(() => {
-    if (surface !== 'content' || !isLocalNewTab || (!newTabPreferences.showClock && newTabPreferences.worldClocks.length === 0)) return
-    setClockNow(new Date())
-    const timer = window.setInterval(() => setClockNow(new Date()), newTabPreferences.showSeconds ? 1_000 : 30_000)
-    return () => window.clearInterval(timer)
-  }, [surface, isLocalNewTab, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length])
+    if (!newTabOnScreen || (!newTabPreferences.showClock && newTabPreferences.worldClocks.length === 0)) return
+    // Tick on the next second/minute boundary: one wakeup per displayed change, never more.
+    const step = newTabPreferences.showSeconds ? 1_000 : 60_000
+    let timer = 0
+    const tick = (): void => {
+      const now = new Date()
+      setClockNow(now)
+      timer = window.setTimeout(tick, step - (now.getTime() % step) + 15)
+    }
+    tick()
+    return () => window.clearTimeout(timer)
+  }, [newTabOnScreen, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length])
 
   useEffect(() => {
     if (surface !== 'content' || !isLocalNewTab || !newTabPreferences.weatherEnabled || !newTabPreferences.weatherLocation.trim()) {
@@ -1051,7 +1068,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const brambleToolbarAction = resolveBrambleToolbarAction(bramblePoc)
 
   return (
-    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}${sidebarResizing ? ' is-sidebar-resizing' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} aria-label="Surffish browser" onMouseMove={(event) => {
+    <section className={`browser-layout${sidebarVisible ? ' is-sidebar-visible' : ''}${sidebarOnScreen ? '' : ' is-sidebar-motion-paused'}${sidebarResizing ? ' is-sidebar-resizing' : ''}`} style={{ '--sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} aria-label="Surffish browser" onMouseMove={(event) => {
       if (!sidebarVisible && event.clientX <= 18) revealSidebar()
     }} onMouseLeave={surface === 'sidebar' ? handleSidebarPointerLeave : undefined}>
       <aside
@@ -1122,7 +1139,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 aria-selected={tab.active}
                 aria-grabbed={tabDrag.draggingId === tab.id ? true : undefined}
                 tabIndex={0}
-                title={tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title}
+                title={withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
                 onClick={() => {
                   void window.api.browser.tabs.activate(tab.id)
                   if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads') exitSettings()
@@ -1145,7 +1162,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 }}
                 {...tabDrag.itemHandlers(tab.id)}
               >
-                <TabFavicon tab={tab} />
+                <TabFavicon tab={tab} animate={sidebarOnScreen} />
                 <span className="tab-title">{tab.title}</span>
                 {tab.private && <span className="tab-private-badge" title="Private tab" aria-label="Private tab"><PrivateGlyph /></span>}
                 {tab.crashed && <span className="tab-crashed-badge" title="This tab crashed · it reloads when you open it" aria-label="Crashed tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg></span>}
@@ -1445,7 +1462,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </p>
           )}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && (
             <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
@@ -1822,6 +1839,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
           )}
           {sidebarMode === 'network' && networkToolEnabled && <NetworkView tabs={tabs} live={surface === 'content'} />}
+          {sidebarMode === 'diagnostics' && <DiagnosticsView live={surface === 'content'} />}
         </div>
       </div>
     </section>

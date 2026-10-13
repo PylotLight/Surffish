@@ -6,6 +6,7 @@ import { APP_NAME } from '../shared/config'
 import { checkForUpdatesFromMenu } from './updates'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { openCommandPalette } from './command-palette'
+import { toggleTaskManager } from './diagnostics'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -137,6 +138,7 @@ export function installAppMenu(): void {
         { role: 'zoom' },
         { type: 'separator' },
         tabItem('Downloads', 'downloads'),
+        { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : [])
       ]
     },
