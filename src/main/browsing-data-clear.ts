@@ -19,6 +19,7 @@ import { clearDownloadHistory, clearDownloadHistorySince } from './downloads'
 import { clearBrowserSiteZoom, resetBrowserSiteSettings } from './browser-persistence'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getActiveTabWebContents } from './browser'
+import { forgetArchivedTabsSince } from './tab-archive-store'
 
 /**
  * Clear browsing data (Settings → Privacy) and per-site data controls. Acts on the profile
@@ -119,6 +120,7 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
   }
   if (options.history) {
     result.historyRemoved = removeBrowsingHistory((entry) => entry.visitedAt >= since)
+    forgetArchivedTabsSince(since)
     sendToMainWindowRenderers('browser:history-changed')
   }
   if (options.downloads) {

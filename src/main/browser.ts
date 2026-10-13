@@ -37,6 +37,8 @@ import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
+import { restoredTabInactiveSince } from './tab-archive-store'
+import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -66,6 +68,8 @@ interface BrowserTab {
   showingPdf: boolean
   /** Set while the tab shows the PDF editor instead of the page; the view then runs on the editor session. */
   pdfEditor: PdfEditorTabState | null
+  /** Back/forward list to restore instead of a plain load (a tab brought back from the archive). */
+  restoreHistory: { entries: Electron.NavigationEntry[]; index: number } | null
 }
 
 interface PdfEditorTabState {
@@ -460,7 +464,9 @@ function ensureTabLoaded(tab: BrowserTab): void {
   const contents = view.webContents
   // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
   const ready = tab.isPrivate && !tab.pdfEditor ? whenPrivateSessionReady() : Promise.resolve()
-  void ready.then(() => contents.isDestroyed() ? undefined : contents.loadURL(target)).catch((error: unknown) => {
+  const restore = tab.restoreHistory
+  tab.restoreHistory = null
+  void ready.then(() => contents.isDestroyed() ? undefined : restore ? contents.navigationHistory.restore(restore) : contents.loadURL(target)).catch((error: unknown) => {
     if (tab.view?.webContents !== contents) return
     const message = error instanceof Error ? error.message : String(error)
     if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
@@ -538,6 +544,23 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
   })
 }
 
+type TabMenuExtrasProvider = (id: string) => MenuItemConstructorOptions[]
+let tabMenuExtrasProvider: TabMenuExtrasProvider | null = null
+
+/** Extra tab context-menu items from feature modules (tab archive) that import this file. */
+export function setBrowserTabMenuExtras(provider: TabMenuExtrasProvider | null): void {
+  tabMenuExtrasProvider = provider
+}
+
+function tabMenuExtras(id: string): MenuItemConstructorOptions[] {
+  try {
+    return tabMenuExtrasProvider?.(id) ?? []
+  } catch (error) {
+    console.warn('Tab menu extras failed:', error)
+    return []
+  }
+}
+
 function showBrowserTabContextMenu(id: string): void {
   const tab = getTab(id)
   if (!tab || !browserWindow || browserWindow.isDestroyed()) return
@@ -555,6 +578,8 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Suspend Tab', enabled: id !== activeTabId && tab.view !== null, click: () => { suspendBrowserTab(id) } },
     { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
     { type: 'separator' },
+    // Feature items bring their own trailing separator.
+    ...tabMenuExtras(id),
     { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
     { label: 'Close Tabs Above', enabled: tabs.some((_candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
     { label: 'Close Tabs Below', enabled: tabs.some((_candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
@@ -1069,7 +1094,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     extensionPageOwner: extensionPage?.owner ?? null,
     isPrivate: isPrivate && !extensionPage,
     showingPdf: false,
-    pdfEditor: null
+    pdfEditor: null,
+    restoreHistory: null
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -1120,7 +1146,13 @@ export function attachBrowserView(win: BaseWindow): void {
     })
   }
   const saved = loadBrowserSession()
-  saved.urls.forEach((url, index) => createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index)))
+  const restoredAt = Date.now()
+  saved.urls.forEach((url, index) => {
+    const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index))
+    // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
+    const tab = id ? getTab(id) : undefined
+    if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
+  })
   if (tabs.length === 0) createTab()
   activeTabId = tabs[saved.activeIndex]?.id ?? tabs[0]?.id ?? null
   if (activeTabId) {
@@ -1873,7 +1905,7 @@ export function setBrowserTabMuted(id: string, muted: boolean): boolean {
   return true
 }
 
-export function closeBrowserTab(id: string): void {
+export function closeBrowserTab(id: string, rememberClosed = true): void {
   const index = tabs.findIndex((tab) => tab.id === id)
   if (index < 0) return
   const tab = tabs[index]
@@ -1885,7 +1917,7 @@ export function closeBrowserTab(id: string): void {
   if (wasActive) cancelActiveMacTrackpadSwipe()
   if (wasActive) hideLinkStatus()
   if (findState.tabId === id) closeFindBar(false)
-  rememberClosedTab(tab, index)
+  if (rememberClosed) rememberClosedTab(tab, index)
   tabs.splice(index, 1)
   cancelSleepTimer(tab)
   if (wasActive) activeTabId = null
@@ -2469,3 +2501,68 @@ onPermissionDenied((contents, permission, requestingUrl) => {
   if (!shouldToastPermission(permission, origin)) return
   flashLinkStatus(permissionDeniedMessage(permission, origin), browserBounds, 3200)
 })
+
+// ---------------------------------------------------------------------------
+// Tab archive hooks (the feature itself lives in tab-archive.ts)
+
+export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
+  return tabs.map((tab) => {
+    const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    return {
+      id: tab.id,
+      url: currentUrl(tab),
+      pinned: tab.pinned,
+      active: tab.id === activeTabId,
+      audible: Boolean(contents?.isCurrentlyAudible()),
+      private: tab.isPrivate,
+      extensionPage: Boolean(tab.extensionPageOrigin),
+      unsavedPdfEdits: Boolean(tab.pdfEditor?.dirty),
+      inactiveSince: tab.id === activeTabId ? null : tab.inactiveSince
+    }
+  })
+}
+
+export interface BrowserTabArchiveCapture {
+  url: string
+  title: string
+  faviconUrl: string | null
+  history?: { entries: Electron.NavigationEntry[]; index: number }
+}
+
+/** What the archive keeps of a tab: URL, title, favicon and (when loaded) its back/forward list. */
+export function captureBrowserTabForArchive(id: string): BrowserTabArchiveCapture | null {
+  const tab = getTab(id)
+  if (!tab || tab.isPrivate || tab.extensionPageOrigin) return null
+  const capture: BrowserTabArchiveCapture = { url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl }
+  const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+  if (contents && !tab.pdfEditor) {
+    try {
+      capture.history = { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
+    } catch {
+      // Older runtimes or a page mid-teardown: the URL alone still restores the tab.
+    }
+  }
+  return capture
+}
+
+/** Close a tab into the archive (it doesn't go on the Reopen Closed Tab stack). True when it closed. */
+export function closeBrowserTabForArchive(id: string): boolean {
+  closeBrowserTab(id, false)
+  return !getTab(id)
+}
+
+/** Reopen an archived tab; background tabs stay asleep until first opened. */
+export function openArchivedBrowserTab(url: string, history: { entries: Electron.NavigationEntry[]; index: number } | undefined, activate = true): string | null {
+  const id = createTab(url, selectedSearchEngine, activate, true)
+  const tab = id ? getTab(id) : undefined
+  if (!tab) return null
+  if (history && history.entries.length > 0) tab.restoreHistory = history
+  if (activate) activateTabInternal(tab.id)
+  else publishState()
+  persistOpenTabs()
+  return id
+}
+
+export function flashBrowserStatus(message: string, durationMs = 2000): void {
+  flashLinkStatus(message, browserBounds, durationMs)
+}

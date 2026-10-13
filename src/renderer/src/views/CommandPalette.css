@@ -200,3 +200,12 @@
 .search-keyword-form input { min-width: 0; width: 100%; }
 .search-keyword-form-actions { display: flex; grid-column: 1 / -1; align-items: center; gap: 8px; }
 .search-keyword-form-actions .settings-message { margin: 0; flex: 1 1 auto; }
+.command-palette-group {
+  margin: 6px 0 2px;
+  padding: 0 12px;
+  color: rgba(245, 247, 250, 0.42);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
