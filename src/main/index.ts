@@ -11,6 +11,7 @@ import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { initializeBrowserProxy } from './proxy'
 import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
+import { quietRetiredShellSenders } from './ipc-retired'
 import { freezeBrowserSession, setBrowserSearchEngine } from './browser'
 import { browserWindows } from './window-scope'
 import { getBrowserSearchEngine } from './browser-persistence'
@@ -84,6 +85,7 @@ app.whenReady().then(async () => {
   }
   // Windows taskbar grouping/notifications; dev builds group under the Electron binary.
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath)
+  quietRetiredShellSenders()
   registerIpc()
   registerUpdateIpc()
   registerDiagnosticsIpc()

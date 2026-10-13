@@ -202,6 +202,14 @@ export function attachBrowserShell(
   applyShellLayout(shell)
 }
 
+// Surfaces of closed windows: their last in-flight IPC calls are dropped quietly (see ipc-retired.ts).
+const retiredRenderers = new WeakSet<WebContents>()
+
+/** A shell surface whose window has closed (it is being torn down). */
+export function isRetiredShellRenderer(contents: WebContents): boolean {
+  return retiredRenderers.has(contents)
+}
+
 export function detachBrowserShell(window?: BaseWindow): void {
   const targets = window ? [shells.get(window)].filter((shell): shell is ShellState => Boolean(shell)) : [...shells.values()]
   for (const shell of targets) {
@@ -210,6 +218,7 @@ export function detachBrowserShell(window?: BaseWindow): void {
     }
     clearPointerTimers(shell)
     shell.syncPageBounds = null
+    for (const contents of shell.renderers.keys()) retiredRenderers.add(contents)
     shell.renderers.clear()
     shells.delete(shell.window)
   }
