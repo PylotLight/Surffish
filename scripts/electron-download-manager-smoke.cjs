@@ -30,7 +30,7 @@ function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds))
 }
 
-async function waitFor(predicate, description, timeout = 30000) {
+async function waitFor(predicate, description, timeout = Number(process.env.SMOKE_WAIT_MS || 30000)) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
     const value = await predicate()
