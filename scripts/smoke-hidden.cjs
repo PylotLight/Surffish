@@ -6,8 +6,10 @@
 //
 // What it does (macOS only; elsewhere it's a no-op, the Linux lanes run under xvfb anyway):
 //   - app.setActivationPolicy('accessory'): no Dock icon, not in Cmd+Tab, no menu bar takeover
-//   - win.show() becomes showInactive(), and every shown window is fully transparent (opacity 0) and
-//     click-through, so it keeps its real size/position and keeps rendering, but nobody sees or hits it
+//   - win.show() becomes showInactive(), and every shown window is near-invisible (opacity 0.01) and
+//     click-through, so it keeps its real size/position and keeps rendering, but nobody sees or hits it.
+//     Not opacity 0: macOS stops vsync for a fully transparent window and Chromium drops to ~1 frame/s
+//     (seen on the runner: tab switch to painted 22 ms -> 1014 ms, the sidebar pin transition stalled)
 //   - win.focus(), app.focus() (incl. { steal: true }) and app.show() never touch the OS. Window focus
 //     is virtual instead: focus() marks that window focused, emits its 'focus' event (and 'blur' on the
 //     previous one), and isFocused() / BrowserWindow.getFocusedWindow() answer from that, so the app's
@@ -19,6 +21,7 @@
 // inactive app's key window doesn't take the keyboard from the user's app).
 'use strict'
 
+const OPACITY = 0.01
 const enabled = process.env.SURFFISH_SMOKE_HIDDEN === '1' && process.platform === 'darwin'
 
 function install() {
@@ -48,7 +51,7 @@ function install() {
   function prepare(win) {
     if (prepared.has(win) || !live(win)) return
     prepared.add(win)
-    try { win.setOpacity(0) } catch { /* ignore */ }
+    try { win.setOpacity(OPACITY) } catch { /* ignore */ }
     try { win.setIgnoreMouseEvents(true) } catch { /* ignore */ }
     win.on('focus', () => {
       if (emitting) return
@@ -99,7 +102,7 @@ function install() {
 
   process.once('exit', () => {
     const stole = stats.activations > 0 || stats.fullScreen > 0
-    const line = `[smoke-hidden] ${stats.shown} window show(s) (inactive, opacity 0, click-through), ` +
+    const line = `[smoke-hidden] ${stats.shown} window show(s) (inactive, opacity ${OPACITY}, click-through), ` +
       `${stats.virtualFocus} virtual focus call(s), app.focus blocked ${stats.blocked.appFocus}x, app.show blocked ${stats.blocked.appShow}x; ` +
       `app activated ${stats.activations}x, full screen entered ${stats.fullScreen}x, a window became key inside the (inactive) app ${stats.realKey}x` +
       (stole ? ' -> STOLE FOCUS' : ' -> never took focus')
