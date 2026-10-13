@@ -57,6 +57,7 @@ let hostTabId: string | null = null
 let probePageUrl = ''
 const bridgeIpcChannel = 'surffish-experimental-extension-get-frames'
 let exitCode = 0
+const probeTimeoutMs = Number(process.env.SMOKE_WAIT_MS || 10000)
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -424,7 +425,7 @@ async function run(): Promise<void> {
         resolve()
       }
       browserSession?.extensions.on('extension-ready', listener)
-    }), 10000, 'extension-ready')
+    }), probeTimeoutMs, 'extension-ready')
   }
   browserSession.extensions.removeListener('extension-ready', recordReadyExtension)
 
@@ -451,7 +452,7 @@ async function run(): Promise<void> {
 
   const pageContents = await waitFor(
     () => webContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL().startsWith(probePageUrl)) ?? null,
-    10000,
+    probeTimeoutMs,
     'Surffish WebContentsView'
   )
   await waitFor(
@@ -475,10 +476,10 @@ async function run(): Promise<void> {
       backgroundThrottling: false
     }
   })
-  await withTimeout(bridgeWindow.loadURL(`chrome-extension://${extension.id}/host-bridge.html`), 10000, 'load isolated extension host bridge')
+  await withTimeout(bridgeWindow.loadURL(`chrome-extension://${extension.id}/host-bridge.html`), probeTimeoutMs, 'load isolated extension host bridge')
   await waitFor(
     () => bridgeWindow?.webContents.executeJavaScript('globalThis.__surffishHostBridgeReady === true', true),
-    10000,
+    probeTimeoutMs,
     'extension host bridge listener'
   )
 
@@ -494,7 +495,7 @@ async function run(): Promise<void> {
     }
   })
   const probeUrl = `chrome-extension://${extension.id}/probe.html?target=${encodeURIComponent(probePageUrl)}`
-  await withTimeout(popupWindow.loadURL(probeUrl), 10000, 'load extension API probe page')
+  await withTimeout(popupWindow.loadURL(probeUrl), probeTimeoutMs, 'load extension API probe page')
   const extensionProbe = await waitFor(
     () => popupWindow?.webContents.executeJavaScript('globalThis.__surffishProbeResult ?? null', true) as Promise<Record<string, unknown> | null>,
     15000,
@@ -519,7 +520,7 @@ async function run(): Promise<void> {
           sandbox: true
         }
       })
-      await withTimeout(officialPopupWindow.loadURL(probePageUrl), 10000, 'initialize popup CDP target on loopback')
+      await withTimeout(officialPopupWindow.loadURL(probePageUrl), probeTimeoutMs, 'initialize popup CDP target on loopback')
       const popupDebugger = officialPopupWindow.webContents.debugger
       popupDebugger.attach('1.3')
       officialPopupDebuggerAttached = true
@@ -539,7 +540,7 @@ async function run(): Promise<void> {
         globalThis.__surffishExperimentalPopupGetCurrentInstalled = typeof tabs.getCurrent === 'function';
       })();`
       await withTimeout(popupDebugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: popupShimSource }), 5000, 'install pre-document popup API instrumentation')
-      await withTimeout(officialPopupWindow.loadURL(`chrome-extension://${extension.id}/${actionPopup}`), 10000, 'load official action popup')
+      await withTimeout(officialPopupWindow.loadURL(`chrome-extension://${extension.id}/${actionPopup}`), probeTimeoutMs, 'load official action popup')
       await delay(2500)
       officialPopupSnapshot = await withTimeout(officialPopupWindow.webContents.executeJavaScript(`(() => ({
         title: document.title,
