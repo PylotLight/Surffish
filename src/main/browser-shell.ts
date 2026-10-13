@@ -6,7 +6,7 @@ import { isAuthorizedShellIpcSender } from './renderer-security'
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
 const PAGE_EXIT_DELAY_MS = 160
-const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics', 'bookmarks'])
+const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics', 'bookmarks', 'watchers'])
 
 const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: 'tabs',

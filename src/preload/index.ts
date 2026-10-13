@@ -43,6 +43,7 @@ type DiagnosticsUpdate = DiagnosticsPayload | null
 import { bookmarksApi } from './bookmarks'
 import { tabArchiveApi } from './tab-archive'
 import { networkToolsApi, proxyRoutingApi } from './network-tools'
+import { watchersApi } from './watchers'
 
 const api = {
   platform: process.platform,
@@ -134,6 +135,7 @@ const api = {
     },
     bookmarks: bookmarksApi,
     tabArchive: tabArchiveApi,
+    watchers: watchersApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
@@ -162,6 +164,7 @@ const api = {
     stop: (): Promise<void> => ipcRenderer.invoke('browser:stop'),
     /** Edit PDF on a PDF tab, Back to Viewer in the editor. */
     togglePdfEditor: (): Promise<boolean> => ipcRenderer.invoke('browser:pdf-editor:toggle'),
+    toggleReader: (): Promise<boolean> => ipcRenderer.invoke('browser:reader:toggle'),
     setBounds: (bounds: BrowserBounds): Promise<void> => ipcRenderer.invoke('browser:set-bounds', bounds),
     tabs: {
       get: (): Promise<BrowserTabSummary[]> => ipcRenderer.invoke('browser:tabs:get'),

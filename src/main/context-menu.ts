@@ -23,6 +23,10 @@ export interface BrowserContextMenuOptions {
   pdfEditor?: { save: () => void; backToViewer: () => void }
   /** Offer Take Screenshot… (the page is the active tab). */
   takeScreenshot?: () => void
+  /** The page looks like an article (or is in Reader view): offer Reader View. */
+  readerView?: () => void
+  /** Offer "Watch This Page for Changes…" (never for private tabs). */
+  watchPage?: (mode: 'page' | 'pick') => void
 }
 
 function runMenuTask(task: Promise<void>): void {
@@ -106,6 +110,8 @@ export function showBrowserContextMenu(
     hasEditPdf: Boolean(options.editPdf),
     pdfEditor: Boolean(options.pdfEditor),
     hasScreenshot: Boolean(options.takeScreenshot),
+    hasReaderView: Boolean(options.readerView),
+    canWatchPage: Boolean(options.watchPage),
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward()
   }, {
@@ -132,7 +138,9 @@ export function showBrowserContextMenu(
     editPdf: options.editPdf,
     savePdfEditor: options.pdfEditor?.save,
     backToViewer: options.pdfEditor?.backToViewer,
-    takeScreenshot: options.takeScreenshot
+    takeScreenshot: options.takeScreenshot,
+    readerView: options.readerView,
+    watchPage: options.watchPage
   })
   if (items.length === 0) return false
 

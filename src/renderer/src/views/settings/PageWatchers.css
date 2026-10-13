@@ -1,0 +1,151 @@
+/* Settings → Watchers: the watcher list, inline edit form and the added/removed lines view. */
+.settings-subnav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #0a84ff;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: 1px;
+}
+.watcher-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+.watcher-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.watcher-item {
+  padding: 10px 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.watcher-item:first-child { border-top: 0; }
+.watcher-item.is-paused .watcher-copy { opacity: 0.6; }
+.watcher-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.watcher-copy {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.watcher-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.watcher-badge {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(10, 132, 255, 0.22);
+  color: #9ccaff;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.watcher-target,
+.watcher-status {
+  overflow: hidden;
+  color: rgba(235, 240, 245, 0.55);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.watcher-target code { font-size: 10.5px; color: rgba(235, 240, 245, 0.75); }
+.watcher-status.is-error { color: #ffb2b8; white-space: normal; }
+.watcher-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.watcher-actions .settings-action { padding-inline: 10px; width: auto; }
+.watcher-actions .settings-action[aria-pressed='true'] { background: rgba(255, 255, 255, 0.16); }
+.watcher-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.watcher-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+}
+.watcher-check {
+  display: flex;
+  flex: 1 1 240px;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.watcher-check small {
+  display: block;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 11px;
+}
+.watcher-diff {
+  margin-top: 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+.watcher-diff-heading {
+  margin: 0;
+  padding: 7px 10px;
+  color: rgba(235, 240, 245, 0.6);
+  font-size: 11px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.watcher-diff-lines {
+  max-height: 320px;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  list-style: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.watcher-diff-lines li {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+}
+.watcher-diff-lines li.is-added { background: rgba(48, 209, 88, 0.14); color: #b9f5c8; }
+.watcher-diff-lines li.is-removed { background: rgba(255, 69, 58, 0.14); color: #ffc4bf; text-decoration: line-through; text-decoration-color: rgba(255, 196, 191, 0.4); }
+.watcher-diff-lines li.is-context { color: rgba(235, 240, 245, 0.45); }
+.watcher-diff-sign { flex: 0 0 1ch; user-select: none; }
+.watcher-diff-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.watcher-add .settings-field-grow { flex: 1 1 280px; min-width: 0; }
+.watcher-add .settings-select,
+.watcher-add .settings-action { flex: 0 0 auto; width: auto; }
+.watcher-actions .settings-action { white-space: nowrap; }

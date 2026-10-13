@@ -16,6 +16,8 @@ import { installAppMenu } from './app-menu'
 import { flushExternalOpens, registerExternalOpenHandlers } from './external-links'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 import { registerPdfEditorScheme } from './pdf-editor'
+import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
+import { disposePageWatchers, initializePageWatchers, registerPageWatcherIpc } from './page-watchers'
 import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
@@ -32,7 +34,7 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
   app.setPath('userData', join(app.getPath('appData'), profileName))
 }
 // Privileged schemes must be registered before ready.
-registerPdfEditorScheme()
+registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
 
@@ -79,6 +81,8 @@ app.whenReady().then(async () => {
   registerDiagnosticsIpc()
   registerBookmarkIpc()
   registerTabArchiveIpc()
+  registerReaderIpc()
+  registerPageWatcherIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {
@@ -96,6 +100,8 @@ app.whenReady().then(async () => {
   initializeTabArchive()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
   initializeUpdates()
+  // Page watchers: checks run in main on their own schedule (never for private tabs).
+  initializePageWatchers()
   try {
     await initializeBramblePoc()
   } catch (error) {
@@ -113,6 +119,7 @@ app.on('window-all-closed', () => {
 })
 app.on('before-quit', () => {
   disposeUpdates()
+  disposePageWatchers()
   disposeBramblePoc()
   disposeWebStoreExtensions()
 })

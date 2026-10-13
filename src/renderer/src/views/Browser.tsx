@@ -49,6 +49,7 @@ import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
 import { SpellcheckSettings } from './settings/SpellcheckSettings'
 import { ProxyKillSwitchSetting } from './settings/ProxyKillSwitchSetting'
 import { PrivacySettings } from './settings/PrivacySettings'
+import { PageWatchersSettings, useUnseenWatcherCount } from './settings/PageWatchersSettings'
 import { SiteDataSettings } from './settings/SiteDataSettings'
 import { TabInterstitial } from './TabInterstitial'
 import { ProxyDownBanner } from './ProxyDownBanner'
@@ -131,6 +132,7 @@ const EMPTY_BROWSER: BrowserState = {
   private: false,
   zoomFactor: 1,
   pdf: null,
+  reader: null,
   interstitial: null
 }
 const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
@@ -160,16 +162,17 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers'>
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
   { mode: 'settings', label: 'General' },
   { mode: 'newtab', label: 'New Tab' },
   { mode: 'integrations', label: 'Extensions' },
   { mode: 'privacy', label: 'Privacy' },
+  { mode: 'watchers', label: 'Watchers' },
   { mode: 'site', label: 'This site' },
   { mode: 'network', label: 'Network' },
   { mode: 'diagnostics', label: 'Diagnostics' }
@@ -313,6 +316,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
+  // Watchers with a change the user hasn't opened yet (badge on Settings → Watchers). Content surface only.
+  const unseenWatchers = useUnseenWatcherCount(surface === 'content')
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
@@ -1352,6 +1357,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     onClick={() => void window.api.browser.zoom('reset')}
                   >{formatZoomPercent(browser.zoomFactor)}</button>
                 )}
+                {browser.reader && !browser.pdf && <button
+                  className={`omnibox-action-button pdf-edit-button reader-mode-button${browser.reader === 'active' ? ' is-current' : ''}`}
+                  type="button"
+                  aria-label={browser.reader === 'active' ? 'Back to page' : 'Reader view'}
+                  aria-pressed={browser.reader === 'active'}
+                  title={browser.reader === 'active' ? 'Back to page (⌥⌘R)' : 'Reader view: just the article, in your font, size and theme (⌥⌘R)'}
+                  onClick={() => void window.api.browser.toggleReader()}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5A2.5 2.5 0 0 1 13 8v11a2 2 0 0 0-2-2H4Z" /><path d="M20 5.5h-6.5A2.5 2.5 0 0 0 11 8v11a2 2 0 0 1 2-2h7Z" /></svg>
+                  <span>Reader</span>
+                </button>}
                 {browser.pdf && <button
                   className={`omnibox-action-button pdf-edit-button${browser.pdf === 'editor' ? ' is-current' : ''}`}
                   type="button"
@@ -1607,7 +1623,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
               {SETTINGS_SECTIONS.filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
-                <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}</button>
+                <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}</button>
               ))}
               <button
                 className="settings-subnav-close"
@@ -1624,6 +1640,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
           {sidebarMode === 'privacy' && <PrivacySettings />}
+          {sidebarMode === 'watchers' && <PageWatchersSettings />}
           {sidebarMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
           {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
             <div className={`settings-view settings-view-${sidebarMode}`}>

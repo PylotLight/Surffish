@@ -106,3 +106,25 @@ describe('rest of the menu', () => {
     expect(takeScreenshot).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('reader view and page watchers', () => {
+  test('page menu offers Reader View and both watch items when the host allows them', () => {
+    const fns = { ...actions(), readerView: mock(() => undefined), watchPage: mock((_mode: 'page' | 'pick') => undefined) }
+    const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, hasReaderView: true, canWatchPage: true }, fns)
+    const all = labels(items)
+    expect(all).toContain('Reader View')
+    expect(all).toContain('Watch This Page for Changes…')
+    expect(all).toContain('Watch Part of This Page…')
+    click(items.find((item) => item.label === 'Watch Part of This Page…'))
+    expect(fns.watchPage).toHaveBeenCalledWith('pick')
+    click(items.find((item) => item.label === 'Reader View'))
+    expect(fns.readerView).toHaveBeenCalled()
+  })
+
+  test('no watch items without permission (private tabs) or on PDFs', () => {
+    expect(labels(buildBrowserContextMenuTemplate(params(), PAGE, actions()))).not.toContain('Watch This Page for Changes…')
+    const pdf = labels(buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf' }), { ...PAGE, pdfDocument: true, canWatchPage: true, hasReaderView: true }, actions()))
+    expect(pdf).not.toContain('Watch This Page for Changes…')
+    expect(pdf).not.toContain('Reader View')
+  })
+})

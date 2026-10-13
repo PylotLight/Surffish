@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, dialog, ipcMain, net, protocol, session, type BaseWindow, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { app, dialog, ipcMain, net, protocol, session, type BaseWindow, type CustomScheme, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import {
   editedPdfFilename,
   isEditablePdfSource,
@@ -71,12 +71,15 @@ let host: PdfEditorHost | null = null
 let editorSession: Electron.Session | null = null
 let ipcRegistered = false
 
-/** Must run before app ready: the scheme needs fetch, a secure origin and module workers (pdf.js). */
-export function registerPdfEditorScheme(): void {
+/**
+ * Must run before app ready: the scheme needs fetch, a secure origin and module workers (pdf.js).
+ * Electron takes one registerSchemesAsPrivileged call, so other internal schemes ride along here.
+ */
+export function registerPdfEditorScheme(otherSchemes: CustomScheme[] = []): void {
   protocol.registerSchemesAsPrivileged([{
     scheme: PDF_EDITOR_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true }
-  }])
+  }, ...otherSchemes])
 }
 
 const mainDirectory = dirname(fileURLToPath(import.meta.url))

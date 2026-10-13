@@ -109,6 +109,8 @@ export interface BrowserState {
   zoomFactor: number
   /** The active tab shows a PDF in the built-in viewer, or the PDF editor. */
   pdf: 'viewer' | 'editor' | null
+  /** Reader view: the page looks like an article ('available') or Reader view is open ('active'). */
+  reader: 'available' | 'active' | null
   /** A full-page notice drawn over the active tab (crash, hang, HTTPS-only fallback). */
   interstitial: BrowserTabInterstitial | null
 }
@@ -163,7 +165,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics' | 'bookmarks'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics' | 'bookmarks' | 'watchers'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {
