@@ -9,6 +9,7 @@ import { browserWindows, currentBrowserWindow, registerBrowserWindow, runInWindo
 import { attachBrowserShell, detachBrowserShell, isFocusAddressShortcut, sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { isExpectedRendererDocument } from './renderer-security'
 import { APP_NAME, WINDOW } from '../shared/config'
+import { retryOnce } from '../shared/retry'
 import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
 
 const WINDOW_STATE_FILE = 'window-state.json'
@@ -162,8 +163,16 @@ function expectedRendererDocumentUrl(surface: 'content' | 'toolbar' | 'sidebar')
   return url.toString()
 }
 
-async function loadRenderer(view: WebContentsView, documentUrl: string): Promise<void> {
-  await view.webContents.loadURL(documentUrl)
+/**
+ * A surface load can fail under heavy CPU contention (ERR_FAILED while the renderer starts);
+ * try once more before leaving the window without that surface.
+ */
+async function loadRenderer(view: WebContentsView, documentUrl: string, isLive: () => boolean): Promise<void> {
+  await retryOnce(() => view.webContents.loadURL(documentUrl), {
+    delayMs: 250,
+    shouldRetry: () => isLive() && !view.webContents.isDestroyed(),
+    onRetry: (error) => console.warn('A Surffish browser surface failed to load; retrying once:', error)
+  })
 }
 
 export interface CreateWindowOptions extends BrowserWindowInit {
@@ -237,13 +246,19 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
 
   win.on('closed', () => {
     detachBrowserShell(win)
+    // A closed BaseWindow doesn't destroy its views' web contents: without this every closed
+    // window left its toolbar, sidebar and content renderers running (~100 MB) and still
+    // calling into main ("available only to the app window" errors).
+    for (const view of [contentView, toolbarView, sidebarView]) {
+      if (!view.webContents.isDestroyed()) view.webContents.close()
+    }
     if (browserWindows().length === 0) onMainWindowClosed()
   })
 
   void Promise.all([
-    loadRenderer(contentView, rendererDocuments.content),
-    loadRenderer(toolbarView, rendererDocuments.toolbar),
-    loadRenderer(sidebarView, rendererDocuments.sidebar)
+    loadRenderer(contentView, rendererDocuments.content, () => !win.isDestroyed()),
+    loadRenderer(toolbarView, rendererDocuments.toolbar, () => !win.isDestroyed()),
+    loadRenderer(sidebarView, rendererDocuments.sidebar, () => !win.isDestroyed())
   ]).then(() => {
     showRestored(win, geometry ?? null)
   }).catch((error: unknown) => {
