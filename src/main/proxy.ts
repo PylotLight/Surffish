@@ -6,6 +6,7 @@ import type { BrowserProxySettings, BrowserProxyTestResult } from '../shared/typ
 import { DEFAULT_BROWSER_PROXY_SETTINGS, parseBrowserProxySettings } from '../shared/persistence'
 import { getBrowserSession, getPrivateSession, hasPrivateSession, onPrivateSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
+import { isAlwaysAllowedPermission } from '../shared/site-permissions'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
@@ -13,6 +14,7 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 let currentSettings: BrowserProxySettings = { ...DEFAULT_PROXY_SETTINGS }
 
 function siteAllowsPermission(origin: string, permission: string): boolean {
+  if (isAlwaysAllowedPermission(permission)) return true
   const settings = getBrowserSiteSettings(origin)
   if (!settings) return false
   if (permission === 'media') return settings.allowMedia
