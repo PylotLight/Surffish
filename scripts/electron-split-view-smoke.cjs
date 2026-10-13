@@ -125,11 +125,11 @@ async function mainPhase() {
   await ready(win)
   let tabs = await waitFor(async () => { const value = await tabsOf(win); return value.length === 4 ? value : null }, 'the restored tabs')
   const id = Object.fromEntries(tabs.map((tab) => [new URL(tab.url).pathname.slice(1), tab.id]))
-  await waitFor(() => pageView(win, '/a')?.getBounds().width > 0, 'page /a on screen')
+  await waitFor(() => pageView(win, '/a')?.getVisible(), 'page /a on screen')
 
   // --- MRU: /b, then back to /a; Cmd+Shift+= (split.toggle) splits /a with /b, /a focused on the left
   await api(win, `tabs.activate(${JSON.stringify(id.b)})`)
-  await waitFor(() => pageView(win, '/b')?.getBounds().width > 0, 'page /b on screen')
+  await waitFor(() => pageView(win, '/b')?.getVisible(), 'page /b on screen')
   await api(win, `tabs.activate(${JSON.stringify(id.a)})`)
   assert.equal(await api(win, 'split.toggle()'), true, 'split with the last used tab')
   let state = await assertPanesOnScreen(win, '/a', '/b')
@@ -207,7 +207,7 @@ async function mainPhase() {
   assert.equal(await api(win, `split.popOut(${JSON.stringify(id.c)})`), true)
   state = await splitOf(win)
   assert.equal(state.splits.length, 0, 'popping out a pane of two unsplits')
-  await waitFor(() => pageView(win, '/c')?.getBounds().width > 0 && !pageView(win, '/a')?.getVisible(), '/c alone on screen')
+  await waitFor(() => pageView(win, '/c')?.getVisible() && !pageView(win, '/a')?.getVisible(), '/c alone on screen')
   assert.equal(splitSurface(win), undefined, 'no split surface without a split')
 
   // --- split with + close the focused pane: its partner stays, alone and focused
@@ -217,7 +217,7 @@ async function mainPhase() {
   await waitFor(async () => {
     const value = await splitOf(win)
     const b = pageView(win, '/b')
-    return value.splits.length === 0 && b && b.getBounds().width > 0 && (await tabsOf(win)).find((tab) => tab.id === id.b)?.active
+    return value.splits.length === 0 && b && b.getVisible() && (await tabsOf(win)).find((tab) => tab.id === id.b)?.active
   }, '/b alone and focused after closing /a')
 
   // --- a split entry moves to a new window as one, with its ratio

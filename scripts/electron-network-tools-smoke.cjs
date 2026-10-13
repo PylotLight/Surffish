@@ -132,7 +132,7 @@ async function run() {
   const toolbar = surface('toolbar')
   await waitFor(() => evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
   const api = (expression) => evaluate(toolbar, `window.api.browser.${expression}`)
-  const activePage = () => views().find((view) => /^https?:/.test(view.webContents.getURL()) && view.getBounds().width > 0) ?? views().find((view) => /^https?:/.test(view.webContents.getURL()))
+  const activePage = () => views().find((view) => /^https?:/.test(view.webContents.getURL()) && view.getVisible()) ?? views().find((view) => /^https?:/.test(view.webContents.getURL()))
 
   // --- per-site routing
   await api(`proxy.set({ enabled: true, host: "127.0.0.1", port: ${mainPort} })`)

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BaseWindow } from 'electron'
+import { parseSwipeIntentOverride, shouldCommitSwipe, swipeIntentForRequest } from '../shared/swipe-intent'
 
 export type MacTrackpadSwipeDirection = 'back' | 'forward'
 
@@ -11,7 +12,18 @@ export interface MacTrackpadSwipeBeginRequest {
   x: number
   y: number
   direction: MacTrackpadSwipeDirection
+  /** Running scroll totals since the fingers went down (newer native builds): the intent check reads them. */
+  dx?: number
+  dy?: number
+  elapsedMs?: number
 }
+
+/** The native module keeps watching the gesture (neither start nor refuse) when onBegin returns this. */
+export const MAC_SWIPE_KEEP_WATCHING = -1
+
+// Deadzone + intent thresholds (shared/swipe-intent.ts); SURFFISH_SWIPE_INTENT tunes them on a real trackpad.
+const swipeIntent = parseSwipeIntentOverride(process.env.SURFFISH_SWIPE_INTENT)
+const swipeDebug = process.env.SURFFISH_SWIPE_DEBUG === '1'
 
 export interface MacTrackpadSwipeCallbacks {
   onBegin(request: MacTrackpadSwipeBeginRequest): number | undefined
@@ -50,6 +62,11 @@ export function startMacTrackpadSwipe(_window: BaseWindow, callbacks: MacTrackpa
     nativeAddon.start({
       onBegin: (request) => {
         try {
+          // Slow sideways drift and mostly-vertical scrolls never start a history swipe.
+          const intent = swipeIntentForRequest(request, swipeIntent)
+          if (swipeDebug && intent !== 'wait') console.info('[trackpad swipe] intent', intent, { dx: request.dx, dy: request.dy, elapsedMs: request.elapsedMs })
+          if (intent === 'wait') return MAC_SWIPE_KEEP_WATCHING
+          if (intent === 'refuse') return undefined
           return callbacks.onBegin(request)
         } catch (error) {
           console.error('[trackpad swipe] Could not validate gesture start:', error)
@@ -65,7 +82,10 @@ export function startMacTrackpadSwipe(_window: BaseWindow, callbacks: MacTrackpa
       },
       onEnd: (contentsId, direction, committed, maxProgress) => {
         try {
-          callbacks.onEnd(contentsId, direction, committed, maxProgress)
+          // A flick that barely moved the page doesn't navigate (AppKit can call that committed).
+          const keep = shouldCommitSwipe(committed, maxProgress, swipeIntent)
+          if (swipeDebug && committed && !keep) console.info('[trackpad swipe] commit refused: too short', { maxProgress })
+          callbacks.onEnd(contentsId, direction, keep, maxProgress)
         } catch (error) {
           console.error('[trackpad swipe] Could not finish gesture:', error)
         }

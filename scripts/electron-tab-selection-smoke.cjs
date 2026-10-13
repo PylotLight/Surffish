@@ -122,7 +122,7 @@ async function mainPhase() {
   await waitFor(() => evaluate(surface(win, 'toolbar'), 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
   // Dock the sidebar so its rows are on screen.
   await api(win, "chrome.set({ sidebarMode: 'tabs', sidebarPinned: true })")
-  await waitFor(() => surface(win, 'sidebar').getBounds().width > 100, 'the docked sidebar')
+  await waitFor(() => surface(win, 'sidebar').getVisible() && surface(win, 'sidebar').getBounds().width > 100, 'the docked sidebar')
   let tabs = await waitFor(async () => { const value = await tabsOf(win); return value.length === 6 ? value : null }, 'the restored tabs')
   const id = Object.fromEntries(tabs.map((tab) => [pathOf(tab).slice(1), tab.id]))
   await waitFor(() => evaluate(surface(win, 'sidebar'), `document.querySelectorAll('.tab-list [data-browser-tab-id]').length === 6`), 'the sidebar rows')

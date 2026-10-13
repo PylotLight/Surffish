@@ -50,7 +50,7 @@ function surfaceFor(view) {
 const viewsOf = (win) => win.contentView.children.filter((view) => view.webContents && !view.webContents.isDestroyed())
 const surface = (win, name) => viewsOf(win).find((view) => surfaceFor(view) === name)
 const windows = () => BaseWindow.getAllWindows().filter((win) => !win.isDestroyed() && surface(win, 'toolbar'))
-const pageView = (win, path) => viewsOf(win).find((view) => { try { return new URL(view.webContents.getURL()).pathname === path && view.getBounds().width > 0 } catch { return false } })
+const pageView = (win, path) => viewsOf(win).find((view) => { try { return new URL(view.webContents.getURL()).pathname === path && view.getVisible() } catch { return false } })
 
 async function evaluate(view, expression) {
   try {

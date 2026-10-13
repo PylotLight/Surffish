@@ -27,9 +27,11 @@ import {
   isMainWindowRenderer,
   isSidebarOverlayShown,
   sendToMainWindowRenderers,
+  setSidebarMotionListener,
   setSidebarOverlayFrame,
   setSidebarOverlayListener
 } from './browser-shell'
+import { scaleArgbAlpha } from '../shared/sidebar-motion'
 import { readUserJson, writeUserJson } from './user-json'
 
 /**
@@ -56,6 +58,8 @@ interface WindowBackdrop {
 }
 const perWindow = new WeakMap<BaseWindow, WindowBackdrop>()
 const layered = new WeakSet<BaseWindow>()
+/** The overlay's open progress (sidebar-motion.ts): the view's tint and blur ramp with its slide. */
+const motionProgress = new WeakMap<BaseWindow, number>()
 
 export function getSidebarBackdropMode(): SidebarBackdropMode {
   return resolveSidebarBackdropMode({ platform: process.platform, settings, override })
@@ -93,14 +97,39 @@ function applyNativeLayer(window: BaseWindow): void {
   const native = getSidebarBackdropMode() === 'native'
   if (!native && !layered.has(window)) return
   try {
-    view.setBackgroundColor(native ? SIDEBAR_NATIVE_TINT : SIDEBAR_FRAMED_SOLID_TINT)
-    view.setBackgroundBlur(native ? SIDEBAR_NATIVE_BLUR_RADIUS : 0)
     view.setBorderRadius(SIDEBAR_CARD_RADIUS)
     layered.add(window)
+    paintNativeLayer(window, motionProgress.get(window) ?? 1)
   } catch (error) {
     console.warn('Could not configure the sidebar background blur:', error)
   }
   setSidebarOverlayFrame(window, { inset: SIDEBAR_CARD_INSET, radius: SIDEBAR_CARD_RADIUS })
+}
+
+/**
+ * The view's own tint + blur at a point of the open/close slide: they fade in and out with the
+ * panel instead of popping in at full strength before it has moved (one timeline, see
+ * shared/sidebar-motion.ts). Only for views that use the native layer.
+ */
+function paintNativeLayer(window: BaseWindow, progress: number): void {
+  const view = getSidebarOverlayView(window)
+  if (!view || !layered.has(window)) return
+  const native = getSidebarBackdropMode() === 'native'
+  // Never fully transparent: a layered view with a 0-alpha background stops drawing its web
+  // contents at all (see applyNativeLayer), so the ramp bottoms out at a near-invisible tint.
+  progress = Math.max(0.02, Math.min(1, progress))
+  view.setBackgroundColor(scaleArgbAlpha(native ? SIDEBAR_NATIVE_TINT : SIDEBAR_FRAMED_SOLID_TINT, progress))
+  view.setBackgroundBlur(native ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * progress) : 0)
+}
+
+function onMotion(window: BaseWindow, progress: number): void {
+  motionProgress.set(window, progress)
+  if (!layered.has(window)) return
+  try {
+    paintNativeLayer(window, progress)
+  } catch {
+    // The view is going away with its window.
+  }
 }
 
 function canCapture(window: BaseWindow): boolean {
@@ -224,6 +253,7 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE))
   setSidebarOverlayListener(onOverlay)
+  setSidebarMotionListener(onMotion)
   ipcMain.handle('browser:sidebar-backdrop:get', (event) => {
     assertMainRenderer(event)
     const window = getShellWindowFor(event.sender)

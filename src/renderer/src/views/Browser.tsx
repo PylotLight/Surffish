@@ -55,6 +55,7 @@ import { groupTabEntries } from '../../../shared/split-view'
 import { dropTargetGroup, TAB_GROUP_COLOR_VALUES, withGroupHeaders } from '../../../shared/tab-groups'
 import { useTabSelection } from './tab-groups/useTabSelection'
 import { TabGroupHeader } from './tab-groups/TabGroupHeader'
+import { useGroupReveal } from './tab-groups/useGroupReveal'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
@@ -81,6 +82,7 @@ import './Browser.css'
 import './bookmarks/bookmarks.css'
 import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from './SidebarBackdrop'
 import './SidebarBackdrop.css'
+import './motion.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
@@ -551,6 +553,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Cmd/Ctrl-click and Shift-click multi-select (a split entry stands for all its panes);
   // only the surface showing the tab list mirrors its selection to main.
   const activeEntryKey = useMemo(() => tabEntries.find((entry) => entry.kind === 'split' ? entry.tabs.some((tab) => tab.active) : entry.kind === 'tab' && entry.tab.active)?.key ?? null, [tabEntries])
+  const revealingGroups = useGroupReveal(tabs)
   const tabSelection = useTabSelection(unpinnedTabIds, (key) => {
     const entry = tabEntriesByKey.get(key)
     return entry?.kind === 'split' ? entry.tabs.map((tab) => tab.id) : entry?.kind === 'tab' ? [entry.tab.id] : []
@@ -1244,7 +1247,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               />
             ) : (({ tab }) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}${tab.group ? ' is-grouped' : ''}${tabSelection.selectedKeys.has(tab.id) ? ' is-multi-selected' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}${tab.group ? ' is-grouped' : ''}${tab.group && revealingGroups.has(tab.group.id) ? ' is-group-revealing' : ''}${tabSelection.selectedKeys.has(tab.id) ? ' is-multi-selected' : ''}`}
                 style={tab.group ? { '--group-color': TAB_GROUP_COLOR_VALUES[tab.group.color] } as React.CSSProperties : undefined}
                 key={tab.id}
                 data-browser-tab-id={tab.id}
@@ -1749,7 +1752,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <p>{sidebarMode === 'integrations' ? 'Bramble and Chrome Web Store extensions.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
               </header>
-              <div className="settings-content">
+              <div className="settings-content" key={sidebarMode}>
                 {sidebarMode === 'settings' && <>
                 <SettingsGroup title="Search">
                   <SettingsRow label="Search engine" hint="Used for searches typed into the address bar.">

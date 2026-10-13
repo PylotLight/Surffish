@@ -95,7 +95,7 @@ async function run() {
   await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`)
   const page = await waitFor(() => pageView('/fixture'), 'the fixture page view')
   await waitFor(() => !page.webContents.isLoading() && page.webContents.getTitle() === 'Table stakes fixture', 'the fixture to load')
-  await waitFor(() => page.getBounds().width > 0, 'the page to be on screen')
+  await waitFor(() => page.getVisible(), 'the page to be on screen')
 
   // --- WebRTC policy follows the proxy toggle
   assert.equal(page.webContents.getWebRTCIPHandlingPolicy(), 'default', 'WebRTC is unrestricted with the proxy off')
@@ -161,7 +161,7 @@ async function run() {
   // --- a second tab: Cmd+1 / Cmd+9 / Cmd+Shift+[ ]
   await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/second`)})`)
   const second = await waitFor(() => pageView('/second'), 'the second tab')
-  await waitFor(() => second.getBounds().width > 0, 'the second tab to be active')
+  await waitFor(() => second.getVisible(), 'the second tab to be active')
   const activeUrl = async () => (await evaluate(toolbar, 'window.api.browser.state()')).url
   key(second, '1', [primary])
   await waitFor(async () => (await activeUrl()) === fixtureUrl, 'Cmd/Ctrl+1 to select the first tab')

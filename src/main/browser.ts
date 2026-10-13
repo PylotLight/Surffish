@@ -48,6 +48,7 @@ import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
 import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
+import { initialPageViewBounds, pageViewBounds } from '../shared/page-view-bounds'
 import { restoredTabInactiveSince } from './tab-archive-store'
 import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
@@ -617,12 +618,18 @@ function applyTabBounds(w: BrowserWindowState): void {
     // Only the page on screen stays in the window. A zero-size view still counts as visible on
     // macOS, so background tabs used to keep running rAF/timers at full speed and kept the GPU
     // process waking up; detached + hidden, Chromium throttles them like Chrome's background tabs.
+    // Size first, then attach, and leave off-screen views at the size they last had instead of
+    // 0x0 (they're detached, which is what throttles them): attaching a 0x0 view and resizing it a
+    // moment later showed a frame of stale/empty page on every tab switch (page-view-bounds.ts).
+    const target = pageViewBounds(visible && pageAreaShown, bounds)
+    if (target) {
+      tab.view.setBounds(target)
+      reader?.setBounds(target)
+    }
     if (!w.window.isDestroyed()) {
       setPageViewOnScreen(w.window, tab.view, visible && pageAreaShown && !reader)
       if (reader) setPageViewOnScreen(w.window, reader, visible && pageAreaShown)
     }
-    tab.view.setBounds(visible ? bounds : { x: 0, y: 0, width: 0, height: 0 })
-    reader?.setBounds(visible ? bounds : { x: 0, y: 0, width: 0, height: 0 })
   }
   if (!w.window.isDestroyed()) {
     updateSplitSurface(w.window, split && layout ? { bounds: { ...browserBounds }, layout, focusedIndex: split.tabIds.indexOf(w.activeTabId ?? '') } : null)
@@ -952,8 +959,11 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   tab.view = view
   // Site tabs are always below the local toolbar, sidebar, and full-app surfaces. applyTabBounds
-  // attaches the view (at index 0) only while it is the tab on screen.
-  view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  // attaches the view (at index 0) only while it is the tab on screen. Start at the page-area size
+  // so the first load lays out at its real width (no 0-width layout + resize on first show).
+  view.setBounds(initialPageViewBounds(tab.win.browserBounds))
+  // Not on screen until applyTabBounds attaches it (getVisible() == on screen for every page view).
+  view.setVisible(false)
 
   const contents = view.webContents
   bindContentsToWindow(contents, tab.win.window)
@@ -1229,7 +1239,9 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   })
   tab.view = view
   // Attached by applyTabBounds while on screen, like site views.
-  view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  view.setBounds(initialPageViewBounds(tab.win.browserBounds))
+  // Not on screen until applyTabBounds attaches it (getVisible() == on screen for every page view).
+  view.setVisible(false)
   const contents = view.webContents
   bindContentsToWindow(contents, tab.win.window)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents

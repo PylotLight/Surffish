@@ -120,7 +120,7 @@ async function run() {
   await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(fixtureUrl)})`)
   const page = await waitFor(() => pageView('/fixture'), 'the fixture page view')
   await waitFor(() => !page.webContents.isLoading() && page.webContents.getTitle() === 'Palette fixture', 'the fixture to load')
-  await waitFor(() => page.getBounds().width > 0, 'the page to be on screen')
+  await waitFor(() => page.getVisible(), 'the page to be on screen')
   page.webContents.focus()
   key(page, 'K', [primary])
   await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#command-palette input"))'), 'the palette to open from the page')
@@ -157,7 +157,7 @@ async function run() {
   // --- Cmd/Ctrl+Shift+A tab search switches tabs
   await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/second`)})`)
   const second = await waitFor(() => pageView('/second'), 'the second tab')
-  await waitFor(() => second.getBounds().width > 0 && !second.webContents.isLoading(), 'the second tab to be active')
+  await waitFor(() => second.getVisible() && !second.webContents.isLoading(), 'the second tab to be active')
   second.webContents.focus()
   key(second, 'A', [primary, 'shift'])
   await waitFor(async () => (await evaluate(toolbar, 'document.querySelector(".command-palette-scope")?.textContent')) === 'Tabs', 'tab search to open pre-filtered to tabs')

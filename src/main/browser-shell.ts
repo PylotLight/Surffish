@@ -5,6 +5,7 @@ import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/s
 import { pagePressDismissesPopovers, POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
+import { SidebarOverlayMotion } from './sidebar-motion'
 
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
@@ -41,6 +42,9 @@ interface ShellState {
   syncPageBounds: BrowserShellLayoutSync | null
   layoutScheduled: boolean
   scheduleLayout: () => void
+  /** Slides the overlay sidebar view along one open/close timeline (sidebar-motion.ts). */
+  sidebarMotion: SidebarOverlayMotion
+  lastOverlayMode: boolean | null
   /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
   sidebarFrame: { inset: number; radius: number } | null
   sidebarOverlayShown: boolean
@@ -52,6 +56,13 @@ let sidebarOverlayListener: ((window: BaseWindow, event: SidebarOverlayEvent) =>
 /** sidebar-backdrop.ts: hear when the overlay sidebar opens/closes over a live page (and just before a hover reveal). */
 export function setSidebarOverlayListener(listener: ((window: BaseWindow, event: SidebarOverlayEvent) => void) | null): void {
   sidebarOverlayListener = listener
+}
+
+let sidebarMotionListener: ((window: BaseWindow, progress: number) => void) | null = null
+
+/** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), to ramp the native tint. */
+export function setSidebarMotionListener(listener: ((window: BaseWindow, progress: number) => void) | null): void {
+  sidebarMotionListener = listener
 }
 
 function emitSidebarOverlay(shell: ShellState, event: SidebarOverlayEvent): void {
@@ -146,21 +157,22 @@ function applyShellLayout(shell: ShellState): void {
   // otherwise it is the full-height strip and the CSS insets the card. Either way the card lands on
   // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts).
   const inset = shell.sidebarFrame ? sidebarCardInset(height, { ...SIDEBAR_CARD, inset: shell.sidebarFrame.inset }) : 0
-  shellViews.sidebar.setBounds({
-    x: 0,
+  // The view keeps its card width while closed (slid out and hidden, see sidebar-motion.ts), so a
+  // reveal never resizes the sidebar renderer. Never wider than the card may get.
+  shell.sidebarMotion.layout({
     y: inset,
-    // A zero-width hidden layer leaves page pixels interactive. Never wider than the card may get.
-    width: sidebarVisible
-      ? Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, sidebarCardMaxWidth(width))
-      : 0,
+    width: Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, sidebarCardMaxWidth(width)),
     height: Math.max(0, height - inset * 2)
   })
-  // Hidden, not just zero-width, while collapsed: nothing in it should paint or animate then.
+  // Open/close slides along one timeline while live pages stay on screen; entering or leaving
+  // New Tab / a full panel snaps (the in-page sidebar takes over there).
   const overlayShown = overlayMode && sidebarVisible
-  shellViews.sidebar.setVisible(overlayShown)
-  if (overlayShown !== shell.sidebarOverlayShown) {
-    shell.sidebarOverlayShown = overlayShown
-    emitSidebarOverlay(shell, overlayShown ? 'shown' : 'hidden')
+  const animate = shell.lastOverlayMode === overlayMode
+  shell.lastOverlayMode = overlayMode
+  shell.sidebarMotion.setOpen(overlayShown, { animate })
+  if (overlayShown && !shell.sidebarOverlayShown) {
+    shell.sidebarOverlayShown = true
+    emitSidebarOverlay(shell, 'shown')
   }
   shell.syncPageBounds?.(width, height, overlayMode, shell.window)
 }
@@ -193,9 +205,19 @@ export function attachBrowserShell(
     syncPageBounds: syncPageBounds ?? null,
     layoutScheduled: false,
     scheduleLayout: () => scheduleShellLayout(shell),
+    sidebarMotion: null as unknown as SidebarOverlayMotion,
+    lastOverlayMode: null,
     sidebarFrame: null,
     sidebarOverlayShown: false
   }
+  shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
+    onProgress: (progress) => sidebarMotionListener?.(window, progress),
+    onHidden: () => {
+      if (!shell.sidebarOverlayShown) return
+      shell.sidebarOverlayShown = false
+      emitSidebarOverlay(shell, 'hidden')
+    }
+  })
   shells.set(window, shell)
   for (const contents of shell.renderers.keys()) bindContentsToWindow(contents, window)
   for (const event of WINDOW_LAYOUT_EVENTS) window.on(event as 'resize', shell.scheduleLayout)
@@ -218,6 +240,7 @@ export function detachBrowserShell(window?: BaseWindow): void {
       for (const event of WINDOW_LAYOUT_EVENTS) shell.window.removeListener(event as 'resize', shell.scheduleLayout)
     }
     clearPointerTimers(shell)
+    shell.sidebarMotion.dispose()
     shell.syncPageBounds = null
     for (const contents of shell.renderers.keys()) retiredRenderers.add(contents)
     shell.renderers.clear()
