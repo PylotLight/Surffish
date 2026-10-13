@@ -3,7 +3,7 @@
  * bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks]
  *
  * One-shot local macOS release: bump version -> checks -> ZIP -> verify -> confirm ->
- * push + tag -> GitHub release via `ghp` -> render + push the Cask.
+ * push + tag -> GitHub release (REST via curl over SURFFISH_GH_PROXY, else `ghp`) -> render + push the Cask.
  * Runs on an Apple-silicon Mac (GitHub macOS runner minutes are used up).
  */
 import { spawnSync } from 'node:child_process'
@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline/promises'
 import { draftReleaseNotes, latestVersionTag, resolveReleaseVersion, setPackageVersion } from './release-version.ts'
+import { checkGitHubApi, createGitHubRelease, githubApiConfigFromEnv, type GitHubApiConfig } from './github-api.ts'
 
 const REPO = 'PylotLight/Surffish'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -41,7 +42,9 @@ if (flag('--help') || flag('-h')) {
 
 release notes come from docs/releases/vX.Y.Z.md; if it's missing a draft is written from
 commits since the last tag and the script stops so you can edit it.
-GitHub calls go through your fish \`ghp\` function (set SURFFISH_GH=gh to use plain gh).`)
+GitHub calls: with SURFFISH_GH_PROXY set (e.g. socks5h://127.0.0.1:1080) they're REST calls via curl
+through that proxy only, using SURFFISH_GH_TOKEN (or GITHUB_TOKEN / GH_TOKEN); --dry-run checks that
+route read-only. Without it they go through your fish \`ghp\` function (SURFFISH_GH=gh uses plain gh).`)
   process.exit(0)
 }
 
@@ -58,7 +61,14 @@ function run(cmd: string, cmdArgs: string[], opts: { capture?: boolean; allowFai
 }
 const git = (...gitArgs: string[]): string => run('git', gitArgs, { capture: true })
 
-/** GitHub CLI via the user's fish `ghp` (personal-account gh wrapper), falling back to SURFFISH_GH. */
+let githubApi: GitHubApiConfig | null = null
+try {
+  githubApi = githubApiConfigFromEnv(process.env, REPO)
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error))
+}
+
+/** Fallback without SURFFISH_GH_PROXY: GitHub CLI via the user's fish `ghp`, or SURFFISH_GH. */
 function gh(ghArgs: string[]): void {
   const override = process.env.SURFFISH_GH
   if (override) return void run(override, ghArgs)
@@ -83,6 +93,16 @@ if (git('status', '--porcelain')) fail('working tree is dirty, commit or stash f
 log('fetching origin…')
 run('git', ['fetch', '--quiet', '--tags', 'origin'])
 if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) fail('main is not in sync with origin/main (pull or push first)')
+if (githubApi) {
+  log(`checking the GitHub API through ${githubApi.proxy} (read-only)…`)
+  try {
+    for (const line of checkGitHubApi(githubApi)) log(`  ${line}`)
+  } catch (error) {
+    fail(`GitHub API check failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
+} else {
+  log('SURFFISH_GH_PROXY not set: GitHub calls will go through ghp / SURFFISH_GH')
+}
 
 const packagePath = join(root, 'package.json')
 const packageJson = readFileSync(packagePath, 'utf8')
@@ -178,8 +198,17 @@ if (!resume) {
   log(`pushed ${tag}`)
 }
 
-gh(['release', 'create', tag, artifact, '--repo', REPO, '--title', `Surffish ${tag}`, '--notes-file', notesPath, '--verify-tag'])
-log('github release created')
+if (githubApi) {
+  try {
+    const created = createGitHubRelease(githubApi, { tag, title: `Surffish ${tag}`, notes: readFileSync(notesPath, 'utf8'), assetPath: artifact, log })
+    log(`github release published: ${created.url} (assets: ${created.assets.join(', ')})`)
+  } catch (error) {
+    fail(`github release: ${error instanceof Error ? error.message : String(error)} — fix it, then run with --resume`)
+  }
+} else {
+  gh(['release', 'create', tag, artifact, '--repo', REPO, '--title', `Surffish ${tag}`, '--notes-file', notesPath, '--verify-tag'])
+  log('github release created')
+}
 
 run('bun', ['scripts/render-cask.ts', '--version', version, '--sha256-arm64', sha256, '--out', 'Casks/surffish.rb'])
 run('git', ['commit', '--quiet', '-m', `chore(tap): update Surffish Cask to ${tag}`, '--', 'Casks/surffish.rb'])
