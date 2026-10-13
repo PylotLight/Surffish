@@ -39,6 +39,8 @@ import NetworkView, { useNetworkToolEnabled } from './NetworkView'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { DefaultBrowserSettings } from './settings/DefaultBrowserSettings'
+import { UpdateSettings } from './settings/UpdateSettings'
+import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
 import { useTabDragSort } from './useTabDragSort'
 import TimeZonePicker from './TimeZonePicker'
@@ -1154,6 +1156,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="3" /><path d="M9 5v14" />{sidebarPinned ? <path d="m15.5 10-2 2 2 2" /> : <path d="m13.5 10 2 2-2 2" />}</svg>
             </button>
           )}
+          <UpdateBadge />
           <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} aria-pressed={isSettingsSection(sidebarMode)} title={isSettingsSection(sidebarMode) ? 'Close settings (Esc)' : 'Settings'} onClick={toggleSettings}>
             <span aria-hidden="true">⚙</span>
           </button>
@@ -1601,6 +1604,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <input type="checkbox" className="settings-switch" checked={networkToolEnabled} onChange={(event) => setNetworkToolEnabled(event.target.checked)} aria-label="Enable network inspector" />
                   </SettingsRow>
                 </SettingsGroup>
+                <UpdateSettings />
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
                 </>}
                 {sidebarMode === 'newtab' && <>

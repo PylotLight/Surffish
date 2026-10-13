@@ -1,0 +1,94 @@
+/* Settings → About & updates, and the sidebar-footer update badge. */
+.update-settings {
+  scroll-margin-top: 16px;
+}
+.update-release {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.update-release-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-release-heading strong {
+  color: rgba(248, 250, 252, 0.96);
+  font-size: 14px;
+  font-weight: 600;
+}
+.update-release-heading span {
+  color: rgba(235, 240, 245, 0.55);
+  font-size: 12.5px;
+}
+.update-release-notes {
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(235, 240, 245, 0.82);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.update-release-actions,
+.update-download,
+.update-feed-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.update-release-actions .settings-action,
+.update-download .settings-action,
+.update-feed-form .settings-action {
+  flex: 0 0 auto;
+  padding: 0 12px;
+}
+.update-download span {
+  flex: 1 1 200px;
+  color: rgba(235, 240, 245, 0.75);
+  font-size: 12.5px;
+}
+.update-feed-form {
+  align-items: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.update-feed-form .settings-field {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.update-feed-form .settings-field input {
+  width: 100%;
+}
+
+.update-badge-button {
+  position: relative;
+  color: rgba(180, 243, 202, 0.95);
+}
+.update-badge-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.update-badge-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(126, 226, 168);
+  box-shadow: 0 0 0 2px rgba(16, 22, 29, 0.9);
+}

@@ -12,6 +12,7 @@ import { installAppMenu } from './app-menu'
 import { flushExternalOpens, registerExternalOpenHandlers } from './external-links'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
 import { registerPdfEditorScheme } from './pdf-editor'
+import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 
 app.setName(APP_NAME)
 // Privileged schemes must be registered before ready.
@@ -56,6 +57,7 @@ app.whenReady().then(async () => {
   // Windows taskbar grouping/notifications; dev builds group under the Electron binary.
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath)
   registerIpc()
+  registerUpdateIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {
@@ -70,6 +72,8 @@ app.whenReady().then(async () => {
   }
   createWindow()
   flushExternalOpens()
+  // Release-feed update notifications: first check ~30s after launch, then every 6h.
+  initializeUpdates()
   try {
     await initializeBramblePoc()
   } catch (error) {
@@ -86,6 +90,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 app.on('before-quit', () => {
+  disposeUpdates()
   disposeBramblePoc()
   disposeWebStoreExtensions()
 })

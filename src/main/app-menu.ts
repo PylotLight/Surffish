@@ -3,6 +3,7 @@ import { newBrowserTab, newPrivateBrowserTab, reopenClosedBrowserTab, runTabComm
 import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
+import { checkForUpdatesFromMenu } from './updates'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -19,6 +20,7 @@ export function installAppMenu(): void {
           label: APP_NAME,
           submenu: [
             { role: 'about' },
+            { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
             { type: 'separator' },
             { role: 'services' },
             { type: 'separator' },
@@ -130,7 +132,9 @@ export function installAppMenu(): void {
         tabItem('Downloads', 'downloads'),
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : [])
       ]
-    }
+    },
+    // macOS has it in the app menu; elsewhere it lives under Help.
+    ...(isMac ? [] : [{ label: 'Help', submenu: [{ label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() }] } satisfies MenuItemConstructorOptions])
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
