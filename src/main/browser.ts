@@ -49,6 +49,7 @@ import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor,
 import { canWatchPage, watchPageFromTab } from './page-watchers'
 import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
+import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -84,6 +85,8 @@ interface BrowserTab {
   restoreHistory: { entries: Electron.NavigationEntry[]; index: number } | null
   /** The Space the tab is in (shared/spaces.ts); always Default while Spaces are off. */
   spaceId: string
+  /** Tab group (BrowserWindowState.groups), or null. */
+  groupId: string | null
 }
 
 interface PdfEditorTabState {
@@ -134,6 +137,8 @@ interface BrowserWindowState {
   activeSpaceId: string
   /** Last active tab per Space, so switching back lands where you were. */
   spaceActiveTabs: Map<string, string>
+  /** Tab groups in this window (shared/tab-groups.ts has the rules). */
+  groups: TabGroup[]
 }
 const windowStates: BrowserWindowState[] = []
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
@@ -294,8 +299,11 @@ function getState(w = currentWindowState()): BrowserState {
 
 function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
   if (!w) return []
+  const membersOf = new Map<string, string[]>()
+  for (const tab of w.tabs) if (tab.groupId) membersOf.set(tab.groupId, [...(membersOf.get(tab.groupId) ?? []), tab.id])
   return spaceTabsOf(w).map((tab) => {
     const split = splitInfoFor(w.splits, tab.id)
+    const group = tab.groupId ? tabGroupInfoFor(w.groups.find((candidate) => candidate.id === tab.groupId), membersOf.get(tab.groupId) ?? [], tab.id) : undefined
     return {
     id: tab.id,
     url: currentUrl(tab),
@@ -309,7 +317,8 @@ function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
     crashed: isTabCrashed(tab.view?.webContents),
-    ...(split ? { split } : {})
+    ...(split ? { split } : {}),
+    ...(group ? { group } : {})
   }
   })
 }
@@ -478,6 +487,7 @@ function noteWindowTitles(): void {
 function publishTabs(w = currentWindowState()): void {
   if (!isLiveWindow(w)) return
   keepSplitTabsTogether(w)
+  keepTabGroupsTogether(w)
   sendToWindowRenderers(w.window, 'browser:tabs', getTabSummaries(w))
   // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
   if (spacesEnabled()) publishSpaces(w)
@@ -514,13 +524,15 @@ function persistOpenTabs(): void {
     const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
+    const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
     return {
       urls: kept.map(currentUrl),
       activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
       pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
       geometry: windowGeometry(w.window),
       ...(splits.length > 0 ? { splits } : {}),
-      ...(spaces ? { spaces } : {})
+      ...(spaces ? { spaces } : {}),
+      ...(groups.length > 0 ? { groups } : {})
     }
   })
   const focused = windowStateFor(focusedBrowserWindow())
@@ -701,6 +713,9 @@ function activateTabInternal(id: string): boolean {
     w.activeSpaceId = tab.spaceId
   }
   w.spaceActiveTabs.set(tab.spaceId, id)
+  // Opening a tab inside a collapsed group expands the group (as in Chrome).
+  const collapsedGroup = w.groups.find((group) => group.id === tab.groupId && group.collapsed)
+  if (collapsedGroup) collapsedGroup.collapsed = false
   const previous = activeTabOf(w)
   const wasOnScreen = onScreenTabIds(w)
   if (previous && previous.id !== id) {
@@ -822,6 +837,7 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') },
     { type: 'separator' },
     ...splitTabMenuItems(tab),
+    ...groupTabMenuItems(tab),
     ...spaceTabMenuItems(tab),
     ...moveTabMenuItems(tab)
   ]
@@ -1409,7 +1425,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pdfEditor: null,
     restoreHistory: null,
     // Extension pages need the profile session (that's where extensions load), so they stay in Default.
-    spaceId: extensionPage ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId)
+    spaceId: extensionPage ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId),
+    groupId: null
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -1446,7 +1463,7 @@ export interface BrowserWindowInit {
   /** A private window: all of its tabs are private and it is never saved. */
   private?: boolean
   /** Tabs to restore (a saved window from the session file). */
-  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null }
+  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null; groups?: readonly SavedTabGroup[] }
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string
 }
@@ -1467,7 +1484,8 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     recentTabIds: [],
     // A new window opens on the Space you're in (private windows have no Spaces).
     activeSpaceId: init.private === true ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), (windowStateFor(focusedBrowserWindow()) ?? currentWindowState())?.activeSpaceId),
-    spaceActiveTabs: new Map()
+    spaceActiveTabs: new Map(),
+    groups: []
   }
   windowStates.push(w)
   tabSleepMinutes = getBrowserTabSleepMinutes()
@@ -1518,6 +1536,15 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
       const group = createSplitGroup(randomUUID(), ids as string[], split.sizes)
       if (group) w.splits.push(group)
     }
+    for (const savedGroup of saved.groups ?? []) {
+      const group = createTabGroup(randomUUID(), w.groups, savedGroup)
+      group.collapsed = savedGroup.collapsed
+      const members = savedGroup.tabs.map((index) => findTab(restoredIds[index])).filter((tab): tab is BrowserTab => Boolean(tab))
+      if (members.length === 0) continue
+      w.groups.push(group)
+      for (const member of members) member.groupId = group.id
+    }
+    keepTabGroupsTogether(w)
     for (const [spaceId, index] of Object.entries(saved.spaces?.spaceActiveTabs ?? {})) {
       const id = restoredIds[index]
       if (id && findTab(id)?.spaceId === spaceId) w.spaceActiveTabs.set(spaceId, id)
@@ -2686,7 +2713,7 @@ export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
  * Move a tab so it lands before `beforeId` (or at the end when null). Pinned and unpinned tabs keep
  * their own groups. A `beforeId` in another window moves the tab into that window.
  */
-export function moveBrowserTab(id: string, beforeId: string | null): boolean {
+export function moveBrowserTab(id: string, beforeId: string | null, groupId?: string | null): boolean {
   const moving = findTab(id)
   if (!moving || id === beforeId) return false
   const before = beforeId ? findTab(beforeId) : undefined
@@ -2711,7 +2738,16 @@ export function moveBrowserTab(id: string, beforeId: string | null): boolean {
     to = last + 1
   }
   tabs.splice(to, 0, ...block)
-  if (tabs.map((item) => item.id).join('|') === orderBefore) return false
+  // A sidebar drop says which group it landed in (null = outside every group); a split moves as one.
+  let regrouped = false
+  if (groupId !== undefined) {
+    const target = groupId && tab.win.groups.some((candidate) => candidate.id === groupId) && !tab.pinned ? groupId : null
+    for (const item of block) {
+      if (item.groupId !== target) regrouped = true
+      item.groupId = target
+    }
+  }
+  if (!regrouped && tabs.map((item) => item.id).join('|') === orderBefore) return false
   persistOpenTabs()
   publishTabs(tab.win)
   return true
@@ -3284,6 +3320,9 @@ export interface BrowserTabArchiveCapture {
   /** The tab's Space (only while Spaces are on); a restore goes back there if it still exists. */
   spaceId?: string
   spaceName?: string
+  /** The tab's group label and colour, kept with the archived tab. */
+  groupName?: string
+  groupColor?: string
   history?: { entries: Electron.NavigationEntry[]; index: number }
 }
 
@@ -3292,6 +3331,11 @@ export function captureBrowserTabForArchive(id: string): BrowserTabArchiveCaptur
   const tab = getTab(id)
   if (!tab || tab.isPrivate || tab.extensionPageOrigin) return null
   const capture: BrowserTabArchiveCapture = { url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl }
+  const group = tab.win.groups.find((candidate) => candidate.id === tab.groupId)
+  if (group) {
+    capture.groupName = tabGroupLabel(group)
+    capture.groupColor = group.color
+  }
   if (spacesEnabled()) {
     capture.spaceId = tab.spaceId
     capture.spaceName = getSpace(tab.spaceId)?.name ?? 'Default'
@@ -3763,6 +3807,7 @@ export function moveBrowserTabToSpace(id: string, spaceId: string): boolean {
   w.tabs.push(...members)
   for (const member of members) {
     member.spaceId = spaceId
+    member.groupId = null
     if (!member.isPrivate && member.view && !member.view.webContents.isDestroyed() && member.view.webContents.session !== pageSessionForTab(member)) {
       member.lastUrl = currentUrl(member)
       member.pendingUrl = member.lastUrl
@@ -3867,5 +3912,303 @@ function finishSidebarSwipe(contentsId: number, direction: MacTrackpadSwipeDirec
   const w = windowStates[contentsId - SPACE_SWIPE_ID_BASE]
   // Content follows the fingers, like pages: swipe right = the Space to the left.
   if (committed && w) cycleBrowserSpace(direction === 'back' ? -1 : 1, w.window)
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Tab groups (shared/tab-groups.ts has the rules; tab-groups-ipc.ts the IPC and the header menu).
+// Groups are per window and work the same with Spaces on or off.
+
+/** Enforce the grouping rules on a window: contiguous runs, no pinned tabs, splits in one group, one Space. */
+function keepTabGroupsTogether(w: BrowserWindowState): void {
+  if (w.groups.length === 0 && w.tabs.every((tab) => !tab.groupId)) return
+  const result = normalizeTabGroups(w.tabs.map((tab) => ({ id: tab.id, groupId: tab.groupId, pinned: tab.pinned, spaceId: tab.spaceId, splitId: splitOf(tab)?.id ?? null })), w.groups)
+  for (const tab of w.tabs) tab.groupId = result.groupOf.get(tab.id) ?? null
+  w.groups = result.groups
+  if (result.order.every((id, index) => w.tabs[index]?.id === id)) return
+  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]))
+  w.tabs.splice(0, w.tabs.length, ...result.order.map((id) => byId.get(id)!))
+}
+
+function groupById(w: BrowserWindowState | undefined, groupId: string | null | undefined): TabGroup | undefined {
+  return w && groupId ? w.groups.find((group) => group.id === groupId) : undefined
+}
+
+/** The window a group is in (group ids are unique across windows). */
+function windowOfGroup(groupId: string): BrowserWindowState | undefined {
+  return windowStates.find((w) => w.groups.some((group) => group.id === groupId))
+}
+
+function groupMembers(w: BrowserWindowState, groupId: string): BrowserTab[] {
+  return w.tabs.filter((tab) => tab.groupId === groupId)
+}
+
+/** Tabs `ids` plus their split partners, unpinned, in one window and Space (the first tab's). */
+function groupableTabs(ids: readonly string[]): BrowserTab[] {
+  const first = findTab(ids[0])
+  if (!first) return []
+  const picked = new Set<BrowserTab>()
+  for (const id of ids) {
+    const tab = findTab(id)
+    if (!tab || tab.win !== first.win || tab.spaceId !== first.spaceId || tab.pinned) continue
+    const split = splitOf(tab)
+    for (const member of split ? split.tabIds.map((memberId) => findTab(memberId)) : [tab]) if (member && !member.pinned) picked.add(member)
+  }
+  return first.win.tabs.filter((tab) => picked.has(tab))
+}
+
+function afterGroupChange(w: BrowserWindowState): void {
+  keepTabGroupsTogether(w)
+  applyTabBounds(w)
+  publishState(w)
+  persistOpenTabs()
+}
+
+/** New group from tabs (the first tab's position); returns the group id. */
+export function createBrowserTabGroup(ids: readonly string[], input: { name?: unknown; color?: unknown } = {}): string | null {
+  const tabs = groupableTabs(ids)
+  const first = tabs[0]
+  if (!first) return null
+  const w = first.win
+  const group = createTabGroup(randomUUID(), w.groups, input)
+  w.groups.push(group)
+  // Gather the members right where the first one is.
+  const at = w.tabs.indexOf(first)
+  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1)
+  w.tabs.splice(Math.min(at, w.tabs.length), 0, ...tabs)
+  for (const tab of tabs) tab.groupId = group.id
+  afterGroupChange(w)
+  return group.id
+}
+
+/** Add tabs to a group (they move to its end). */
+export function addBrowserTabsToGroup(ids: readonly string[], groupId: string): boolean {
+  const w = windowOfGroup(groupId)
+  const members = w ? groupMembers(w, groupId) : []
+  if (!w || members.length === 0) return false
+  const tabs = groupableTabs(ids).filter((tab) => tab.win === w && tab.spaceId === members[0]!.spaceId && tab.groupId !== groupId)
+  if (tabs.length === 0) return false
+  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1)
+  const last = w.tabs.indexOf(members[members.length - 1]!)
+  w.tabs.splice(last + 1, 0, ...tabs)
+  for (const tab of tabs) tab.groupId = groupId
+  afterGroupChange(w)
+  return true
+}
+
+/** Take tabs out of their group; they go just after it so the group stays one run. */
+export function removeBrowserTabsFromGroup(ids: readonly string[]): boolean {
+  const tabs = groupableTabs(ids).filter((tab) => tab.groupId)
+  const w = tabs[0]?.win
+  if (!w) return false
+  for (const tab of tabs) {
+    const groupId = tab.groupId!
+    tab.groupId = null
+    const rest = groupMembers(w, groupId)
+    const last = rest[rest.length - 1]
+    if (last && w.tabs.indexOf(last) > w.tabs.indexOf(tab)) {
+      w.tabs.splice(w.tabs.indexOf(tab), 1)
+      w.tabs.splice(w.tabs.indexOf(last) + 1, 0, tab)
+    }
+  }
+  afterGroupChange(w)
+  return true
+}
+
+/** Rename / recolour / collapse. Collapsing the group that holds the active tab moves you to a tab outside it. */
+export function updateBrowserTabGroup(groupId: string, patch: { name?: unknown; color?: unknown; collapsed?: unknown }): boolean {
+  const w = windowOfGroup(groupId)
+  const group = groupById(w, groupId)
+  if (!w || !group) return false
+  const next = updateTabGroup(group, patch)
+  w.groups = w.groups.map((candidate) => candidate === group ? next : candidate)
+  if (next.collapsed && !group.collapsed) {
+    const active = activeTabOf(w)
+    if (active?.groupId === groupId) {
+      // Like Chrome: the next tab outside the group in this Space, or a New Tab.
+      const tabs = spaceTabsOf(w, active.spaceId).filter((tab) => !tab.pinned)
+      const at = tabs.indexOf(active)
+      const outside = [...tabs.slice(at + 1), ...tabs.slice(0, at).reverse()].find((tab) => tab.groupId !== groupId)
+      if (outside) activateTabInternal(outside.id)
+      else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, active.spaceId)
+      // Activating a tab expands its group; this one stays collapsed.
+      const still = groupById(w, groupId)
+      if (still) still.collapsed = true
+    }
+  }
+  afterGroupChange(w)
+  return true
+}
+
+export function toggleBrowserTabGroupCollapsed(groupId: string): boolean {
+  const group = groupById(windowOfGroup(groupId), groupId)
+  return group ? updateBrowserTabGroup(groupId, { collapsed: !group.collapsed }) : false
+}
+
+/** Ungroup: the tabs stay where they are. */
+export function ungroupBrowserTabGroup(groupId: string): boolean {
+  const w = windowOfGroup(groupId)
+  if (!w) return false
+  for (const tab of groupMembers(w, groupId)) tab.groupId = null
+  w.groups = w.groups.filter((group) => group.id !== groupId)
+  afterGroupChange(w)
+  return true
+}
+
+/** Close every tab in the group (the caller confirms when it's more than one). */
+export function closeBrowserTabGroup(groupId: string): boolean {
+  const w = windowOfGroup(groupId)
+  if (!w) return false
+  for (const tab of groupMembers(w, groupId)) closeBrowserTab(tab.id)
+  return true
+}
+
+/** New Tab at the end of the group, in its Space. */
+export function newBrowserTabInGroup(groupId: string): string | null {
+  const w = windowOfGroup(groupId)
+  const members = w ? groupMembers(w, groupId) : []
+  const last = members[members.length - 1]
+  if (!w || !last) return null
+  const id = createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, w.tabs.indexOf(last) + 1, false, false, w, last.spaceId)
+  const tab = findTab(id)
+  if (tab) {
+    tab.groupId = groupId
+    afterGroupChange(w)
+  }
+  return id
+}
+
+/** Drag a group header: the whole group lands before `beforeId` (never inside another group or split). */
+export function moveBrowserTabGroup(groupId: string, beforeId: string | null): boolean {
+  const w = windowOfGroup(groupId)
+  if (!w) return false
+  const before = beforeId ? findTab(beforeId) : undefined
+  if (before && before.win !== w) return moveBrowserTabGroupToWindow(groupId, before.win.window)
+  const members = groupMembers(w, groupId)
+  if (members.length === 0 || (before && before.groupId === groupId)) return false
+  const orderBefore = w.tabs.map((tab) => tab.id).join('|')
+  for (const tab of members) w.tabs.splice(w.tabs.indexOf(tab), 1)
+  // Snap to the start of whatever group / split `before` is in.
+  let anchor = before
+  if (anchor?.groupId) anchor = w.tabs.find((tab) => tab.groupId === anchor!.groupId)
+  const split = splitOf(anchor)
+  if (split) anchor = w.tabs.find((tab) => split.tabIds.includes(tab.id)) ?? anchor
+  let at = anchor ? w.tabs.indexOf(anchor) : -1
+  if (at < 0) at = w.tabs.length
+  w.tabs.splice(at, 0, ...members)
+  if (w.tabs.map((tab) => tab.id).join('|') === orderBefore) return false
+  afterGroupChange(w)
+  return true
+}
+
+/** Move a whole group (its splits too) into another window, or a new one when `target` is null. */
+export function moveBrowserTabGroupToWindow(groupId: string, target: BaseWindow | null, position?: { x: number; y: number }): boolean {
+  const from = windowOfGroup(groupId)
+  const group = groupById(from, groupId)
+  if (!from || !group) return false
+  const members = groupMembers(from, groupId)
+  if (members.length === 0 || members.some((tab) => !canMoveTabTo(tab, windowStateFor(target) ?? from))) return false
+  const focus = members.find((tab) => tab.id === from.activeTabId) ?? members[0]!
+  let to: BrowserWindowState | undefined
+  if (target) {
+    to = windowStateFor(target)
+    if (!isLiveWindow(to) || to === from) return false
+  } else {
+    // Something has to stay behind in the old window.
+    if (from.tabs.length <= members.length || !browserWindowFactory) return false
+    let size: { width: number; height: number } | undefined
+    try {
+      const [width = 0, height = 0] = from.window.getSize()
+      if (width > 0 && height > 0) size = { width, height }
+    } catch {
+      // Default size.
+    }
+    const created = browserWindowFactory({ private: from.isPrivate, adoptTabId: members[0]!.id, position, size })
+    to = created ? windowStateFor(created) : undefined
+    if (!to) return false
+  }
+  for (const tab of members) if (tab.win !== to) moveTabsWithSplit(tab, to, null)
+  const moved = { ...group }
+  to.groups = [...to.groups.filter((candidate) => candidate.id !== groupId), moved]
+  from.groups = from.groups.filter((candidate) => candidate.id !== groupId)
+  for (const tab of members) if (tab.win === to) tab.groupId = groupId
+  activateTabInternal(focus.id)
+  afterGroupChange(to)
+  publishState(from)
+  if (!to.window.isDestroyed()) to.window.focus()
+  return true
+}
+
+/** A group header drag ended outside the list: another window under the pointer, else a new window. */
+export function dropBrowserTabGroupOutside(groupId: string): boolean {
+  const from = windowOfGroup(groupId)
+  if (!from) return false
+  const point = screen.getCursorScreenPoint()
+  const contains = (window: BaseWindow): boolean => {
+    if (window.isDestroyed() || window.isMinimized()) return false
+    const bounds = window.getBounds()
+    return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
+  }
+  if (contains(from.window)) return false
+  const target = windowStates.find((w) => w !== from && isLiveWindow(w) && contains(w.window))
+  if (target) return moveBrowserTabGroupToWindow(groupId, target.window)
+  return moveBrowserTabGroupToWindow(groupId, null, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
+}
+
+/** Groups of the current window's Space, for the palette ("Add Tab to Group: …"). */
+export function listBrowserTabGroups(w = currentWindowState()): { id: string; label: string; color: string; collapsed: boolean; count: number }[] {
+  if (!w) return []
+  const visible = new Set(spaceTabsOf(w).map((tab) => tab.groupId))
+  return w.groups.filter((group) => visible.has(group.id)).map((group) => ({ id: group.id, label: tabGroupLabel(group), color: group.color, collapsed: group.collapsed, count: groupMembers(w, group.id).length }))
+}
+
+/** The active tab's group id (palette commands act on it). */
+export function activeBrowserTabGroupId(): string | null {
+  return activeTabOf(currentWindowState())?.groupId ?? null
+}
+
+type TabGroupHeaderMenuHook = (groupId: string) => MenuItemConstructorOptions[]
+let groupHeaderMenuHook: TabGroupHeaderMenuHook | null = null
+/** tab-groups-ipc.ts supplies the rename / close-with-confirm items (they need the renderer and dialogs). */
+export function setTabGroupMenuHook(hook: TabGroupHeaderMenuHook | null): void {
+  groupHeaderMenuHook = hook
+}
+
+/** Tab context menu: Add to New Group / Add to Group ▸ / Remove from Group. */
+function groupTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
+  if (tab.pinned) return []
+  const w = tab.win
+  const others = listBrowserTabGroups(w).filter((group) => group.id !== tab.groupId && windowOfGroup(group.id) === w && groupMembers(w, group.id)[0]?.spaceId === tab.spaceId)
+  return [
+    { label: 'Add Tab to New Group', click: () => { createBrowserTabGroup([tab.id]) } },
+    ...(others.length > 0 ? [{
+      label: 'Add Tab to Group',
+      submenu: others.map((group): MenuItemConstructorOptions => ({ label: `${group.label} (${group.count})`, click: () => { addBrowserTabsToGroup([tab.id], group.id) } }))
+    }] : []),
+    ...(tab.groupId ? [{ label: 'Remove from Group', click: () => { removeBrowserTabsFromGroup([tab.id]) } }] : []),
+    { type: 'separator' as const }
+  ]
+}
+
+/** Right-click on a group header. */
+export function showBrowserTabGroupMenu(groupId: string): boolean {
+  const w = windowOfGroup(groupId)
+  const group = groupById(w, groupId)
+  if (!w || !group) return false
+  const others = windowStates.filter((candidate) => candidate !== w && isLiveWindow(candidate) && !candidate.isPrivate === !w.isPrivate)
+  const items: MenuItemConstructorOptions[] = [
+    ...(groupHeaderMenuHook?.(groupId) ?? []),
+    {
+      label: 'Colour',
+      submenu: TAB_GROUP_COLORS.map((color): MenuItemConstructorOptions => ({ label: color[0]!.toUpperCase() + color.slice(1), type: 'checkbox', checked: group.color === color, click: () => { updateBrowserTabGroup(groupId, { color }) } }))
+    },
+    { label: group.collapsed ? 'Expand Group' : 'Collapse Group', click: () => { toggleBrowserTabGroupCollapsed(groupId) } },
+    { label: 'New Tab in Group', click: () => { newBrowserTabInGroup(groupId) } },
+    { type: 'separator' },
+    { label: 'Ungroup', click: () => { ungroupBrowserTabGroup(groupId) } },
+    { label: 'Move Group to New Window', enabled: w.tabs.length > groupMembers(w, groupId).length, click: () => { moveBrowserTabGroupToWindow(groupId, null) } },
+    ...others.map((candidate): MenuItemConstructorOptions => ({ label: `Move Group to ${browserWindowLabel(candidate.window)}`, click: () => { moveBrowserTabGroupToWindow(groupId, candidate.window) } }))
+  ]
+  Menu.buildFromTemplate(items).popup({ window: w.window })
   return true
 }

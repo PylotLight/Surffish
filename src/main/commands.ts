@@ -37,6 +37,8 @@ import { takeScreenshot } from './screenshot'
 import { readerStateFor, toggleReaderMode } from './reader-mode'
 import { cycleBrowserSpace, getBrowserSpacesSnapshot, moveBrowserTabToSpace, switchBrowserSpace } from './browser'
 import { createBrowserSpace, deleteBrowserSpaceWithConfirm } from './spaces-ipc'
+import { activeBrowserTabGroupId, addBrowserTabsToGroup, createBrowserTabGroup, listBrowserTabGroups, newBrowserTabInGroup, removeBrowserTabsFromGroup, toggleBrowserTabGroupCollapsed, ungroupBrowserTabGroup } from './browser'
+import { closeBrowserTabGroupWithConfirm, renameBrowserTabGroup } from './tab-groups-ipc'
 import { DEFAULT_SPACE_ID } from '../shared/spaces'
 
 /**
@@ -218,8 +220,33 @@ function spaceCommands(): BrowserCommand[] {
   ]
 }
 
+/** Tab group commands (work with Spaces on or off); "Add Tab to Group: …" lists this Space's groups. */
+function tabGroupCommands(): BrowserCommand[] {
+  const tab = activeTab()
+  const groupId = activeBrowserTabGroupId()
+  const groups = listBrowserTabGroups()
+  const inGroup = (): boolean => Boolean(groupId)
+  const canGroup = (): boolean => Boolean(tab && !tab.pinned)
+  return [
+    { id: 'group.new', title: 'Add Tab to New Group', section: 'Tab Group', keywords: ['tab group', 'group tabs', 'create group'], refocusPage: true, enabled: canGroup, run: () => { if (tab) createBrowserTabGroup([tab.id]) } },
+    { id: 'group.remove', title: 'Remove Tab from Group', section: 'Tab Group', keywords: ['tab group', 'ungroup tab'], refocusPage: true, enabled: inGroup, run: () => { if (tab) removeBrowserTabsFromGroup([tab.id]) } },
+    { id: 'group.rename', title: 'Rename Group…', section: 'Tab Group', keywords: ['tab group', 'name group'], enabled: inGroup, run: () => { if (groupId) renameBrowserTabGroup(groupId) } },
+    { id: 'group.collapse', title: 'Collapse Group', section: 'Tab Group', keywords: ['tab group', 'fold', 'hide group'], enabled: inGroup, run: () => { if (groupId) toggleBrowserTabGroupCollapsed(groupId) } },
+    { id: 'group.newTab', title: 'New Tab in Group', section: 'Tab Group', keywords: ['tab group'], enabled: inGroup, run: () => { if (groupId) newBrowserTabInGroup(groupId) } },
+    { id: 'group.ungroup', title: 'Ungroup', section: 'Tab Group', keywords: ['tab group', 'dissolve group'], refocusPage: true, enabled: inGroup, run: () => { if (groupId) ungroupBrowserTabGroup(groupId) } },
+    { id: 'group.close', title: 'Close Group…', section: 'Tab Group', keywords: ['tab group', 'close tabs'], enabled: inGroup, run: () => { if (groupId) return closeBrowserTabGroupWithConfirm(groupId) } },
+    ...groups.map((group): BrowserCommand => ({
+      id: `group.add:${group.id}`, title: `Add Tab to Group: ${group.label}`, section: 'Tab Group', keywords: ['tab group', 'move to group'], refocusPage: true,
+      enabled: () => canGroup() && group.id !== groupId, run: () => { if (tab) addBrowserTabsToGroup([tab.id], group.id) }
+    })),
+    ...groups.filter((group) => group.collapsed).map((group): BrowserCommand => ({
+      id: `group.expand:${group.id}`, title: `Expand Group: ${group.label}`, section: 'Tab Group', keywords: ['tab group', 'unfold', 'show group'], run: () => toggleBrowserTabGroupCollapsed(group.id)
+    }))
+  ]
+}
+
 function allCommands(): BrowserCommand[] {
-  return [...COMMANDS, ...spaceCommands()]
+  return [...COMMANDS, ...tabGroupCommands(), ...spaceCommands()]
 }
 
 function isEnabled(command: BrowserCommand): boolean {
@@ -253,7 +280,7 @@ export function focusActivePage(): void {
 
 export async function runCommand(id: unknown): Promise<boolean> {
   if (typeof id !== 'string') return false
-  const command = COMMANDS_BY_ID.get(id) ?? (id.startsWith('space.') ? allCommands().find((candidate) => candidate.id === id) : undefined)
+  const command = COMMANDS_BY_ID.get(id) ?? (id.startsWith('space.') || id.startsWith('group.') ? allCommands().find((candidate) => candidate.id === id) : undefined)
   if (!command || !isEnabled(command)) return false
   noteCommandUsed(id)
   if (command.refocusPage) focusActivePage()

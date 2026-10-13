@@ -2,6 +2,7 @@ import { MAX_RESTORED_TABS, normalizeBrowserSession, parseBrowserSession } from 
 import { parseSavedWindowState, type SavedWindowState } from './window-geometry'
 import { parseSessionSplits, remapSessionSplits, type SavedSplit } from './split-view'
 import { parseSavedWindowSpaces, remapSavedWindowSpaces, type SavedWindowSpaces } from './spaces'
+import { parseSavedTabGroups, remapSavedTabGroups, type SavedTabGroup } from './tab-groups'
 
 /**
  * The saved session with several windows.
@@ -24,6 +25,8 @@ export interface SavedSessionWindow {
   splits?: SavedSplit[]
   /** Which Space each tab is in (spaces.ts); left out when everything is in Default. */
   spaces?: SavedWindowSpaces
+  /** Tab groups (indexes into `urls`, tab-groups.ts); left out when there are none. */
+  groups?: SavedTabGroup[]
 }
 
 export interface SavedWindowsSession {
@@ -39,6 +42,7 @@ export interface SessionWindowInput {
   geometry: SavedWindowState | null
   splits?: readonly SavedSplit[]
   spaces?: SavedWindowSpaces | null
+  groups?: readonly SavedTabGroup[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +75,13 @@ function normalizeSpaces(window: SessionWindowInput, keptCount: number): SavedWi
   return remapSavedWindowSpaces(valid, (index) => newIndex.get(index) ?? -1, keptCount)
 }
 
+function normalizeGroups(window: SessionWindowInput, keptCount: number, pinnedIndexes: readonly number[]): SavedTabGroup[] {
+  if (!window.groups || window.groups.length === 0) return []
+  const valid = parseSavedTabGroups(window.groups, window.urls.length)
+  const newIndex = keptIndexMap(window, keptCount)
+  return parseSavedTabGroups(remapSavedTabGroups(valid, (index) => newIndex.get(index) ?? -1), keptCount, pinnedIndexes)
+}
+
 function normalizeSplits(window: SessionWindowInput, keptCount: number, pinnedIndexes: readonly number[]): SavedSplit[] {
   if (!window.splits || window.splits.length === 0) return []
   const newIndex = keptIndexMap(window, keptCount)
@@ -90,7 +101,8 @@ export function normalizeWindowsSession(windows: readonly SessionWindowInput[], 
     if (index === focusedIndex) focused = kept.length
     const splits = normalizeSplits(window, session.urls.length, session.pinnedIndexes)
     const spaces = normalizeSpaces(window, session.urls.length)
-    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}) })
+    const groups = normalizeGroups(window, session.urls.length, session.pinnedIndexes)
+    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}), ...(groups.length > 0 ? { groups } : {}) })
   })
   // A focused window that was dropped (or an out-of-range index) falls back to the last one.
   return { windows: kept, focusedIndex: clampFocused(focused, kept.length) }
@@ -111,6 +123,7 @@ export function serializeWindowsSession(session: SavedWindowsSession): Record<st
       pinnedTabs: window.pinnedIndexes,
       ...(window.splits && window.splits.length > 0 ? { splits: window.splits } : {}),
       ...(window.spaces ? { spaces: window.spaces } : {}),
+      ...(window.groups && window.groups.length > 0 ? { groups: window.groups } : {}),
       ...(window.geometry ? { bounds: window.geometry.bounds, maximized: window.geometry.maximized, fullScreen: window.geometry.fullScreen } : {})
     }))
   }
@@ -128,7 +141,8 @@ export function parseWindowsSession(value: unknown, legacyGeometry: SavedWindowS
       pinnedIndexes: Array.isArray(window.pinnedTabs) ? window.pinnedTabs.filter((index): index is number => typeof index === 'number' && Number.isInteger(index)) : [],
       geometry: parseSavedWindowState(window),
       splits: Array.isArray(window.splits) ? window.splits as SavedSplit[] : [],
-      spaces: parseSavedWindowSpaces(window.spaces, Array.isArray(window.tabs) ? window.tabs.length : 0)
+      spaces: parseSavedWindowSpaces(window.spaces, Array.isArray(window.tabs) ? window.tabs.length : 0),
+      groups: Array.isArray(window.groups) ? window.groups as SavedTabGroup[] : []
     }))
     const focused = typeof value.focusedWindow === 'number' ? value.focusedWindow : windows.length - 1
     const session = normalizeWindowsSession(windows, focused)

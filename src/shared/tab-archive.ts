@@ -54,6 +54,9 @@ export interface ArchivedTab {
   /** The Space it was in (only recorded while Spaces are on); restore goes back there if it still exists. */
   spaceId?: string
   spaceName?: string
+  /** The tab group it was in: label and colour (the group itself isn't recreated on restore). */
+  groupName?: string
+  groupColor?: string
 }
 
 export interface TabArchiveSnapshot {
@@ -246,6 +249,11 @@ export function sanitizeArchivedTab(value: unknown): ArchivedTab | null {
   if (typeof record.spaceId === 'string' && /^[a-z0-9][a-z0-9-]{0,39}$/.test(record.spaceId) && label) {
     tab.spaceId = record.spaceId
     tab.spaceName = label
+  }
+  const groupName = cleanLabel(record.groupName)
+  if (groupName && typeof record.groupColor === 'string' && /^[a-z]{3,10}$/.test(record.groupColor)) {
+    tab.groupName = groupName
+    tab.groupColor = record.groupColor
   }
   return tab
 }

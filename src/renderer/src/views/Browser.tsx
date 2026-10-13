@@ -63,6 +63,8 @@ import { formatVisitedAt } from '../lib/format'
 import { useTabDragSort } from './useTabDragSort'
 import { SplitTabEntry } from './SplitTabEntry'
 import { groupTabEntries } from '../../../shared/split-view'
+import { dropTargetGroup, TAB_GROUP_COLOR_VALUES, withGroupHeaders } from '../../../shared/tab-groups'
+import { TabGroupHeader } from './tab-groups/TabGroupHeader'
 import TimeZonePicker from './TimeZonePicker'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { ExtensionsSettings } from './ExtensionsSettings'
@@ -306,10 +308,33 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const spaces = useSpaces()
   const activeSpace = spaces?.enabled ? spaces.spaces.find((space) => space.id === spaces.activeSpaceId) : undefined
   // A split view is one sidebar entry (keyed by its first tab), so it sorts and drags as one.
-  const tabEntries = useMemo(() => groupTabEntries(tabs.filter((tab) => !tab.pinned)), [tabs])
+  // Tab groups add a header entry (`group:<id>`) before each group's run and hide collapsed runs.
+  const tabEntries = useMemo(() => withGroupHeaders(groupTabEntries(tabs.filter((tab) => !tab.pinned)), (entry) => (entry.kind === 'split' ? entry.tabs[0] : entry.tab)?.group), [tabs])
   const tabEntriesByKey = useMemo(() => new Map(tabEntries.map((entry) => [entry.key, entry])), [tabEntries])
   const unpinnedTabIds = useMemo(() => tabEntries.map((entry) => entry.key), [tabEntries])
-  const tabDrag = useTabDragSort(unpinnedTabIds, (id, beforeId) => { void window.api.browser.tabs.move(id, beforeId) }, (id) => { void window.api.browser.tabs.dropOutside(id) })
+  const tabDrag = useTabDragSort(unpinnedTabIds, moveSidebarEntry, (key) => {
+    if (key.startsWith('group:')) void window.api.browser.tabGroups.dropOutside(key.slice('group:'.length))
+    else void window.api.browser.tabs.dropOutside(key)
+  })
+  /** A sidebar entry key as a tab id main understands: a group header stands for its first tab. */
+  function entryTabId(key: string | null): string | null {
+    if (!key?.startsWith('group:')) return key
+    const groupId = key.slice('group:'.length)
+    return tabs.find((tab) => tab.group?.id === groupId)?.id ?? null
+  }
+  /** Drop handler: a header moves its whole group; a tab (or split) lands in the group it was dropped into, or none. */
+  function moveSidebarEntry(key: string, beforeKey: string | null): void {
+    if (key.startsWith('group:')) {
+      void window.api.browser.tabGroups.move(key.slice('group:'.length), entryTabId(beforeKey))
+      return
+    }
+    const order = unpinnedTabIds.filter((candidate) => candidate !== key)
+    const at = beforeKey ? order.indexOf(beforeKey) : -1
+    order.splice(at < 0 ? order.length : at, 0, key)
+    const groupOfKey = (candidate: string): string | null => tabs.find((tab) => tab.id === candidate)?.group?.id ?? null
+    const target = dropTargetGroup(order, key, groupOfKey, (groupId) => tabs.some((tab) => tab.group?.id === groupId && tab.group.collapsed))
+    void window.api.browser.tabGroups.moveTab(key, entryTabId(beforeKey), target)
+  }
   const [bramblePoc, setBramblePoc] = useState<BrambleExtensionState>(EMPTY_BRAMBLE_POC)
   const [webStoreExtensions, setWebStoreExtensions] = useWebStoreExtensions()
   const [history, setHistory] = useState<BrowsingHistoryEntry[]>([])
@@ -1176,8 +1201,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           </div>
         ) : (
           <div ref={tabDrag.listRef} className={`tab-list${tabDrag.draggingId ? ' is-drag-sorting' : ''}`} role="tablist" aria-label="Open tabs" onClickCapture={tabDrag.onClickCapture}>
-            {tabDrag.orderedIds.map((id) => tabEntriesByKey.get(id)).filter((entry) => entry !== undefined).map((entry) => entry.kind === 'split' ? (
+            {tabDrag.orderedIds.map((id) => tabEntriesByKey.get(id)).filter((entry) => entry !== undefined).map((entry) => entry.kind === 'group' ? (
+              <TabGroupHeader key={entry.key} entryKey={entry.key} group={entry.group} dragging={tabDrag.draggingId === entry.key} handlers={tabDrag.itemHandlers(entry.key)} />
+            ) : entry.kind === 'split' ? (
               <SplitTabEntry
+                groupColor={entry.tabs[0]?.group ? TAB_GROUP_COLOR_VALUES[entry.tabs[0].group.color] : undefined}
                 key={entry.key}
                 entryId={entry.key}
                 tabs={entry.tabs}
@@ -1193,7 +1221,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               />
             ) : (({ tab }) => (
               <div
-                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}`}
+                className={`tab-item${tab.active ? ' is-active' : ''}${tab.private ? ' is-private' : ''}${tab.sleeping ? ' is-sleeping' : ''}${tabDrag.draggingId === tab.id ? ' is-dragging' : ''}${tab.group ? ' is-grouped' : ''}`}
+                style={tab.group ? { '--group-color': TAB_GROUP_COLOR_VALUES[tab.group.color] } as React.CSSProperties : undefined}
                 key={tab.id}
                 data-browser-tab-id={tab.id}
                 role="tab"

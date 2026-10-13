@@ -45,6 +45,7 @@ import { tabArchiveApi } from './tab-archive'
 import { networkToolsApi, proxyRoutingApi } from './network-tools'
 import { splitViewApi } from './split-view'
 import { spacesApi } from './spaces'
+import { tabGroupsApi } from './tab-groups'
 import { watchersApi } from './watchers'
 
 const api = {
@@ -188,6 +189,7 @@ const api = {
     },
     split: splitViewApi,
     spaces: spacesApi,
+    tabGroups: tabGroupsApi,
     session: {
       clear: (): Promise<boolean> => ipcRenderer.invoke('browser:session:clear')
     },
