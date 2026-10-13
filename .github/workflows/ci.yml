@@ -319,9 +319,12 @@ jobs:
       - name: Core Electron smokes (2 at a time)
         env:
           TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors"
+          # TODO: run tab-groups hidden too. Hidden mode breaks the sidebar right-click hit-test it
+          # relies on (and it once stole focus anyway), so for now it runs with normal windows.
+          VISIBLE_TESTS: "test:electron-tab-groups"
         run: |
           export logs="$RUNNER_TEMP/smoke-logs"; mkdir -p "$logs"
-          printf '%s\n' $TESTS | xargs -P 2 -I{} sh -c 's=$(date +%s); bun run "$1" >"$logs/$1.log" 2>&1; echo "$? $(( $(date +%s) - s ))" >"$logs/$1.status"' _ {}
+          printf '%s\n' $TESTS | xargs -P 2 -I{} sh -c 'case " $VISIBLE_TESTS " in *" $1 "*) export SURFFISH_SMOKE_HIDDEN=0;; esac; s=$(date +%s); bun run "$1" >"$logs/$1.log" 2>&1; echo "$? $(( $(date +%s) - s ))" >"$logs/$1.status"' _ {}
           failed=0
           for t in $TESTS; do
             read -r code secs < "$logs/$t.status"
