@@ -88,7 +88,10 @@ jobs:
           if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
           echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
           "$BUN_INSTALL/bin/bun" --version
-      - run: bun install
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
       - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
         run: |
           helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
@@ -135,10 +138,113 @@ jobs:
           for t in $TESTS; do echo "$((100 + i)) $t"; i=$((i + 1)); done \
             | xargs -P 2 -L 1 bash -c 'run_one "$0" "$1"'
 
+  # Per-PR perf regression check (docs/perf.md). Builds the PR (merge commit) and its base on the
+  # same pod, runs scripts/perf/bench.cjs on each, interleaved, and compares medians. Its own job,
+  # so it runs in parallel with the lanes. On push to main it compares against the previous main.
+  perf:
+    name: perf (linux)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      PERF_RUNS: 3
+    steps:
+      - name: Checkout PR and its base (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || 'main' }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+          base="$RUNNER_TEMP/perf-base"
+          git worktree prune; rm -rf "$base"
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != 0000000000000000000000000000000000000000 ] && git fetch -q --no-tags --depth 1 origin "$BASE_SHA"; then
+            git worktree add -q --detach "$base" FETCH_HEAD
+            echo "PERF_BASE=$base" >> "$GITHUB_ENV"
+            echo "comparing $SHA against base $BASE_SHA"
+          else
+            echo "::warning::no base commit to compare against, perf runs on this commit only"
+          fi
+      - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
+        run: |
+          dir="${SURFFISH_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/surffish; fi
+          if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+            { echo "BUN_INSTALL=$dir/bun"; echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache"; echo "ELECTRON_CACHE=$dir/electron"; } >> "$GITHUB_ENV"
+          else
+            echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
+          fi
+      - name: Bun (pinned to .bun-version, installed into $BUN_INSTALL if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      - name: Install base deps (reuses the PR's node_modules when the dependencies match)
+        if: env.PERF_BASE
+        run: |
+          if bun scripts/perf/same-deps.ts . "$PERF_BASE"; then
+            ln -s "$PWD/node_modules" "$PERF_BASE/node_modules"
+          else
+            (cd "$PERF_BASE" && bash "$GITHUB_WORKSPACE/scripts/ci/watch-node.sh" bun install)
+          fi
+      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+        run: |
+          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          if sudo -n true 2>/dev/null; then sudo chown root:root "$helper" && sudo chmod 4755 "$helper"; else echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"; fi
+      - name: Start D-Bus (silences Chromium bus spam in containers)
+        run: |
+          sudo mkdir -p /run/dbus
+          sudo dbus-daemon --system --fork 2>/dev/null || true
+          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
+      - name: Perf unit tests
+        run: bun run test:perf
+      - name: Build PR and base
+        run: |
+          bun run build >"$RUNNER_TEMP/build-pr.log" 2>&1 & pr=$!
+          if [ -n "${PERF_BASE:-}" ]; then (cd "$PERF_BASE" && bun run build) >"$RUNNER_TEMP/build-base.log" 2>&1 & base=$!; fi
+          ok=0
+          wait $pr || { echo "::error::PR build failed"; cat "$RUNNER_TEMP/build-pr.log"; ok=1; }
+          if [ -n "${base:-}" ]; then wait $base || { echo "::error::base build failed"; cat "$RUNNER_TEMP/build-base.log"; ok=1; }; fi
+          exit $ok
+      - name: Bench (PR vs base, interleaved)
+        run: |
+          apps="--app pr=."
+          [ -n "${PERF_BASE:-}" ] && apps="--app main=$PERF_BASE $apps"
+          xvfb-run -a -s "-screen 0 1600x1000x24" bun run perf $apps --out "$RUNNER_TEMP/perf.json"
+      - name: Compare, step summary and sticky PR comment
+        if: env.PERF_BASE
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          bun run perf:compare "$RUNNER_TEMP/perf.json" --base main --head pr --title "Perf check (linux)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
+          status=$?
+          cat "$RUNNER_TEMP/perf.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/perf.md"
+          if [ -n "$PR_NUMBER" ]; then bun scripts/perf/post-comment.ts linux "$RUNNER_TEMP/perf.md"; fi
+          [ "$status" = 0 ] || echo "::error::perf regression beyond the thresholds in scripts/perf/perf.config.json (see the table above)"
+          exit $status
+
   native-macos:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS]
     timeout-minutes: 45
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -157,7 +263,10 @@ jobs:
           if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           "$HOME/.bun/bin/bun" --version
-      - run: bun install
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
       - run: swift --version
       - name: Typecheck and unit tests on macOS
         run: bun run typecheck && bun run test
@@ -171,3 +280,154 @@ jobs:
       - name: Build native prototype
         working-directory: src/native/macos
         run: swift build
+
+  # Core Electron smokes on real macOS (no xvfb). The sidebar-overlay smoke drives the cursor with
+  # xdotool, so it stays Linux-only. Same install path as native-macos. Set the repo variable
+  # SURFFISH_MAC_CI=label to run it on PRs only when they carry the `mac` label (main always runs).
+  macos-smoke:
+    name: macos smoke
+    if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || vars.SURFFISH_MAC_CI != 'label' || contains(github.event.pull_request.labels.*.name, 'mac'))
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      # Hidden smoke mode (scripts/smoke-hidden.cjs): the runner is someone's laptop in use, so no
+      # Dock icon, no visible window, no focus stealing.
+      SURFFISH_SMOKE_HIDDEN: "1"
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      - run: bun run build
+      - name: Core Electron smokes (2 at a time)
+        env:
+          TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors"
+          # TODO: run tab-groups hidden too. Hidden mode breaks the sidebar right-click hit-test it
+          # relies on (and it once stole focus anyway), so for now it runs with normal windows.
+          VISIBLE_TESTS: "test:electron-tab-groups"
+        run: |
+          export logs="$RUNNER_TEMP/smoke-logs"; mkdir -p "$logs"
+          printf '%s\n' $TESTS | xargs -P 2 -I{} sh -c 'case " $VISIBLE_TESTS " in *" $1 "*) export SURFFISH_SMOKE_HIDDEN=0;; esac; s=$(date +%s); bun run "$1" >"$logs/$1.log" 2>&1; echo "$? $(( $(date +%s) - s ))" >"$logs/$1.status"' _ {}
+          failed=0
+          for t in $TESTS; do
+            read -r code secs < "$logs/$t.status"
+            [ "$code" = 0 ] && st=ok || { st=FAILED; failed=1; echo "::error::$t failed on macOS"; }
+            echo "::group::$st $t (${secs}s)"; cat "$logs/$t.log"; echo "::endgroup::"
+          done
+          exit $failed
+
+  # Perf check on the Mac runner (real GPU, macOS memory accounting), opt-in. The machine is in use, so
+  # timing/memory only warn here (perf.config.json platforms.darwin); deterministic metrics can fail.
+  # Results go to the step summary; with SURFFISH_GH_PROXY set in the runner's .env they are also
+  # posted to the PR as a sticky comment through that proxy (only those curl calls use it).
+  perf-macos:
+    name: perf (macos)
+    # Opt-in only: a PR with the `perf-mac` label, or a manual workflow_dispatch run.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      PERF_RUNS: 3
+      SURFFISH_SMOKE_HIDDEN: "1"
+    steps:
+      - name: Checkout PR and its base (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || 'main' }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build
+          base="$RUNNER_TEMP/perf-base"
+          git worktree prune; rm -rf "$base"
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != 0000000000000000000000000000000000000000 ] && git fetch -q --no-tags --depth 1 origin "$BASE_SHA"; then
+            git worktree add -q --detach "$base" FETCH_HEAD
+            echo "PERF_BASE=$base" >> "$GITHUB_ENV"
+          else
+            echo "::warning::no base commit to compare against, perf runs on this commit only"
+          fi
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      # Never a second bun install / install-electron on the Mac (corporate endpoint protection
+      # flags it). The base shares the PR's node_modules or isn't compared at all.
+      - name: Base deps (share the PR's node_modules, else skip the comparison)
+        if: env.PERF_BASE
+        run: |
+          if bun scripts/perf/same-deps.ts . "$PERF_BASE"; then
+            ln -s "$PWD/node_modules" "$PERF_BASE/node_modules"
+          else
+            echo "::warning::dependencies differ from the base, so perf (macos) only runs this PR's build (no comparison)"
+            echo "### Perf check (macOS): no comparison" >> "$GITHUB_STEP_SUMMARY"
+            echo "This PR changes dependencies (bun.lock or package.json), and the Mac runner never runs a second install, so the base wasn't benched. See the Linux perf check." >> "$GITHUB_STEP_SUMMARY"
+            echo "PERF_BASE=" >> "$GITHUB_ENV"
+          fi
+      - name: GitHub API proxy check (presence and HTTP status only)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "${SURFFISH_GH_PROXY:-}" ]; then echo "SURFFISH_GH_PROXY present: no (results go to the step summary only)"; exit 0; fi
+          echo "SURFFISH_GH_PROXY present: yes"
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 --proxy "$SURFFISH_GH_PROXY" -H "Authorization: Bearer $GITHUB_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY" || true)"
+          echo "GET /repos/$GITHUB_REPOSITORY through the proxy: HTTP $code"
+      - name: Build PR and base (base reuses the PR's native addons, which this check doesn't measure)
+        run: |
+          bun run build
+          if [ -n "${PERF_BASE:-}" ]; then
+            (cd "$PERF_BASE" && bunx electron-vite build)
+            [ -d out/native ] && mkdir -p "$PERF_BASE/out" && cp -R out/native "$PERF_BASE/out/"
+          fi
+      - name: Bench (PR vs base, interleaved)
+        run: |
+          apps="--app pr=."
+          [ -n "${PERF_BASE:-}" ] && apps="--app main=$PERF_BASE $apps"
+          bun run perf $apps --out "$RUNNER_TEMP/perf.json"
+      - name: Compare, step summary and (via SURFFISH_GH_PROXY) sticky PR comment
+        if: env.PERF_BASE
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          bun run perf:compare "$RUNNER_TEMP/perf.json" --base main --head pr --title "Perf check (macOS)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
+          status=$?
+          cat "$RUNNER_TEMP/perf.md" >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/perf.md"
+          if [ -n "$PR_NUMBER" ] && [ -n "${SURFFISH_GH_PROXY:-}" ]; then
+            GH_PROXY="$SURFFISH_GH_PROXY" bun scripts/perf/post-comment.ts macos "$RUNNER_TEMP/perf.md"
+          else
+            echo "no PR comment from the Mac runner (no SURFFISH_GH_PROXY or not a PR)"
+          fi
+          [ "$status" = 0 ] || echo "::error::perf regression beyond the thresholds in scripts/perf/perf.config.json (see the table above)"
+          exit $status
