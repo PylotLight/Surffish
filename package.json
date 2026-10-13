@@ -16,9 +16,10 @@
     "preview": "electron-vite preview",
     "clean": "rm -rf out",
     "typecheck": "bun check",
-    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts scripts/release-version.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/external-links.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/shared/world-cities.test.ts src/renderer/src/views/useTabDragSort.test.ts src/main/renderer-security.test.ts src/main/focus-address-shortcut.test.ts src/main/adblock.test.ts src/main/google-webkit-sign-in.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts src/main/crx.test.ts src/main/extension-staging.test.ts src/main/web-store-extension-adapter.test.ts src/shared/chrome-web-store.test.ts src/shared/extension-compat.test.ts src/shared/extension-tabs.test.ts src/shared/clean-link.test.ts src/shared/zoom.test.ts",
+    "test": "bun test --parallel=4 scripts/ensure-dependencies.test.ts scripts/native-build-cache.test.ts scripts/render-cask.test.ts scripts/release-version.test.ts src/preload/mac-trackpad-swipe.test.cjs src/shared/navigation.test.ts src/shared/external-links.test.ts src/shared/persistence.test.ts src/shared/autocomplete.test.ts src/shared/quick-links.test.ts src/shared/quick-links-backgrounds.test.ts src/shared/new-tab-photo-feed.test.ts src/shared/password-extension-compat.test.ts src/shared/downloads.test.ts src/shared/window-geometry.test.ts src/shared/world-cities.test.ts src/renderer/src/views/useTabDragSort.test.ts src/main/renderer-security.test.ts src/main/focus-address-shortcut.test.ts src/main/adblock.test.ts src/main/google-webkit-sign-in.test.ts src/main/adblock-filters.test.ts src/main/bramble-poc-adapter.test.ts src/main/bramble-release.test.ts src/main/crx.test.ts src/main/extension-staging.test.ts src/main/web-store-extension-adapter.test.ts src/shared/chrome-web-store.test.ts src/shared/extension-compat.test.ts src/shared/extension-tabs.test.ts src/shared/clean-link.test.ts src/shared/zoom.test.ts src/shared/pdf-editor.test.ts src/shared/pdf-page-ops.test.ts",
     "test:electron-security": "electron scripts/electron-security-smoke.cjs",
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
+    "test:electron-pdf-editor": "node scripts/electron-pdf-editor-smoke.mjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
     "test:electron-table-stakes": "electron scripts/electron-table-stakes-smoke.cjs",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
@@ -107,6 +108,8 @@
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
     "node-api-headers": "^1.9.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.4.299",
     "vite": "^8.3.2"
   },
   "dependencies": {

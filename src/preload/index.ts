@@ -122,6 +122,8 @@ const api = {
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
     stop: (): Promise<void> => ipcRenderer.invoke('browser:stop'),
+    /** Edit PDF on a PDF tab, Back to Viewer in the editor. */
+    togglePdfEditor: (): Promise<boolean> => ipcRenderer.invoke('browser:pdf-editor:toggle'),
     setBounds: (bounds: BrowserBounds): Promise<void> => ipcRenderer.invoke('browser:set-bounds', bounds),
     tabs: {
       get: (): Promise<BrowserTabSummary[]> => ipcRenderer.invoke('browser:tabs:get'),

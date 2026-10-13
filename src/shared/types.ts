@@ -89,6 +89,8 @@ export interface BrowserState {
   private: boolean
   /** Page zoom of the active tab (1 = 100%). */
   zoomFactor: number
+  /** The active tab shows a PDF in the built-in viewer, or the PDF editor. */
+  pdf: 'viewer' | 'editor' | null
 }
 
 /** Find-in-page result for the active tab, from Electron's `found-in-page`. */

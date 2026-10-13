@@ -307,3 +307,24 @@ export async function openDownloadsFolder(): Promise<boolean> {
     return false
   }
 }
+
+/** A file Surffish wrote itself (e.g. Save in the PDF editor): listed like a finished download. */
+export function recordSavedFile(saved: { filePath: string; sourceUrl: string; bytes: number; isPrivate: boolean }): void {
+  const now = Date.now()
+  records.unshift({
+    id: randomUUID(),
+    filename: safeDownloadFilename(saved.filePath),
+    source: safeDownloadSource(saved.sourceUrl),
+    startedAt: now,
+    completedAt: now,
+    receivedBytes: Math.max(0, saved.bytes),
+    totalBytes: Math.max(0, saved.bytes),
+    state: 'completed',
+    canResume: false,
+    fileAvailable: true,
+    message: null,
+    filePath: saved.filePath,
+    ...(saved.isPrivate ? { isPrivate: true } : {})
+  })
+  persistAndPublish()
+}

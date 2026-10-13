@@ -3524,3 +3524,17 @@
   outline: 0;
 }
 .find-bar-button:disabled { color: rgba(245, 247, 250, 0.3); cursor: default; }
+/* PDF tabs: Edit PDF / Back to viewer, shown only while the active tab is a PDF or its editor. */
+.omnibox-action-button.pdf-edit-button {
+  width: auto;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 0 8px 0 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.omnibox-action-button.pdf-edit-button svg {
+  width: 14px;
+  height: 14px;
+}

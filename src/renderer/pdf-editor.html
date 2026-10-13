@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF editor</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="toolbar" role="toolbar" aria-label="PDF editing tools">
+        <div class="group" role="radiogroup" aria-label="Tool">
+          <button type="button" class="tool is-active" data-tool="none" title="Select and fill forms (Esc)">Select</button>
+          <button type="button" class="tool" data-tool="highlight" title="Highlight text">Highlight</button>
+          <button type="button" class="tool" data-tool="freetext" title="Add text">Text</button>
+          <button type="button" class="tool" data-tool="ink" title="Draw">Draw</button>
+          <button type="button" class="tool" data-tool="stamp" title="Add an image">Image</button>
+          <button type="button" class="tool" data-tool="signature" title="Add a signature">Sign</button>
+        </div>
+        <div class="group tool-options" id="toolOptions" hidden>
+          <label class="color" title="Color"><span class="sr-only">Color</span><input type="color" id="toolColor" value="#ffd400" /></label>
+          <label class="size" id="toolSizeLabel" title="Size"><span id="toolSizeName" class="sr-only">Size</span><input type="range" id="toolSize" min="1" max="40" value="10" /></label>
+        </div>
+        <div class="group">
+          <button type="button" id="undo" title="Undo (⌘Z)" disabled>Undo</button>
+          <button type="button" id="redo" title="Redo (⇧⌘Z)" disabled>Redo</button>
+        </div>
+        <div class="group">
+          <button type="button" id="zoomOut" title="Zoom out">−</button>
+          <select id="zoom" aria-label="Zoom">
+            <option value="auto">Auto</option>
+            <option value="page-width" selected>Page width</option>
+            <option value="page-fit">Whole page</option>
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
+            <option value="1">100%</option>
+            <option value="1.5">150%</option>
+            <option value="2">200%</option>
+          </select>
+          <button type="button" id="zoomIn" title="Zoom in">+</button>
+          <button type="button" id="togglePages" class="is-active" title="Show or hide page tools">Pages</button>
+        </div>
+        <div class="spacer"></div>
+        <span id="dirtyNote" class="dirty-note" hidden>Unsaved changes</span>
+        <button type="button" id="back" title="Back to the built-in viewer">Back to viewer</button>
+        <button type="button" id="save" class="primary" title="Save a copy (⌘S)" disabled>Save…</button>
+      </header>
+      <div id="workspace">
+        <aside id="pages" aria-label="Pages">
+          <ol id="pageList"></ol>
+        </aside>
+        <div id="viewerContainer" tabindex="0">
+          <div id="viewer" class="pdfViewer"></div>
+        </div>
+      </div>
+      <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+    </div>
+
+    <dialog id="signatureDialog" aria-labelledby="signatureTitle">
+      <form method="dialog" id="signatureForm">
+        <h2 id="signatureTitle">Add a signature</h2>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" data-signature-tab="draw" aria-selected="true">Draw</button>
+          <button type="button" role="tab" data-signature-tab="type" aria-selected="false">Type</button>
+        </div>
+        <div class="signature-pane" data-signature-pane="draw">
+          <canvas id="signaturePad" width="560" height="180" aria-label="Draw your signature"></canvas>
+          <button type="button" id="signatureClear" class="link">Clear</button>
+        </div>
+        <div class="signature-pane" data-signature-pane="type" hidden>
+          <input type="text" id="signatureText" placeholder="Type your name" autocomplete="name" spellcheck="false" />
+        </div>
+        <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" /></label>
+        <div class="actions">
+          <button type="button" id="signatureCancel">Cancel</button>
+          <button type="submit" id="signatureAdd" class="primary">Add</button>
+        </div>
+      </form>
+    </dialog>
+    <script type="module" src="./src/pdf-editor/main.ts"></script>
+  </body>
+</html>

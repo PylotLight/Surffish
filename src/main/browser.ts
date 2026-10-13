@@ -18,6 +18,8 @@ import { forgetPrivateDownloads } from './downloads'
 import { getBrowserNewTabPage, getBrowserPreferencesSnapshot, getBrowserPinnedSites, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, loadBrowserSession, saveBrowserSiteZoom, saveBrowserPinnedSites, saveBrowserSession, saveBrowserSiteFavicon } from './browser-persistence'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
+import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
+import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
 import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
@@ -50,6 +52,17 @@ interface BrowserTab {
   extensionPageOwner: ExtensionPageOwner | null
   /** Private tab: in-memory session, never saved to history, the session file or the favicon cache. */
   isPrivate: boolean
+  /** The built-in viewer is showing a PDF (refreshed on frame loads so the toolbar can offer Edit PDF). */
+  showingPdf: boolean
+  /** Set while the tab shows the PDF editor instead of the page; the view then runs on the editor session. */
+  pdfEditor: PdfEditorTabState | null
+}
+
+interface PdfEditorTabState {
+  /** The PDF's own http(s)/file URL; what the tab reports, persists and goes back to. */
+  sourceUrl: string
+  name: string
+  dirty: boolean
 }
 
 /** Who opened an extension UI tab: Bramble's own integration or a Chrome Web Store extension. */
@@ -98,6 +111,7 @@ function getTab(id: string | null = activeTabId): BrowserTab | undefined {
 }
 
 function currentUrl(tab: BrowserTab): string {
+  if (tab.pdfEditor) return tab.pdfEditor.sourceUrl
   return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
 }
 
@@ -110,6 +124,7 @@ export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boo
   return Boolean(tab?.pauseAutoplayUntilVisited && tab.id !== activeTabId)
 }
 function pageTitle(tab: BrowserTab): string {
+  if (tab.pdfEditor) return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty)
   if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return 'New Tab'
   const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
@@ -127,11 +142,13 @@ function getState(): BrowserState {
     url: tab ? currentUrl(tab) : configuredStartPage(),
     title: tab ? pageTitle(tab) : 'New tab',
     loading: contents?.isLoading() ?? false,
-    canGoBack: contents?.navigationHistory.canGoBack() ?? false,
-    canGoForward: contents?.navigationHistory.canGoForward() ?? false,
+    // Back from the editor returns to the viewer.
+    canGoBack: tab?.pdfEditor ? true : contents?.navigationHistory.canGoBack() ?? false,
+    canGoForward: tab?.pdfEditor ? false : contents?.navigationHistory.canGoForward() ?? false,
     error: tab?.error ?? null,
     private: tab?.isPrivate ?? false,
-    zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1
+    zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
+    pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null
   }
 }
 
@@ -377,7 +394,8 @@ function hibernateTab(tab: BrowserTab): void {
 
 function scheduleTabSleep(tab: BrowserTab): void {
   cancelSleepTimer(tab)
-  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.id === activeTabId || tab.inactiveSince === null) return
+  // An editor tab holds unsaved edits in memory, so it never sleeps.
+  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || tab.id === activeTabId || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
   tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
 }
@@ -419,7 +437,7 @@ function ensureTabLoaded(tab: BrowserTab): void {
   applyTabBounds()
   const contents = view.webContents
   // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
-  const ready = tab.isPrivate ? whenPrivateSessionReady() : Promise.resolve()
+  const ready = tab.isPrivate && !tab.pdfEditor ? whenPrivateSessionReady() : Promise.resolve()
   void ready.then(() => contents.isDestroyed() ? undefined : contents.loadURL(target)).catch((error: unknown) => {
     if (tab.view?.webContents !== contents) return
     const message = error instanceof Error ? error.message : String(error)
@@ -470,7 +488,9 @@ function activateTabInternal(id: string): boolean {
 
 function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
   if (!browserWindow || browserWindow.isDestroyed()) return
-  const isBrowserPage = tabs.some((tab) => tab.view?.webContents === contents)
+  const tab = tabs.find((candidate) => candidate.view?.webContents === contents)
+  const isBrowserPage = tab !== undefined
+  const editorTab = tab?.pdfEditor ? tab : undefined
   const origin = isBrowserPage ? { x: browserBounds.x, y: browserBounds.y } : getMainRendererOrigin(contents) ?? { x: 0, y: 0 }
   showBrowserContextMenu(event, contents, params, {
     window: browserWindow,
@@ -484,7 +504,12 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     },
     openInBackgroundTab: openBackgroundTab,
     pdfDocument: isBrowserPage && isShowingPdf(contents),
-    printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined
+    printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined,
+    editPdf: isBrowserPage && editorTab === undefined ? () => { if (tab) openPdfEditor(tab.id) } : undefined,
+    pdfEditor: editorTab ? {
+      save: () => sendPdfEditorCommand(contents, 'save'),
+      backToViewer: () => { closePdfEditor(editorTab.id) }
+    } : undefined
   })
 }
 
@@ -558,6 +583,7 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
 
 function createTabView(tab: BrowserTab): WebContentsView | null {
   if (!browserWindow || browserWindow.isDestroyed()) return null
+  if (tab.pdfEditor) return createPdfEditorView(tab)
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
   const preload = tab.extensionPreloadPath ?? browserViewPreload
@@ -661,6 +687,7 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
     publishState()
   })
   contents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
+    if (isCurrentContents() && isMainFrame && !isInPlace) tab.showingPdf = false
     if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))) return
     if (!isInPlace && tab.id === activeTabId) hideLinkStatus()
     tab.downloadStartedForCurrentLoad = false
@@ -694,8 +721,17 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-stop-loading', () => {
     if (!isCurrentContents()) return
+    tab.showingPdf = isShowingPdf(contents)
     publishState()
     refreshTabFavicon(tab)
+  })
+  // The built-in PDF viewer is a child frame; notice it (and its absence) as soon as frames load.
+  contents.on('did-frame-finish-load', (_event, isMainFrame) => {
+    if (!isCurrentContents() || isMainFrame) return
+    const showingPdf = isShowingPdf(contents)
+    if (showingPdf === tab.showingPdf) return
+    tab.showingPdf = showingPdf
+    if (tab.id === activeTabId) publishState()
   })
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
@@ -772,6 +808,183 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
+/**
+ * The PDF editor runs in a tab of its own kind: the isolated editor session (no network, the
+ * surffish-pdf:// scheme only), its narrow preload, and no page-level extras (ad-filter preload,
+ * swipe preload, network inspector). Only main ever navigates it.
+ */
+function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
+  if (!browserWindow || browserWindow.isDestroyed()) return null
+  const preload = pdfEditorPreloadPath()
+  if (!preload) {
+    console.warn('[pdf editor] preload missing; editor unavailable')
+    return null
+  }
+  const view = new WebContentsView({
+    webPreferences: {
+      preload,
+      session: getPdfEditorSession(),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      nodeIntegrationInSubFrames: false,
+      spellcheck: !tab.isPrivate
+    }
+  })
+  tab.view = view
+  browserWindow.contentView.addChildView(view, 0)
+  view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+  const contents = view.webContents
+  const isCurrentContents = (): boolean => tab.view?.webContents === contents
+  contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  contents.on('before-mouse-event', (_event, mouseEvent) => {
+    if (activeTabId === tab.id && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent)
+  })
+  contents.on('before-input-event', (event, inputEvent) => {
+    if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
+    // Cmd/Ctrl+S saves here (and only here), so the page and the app menu never both fire.
+    if (inputEvent.key.toLowerCase() === 's' && !inputEvent.alt) {
+      event.preventDefault()
+      if (!inputEvent.isAutoRepeat) sendPdfEditorCommand(contents, 'save')
+      return
+    }
+    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
+  })
+  // Links inside the PDF open as ordinary tabs; the editor page itself never navigates.
+  contents.setWindowOpenHandler((details) => {
+    const target = resolveNavigationTarget(details.url, selectedSearchEngine)
+    if (target && /^https?:\/\//i.test(target)) {
+      const id = createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, tab.isPrivate)
+      if (id) persistOpenTabs()
+    }
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', (event) => event.preventDefault())
+  contents.on('will-redirect', (event, url) => { if (!isPdfEditorUrl(url)) event.preventDefault() })
+  contents.on('did-start-loading', () => {
+    if (!isCurrentContents()) return
+    tab.error = null
+    publishState()
+  })
+  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState() })
+  contents.on('page-title-updated', () => { if (isCurrentContents()) publishState() })
+  contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+    if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
+    tab.error = `${errorDescription} (${errorCode})`
+    publishState()
+  })
+  contents.on('render-process-gone', () => {
+    // A crashed editor has lost its edits either way; don't nag on close.
+    if (isCurrentContents() && tab.pdfEditor) tab.pdfEditor.dirty = false
+  })
+  contents.on('destroyed', () => {
+    if (!isCurrentContents()) return
+    const index = tabs.findIndex((candidate) => candidate.id === tab.id)
+    if (index < 0) return
+    tabs.splice(index, 1)
+    if (activeTabId === tab.id) {
+      activeTabId = null
+      const replacement = tabs[Math.min(index, tabs.length - 1)]
+      if (replacement) activateTabInternal(replacement.id)
+      else if (browserWindow && !browserWindow.isDestroyed()) newBrowserTab()
+    }
+    publishState()
+  })
+  return view
+}
+
+/** Swap a tab's view: the PDF editor in place of the page, or back. Navigation history is not kept. */
+function replaceTabView(tab: BrowserTab, editor: PdfEditorTabState | null, url: string): void {
+  disposeTabView(tab)
+  tab.pdfEditor = editor
+  tab.showingPdf = false
+  tab.error = null
+  tab.lastUrl = editor ? editor.sourceUrl : url
+  tab.pendingUrl = url
+  if (tab.id === activeTabId) {
+    ensureTabLoaded(tab)
+    applyTabBounds()
+    const contents = tab.view?.webContents
+    if (contents && !contents.isDestroyed()) contents.focus()
+  }
+  persistOpenTabs()
+  publishState()
+}
+
+/** Edit PDF: open the PDF the tab shows in the bundled pdf.js editor. */
+export function openPdfEditor(id = activeTabId ?? undefined): boolean {
+  const tab = id ? getTab(id) : undefined
+  const contents = tab?.view?.webContents
+  if (!tab || tab.pdfEditor || tab.extensionPageOrigin || !contents || contents.isDestroyed() || !isShowingPdf(contents)) return false
+  const sourceUrl = contents.getURL()
+  if (!isEditablePdfSource(sourceUrl)) return false
+  replaceTabView(tab, { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false }, PDF_EDITOR_URL)
+  return true
+}
+
+function allowLeavingPdfEditor(tab: BrowserTab, action: string): boolean {
+  if (!tab.pdfEditor?.dirty) return true
+  return confirmDiscardPdfEdits(browserWindow, tab.pdfEditor.name, action)
+}
+
+/** Back to viewer: reload the original PDF in the built-in viewer (asks first if there are unsaved edits). */
+export function closePdfEditor(id = activeTabId ?? undefined): boolean {
+  const tab = id ? getTab(id) : undefined
+  if (!tab?.pdfEditor) return false
+  if (!allowLeavingPdfEditor(tab, 'Discard Changes')) return false
+  replaceTabView(tab, null, tab.pdfEditor.sourceUrl)
+  return true
+}
+
+/** App menu / toolbar: Edit PDF on a PDF, Back to Viewer in the editor. */
+export function togglePdfEditor(): boolean {
+  const tab = getTab()
+  if (!tab) return false
+  return tab.pdfEditor ? closePdfEditor(tab.id) : openPdfEditor(tab.id)
+}
+
+/** App menu Save while the editor is the active tab. */
+export function savePdfEditor(): boolean {
+  const contents = getTab()?.pdfEditor ? getTab()?.view?.webContents : null
+  if (!contents || contents.isDestroyed()) return false
+  sendPdfEditorCommand(contents, 'save')
+  return true
+}
+
+function hasUnsavedPdfEdits(): BrowserTab[] {
+  return tabs.filter((tab) => tab.pdfEditor?.dirty)
+}
+
+function pdfEditorTabFor(contents: WebContents): BrowserTab | undefined {
+  return tabs.find((tab) => tab.pdfEditor && tab.view?.webContents === contents)
+}
+
+attachPdfEditor({
+  documentFor: (contents) => {
+    const tab = pdfEditorTabFor(contents)
+    if (!tab?.pdfEditor) return null
+    return {
+      sourceUrl: tab.pdfEditor.sourceUrl,
+      name: tab.pdfEditor.name,
+      isPrivate: tab.isPrivate,
+      sourceSession: tab.isPrivate ? getPrivateSession() : getBrowserSession()
+    }
+  },
+  setDirty: (contents, dirty) => {
+    const tab = pdfEditorTabFor(contents)
+    if (!tab?.pdfEditor || tab.pdfEditor.dirty === dirty) return
+    tab.pdfEditor.dirty = dirty
+    publishState()
+  },
+  backToViewer: (contents) => {
+    const tab = pdfEditorTabFor(contents)
+    if (tab) closePdfEditor(tab.id)
+  },
+  window: () => browserWindow
+})
+
 export interface ExtensionPageTabOptions {
   extensionUrl: string
   preloadPath: string
@@ -807,7 +1020,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     extensionPageOrigin: extensionPage?.extensionUrl ?? null,
     extensionPreloadPath: extensionPage?.preloadPath ?? null,
     extensionPageOwner: extensionPage?.owner ?? null,
-    isPrivate: isPrivate && !extensionPage
+    isPrivate: isPrivate && !extensionPage,
+    showingPdf: false,
+    pdfEditor: null
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -898,7 +1113,18 @@ export function attachBrowserView(win: BaseWindow): void {
     },
     handleShortcut: (input) => handleBrowserShortcutInput(input)
   })
-  win.on('close', persistOpenTabs)
+  win.on('close', (event) => {
+    const unsaved = hasUnsavedPdfEdits()
+    if (unsaved.length > 0) {
+      const name = unsaved.length === 1 ? unsaved[0]!.pdfEditor!.name : `${unsaved.length} PDFs`
+      if (!confirmDiscardPdfEdits(win, name, 'Close Window')) {
+        event.preventDefault()
+        return
+      }
+      for (const tab of unsaved) tab.pdfEditor!.dirty = false
+    }
+    persistOpenTabs()
+  })
   win.on('closed', () => {
     if (browserWindow !== win) return
     cancelActiveMacTrackpadSwipe()
@@ -1569,6 +1795,8 @@ export function closeBrowserTab(id: string): void {
   if (index < 0) return
   const tab = tabs[index]
   if (!tab) return
+  if (!allowLeavingPdfEditor(tab, 'Close Tab')) return
+  if (tab.pdfEditor) tab.pdfEditor.dirty = false
   tabThumbnails.delete(id)
   const wasActive = activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
@@ -1672,6 +1900,8 @@ export function duplicateBrowserTab(id: string): string | null {
 function reloadBrowserTab(id: string, ignoreCache = false): void {
   const tab = getTab(id)
   if (!tab) return
+  if (!allowLeavingPdfEditor(tab, 'Reload')) return
+  if (tab.pdfEditor) tab.pdfEditor.dirty = false
   if (tab.view && !tab.view.webContents.isDestroyed()) {
     if (ignoreCache) tab.view.webContents.reloadIgnoringCache()
     else tab.view.webContents.reload()
@@ -1706,6 +1936,12 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   const url = resolveNavigationTarget(input, engine)
   const tab = getTab()
   if (!url || !tab) return false
+  if (tab.pdfEditor) {
+    // Leaving the editor: ask about unsaved edits, then load the address in a normal page view.
+    if (!allowLeavingPdfEditor(tab, 'Leave Page')) return false
+    replaceTabView(tab, null, url)
+    return Boolean(tab.view)
+  }
   if (tab.lastUrl === SURFFISH_QUICK_LINKS_URL && !tab.view) {
     tab.lastUrl = url
     tab.pendingUrl = url
@@ -2092,6 +2328,10 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
 }
 
 export function browserBack(): void {
+  if (getTab()?.pdfEditor) {
+    closePdfEditor()
+    return
+  }
   const contents = getTab()?.view?.webContents
   if (contents?.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
 }
@@ -2102,7 +2342,8 @@ export function browserForward(): void {
 }
 
 export function browserReload(): void {
-  getTab()?.view?.webContents.reload()
+  const id = getTab()?.id
+  if (id) reloadBrowserTab(id)
 }
 
 export function browserStop(): void {
