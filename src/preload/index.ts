@@ -49,6 +49,7 @@ import { spacesApi } from './spaces'
 import { sidebarBackdropApi } from './sidebar-backdrop'
 import { tabGroupsApi } from './tab-groups'
 import { watchersApi } from './watchers'
+import { onTabsChange } from './tab-sync'
 
 const api = {
   platform: process.platform,
@@ -183,11 +184,7 @@ const api = {
       moveToNewWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move-to-new-window', id),
       newWindow: (isPrivate = false): Promise<boolean> => ipcRenderer.invoke('browser:windows:new', isPrivate),
       setMuted: (id: string, muted: boolean): Promise<boolean> => ipcRenderer.invoke('browser:tabs:mute', id, muted),
-      onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => {
-        const listener = (_event: Electron.IpcRendererEvent, tabs: BrowserTabSummary[]): void => callback(tabs)
-        ipcRenderer.on('browser:tabs', listener)
-        return () => ipcRenderer.removeListener('browser:tabs', listener)
-      }
+      onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => onTabsChange(callback)
     },
     split: splitViewApi,
     spaces: spacesApi,
