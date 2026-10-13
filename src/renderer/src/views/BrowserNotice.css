@@ -16,7 +16,6 @@
   background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
   color: #eef2f5;
   font-size: 12.5px;
   line-height: 1.4;
