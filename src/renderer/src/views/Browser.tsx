@@ -77,9 +77,11 @@ import {
   MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
+import { PageWatchersToggle } from './lazy-views'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
-import { useUnseenWatcherCount } from './settings/useWatchers'
+import { usePageWatchersEnabled, useUnseenWatcherCount } from './settings/useWatchers'
+import { sidebarModeForWatchers, visibleWatcherSections } from '../../../shared/page-watchers-feature'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
 import './toolbar-popovers.css'
@@ -376,7 +378,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
   // Watchers with a change the user hasn't opened yet (badge on Settings → Watchers). Content surface only.
-  const unseenWatchers = useUnseenWatcherCount(surface === 'content')
+  // Settings → General → "Enable page watchers": off hides the Watchers section and its badge.
+  const watchersEnabled = usePageWatchersEnabled()
+  const unseenWatchers = useUnseenWatcherCount(surface === 'content' && watchersEnabled === true)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
@@ -930,6 +934,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   useEffect(() => {
     if (sidebarMode === 'network' && !networkToolEnabled) setSidebarMode('settings')
   }, [sidebarMode, networkToolEnabled])
+
+  useEffect(() => {
+    if (surface === 'content' && watchersEnabled === false && sidebarModeForWatchers(sidebarMode, false) !== sidebarMode) setSidebarMode('settings')
+  }, [surface, sidebarMode, watchersEnabled])
 
   useEffect(() => {
     const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc)
@@ -1722,7 +1730,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           )}
           {SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
-              {SETTINGS_SECTIONS.filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
+              {visibleWatcherSections(SETTINGS_SECTIONS, watchersEnabled !== false).filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
                 <button key={section.mode} type="button" className={sidebarMode === section.mode ? 'is-current' : ''} aria-current={sidebarMode === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}</button>
               ))}
               <button
@@ -1741,7 +1749,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {surface === 'content' && hasLoadErrorPage && browser.loadError && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && <LoadErrorPage loadError={browser.loadError} canGoBack={browser.canGoBack} />}
           {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
           {sidebarMode === 'privacy' && <PrivacySettings />}
-          {sidebarMode === 'watchers' && <PageWatchersSettings />}
+          {sidebarMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
           {sidebarMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
           {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations') && (
             <div className={`settings-view settings-view-${sidebarMode}`}>
@@ -1795,6 +1803,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsGroup>
                 <TabArchiveSettings />
                 <SpacesSettings />
+                <PageWatchersToggle />
                 <SpellcheckSettings />
                 <SettingsGroup
                   title="SOCKS5 proxy"

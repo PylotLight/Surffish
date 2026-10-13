@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, dialog, ipcMain, Notification, powerMonitor, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { BrowserWindow, dialog, Notification, powerMonitor, type WebContents } from 'electron'
 import {
   applyCheckFailure,
   applyCheckSuccess,
@@ -22,7 +22,7 @@ import {
 import { APP_NAME } from '../shared/config'
 import { backgroundNetworkBlockedReason } from './background-network'
 import { getBrowserSession } from './browser-session'
-import { isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
+import { sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { deferWrite } from './deferred-writes'
 import type { WatchTextResult } from './page-watcher-text'
 import { readUserJson, writeUserJson } from './user-json'
@@ -467,14 +467,13 @@ function checkNow(id: unknown): PageWatchersSnapshot {
   return snapshot()
 }
 
-function assertMainRenderer(event: IpcMainInvokeEvent): void {
-  if (!isMainWindowRenderer(event.sender, event.senderFrame)) throw new Error('This browser operation is available only to the app window.')
-}
-
-export function registerPageWatcherIpc(): void {
-  ipcMain.handle('browser:watchers:list', (event) => { assertMainRenderer(event); return snapshot() })
-  ipcMain.handle('browser:watchers:add', (event, input: unknown) => {
-    assertMainRenderer(event)
+/**
+ * IPC handlers, registered (behind the "Enable page watchers" gate and the app-window check) by
+ * page-watchers-feature.ts, which only imports this module while watchers are on.
+ */
+export const pageWatcherIpcHandlers = {
+  list: (): PageWatchersSnapshot => snapshot(),
+  add: (input: unknown): Promise<{ ok: true; watcher: PageWatcherSummary } | { ok: false; error: string }> | { ok: false; error: string } => {
     const record = typeof input === 'object' && input !== null ? input as Record<string, unknown> : {}
     if (typeof record.url !== 'string') return { ok: false, error: 'Enter a web address to watch.' }
     return addWatcher({
@@ -484,18 +483,24 @@ export function registerPageWatcherIpc(): void {
       intervalMinutes: typeof record.intervalMinutes === 'number' ? record.intervalMinutes as NewWatcherInput['intervalMinutes'] : undefined,
       renderJs: record.renderJs === true
     })
-  })
-  ipcMain.handle('browser:watchers:update', (event, id: unknown, patch: unknown) => { assertMainRenderer(event); return updateWatcher(id, patch) })
-  ipcMain.handle('browser:watchers:delete', (event, id: unknown) => { assertMainRenderer(event); return deleteWatcher(id) })
-  ipcMain.handle('browser:watchers:check-now', (event, id: unknown) => { assertMainRenderer(event); return checkNow(id) })
+  },
+  update: (id: unknown, patch: unknown) => updateWatcher(id, patch),
+  delete: (id: unknown): PageWatchersSnapshot => deleteWatcher(id),
+  checkNow: (id: unknown): PageWatchersSnapshot => checkNow(id)
 }
 
-export function initializePageWatchers(): void {
+let resumeHooked = false
+
+/** Start the schedule. `startupHold: false` (turned back on in Settings) checks due watchers right away. */
+export function initializePageWatchers(options: { startupHold?: boolean } = {}): void {
   load()
-  startedAt = Date.now()
+  startedAt = options.startupHold === false ? Date.now() - STARTUP_DELAY_MS : Date.now()
   disposed = false
   // After sleep the timers are stale; look again.
-  try { powerMonitor.on('resume', () => schedule()) } catch { /* not available in tests */ }
+  if (!resumeHooked) {
+    resumeHooked = true
+    try { powerMonitor.on('resume', () => schedule()) } catch { /* not available in tests */ }
+  }
   schedule()
 }
 

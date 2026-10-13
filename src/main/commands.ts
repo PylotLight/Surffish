@@ -42,6 +42,8 @@ import { activeBrowserTabGroupId, addBrowserTabsToGroup, createBrowserTabGroup, 
 import { closeBrowserTabGroupWithConfirm, renameBrowserTabGroup } from './tab-groups-ipc'
 import { groupSelectedBrowserTabs, getSelectedBrowserTabIds } from './tab-selection'
 import { DEFAULT_SPACE_ID } from '../shared/spaces'
+import { isCommandHiddenByWatchers } from '../shared/page-watchers-feature'
+import { pageWatchersEnabled } from './page-watchers-feature'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -172,7 +174,7 @@ const COMMANDS: BrowserCommand[] = [
   { id: 'settings.newTab', title: 'Settings: New Tab', section: 'Settings', keywords: ['preferences', 'clock', 'weather', 'background'], run: () => openPanel('newtab') },
   { id: 'settings.extensions', title: 'Settings: Extensions', section: 'Settings', keywords: ['preferences', 'chrome web store', 'bramble', 'addons'], run: () => openPanel('integrations') },
   { id: 'settings.site', title: 'Settings: This Site', section: 'Settings', keywords: ['permissions', 'adblock', 'clipboard', 'popups'], enabled: activeIsWebPage, run: () => openPanel('site') },
-  { id: 'settings.watchers', title: 'Page Watchers', section: 'Settings', keywords: ['watch', 'monitor', 'changes', 'diff', 'notify'], run: () => openPanel('watchers') },
+  { id: 'settings.watchers', title: 'Page Watchers', section: 'Settings', keywords: ['watch', 'monitor', 'changes', 'diff', 'notify'], enabled: pageWatchersEnabled, run: () => openPanel('watchers') },
   { id: 'tools.network', title: 'Network Inspector', section: 'Tools', keywords: ['requests', 'devtools', 'debug', 'har'], run: () => openPanel('network') },
   {
     id: 'settings.defaultBrowser', title: 'Make Surffish the Default Browser', section: 'Settings', keywords: ['default browser', 'open links'],
@@ -252,7 +254,8 @@ function tabGroupCommands(): BrowserCommand[] {
 }
 
 function allCommands(): BrowserCommand[] {
-  return [...COMMANDS, ...tabGroupCommands(), ...spaceCommands()]
+  const watchersEnabled = pageWatchersEnabled()
+  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands()]
 }
 
 function isEnabled(command: BrowserCommand): boolean {
