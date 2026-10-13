@@ -1987,7 +1987,9 @@ export function newBrowserTab(input?: string, engine?: SearchEngineId, w = curre
   const id = createTab(input, engine ?? selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
   if (id && w) {
     persistOpenTabs()
-    setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
+    // Only a blank New Tab wants the address bar. A tab opened on a URL (palette "open in new tab",
+    // bookmarks) keeps focus on its page, as in Chrome, so typing and Space reach the site.
+    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
   }
   return id
 }
