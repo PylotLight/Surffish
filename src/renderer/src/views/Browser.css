@@ -25,7 +25,6 @@
   background: linear-gradient(150deg, rgba(240, 247, 255, 0.24), rgba(39, 46, 55, 0.48) 42%, rgba(16, 20, 25, 0.6));
   box-shadow: var(--sidebar-card-shadow);
   backdrop-filter: blur(34px) saturate(185%);
-  -webkit-backdrop-filter: blur(34px) saturate(185%);
   transform: translateX(-100%);
   visibility: hidden;
   pointer-events: none;
@@ -465,7 +464,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(18, 21, 25, 0.82);
   backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
 .browser-toolbar {
   display: flex;
@@ -604,7 +602,6 @@
   padding: 10px 0;
   background: rgba(16, 20, 24, 0.94);
   backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 .settings-page-heading-copy {
   min-width: 0;
@@ -1035,7 +1032,6 @@
 .browser-sidebar {
   background: linear-gradient(145deg, rgba(36, 40, 46, 0.7), rgba(23, 27, 32, 0.76) 38%, rgba(10, 13, 16, 0.82));
   backdrop-filter: blur(38px) saturate(185%);
-  -webkit-backdrop-filter: blur(38px) saturate(185%);
   transition: transform 230ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 230ms;
 }
 .browser-layout.is-sidebar-visible .browser-sidebar {
@@ -1367,7 +1363,6 @@
   background: linear-gradient(145deg, rgba(50, 58, 68, 0.94), rgba(17, 21, 26, 0.96));
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
   scrollbar-width: thin;
 }
@@ -1442,7 +1437,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
   background: rgba(14, 17, 21, 0.52);
   backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 .settings-subnav button {
   min-height: 29px;
@@ -1622,7 +1616,6 @@
   background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
   -webkit-app-region: no-drag;
 }
 .site-actions-menu button {
@@ -1782,7 +1775,6 @@
   background: linear-gradient(138deg, rgba(255, 255, 255, 0.23), rgba(255, 255, 255, 0.075) 52%, rgba(255, 255, 255, 0.16));
   box-shadow: 0 17px 46px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.38), 0 0 0 1px rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(30px) saturate(185%) brightness(1.06);
-  -webkit-backdrop-filter: blur(30px) saturate(185%) brightness(1.06);
   transform: translateY(clamp(34px, 7.5vh, 78px));
 }
 .new-tab-icon-tile {
@@ -1799,7 +1791,6 @@
   cursor: pointer;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.18);
   backdrop-filter: blur(14px) saturate(155%);
-  -webkit-backdrop-filter: blur(14px) saturate(155%);
   transition: transform 130ms ease, border-color 130ms ease, background 130ms ease, box-shadow 130ms ease;
 }
 .new-tab-icon-tile:hover,
@@ -2160,7 +2151,6 @@
   background: transparent;
   box-shadow: none;
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   transform: none;
 }
 .new-tab-icon-tile {
@@ -2181,7 +2171,6 @@
   cursor: pointer;
   box-shadow: none;
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   transition: transform 130ms ease, filter 130ms ease;
 }
 .new-tab-icon-tile:hover,
@@ -2420,7 +2409,6 @@
   padding: 4px 0 14px;
   background: transparent;
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   position: static;
 }
 .settings-page-header h1 {
@@ -2861,7 +2849,6 @@
   background: linear-gradient(150deg, rgba(44, 52, 63, 0.82), rgba(18, 23, 30, 0.88));
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
   color: rgba(248, 250, 252, 0.95);
   animation: extensions-menu-in 140ms ease-out;
 }
@@ -3008,7 +2995,6 @@
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 18px 40px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(28px) saturate(150%);
-  -webkit-backdrop-filter: blur(28px) saturate(150%);
 }
 .settings-content > .settings-section { gap: 12px; padding: 18px 20px; }
 .settings-group-header {
@@ -3264,7 +3250,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(14, 17, 21, 0.6);
   backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 .settings-subnav button:not(.settings-subnav-close) {
   min-height: 34px;
@@ -3383,7 +3368,6 @@
   background: rgba(30, 20, 52, 0.5);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35), inset 0 1px rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
   color: rgba(240, 235, 255, 0.92);
   text-align: center;
 }
@@ -3444,7 +3428,6 @@
   background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 .find-bar input {
   min-width: 0;
@@ -3526,13 +3509,11 @@
 .app-shell[data-surface='toolbar'] .browser-chrome,
 .app-shell[data-surface='sidebar'] .browser-sidebar {
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 /* Settings cards sit on the flat shell gradient, so blurring it changed nothing but scroll cost. */
 .settings-group,
 .settings-content > .settings-section {
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
 }
 /* Nothing in a collapsed or off-screen sidebar may keep animating (audio pulse, spinners). */
 .browser-layout.is-sidebar-motion-paused .browser-sidebar *,

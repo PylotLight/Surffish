@@ -36,7 +36,6 @@
   background: linear-gradient(145deg, rgba(43, 53, 64, 0.84), rgba(16, 22, 29, 0.86));
   box-shadow: 0 22px 62px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.13);
   backdrop-filter: blur(34px) saturate(185%);
-  -webkit-backdrop-filter: blur(34px) saturate(185%);
 }
 .downloads-popup-header {
   display: flex;
@@ -437,7 +436,6 @@
   background: rgba(30, 36, 44, 0.94);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
 }
 .downloads-menu button {
   display: flex;
