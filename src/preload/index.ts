@@ -42,6 +42,7 @@ import type { DiagnosticsPayload } from '../shared/diagnostics'
 type DiagnosticsUpdate = DiagnosticsPayload | null
 import { bookmarksApi } from './bookmarks'
 import { tabArchiveApi } from './tab-archive'
+import { networkToolsApi, proxyRoutingApi } from './network-tools'
 
 const api = {
   platform: process.platform,
@@ -233,7 +234,8 @@ const api = {
     proxy: {
       get: (): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:get'),
       set: (settings: BrowserProxySettings): Promise<BrowserProxySettings> => ipcRenderer.invoke('browser:proxy:set', settings),
-      test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> => ipcRenderer.invoke('browser:proxy:test', settings)
+      test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> => ipcRenderer.invoke('browser:proxy:test', settings),
+      ...proxyRoutingApi
     },
     downloads: {
       get: (): Promise<DownloadEntry[]> => ipcRenderer.invoke('browser:downloads:get'),
@@ -332,7 +334,8 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, requests: NetworkRequestSummary[]): void => callback(requests)
         ipcRenderer.on('browser:network:changed', listener)
         return () => ipcRenderer.removeListener('browser:network:changed', listener)
-      }
+      },
+      ...networkToolsApi
     }
   }
 }

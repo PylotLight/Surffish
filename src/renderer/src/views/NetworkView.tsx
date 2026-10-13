@@ -1,5 +1,7 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { BrowserTabSummary, NetworkRequestDetails, NetworkRequestSummary, NetworkResponseBody } from '../../../shared/types'
+import type { NetworkOverrideRule, NetworkReplayResult } from '../../../shared/network-overrides'
+import { NetworkOverridesPanel, newOverrideId, useNetworkOverrides } from './NetworkOverridesPanel'
 import { formatVisitedAt } from '../lib/format'
 import { useStoredState } from '../lib/stored-state'
 
@@ -80,6 +82,72 @@ export default function NetworkView({ tabs, live }: NetworkViewProps): React.JSX
   const [networkResponseBody, setNetworkResponseBody] = useState<NetworkResponseBody | null>(null)
   const [networkResponseError, setNetworkResponseError] = useState('')
   const [networkBodyLoading, setNetworkBodyLoading] = useState(false)
+  const [exportBodies, setExportBodies] = useState(false)
+  const [toolNote, setToolNote] = useState<{ text: string; error: boolean } | null>(null)
+  const [replay, setReplay] = useState<{ id: string; busy: boolean; result: NetworkReplayResult | null }>({ id: '', busy: false, result: null })
+  const [overridesOpen, setOverridesOpen] = useState(false)
+  const [overrideSeed, setOverrideSeed] = useState<NetworkOverrideRule | null>(null)
+  const overrides = useNetworkOverrides(live)
+  const consumeSeed = useCallback(() => setOverrideSeed(null), [])
+  const activeTabId = tabs.find((tab) => tab.active)?.id ?? null
+
+  const note = (text: string, error = false): void => setToolNote({ text, error })
+  const cleanError = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+
+  async function exportHar(): Promise<void> {
+    note(exportBodies ? 'Collecting requests and bodies…' : 'Collecting requests…')
+    try {
+      const result = await window.api.browser.network.exportHar({ tabId: networkScope === 'active' ? activeTabId : null, includeBodies: exportBodies })
+      if (result.error) note(result.error, true)
+      else if (result.saved) note(`Saved ${result.entries.toLocaleString()} requests${exportBodies ? ` (${result.bodies.toLocaleString()} bodies)` : ''} to ${result.path}`)
+      else setToolNote(null)
+    } catch (error) {
+      note(cleanError(error), true)
+    }
+  }
+
+  async function copyAs(format: 'curl' | 'fetch'): Promise<void> {
+    if (!selectedNetworkId) return
+    try {
+      const result = await window.api.browser.network.copyAs(selectedNetworkId, format)
+      note(`Copied as ${format === 'curl' ? 'cURL' : 'fetch'}.${result.warning ? ` ${result.warning}` : ''} Headers include cookies and tokens; treat it like a password.`)
+    } catch (error) {
+      note(cleanError(error), true)
+    }
+  }
+
+  async function replayRequest(request: NetworkRequestSummary): Promise<void> {
+    const method = request.method.toUpperCase()
+    if (method !== 'GET' && method !== 'HEAD' && !window.confirm(`Replay this ${method} request? It is sent again to ${networkRequestName(request.url)} with the same headers and payload, which can repeat its effect (a purchase, a post, a delete).`)) return
+    setReplay({ id: request.id, busy: true, result: null })
+    try {
+      const result = await window.api.browser.network.replay(request.id)
+      setReplay({ id: request.id, busy: false, result })
+    } catch (error) {
+      setReplay({ id: request.id, busy: false, result: { ok: false, status: null, statusText: '', sizeBytes: 0, sizeCapped: false, durationMs: 0, finalUrl: request.url, redirected: false, error: cleanError(error) } })
+    }
+  }
+
+  function mockRequest(request: NetworkRequestSummary): void {
+    let pattern = request.url
+    try {
+      const parsed = new URL(request.url)
+      pattern = `${parsed.host}${parsed.pathname}`
+    } catch {
+      // Keep the raw URL.
+    }
+    setOverrideSeed({
+      id: newOverrideId(),
+      enabled: true,
+      urlPattern: pattern,
+      method: request.method.toUpperCase(),
+      action: 'respond',
+      status: request.status ?? 200,
+      headers: request.mimeType ? [{ name: 'Content-Type', value: request.mimeType }] : [],
+      body: ''
+    })
+    setOverridesOpen(true)
+  }
 
   useEffect(() => {
     // Network rows are only streamed while someone is looking at them; capture itself starts on first open.
@@ -154,6 +222,14 @@ export default function NetworkView({ tabs, live }: NetworkViewProps): React.JSX
             <option value="all">All types</option>
             {[...new Set(networkRequests.map((request) => request.resourceType))].sort().map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
+          <label className="network-export-bodies" title="Include response bodies (up to 1 MB each, 25 MB total) and request payloads">
+            <input type="checkbox" checked={exportBodies} onChange={(event) => setExportBodies(event.target.checked)} aria-label="Include bodies in the HAR export" />
+            Bodies
+          </label>
+          <button className="settings-action secondary network-clear" type="button" disabled={networkRequests.length === 0} title={networkScope === 'active' ? 'Export the active tab’s requests as HAR 1.2' : 'Export every captured request as HAR 1.2'} onClick={() => void exportHar()}>Export HAR</button>
+          <button className={`settings-action secondary network-clear${overridesOpen ? ' is-current' : ''}`} type="button" aria-pressed={overridesOpen} onClick={() => setOverridesOpen((open) => !open)}>
+            Overrides{overrides?.rules.some((rule) => rule.enabled) ? ` (${overrides.rules.filter((rule) => rule.enabled).length})` : ''}
+          </button>
           <button className="settings-action secondary network-clear" type="button" disabled={networkRequests.length === 0} onClick={() => {
             void window.api.browser.network.clear()
             setSelectedNetworkId(null)
@@ -167,7 +243,10 @@ export default function NetworkView({ tabs, live }: NetworkViewProps): React.JSX
         <span>{networkRequests.filter((request) => request.state === 'pending').length.toLocaleString()} pending</span>
         <span>Latest 1,000 retained · oldest roll off</span>
         {networkRequests.length === 0 && <span>Navigate in a loaded tab to capture requests.</span>}
+        {overrides?.active && <span className="network-tool-note">Overrides active</span>}
       </div>
+      {toolNote && <p className={`network-tool-note${toolNote.error ? ' is-error' : ''}`} role="status">{toolNote.text}</p>}
+      {overridesOpen && <NetworkOverridesPanel state={overrides} seed={overrideSeed} onSeedConsumed={consumeSeed} />}
       <div className="network-workspace">
         <div className="network-request-table-wrap">
           <table className="network-request-table">
@@ -210,7 +289,25 @@ export default function NetworkView({ tabs, live }: NetworkViewProps): React.JSX
         <section className="network-request-details" aria-label="Selected request details">
           {selectedNetworkSummary ? (
             <>
-              <div className="network-detail-title"><strong>{networkRequestName(selectedNetworkSummary.url)}</strong><span>{selectedNetworkSummary.method} · {networkStatusLabel(selectedNetworkSummary)}</span></div>
+              <div className="network-detail-title">
+                <strong>{networkRequestName(selectedNetworkSummary.url)}</strong><span>{selectedNetworkSummary.method} · {networkStatusLabel(selectedNetworkSummary)}</span>
+                <div className="network-detail-actions" role="group" aria-label="Request actions">
+                  <button type="button" onClick={() => void copyAs('curl')} title="Copy as a cURL command (bash / zsh)">Copy as cURL</button>
+                  <button type="button" onClick={() => void copyAs('fetch')} title="Copy as a JavaScript fetch() call">Copy as fetch</button>
+                  <button type="button" disabled={replay.busy && replay.id === selectedNetworkSummary.id} onClick={() => void replayRequest(selectedNetworkSummary)} title="Send this request again through the tab’s session (same proxy route and filters)">{replay.busy && replay.id === selectedNetworkSummary.id ? 'Replaying…' : 'Replay'}</button>
+                  <button type="button" onClick={() => mockRequest(selectedNetworkSummary)} title="Create an override that answers this URL with a fixed response">Mock</button>
+                </div>
+              </div>
+              {replay.id === selectedNetworkSummary.id && replay.result && (
+                <div className={`network-replay-result${replay.result.error || !replay.result.ok ? ' is-error' : ''}`} role="status">
+                  <span>Replay:</span>
+                  <strong>{replay.result.error ? 'Failed' : `${replay.result.status ?? '—'}${replay.result.statusText ? ` ${replay.result.statusText}` : ''}`}</strong>
+                  {!replay.result.error && <span>{formatNetworkSize(replay.result.sizeBytes)}{replay.result.sizeCapped ? '+ (stopped reading at 50 MB)' : ''}</span>}
+                  <span>{formatNetworkTime(replay.result.durationMs)}</span>
+                  {replay.result.redirected && <span>Redirected to {networkRequestName(replay.result.finalUrl)}</span>}
+                  {replay.result.error && <span>{replay.result.error}</span>}
+                </div>
+              )}
               <nav className="network-detail-tabs" aria-label="Request detail sections">
                 {(['headers', 'payload', 'response', 'timing'] as const).map((tab) => <button key={tab} type="button" className={networkDetailsTab === tab ? 'is-current' : ''} aria-current={networkDetailsTab === tab ? 'page' : undefined} onClick={() => setNetworkDetailsTab(tab)}>{tab[0]?.toUpperCase()}{tab.slice(1)}</button>)}
               </nav>

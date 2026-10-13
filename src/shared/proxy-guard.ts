@@ -116,7 +116,27 @@ export interface ProxyGuardStatus {
   /** Proxy is enabled and the kill switch is on, so the guard is watching. */
   armed: boolean
   state: ProxyHealthState
-  /** Page traffic is being cancelled right now. */
+  /** Page traffic is being cancelled right now (for sites routed through a proxy that is down). */
   blocking: boolean
+  /** The main proxy, or while blocking the proxy (or proxies) that are down. */
   endpoint: string | null
+  /** Every proxy in use (main proxy and any per-site rule proxies), each watched on its own. */
+  endpoints: ProxyGuardEndpointStatus[]
+}
+
+export interface ProxyGuardEndpointStatus {
+  /** host:port */
+  key: string
+  /** null = the main proxy */
+  name: string | null
+  state: ProxyHealthState
+}
+
+/** One status for the whole guard: down if any proxy is down, up only when all are up. */
+export function aggregateProxyHealthState(states: ProxyHealthState[]): ProxyHealthState {
+  if (states.length === 0) return 'off'
+  if (states.includes('down')) return 'down'
+  if (states.includes('checking')) return 'checking'
+  if (states.every((state) => state === 'up')) return 'up'
+  return 'checking'
 }
