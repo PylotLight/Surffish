@@ -16,7 +16,7 @@ import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type Session } fro
 import type { ElectronBlocker } from '@ghostery/adblocker-electron'
 import { isExtensionExemptRequest, isProtectedVideoDeliveryUrl } from './adblock-policy.ts'
 import { frameStartPayload, frameUpdateStyles, type FrameDomFeatures, type FrameStartPayload } from './adblock-filters.ts'
-import { gateRequest, installFallbackRequestGate } from './request-gate.ts'
+import { afterStartupHold, gateRequest, installFallbackRequestGate, setSessionRequestHandler } from './request-gate.ts'
 
 export { applyFilterEnvironment, buildFilterEngine, frameStartPayload, frameUpdateStyles } from './adblock-filters.ts'
 export type { BuiltFilterEngine, FrameDomFeatures, FrameStartPayload, ListFetch } from './adblock-filters.ts'
@@ -113,7 +113,7 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
   }
   attachedSessions.set(session, hooks)
 
-  session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+  const handleBeforeRequest = (details: BeforeRequestDetails, callback: (response: BeforeRequestResponse) => void): void => {
     // Kill switch / HTTPS-only run first, whatever the ad blocker would do.
     const gated = gateRequest(details)
     if (gated) return callback(gated)
@@ -134,6 +134,12 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
       hooks.onRequest?.(details, response, pageUrl)
       callback(response)
     })
+  }
+  // Page requests made before the engine is loaded (the window shows first) wait for it; ones the
+  // fallback gate was already holding come here when released.
+  setSessionRequestHandler(session, handleBeforeRequest)
+  session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+    afterStartupHold(details, () => handleBeforeRequest(details, callback))
   })
 
   session.webRequest.onHeadersReceived({ urls: ['<all_urls>'] }, (details, callback) => {
@@ -147,6 +153,7 @@ export function attachAdblockToSession(session: Session, hooks: AdblockSessionHo
 
   return () => {
     session.webRequest.onBeforeRequest(null)
+    setSessionRequestHandler(session, null)
     installFallbackRequestGate(session)
     session.webRequest.onHeadersReceived(null)
     session.unregisterPreloadScript(preloadId)

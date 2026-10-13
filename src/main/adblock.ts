@@ -303,7 +303,15 @@ async function initialize(): Promise<void> {
   await Promise.race([firstRefresh, new Promise((resolve) => setTimeout(resolve, FIRST_RUN_WAIT_MS))])
 }
 
-/** Initialize after the SOCKS settings and before creating any remote browser page. */
+/**
+ * Hook the filter into every page session now (cheap); the engine itself loads in
+ * initializeNetworkAdblock() after the first window is up, with page requests held until then.
+ */
+export function attachNetworkAdblock(): void {
+  ensureSessionAttached()
+}
+
+/** Load the filter engine (cache or first download). Page requests are held until this settles. */
 export function initializeNetworkAdblock(): Promise<void> {
   initialization ??= initialize()
   return initialization

@@ -21,6 +21,8 @@ import { initializeDownloads } from './downloads'
 import { installAppMenu } from './app-menu'
 import { flushExternalOpens, registerExternalOpenHandlers } from './external-links'
 import { disposeWebStoreExtensions, initializeWebStoreExtensions } from './web-store-extensions'
+import { holdPageRequestsUntil } from './request-gate'
+import { afterFirstWindowPaint, traceStartup } from './startup-defer'
 import { registerPdfEditorScheme } from './pdf-editor'
 import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
 import { disposePageWatchers, initializePageWatchers, registerPageWatcherIpc } from './page-watchers'
@@ -45,6 +47,9 @@ registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
 
+// Worst case (first run downloading filter lists waits up to 8 s, plus extensions) before pages load anyway.
+const STARTUP_HOLD_TIMEOUT_MS = 20_000
+
 const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) app.quit()
 // Default-browser links and opened files can arrive before ready; they queue until tabs exist.
@@ -65,24 +70,12 @@ app.whenReady().then(async () => {
     app.quit()
     return
   }
-  const originalSecurityWarnings = process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
-  let initializeNetworkAdblock: (() => Promise<void>) | undefined
-  try {
-    // The adapter sets this environment variable as an import side effect.
-    // Restore the app's previous setting before any windows are created.
-    const adblock = await import('./adblock')
-    initializeNetworkAdblock = adblock.initializeNetworkAdblock
-  } catch (error) {
-    console.warn('Could not load the network ad-filter adapter; continuing without it:', error)
-  } finally {
-    if (originalSecurityWarnings === undefined) delete process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
-    else process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = originalSecurityWarnings
-  }
-  try {
-    await initializeNetworkAdblock?.()
-  } catch (error) {
-    console.warn('Could not initialize network ad filtering; continuing without it:', error)
-  }
+  traceStartup('profile ready')
+  // The ad filter and Web Store extensions load after the first window is drawn; until then page
+  // requests wait in the fallback gate (no unfiltered first page, extension content scripts still
+  // apply) and are handed to the ad blocker once it attaches.
+  let finishDeferredStartup: () => void = () => {}
+  holdPageRequestsUntil(new Promise<void>((resolve) => { finishDeferredStartup = resolve }), STARTUP_HOLD_TIMEOUT_MS)
   // Windows taskbar grouping/notifications; dev builds group under the Electron binary.
   if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? APP_ID : process.execPath)
   quietRetiredShellSenders()
@@ -100,29 +93,54 @@ app.whenReady().then(async () => {
     disposeBramblePoc()
     disposeWebStoreExtensions()
   })
-  try {
-    // Load Chrome Web Store extensions before restored tabs load, so content scripts apply.
-    await initializeWebStoreExtensions()
-  } catch (error) {
-    console.warn('Could not load Chrome Web Store extensions; continuing without them:', error)
-  }
   // Every saved window comes back (an older single-window session becomes one window).
-  restoreWindows()
+  const windows = restoreWindows()
+  traceStartup('windows created')
   flushExternalOpens()
   initializeTabArchive()
   // Release-feed update notifications: first check ~30s after launch, then every 6h.
   initializeUpdates()
   // Page watchers: checks run in main on their own schedule (never for private tabs).
   initializePageWatchers()
+  // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
+  app.on('activate', () => {
+    if (browserWindows().length === 0) restoreWindows()
+  })
+  await afterFirstWindowPaint(windows.at(-1))
+  traceStartup('first window painted')
+  const originalSecurityWarnings = process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
+  let initializeNetworkAdblock: (() => Promise<void>) | undefined
+  try {
+    // The adapter sets this environment variable as an import side effect; restore the app's
+    // previous setting right away.
+    const adblock = await import('./adblock')
+    initializeNetworkAdblock = adblock.initializeNetworkAdblock
+    adblock.attachNetworkAdblock()
+  } catch (error) {
+    console.warn('Could not load the network ad-filter adapter; continuing without it:', error)
+  } finally {
+    if (originalSecurityWarnings === undefined) delete process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
+    else process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = originalSecurityWarnings
+  }
+  try {
+    await initializeNetworkAdblock?.()
+  } catch (error) {
+    console.warn('Could not initialize network ad filtering; continuing without it:', error)
+  }
+  traceStartup('adblock engine ready')
+  try {
+    // Before page requests are released, so content scripts apply to restored tabs.
+    await initializeWebStoreExtensions()
+  } catch (error) {
+    console.warn('Could not load Chrome Web Store extensions; continuing without them:', error)
+  }
+  finishDeferredStartup()
+  traceStartup('extensions ready, page requests released')
   try {
     await initializeBramblePoc()
   } catch (error) {
     console.warn('Could not initialize the Bramble extension; continuing without it:', error)
   }
-  // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
-  app.on('activate', () => {
-    if (browserWindows().length === 0) restoreWindows()
-  })
 }).catch((error: unknown) => {
   console.error('App startup failed:', error)
   app.quit()
