@@ -1,3 +1,4 @@
+# screen recording permission: not granted
 hero.png	capturePage compose	darwin
 command-palette.png	capturePage compose	darwin
 split-view.png	capturePage compose	darwin
