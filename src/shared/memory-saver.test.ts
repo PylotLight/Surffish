@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { discardOrder, lowAvailableThresholdMB, MIN_BACKGROUND_MS, memoryPressure, parseMemorySaverSettings, type DiscardCandidate } from './memory-saver'
+import { discardOrder, lowAvailableThresholdMB, MIN_BACKGROUND_MS, memoryPressure, parseMemorySaverSettings, shouldShareSiteProcesses, type DiscardCandidate } from './memory-saver'
 
 const now = 10_000_000
 const tab = (id: string, extra: Partial<DiscardCandidate> = {}): DiscardCandidate => ({
@@ -8,9 +8,19 @@ const tab = (id: string, extra: Partial<DiscardCandidate> = {}): DiscardCandidat
 
 describe('memory saver', () => {
   test('on by default; a saved choice is kept', () => {
-    expect(parseMemorySaverSettings(undefined)).toEqual({ enabled: true })
-    expect(parseMemorySaverSettings({ enabled: false })).toEqual({ enabled: false })
-    expect(parseMemorySaverSettings({ enabled: 'no' })).toEqual({ enabled: true })
+    expect(parseMemorySaverSettings(undefined)).toEqual({ enabled: true, shareSiteProcesses: true })
+    expect(parseMemorySaverSettings({ enabled: false })).toEqual({ enabled: false, shareSiteProcesses: true })
+    expect(parseMemorySaverSettings({ enabled: 'no', shareSiteProcesses: false })).toEqual({ enabled: true, shareSiteProcesses: false })
+  })
+
+  test('same-site process sharing: saved choice, env override', () => {
+    const on = parseMemorySaverSettings({})
+    const off = parseMemorySaverSettings({ shareSiteProcesses: false })
+    expect(shouldShareSiteProcesses(on, undefined)).toBe(true)
+    expect(shouldShareSiteProcesses(off, undefined)).toBe(false)
+    expect(shouldShareSiteProcesses(on, '0')).toBe(false)
+    expect(shouldShareSiteProcesses(off, '1')).toBe(true)
+    expect(shouldShareSiteProcesses(off, 'yes')).toBe(false)
   })
 
   test('pressure: low available memory, macOS pressure level, or Surffish over half of RAM', () => {

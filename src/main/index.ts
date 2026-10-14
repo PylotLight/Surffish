@@ -11,7 +11,7 @@ import { registerDiagnosticsIpc } from './diagnostics'
 import { registerBookmarkIpc } from './bookmarks-ipc'
 import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
-import { disposeMemorySaver, initializeMemorySaver, registerMemorySaverIpc } from './memory-saver'
+import { applySiteProcessSharing, disposeMemorySaver, initializeMemorySaver, registerMemorySaverIpc } from './memory-saver'
 import { registerPreconnectIpc } from './preconnect'
 import { registerWakeSnapshotIpc } from './wake-snapshot'
 import { initializeBrowserProxy } from './proxy'
@@ -59,6 +59,8 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
 // Turnstile's challenges.cloudflare.com frame) use this app-wide fallback, which otherwise still says
 // `Electron/x Surffish/x`; challenges see two different browsers and never pass.
 app.userAgentFallback = chromeUserAgent(app.userAgentFallback)
+// Same-site tabs share a renderer unless turned off in Settings (a Chromium switch: before ready, after userData is final).
+applySiteProcessSharing()
 // Privileged schemes must be registered before ready.
 registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.

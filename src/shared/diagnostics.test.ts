@@ -64,6 +64,17 @@ test('tabs sharing a renderer are grouped and deduplicated', () => {
   assert.equal(snapshot.tabs.z, undefined, 'occupants without a live process are dropped')
 })
 
+test('app UI surfaces sharing one renderer are all named', () => {
+  const shared = buildDiagnosticsSnapshot([metric(30, 'Tab', 0, 90_000)], [
+    { pid: 30, kind: 'shell', label: 'toolbar' },
+    { pid: 30, kind: 'shell', label: 'sidebar' },
+    { pid: 30, kind: 'shell', label: 'toolbar' },
+    { pid: 30, kind: 'shell', label: 'content' }
+  ], 1000).rows[0]!
+  assert.equal(shared.label, 'Surffish UI: toolbar, sidebar, content')
+  assert.equal(shared.canKill, false)
+})
+
 test('totals add up every process', () => {
   const snapshot = buildDiagnosticsSnapshot(metrics, occupants, 1000)
   assert.equal(snapshot.totals.processes, metrics.length)

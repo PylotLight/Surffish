@@ -1,7 +1,8 @@
 import { ipcRenderer } from 'electron'
 import type { MemorySaverSettings } from '../shared/memory-saver'
 
-type MemorySaverSnapshot = MemorySaverSettings & { discarded: number }
+/** shareSiteProcessesActive: what this launch runs with (shareSiteProcesses applies from the next launch). */
+type MemorySaverSnapshot = MemorySaverSettings & { discarded: number; shareSiteProcessesActive: boolean }
 
 /** window.api.browser.memorySaver: discard background tabs when memory is tight (Settings → Tabs). */
 export const memorySaverApi = {

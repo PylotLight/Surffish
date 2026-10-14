@@ -162,7 +162,8 @@ async function run() {
     totals: [...document.querySelectorAll('.diagnostics-totals strong')].map((node) => node.textContent)
   })`)
   report.tabHint = await content.webContents.executeJavaScript('[...document.querySelectorAll("[data-browser-tab-id]")].map((node) => node.title).join("\\n---\\n")')
-  // Kill a background tab's renderer: the tab goes to sleep (reloads when selected), nothing else dies.
+  // Kill a background tab's renderer: the tab goes to sleep (reloads when selected). With same-site process
+  // sharing its same-site tabs share that renderer and go with it; other sites and the UI never do.
   const victim = webContents.getAllWebContents().find((contents) => contents.getURL().endsWith('/busy-a'))
   report.killed = await content.webContents.executeJavaScript(`window.api.browser.diagnostics.kill(${victim.getOSProcessId()})`)
   report.sleepingAfterKill = await waitFor(async () => {
@@ -196,8 +197,12 @@ async function run() {
     const content = report.onNewTab.rows.find((entry) => entry.label === 'shell:content')
     assert.ok(content && content.wakeups < 40, `New Tab with a loading tab in the collapsed sidebar stays quiet (${content?.wakeups} wakeups/s)`)
     const labels = report.diagnostics.labels
-    for (const expected of ['Browser (main process)', 'GPU process', 'Surffish UI: toolbar', 'Surffish UI: sidebar', 'Surffish UI: content']) {
+    for (const expected of ['Browser (main process)', 'GPU process']) {
       assert.ok(labels.includes(expected), `Diagnostics lists ${expected}`)
+    }
+    // One renderer per surface, or one shared by all of them with same-site process sharing (file://).
+    for (const surface of ['toolbar', 'sidebar', 'content']) {
+      assert.ok(labels.some((text) => text.startsWith('Surffish UI: ') && text.slice('Surffish UI: '.length).split(', ').includes(surface)), `Diagnostics lists Surffish UI: ${surface}`)
     }
     assert.ok(labels.some((text) => /Busy \/busy-a/.test(text)), 'Diagnostics names tabs by title')
     assert.ok(labels.some((text) => text.startsWith('Utility: ')), 'Diagnostics names utility processes')

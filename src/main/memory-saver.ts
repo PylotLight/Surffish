@@ -7,6 +7,7 @@ import {
   MEMORY_CHECK_INTERVAL_MS,
   memoryPressure,
   parseMemorySaverSettings,
+  shouldShareSiteProcesses,
   UNSAVED_FORM_PROBE,
   type MemorySample,
   type MemorySaverSettings
@@ -25,6 +26,7 @@ let settings: MemorySaverSettings | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 let checking = false
 let discardedForMemory = 0
+let siteProcessSharingAtLaunch = false
 
 function current(): MemorySaverSettings {
   settings ??= parseMemorySaverSettings(readUserJson(FILE))
@@ -110,6 +112,18 @@ function applySchedule(): void {
   }
 }
 
+/**
+ * Same-site tabs share a renderer (Settings → General → Tabs). Must run before app ready: it is a
+ * Chromium switch, so the setting applies from the next launch. Electron honours neither
+ * --renderer-process-limit nor Chromium's ProcessPerSiteUpToMainFrameThreshold (both need embedder
+ * hooks Chrome has and Electron doesn't), so per-site sharing is the one process-count lever.
+ */
+export function applySiteProcessSharing(): boolean {
+  siteProcessSharingAtLaunch = shouldShareSiteProcesses(current(), process.env['SURFFISH_PROCESS_PER_SITE'])
+  if (siteProcessSharingAtLaunch) app.commandLine.appendSwitch('process-per-site')
+  return siteProcessSharingAtLaunch
+}
+
 export function initializeMemorySaver(): void {
   applySchedule()
 }
@@ -119,8 +133,8 @@ export function disposeMemorySaver(): void {
   timer = null
 }
 
-function snapshot(): MemorySaverSettings & { discarded: number } {
-  return { ...current(), discarded: discardedForMemory }
+function snapshot(): MemorySaverSettings & { discarded: number; shareSiteProcessesActive: boolean } {
+  return { ...current(), discarded: discardedForMemory, shareSiteProcessesActive: siteProcessSharingAtLaunch }
 }
 
 function assertAppRenderer(event: IpcMainInvokeEvent): void {
@@ -139,6 +153,12 @@ export function registerMemorySaverIpc(): void {
       settings = { ...current(), enabled: record.enabled }
       writeUserJson(FILE, settings)
       applySchedule()
+      sendToMainWindowRenderers('browser:memory-saver:changed', snapshot())
+    }
+    if (typeof record.shareSiteProcesses === 'boolean' && record.shareSiteProcesses !== current().shareSiteProcesses) {
+      // Takes effect at the next launch (a Chromium switch); the snapshot says whether a restart is pending.
+      settings = { ...current(), shareSiteProcesses: record.shareSiteProcesses }
+      writeUserJson(FILE, settings)
       sendToMainWindowRenderers('browser:memory-saver:changed', snapshot())
     }
     return snapshot()

@@ -7,13 +7,28 @@
 
 export interface MemorySaverSettings {
   enabled: boolean
+  /**
+   * Tabs of the same site share one renderer process (Chromium's --process-per-site). Read once at
+   * launch, so a change applies after a restart. Different sites, cross-site iframes, private tabs
+   * and Space partitions never share a process either way (site isolation and storage partitions).
+   */
+  shareSiteProcesses: boolean
 }
 
-export const DEFAULT_MEMORY_SAVER_SETTINGS: MemorySaverSettings = { enabled: true }
+export const DEFAULT_MEMORY_SAVER_SETTINGS: MemorySaverSettings = { enabled: true, shareSiteProcesses: true }
 
 export function parseMemorySaverSettings(value: unknown): MemorySaverSettings {
   const record = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
-  return { enabled: typeof record.enabled === 'boolean' ? record.enabled : DEFAULT_MEMORY_SAVER_SETTINGS.enabled }
+  return {
+    enabled: typeof record.enabled === 'boolean' ? record.enabled : DEFAULT_MEMORY_SAVER_SETTINGS.enabled,
+    shareSiteProcesses: typeof record.shareSiteProcesses === 'boolean' ? record.shareSiteProcesses : DEFAULT_MEMORY_SAVER_SETTINGS.shareSiteProcesses
+  }
+}
+
+/** `SURFFISH_PROCESS_PER_SITE=0|1` (tests, benches, troubleshooting) overrides the saved setting. */
+export function shouldShareSiteProcesses(settings: MemorySaverSettings, envValue: string | undefined): boolean {
+  if (envValue === '0' || envValue === '1') return envValue === '1'
+  return settings.shareSiteProcesses
 }
 
 /** How often main samples memory while the saver is on (ms). */

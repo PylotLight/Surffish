@@ -120,7 +120,9 @@ function labelForOccupants(occupants: DiagnosticsOccupant[]): { kind: Diagnostic
         : first.kind === 'shell' ? 'Surffish UI'
           : first.kind === 'overlay' ? 'Overlay'
             : 'Subframe'
-  return { kind: first.kind, label: `${prefix}: ${first.label}` }
+  // Same-site process sharing puts all the app UI surfaces (file://) in one renderer: name them all.
+  const names = [...new Set(sameKind.map((occupant) => occupant.label))]
+  return { kind: first.kind, label: `${prefix}: ${first.kind === 'shell' ? names.join(', ') : first.label}` }
 }
 
 /** Label every process and total the numbers. Occupants without a matching process are ignored. */
