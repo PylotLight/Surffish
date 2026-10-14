@@ -48,7 +48,7 @@ fixture site, then:
 | idle IPC, idle main-process timer fires, background tab CPU, main CPU | 5 s idle with 30 tabs open (29 in the background) |
 | tab switch | activate → view attached → two frames painted in the tab (median of 12) |
 | new site tab first paint, New Tab page shown | create → first contentful paint (median of 5); blank tab → New Tab page painted (median of 3) |
-| processes / webContents left, memory growth after window cycles | open and close a second window 3 times; anything left behind is a leak |
+| processes / webContents left, memory growth after window cycles | open and close a second window 3 times; anything left behind is a leak. Both memory samples follow a forced major GC and a critical memory-pressure notification in every app-UI renderer (`HeapProfiler.collectGarbage`, `Memory.simulatePressureNotification`), so memory that is only waiting to be reclaimed (a closed window's documents and caches in a renderer shared with other windows) doesn't count as growth; the unreclaimed number is in the sample as `windowCycles.memGrowthBeforeGcMB` |
 | renderers hosting 16 tabs over 4 sites, memory of those renderers | 16 tabs on `site0..3.localhost` (separate sites to Chromium): distinct processes hosting their pages and iframes, and those processes' memory |
 | ad-filter CSS + scriptlets sent per navigation, frame-start main time, DOM-update IPC, injections on same-document navigations | 4 navigations to `video.localhost`, which the fixture engine gives site CSS, 300+ generic rules and 18 scriptlets sharing uBO-style helpers: size of the frame-start payloads, main-process time answering them, frame-update IPCs, then `pushState`/hash changes (must inject nothing) |
 
