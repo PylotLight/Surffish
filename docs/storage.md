@@ -1,15 +1,14 @@
 # Profile storage (surffish.db)
 
-Surffish is moving its JSON stores into one SQLite database in the profile folder,
+Surffish keeps its profile data in one SQLite database in the profile folder,
 `surffish.db` (with `-wal`/`-shm` next to it). It's the groundwork for sync: every row has a
 stable id, a clock stamp and a tombstone, and every write lands in a change log.
 
-Status: **history** lives in the database (PR 1); the **open-windows session** (windows, tabs,
-pins, groups, splits, each tab's Space) is saved to it too (PR 2), with browser-session.json still
-written alongside as the fallback. **Bookmarks**, **browser preferences** and **Spaces** moved
-next, with bookmarks.json / browser-preferences.json / browser-spaces.json kept as fallback copies.
+In the database today: **history**, the **open-windows session** (windows, tabs, pins, groups,
+splits, each tab's Space), **bookmarks**, **browser preferences**, **Spaces** and the **Reading
+List**. Each keeps its old JSON file (browser-session.json, bookmarks.json, …) as a fallback copy.
 Everything else (small settings files such as spellcheck, HTTPS-only, proxy routing, search
-keywords) is still JSON.
+keywords, feeds) is still JSON.
 
 ## Which SQLite
 
@@ -74,7 +73,7 @@ Every synced table has `id` (UUID, v7 for new rows), `device_id`, `created_at`, 
 | `bookmarks` | folder/URL tree | `position` is a fractional index so concurrent moves merge; no FK on `parent_id` (children can arrive before folders) |
 | `spaces` | Spaces | `separate_storage`, `proxy` JSON |
 | `session_windows` / `session_tabs` / `tab_groups` / `session_splits` | open windows and tabs | rows belong to their `device_id`; another device's rows are its "tabs on other devices" |
-| `reading_list` (v2) | Reading List: pages saved for later | `added_at`, `read_at` (NULL = unread); `snapshot`/`snapshot_at` hold an offline Reader copy that is **device-local** (not in the oplog payload, and saving it doesn't bump `hlc`); remove = tombstone with url/title/excerpt/snapshot blanked; no unique index on `url` (two devices can save the same page before syncing; the app de-duplicates on read). See docs/reading-list.md |
+| `reading_list` (v2) | Reading List: pages saved for later | `added_at`, `read_at` (NULL = unread); `snapshot`/`snapshot_at` hold an offline Reader copy that is **device-local** (not in the oplog payload, and saving it doesn't bump `hlc`); remove = tombstone with url/title/excerpt/snapshot blanked; no unique index on `url` (two devices can save the same page before syncing; the app de-duplicates on read). Lazily loaded (`src/main/reading-list.ts`); `SURFFISH_STORE=json` forces `reading-list.json` |
 
 ## Change log and sync
 

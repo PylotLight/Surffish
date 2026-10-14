@@ -1,6 +1,6 @@
 # Development and technical notes
 
-This page collects setup and implementation details for contributors. The project landing page remains focused on the Surffish experience; detailed feature notes live in the linked guides below.
+This page collects setup and implementation details for contributors. Feature behavior lives in the code and its tests; this page covers setup, testing and the non-obvious bits.
 
 ## Local development
 
@@ -43,20 +43,26 @@ Every `scripts/electron-*-smoke.cjs` (and the perf / extension probes) requires 
 
 The k3s runner has passwordless sudo, so CI runs sandboxed. Chromium picks the user-namespace sandbox there and the OOM-score line still shows up for each renderer. It's harmless. Routing the write through the setuid `chrome-sandbox` helper (`--disable-namespace-sandbox`) doesn't work in the pod: the setuid sandbox can't create its PID namespace ("Failed to move to new namespace … Operation not permitted"). Adding capabilities to the pod securityContext doesn't help either, because the runner isn't root.
 
+## Feature smokes and probes
+
+Each feature has a `test:electron-<feature>` script in `package.json` (feeds, reading-list, spaces, tab-groups, downloads, adblock, extension-dnr, …). Run it after `bun run build`, under `xvfb-run -a` on Linux. Smokes that hit the real web (`test:electron-youtube`, `test:electron-adblock-sites`) write JSON and screenshots to `adblock-harness-output/`; `SURFFISH_HARNESS_PROXY` routes them through a SOCKS proxy.
+
+- Web Store extensions: `bun run probe:web-store-extension modern-for-hn|i-still-dont-care-about-cookies [out-dir] [--probe]` downloads, verifies and stages one as Surffish would; `bun run probe:electron-extension-real -- <unpacked-dir>` loads one unmodified and reports what fails; `bun run check:password-extension -- bitwarden|bramble <unpacked-dir>` statically lists APIs Electron lacks; `bun run bench:dnr [rules.json]` times the DNR matcher. `SURFFISH_DNR_SMOKE_EXTENSION=<staged dir>` runs `test:electron-extension-dnr` against a real extension.
+- Bramble: `bun run check:bramble-quick-unlock <bramble_firefox_X>` (and `scripts/check-bramble-quick-unlock-app.cjs` against the built app) need an unpacked upstream Firefox build; they are not in CI.
+- Tuning knobs: `SURFFISH_SIDEBAR_MOTION=stepped|native|off` (sidebar slide; `native` is experimental on macOS), `SURFFISH_SWIPE_INTENT="minDistance=8,minRatio=1.8,minVelocity=0.06"` and `SURFFISH_SWIPE_DEBUG=1` (trackpad back/forward swipe), `SURFFISH_STORE=json` (skip `surffish.db`).
+
+## Electron gotchas
+
+- Electron allows one listener per `webRequest` event per session. `src/main/adblock-engine.ts` owns it; anything else (kill switch, HTTPS-only, extension DNR) plugs in as a request gate rather than registering its own.
+- Electron's native `declarativeNetRequest` enforces nothing while the session has a `webRequest` listener, so Surffish matches DNR rules itself (`src/shared/dnr.ts`, `src/main/extension-dnr.ts`).
+- Electron 44 never delivers `chrome.storage.onChanged` to an MV3 service worker; the Bramble shim relays local-area changes from Bramble's offscreen page.
+- Electron's `tabs.query`/`tabs.create`, `storage.sync`, `webNavigation` and `management` don't work for extensions; Surffish shims them in extension contexts (`src/main/web-store-extension-adapter.ts` and the `extension-host`/`extension-bridge` preloads).
+
 ## Further technical references
 
 - [Architecture](architecture.md)
 - [Profile storage (surffish.db)](storage.md)
-- [Browser, profile, and proxy notes](browser-and-proxy.md)
-- [UI motion, swipe intent and view flashes](ui-motion.md)
-- [Spaces](spaces.md) and [Tab groups](tab-groups.md)
-- [Downloads manager](downloads-manager.md)
-- [Feeds](feeds.md)
-- [Chrome Web Store extensions](chrome-web-store-extensions.md)
-- [Bramble integration](bramble-integration.md)
-- [New Tab photo sources and cache](new-tab-photo-sources.md)
-- [Third-party assets and licenses](third-party-assets.md)
 - [Perf check and CI](perf.md)
 - [macOS builds and releases](releasing.md)
 - [Troubleshooting](troubleshooting.md)
-- [macOS WebKit evaluation](native-webkit-evaluation.md)
+- [Third-party assets and licenses](third-party-assets.md)

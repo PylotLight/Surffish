@@ -2,6 +2,12 @@
 
 ## The proxy is on but pages do not load
 
+Surffish only talks to a local SOCKS5 endpoint; it does not start SSH for you. A typical one:
+
+```bash
+ssh -N -D 127.0.0.1:1080 user@your-ssh-host
+```
+
 Make sure the SSH dynamic-forwarding command is still running on the same computer, and that its `-D` port matches Surffish's **SOCKS5** settings. **Test port** checks only whether a TCP service is listening; it does not test the SOCKS handshake or SSH destination. Turn the **SOCKS5 proxy** switch off in **Settings → General** to test a direct connection.
 
 ## Address bar does not open the expected page
