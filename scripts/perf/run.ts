@@ -5,7 +5,7 @@
 // Apps are run interleaved (A B, B A, A B ...) so machine noise lands on both sides.
 // Each app is launched with its own node_modules Electron when it has one.
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { summarize } from './metrics.ts'
@@ -20,6 +20,11 @@ let runs = Number(process.env.PERF_RUNS || config.runs || 3)
 // One discarded start-up-only launch per app first: the very first Electron launch on a fresh pod
 // pays for the font cache, the shader cache and a cold page cache (up to ~3 s of "first paint").
 let warmup = Number(process.env.PERF_WARMUP ?? config.warmup ?? 1)
+// Start-up-only launches on the profile the warm-up left behind (V8 code cache, HTTP cache and
+// window state already there): the "returning user" start. Needs a warm-up; 0 turns them off.
+let warmStarts = Number(process.env.PERF_WARM_STARTS ?? config.warmStarts ?? 0)
+// --trace <dir>: one Chrome trace per app (first measured run), see PERF_TRACE in bench.cjs.
+let traceDir = ''
 let outFile = ''
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!
@@ -28,6 +33,8 @@ for (let i = 0; i < args.length; i++) {
     apps.push({ label: label!, dir: resolve(dir!) })
   } else if (a === '--runs') runs = Number(args[++i])
   else if (a === '--warmup') warmup = Number(args[++i])
+  else if (a === '--warm-starts') warmStarts = Number(args[++i])
+  else if (a === '--trace') traceDir = resolve(args[++i]!)
   else if (a === '--out') outFile = args[++i]!
   else throw new Error(`unknown argument ${a}`)
 }
@@ -89,15 +96,24 @@ function electronFor(dir: string): string {
 
 const tmp = mkdtempSync(join(tmpdir(), 'surffish-perf-'))
 const bench = join(here, 'bench.cjs')
-function sample(app: { label: string; dir: string }, n: number, warm = false): Record<string, unknown> | null {
+type Launch = 'run' | 'warmup' | 'warm-start'
+const profileOf = (app: { label: string }) => join(tmp, `${app.label}-profile`)
+function sample(app: { label: string; dir: string }, n: number, launch: Launch = 'run'): Record<string, unknown> | null {
   if (!existsSync(join(app.dir, 'out/main/index.js'))) throw new Error(`${app.dir} has no out/main/index.js (run bun run build there)`)
-  const out = join(tmp, `${app.label}-${warm ? 'warmup' : n}.json`)
+  const warm = launch !== 'run'
+  const out = join(tmp, `${app.label}-${launch}-${n}.json`)
+  const trace = traceDir && launch === 'run' && n === 0 ? join(traceDir, `${app.label}-startup-trace.json`) : ''
   const extra = process.platform === 'linux' && process.env.ELECTRON_DISABLE_SANDBOX ? ['--no-sandbox'] : []
   for (let attempt = 1; attempt <= 2; attempt++) {
     const started = Date.now()
     const r = spawnSync(electronFor(app.dir), [...extra, bench], {
       cwd: app.dir,
-      env: { ...process.env, PERF_APP_DIR: app.dir, PERF_OUT: out, PERF_CONFIG: JSON.stringify(config.bench ?? {}), PERF_WARMUP: warm ? '1' : '' },
+      env: {
+        ...process.env, PERF_APP_DIR: app.dir, PERF_OUT: out, PERF_CONFIG: JSON.stringify(config.bench ?? {}), PERF_WARMUP: warm ? '1' : '',
+        // The warm-up and warm starts share one kept profile per app; measured runs start from a fresh one.
+        PERF_USER_DATA: warm && warmStarts > 0 ? profileOf(app) : '',
+        PERF_TRACE: trace
+      },
       encoding: 'utf8',
       timeout: 150_000,
       maxBuffer: 64 * 1024 * 1024
@@ -105,8 +121,10 @@ function sample(app: { label: string; dir: string }, n: number, warm = false): R
     const secs = ((Date.now() - started) / 1000).toFixed(1)
     if (r.status === 0 && existsSync(out)) {
       const s = JSON.parse(readFileSync(out, 'utf8'))
-      if (warm) { console.error(`[perf] ${app.label} warm-up ok (${secs}s, first paint ${s.startup?.firstPaintMs}ms, discarded)`); rmSync(out, { force: true }); return s }
-      console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms`)
+      const toolbar = s.startup?.phases?.toolbarReadyMs
+      if (launch === 'warmup') { console.error(`[perf] ${app.label} warm-up ok (${secs}s, first paint ${s.startup?.firstPaintMs}ms, discarded)`); rmSync(out, { force: true }); return s }
+      if (launch === 'warm-start') { console.error(`[perf] ${app.label} warm start ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms toolbar=${toolbar}ms`); rmSync(out, { force: true }); return s }
+      console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms toolbar=${toolbar}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms`)
       rmSync(out, { force: true })
       return s
     }
@@ -116,10 +134,11 @@ function sample(app: { label: string; dir: string }, n: number, warm = false): R
   return null
 }
 
-const results: Record<string, { dir: string; bundle: ReturnType<typeof bundleSizes>; samples: Record<string, unknown>[]; failures: number; median: Record<string, number> }> = {}
-for (const app of apps) results[app.label] = { dir: app.dir, bundle: bundleSizes(app.dir), samples: [], failures: 0, median: {} }
+const results: Record<string, { dir: string; bundle: ReturnType<typeof bundleSizes>; samples: Record<string, unknown>[]; warmSamples: Record<string, unknown>[]; failures: number; median: Record<string, number> }> = {}
+for (const app of apps) results[app.label] = { dir: app.dir, bundle: bundleSizes(app.dir), samples: [], warmSamples: [], failures: 0, median: {} }
+if (traceDir) mkdirSync(traceDir, { recursive: true })
 const started = Date.now()
-for (let n = 0; n < warmup; n++) for (const app of apps) sample(app, n, true)
+for (let n = 0; n < warmup; n++) for (const app of apps) sample(app, n, 'warmup')
 for (let n = 0; n < runs; n++) {
   const order = n % 2 === 0 ? apps : [...apps].reverse()
   for (const app of order) {
@@ -128,10 +147,21 @@ for (let n = 0; n < runs; n++) {
     else results[app.label]!.failures++
   }
 }
+// Warm starts last, interleaved: by now the pod's first-launch costs (fonts, shaders, page cache) are long
+// paid, so warm vs cold compares the profile, not the machine warming up (run first, they were slower than cold).
+if (warmup > 0) {
+  for (let n = 0; n < warmStarts; n++) {
+    for (const app of n % 2 === 0 ? apps : [...apps].reverse()) {
+      const s = sample(app, n, 'warm-start')
+      if (s) results[app.label]!.warmSamples.push(s)
+    }
+  }
+}
+for (const app of apps) rmSync(profileOf(app), { recursive: true, force: true })
 // `median` holds each metric's aggregate: the median, or the minimum for metrics with "stat": "min".
-for (const r of Object.values(results)) r.median = summarize(r.samples, r.bundle, config.metrics)
+for (const r of Object.values(results)) r.median = summarize(r.samples, r.bundle, config.metrics, r.warmSamples)
 rmSync(tmp, { recursive: true, force: true })
-const report = { platform: process.platform, arch: process.arch, runs, warmup, seconds: Math.round((Date.now() - started) / 1000), config, apps: results }
+const report = { platform: process.platform, arch: process.arch, runs, warmup, warmStarts: warmup > 0 ? warmStarts : 0, seconds: Math.round((Date.now() - started) / 1000), config, apps: results }
 const json = JSON.stringify(report, null, 2)
 if (outFile) writeFileSync(outFile, json)
 console.log(JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, { failures: v.failures, median: v.median }])), null, 2))

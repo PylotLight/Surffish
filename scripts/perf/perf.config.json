@@ -2,6 +2,7 @@
   "$comment": "Perf check config. See docs/perf.md. Regression = PR worse than main by more than BOTH pct and abs. deterministic: fail above failPct. noisy: warn above warnPct, fail above failPct (never fails where noisyFail is false, per platform or per metric via platforms.<os>.noisyFail); when only noisy metrics fail, CI benches again and judges the pooled runs. leak: fail when PR leaves anything behind and more than main.",
   "runs": 3,
   "warmup": 1,
+  "warmStarts": 2,
   "bench": {
     "tabsMid": 10,
     "tabsMax": 30,
@@ -18,6 +19,12 @@
   "platforms": {
     "linux": { "noisyFail": true },
     "darwin": { "noisyFail": false }
+  },
+  "groups": {
+    "phases": {
+      "title": "Cold start by phase (warn-only)",
+      "note": "Each row is ms from process start to that point (best of the runs; the bench's own profile seeding is cut out). Main-process marks come from `traceStartup()` in src/main/startup-defer.ts, the toolbar from its `surffish:first-commit` mark (it sits hidden behind the New Tab page, so it has no paint of its own); a build without them shows –. Warm start = a start-up-only launch on the profile the warm-up left behind (V8 code cache, HTTP cache, window state already there)."
+    }
   },
   "metrics": {
     "bundle.mainJs": { "kind": "deterministic", "label": "main JS at startup (index.js + imports)", "unit": "KB" },
@@ -49,6 +56,18 @@
     "idle.mainCpuMsPerSec": { "kind": "noisy", "label": "main process CPU, idle", "unit": "ms/s", "abs": 10 },
     "windowCycles.processesGrowth": { "kind": "leak", "label": "processes left after 3 window open/close", "unit": "" },
     "windowCycles.webContentsGrowth": { "kind": "leak", "label": "webContents left after 3 window open/close", "unit": "" },
-    "windowCycles.memGrowthMB": { "kind": "noisy", "label": "memory growth after 3 window open/close", "unit": "MB", "abs": 40 }
+    "windowCycles.memGrowthMB": { "kind": "noisy", "label": "memory growth after 3 window open/close", "unit": "MB", "abs": 40 },
+    "startup.phases.mainLoadedMs": { "kind": "noisy", "label": "main JS loaded (out/main/index.js evaluated)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.electronReadyMs": { "kind": "noisy", "label": "Electron ready (app 'ready' event)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.profileReadyMs": { "kind": "noisy", "label": "profile ready (proxy, safety, cookies, downloads)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.windowCreatedMs": { "kind": "noisy", "label": "first window created", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.toolbarReadyMs": { "kind": "noisy", "label": "toolbar rendered (first React commit)", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.renderer.toolbarCommitMs": { "kind": "noisy", "label": "toolbar JS start-up inside its renderer (navigation → first commit)", "unit": "ms", "abs": 30, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.newTabLoadMs": { "kind": "noisy", "label": "first tab (New Tab page) loaded", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.windowPaintedMs": { "kind": "noisy", "label": "first window painted (deferred start-up begins)", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.adblockReadyMs": { "kind": "noisy", "label": "deferred: ad filter ready", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
+    "startup.phases.extensionsReadyMs": { "kind": "noisy", "label": "deferred: extensions ready, page requests released", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
+    "warm.startup.phases.toolbarReadyMs": { "kind": "noisy", "label": "warm start: toolbar rendered", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
+    "warm.startup.firstPaintMs": { "kind": "noisy", "label": "warm start: first paint (New Tab page)", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" }
   }
 }

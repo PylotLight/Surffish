@@ -25,7 +25,16 @@ export async function afterFirstWindowPaint(window: BaseWindow | undefined, time
 }
 
 const traceStart = Date.now()
-/** SURFFISH_STARTUP_TRACE=1 prints start-up phase times (ms since main loaded). */
+/**
+ * Start-up phase marks as [label, epoch ms], oldest first. Always recorded (a handful of entries,
+ * one Date.now() each) and read in-process by the perf bench (scripts/perf/bench.cjs) to break cold
+ * start into phases; the global name is the contract with the bench.
+ */
+const marks: [string, number][] = []
+;(globalThis as { __surffishStartupMarks?: [string, number][] }).__surffishStartupMarks = marks
+/** Records a start-up phase; SURFFISH_STARTUP_TRACE=1 also prints it (ms since main loaded). */
 export function traceStartup(label: string): void {
-  if (process.env.SURFFISH_STARTUP_TRACE) console.info(`[startup] ${label} +${Date.now() - traceStart} ms`)
+  const now = Date.now()
+  marks.push([label, now])
+  if (process.env.SURFFISH_STARTUP_TRACE) console.info(`[startup] ${label} +${now - traceStart} ms`)
 }

@@ -5,12 +5,13 @@
 // instrumentation below is in place, so IPC and main-process timers are counted from the start.
 // Works on Linux (PSS from /proc) and macOS (working set from app.getAppMetrics()).
 const T_PROCESS_START = Date.now() - process.uptime() * 1000
+const T_BENCH_START = Date.now()
 const { createServer } = require('node:http')
 const { mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync, existsSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, webContents, ipcMain } = require('electron')
+const { app, BaseWindow, webContents, ipcMain, contentTracing } = require('electron')
 // SURFFISH_SMOKE_HIDDEN=1|2 (Mac CI only): windows never take focus (2: never shown); applies to base and PR alike
 require('../smoke-hidden.cjs')
 
@@ -23,7 +24,23 @@ const IDLE_SECONDS = cfg.idleSeconds ?? 5
 const SWITCHES = cfg.tabSwitches ?? 12
 const NEW_TABS = cfg.newTabs ?? 5
 const WINDOW_CYCLES = cfg.windowCycles ?? 3
-const userData = join(tmpdir(), `surffish-perf-${process.pid}`)
+// PERF_USER_DATA: a profile kept across launches (run.ts: the warm-up launch, then the warm starts
+// reuse it, so the renderer's V8 code cache and the HTTP cache are warm like a returning user's).
+const KEEP_PROFILE = Boolean(process.env.PERF_USER_DATA)
+const userData = process.env.PERF_USER_DATA || join(tmpdir(), `surffish-perf-${process.pid}`)
+// PERF_TRACE=<file.json>: opt-in Chrome trace (contentTracing) from app ready to the first window's
+// deferred start-up (open in https://ui.perfetto.dev or chrome://tracing). Off in CI by default.
+const TRACE_FILE = process.env.PERF_TRACE || ''
+let tAppReady = NaN
+app.once('ready', () => {
+  tAppReady = Date.now()
+  if (TRACE_FILE) {
+    contentTracing.startRecording({
+      included_categories: ['toplevel', 'v8', 'blink', 'blink.user_timing', 'loading', 'devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-v8.compile', 'electron'],
+      excluded_categories: ['*']
+    }).catch((e) => step(`trace not started: ${e.message}`))
+  }
+})
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 const step = (t) => process.stderr.write(`[perf] ${((Date.now() - T_PROCESS_START) / 1000).toFixed(1)}s ${t}\n`)
 const round = (n, d = 1) => Math.round(n * 10 ** d) / 10 ** d
@@ -114,6 +131,7 @@ const twoFrames = (wc) => wc.executeJavaScript('new Promise(r=>requestAnimationF
 // so the bench never downloads filter lists and both builds start from the same state.
 // PERF_ADBLOCK_ENGINE=<adblock-engine-v2.bin> seeds a real prebuilt engine instead.
 async function seedProfile() {
+  if (KEEP_PROFILE && existsSync(join(userData, 'adblock-engine-v2.bin'))) return 'kept'
   rmSync(userData, { recursive: true, force: true })
   mkdirSync(userData, { recursive: true, mode: 0o700 })
   const now = Date.now()
@@ -132,18 +150,42 @@ async function seedProfile() {
   }
 }
 
+// Cold-start phases, all in ms since process start with the bench's own profile seeding cut out
+// (like windowMs/firstPaintMs). Main-process marks come from the app's traceStartup()
+// (src/main/startup-defer.ts, globalThis.__surffishStartupMarks); builds without it report NaN (n/a).
+const APP_MARKS = {
+  profileReadyMs: 'profile ready',
+  windowCreatedMs: 'windows created',
+  windowPaintedMs: 'first window painted',
+  adblockReadyMs: 'adblock engine ready',
+  extensionsReadyMs: 'extensions ready, page requests released'
+}
+const appMarks = () => globalThis.__surffishStartupMarks
+const markAt = (label) => appMarks()?.find((m) => m[0] === label)?.[1] ?? NaN
+// A shell surface's start-up user-timing mark (src/renderer/src/main.tsx) as epoch ms; NaN if absent.
+// surffish:first-commit = first React commit (script loaded, compiled, run); surffish:first-frame = a frame produced after it (visible surfaces only).
+const userMarkOf = (wc, name, timeoutMs) => wc.executeJavaScript(`new Promise((r) => { const end = Date.now() + ${timeoutMs}; const f = () => { const e = performance.getEntriesByName(${JSON.stringify(name)})[0]; if (e) r(performance.timeOrigin + e.startTime); else if (Date.now() > end) r(null); else setTimeout(f, 5) }; f() })`).then((v) => (v == null ? NaN : v), () => NaN)
+// Inside one surface's renderer: its navigation start to its first React commit (fetch, compile and run
+// the shell bundle, first render), free of process-launch scheduling noise. NaN without the mark.
+const commitSinceNavOf = (wc) => wc.executeJavaScript(`(() => { const e = performance.getEntriesByName('surffish:first-commit')[0]; return e ? e.startTime : null })()`).then((v) => (v == null ? NaN : round(v)), () => NaN)
+const loadEndOf = (wc) => wc.executeJavaScript(`(() => { const n = performance.getEntriesByType('navigation')[0]; return n && n.loadEventEnd > 0 ? performance.timeOrigin + n.loadEventEnd : null })()`).then((v) => (v == null ? NaN : v), () => NaN)
+
 async function run() {
   const result = { platform: process.platform, arch: process.arch, electron: process.versions.electron }
   app.setPath('userData', userData)
   const seedStart = Date.now()
   result.adblockEngine = await seedProfile()
-  const seedMs = Date.now() - seedStart // excluded from startup timings
+  const seedEnd = Date.now()
+  const seedMs = seedEnd - seedStart // excluded from startup timings
+  // An event's time on the cold-start timeline: before the seed as is, during it clamped, after it minus the seed.
+  const at = (t) => !Number.isFinite(t) ? NaN : Math.round(t <= seedStart ? t - T_PROCESS_START : t < seedEnd ? seedStart - T_PROCESS_START : t - T_PROCESS_START - seedMs)
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
   const origin = `http://127.0.0.1:${server.address().port}`
   counting = true // startup IPC
   const tImport = performance.now()
   await import(pathToFileURL(join(APP_DIR, 'out/main/index.js')).href)
   const mainImportMs = performance.now() - tImport
+  const tMainLoaded = Date.now()
   await app.whenReady()
   win = await waitFor(() => BaseWindow.getAllWindows()[0], 'window', 30000)
   const tWindow = Date.now() - T_PROCESS_START - seedMs
@@ -154,6 +196,32 @@ async function run() {
   const contentFcp = await Promise.race([fcpOf(content.webContents), delay(10000).then(() => NaN)])
   result.startup = { windowMs: Math.round(tWindow), firstPaintMs: Math.round(contentFcp - T_PROCESS_START - seedMs), mainImportMs: round(mainImportMs) }
   step('first paint')
+  // Phases. The toolbar's mark is normally long there by now; a build without marks gets a short grace.
+  // The toolbar is hidden behind a New Tab page (the page draws its own bar), so its start-up number is
+  // its first React commit: script loaded, compiled and run, ready to show.
+  const hasMarks = Array.isArray(appMarks())
+  const toolbarReady = await userMarkOf(toolbar.webContents, 'surffish:first-commit', hasMarks ? 5000 : 300)
+  const phases = {
+    electronBootMs: at(T_BENCH_START),
+    electronReadyMs: at(tAppReady),
+    mainLoadedMs: at(tMainLoaded),
+    profileReadyMs: at(markAt(APP_MARKS.profileReadyMs)),
+    windowCreatedMs: at(markAt(APP_MARKS.windowCreatedMs)),
+    toolbarReadyMs: at(toolbarReady),
+    newTabLoadMs: at(await loadEndOf(content.webContents)),
+    windowPaintedMs: NaN,
+    adblockReadyMs: NaN,
+    extensionsReadyMs: NaN
+  }
+  // Deferred start-up (ad filter, extensions) finishes after the first paint: wait for its last mark.
+  if (hasMarks) await waitFor(() => Number.isFinite(markAt(APP_MARKS.extensionsReadyMs)), 'deferred start-up', 20000).catch(() => step('deferred start-up mark not seen'))
+  for (const key of ['windowPaintedMs', 'adblockReadyMs', 'extensionsReadyMs']) phases[key] = at(markAt(APP_MARKS[key]))
+  result.startup.phases = phases
+  result.startup.renderer = { toolbarCommitMs: await commitSinceNavOf(toolbar.webContents), contentCommitMs: await commitSinceNavOf(content.webContents) }
+  step(`phases ${JSON.stringify(phases)}`)
+  if (TRACE_FILE) {
+    await contentTracing.stopRecording(TRACE_FILE).then((f) => step(`trace written: ${f}`), (e) => step(`trace failed: ${e.message}`))
+  }
   // Warm-up launch (run.ts, discarded): only pays the first-launch costs, so stop here.
   if (process.env.PERF_WARMUP === '1') return result
   const api = (expr) => toolbar.webContents.executeJavaScript(expr)
@@ -259,6 +327,8 @@ run().then((r) => {
   if (OUT) writeFileSync(OUT, json)
   console.log(`PERF_SAMPLE ${json}`)
   server.close()
-  rmSync(userData, { recursive: true, force: true })
-  app.exit(0)
-}, (e) => { console.error('[perf] FAILED', e); rmSync(userData, { recursive: true, force: true }); app.exit(1) })
+  if (!KEEP_PROFILE) rmSync(userData, { recursive: true, force: true })
+  // A kept profile: let the session flush (cookies, V8 code cache) before exiting, like a real quit.
+  if (KEEP_PROFILE) app.quit()
+  else app.exit(0)
+}, (e) => { console.error('[perf] FAILED', e); if (!KEEP_PROFILE) rmSync(userData, { recursive: true, force: true }); app.exit(1) })

@@ -53,6 +53,33 @@ fixture site, then:
 The tab counts, idle window and cycle count are in `perf.config.json` → `bench` (trim `tabsMax`
 if the job gets too slow).
 
+## Cold start by phase
+
+Every run also breaks the cold start into phases, shown as a second table ("Cold start by phase",
+warn-only) in the step summary and the sticky comment. Each value is ms from process start to that
+point, best of the runs, with the bench's own profile seeding cut out (like the first-paint metric):
+
+| phase | where it comes from |
+|---|---|
+| main JS loaded | the bench's `import()` of `out/main/index.js` resolving (boot entry + app evaluated) |
+| Electron ready | the app `ready` event (fires after the main JS has loaded) |
+| profile ready, first window created | `traceStartup()` marks in `src/main/index.ts` |
+| toolbar rendered | the toolbar renderer's `surffish:first-commit` user-timing mark (`src/renderer/src/main.tsx`). The toolbar sits hidden behind the New Tab page, which draws its own bar, so it never paints at start-up; its first React commit is when it is ready to show |
+| toolbar JS start-up inside its renderer | the same mark relative to the toolbar's own navigation start: fetch, compile and run of the shell bundle plus the first render, without process-launch noise |
+| first tab (New Tab page) loaded | the content surface's `load` event (its first paint is "cold start to first paint" in the main table) |
+| first window painted, ad filter ready, extensions ready | the deferred start-up marks (`afterFirstWindowPaint`, then the ad-filter engine and Web Store extensions; page requests are released at the last one) |
+| warm start: toolbar rendered / first paint | `warmStarts` (2) start-up-only launches per side on the profile the warm-up launch left behind, so the renderer's V8 code cache, the HTTP cache and the window state are warm, like a returning user's. They run after the measured runs, interleaved, when the pod's first-launch costs are long paid |
+
+The main-process marks are recorded by `traceStartup()` (`src/main/startup-defer.ts`) into
+`globalThis.__surffishStartupMarks` on every launch (a few `Date.now()` calls); `SURFFISH_STARTUP_TRACE=1`
+also prints them. A build without the marks (a base from before they existed) shows `–`. Phase
+metrics are `"warnOnly": true` in `perf.config.json`: they warn above their margins and never fail,
+on any platform, until their noise on the pods is known. Warm starts add ~1 s per launch (~5 s per job).
+
+**Chrome trace (opt-in, local).** `bun run perf --trace <dir>` records one `contentTracing` trace per
+app (first measured run, app ready → deferred start-up done) as `<dir>/<label>-startup-trace.json`, for
+https://ui.perfetto.dev. `PERF_TRACE=<file>` does the same for a single bench launch. CI doesn't trace.
+
 Since perf pass 3 `out/main/index.js` is a tiny boot entry: it turns on Node's on-disk compile cache
 (`module.enableCompileCache`, in the OS cache dir under `Surffish/node-compile-cache`) and then imports the
 app, so every launch after the first skips compiling the ~1 MB main bundle. `SURFFISH_NO_COMPILE_CACHE=1`
@@ -109,6 +136,7 @@ busy laptop are only good for spotting big changes.
 ## CI settings
 
 - `PERF_RUNS` (job env, default 3): runs per side. Each run is ~20–30 s on the Linux pods.
+- `PERF_WARM_STARTS` (default `warmStarts` in the config, 2): warm-profile start-up launches per side; 0 turns them off.
 - `SURFFISH_GH_PROXY` (Mac runner `.env`, optional), e.g. `socks5h://127.0.0.1:1080`. The Mac
   runner's network blocks non-enterprise GitHub API calls, so by default its results only go to
   the step summary. With this set, the job passes it to `curl --proxy` for the comment calls only
@@ -150,3 +178,11 @@ would also change how local `bun run dev` executes tools.
   the numbers. Set `PERF_ADBLOCK_ENGINE=/path/to/adblock-engine-v2.bin` to seed a real one.
 - Linux has no GPU; the Mac job is where GPU memory and real compositing show up. Memory-pressure
   tab discard and native sidebar blur aren't exercised by the bench yet.
+- Tried and not adopted (Oct 2026): a V8 code cache for the browser chrome. Chromium never code-caches
+  `file://` scripts, so the shell was served from a `codeCache` custom scheme with
+  `v8CacheOptions: 'bypassHeatCheck'` (and `…AndEagerCompile`). Traces showed the cache hit (170 KB
+  consumed for the main bundle, not rejected), but toolbar and first-paint times were no better than
+  `file://`, which streams and compiles scripts off the main thread and needs no main-process round
+  trip per file (warm toolbar commit inside its renderer: 150 ms best / 195 ms median on `file://`
+  vs 160 / 201 ms with the cache, 30 launches each). Most of the renderer's compile time is lazy
+  functions the cache doesn't hold.
