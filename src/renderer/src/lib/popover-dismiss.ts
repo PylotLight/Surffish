@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react'
-import { blurDismissesPopover, dismissReasonCloses, normalizeDismissReason, POPOVER_DISMISS_EVENT, type DismissibleKind, type PopoverDismissReason } from '../../../shared/popover-dismiss'
+import { blurDismissesPopover, dismissReasonCloses, normalizeDismissReason, POPOVER_DISMISS_EVENT, readDismissRequest, tabSwitchClosesPopover, type DismissibleKind, type PopoverDismissReason, type PopoverDismissRequest } from '../../../shared/popover-dismiss'
 
-/** Close every open popover in this renderer (main asked, see shared/popover-dismiss.ts). */
-export function dismissPopovers(reason: PopoverDismissReason | string = 'request'): void {
-  window.dispatchEvent(new CustomEvent(POPOVER_DISMISS_EVENT, { detail: normalizeDismissReason(reason) }))
+/**
+ * Close every open popover in this renderer (main asked, see shared/popover-dismiss.ts). `since`
+ * goes with `tab-switch`: when main switched the tab, so popovers opened after it stay open.
+ */
+export function dismissPopovers(reason: PopoverDismissReason | string = 'request', since?: number): void {
+  const detail: PopoverDismissRequest = since === undefined ? { reason: normalizeDismissReason(reason) } : { reason: normalizeDismissReason(reason), since }
+  window.dispatchEvent(new CustomEvent(POPOVER_DISMISS_EVENT, { detail }))
 }
 
 export interface PopoverDismissOptions {
@@ -27,6 +31,8 @@ export function usePopoverDismiss(open: boolean, containerRef: React.RefObject<H
   useEffect(() => {
     if (!open) return
     const kind = latest.current.options.kind ?? 'popover'
+    // When it opened: a late tab-switch broadcast for a switch made before this must not close it.
+    const openedAt = Date.now()
     const dismiss = (): void => latest.current.close()
     const onPointerDown = (event: PointerEvent): void => {
       if (!containerRef.current?.contains(event.target as Node)) dismiss()
@@ -41,7 +47,10 @@ export function usePopoverDismiss(open: boolean, containerRef: React.RefObject<H
       if (kind === 'popover' && blurDismissesPopover(document.activeElement?.tagName)) dismiss()
     }
     const onRequest = (event: Event): void => {
-      if (dismissReasonCloses(kind, normalizeDismissReason((event as CustomEvent).detail))) dismiss()
+      const request = readDismissRequest((event as CustomEvent).detail)
+      if (!dismissReasonCloses(kind, request.reason)) return
+      if (request.reason === 'tab-switch' && !tabSwitchClosesPopover(openedAt, request.since)) return
+      dismiss()
     }
     window.addEventListener('pointerdown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)

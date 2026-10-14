@@ -8,7 +8,9 @@ import {
   POPOVER_DISMISS_EVENT,
   POPOVER_SHADOW_ROOM,
   popoverRoom,
+  readDismissRequest,
   sidebarModeAfterTabSwitch,
+  tabSwitchClosesPopover,
   surfacePressDismissReason,
   toolbarExtentFor,
   windowBlurDismissesPopovers
@@ -144,5 +146,32 @@ describe('toolbar view sized to its popovers', () => {
     expect(popoverRoom(200, 50)).toBe(180)
     expect(popoverRoom(undefined, 50)).toBeNull()
     expect(popoverRoom(0, 50)).toBeNull()
+  })
+})
+
+describe('late tab-switch broadcast', () => {
+  test('a popover open before main switched the tab closes', () => {
+    expect(tabSwitchClosesPopover(1_000, 1_005)).toBe(true)
+  })
+
+  test('a popover main opened after the switch stays open (close a tab, then Open Reading List)', () => {
+    expect(tabSwitchClosesPopover(1_020, 1_005)).toBe(false)
+    // Same millisecond: an IPC hop and a React commit can't come before the switch.
+    expect(tabSwitchClosesPopover(1_005, 1_005)).toBe(false)
+  })
+
+  test('no switch time (older main, start-up) closes, as before', () => {
+    expect(tabSwitchClosesPopover(1_020, undefined)).toBe(true)
+    expect(tabSwitchClosesPopover(1_020, 0)).toBe(true)
+    expect(tabSwitchClosesPopover(1_020, Number.NaN)).toBe(true)
+  })
+
+  test('dismiss event details: bare reasons and requests with a switch time', () => {
+    expect(readDismissRequest('page-press')).toEqual({ reason: 'page-press' })
+    expect(readDismissRequest('nonsense')).toEqual({ reason: 'request' })
+    expect(readDismissRequest({ reason: 'tab-switch', since: 1_005 })).toEqual({ reason: 'tab-switch', since: 1_005 })
+    expect(readDismissRequest({ reason: 'tab-switch', since: 'soon' })).toEqual({ reason: 'tab-switch' })
+    expect(readDismissRequest({ reason: 'tab-switch', since: -1 })).toEqual({ reason: 'tab-switch' })
+    expect(readDismissRequest(null)).toEqual({ reason: 'request' })
   })
 })

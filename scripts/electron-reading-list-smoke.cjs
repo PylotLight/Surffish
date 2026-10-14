@@ -166,13 +166,29 @@ async function run() {
   assert.equal(refused.ok, false)
   assert.match(refused.error, /Private/)
   assert.equal((await evaluate(toolbar, 'window.api.browser.commands.list()')).commands.find((command) => command.id === 'readingList.add').enabled, false)
-  await evaluate(toolbar, 'window.api.browser.tabs.get().then((tabs) => window.api.browser.tabs.close(tabs.find((tab) => tab.active).id))')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).private === false, 'back to a normal tab')
   console.log('reading list: link save, re-save, private refusal ok')
 
-  // --- the popover: Open Reading List (palette), Unread filter, search, open marks read
-  await evaluate(toolbar, 'window.api.browser.commands.run("readingList.show")')
+  // --- the popover: Open Reading List (palette) right as the private tab closes. Main switches back
+  // to the article tab and opens the popover in the same breath; the toolbar hears of the switch
+  // from the per-frame coalesced tab broadcast, which used to land after the popover opened and
+  // close it as "the old tab's popover" (CI flake, Oct 2026). Both requests go out back to back on
+  // purpose, so this is a regression test for that race rather than a lucky ordering.
+  const articleTabId = (await evaluate(toolbar, 'window.api.browser.tabs.get()')).find((tab) => tab.url.startsWith(`${origin}/article`))?.id
+  assert.ok(articleTabId, 'the article tab is still open behind the private tab')
+  await evaluate(toolbar, `(() => {
+    window.__smokeActiveTabSeen = null
+    window.api.browser.tabs.onChange((tabs) => { window.__smokeActiveTabSeen = tabs.find((tab) => tab.active)?.id ?? null })
+    return true
+  })()`)
+  await evaluate(toolbar, 'window.api.browser.tabs.get().then((tabs) => Promise.all([window.api.browser.tabs.close(tabs.find((tab) => tab.active).id), window.api.browser.commands.run("readingList.show")]))')
+  const afterClose = await evaluate(toolbar, 'window.api.browser.state()')
+  assert.equal(afterClose.private, false, 'back to a normal tab')
+  assert.ok(afterClose.activeTabSince > 0, 'state carries when the tab became active')
   await waitFor(() => evaluate(toolbar, 'document.querySelectorAll("#reading-list-popover .reading-list-item").length === 2'), 'the popover with two unread items')
+  // The late tab broadcast has now reached the toolbar (and React has committed it): still open.
+  await waitFor(() => evaluate(toolbar, `window.__smokeActiveTabSeen === ${JSON.stringify(articleTabId)}`), 'the tab switch broadcast to reach the toolbar')
+  await evaluate(toolbar, 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => done(true)))))')
+  assert.equal(await evaluate(toolbar, 'document.querySelectorAll("#reading-list-popover .reading-list-item").length'), 2, 'the tab switch that came before Open Reading List left the popover open')
   await screenshot(toolbar, 'reading-list-popover.png')
   await evaluate(toolbar, `(() => { const input = document.querySelector('.reading-list-search input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(input, 'linked'); input.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
   await waitFor(() => evaluate(toolbar, 'document.querySelectorAll("#reading-list-popover .reading-list-item").length === 1 && document.querySelector(".reading-list-title").textContent === "A linked story"'), 'search to narrow the list')
@@ -189,7 +205,9 @@ async function run() {
   await waitFor(() => evaluate(toolbar, 'document.querySelectorAll("#reading-list-popover .reading-list-item").length === 2'), 'All showing both')
   await evaluate(toolbar, 'document.querySelector(".reading-list-item:not(.is-unread) .reading-list-item-actions button").click()')
   await waitFor(async () => (await evaluate(toolbar, rl('get()'))).unread === 2, 'mark unread')
-  // Outside press (Escape) closes it like every toolbar popover.
+  // Outside press (Escape) closes it like every toolbar popover; it must still be open first, or
+  // the check below proves nothing.
+  assert.equal(await evaluate(toolbar, 'Boolean(document.querySelector("#reading-list-popover"))'), true, 'popover still open before Escape')
   toolbar.webContents.focus()
   toolbar.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
   toolbar.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
@@ -209,6 +227,13 @@ async function run() {
   console.log('reading list: offline reader copy ok')
 
   // --- surffish.db: rows, change log without the snapshot, remove leaves a blank tombstone
+  const opsBefore = JSON.stringify(profileRows("SELECT payload FROM oplog WHERE entity = 'reading_item'"))
+  // The change log keeps one row per item (the latest change), so the removal shows as a newer row.
+  const linkOpSeq = () => Number(profileRows(`SELECT MAX(seq) AS seq FROM oplog WHERE entity = 'reading_item' AND entity_id = '${link.item.id}'`)[0]?.seq ?? 0)
+  const linkOpBefore = linkOpSeq()
+  assert.ok(linkOpBefore > 0, 'the saved link is in the change log')
+  // Guards for the change-log checks below: they'd pass on an empty log (wrong entity name, no writes).
+  assert.ok(opsBefore.includes('/linked'), 'the change log records the saved link before it is removed')
   const rows = profileRows("SELECT id, url, title, read_at, snapshot IS NOT NULL AS has_snapshot, deleted_at FROM reading_list ORDER BY added_at DESC")
   assert.equal(rows.length, 2)
   assert.equal(rows.find((row) => row.id === article.id).has_snapshot, 1)
@@ -218,7 +243,9 @@ async function run() {
   assert.equal(removed.snapshot.items.length, 1)
   const tombstone = profileRows(`SELECT url, title, deleted_at FROM reading_list WHERE id = '${link.item.id}'`)[0]
   assert.ok(tombstone.deleted_at !== null && tombstone.url === '' && tombstone.title === '')
-  assert.ok(!JSON.stringify(profileRows("SELECT payload FROM oplog WHERE entity = 'reading_item'")).includes('/linked'), 'no URL left in the change log')
+  const opsAfter = profileRows("SELECT payload FROM oplog WHERE entity = 'reading_item'")
+  assert.ok(linkOpSeq() > linkOpBefore, 'the removal is in the change log')
+  assert.ok(!JSON.stringify(opsAfter).includes('/linked'), 'no URL left in the change log')
   console.log('reading list: database rows + tombstone ok')
 
   console.log('Electron reading list smoke passed.')

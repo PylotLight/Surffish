@@ -121,12 +121,19 @@ export function useHistoryPanelDismiss(open: boolean, anchorRef: React.RefObject
   usePopoverDismiss(open, anchorRef, close, { kind: 'panel' })
 }
 
-/** A tab switch closes whatever popover is open in this surface (it belonged to the old page). */
-export function useDismissOnTabSwitch(activeTabId: string): void {
+/**
+ * A tab switch closes whatever popover was open in this surface before it (it belonged to the old
+ * page). `activeTabSince` is when main made the tab active (BrowserState): the tab broadcast that
+ * tells this renderer is coalesced per frame and can arrive after a popover main opened right
+ * after the switch (close a tab, then Open Reading List), which must stay open.
+ */
+export function useDismissOnTabSwitch(activeTabId: string, activeTabSince?: number): void {
   const previous = useRef(activeTabId)
+  const since = useRef(activeTabSince)
+  since.current = activeTabSince
   useEffect(() => {
     if (previous.current === activeTabId) return
     previous.current = activeTabId
-    dismissPopovers('tab-switch')
+    dismissPopovers('tab-switch', since.current)
   }, [activeTabId])
 }
