@@ -98,9 +98,11 @@ for (const name of ['setTimeout', 'setInterval']) {
     return orig.call(this, function (...a) { if (counting && line) timers.set(where, (timers.get(where) || 0) + 1); return fn.apply(this, a) }, ms, ...rest)
   }
 }
-// Main-process CPU in ms (getrusage: every thread of the browser process), µs resolution where
-// getAppMetrics() counts in 10 ms scheduler ticks: per-switch/per-close numbers need the precision.
-const mainCpuMs = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000 }
+// CPU of the main process's UI thread in ms (where the app's JS, IPC and view work run and where input
+// waits), µs resolution where getAppMetrics() counts the whole process in 10 ms ticks. Compositor/IO
+// threads are left out: they vary run to run on the pods (31-54 ms per switch on identical code) and
+// don't block input. Falls back to the whole process on an Electron without process.threadCpuUsage.
+const mainCpuMs = () => { const u = process.threadCpuUsage ? process.threadCpuUsage() : process.cpuUsage(); return (u.user + u.system) / 1000 }
 const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0)
 const top = (m, n = 8) => Object.fromEntries([...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n))
 
