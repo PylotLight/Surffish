@@ -4,8 +4,6 @@ import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os'
 import { basename, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
-import type { SqlJsStatic } from 'sql.js'
-import sqlWasmPath from 'sql.js/dist/sql-wasm-browser.wasm?asset'
 import {
   buildFirefoxBookmarkTree,
   parseChromiumBookmarks,
@@ -20,14 +18,14 @@ import {
 } from '../shared/bookmark-import'
 import { isBinaryPlist, parseBinaryPlist, type PlistValue } from '../shared/bplist'
 import type { ImportedBookmarkNode } from '../shared/bookmarks'
-import { openSqliteBytes, readChromiumHistory, readFirefoxBookmarks, readFirefoxHistory, readSafariHistory } from './bookmark-import-db'
+import { openSqliteCopy, readChromiumHistory, type ImportDatabase, readFirefoxBookmarks, readFirefoxHistory, readSafariHistory } from './bookmark-import-db'
 import { exportBookmarksHtml, importBookmarks } from './bookmarks'
 import { importBrowsingHistory } from './history'
 
 /**
  * Settings → Import: finds other browsers' profiles on this machine and copies their bookmarks
  * and history in. Databases are copied to a temp dir first (the browser may have them locked)
- * and read with sql.js. Passwords are never touched — Bramble owns those.
+ * and read with node:sqlite. Passwords are never touched — Bramble owns those.
  */
 
 const execFileAsync = promisify(execFile)
@@ -39,18 +37,6 @@ interface ResolvedSource extends BookmarkImportSource {
 }
 
 let lastScan = new Map<string, ResolvedSource>()
-let sqlPromise: Promise<SqlJsStatic> | null = null
-
-function loadSql(): Promise<SqlJsStatic> {
-  if (!sqlPromise) {
-    const bytes = readFileSync(sqlWasmPath)
-    // sql.js only runs for a browser import; keep its glue code out of the launch bundle.
-    sqlPromise = import('sql.js/dist/sql-wasm-browser.js').then(({ default: initSqlJs }) => initSqlJs({ wasmBinary: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer }))
-    sqlPromise.catch(() => { sqlPromise = null })
-  }
-  return sqlPromise
-}
-
 function home(): string {
   return app.getPath('home')
 }
@@ -246,27 +232,26 @@ function readBoundedFile(path: string, limit: number): Buffer {
 }
 
 /** Copy a database aside first: the browser may have the live file open or locked. */
-async function withDatabaseCopy<T>(path: string, read: (bytes: Uint8Array) => T): Promise<T> {
+async function withDatabaseCopy<T>(path: string, read: (db: ImportDatabase) => T): Promise<T> {
+  const size = statSync(path).size
+  if (size > MAX_DATABASE_BYTES) throw new Error(`the file is too large (${Math.round(size / 1024 / 1024)} MB)`)
   const directory = mkdtempSync(join(tmpdir(), 'surffish-import-'))
   try {
     const copy = join(directory, basename(path))
     copyFileSync(path, copy)
-    return read(new Uint8Array(readBoundedFile(copy, MAX_DATABASE_BYTES)))
+    const db = openSqliteCopy(copy)
+    try {
+      return read(db)
+    } finally {
+      db.close()
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
 }
 
-async function readHistoryDatabase(path: string, reader: (db: import('sql.js').Database) => ImportedHistoryEntry[]): Promise<ImportedHistoryEntry[]> {
-  const SQL = await loadSql()
-  return withDatabaseCopy(path, (bytes) => {
-    const db = openSqliteBytes(SQL, bytes)
-    try {
-      return reader(db)
-    } finally {
-      db.close()
-    }
-  })
+function readHistoryDatabase(path: string, reader: (db: ImportDatabase) => ImportedHistoryEntry[]): Promise<ImportedHistoryEntry[]> {
+  return withDatabaseCopy(path, reader)
 }
 
 async function readSafariPlist(path: string): Promise<PlistValue> {
@@ -279,15 +264,7 @@ async function readSafariPlist(path: string): Promise<PlistValue> {
 
 async function readSourceBookmarks(source: ResolvedSource): Promise<ImportedBookmarkNode[]> {
   if (source.browser === 'firefox') {
-    const SQL = await loadSql()
-    return withDatabaseCopy(join(source.directory, 'places.sqlite'), (bytes) => {
-      const db = openSqliteBytes(SQL, bytes)
-      try {
-        return buildFirefoxBookmarkTree(readFirefoxBookmarks(db))
-      } finally {
-        db.close()
-      }
-    })
+    return withDatabaseCopy(join(source.directory, 'places.sqlite'), (db) => buildFirefoxBookmarkTree(readFirefoxBookmarks(db)))
   }
   if (source.browser === 'safari') return parseSafariBookmarks(await readSafariPlist(join(source.directory, 'Bookmarks.plist')))
   return parseChromiumBookmarks(JSON.parse(readBoundedFile(join(source.directory, 'Bookmarks'), MAX_BOOKMARK_FILE_BYTES).toString('utf8')))
