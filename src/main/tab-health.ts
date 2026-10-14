@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import { canAutoReload, crashReasonLabel, emptyCrashRecord, recordAutoReload, recordCrash, type TabCrashRecord } from '../shared/tab-crash'
+import { markTabContents } from './crash-guard'
 import { forgetTabInterstitial, getTabInterstitial, setTabInterstitial } from './tab-interstitials'
 
 /**
@@ -38,6 +39,7 @@ function showCrash(contents: WebContents, reason: string, entry: TabHealth): voi
 
 export function attachTabHealth(contents: WebContents): void {
   const id = contents.id
+  markTabContents(contents)
   contents.on('render-process-gone', (_event, details) => {
     const entry = stateFor(contents)
     clearWaitTimer(entry)

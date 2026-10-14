@@ -172,6 +172,9 @@ export function forgetSessionCookieSnapshot(partition: string): void {
   if (file && file !== SESSION_COOKIE_FILE) rmSync(cookieFilePath(file), { force: true })
 }
 
+/** Longest quit waits for the cookie snapshot and Chromium's cookie store flush. */
+const QUIT_FLUSH_TIMEOUT_MS = 3_000
+
 export async function initializeSessionCookiePersistence(): Promise<void> {
   await onPageSessionCreated((session, info) => info.persistent ? attachCookieSnapshot(session, info.partition) : undefined)
 
@@ -189,10 +192,21 @@ export async function initializeSessionCookiePersistence(): Promise<void> {
       if (target.saveTimer) clearTimeout(target.saveTimer)
       target.saveTimer = undefined
     }
-    void Promise.all(all.map((target) => queueSessionCookieSave(target)))
+    const flush = Promise.all(all.map((target) => queueSessionCookieSave(target)))
       .then(() => Promise.all(listPageSessions().filter(({ info }) => info.persistent).map(({ session }) => session.cookies.flushStore())))
+    // Bounded: a hung or restarting network service never answers flushStore(), and quit would wait
+    // on it forever (Cmd+Q doing nothing). The periodic snapshot on disk is at most a moment old.
+    let quitTimer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<void>((resolve) => {
+      quitTimer = setTimeout(() => {
+        console.warn(`Cookie flush still running after ${QUIT_FLUSH_TIMEOUT_MS / 1000}s; quitting anyway.`)
+        resolve()
+      }, QUIT_FLUSH_TIMEOUT_MS)
+    })
+    void Promise.race([flush, deadline])
       .catch((error: unknown) => console.error('Could not flush browser cookies on exit:', error))
       .finally(() => {
+        clearTimeout(quitTimer)
         proceedToQuit = true
         app.quit()
       })

@@ -1,5 +1,5 @@
 import { clipboard, dialog, Menu, type BaseWindow, type ContextMenuParams, type WebContents } from 'electron'
-import { buildBrowserContextMenuTemplate, safeFilename, safeHttpUrl } from './context-menu-template'
+import { buildBrowserContextMenuTemplate, normalizeContextMenuParams, safeFilename, safeHttpUrl } from './context-menu-template'
 import type { SearchEngineId } from '../shared/types'
 
 interface ContextMenuEvent {
@@ -101,10 +101,11 @@ function pageFilename(pageURL: string): string {
 export function showBrowserContextMenu(
   event: ContextMenuEvent,
   contents: WebContents,
-  params: ContextMenuParams,
+  rawParams: ContextMenuParams,
   options: BrowserContextMenuOptions
 ): boolean {
   if (options.window.isDestroyed() || contents.isDestroyed()) return false
+  const params = normalizeContextMenuParams(rawParams) as ContextMenuParams
 
   const items = buildBrowserContextMenuTemplate(params, {
     pageActions: options.pageActions,

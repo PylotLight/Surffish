@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import type { MenuItemConstructorOptions } from 'electron'
-import { buildBrowserContextMenuTemplate, MAX_SPELLING_SUGGESTIONS, spellingMenuItems, type ContextMenuActions, type ContextMenuParamsInput, type ContextMenuTemplateOptions } from './context-menu-template.ts'
+import { buildBrowserContextMenuTemplate, MAX_SPELLING_SUGGESTIONS, normalizeContextMenuParams, spellingMenuItems, type ContextMenuActions, type ContextMenuParamsInput, type ContextMenuTemplateOptions } from './context-menu-template.ts'
 
 const EDIT_FLAGS = { canUndo: true, canRedo: false, canCut: true, canCopy: true, canPaste: true, canDelete: true, canSelectAll: true, canEditRichly: false }
 
@@ -169,5 +169,29 @@ describe('Glance item', () => {
     expect(labels(buildBrowserContextMenuTemplate(params({ linkURL: 'javascript:alert(1)' }), options, actions()))).not.toContain('Open Link in Glance')
     expect(labels(buildBrowserContextMenuTemplate(params(), options, actions()))).not.toContain('Open Link in Glance')
     expect(labels(buildBrowserContextMenuTemplate(params({ linkURL: 'https://example.com/' }), { ...options, pageActions: false }, actions()))).not.toContain('Open Link in Glance')
+  })
+})
+
+describe('partial params (synthetic context-menu events)', () => {
+  test('only x/y: no TypeError, a page menu still builds', () => {
+    const partial = { x: 4, y: 5 } as unknown as ContextMenuParamsInput
+    const items = buildBrowserContextMenuTemplate(partial, PAGE, actions())
+    expect(labels(items)).toContain('Back')
+  })
+
+  test('normalize fills strings, flags and coordinates', () => {
+    const normalized = normalizeContextMenuParams({ x: Number.NaN, selectionText: undefined, dictionarySuggestions: [1, 'word'] } as unknown as ContextMenuParamsInput)
+    expect(normalized.x).toBe(0)
+    expect(normalized.y).toBe(0)
+    expect(normalized.selectionText).toBe('')
+    expect(normalized.editFlags.canCopy).toBe(false)
+    expect(normalized.dictionarySuggestions).toEqual(['word'])
+    expect(normalized.mediaType).toBe('none')
+    expect(normalizeContextMenuParams(null).pageURL).toBe('')
+  })
+
+  test('real params pass through unchanged', () => {
+    const full = params({ selectionText: ' hello ', linkText: 'Link' })
+    expect(normalizeContextMenuParams(full)).toEqual(full)
   })
 })

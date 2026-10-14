@@ -12,6 +12,7 @@ import { APP_NAME, WINDOW } from '../shared/config'
 import { retryOnce } from '../shared/retry'
 import { fitBoundsToDisplays, parseSavedWindowState, type Rect, type SavedWindowState } from '../shared/window-geometry'
 import { createFileTextCache } from '../shared/write-skip'
+import { watchShellSurface } from './crash-guard'
 
 const WINDOW_STATE_FILE = 'window-state.json'
 const SAVE_DELAY_MS = 400
@@ -254,6 +255,11 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   attachBrowserView(win, { private: options.private, session: options.session, adoptTabId: options.adoptTabId })
   attachSidebarBackdrop(win)
 
+  // A crashed or hung toolbar/sidebar/content renderer reloads instead of leaving a dead window.
+  for (const [view, documentUrl] of [[contentView, rendererDocuments.content], [toolbarView, rendererDocuments.toolbar], [sidebarView, rendererDocuments.sidebar]] as const) {
+    watchShellSurface(view.webContents, () => loadRenderer(view, documentUrl, () => !win.isDestroyed()), () => !win.isDestroyed())
+  }
+
   win.on('closed', () => {
     detachBrowserShell(win)
     // A closed BaseWindow doesn't destroy its views' web contents: without this every closed
@@ -272,6 +278,8 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   ]).then(() => {
     showRestored(win, geometry ?? null)
   }).catch((error: unknown) => {
+    // A window closed while its surfaces were still loading aborts them (ERR_FAILED); that's expected.
+    if (win.isDestroyed()) return
     console.error('Could not load Surffish browser surfaces:', error)
     showRestored(win, geometry ?? null)
   })
