@@ -29,6 +29,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/tab-overview.cjs'),
       join(outputDirectory, 'tab-overview.cjs')
     )
+    // Glance header/backdrop page bridge.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/glance.cjs'),
+      join(outputDirectory, 'glance.cjs')
+    )
     copyFileSync(
       resolve(projectDirectory, 'src/preload/screenshot.cjs'),
       join(outputDirectory, 'screenshot.cjs')

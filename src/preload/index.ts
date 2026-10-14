@@ -54,6 +54,7 @@ import { tabSelectionApi } from './tab-selection'
 import { watchersApi } from './watchers'
 import { feedsApi } from './feeds'
 import { readingListApi } from './reading-list'
+import { glanceApi } from './glance-settings'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 import type { SiteCertificateInfo } from '../shared/certificates'
@@ -152,6 +153,7 @@ const api = {
     watchers: watchersApi,
     feeds: feedsApi,
     readingList: readingListApi,
+    glance: glanceApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)

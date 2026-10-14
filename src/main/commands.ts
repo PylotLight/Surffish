@@ -1,3 +1,4 @@
+import { clipboard } from 'electron'
 import { isBookmarksBarVisible } from './bookmarks-bar'
 import { normalizeHttpOrigin } from '../shared/persistence'
 import type { BrowserSidebarMode } from '../shared/types'
@@ -5,6 +6,7 @@ import type { CommandDescriptor, CommandPaletteSnapshot } from '../shared/comman
 import {
   TAB_COMMAND_SHORTCUTS,
   browserPictureInPicture,
+  flashBrowserStatus,
   focusAdjacentSplitPane,
   getActiveTabWebContents,
   getBrowserState,
@@ -46,6 +48,8 @@ import { isCommandHiddenByWatchers } from '../shared/page-watchers-feature'
 import { pageWatchersEnabled } from './page-watchers-feature'
 import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
+import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
+import { glanceUrlFromText } from '../shared/glance'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -156,6 +160,26 @@ const COMMANDS: BrowserCommand[] = [
   {
     id: 'view.reader', title: () => (readerStateFor(getActiveTabWebContents()) === 'active' ? 'Exit Reader View' : 'Reader View'), accelerator: APP_SHORTCUTS.readerView, section: 'View',
     keywords: ['reader mode', 'article', 'readability', 'distraction free', 'clean'], enabled: () => readerStateFor(getActiveTabWebContents()) !== null, run: () => toggleReaderMode()
+  },
+  // Glance (link peek)
+  {
+    id: 'glance.openCopiedLink', title: 'Open Copied Link in Glance', section: 'View',
+    keywords: ['glance', 'peek', 'preview', 'quick look', 'clipboard', 'paste link'],
+    enabled: activeIsWebPage,
+    run: async () => {
+      const url = glanceUrlFromText(await clipboard.readText())
+      const page = getActiveTabWebContents()
+      if (!url) {
+        flashBrowserStatus('Copy a link first to open it in Glance')
+        return false
+      }
+      return page ? openGlance(page, url) : false
+    }
+  },
+  {
+    id: 'glance.toggleShiftClick', title: () => (glanceShiftClickEnabled() ? 'Turn Off Shift-Click Glance' : 'Turn On Shift-Click Glance'), section: 'Settings',
+    keywords: ['glance', 'peek', 'shift click', 'link preview'], refocusPage: true,
+    run: () => setGlanceShiftClick(!glanceShiftClickEnabled())
   },
   // Split view
   {

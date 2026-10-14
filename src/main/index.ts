@@ -33,6 +33,7 @@ import { initializeCertificateHandling } from './certificates'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
 import { registerReadingListIpc } from './reading-list-ipc'
+import { registerGlanceIpc } from './glance-entry'
 
 installIpcWindowScope()
 app.setName(APP_NAME)
@@ -98,6 +99,8 @@ app.whenReady().then(async () => {
   registerPageWatcherIpc()
   registerFeedIpc()
   registerReadingListIpc()
+  // Glance settings only; the glance module itself loads on the first Shift+click.
+  registerGlanceIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {

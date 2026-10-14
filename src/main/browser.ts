@@ -59,6 +59,8 @@ import { canWatchPage, watchPageFromTab } from './page-watchers-feature'
 import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitMoveFocusId, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
+import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
+import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -514,6 +516,8 @@ function publishState(w = currentWindowState()): void {
   // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
   setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
   broadcastQueue.mark(w, true)
+  // A glance belongs to the tab it opened over: a tab switch (or the tab closing) closes it.
+  noteGlanceWindowState(w.window)
 }
 
 /** A load, title or tab change burst becomes one `browser:state` + one `browser:tabs` diff per frame. */
@@ -838,6 +842,7 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       if (id) persistOpenTabs()
     },
     openInBackgroundTab: (url) => openBackgroundTab(url, false, w),
+    openInGlance: isBrowserPage && editorTab === undefined && !tab.extensionPageOrigin ? (url) => { void openGlance(contents, url) } : undefined,
     pdfDocument: isBrowserPage && isShowingPdf(contents),
     printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined,
     editPdf: isBrowserPage && editorTab === undefined ? () => { if (tab) openPdfEditor(tab.id) } : undefined,
@@ -969,36 +974,42 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
   return true
 }
 
-/**
- * `opened`: the contents Chromium already made for a page's window.open / target=_blank (see
- * openPageMadeTab). It keeps the opener's process, session and window.opener, which a blob: URL
- * needs to resolve; its webPreferences are the opener's, so ours below are not applied.
- */
-function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebContents; webPreferences?: Electron.WebPreferences }): WebContentsView | null {
-  if (!isLiveWindow(tab.win)) return null
-  if (tab.pdfEditor) return createPdfEditorView(tab)
-  const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
+/** A site tab's webPreferences (Glance pages get the same, so a promoted glance is a normal tab). */
+function tabWebPreferences(tab: BrowserTab, pauseAutoplay = tab.pauseAutoplayUntilVisited): Electron.WebPreferences {
+  const needsBrowserViewPreload = process.platform === 'darwin' || pauseAutoplay
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
   const preload = tab.extensionPreloadPath ?? browserViewPreload
-  const view = opened ? new WebContentsView({ webContents: opened.webContents, ...(opened.webPreferences ? { webPreferences: opened.webPreferences } : {}) }) : new WebContentsView({
-    webPreferences: {
-      ...(preload ? { preload } : {}),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-      // Run the session's sandboxed ad-filter preload in iframes too, so
-      // embedded players (YouTube embeds) and ad frames get scriptlets/CSS.
-      // Remote pages still get no Node.js: sandbox stays on.
-      nodeIntegrationInSubFrames: true,
-      // Private tabs: the in-memory session. Otherwise the tab's Space partition (Default = the profile one).
-      ...(tab.isPrivate ? { session: getPrivateSession() } : { session: pageSessionForTab(tab) }),
-      // On for every tab; the session decides (private tabs: off unless the user opts in).
-      spellcheck: true,
-      // Explicit: background tabs must be throttled (timers, rAF) once they leave the screen.
-      backgroundThrottling: true
-    }
+  return {
+    ...(preload ? { preload } : {}),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    webSecurity: true,
+    allowRunningInsecureContent: false,
+    // Run the session's sandboxed ad-filter preload in iframes too, so
+    // embedded players (YouTube embeds) and ad frames get scriptlets/CSS.
+    // Remote pages still get no Node.js: sandbox stays on.
+    nodeIntegrationInSubFrames: true,
+    // Private tabs: the in-memory session. Otherwise the tab's Space partition (Default = the profile one).
+    ...(tab.isPrivate ? { session: getPrivateSession() } : { session: pageSessionForTab(tab) }),
+    // On for every tab; the session decides (private tabs: off unless the user opts in).
+    spellcheck: true,
+    // Explicit: background tabs must be throttled (timers, rAF) once they leave the screen.
+    backgroundThrottling: true
+  }
+}
+
+/**
+ * `opened`: the contents Chromium already made for a page's window.open / target=_blank (see
+ * openPageMadeTab), or a promoted Glance's view (glance.ts), taken over as is. It keeps the opener's process, session and window.opener, which a blob: URL
+ * needs to resolve; its webPreferences are the opener's, so ours below are not applied.
+ */
+function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebContents; webPreferences?: Electron.WebPreferences } | { view: WebContentsView }): WebContentsView | null {
+  if (!isLiveWindow(tab.win)) return null
+  if (tab.pdfEditor) return createPdfEditorView(tab)
+  // A promoted Glance brings its whole view (a webContents can't move to a second view).
+  const view = opened && 'view' in opened ? opened.view : opened ? new WebContentsView({ webContents: opened.webContents, ...(opened.webPreferences ? { webPreferences: opened.webPreferences } : {}) }) : new WebContentsView({
+    webPreferences: tabWebPreferences(tab)
   })
   tab.view = view
   // Site tabs are always below the local toolbar, sidebar, and full-app surfaces. applyTabBounds
@@ -1041,6 +1052,8 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   })
   contents.on('update-target-url', (_event, url) => {
     if (isTabOnScreen(tab) && isCurrentContents()) showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
+    // Hook for a later preconnect-on-hover pass (glance-entry.ts); a no-op with no listeners.
+    if (isCurrentContents()) emitGlanceLinkHover(contents, url)
   })
   contents.on('found-in-page', (_event, result) => {
     const { findState } = tab.win
@@ -1077,6 +1090,12 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   contents.setWindowOpenHandler((details) => {
     if (tab.extensionPageOrigin && tab.extensionPreloadPath && isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)) {
       openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
+      return { action: 'deny' }
+    }
+    // Shift+click on a link: peek at it in a Glance over this page instead of a new window
+    // (Settings → General; off keeps the old Shift+click behaviour below).
+    if (!tab.extensionPageOrigin && !tab.pdfEditor && isShiftClickLinkOpen(details) && isGlanceableUrl(details.url) && glanceShiftClickEnabled()) {
+      void openGlance(contents, details.url)
       return { action: 'deny' }
     }
     // blob:/data: links and window.open(blobUrl): let Chromium make the new contents (same process,
@@ -1499,6 +1518,77 @@ attachPdfEditor({
     if (tab) closePdfEditor(tab.id)
   },
   window: () => currentWindowState()?.window ?? null
+})
+
+function glanceSourceTab(source: GlanceSource): BrowserTab | undefined {
+  const tab = findTab(source.tabId)
+  return tab && tab.view?.webContents === source.contents ? tab : undefined
+}
+
+/**
+ * Glance (glance-entry.ts / glance.ts): a link peeked at over a tab. The glance page runs in the
+ * tab's session with a tab's webPreferences, so Open as Tab can hand its webContents to a new tab
+ * as is (no reload, back/forward kept), the way blob: tabs adopt Chromium's contents.
+ */
+setGlanceHost({
+  sourceFor: (contents) => {
+    const tab = tabForContents(contents)
+    if (!tab || tab.extensionPageOrigin || tab.pdfEditor || !isLiveWindow(tab.win) || contents.isDestroyed()) return null
+    return { tabId: tab.id, window: tab.win.window, contents, isPrivate: tab.isPrivate }
+  },
+  pageWebPreferences: (source) => {
+    const tab = glanceSourceTab(source)
+    if (!tab) throw new Error('Glance source tab is gone')
+    return tabWebPreferences(tab, false)
+  },
+  adoptAsTab: (source, pageView, url, activate) => {
+    const opener = findTab(source.tabId)
+    const w = opener?.win ?? windowStateFor(source.window)
+    if (!isLiveWindow(w) || pageView.webContents.isDestroyed()) return null
+    const at = opener ? w.tabs.indexOf(opener) : -1
+    const id = createTab(undefined, selectedSearchEngine, activate, true, false, false, undefined, at >= 0 ? at + 1 : undefined, source.isPrivate, false, w, opener?.spaceId)
+    const tab = id ? findTab(id) : undefined
+    if (!tab) return null
+    tab.lastUrl = url
+    tab.pendingUrl = ''
+    tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
+    if (opener?.groupId) tab.groupId = opener.groupId
+    const view = createTabView(tab, { view: pageView })
+    if (!view) {
+      closeBrowserTab(tab.id, false)
+      return null
+    }
+    if (isActiveTab(tab)) tab.inactiveSince = null
+    applySavedZoom(tab, url)
+    applyTabBounds(tab.win)
+    if (isActiveTab(tab)) view.webContents.focus()
+    else scheduleTabSleep(tab)
+    refreshTabFavicon(tab)
+    persistOpenTabs()
+    publishTabs(tab.win)
+    publishState(tab.win)
+    return tab.id
+  },
+  openInSplitView: (tabId) => openBrowserTabInSplitView(tabId),
+  canSplit: (source) => canSplitTab(findTab(source.tabId)),
+  openTab: (source, url, activate) => {
+    const w = findTab(source.tabId)?.win ?? windowStateFor(source.window)
+    if (!activate) return openBackgroundTab(url, source.isPrivate, w)
+    if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, source.isPrivate, false, w)) persistOpenTabs()
+  },
+  searchEngine: () => selectedSearchEngine,
+  focusSource: (source) => {
+    const tab = glanceSourceTab(source)
+    const contents = tab?.view?.webContents
+    if (!tab || !contents || contents.isDestroyed() || !isTabOnScreen(tab)) return
+    ;(readerViewFor(contents)?.webContents ?? contents).focus()
+  },
+  handleShortcut: (source, input) => handleBrowserShortcutInput(input, findTab(source.tabId)?.id ?? null),
+  isActiveTab: (window, tabId) => {
+    const tab = findTab(tabId)
+    return Boolean(tab && tab.win.window === window && isTabOnScreen(tab))
+  },
+  bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
 })
 
 export interface ExtensionPageTabOptions {
