@@ -3,6 +3,8 @@ import {
   activateBrowserTab,
   browserBack,
   browserForward,
+  browserGoToNavHistory,
+  getBrowserNavHistory,
   browserReload,
   browserStop,
   browserPictureInPicture,
@@ -33,6 +35,7 @@ import {
 } from './browser'
 import { certificateInfoFor, proceedPastCertificateError, showNativeCertificate } from './certificates'
 import { isSearchEngineId } from '../shared/navigation'
+import { isNavHistoryDisposition } from '../shared/nav-history-menu'
 import { registerCommandIpc } from './command-ipc'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
@@ -465,6 +468,14 @@ export function registerIpc(): void {
   ipcMain.handle('browser:back', (event) => { assertMainRenderer(event); browserBack() })
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })
   ipcMain.handle('browser:reload', (event) => { assertMainRenderer(event); browserReload() })
+  ipcMain.handle('browser:nav-history:list', (event, direction: unknown) => {
+    assertMainRenderer(event)
+    return getBrowserNavHistory(direction === 'forward' ? 'forward' : 'back')
+  })
+  ipcMain.handle('browser:nav-history:go', (event, index: unknown, disposition: unknown) => {
+    assertMainRenderer(event)
+    return typeof index === 'number' && browserGoToNavHistory(index, isNavHistoryDisposition(disposition) ? disposition : 'current')
+  })
   ipcMain.handle('browser:stop', (event) => { assertMainRenderer(event); browserStop() })
   ipcMain.handle('browser:load-error:dismiss', (event) => { assertMainRenderer(event); return dismissActiveLoadError() })
   ipcMain.handle('browser:certificate:info', (event) => {

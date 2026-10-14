@@ -64,6 +64,7 @@ import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } f
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
+import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
 export const START_PAGE = 'https://online.bonjourr.fr/'
@@ -3602,6 +3603,47 @@ export function browserBack(): void {
 export function browserForward(): void {
   const contents = getTab()?.view?.webContents
   if (contents?.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
+}
+
+/** Navigation history entries the press-and-hold Back/Forward menu lists for the active tab (the focused split pane). */
+export function getBrowserNavHistory(direction: NavHistoryDirection): BrowserNavHistoryMenu {
+  const tab = getTab()
+  const contents = tab?.view?.webContents
+  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed()) return { direction, entries: [], total: 0 }
+  const history = contents.navigationHistory
+  const all = history.getAllEntries().map((entry) => ({
+    url: entry.url,
+    title: entry.url === SURFFISH_QUICK_LINKS_URL ? 'New Tab' : entry.title
+  }))
+  const menu = navHistoryMenu(all, history.getActiveIndex(), direction)
+  return {
+    ...menu,
+    // Read-only lookups in the favicon cache: nothing is fetched or written, private tabs included.
+    entries: menu.entries.map((entry) => ({ ...entry, faviconUrl: /^https?:\/\//i.test(entry.url) ? getCachedBrowserSiteFavicon(entry.url) : null }))
+  }
+}
+
+/**
+ * Go to one entry of the active tab's history (a row of the Back/Forward menu), or open that
+ * entry's URL in a new tab right after it (Cmd/Ctrl- or middle-click), keeping private tabs private.
+ */
+export function browserGoToNavHistory(index: number, disposition: NavHistoryOpenDisposition = 'current'): boolean {
+  const tab = getTab()
+  const contents = tab?.view?.webContents
+  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed()) return false
+  const history = contents.navigationHistory
+  if (!isNavHistoryTarget(index, history.length(), history.getActiveIndex())) return false
+  if (disposition === 'current') {
+    history.goToIndex(index)
+    return true
+  }
+  const url = history.getEntryAtIndex(index)?.url
+  if (!url) return false
+  const w = tab.win
+  const position = w.tabs.indexOf(tab)
+  const id = createTab(url, selectedSearchEngine, disposition === 'foreground-tab', false, disposition === 'background-tab', false, undefined, position >= 0 ? position + 1 : undefined, tab.isPrivate, false, w, tab.spaceId)
+  if (id) persistOpenTabs()
+  return Boolean(id)
 }
 
 export function browserReload(): void {

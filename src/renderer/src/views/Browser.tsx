@@ -42,6 +42,7 @@ import { CommandPalette } from './CommandPalette'
 import { useSearchKeywords } from './useSearchKeywords'
 import { parseKeywordSearch } from '../../../shared/search-keywords'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
+import { NavHistoryButtons } from './NavHistoryButtons'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
 import { TabInterstitial } from './TabInterstitial'
 import { ProxyDownBanner } from './ProxyDownBanner'
@@ -1407,13 +1408,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           <form className={`browser-toolbar${browser.private ? ' is-private' : ''}`} onSubmit={(event) => void navigate(event)}>
             <div className="browser-toolbar-leading" aria-hidden="true" />
             <div className="omnibox-wrap">
-              <div className="browser-nav-buttons">
-                <button className="toolbar-button" type="button" aria-label="Back" title="Back" disabled={!browser.canGoBack} onClick={() => void window.api.browser.back()}>
-                  <span aria-hidden="true">‹</span>
-                </button>
-                <button className="toolbar-button" type="button" aria-label="Forward" title="Forward" disabled={!browser.canGoForward} onClick={() => void window.api.browser.forward()}>
-                  <span aria-hidden="true">›</span>
-                </button>
+              <NavHistoryButtons canGoBack={browser.canGoBack} canGoForward={browser.canGoForward} currentUrl={`${activeTabId}\n${browser.url}`} onShowFullHistory={() => { if (sidebarMode !== 'history') toggleToolbarPanel('history') }}>
                 <button
                   className={`toolbar-button reload-button${browser.loading ? ' is-loading' : ''}`}
                   type="button"
@@ -1423,7 +1418,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 >
                   <span aria-hidden="true">{browser.loading ? '×' : '↻'}</span>
                 </button>
-              </div>
+              </NavHistoryButtons>
               <div className="omnibox">
                 {browser.private && <span className="omnibox-private-pill" title="Private tab: nothing from this tab is saved"><PrivateGlyph /><span>Private</span></span>}
                 {certificateBypassed && <span className="omnibox-insecure-pill is-cert-bypassed" title={`Not secure: ${browser.security?.host ?? 'this site'}’s certificate isn’t valid${browser.security?.error ? ` (${browser.security.error})` : ''} and you chose to proceed`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><path d="M3 21 21 3" /></svg><span>Not secure</span></span>}
