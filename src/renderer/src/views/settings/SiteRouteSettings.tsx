@@ -34,7 +34,7 @@ export function SiteRouteSettings({ url }: { url: string }): React.JSX.Element |
     { value: 'proxy', label: routing?.proxies.length ? 'Main proxy' : 'Proxy' },
     ...(routing?.proxies ?? []).map((proxy) => ({ value: `proxy:${proxy.name}` as ProxyRoute, label: `Proxy ${proxy.name}` }))
   ]
-  const via = state.effective.source === 'rule' ? `rule ${state.effective.pattern}` : state.effective.source === 'local' ? 'local address' : routing?.primary.enabled ? 'default: SOCKS5 proxy on' : 'default: SOCKS5 proxy off'
+  const via = state.effective.source === 'rule' ? `rule ${state.effective.pattern}` : state.effective.source === 'local' ? 'local address' : state.effective.source === 'lan' ? 'local network' : routing?.primary.enabled ? 'default: SOCKS5 proxy on' : 'default: SOCKS5 proxy off'
 
   async function choose(choice: ProxyRoute | 'default'): Promise<void> {
     setBusy(true)

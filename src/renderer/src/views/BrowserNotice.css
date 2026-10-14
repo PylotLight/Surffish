@@ -96,3 +96,56 @@
 .browser-notice-dismiss svg { width: 14px; height: 14px; }
 .browser-notice button:focus-visible { outline: 2px solid rgba(140, 190, 255, 0.8); outline-offset: 1px; }
 .tab-interstitial.is-load-error .tab-interstitial-icon { color: rgba(190, 205, 220, 0.85); }
+.tab-interstitial.is-proxy .tab-interstitial-icon { color: rgba(255, 196, 120, 0.9); }
+.tab-interstitial.is-certificate .tab-interstitial-icon { color: rgba(255, 140, 150, 0.95); }
+.tab-interstitial.is-certificate { overflow-y: auto; }
+.tab-interstitial.is-certificate.is-expanded { align-items: flex-start; }
+.tab-interstitial.is-certificate .tab-interstitial-card { max-width: 520px; }
+.tab-interstitial-error { color: #ffb4b9 !important; }
+.cert-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.cert-advanced-muted { color: rgba(235, 240, 245, 0.5) !important; font-size: 12px !important; }
+.cert-advanced-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+.cert-advanced-facts > div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 12.5px;
+}
+.cert-advanced-facts dt { color: rgba(235, 240, 245, 0.5); }
+.cert-advanced-facts dd { margin: 0; overflow-wrap: anywhere; color: rgba(242, 245, 248, 0.9); user-select: text; }
+.cert-advanced-facts dd.is-mono { font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.cert-advanced-links { display: flex; gap: 14px; }
+.cert-link {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #9cc8ff;
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.cert-link:hover { color: #c3ddff; }
+.cert-link.is-danger { color: #ff9aa2; }
+.cert-link.is-danger:hover { color: #ffc2c6; }
+.cert-link:disabled { opacity: 0.6; cursor: default; }
+.cert-advanced-viewer {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}

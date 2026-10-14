@@ -6,6 +6,7 @@ import {
   buildRoutingProxyConfig,
   effectiveRouteForHost,
   effectiveRouteForUrl,
+  isLocalNetworkHost,
   matchProxyRule,
   normalizeRulePattern,
   pacResultAllowsDirect,
@@ -49,7 +50,9 @@ const HOSTS = [
   'example.com', 'www.example.com', 'bank.example', 'www.bank.example', 'secure.bank.example', 'a.secure.bank.example',
   'corp.example', 'git.corp.example', 'deep.git.corp.example', 'xcorp.example', 'abc.onion', 'onion', 'nas', 'nas.lan',
   'intranet', 'localhost', 'app.localhost', '127.0.0.1', '127.1.2.3', '::1', '[::1]', '2001:db8::5', '2001:db8::6',
-  'EXAMPLE.COM', 'www.bank.example.', 'bank.example.evil.com', '10.0.0.1'
+  'EXAMPLE.COM', 'www.bank.example.', 'bank.example.evil.com', '10.0.0.1',
+  '192.168.1.1', '172.16.0.1', '172.31.255.255', '172.32.0.1', '169.254.1.1', '192.169.1.1', '11.0.0.1', '100.64.0.1', 'unifi.local', 'printer.LOCAL.',
+  'local', 'notlocal', 'fd12:3456::1', 'fe80::1', 'fec0::1', 'fc::1', '999.168.1.1', '192.168.1.1.nip.io'
 ]
 
 describe('rule patterns', () => {
@@ -127,7 +130,7 @@ describe('effective route', () => {
 
 describe('PAC script', () => {
   test('agrees with the matcher for every host, with and without a default proxy', () => {
-    for (const input of [INPUT, { ...INPUT, primary: PRIMARY_OFF }]) {
+    for (const input of [INPUT, { ...INPUT, primary: PRIMARY_OFF }, { ...INPUT, primary: { ...PRIMARY_ON, bypassLocalNetwork: false } }]) {
       const find = pac(input)
       for (const host of HOSTS) expect(`${host} → ${find(host)}`).toBe(`${host} → ${pacResultFor(effectiveRouteForHost(host, input))}`)
     }
@@ -168,9 +171,35 @@ describe('PAC script', () => {
   })
 })
 
+describe('local network bypass', () => {
+  test('private, link-local and .local hosts are local network; public, CGNAT and lookalikes are not', () => {
+    for (const host of ['192.168.1.1', '10.1.2.3', '172.16.0.1', '172.31.9.9', '169.254.10.10', 'unifi.local', 'NAS.Local.', 'fd00::1', 'fdab:1::2', '[fe80::1]', 'fe9a:1::1']) expect(`${host} ${isLocalNetworkHost(host)}`).toBe(`${host} true`)
+    for (const host of ['8.8.8.8', '172.32.0.1', '172.15.0.1', '192.169.0.1', '100.64.0.1', '127.0.0.1', 'example.com', 'local', 'evil.local.example.com', '192.168.1.1.nip.io', '2001:db8::1', 'fc::1', 'fec0::1', '256.168.1.1', '']) expect(`${host} ${isLocalNetworkHost(host)}`).toBe(`${host} false`)
+  })
+  test('go direct by default even with the main proxy on; a rule still wins; the setting turns it off', () => {
+    const input: ProxyRoutingInput = { primary: PRIMARY_ON, proxies: [], rules: [] }
+    expect(effectiveRouteForUrl('https://192.168.1.1/', input)).toEqual({ kind: 'direct', source: 'lan', pattern: null })
+    expect(effectiveRouteForUrl('https://unifi.local:8443/', input)).toEqual({ kind: 'direct', source: 'lan', pattern: null })
+    expect(effectiveRouteForUrl('https://example.com/', input)?.kind).toBe('proxy')
+    const ruled: ProxyRoutingInput = { ...input, rules: [{ pattern: '192.168.1.1', route: 'proxy' }] }
+    expect(effectiveRouteForUrl('https://192.168.1.1/', ruled)).toMatchObject({ kind: 'proxy', source: 'rule' })
+    expect(pac(ruled)('192.168.1.1')).toBe('SOCKS5 127.0.0.1:1080')
+    expect(pac(ruled)('192.168.1.2')).toBe('DIRECT')
+    const off: ProxyRoutingInput = { ...input, primary: { ...PRIMARY_ON, bypassLocalNetwork: false } }
+    expect(effectiveRouteForUrl('https://192.168.1.1/', off)).toMatchObject({ kind: 'proxy', source: 'default' })
+    expect(pac({ ...off, rules: [{ pattern: 'x.example', route: 'direct' }] })('192.168.1.1')).toBe('SOCKS5 127.0.0.1:1080')
+    expect(routeLabel(effectiveRouteForHost('192.168.1.1', input))).toBe('Direct (local network)')
+  })
+  test('the self-test checks a private address so a PAC without the branch is caught', () => {
+    expect(routingSelfTestCases(INPUT)).toContainEqual({ url: 'https://192.168.254.254/', expected: 'DIRECT' })
+    expect(routingSelfTestCases({ ...INPUT, primary: { ...PRIMARY_ON, bypassLocalNetwork: false } })).toContainEqual({ url: 'https://192.168.254.254/', expected: 'SOCKS5 127.0.0.1:1080' })
+  })
+})
+
 describe('proxy config', () => {
   test('no rules keeps the single-server config', () => {
-    expect(buildRoutingProxyConfig({ primary: PRIMARY_ON, proxies: [], rules: [] })).toEqual({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080', proxyBypassRules: '<local>' })
+    expect(buildRoutingProxyConfig({ primary: PRIMARY_ON, proxies: [], rules: [] })).toEqual({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080', proxyBypassRules: '<local>;*.local;10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;fc00::/7;fe80::/10' })
+    expect(buildRoutingProxyConfig({ primary: { ...PRIMARY_ON, bypassLocalNetwork: false }, proxies: [], rules: [] })).toEqual({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080', proxyBypassRules: '<local>' })
     expect(buildRoutingProxyConfig({ primary: PRIMARY_OFF, proxies: [{ name: 'Work', host: '127.0.0.1', port: 1081 }], rules: [] })).toEqual({ mode: 'direct' })
   })
   test('rules produce a base64 data: PAC URL holding the script', () => {

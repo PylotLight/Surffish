@@ -56,6 +56,7 @@ import { feedsApi } from './feeds'
 import { readingListApi } from './reading-list'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
+import type { SiteCertificateInfo } from '../shared/certificates'
 
 const api = {
   platform: process.platform,
@@ -180,6 +181,12 @@ const api = {
       }
     },
     back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
+    dismissLoadError: (): Promise<boolean> => ipcRenderer.invoke('browser:load-error:dismiss'),
+    certificate: {
+      info: (): Promise<SiteCertificateInfo | null> => ipcRenderer.invoke('browser:certificate:info'),
+      proceed: (): Promise<boolean> => ipcRenderer.invoke('browser:certificate:proceed'),
+      showNative: (): Promise<boolean> => ipcRenderer.invoke('browser:certificate:show-native')
+    },
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
     stop: (): Promise<void> => ipcRenderer.invoke('browser:stop'),

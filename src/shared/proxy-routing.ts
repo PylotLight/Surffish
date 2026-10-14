@@ -6,7 +6,7 @@
  * "SOCKS5 host:port" back. No "; DIRECT" fallback, ever, so a dead proxy means a failed
  * request (and the kill switch), never a silent direct connection. Pure, so it's unit-testable.
  */
-import { buildProxyConfig, type ProxyEndpoint } from './proxy-guard'
+import { buildProxyConfig, bypassesLocalNetwork, type ProxyEndpoint } from './proxy-guard'
 
 export interface NamedProxy {
   name: string
@@ -39,7 +39,8 @@ export interface ProxyRoutingState extends ProxyRoutingInput {
   error: string | null
 }
 
-export type EffectiveRouteSource = 'rule' | 'default' | 'local'
+/** 'local' = loopback / single-label names; 'lan' = local-network addresses (private IPs, `.local`). */
+export type EffectiveRouteSource = 'rule' | 'default' | 'local' | 'lan'
 
 export type EffectiveRoute =
   | { kind: 'direct'; source: EffectiveRouteSource; pattern: string | null }
@@ -73,6 +74,31 @@ export function isLoopbackHost(host: string): boolean {
 export function isPlainHostName(host: string): boolean {
   const value = normalizeHost(host)
   return value.length > 0 && !value.includes('.') && !value.includes(':')
+}
+
+function ipv4Octets(host: string): number[] | null {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return null
+  const parts = host.split('.').map(Number)
+  return parts.every((part) => part <= 255) ? parts : null
+}
+
+/**
+ * A local-network address that connects directly (when the main proxy's local-network bypass is
+ * on): RFC 1918 and link-local IPv4, IPv6 unique-local (fc00::/7) and link-local (fe80::/10)
+ * literals, and mDNS `.local` names. Literal checks only, never a DNS lookup. Matches Chromium's
+ * bypass list (`LOCAL_NETWORK_BYPASS_RULES`) and the PAC script below.
+ */
+export function isLocalNetworkHost(host: string): boolean {
+  const value = normalizeHost(host)
+  if (!value) return false
+  if (value.endsWith('.local')) return true
+  const v4 = ipv4Octets(value)
+  if (v4) {
+    const [a, b] = v4 as [number, number, number, number]
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)
+  }
+  if (value.includes(':')) return /^f[cd][0-9a-f]{2}:/.test(value) || /^fe[89ab][0-9a-f]:/.test(value)
+  return false
 }
 
 function hostnameFromInput(raw: string): string | null {
@@ -191,6 +217,7 @@ export function effectiveRouteForHost(host: string, input: ProxyRoutingInput): E
     return { kind: 'proxy', source: 'rule', pattern: match.rule.pattern, ...proxyRouteTarget(match.rule.route, input) }
   }
   if (isPlainHostName(target)) return { kind: 'direct', source: 'local', pattern: null }
+  if (bypassesLocalNetwork(input.primary) && isLocalNetworkHost(target)) return { kind: 'direct', source: 'lan', pattern: null }
   if (!input.primary.enabled) return { kind: 'direct', source: 'default', pattern: null }
   return { kind: 'proxy', source: 'default', pattern: null, name: null, host: input.primary.host, port: input.primary.port }
 }
@@ -250,7 +277,20 @@ export function buildPacScript(input: ProxyRoutingInput): string {
     `var EXACT = ${JSON.stringify(exact)};`,
     `var SUFFIX = ${JSON.stringify(suffix)};`,
     `var FALLBACK = ${JSON.stringify(fallback)};`,
+    `var LAN_DIRECT = ${bypassesLocalNetwork(input.primary) ? 'true' : 'false'};`,
     'function own(map, key) { return Object.prototype.hasOwnProperty.call(map, key); }',
+    // Literal checks only (no dnsResolve / isInNet): same set as isLocalNetworkHost.
+    'function isLan(h) {',
+    '  if (/\\.local$/.test(h)) return true;',
+    '  var m = /^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$/.exec(h);',
+    '  if (m) {',
+    '    var a = +m[1], b = +m[2];',
+    '    if (a > 255 || b > 255 || +m[3] > 255 || +m[4] > 255) return false;',
+    '    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);',
+    '  }',
+    '  if (h.indexOf(":") >= 0) return /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h);',
+    '  return false;',
+    '}',
     'function FindProxyForURL(url, host) {',
     '  var h = String(host).toLowerCase();',
     '  if (h.charAt(0) === "[" && h.charAt(h.length - 1) === "]") h = h.substring(1, h.length - 1);',
@@ -267,6 +307,7 @@ export function buildPacScript(input: ProxyRoutingInput): string {
     '    }',
     '  }',
     '  if (h.length > 0 && h.indexOf(".") < 0 && h.indexOf(":") < 0) return "DIRECT";',
+    '  if (LAN_DIRECT && isLan(h)) return "DIRECT";',
     '  return FALLBACK;',
     '}',
     ''
@@ -324,7 +365,8 @@ export function anyProxyActive(input: ProxyRoutingInput): boolean {
  * must produce. Catches a PAC script Chromium didn't load (it would answer DIRECT).
  */
 export function routingSelfTestCases(input: ProxyRoutingInput, limit = 12): Array<{ url: string; expected: string }> {
-  const hosts = new Set<string>(['surffish-route-check.invalid'])
+  // A private address too: proves the PAC's local-network branch matches isLocalNetworkHost.
+  const hosts = new Set<string>(['surffish-route-check.invalid', '192.168.254.254'])
   for (const rule of input.rules) {
     hosts.add(rule.pattern.startsWith('*.') ? `surffish-check.${rule.pattern.slice(2)}` : rule.pattern)
     if (hosts.size >= limit) break
@@ -440,7 +482,7 @@ export function withRuleForPattern(settings: ProxyRoutingSettings, pattern: stri
 
 /** Human label for a route, e.g. in the rules table and site panel. */
 export function routeLabel(route: EffectiveRoute): string {
-  if (route.kind === 'direct') return route.source === 'local' ? 'Direct (local address)' : 'Direct'
+  if (route.kind === 'direct') return route.source === 'local' ? 'Direct (local address)' : route.source === 'lan' ? 'Direct (local network)' : 'Direct'
   return `${route.name ? `Proxy ${route.name}` : 'Proxy'} (${hostPort(route.host, route.port)})`
 }
 

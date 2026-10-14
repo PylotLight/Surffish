@@ -45,6 +45,7 @@ import { noteTabLoadError, tabLoadError } from './load-errors'
 import { isAbortedNavigation, parseLoadError, shouldShowFullPageError, type NavigateResult } from '../shared/navigation-errors'
 import { attachTabSafety } from './safety'
 import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitials'
+import { forgetCertificateState, onCertificateStateChanged, pageSecurityFor } from './certificates'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
 import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
@@ -304,7 +305,8 @@ function getState(w = currentWindowState()): BrowserState {
     pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
     reader: tab?.pdfEditor ? null : readerStateFor(contents),
     interstitial: getTabInterstitial(contents),
-    loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents.session : undefined) : null,
+    loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents : undefined) : null,
+    security: tab && !tab.pdfEditor && !tab.error ? pageSecurityFor(contents) : null,
     activeTabSince: w ? activeTabSinceFor(w.window) : 0
   }
 }
@@ -734,7 +736,7 @@ function ensureTabLoaded(tab: BrowserTab): void {
       return new Promise<void>((resolve) => setTimeout(resolve, 100)).then(() => {
         if (tab.view?.webContents !== contents) return
         if (tab.downloadStartedForCurrentLoad) tab.error = null
-        else tab.error = message
+        else noteLoadRejection(tab, message, target)
         publishState(tab.win)
       })
     }
@@ -743,9 +745,21 @@ function ensureTabLoaded(tab: BrowserTab): void {
       publishState(tab.win)
       return
     }
-    tab.error = message
+    noteLoadRejection(tab, message, target)
     publishState(tab.win)
   })
+}
+
+/**
+ * A loadURL rejection. did-fail-load usually reported the same failure first (with the URL and the
+ * full-page decision): keep that. Otherwise (a provisional failure that never committed an error
+ * page) record it with the same full-page rule, so a new or restored tab never ends up as a blank
+ * page with a toast over it.
+ */
+function noteLoadRejection(tab: BrowserTab, message: string, url: string): void {
+  if (tab.error !== null) return
+  tab.error = message
+  noteTabLoadError(tab, message, url, shouldShowFullPageError(parseLoadError(message).code))
 }
 
 function activateTabInternal(id: string): boolean {
@@ -2115,7 +2129,7 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
       if (contents && !contents.isDestroyed()) {
         void contents.loadURL(url).catch((error: unknown) => {
           if (tab?.view?.webContents !== contents || isAbortedNavigation(error)) return
-          tab.error = error instanceof Error ? error.message : String(error)
+          noteLoadRejection(tab, error instanceof Error ? error.message : String(error), url)
           publishState(tab.win)
         })
       } else {
@@ -2594,6 +2608,7 @@ function toggleBrowserPanel(mode: 'history' | 'downloads' | 'bookmarks'): void {
 // Cmd+G works with focus anywhere (page, toolbar, tab overview).
 
 onTabInterstitialChanged(() => publishAllWindows())
+onCertificateStateChanged(() => publishAllWindows())
 
 const CLOSED_FIND_STATE: FindState = { tabId: null, open: false, text: '', result: null }
 
@@ -2839,6 +2854,7 @@ function hasOtherWindows(w: BrowserWindowState): boolean {
 function endPrivateSession(): void {
   privateSiteZoom.clear()
   forgetPrivateDownloads()
+  forgetCertificateState(PRIVATE_PARTITION)
   void clearPrivateSession()
 }
 
@@ -3028,10 +3044,12 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     // navigation). did-fail-load already ignores -3; any error now belongs to the newer load.
     if (isAbortedNavigation(error)) return { ok: true }
     if (tab.view?.webContents !== contents) return { ok: false, reason: 'cancelled' }
-    // did-fail-load usually got here first with the same failure; keep its details.
+    // did-fail-load usually got here first with the same failure; keep its details. When it didn't
+    // (a provisional failure that never committed an error page, e.g. the proxy refusing the
+    // connection), the error still belongs in the page area, not a toast over a blank tab.
     if (tab.error === null) {
       tab.error = message
-      noteTabLoadError(tab, message, url, false)
+      noteTabLoadError(tab, message, url, shouldShowFullPageError(parseLoadError(message).code))
     }
     publishState(tab.win)
     return { ok: false, reason: 'load', code: parseLoadError(message).code, message }
@@ -3429,6 +3447,20 @@ export function browserForward(): void {
 export function browserReload(): void {
   const id = getTab()?.id
   if (id) reloadBrowserTab(id)
+}
+
+/** "Back to <page>" on an in-page error whose failed load never replaced the page: just hide it. */
+export function dismissActiveLoadError(): boolean {
+  const tab = getTab()
+  if (!tab || !tab.error) return false
+  tab.error = null
+  publishState(tab.win)
+  return true
+}
+
+/** The active tab currently shows a load error (certificate viewer: show the failure, not a stale record). */
+export function activeTabHasLoadError(): boolean {
+  return Boolean(getTab()?.error)
 }
 
 export function browserStop(): void {

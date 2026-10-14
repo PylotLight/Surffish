@@ -1,0 +1,172 @@
+/* Certificate viewer (lazy chunk): site menu (toolbar) and the certificate error page (content). */
+.cert-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(242, 245, 248, 0.92);
+  font-size: 12.5px;
+  text-align: left;
+}
+.cert-viewer-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cert-viewer .cert-viewer-back,
+.browser-chrome .site-actions-menu .cert-viewer .cert-viewer-back {
+  display: inline-flex;
+  width: 26px;
+  min-height: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.85);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.cert-viewer .cert-viewer-back:hover { background: rgba(255, 255, 255, 0.09); }
+.cert-viewer-heading {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.cert-viewer-heading strong { font-size: 13.5px; font-weight: 600; }
+.cert-viewer-heading span {
+  overflow: hidden;
+  color: rgba(235, 240, 245, 0.55);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cert-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(120, 220, 160, 0.1);
+  line-height: 1.4;
+}
+.cert-verdict strong { color: #a4edbd; font-size: 12.5px; font-weight: 600; }
+.cert-verdict span { color: rgba(235, 240, 245, 0.72); font-size: 11.5px; }
+.cert-verdict code { color: rgba(235, 240, 245, 0.55); font-size: 11px; }
+.cert-verdict.is-invalid { background: rgba(255, 110, 110, 0.12); }
+.cert-verdict.is-invalid strong { color: #ffb4b9; }
+.cert-chain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cert-viewer .cert-chain-entry,
+.browser-chrome .site-actions-menu .cert-viewer .cert-chain-entry {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(242, 245, 248, 0.85);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.cert-viewer .cert-chain-entry:hover { background: rgba(255, 255, 255, 0.07); }
+.cert-viewer .cert-chain-entry.is-selected,
+.browser-chrome .site-actions-menu .cert-viewer .cert-chain-entry.is-selected {
+  border-color: rgba(164, 237, 189, 0.35);
+  background: rgba(164, 237, 189, 0.1);
+  color: #fff;
+}
+.cert-chain-kind {
+  flex: 0 0 auto;
+  min-width: 38px;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cert-chain-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cert-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+}
+.cert-section {
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cert-field {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 8px;
+  padding: 3px 0;
+}
+.cert-field dt { color: rgba(235, 240, 245, 0.55); font-size: 11.5px; }
+.cert-field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  user-select: text;
+}
+.cert-field dd.is-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.cert-field .is-muted, .cert-field dd.is-muted { color: rgba(235, 240, 245, 0.42); }
+.cert-san-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cert-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+}
+.cert-badge.is-bad { background: rgba(255, 110, 110, 0.18); color: #ffb4b9; }
+.cert-empty { margin: 0; color: rgba(235, 240, 245, 0.6); font-size: 12px; }
+.cert-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+.cert-viewer .cert-action,
+.browser-chrome .site-actions-menu .cert-viewer .cert-action {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(245, 247, 250, 0.9);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.cert-viewer .cert-action:hover { background: rgba(255, 255, 255, 0.12); }

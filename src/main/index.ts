@@ -29,6 +29,7 @@ import { registerPdfEditorScheme } from './pdf-editor'
 import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
 import { disposePageWatchersFeature, initializePageWatchersFeature, registerPageWatcherIpc } from './page-watchers-feature'
 import { initializeBrowserSafety } from './safety'
+import { initializeCertificateHandling } from './certificates'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
 import { registerReadingListIpc } from './reading-list-ipc'
@@ -68,6 +69,8 @@ app.whenReady().then(async () => {
     void initializeScreenSharing()
     // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
     initializeBrowserSafety()
+    // Certificate capture, the macOS OS-trust fallback and "Proceed anyway" exceptions.
+    initializeCertificateHandling()
     await initializeSessionCookiePersistence()
     initializeDownloads()
   } catch (error) {

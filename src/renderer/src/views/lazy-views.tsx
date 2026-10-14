@@ -43,3 +43,4 @@ export const NetworkView = deferred(() => import('./NetworkView').then((m) => m.
 export const DiagnosticsView = deferred(() => import('./DiagnosticsView').then((m) => m.default))
 export const BookmarksManager = deferred(() => import('./bookmarks/BookmarksManager').then((m) => m.BookmarksManager))
 export const ArchivedTabsSidebar = deferred(() => import('./tab-archive/ArchivedTabsSidebar').then((m) => m.ArchivedTabsSidebar))
+export const CertificateViewer = deferred(() => import('./certificates/CertificateViewer').then((m) => m.CertificateViewer))

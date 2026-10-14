@@ -47,7 +47,7 @@ jobs:
         # per lane, so each lane's smokes finish in ~30 s at two at a time.
         - lane: A
           unit: false
-          tests: "test:electron-watchers-toggle test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync"
+          tests: "test:electron-watchers-toggle test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-certificates"
         - lane: B
           unit: false
           tests: "test:electron-spaces test:electron-toolbar-popovers test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-network-tools test:electron-tab-archive test:electron-media-session test:electron-sqlite-store test:electron-sqlite-session test:electron-feeds"
@@ -389,7 +389,7 @@ jobs:
         run: swiftc -O -o "$RUNNER_TEMP/window-watch" scripts/ci/window-watch.swift || echo "::warning::window-watch did not build; no external on-screen check"
       - name: Core Electron smokes (2 at a time)
         env:
-          TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors"
+          TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors test:electron-certificates"
           # Smokes that need real windows (SURFFISH_SMOKE_HIDDEN=0). None at the moment.
           VISIBLE_TESTS: ""
         run: |

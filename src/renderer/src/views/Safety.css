@@ -61,6 +61,10 @@
   white-space: nowrap;
 }
 .omnibox-insecure-pill svg { width: 13px; height: 13px; }
+.omnibox-insecure-pill.is-cert-bypassed {
+  background: rgba(255, 80, 90, 0.24);
+  color: #ffb0b6;
+}
 .proxy-down-banner {
   display: flex;
   align-items: center;

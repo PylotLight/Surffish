@@ -29,8 +29,10 @@ export interface BrowserLoadError {
   url: string
   /** A proxy route applies to `url` right now (per-site routing included). */
   viaProxy: boolean
-  /** The failed main-frame load left an empty error page: show an in-page error instead of a toast. */
+  /** The main-frame load failed: show the in-page error (the toast is only for pages that stayed loaded). */
   fullPage: boolean
+  /** The failed load never committed and this page is still underneath (offer to go back to it). */
+  pageBehind?: string | null
 }
 
 export type LoadErrorKind =

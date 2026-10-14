@@ -1,4 +1,4 @@
-import type { Session } from 'electron'
+import type { WebContents } from 'electron'
 import { parseLoadError, type BrowserLoadError } from '../shared/navigation-errors'
 import { getEffectiveRoute } from './proxy'
 
@@ -19,7 +19,7 @@ export function noteTabLoadError(tab: object, message: string, url: string, full
 }
 
 /** Load-error details for the tab's current `error`, or null when it has none. */
-export function tabLoadError(tab: object, error: string | null, fallbackUrl: string, session?: Session): BrowserLoadError | null {
+export function tabLoadError(tab: object, error: string | null, fallbackUrl: string, contents?: WebContents): BrowserLoadError | null {
   if (!error) return null
   const note = notes.get(tab)
   const matching = note && note.message === error ? note : null
@@ -27,9 +27,20 @@ export function tabLoadError(tab: object, error: string | null, fallbackUrl: str
   const { code, name } = parseLoadError(error)
   let viaProxy = false
   try {
-    viaProxy = getEffectiveRoute(url, session)?.kind === 'proxy'
+    viaProxy = getEffectiveRoute(url, contents?.session)?.kind === 'proxy'
   } catch {
     viaProxy = false
   }
-  return { code, name, url, viaProxy, fullPage: matching?.fullPage ?? false }
+  return { code, name, url, viaProxy, fullPage: matching?.fullPage ?? false, pageBehind: pageBehindError(contents, url) }
+}
+
+/**
+ * The failed load never committed, so the previous page is still underneath the error (Chromium
+ * didn't swap in its error page): the in-page error offers "Back to <page>" instead of history back.
+ */
+function pageBehindError(contents: WebContents | undefined, failedUrl: string): string | null {
+  if (!contents || contents.isDestroyed()) return null
+  const current = contents.getURL()
+  if (!/^https?:\/\//i.test(current) || current === failedUrl) return null
+  return current
 }
