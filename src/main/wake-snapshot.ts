@@ -57,6 +57,8 @@ const presentations = new Map<BaseWindow, Presentation>()
 let nextToken = 1
 let shownCount = 0
 let registered = false
+/** Bumped when private browsing ends, so a private snapshot still waiting to be encoded never lands. */
+let privateEpoch = 0
 const DEBUG = process.env.SURFFISH_WAKE_SNAPSHOT_DEBUG === '1'
 
 // Paint timing from an isolated world (pages can't fake or break it). Resolves true on the first
@@ -74,12 +76,26 @@ const FIRST_PAINT_SCRIPT = `new Promise((resolve) => {
   setTimeout(() => done(false), ${WAKE_SNAPSHOT_MAX_SHOW_MS})
 })`
 const PAINT_WORLD_ID = 1907
+const WAKE_SNAPSHOT_ENCODE_DELAY_MS = 300
 
 /**
  * Keep the picture a tab had when it left the screen (`image` is the capture the tab overview
  * thumbnail was made from, so this costs one resize + JPEG encode, no extra capture).
  */
 export function rememberWakeSnapshot(tabId: string, image: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
+  // Encode after the tab that just came on screen has had its frames (keeps the switch/new-tab paint fast).
+  const epoch = privateEpoch
+  setTimeout(() => {
+    if (isPrivate && epoch !== privateEpoch) return
+    encodeWakeSnapshot(tabId, image, pageSize, url, isPrivate)
+  }, WAKE_SNAPSHOT_ENCODE_DELAY_MS)
+}
+
+/** Tabs closed before their deferred encode ran (their snapshot must never land). */
+const closedBeforeEncode = new Set<string>()
+
+function encodeWakeSnapshot(tabId: string, image: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
+  if (closedBeforeEncode.delete(tabId)) return
   try {
     if (image.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0)) return
     const size = image.getSize()
@@ -97,9 +113,17 @@ export function dropWakeSnapshot(tabId: string): void {
   store.delete(tabId)
 }
 
+/** The tab closed: drop its snapshot, including one still waiting to be encoded. */
+export function forgetWakeSnapshotTab(tabId: string): void {
+  store.delete(tabId)
+  closedBeforeEncode.add(tabId)
+  setTimeout(() => closedBeforeEncode.delete(tabId), WAKE_SNAPSHOT_ENCODE_DELAY_MS + 100)
+}
+
 /** Private browsing ended: nothing from it may outlive it. */
 export function dropPrivateWakeSnapshots(): void {
   store.deleteWhere((entry) => entry.isPrivate)
+  privateEpoch += 1
 }
 
 export function hasWakeSnapshot(tabId: string): boolean {

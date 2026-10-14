@@ -38,7 +38,7 @@ import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, forgetWakeSnapshotTab, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -164,6 +164,10 @@ const tabThumbnails = new Map<string, string>()
 // Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
 let newTabThumbnail: string | null = null
 const THUMBNAIL_WIDTH = 640
+/** When each tab last came on screen as the active tab (wake snapshots skip tabs only passed through). */
+const tabShownAt = new WeakMap<BrowserTab, number>()
+/** A tab must have been the active tab this long before leaving for its picture to be kept (wake-snapshot.ts). */
+const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500
 /** Preconnect cooldown key for the private session (its partition name is ''). */
 const PRIVATE_PRECONNECT_KEY = '(private)'
 const FAVICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
@@ -795,8 +799,9 @@ function activateTabInternal(id: string): boolean {
   }
   // Best effort: grab the outgoing tab while it is still on screen for the tab overview, and keep
   // a larger copy to show if it is asleep the next time it is opened (wake-snapshot.ts).
-  if (previous && previous.id !== id) void captureTabThumbnail(previous, true)
+  if (previous && previous.id !== id) void captureTabThumbnail(previous, wasShownLongEnough(previous))
   w.activeTabId = id
+  if (previous?.id !== id) tabShownAt.set(tab, Date.now())
   w.recentTabIds = noteRecentTab(w.recentTabIds, id)
   // Everything that left the screen starts its sleep clock; everything on it (both panes of a split) wakes.
   const nowOnScreen = onScreenTabIds(w)
@@ -1665,7 +1670,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   if (shouldActivate) {
     // The outgoing tab's picture, while it is still on screen (overview thumbnail + wake snapshot).
     // A page still loading has nothing worth showing yet (and may not answer a capture for a while).
-    if (previous && previous.win === w && isActiveTab(previous) && previous.view && !previous.view.webContents.isLoading()) void captureTabThumbnail(previous, true)
+    // Only for a page someone was looking at: opening tabs in a burst (restore, open all) pays nothing.
+    if (previous && previous.win === w && isActiveTab(previous) && previous.view && !previous.view.webContents.isLoading() && wasShownLongEnough(previous)) void captureTabThumbnail(previous, true)
     // The new tab replaces whatever was on screen (a split's panes go off screen together).
     const wasOnScreen = previous ? onScreenTabIds(w) : []
     if (tab.spaceId !== w.activeSpaceId) {
@@ -1675,6 +1681,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     }
     w.spaceActiveTabs.set(tab.spaceId, tab.id)
     w.activeTabId = tab.id
+    tabShownAt.set(tab, Date.now())
     w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
     for (const goneId of wasOnScreen) {
       const gone = findTab(goneId)
@@ -1894,7 +1901,7 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
       tabThumbnails.delete(tab.id)
-      dropWakeSnapshot(tab.id)
+      forgetWakeSnapshotTab(tab.id)
       const view = tab.view
       tab.view = null
       if (view) {
@@ -2943,7 +2950,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (tab.pdfEditor) tab.pdfEditor.dirty = false
   tabThumbnails.delete(id)
   endWakeSnapshotForTab(id)
-  dropWakeSnapshot(id)
+  forgetWakeSnapshotTab(id)
   const wasActive = w.activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   if (wasActive) hideLinkStatus(false, w.window)
@@ -3420,6 +3427,12 @@ export function updateBrowserPageScale(contents: WebContents, input: unknown): v
   if (contents.isDestroyed() || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) return
   const tab = tabForContents(contents)
   if (tab) tab.pageScale = input
+}
+
+function wasShownLongEnough(tab: BrowserTab): boolean {
+  const shownAt = tabShownAt.get(tab)
+  // Never stamped: the tab was on screen from start-up (restored session), so it counts as seen.
+  return shownAt === undefined || Date.now() - shownAt >= WAKE_SNAPSHOT_MIN_SHOWN_MS
 }
 
 function isLocalNewTab(tab: BrowserTab): boolean {
@@ -3908,6 +3921,7 @@ function focusSplitPane(id: string | undefined, focusContents = true): boolean {
     hideLinkStatus(false, w.window)
     if (w.findState.open) closeFindBar(false, w)
     w.activeTabId = tab.id
+    tabShownAt.set(tab, Date.now())
     w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
     applyTabBounds(w)
     publishState(w)

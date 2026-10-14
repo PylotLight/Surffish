@@ -137,12 +137,14 @@ async function run() {
 
   /** Front tab on screen, wake tab asleep. */
   async function sendWakeTabToSleep() {
+    // Only a page that was actually looked at (on screen 1.5 s+) keeps a picture when it leaves.
+    await delay(1600)
     const front = await tabFor('front')
     if (front) await evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify(front.id)})`)
     else await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(url('front'))})`)
     await waitFor(async () => (await tabFor('front'))?.active && (await tabFor('front')).title === 'Fixture front', 'the front tab')
-    // The switch-away capture is async (capturePage + encode).
-    await delay(500)
+    // The switch-away capture is async (capturePage, then an encode deferred ~300 ms past the switch).
+    await delay(1000)
     // Hibernate Tab (the same path the memory saver discards through).
     assert.equal(await evaluate(toolbar, `window.api.browser.diagnostics.discardTab(${JSON.stringify((await tabFor('wake')).id)})`), true)
     await waitFor(async () => (await tabFor('wake'))?.sleeping, 'the wake tab to sleep')
