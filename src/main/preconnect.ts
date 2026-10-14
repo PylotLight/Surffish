@@ -10,6 +10,7 @@ import {
 } from '../shared/preconnect'
 import { getActiveTabNetworkContext, getSelectedSearchEngine } from './browser'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
+import { onGlanceLinkHover } from './glance-entry'
 import { getProxyGuardStatus } from './proxy-kill-switch'
 import { resolveAddressInput } from './search-keywords'
 import { readUserJson, writeUserJson } from './user-json'
@@ -113,6 +114,16 @@ export function registerPreconnectIpc(): void {
       sendToMainWindowRenderers('browser:preconnect:changed', snapshot())
     }
     return snapshot()
+  })
+  // Links hovered inside a glance (tab pages already report through noteLinkHover in browser.ts).
+  // A glance loads in its source tab's session and closes when that tab leaves the screen, so the
+  // active tab's context is the glance's; anything else (split pane mismatch) is skipped.
+  onGlanceLinkHover((hover) => {
+    if (!hover.inGlance) return
+    noteLinkHover(hover.contents, hover.url, () => {
+      const context = getActiveTabNetworkContext()
+      return context && context.session === hover.session ? context : null
+    })
   })
   // Address bar, already debounced in the renderer: the typed text and the top suggestion's URL.
   ipcMain.on('browser:preconnect:typed', (event, input: unknown, topSuggestionUrl: unknown) => {

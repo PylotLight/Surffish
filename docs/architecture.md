@@ -55,7 +55,7 @@ Shift+click a link (or right-click → **Open Link in Glance**, or ⌘K → **Op
 - Esc, ⌘/Ctrl+W or a press on the backdrop close it and destroy both webContents. Any other browser shortcut (⌘T, ⌘K, ⌘L…) closes the glance first and then runs. The glance also closes when its tab leaves the screen (tab switch, tab closed) or the window closes.
 - ⌘/Ctrl+Enter (or **Open as Tab**) promotes it: the page's own view becomes a new tab right after the source tab, so nothing reloads and back/forward history is kept. **Split View** does the same and shows the new tab in a split next to the source. (A webContents can't be handed to a second `WebContentsView`; trying hangs main, so the tab takes over the view itself.)
 - Links inside navigate within the glance (plain clicks, `target=_blank` and Shift+click); ⌘/Ctrl+click still opens a background tab. Visits go to history like a tab's, except from private tabs.
-- Diagnostics lists an open glance (`Glance: host`). `onGlanceLinkHover` / `openGlance` in `glance-entry.ts` are the hooks for a later preconnect-on-hover pass; nothing listens yet.
+- Diagnostics lists an open glance (`Glance: host`). `onGlanceLinkHover` in `glance-entry.ts` feeds preconnect: links hovered inside a glance preconnect like tab links do (same 200 ms dwell, in the glance's session).
 - Coverage: `test:electron-glance` (real Shift+click input, navigate inside, promote without reload, split, Esc/backdrop/tab-switch close, no leaked webContents or renderer processes, setting off, private session).
 
 ## Perceived speed: preconnect and wake snapshots
