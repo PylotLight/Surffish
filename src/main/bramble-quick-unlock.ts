@@ -16,11 +16,15 @@ import { readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  BRAMBLE_VAULT_PROBE_SCRIPT,
   buildUnlockFillScript,
+  classifyBrambleVaultProbe,
   classifyBrambleUnlockScreen,
   classifyFillOutcome,
+  quickUnlockSetupBlocker,
   UNLOCK_SNAPSHOT_SCRIPT,
   type BrambleQuickUnlockEnrolInput,
+  type BrambleVaultStatus,
   type BrambleQuickUnlockState,
   type QuickUnlockResult
 } from '../shared/bramble-quick-unlock'
@@ -28,6 +32,7 @@ import { BrambleQuickUnlockVault, MASTER_CHANGED_NOTICE, type DeviceKeyProtector
 import { QUICK_UNLOCK_OVERLAY_HTML } from './bramble-quick-unlock-overlay'
 import { writeJsonAtomic } from './extension-staging'
 import { sendToMainWindowRenderers } from './browser-shell'
+import { evaluateInBrambleExtensionPage } from './bramble-poc'
 
 export const QUICK_UNLOCK_CONFIG_FILE = 'bramble-quick-unlock.json'
 /** Isolated world Surffish reads/fills Bramble's unlock form from (never Bramble's own world). */
@@ -88,6 +93,15 @@ function getVault(): BrambleQuickUnlockVault {
   return vault
 }
 
+/** Read Bramble's extension storage: does it hold a vault the PIN could unlock? */
+export async function getBrambleVaultStatus(): Promise<BrambleVaultStatus> {
+  try {
+    return classifyBrambleVaultProbe(await evaluateInBrambleExtensionPage(BRAMBLE_VAULT_PROBE_SCRIPT))
+  } catch {
+    return 'unknown'
+  }
+}
+
 function touchIdAvailable(): boolean {
   try {
     return process.platform === 'darwin' && systemPreferences.canPromptTouchID()
@@ -110,7 +124,8 @@ export async function getQuickUnlockState(): Promise<BrambleQuickUnlockState> {
     persistAvailable: await secureStorageAvailable(),
     failedAttempts: status.failedAttempts,
     maxAttempts: status.maxAttempts,
-    notice: status.notice
+    notice: status.notice,
+    vault: await getBrambleVaultStatus()
   }
 }
 
@@ -137,6 +152,9 @@ export function enrolQuickUnlock(input: unknown): Promise<QuickUnlockResult> {
     if (typeof value.masterPassword !== 'string' || typeof value.pin !== 'string' || typeof value.confirmPin !== 'string') {
       throw new Error('Enter your master password and a PIN.')
     }
+    // No vault, nothing to unlock: never take (and keep) a "master password" for a vault that does not exist.
+    const blocker = quickUnlockSetupBlocker(await getBrambleVaultStatus())
+    if (blocker) throw new Error(blocker)
     const wantsTouchId = value.touchId === true
     if (wantsTouchId && !touchIdAvailable()) throw new Error('Touch ID is not available on this Mac.')
     await getVault().enrol({

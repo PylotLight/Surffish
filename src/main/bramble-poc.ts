@@ -760,6 +760,19 @@ async function sendBrambleBackgroundMessage(message: Record<string, unknown>): P
   return response && typeof response === 'object' ? (response as BrambleEnvelope) : { ok: false, error: 'bad response' }
 }
 
+/**
+ * Evaluate a read-only script in Bramble's own offscreen extension page (its origin, so it can read
+ * chrome.storage.local) and return what it resolves to. Null when Bramble is not loaded. Used by the
+ * quick unlock to check that a vault exists; the offscreen page already runs whenever Bramble does.
+ */
+export async function evaluateInBrambleExtensionPage(script: string): Promise<unknown> {
+  if (!loadedExtension) return null
+  await ensureOffscreenDocument()
+  const host = offscreenWindow
+  if (!host || host.isDestroyed()) return null
+  return (await host.webContents.executeJavaScript(script, true)) as unknown
+}
+
 export async function findBrambleLogins(hostname: string): Promise<BrambleLoginList> {
   offeredLogins = null
   if (!loadedExtension) return { status: 'unavailable' }
