@@ -114,3 +114,75 @@ test('generic cosmetic CSS is returned only for DOM features the page has', asyn
   assert.equal(frameUpdateStyles(engine, 'https://news.example/', { classes: ['content'] }), '')
   assert.equal(frameUpdateStyles(engine, 'https://news.example/', { classes: 'not-an-array' }), '')
 })
+
+// Shared helpers like uBO's safeSelf, so assembled scriptlets each carry a copy until bundled.
+const SHARED_RESOURCES = JSON.stringify({
+  redirects: [],
+  scriptlets: [
+    { name: 'safe-self.fn', aliases: [], body: 'function safeSelf() { if (safeSelf.safe) return safeSelf.safe; safeSelf.safe = { marks: [] }; return safeSelf.safe }', dependencies: [] },
+    { name: 'mark-helper.fn', aliases: [], body: 'class MarkHelper { static mark(name) { safeSelf().marks.push(name); window[name] = true } }', dependencies: ['safe-self.fn'] },
+    { name: 'mark.js', aliases: [], body: 'function mark(name) { MarkHelper.mark(name) }', dependencies: ['mark-helper.fn', 'safe-self.fn'] },
+    { name: 'boom.js', aliases: [], body: 'function boom() { throw new Error("boom") }', dependencies: ['safe-self.fn'] }
+  ]
+})
+
+async function sharedEngine(lines: string[]) {
+  const fetch = async (url: string): Promise<Response> => {
+    if (url === SCRIPTLET_RESOURCES_URL) return new Response(SHARED_RESOURCES)
+    if (url.endsWith('/main.txt')) return new Response(lines.join('\n'))
+    return new Response('! empty')
+  }
+  return (await buildFilterEngine(fetch, SOURCES.slice(0, 3))).engine
+}
+
+test('frame start payload bundles scriptlets so shared helpers ship once', async () => {
+  const engine = await sharedEngine([
+    'video.example##+js(mark, markOne)',
+    'video.example##+js(boom)',
+    'video.example##+js(mark, markTwo)'
+  ])
+  const payload = frameStartPayload(engine, 'https://video.example/watch')
+  assert.equal(payload.scripts.length, 1)
+  assert.equal(payload.scriptletCount, 3)
+  const bundle = payload.scripts[0]!
+  assert.equal(bundle.split('function safeSelf()').length - 1, 1, 'safeSelf declared once')
+  assert.equal(bundle.split('class MarkHelper').length - 1, 1, 'MarkHelper declared once')
+  // Same evaluation as the preload (one block in one global scope); a throwing scriptlet doesn't stop the rest.
+  const window: Record<string, unknown> = {}
+  new Function('window', `{\n${bundle}\n}`)(window)
+  assert.equal(window.markOne, true)
+  assert.equal(window.markTwo, true)
+})
+
+test('frame start payload is cached per hostname and per engine', async () => {
+  const engine = await sharedEngine(['video.example##+js(mark, markOne)', 'video.example##+js(mark, markTwo)', 'video.example##.promo'])
+  const first = frameStartPayload(engine, 'https://video.example/watch?v=1')
+  assert.equal(frameStartPayload(engine, 'https://video.example/other#x'), first)
+  assert.notEqual(frameStartPayload(engine, 'https://other.example/'), first)
+  const refreshed = await sharedEngine(['video.example##.promo'])
+  const after = frameStartPayload(refreshed, 'https://video.example/watch?v=1')
+  assert.notEqual(after, first)
+  assert.deepEqual(after.scripts, [])
+})
+
+test('path-specific hide exceptions are part of the cache key', async () => {
+  const engine = await sharedEngine(['##.generic-promo', 'shop.example##.site-promo', '@@||shop.example/checkout$elemhide'])
+  const home = frameStartPayload(engine, 'https://shop.example/')
+  assert.match(home.styles, /\.site-promo/)
+  assert.equal(home.observe, true)
+  const checkout = frameStartPayload(engine, 'https://shop.example/checkout/pay')
+  assert.doesNotMatch(checkout.styles, /\.site-promo/)
+  assert.equal(checkout.observe, false)
+  assert.equal(frameStartPayload(engine, 'https://shop.example/cart'), home)
+})
+
+test('$generichide frames with nothing specific are inactive (no DOM observer)', async () => {
+  const engine = await sharedEngine(['##.generic-promo', '@@||code.example^$generichide', 'docs.example##.banner', '@@||docs.example^$generichide'])
+  assert.deepEqual(frameStartPayload(engine, 'https://code.example/repo'), { active: false, styles: '', scripts: [], observe: false })
+  const docs = frameStartPayload(engine, 'https://docs.example/')
+  assert.equal(docs.active, true)
+  assert.match(docs.styles, /\.banner/)
+  assert.equal(docs.observe, false)
+  assert.equal(frameStartPayload(engine, 'https://news.example/').observe, true)
+  assert.match(frameUpdateStyles(engine, 'https://news.example/', { classes: ['generic-promo'] }), /\.generic-promo/)
+})

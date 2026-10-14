@@ -7,8 +7,9 @@
  * - `frameStartPayload` returns the scriptlets and base CSS a frame needs at
  *   document start; `frameUpdateStyles` adds generic CSS for DOM features.
  */
-import { ElectronBlocker } from '@ghostery/adblocker-electron'
+import { ElectronBlocker, Request } from '@ghostery/adblocker-electron'
 import { parse as parseDomain } from 'tldts-experimental'
+import { bundleScriptlets, type ScriptletResources } from './adblock-scriptlets.ts'
 import {
   extractIncludes,
   FILTER_ENVIRONMENT,
@@ -30,6 +31,8 @@ export interface FrameStartPayload {
   styles: string
   scripts: string[]
   observe: boolean
+  /** Scriptlets the scripts run (several are bundled into one script); defaults to scripts.length. */
+  scriptletCount?: number
 }
 
 export interface FrameDomFeatures {
@@ -114,11 +117,51 @@ function domainParts(url: string): { hostname: string; domain: string } {
   return { hostname: parsed.hostname ?? '', domain: parsed.domain ?? parsed.hostname ?? '' }
 }
 
-/** Scriptlets + specific/generic base CSS for a frame's first paint. */
-export function frameStartPayload(engine: ElectronBlocker, url: string): FrameStartPayload {
-  const inactive: FrameStartPayload = { active: false, styles: '', scripts: [], observe: false }
-  if (!isWebPageUrl(url)) return inactive
-  const { hostname, domain } = domainParts(url)
+const INACTIVE_PAYLOAD: FrameStartPayload = Object.freeze({ active: false, styles: '', scripts: [], observe: false }) as FrameStartPayload
+/** Distinct hostname/exception combinations remembered per engine (one per site the user has open, plus their iframes). */
+export const FRAME_PAYLOAD_CACHE_SIZE = 256
+const payloadCache = new WeakMap<ElectronBlocker, Map<string, FrameStartPayload>>()
+
+type HideException = { isImportant(): boolean; isException(): boolean; isGenericHide(): boolean; isSpecificHide(): boolean; getId(): number }
+
+/** Ghostery's findApplicableHideException (engine.js): `$important,Xhide` > `$Xhide` > `@@$Xhide`; only an exception disables. */
+function applicableHideException(filters: readonly HideException[]): HideException | undefined {
+  let hideFilter: HideException | undefined
+  let currentScore = 0
+  for (const filter of filters) {
+    const score = (filter.isImportant() ? 4 : 0) | (filter.isException() ? 1 : 2)
+    if (score >= currentScore) {
+      currentScore = score
+      hideFilter = filter
+    }
+  }
+  return hideFilter?.isException() ? hideFilter : undefined
+}
+
+/**
+ * The `$elemhide` / `$generichide` / `$specifichide` exceptions that apply to this frame URL, the
+ * only URL-dependent input to the hostname cosmetics (they can name paths), so it is part of the
+ * cache key. Uses the same request shape as Ghostery's matchCosmeticFilters. null = can't tell (no cache).
+ */
+function hideExceptionState(engine: ElectronBlocker, url: string, hostname: string, domain: string): { key: string; allowGenericHides: boolean } | null {
+  try {
+    // Engine internals (stable across Ghostery 2.x); without them there is simply no cache.
+    const internals = engine as unknown as {
+      hideExceptions?: { matchAll?: (request: Request, excluded: (filter: unknown) => boolean) => HideException[] }
+      isFilterExcluded?: (filter: unknown) => boolean
+    }
+    const bucket = internals.hideExceptions
+    if (typeof bucket?.matchAll !== 'function' || typeof internals.isFilterExcluded !== 'function') return null
+    const request = Request.fromRawDetails({ domain, hostname, url, sourceDomain: '', sourceHostname: '', sourceUrl: '' })
+    const matched = bucket.matchAll(request, internals.isFilterExcluded.bind(engine))
+    const key = matched.map((filter) => filter.getId()).sort((a, b) => a - b).join(',')
+    return { key, allowGenericHides: applicableHideException(matched.filter((filter) => filter.isGenericHide())) === undefined }
+  } catch {
+    return null
+  }
+}
+
+function computeFrameStartPayload(engine: ElectronBlocker, url: string, hostname: string, domain: string, allowGenericHides: boolean): FrameStartPayload {
   const { active, styles, scripts } = engine.getCosmeticsFilters({
     url,
     hostname,
@@ -129,8 +172,42 @@ export function frameStartPayload(engine: ElectronBlocker, url: string): FrameSt
     getRulesFromHostname: true,
     getRulesFromDOM: false
   })
-  if (active === false) return inactive
-  return { active: true, styles, scripts, observe: engine.config.enableMutationObserver }
+  if (active === false) return INACTIVE_PAYLOAD
+  // DOM-driven generic rules are all the frame observer can add; with $generichide in force it would only cost IPC.
+  const observe = engine.config.enableMutationObserver && allowGenericHides
+  if (!styles && scripts.length === 0 && !observe) return INACTIVE_PAYLOAD
+  const bundled = bundleScriptlets(scripts, (engine as unknown as { resources?: ScriptletResources }).resources)
+  return Object.freeze({ active: true, styles, scripts: bundled.scripts, observe, scriptletCount: bundled.scriptletCount })
+}
+
+/**
+ * Scriptlets + specific/generic base CSS for a frame's first paint. Cached per engine by hostname
+ * (+ the hide exceptions for this URL), so every same-site frame and navigation reuses one payload
+ * instead of re-matching and re-assembling scriptlets. A refreshed engine is a new cache.
+ * `active: false` when nothing would be injected or observed, so the preload does nothing.
+ */
+export function frameStartPayload(engine: ElectronBlocker, url: string): FrameStartPayload {
+  if (!isWebPageUrl(url)) return INACTIVE_PAYLOAD
+  const { hostname, domain } = domainParts(url)
+  const hide = hideExceptionState(engine, url, hostname, domain)
+  if (!hide) return computeFrameStartPayload(engine, url, hostname, domain, true)
+  let cache = payloadCache.get(engine)
+  if (!cache) {
+    cache = new Map()
+    payloadCache.set(engine, cache)
+  }
+  const key = `${hostname}\u0000${domain}\u0000${hide.key}`
+  const hit = cache.get(key)
+  if (hit) {
+    // Least recently used goes first when the cache is full.
+    cache.delete(key)
+    cache.set(key, hit)
+    return hit
+  }
+  const payload = computeFrameStartPayload(engine, url, hostname, domain, hide.allowGenericHides)
+  cache.set(key, payload)
+  if (cache.size > FRAME_PAYLOAD_CACHE_SIZE) cache.delete(cache.keys().next().value as string)
+  return payload
 }
 
 function stringList(value: unknown, limit = 2000): string[] {

@@ -187,8 +187,9 @@ function recordRequest(details: BeforeRequestDetails, response: BeforeRequestRes
 }
 
 function recordFrameStart(payload: FrameStartPayload): void {
-  if (payload.scripts.length === 0) return
-  diagnostics.pageFixInjections += payload.scripts.length
+  const scriptlets = payload.scriptletCount ?? payload.scripts.length
+  if (scriptlets === 0) return
+  diagnostics.pageFixInjections += scriptlets
   scheduleDiagnosticsBroadcast()
 }
 

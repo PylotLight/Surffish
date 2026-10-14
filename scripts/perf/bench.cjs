@@ -24,6 +24,9 @@ const IDLE_SECONDS = cfg.idleSeconds ?? 5
 const SWITCHES = cfg.tabSwitches ?? 12
 const NEW_TABS = cfg.newTabs ?? 5
 const WINDOW_CYCLES = cfg.windowCycles ?? 3
+const SITE_TABS = cfg.siteTabs ?? 16
+const SITES = cfg.sites ?? 4
+const ADBLOCK_NAVS = cfg.adblockNavigations ?? 4
 // PERF_USER_DATA: a profile kept across launches (run.ts: the warm-up launch, then the warm starts
 // reuse it, so the renderer's V8 code cache and the HTTP cache are warm like a returning user's).
 const KEEP_PROFILE = Boolean(process.env.PERF_USER_DATA)
@@ -59,9 +62,25 @@ const bump = (key, args) => {
   ipc.channels.set(key, (ipc.channels.get(key) || 0) + 1)
 }
 const origHandle = ipcMain.handle.bind(ipcMain)
-ipcMain.handle = (channel, fn) => origHandle(channel, (event, ...a) => { bump(`invoke ${channel}`, a); return fn(event, ...a) })
+ipcMain.handle = (channel, fn) => origHandle(channel, (event, ...a) => { bump(`invoke ${channel}`, a); if (adblock.counting && channel === ADBLOCK_FRAME_UPDATE) adblock.updates++; return fn(event, ...a) })
+// Ad-filter frame-start (sync IPC every frame makes at document start): handler time and reply size.
+const ADBLOCK_FRAME_START = 'surffish:adblock:frame-start'
+const ADBLOCK_FRAME_UPDATE = 'surffish:adblock:frame-update'
+const adblock = { counting: false, starts: 0, bytes: 0, ms: 0, updates: 0 }
+const payloadBytes = (p) => (typeof p?.styles === 'string' ? p.styles.length : 0) + (Array.isArray(p?.scripts) ? p.scripts.reduce((n, x) => n + (typeof x === 'string' ? x.length : 0), 0) : 0)
 const origOn = ipcMain.on.bind(ipcMain)
-ipcMain.on = (channel, fn) => origOn(channel, (event, ...a) => { bump(`on ${channel}`, a); return fn(event, ...a) })
+ipcMain.on = (channel, fn) => origOn(channel, (event, ...a) => {
+  bump(`on ${channel}`, a)
+  if (channel !== ADBLOCK_FRAME_START || !adblock.counting) return fn(event, ...a)
+  // event.returnValue is a write-only reply setter: watch it through a proxy.
+  let reply
+  const proxied = new Proxy(event, {
+    set(target, key, value) { if (key === 'returnValue') reply = value; target[key] = value; return true },
+    get(target, key) { const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value }
+  })
+  const t0 = performance.now()
+  try { return fn(proxied, ...a) } finally { adblock.ms += performance.now() - t0; adblock.starts++; adblock.bytes += payloadBytes(reply) }
+})
 app.on('web-contents-created', (_e, contents) => {
   const send = contents.send.bind(contents)
   contents.send = (channel, ...a) => { bump(`send ${channel}`, a); return send(channel, ...a) }
@@ -84,7 +103,11 @@ const top = (m, n = 8) => Object.fromEntries([...m.entries()].sort((a, b) => b[1
 const PAGE = (n) => `<!doctype html><meta charset="utf-8"><title>Page ${n}</title><style>body{font:16px system-ui;margin:40px}</style>
 <h1>Fixture page ${n}</h1>${'<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. </p>'.repeat(40)}
 <img src="/img.svg" width="300" height="120"><script>window.__t=0;setInterval(()=>{window.__t++},1000)</script>`
+// Video fixture page: a classed layout like a real site, so the frame's DOM observer has work to report.
+const VIDEO_PAGE = (n) => `<!doctype html><meta charset="utf-8"><title>Video ${n}</title><div class="app-shell"><header id="masthead" class="masthead"><a href="/home">Home</a></header>
+<main class="watch-grid">${Array.from({ length: 30 }, (_, i) => `<div class="card card-${i}" id="v${i}"><a class="thumb" href="/v${i}">Video ${i}</a></div>`).join('')}<div class="perf-ad-7">ad</div></main></div>`
 const server = createServer((req, res) => {
+  if (/^\/v\d+$/.test(req.url)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(VIDEO_PAGE(req.url)); return }
   if (req.url === '/img.svg') { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120"><rect width="300" height="120" fill="teal"/></svg>'); return }
   if (req.url === '/favicon.ico') { res.writeHead(404); res.end(); return }
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -107,6 +130,11 @@ function memory() {
   const gpu = m.filter((e) => e.type === 'GPU').reduce((n, e) => n + (isLinux ? pssKB(e.pid) : (e.memory?.workingSetSize || 0)), 0)
   return { totalMB: Math.round(kb / 1024), gpuMB: Math.round(gpu / 1024), processes: m.length }
 }
+// Memory of the given processes (MB): PSS on Linux, working set elsewhere, like memory().
+function processMB(pids) {
+  const kb = app.getAppMetrics().filter((e) => pids.has(e.pid)).reduce((n, e) => n + (isLinux ? pssKB(e.pid) : (e.memory?.workingSetSize || 0)), 0)
+  return Math.round(kb / 1024)
+}
 // Cumulative CPU seconds per process group (cross-platform via getAppMetrics).
 function cpuSeconds() {
   const kindByPid = new Map()
@@ -127,6 +155,31 @@ async function waitFor(pred, what, timeout = 20000) {
 const fcpOf = (wc) => wc.executeJavaScript(`new Promise((r) => { const f = () => { const e = performance.getEntriesByName('first-contentful-paint')[0]; if (e) r(performance.timeOrigin + e.startTime); else setTimeout(f, 5) }; f() })`)
 const twoFrames = (wc) => wc.executeJavaScript('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>r(1))))')
 
+// Fixture filters shaped like uBO's: generic hiding, site CSS, and scriptlets on video.localhost that
+// share helpers (uBO's YouTube rules inject ~30 scriptlets that all inline safeSelf & co.).
+const fixtureHelper = (name, size) => `function ${name}(){if(${name}.v)return ${name}.v;const t={${Array.from({ length: size }, (_, i) => `k${i}:${i}`).join(',')}};${name}.v=t;return t}`
+const FIXTURE_SCRIPTLETS = JSON.stringify({
+  redirects: [],
+  scriptlets: [
+    { name: 'safe-self.fn', aliases: [], body: fixtureHelper('safeSelf', 600), dependencies: [] },
+    { name: 'match-props.fn', aliases: [], body: fixtureHelper('matchPropsFn', 250), dependencies: ['safe-self.fn'] },
+    { name: 'proxy-apply.fn', aliases: [], body: fixtureHelper('proxyApplyFn', 200), dependencies: ['safe-self.fn'] },
+    { name: 'prune-object.fn', aliases: [], body: fixtureHelper('pruneObjectFn', 300), dependencies: ['match-props.fn'] },
+    { name: 'perf-prune.js', aliases: [], body: 'function perfPrune(a){safeSelf();pruneObjectFn();window.__perfPrune=(window.__perfPrune||0)+1}', dependencies: ['prune-object.fn', 'safe-self.fn'] },
+    { name: 'perf-fetch.js', aliases: [], body: 'function perfFetch(a){safeSelf();proxyApplyFn();matchPropsFn();window.__perfFetch=a}', dependencies: ['proxy-apply.fn', 'match-props.fn', 'safe-self.fn'] },
+    { name: 'perf-set.js', aliases: [], body: 'function perfSet(a,b){safeSelf();window[a]=b}', dependencies: ['safe-self.fn'] }
+  ]
+})
+const FIXTURE_FILTERS = [
+  '! surffish perf fixture', '||ads.invalid^', '##.perf-fixture-ad',
+  ...Array.from({ length: 300 }, (_, i) => `##.perf-ad-${i}`),
+  ...Array.from({ length: 40 }, (_, i) => `##div[id^="perf-gpt-${i}"]`),
+  ...Array.from({ length: 20 }, (_, i) => `video.localhost##.perf-promo-${i}`),
+  ...Array.from({ length: 6 }, (_, i) => `video.localhost##+js(perf-prune, playerResponse.adSlots${i})`),
+  ...Array.from({ length: 6 }, (_, i) => `video.localhost##+js(perf-fetch, /ad${i}/)`),
+  ...Array.from({ length: 6 }, (_, i) => `video.localhost##+js(perf-set, perfFlag${i}, true)`)
+].join('\n')
+
 // Seed an offline ad-filter engine built by the app's own adblock module (tiny fixture lists),
 // so the bench never downloads filter lists and both builds start from the same state.
 // PERF_ADBLOCK_ENGINE=<adblock-engine-v2.bin> seeds a real prebuilt engine instead.
@@ -140,7 +193,9 @@ async function seedProfile() {
   if (process.env.PERF_ADBLOCK_ENGINE && existsSync(process.env.PERF_ADBLOCK_ENGINE)) { copyFileSync(process.env.PERF_ADBLOCK_ENGINE, dest); return 'prebuilt' }
   try {
     const mod = await import(pathToFileURL(join(APP_DIR, 'out/main/adblock-engine.js')).href)
-    const fetch = async (url) => new Response(url.endsWith('.json') ? '[]' : '! surffish perf fixture\n||ads.invalid^\n##.perf-fixture-ad\n')
+    // The fixture rules in the first list only (every list is fetched; duplicates would multiply the scriptlets).
+    const firstList = mod.FILTER_LIST_SOURCES?.[0]?.url
+    const fetch = async (url) => new Response(url.endsWith('.json') ? FIXTURE_SCRIPTLETS : url === firstList ? FIXTURE_FILTERS : '! surffish perf fixture\n')
     const { engine } = await mod.buildFilterEngine(fetch, mod.FILTER_LIST_SOURCES)
     writeFileSync(dest, engine.serialize())
     return 'fixture'
@@ -236,6 +291,7 @@ async function run() {
   await delay(1500)
   counting = false
   result.startup.ipcCount = ipc.count
+  result.startup.ipcTop = top(ipc.channels, 12)
   result.mem1 = memory()
 
   await openTabs(1, TABS_MID - 1)
@@ -319,6 +375,46 @@ async function run() {
   const after = count()
   result.windowCycles = { cycles: WINDOW_CYCLES, processesGrowth: after.processes - before.processes, webContentsGrowth: after.webContents - before.webContents, shellGrowth: after.shell - before.shell, memGrowthMB: after.totalMB - before.totalMB }
   step('window cycles')
+
+  // Mixed sites: SITE_TABS tabs over SITES sites (*.localhost, separate sites to Chromium). How many
+  // renderers host them (their pages and iframes) and those processes' memory.
+  const siteTabUrl = (i) => `http://site${i % SITES}.localhost:${server.address().port}/s${i}`
+  const isSiteTab = (c) => /\/\/site\d+\.localhost:\d+\/s\d+$/.test(c.getURL())
+  for (let i = 0; i < SITE_TABS; i++) await api(`window.api.browser.tabs.create(${JSON.stringify(siteTabUrl(i))})`)
+  await waitFor(() => webContents.getAllWebContents().filter((c) => !c.isDestroyed() && isSiteTab(c) && !c.isLoading()).length >= SITE_TABS, 'site tabs loaded', 60000)
+  await delay(1500)
+  const sitePids = new Set()
+  for (const c of webContents.getAllWebContents()) {
+    if (c.isDestroyed() || !isSiteTab(c)) continue
+    try { for (const f of c.mainFrame.framesInSubtree) if (f.osProcessId > 0) sitePids.add(f.osProcessId) } catch { sitePids.add(c.getOSProcessId()) }
+  }
+  result.sites = { tabs: SITE_TABS, sites: SITES, renderers: sitePids.size, memMB: processMB(sitePids) }
+  step('mixed sites')
+
+  // Ad-filter cosmetics: what one navigation to a page with site CSS + scriptlets costs (bytes sent to
+  // the frame, main-process time answering it), and that same-document navigations inject nothing.
+  const videoUrl = (i) => `http://video.localhost:${server.address().port}/v${i}`
+  const isVideo = (c, i) => c.getURL() === videoUrl(i)
+  adblock.counting = true
+  for (let i = 0; i < ADBLOCK_NAVS; i++) {
+    await api(`window.api.browser.navigate(${JSON.stringify(videoUrl(i))})`)
+    await waitFor(() => webContents.getAllWebContents().find((c) => !c.isDestroyed() && isVideo(c, i) && !c.isLoading()), `video ${i}`, 15000)
+    await delay(300)
+  }
+  const navStarts = adblock.starts
+  const video = webContents.getAllWebContents().find((c) => !c.isDestroyed() && isVideo(c, ADBLOCK_NAVS - 1))
+  if (video) await video.executeJavaScript(`for (let i = 0; i < 3; i++) history.pushState({}, '', '/spa' + i); location.hash = 'x'`)
+  await delay(500)
+  adblock.counting = false
+  result.adblock = {
+    navigations: ADBLOCK_NAVS,
+    frameStartBytes: Math.round(adblock.bytes / ADBLOCK_NAVS),
+    frameStartMainMs: round(adblock.ms / ADBLOCK_NAVS, 2),
+    frameStarts: round(navStarts / ADBLOCK_NAVS, 2),
+    frameUpdates: round(adblock.updates / ADBLOCK_NAVS, 2),
+    sameDocFrameStarts: adblock.starts - navStarts
+  }
+  step('adblock cosmetics')
   return result
 }
 
