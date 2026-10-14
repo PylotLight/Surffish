@@ -290,10 +290,6 @@ export function getExtensionDnrStats(): ExtensionDnrStats {
   return { ...stats }
 }
 
-export function resetExtensionDnrStats(): void {
-  Object.assign(stats, { evaluated: 0, blocked: 0, redirected: 0, allowed: 0, headerRequests: 0, gateMicroseconds: 0 })
-}
-
 // ---------------------------------------------------------------------------
 // Matching from the webRequest pipeline
 

@@ -144,10 +144,6 @@ function safeHttpUrl(value: unknown): string | null {
   }
 }
 
-export function isHttpUrl(value: unknown): value is string {
-  return safeHttpUrl(value) !== null
-}
-
 /** Preserve ordinary URL behavior in restored tabs while dropping common secrets from plaintext session storage. */
 export function normalizeSessionUrl(value: unknown): string | null {
   const safe = safeHttpUrl(value)

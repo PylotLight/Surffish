@@ -198,8 +198,3 @@ export function systemTrustAnchors(allowTestAnchors: boolean): X509Certificate[]
   systemAnchors = pems.map(parseX509).filter((cert): cert is X509Certificate => cert !== null)
   return systemAnchors
 }
-
-/** Tests: forget the cached anchors. */
-export function resetSystemTrustAnchors(): void {
-  systemAnchors = null
-}

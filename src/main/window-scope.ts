@@ -64,10 +64,6 @@ export function browserWindows(): BaseWindow[] {
   return windows.filter((win) => !win.isDestroyed())
 }
 
-export function isBrowserWindow(win: BaseWindow | null | undefined): boolean {
-  return live(win)
-}
-
 /** 1-based position among the open windows (what menus and the task manager call "Window 2"). */
 export function browserWindowNumber(win: BaseWindow): number {
   return browserWindows().indexOf(win) + 1
@@ -104,10 +100,6 @@ export function bindContentsToWindow(contents: WebContents, win: BaseWindow): vo
   contents.once('destroyed', () => {
     if (contentsWindows.get(id) === win) contentsWindows.delete(id)
   })
-}
-
-export function unbindContents(contents: WebContents): void {
-  contentsWindows.delete(contents.id)
 }
 
 export function windowForContents(contents: WebContents | null | undefined): BaseWindow | null {

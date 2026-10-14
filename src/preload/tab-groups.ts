@@ -11,7 +11,6 @@ export const tabGroupsApi = {
   ungroup: (groupId: string): Promise<boolean> => ipcRenderer.invoke('browser:tab-groups:ungroup', groupId),
   /** Asks first (native dialog) when the group has more than one tab. */
   close: (groupId: string): Promise<boolean> => ipcRenderer.invoke('browser:tab-groups:close', groupId),
-  newTab: (groupId: string): Promise<string | null> => ipcRenderer.invoke('browser:tab-groups:new-tab', groupId),
   /** Drag a group header: the whole group lands before `beforeId` (a tab id) or at the end. */
   move: (groupId: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tab-groups:move', groupId, beforeId),
   moveToNewWindow: (groupId: string): Promise<boolean> => ipcRenderer.invoke('browser:tab-groups:move-to-new-window', groupId),

@@ -108,5 +108,3 @@ export function CertificateViewer({ info, onBack }: { info: SiteCertificateInfo;
     </div>
   )
 }
-
-export default CertificateViewer

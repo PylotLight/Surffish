@@ -10,7 +10,6 @@ import {
   moveBookmarks
 } from './bookmarks'
 import { exportBookmarksHtmlFile, importBookmarksHtmlFile, listBookmarkImportSources, openFullDiskAccessSettings, runBookmarkImport } from './bookmark-import'
-import { bookmarkAllBrowserTabs } from './browser'
 import type { BookmarkMenuAction } from '../shared/bookmark-import'
 
 
@@ -86,10 +85,6 @@ export function registerBookmarkIpc(): void {
   ipcMain.handle('browser:bookmarks:delete', (event, ids: unknown) => {
     assertMainRenderer(event)
     return deleteBookmarks(ids)
-  })
-  ipcMain.handle('browser:bookmarks:bookmark-all-tabs', (event) => {
-    assertMainRenderer(event)
-    return bookmarkAllBrowserTabs()
   })
   ipcMain.handle('browser:bookmarks:context-menu', (event, request: unknown) => {
     assertMainRenderer(event)

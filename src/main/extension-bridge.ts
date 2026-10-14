@@ -266,12 +266,6 @@ export function stopExtensionBridge(id: string): void {
   if (!contents.isDestroyed()) contents.close()
 }
 
-/** Is this webContents one of Surffish's hidden bridge pages (never a tab)? */
-export function isExtensionBridgeContents(contents: WebContents): boolean {
-  for (const bridge of bridges.values()) if (bridge.view.webContents === contents) return true
-  return false
-}
-
 export function disposeExtensionBridges(): void {
   for (const id of [...bridges.keys()]) stopExtensionBridge(id)
 }

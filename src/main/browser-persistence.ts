@@ -8,13 +8,10 @@ import {
   normalizeSidebarWidth,
   normalizePinnedSites,
   parseBrowserSiteSettings,
-  normalizeBrowserSession,
   parseBrowserPreferences,
-  parseBrowserSession,
   parseNewTabPreferences,
   normalizeCachedFaviconDataUrl,
-  type BrowserPreferences,
-  type SavedBrowserSession
+  type BrowserPreferences
 } from '../shared/persistence'
 import { normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, type SavedWindowsSession, type SessionWindowInput } from '../shared/window-session'
 import type { SavedWindowState } from '../shared/window-geometry'
@@ -119,20 +116,6 @@ export function saveBrowserSiteFavicon(originInput: unknown, iconInput: unknown)
   }
   deferWrite('site-icons', () => writeJson(SITE_ICON_CACHE_FILE, { version: 1, icons: Object.fromEntries(cachedSiteIcons) }), 2000)
   return icon
-}
-
-export function loadBrowserSession(): SavedBrowserSession {
-  const saved = parseBrowserSession(readJson(SESSION_FILE))
-  writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
-  return saved
-}
-
-export function saveBrowserSession(urls: readonly string[], activeIndex: number, pinnedIndexes: readonly number[] = []): void {
-  if (sessionPersistenceDisabled) return
-  const saved = normalizeBrowserSession(urls, activeIndex, pinnedIndexes)
-  deferWrite('session', () => {
-    if (!sessionPersistenceDisabled) writeJson(SESSION_FILE, { version: 1, tabs: saved.urls, activeIndex: saved.activeIndex, pinnedTabs: saved.pinnedIndexes })
-  }, 600)
 }
 
 let sessionStore: SessionStore | null | undefined

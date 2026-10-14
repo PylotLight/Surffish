@@ -42,10 +42,6 @@ function current(): PreconnectSettings {
   return settings
 }
 
-export function isPreconnectEnabled(): boolean {
-  return current().enabled
-}
-
 /**
  * Open one socket to `url`'s origin in `context`'s session. Returns true when a preconnect went
  * out. Never in private tabs (typing there must not reach the network before Enter), never while

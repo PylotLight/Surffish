@@ -1949,10 +1949,6 @@ export function browserWindowLabel(window: BaseWindow): string {
   return `${w?.isPrivate ? 'Private ' : ''}Window ${number > 0 ? number : ''} — ${short}`.replace('Window  —', 'Window —')
 }
 
-export function isPrivateBrowserWindow(window: BaseWindow | null | undefined): boolean {
-  return Boolean(windowStateFor(window)?.isPrivate)
-}
-
 /** Private windows only take private tabs (a normal tab can't switch to the private session). */
 function canMoveTabTo(tab: BrowserTab, w: BrowserWindowState): boolean {
   return !w.isPrivate || tab.isPrivate

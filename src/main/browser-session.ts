@@ -37,7 +37,6 @@ interface PageSessionEntry {
 
 const setups: PageSessionSetup[] = []
 const pageSessions = new Map<string, PageSessionEntry>()
-const createdListeners = new Set<(info: PageSessionInfo) => void>()
 
 function infoFor(partition: string): PageSessionInfo {
   return {
@@ -78,7 +77,6 @@ export function getPageSession(partition: string = BROWSER_SESSION_PARTITION): E
     // they configure it as they register (same order as before the refactor).
     for (const setup of setups) entry.ready = Promise.all([entry.ready, runSetup(entry, setup)]).then(() => undefined)
   }
-  for (const listener of createdListeners) listener(info)
   return created
 }
 
@@ -100,19 +98,9 @@ export function onPageSessionCreated(setup: PageSessionSetup): Promise<void> {
   return Promise.all(runs).then(() => undefined)
 }
 
-/** Hear when a page session is created (diagnostics, etc). */
-export function onPageSessionAdded(listener: (info: PageSessionInfo) => void): () => void {
-  createdListeners.add(listener)
-  return () => { createdListeners.delete(listener) }
-}
-
 /** Resolves once async setup (notably the proxy) is applied; pages in that session must not load before it. */
 export function whenPageSessionReady(partition: string): Promise<void> {
   return pageSessions.get(partition)?.ready ?? Promise.resolve()
-}
-
-export function hasPageSession(partition: string): boolean {
-  return pageSessions.has(partition)
 }
 
 /** Every page session created so far, with its info. */
@@ -132,17 +120,9 @@ export function getBrowserSession(): Electron.Session {
   return getPageSession(BROWSER_SESSION_PARTITION)
 }
 
-export function whenPrivateSessionReady(): Promise<void> {
-  return whenPageSessionReady(PRIVATE_SESSION_PARTITION)
-}
-
 /** In-memory session for private tabs: no profile cookies, history, extensions or saved state. */
 export function getPrivateSession(): Electron.Session {
   return getPageSession(PRIVATE_SESSION_PARTITION)
-}
-
-export function hasPrivateSession(): boolean {
-  return pageSessions.has(PRIVATE_SESSION_PARTITION)
 }
 
 /** Last private tab closed: wipe everything the in-memory session picked up so the next one starts clean. */

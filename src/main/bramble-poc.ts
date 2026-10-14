@@ -25,7 +25,7 @@ import type { ExtensionTabsCaller } from './extension-tabs-host'
 import { anchoredPopupBounds, centredPopupAnchor } from '../shared/window-geometry'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { createRestrictedFetch } from './restricted-fetch'
-import { activateStagedDirectory, assertExtensionIdentity, extensionWorkerStamp, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
+import { activateStagedDirectory, assertExtensionIdentity, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
 
 const CONFIG_FILENAME = 'bramble-firefox-poc.json'
 const BRAMBLE_DATA_DIRECTORY = 'bramble-firefox-poc'
@@ -449,11 +449,6 @@ function releaseArchivePath(version: string, sha256: string): string {
 const BRAMBLE_WORKER_STAMP_FILE = 'worker-stamp'
 
 const BRAMBLE_WORKER_FILES = ['surffish-bramble-background.js', BRAMBLE_BROWSER_ALIAS_FILE, 'background.js'] as const
-
-/** Fingerprint of every script Bramble's background worker loads, to spot a stale registration. */
-export function brambleWorkerStamp(directory: string): string {
-  return extensionWorkerStamp(directory, BRAMBLE_WORKER_FILES)
-}
 
 /** Load Bramble with a fresh service worker whenever its worker scripts changed (see extension-staging). */
 async function loadBrambleExtension(directory: string): Promise<Electron.Extension> {

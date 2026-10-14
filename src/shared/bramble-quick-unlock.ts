@@ -9,7 +9,6 @@
  */
 
 export const QUICK_UNLOCK_PIN_PATTERN = /^[0-9]{4,8}$/
-export const QUICK_UNLOCK_MAX_ATTEMPTS = 5
 
 /** What Settings shows. Never carries secrets. */
 export interface BrambleQuickUnlockState {

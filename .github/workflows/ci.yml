@@ -114,6 +114,9 @@ jobs:
       - name: Unit tests
         if: matrix.unit
         run: bun run test
+      - name: Dead code check (knip; unused files, exports, deps; config in knip.json)
+        if: matrix.unit
+        run: bun run check:dead
       - name: Start D-Bus (silences Chromium bus spam in containers)
         run: |
           sudo mkdir -p /run/dbus

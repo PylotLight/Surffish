@@ -55,10 +55,6 @@ export function chromeWebStoreCrxUrl(id: string, chromeVersion: string): string 
   return `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${normalizeChromeVersion(chromeVersion)}&acceptformat=crx2,crx3&x=${x}`
 }
 
-export function chromeWebStoreDetailUrl(id: string): string {
-  return `https://chromewebstore.google.com/detail/${id}`
-}
-
 /** Hosts the CRX download may come from (the update service and Google's download CDNs). */
 export function isAllowedChromeWebStoreDownloadUrl(value: string | URL): boolean {
   let url: URL

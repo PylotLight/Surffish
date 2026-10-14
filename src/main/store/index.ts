@@ -67,11 +67,6 @@ export function getProfileDatabase(): SurffishDatabase | null {
   return database
 }
 
-export function getProfileStoreStatus(): ProfileStoreStatus {
-  getProfileDatabase()
-  return status!
-}
-
 /**
  * Close surffish.db at quit, after every queued write has landed. Deferred writes are flushed
  * here first (and run at once from then on), so a save timer can't fire against a closed database

@@ -42,7 +42,6 @@ interface Watched {
 let killSwitch = false
 let routing: ProxyRoutingInput = getProxyRoutingInput()
 const watched = new Map<string, Watched>()
-const statusListeners = new Set<(status: ProxyGuardStatus) => void>()
 
 function armed(): boolean {
   return killSwitch && watched.size > 0
@@ -67,16 +66,8 @@ export function getProxyGuardStatus(): ProxyGuardStatus {
   }
 }
 
-/** Hear when traffic starts or stops being blocked (and other status changes). */
-export function onProxyGuardStatus(listener: (status: ProxyGuardStatus) => void): () => void {
-  statusListeners.add(listener)
-  return () => { statusListeners.delete(listener) }
-}
-
 function publish(): void {
-  const status = getProxyGuardStatus()
-  sendToMainWindowRenderers('browser:proxy-guard:changed', status)
-  for (const listener of statusListeners) listener(status)
+  sendToMainWindowRenderers('browser:proxy-guard:changed', getProxyGuardStatus())
 }
 
 function dispatch(entry: Watched, event: ProxyHealthEvent): void {

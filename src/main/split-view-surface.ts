@@ -1,4 +1,4 @@
-import { screen, WebContentsView, type BaseWindow, type WebContents } from 'electron'
+import { screen, WebContentsView, type BaseWindow } from 'electron'
 import type { BrowserBounds } from '../shared/types'
 import { splitDividerAt, splitPaneAt, type SplitLayout } from '../shared/split-view'
 import { bindContentsToWindow } from './window-scope'
@@ -191,10 +191,6 @@ export function notifySplitPagePointer(window: BaseWindow, input: Electron.Mouse
   if (input.type === 'mouseUp' || (input.type === 'mouseMove' && !leftButtonDown(input))) stopDrag(surface, true)
 }
 
-export function isSplitDividerDragging(window: BaseWindow): boolean {
-  return Boolean(surfaces.get(window)?.drag)
-}
-
 function ensureView(surface: Surface): WebContentsView | null {
   if (surface.view && !surface.view.webContents.isDestroyed()) return surface.view
   if (surface.window.isDestroyed()) return null
@@ -290,10 +286,4 @@ export function destroySplitSurface(window: BaseWindow): void {
     if (!window.isDestroyed() && window.contentView.children.includes(view)) window.contentView.removeChildView(view)
     view.webContents.close()
   }
-}
-
-/** The surface's web contents (smoke tests drive the divider through it). */
-export function getSplitSurfaceContents(window: BaseWindow): WebContents | null {
-  const view = surfaces.get(window)?.view
-  return view && !view.webContents.isDestroyed() ? view.webContents : null
 }
