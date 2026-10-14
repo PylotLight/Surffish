@@ -139,7 +139,16 @@ for (const app of apps) results[app.label] = { dir: app.dir, bundle: bundleSizes
 if (traceDir) mkdirSync(traceDir, { recursive: true })
 const started = Date.now()
 for (let n = 0; n < warmup; n++) for (const app of apps) sample(app, n, 'warmup')
-// Warm starts right after the warm-up, interleaved, before the measured runs.
+for (let n = 0; n < runs; n++) {
+  const order = n % 2 === 0 ? apps : [...apps].reverse()
+  for (const app of order) {
+    const s = sample(app, n)
+    if (s) results[app.label]!.samples.push(s)
+    else results[app.label]!.failures++
+  }
+}
+// Warm starts last, interleaved: by now the pod's first-launch costs (fonts, shaders, page cache) are long
+// paid, so warm vs cold compares the profile, not the machine warming up (run first, they were slower than cold).
 if (warmup > 0) {
   for (let n = 0; n < warmStarts; n++) {
     for (const app of n % 2 === 0 ? apps : [...apps].reverse()) {
@@ -149,14 +158,6 @@ if (warmup > 0) {
   }
 }
 for (const app of apps) rmSync(profileOf(app), { recursive: true, force: true })
-for (let n = 0; n < runs; n++) {
-  const order = n % 2 === 0 ? apps : [...apps].reverse()
-  for (const app of order) {
-    const s = sample(app, n)
-    if (s) results[app.label]!.samples.push(s)
-    else results[app.label]!.failures++
-  }
-}
 // `median` holds each metric's aggregate: the median, or the minimum for metrics with "stat": "min".
 for (const r of Object.values(results)) r.median = summarize(r.samples, r.bundle, config.metrics, r.warmSamples)
 rmSync(tmp, { recursive: true, force: true })

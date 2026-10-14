@@ -68,7 +68,7 @@ point, best of the runs, with the bench's own profile seeding cut out (like the 
 | toolbar JS start-up inside its renderer | the same mark relative to the toolbar's own navigation start: fetch, compile and run of the shell bundle plus the first render, without process-launch noise |
 | first tab (New Tab page) loaded | the content surface's `load` event (its first paint is "cold start to first paint" in the main table) |
 | first window painted, ad filter ready, extensions ready | the deferred start-up marks (`afterFirstWindowPaint`, then the ad-filter engine and Web Store extensions; page requests are released at the last one) |
-| warm start: toolbar rendered / first paint | `warmStarts` (2) start-up-only launches per side on the profile the warm-up launch left behind, so the renderer's V8 code cache, the HTTP cache and the window state are warm, like a returning user's. They run right after the warm-up, interleaved |
+| warm start: toolbar rendered / first paint | `warmStarts` (2) start-up-only launches per side on the profile the warm-up launch left behind, so the renderer's V8 code cache, the HTTP cache and the window state are warm, like a returning user's. They run after the measured runs, interleaved, when the pod's first-launch costs are long paid |
 
 The main-process marks are recorded by `traceStartup()` (`src/main/startup-defer.ts`) into
 `globalThis.__surffishStartupMarks` on every launch (a few `Date.now()` calls); `SURFFISH_STARTUP_TRACE=1`
