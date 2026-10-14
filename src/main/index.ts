@@ -63,6 +63,7 @@ if (!hasInstanceLock) app.quit()
 // Default-browser links and opened files can arrive before ready; they queue until tabs exist.
 else registerExternalOpenHandlers()
 app.whenReady().then(async () => {
+  traceStartup('app ready')
   if (!app.isPackaged) console.info('Surffish browser profile:', app.getPath('userData'))
   try {
     // Space definitions first: the proxy reads each Space partition's forced route.

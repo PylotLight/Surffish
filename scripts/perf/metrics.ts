@@ -6,15 +6,20 @@ export type Status = 'ok' | 'better' | 'warn' | 'fail' | 'n/a'
 export type Stat = 'median' | 'min'
 export interface MetricSpec {
   kind: Kind; label: string; unit: string; abs?: number; warnPct?: number; failPct?: number; stat?: Stat
+  /** Never fails on any platform, only warns (new metrics start here until their noise is known). */
+  warnOnly?: boolean
+  /** Rendered in its own table (`groups` in the config gives the title); ungrouped metrics form the main table. */
+  group?: string
   /** Per-platform override of the platform's noisyFail (e.g. a metric that only warns on linux). */
   platforms?: Record<string, { noisyFail?: boolean }>
 }
 export interface PerfConfig {
   defaults: Record<Kind, { abs?: number; warnPct?: number; failPct?: number }>
   platforms?: Record<string, { noisyFail?: boolean }>
+  groups?: Record<string, { title: string; note?: string }>
   metrics: Record<string, MetricSpec>
 }
-export interface Row { key: string; label: string; unit: string; kind: Kind; base: number; head: number; deltaPct: number | null; status: Status }
+export interface Row { key: string; label: string; unit: string; kind: Kind; base: number; head: number; deltaPct: number | null; status: Status; group?: string; warnOnly?: boolean }
 
 /** {a: {b: 1}} -> {'a.b': 1}; only finite numbers are kept. */
 export function flatten(value: unknown, prefix = '', out: Record<string, number> = {}): Record<string, number> {
@@ -52,9 +57,9 @@ export function verdict(spec: MetricSpec, config: PerfConfig, base: number, head
   const abs = d.abs ?? 0
   const pct = base === 0 ? (delta === 0 ? 0 : Infinity) : (delta / Math.abs(base)) * 100
   const over = (limit: number | undefined) => limit !== undefined && delta > abs && pct > limit
-  const noisyFail = spec.platforms?.[platform]?.noisyFail ?? config.platforms?.[platform]?.noisyFail ?? true
+  const noisyFail = !spec.warnOnly && (spec.platforms?.[platform]?.noisyFail ?? config.platforms?.[platform]?.noisyFail ?? true)
   if (spec.kind === 'deterministic') {
-    if (over(d.failPct)) return 'fail'
+    if (over(d.failPct)) return spec.warnOnly ? 'warn' : 'fail'
   } else {
     if (noisyFail && over(d.failPct)) return 'fail'
     if (over(d.warnPct) || over(d.failPct)) return 'warn'
@@ -69,7 +74,7 @@ export function compare(config: PerfConfig, base: Record<string, number>, head: 
     const b = base[key] ?? NaN
     const h = head[key] ?? NaN
     const deltaPct = Number.isFinite(b) && Number.isFinite(h) && b !== 0 ? ((h - b) / Math.abs(b)) * 100 : null
-    return { key, label: spec.label, unit: spec.unit, kind: spec.kind, base: b, head: h, deltaPct, status: verdict(spec, config, b, h, platform) }
+    return { key, label: spec.label, unit: spec.unit, kind: spec.kind, base: b, head: h, deltaPct, status: verdict(spec, config, b, h, platform), ...(spec.group ? { group: spec.group } : {}), ...(spec.warnOnly ? { warnOnly: true } : {}) }
   })
 }
 
@@ -85,22 +90,39 @@ export function markdownTable(rows: Row[]): string {
   const lines = ['| metric | main | PR | Δ% | status |', '|---|---:|---:|---:|---|']
   for (const r of rows) {
     const d = r.deltaPct === null ? (r.base === r.head ? '0%' : '–') : `${r.deltaPct > 0 ? '+' : ''}${r.deltaPct.toFixed(1)}%`
-    lines.push(`| ${r.label}${r.kind === 'noisy' ? '' : ' ¹'} | ${formatValue(r.base, r.unit)} | ${formatValue(r.head, r.unit)} | ${d} | ${ICON[r.status]} |`)
+    const mark = r.warnOnly ? '' : r.kind === 'noisy' ? '' : ' ¹'
+    lines.push(`| ${r.label}${mark} | ${formatValue(r.base, r.unit)} | ${formatValue(r.head, r.unit)} | ${d} | ${ICON[r.status]} |`)
   }
   return lines.join('\n')
 }
 
+/** The main table (ungrouped rows), then one titled table per group, in config order. */
+export function markdownTables(rows: Row[], groups: PerfConfig['groups'] = {}): string {
+  const parts = [markdownTable(rows.filter((r) => !r.group))]
+  const names = [...new Set(rows.map((r) => r.group).filter((g): g is string => Boolean(g)))]
+  for (const name of names) {
+    const g = groups[name]
+    parts.push(`#### ${g?.title ?? name}`, ...(g?.note ? [g.note] : []), markdownTable(rows.filter((r) => r.group === name)))
+  }
+  return parts.join('\n\n')
+}
+
 /** Each metric's aggregate over a side's samples (median, or min where the spec says), plus its bundle sizes. */
-export function summarize(samples: Record<string, unknown>[], bundle: Record<string, number>, metrics: Record<string, Partial<MetricSpec>> = {}): Record<string, number> {
+export function summarize(samples: Record<string, unknown>[], bundle: Record<string, number>, metrics: Record<string, Partial<MetricSpec>> = {}, warmSamples: Record<string, unknown>[] = []): Record<string, number> {
   const out: Record<string, number> = {}
-  const flat = samples.map((s) => flatten(s))
-  const keys = new Set(flat.flatMap((f) => Object.keys(f)))
-  for (const k of keys) out[k] = aggregate(flat.map((f) => f[k]!).filter((v) => v !== undefined), metrics[k]?.stat)
+  const add = (list: Record<string, unknown>[], prefix: string) => {
+    const flat = list.map((s) => flatten(s, prefix))
+    const keys = new Set(flat.flatMap((f) => Object.keys(f)))
+    for (const k of keys) out[k] = aggregate(flat.map((f) => f[k]!).filter((v) => v !== undefined), metrics[k]?.stat)
+  }
+  add(samples, '')
+  // Warm starts (start-up-only launches on a kept profile) under `warm.`, e.g. warm.startup.firstPaintMs.
+  add(warmSamples, 'warm')
   for (const [k, v] of Object.entries(bundle)) out[`bundle.${k}`] = v
   return out
 }
 
-interface AppReport { dir?: string; bundle: Record<string, number>; samples: Record<string, unknown>[]; failures: number; median: Record<string, number> }
+interface AppReport { dir?: string; bundle: Record<string, number>; samples: Record<string, unknown>[]; warmSamples?: Record<string, unknown>[]; failures: number; median: Record<string, number> }
 interface Report { runs: number; seconds: number; config: PerfConfig; apps: Record<string, AppReport>; confirmRuns?: number; [key: string]: unknown }
 
 /**
@@ -113,7 +135,8 @@ export function mergeReports(first: Report, second: Report): Report {
   for (const [label, a] of Object.entries(first.apps)) {
     const b = second.apps[label]
     const samples = [...a.samples, ...(b?.samples ?? [])]
-    apps[label] = { ...a, samples, failures: a.failures + (b?.failures ?? 0), median: summarize(samples, a.bundle, first.config.metrics) }
+    const warmSamples = [...(a.warmSamples ?? []), ...(b?.warmSamples ?? [])]
+    apps[label] = { ...a, samples, warmSamples, failures: a.failures + (b?.failures ?? 0), median: summarize(samples, a.bundle, first.config.metrics, warmSamples) }
   }
   return { ...first, runs: first.runs + second.runs, seconds: first.seconds + second.seconds, confirmRuns: second.runs, apps }
 }

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { aggregate, compare, compareExitCode, flatten, markdownTable, median, mergeReports, verdict, type MetricSpec, type PerfConfig, type Row } from './metrics.ts'
+import { aggregate, compare, compareExitCode, flatten, markdownTable, markdownTables, median, mergeReports, summarize, verdict, type MetricSpec, type PerfConfig, type Row } from './metrics.ts'
 
 const config = JSON.parse(readFileSync(join(import.meta.dir, 'perf.config.json'), 'utf8')) as PerfConfig
 const det: MetricSpec = { kind: 'deterministic', label: 'd', unit: '' }
@@ -108,4 +108,52 @@ test('a confirmation pass is pooled per app and every aggregate recomputed', () 
   expect(merged.apps.pr!.median['memMax.totalMB']).toBe(25) // median of 11.8 12.2 25 26 27 90
   expect(merged.apps.pr!.median['bundle.mainJs']).toBe(10)
   expect(verdict(config.metrics['startup.windowMs']!, config, 120, 118, 'linux')).toBe('ok')
+})
+
+test('start-up phase metrics are warn-only: a big slowdown warns, never fails, on every platform', () => {
+  const phases = Object.entries(config.metrics).filter(([, spec]) => spec.group === 'phases')
+  expect(phases.length).toBeGreaterThanOrEqual(8)
+  for (const [key, spec] of phases) {
+    expect(spec.warnOnly, key).toBe(true)
+    expect(spec.stat, key).toBe('min')
+    expect(config.groups?.[spec.group!]?.title).toBeTruthy()
+    for (const platform of ['linux', 'darwin']) expect(verdict(spec, config, 400, 4000, platform)).toBe('warn')
+  }
+  // warnOnly holds for deterministic metrics too.
+  expect(verdict({ ...det, warnOnly: true }, config, 1000, 2000, 'linux')).toBe('warn')
+  const rows = compare(config, { 'startup.phases.toolbarReadyMs': 400 }, { 'startup.phases.toolbarReadyMs': 4000 }, 'linux')
+  expect(compareExitCode(rows)).toBe(0)
+})
+
+test('grouped metrics render as their own titled table after the main one', () => {
+  const rows = compare(config, {}, {}, 'linux')
+  const md = markdownTables(rows, config.groups)
+  const [main, rest] = md.split(`#### ${config.groups!.phases!.title}`)
+  expect(rest).toBeDefined()
+  expect(main).toContain('cold start to first paint')
+  expect(main).not.toContain('toolbar rendered')
+  expect(rest).toContain('toolbar rendered')
+  expect(rest).toContain('deferred: extensions ready')
+  // Every configured metric still shows exactly once.
+  for (const spec of Object.values(config.metrics)) expect(md.split(`| ${spec.label}`).length - 1, spec.label).toBe(1)
+})
+
+test('warm starts aggregate under warm.*, separately from the cold runs', () => {
+  const cold = [{ startup: { firstPaintMs: 520, phases: { toolbarReadyMs: 430 } } }, { startup: { firstPaintMs: 500, phases: { toolbarReadyMs: 410 } } }]
+  const warm = [{ startup: { firstPaintMs: 470, phases: { toolbarReadyMs: 380 } } }, { startup: { firstPaintMs: 460, phases: { toolbarReadyMs: 395 } } }]
+  const m = summarize(cold, { mainJs: 1 }, config.metrics, warm)
+  expect(m['startup.firstPaintMs']).toBe(500)
+  expect(m['warm.startup.firstPaintMs']).toBe(460)
+  expect(m['warm.startup.phases.toolbarReadyMs']).toBe(380)
+  expect(m['bundle.mainJs']).toBe(1)
+  expect(summarize(cold, {}, config.metrics)['warm.startup.firstPaintMs']).toBeUndefined()
+})
+
+test('a confirmation pass keeps the first pass warm starts', () => {
+  const app = (warm: number[]) => ({ bundle: {}, samples: [{ startup: { firstPaintMs: 500 } }], warmSamples: warm.map((v) => ({ startup: { firstPaintMs: v } })), failures: 0, median: {} })
+  const first = { runs: 3, seconds: 1, config, apps: { main: app([470, 480]), pr: app([460]) } }
+  const second = { runs: 3, seconds: 1, config, apps: { main: { ...app([]), warmSamples: undefined }, pr: app([]) } }
+  const merged = mergeReports(first, second as never)
+  expect(merged.apps.main!.median['warm.startup.firstPaintMs']).toBe(470)
+  expect(merged.apps.pr!.median['warm.startup.firstPaintMs']).toBe(460)
 })

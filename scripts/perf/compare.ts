@@ -4,7 +4,7 @@
 // Exit code 0 when nothing fails its threshold (scripts/perf/perf.config.json), 3 when only timing/
 // memory ("noisy") metrics fail (CI then runs a confirmation pass, scripts/perf/merge.ts), 1 otherwise.
 import { readFileSync, writeFileSync } from 'node:fs'
-import { compare, compareExitCode, markdownTable, type PerfConfig } from './metrics.ts'
+import { compare, compareExitCode, markdownTables, type PerfConfig } from './metrics.ts'
 
 const args = process.argv.slice(2)
 const file = args[0]?.startsWith('--') ? undefined : args[0]
@@ -27,11 +27,13 @@ const sample = head.samples[0] ?? {}
 const md = [
   `### ${opt('title', `Perf check (${report.platform})`)}: ${summary}`,
   '',
-  `Median of ${base.samples.length} (main) / ${head.samples.length} (PR) cold runs each, interleaved on one runner (${report.platform} ${report.arch}, Electron ${sample.electron ?? '?'}, ${report.seconds}s).` +
+  `Median of ${base.samples.length} (main) / ${head.samples.length} (PR) cold runs each` +
+    (base.warmSamples?.length || head.warmSamples?.length ? ` (plus ${base.warmSamples?.length ?? 0} / ${head.warmSamples?.length ?? 0} warm starts)` : '') +
+    `, interleaved on one runner (${report.platform} ${report.arch}, Electron ${sample.electron ?? '?'}, ${report.seconds}s).` +
     (base.failures + head.failures ? ` ${base.failures + head.failures} run(s) failed and were skipped.` : '') +
     (report.confirmRuns ? ` Includes a ${report.confirmRuns}-run confirmation pass: the first pass flagged only timing/memory metrics, so both passes are pooled before judging.` : ''),
   '',
-  markdownTable(rows),
+  markdownTables(rows, config.groups),
   '',
   `¹ deterministic: fails above its threshold. Others are timing/memory: warn above ${config.defaults.noisy.warnPct}%` +
     (noisyFail ? `, fail above ${config.defaults.noisy.failPct}%.` : ', never fail on this runner.') +
