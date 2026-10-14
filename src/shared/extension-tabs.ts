@@ -1,5 +1,5 @@
 /**
- * Pure helpers behind the chrome.tabs shim for Web Store extension popups/options pages:
+ * Pure helpers behind the chrome.tabs shim for extension popups/options pages (Web Store extensions and Bramble):
  * Chrome match patterns, tabs.query filtering, URL visibility (tabs / activeTab / host access),
  * and which URLs an extension may open. No Electron imports.
  */
@@ -9,6 +9,8 @@ export interface ExtensionTabRecord {
   id: number
   index: number
   active: boolean
+  /** In the window the user last used (Surffish's "current" window); absent means unknown. */
+  currentWindow?: boolean
   pinned: boolean
   url: string
   title: string
@@ -83,10 +85,17 @@ function globMatch(glob: string, value: string): boolean {
   return new RegExp(`^${glob.split('*').map(escapeRegex).join('.*')}$`, 'i').test(value)
 }
 
-/** chrome.tabs.query filtering over Surffish's single window. Unknown keys are ignored. */
+/**
+ * chrome.tabs.query filtering. Extensions see Surffish as one window (windowId 1), but with several
+ * windows open `currentWindow` / `lastFocusedWindow` narrow to the window the user last used, so
+ * `{ active: true, currentWindow: true }` is one tab, as in Chrome. Unknown keys are ignored.
+ */
 export function filterTabsForQuery(tabs: readonly ExtensionTabRecord[], query: unknown): ExtensionTabRecord[] {
   const info = typeof query === 'object' && query !== null ? query as Record<string, unknown> : {}
   return tabs.filter((tab) => {
+    for (const key of ['currentWindow', 'lastFocusedWindow'] as const) {
+      if (typeof info[key] === 'boolean' && typeof tab.currentWindow === 'boolean' && tab.currentWindow !== info[key]) return false
+    }
     if (typeof info.active === 'boolean' && tab.active !== info.active) return false
     if (typeof info.highlighted === 'boolean' && tab.active !== info.highlighted) return false
     if (typeof info.pinned === 'boolean' && tab.pinned !== info.pinned) return false

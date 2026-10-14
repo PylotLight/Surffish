@@ -48,7 +48,7 @@ The k3s runner has passwordless sudo, so CI runs sandboxed. Chromium picks the u
 Each feature has a `test:electron-<feature>` script in `package.json` (feeds, reading-list, spaces, tab-groups, downloads, adblock, extension-dnr, …). Run it after `bun run build`, under `xvfb-run -a` on Linux. Smokes that hit the real web (`test:electron-youtube`, `test:electron-adblock-sites`) write JSON and screenshots to `adblock-harness-output/`; `SURFFISH_HARNESS_PROXY` routes them through a SOCKS proxy.
 
 - Web Store extensions: `bun run probe:web-store-extension modern-for-hn|i-still-dont-care-about-cookies [out-dir] [--probe]` downloads, verifies and stages one as Surffish would; `bun run probe:electron-extension-real -- <unpacked-dir>` loads one unmodified and reports what fails; `bun run check:password-extension -- bitwarden|bramble <unpacked-dir>` statically lists APIs Electron lacks; `bun run bench:dnr [rules.json]` times the DNR matcher. `SURFFISH_DNR_SMOKE_EXTENSION=<staged dir>` runs `test:electron-extension-dnr` against a real extension.
-- Bramble: `bun run check:bramble-quick-unlock <bramble_firefox_X>` (and `scripts/check-bramble-quick-unlock-app.cjs` against the built app) need an unpacked upstream Firefox build; they are not in CI.
+- Bramble: `bun run check:bramble-quick-unlock <bramble_firefox_X>` (and `scripts/check-bramble-quick-unlock-app.cjs`, `check-bramble-focus-existing-tab-app.cjs`, `check-bramble-tabs-create-app.cjs` against the built app) need an unpacked upstream Firefox build; they are not in CI.
 - Tuning knobs: `SURFFISH_SIDEBAR_MOTION=stepped|native|off` (sidebar slide; `native` is experimental on macOS), `SURFFISH_DEBUG_SIDEBAR=1` (logs why the auto-hide sidebar is held open and what released it, to stderr and `sidebar-lock.log` in the app's logs folder, `~/Library/Logs/Surffish` on macOS), `SURFFISH_SIDEBAR_CURSOR_POLL=off` (no cursor-poll fallback for a missed mouseleave), `SURFFISH_SWIPE_INTENT="minDistance=8,minRatio=1.8,minVelocity=0.06"` and `SURFFISH_SWIPE_DEBUG=1` (trackpad back/forward swipe), `SURFFISH_STORE=json` (skip `surffish.db`).
 
 ## Electron gotchas
@@ -56,7 +56,7 @@ Each feature has a `test:electron-<feature>` script in `package.json` (feeds, re
 - Electron allows one listener per `webRequest` event per session. `src/main/adblock-engine.ts` owns it; anything else (kill switch, HTTPS-only, extension DNR) plugs in as a request gate rather than registering its own.
 - Electron's native `declarativeNetRequest` enforces nothing while the session has a `webRequest` listener, so Surffish matches DNR rules itself (`src/shared/dnr.ts`, `src/main/extension-dnr.ts`).
 - Electron 44 never delivers `chrome.storage.onChanged` to an MV3 service worker; the Bramble shim relays local-area changes from Bramble's offscreen page.
-- Electron's `tabs.query`/`tabs.create`, `storage.sync`, `webNavigation` and `management` don't work for extensions; Surffish shims them in extension contexts (`src/main/web-store-extension-adapter.ts` and the `extension-host`/`extension-bridge` preloads).
+- Electron's `tabs.query`/`tabs.create`, `storage.sync`, `webNavigation` and `management` don't work for extensions; Surffish shims them in extension contexts (`src/main/web-store-extension-adapter.ts` and the `extension-host`/`extension-bridge` preloads). The extension-page `chrome.tabs` shim (`extension-tabs-shim.ts`, served by `extension-tabs-host.ts`) is shared by Web Store extensions and Bramble's popup/tabs.
 
 ## Further technical references
 

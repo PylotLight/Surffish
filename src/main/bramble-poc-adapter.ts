@@ -1,5 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
+import { EXTENSION_PAGE_TABS_SHIM } from './extension-tabs-shim.ts'
 
 export const BRAMBLE_BROWSER_ALIAS_FILE = 'surffish-bramble-browser-alias.js'
 export const BRAMBLE_BACKGROUND_WORKER_FILE = 'surffish-bramble-background.js'
@@ -271,6 +272,14 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
         value: (text) => brambleBridge.writeClipboard(text)
       });
     } catch {}
+  }
+  // chrome.tabs in Bramble's popup and options/setup tab: Electron gives extension pages no tabs.create
+  // (Settings → Backups → Restore / Import call tabs.create({ url: 'options.html?screen=…' })) and a
+  // tabs.query that cannot see Surffish's tabs (the popup's current-site lookup). Route them to
+  // Surffish's tabs, the same shim Web Store extension pages get. Not in the hidden offscreen host.
+  if (typeof globalThis.document !== 'undefined' && globalThis.location?.protocol === 'chrome-extension:' &&
+      globalThis.location.pathname !== '/offscreen.html') {
+    (${EXTENSION_PAGE_TABS_SHIM})(extensionApi, globalThis.surffishExtensionHost);
   }
   if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime &&
       typeof brambleBridge?.openOptionsPage === 'function' && typeof extensionApi.runtime.openOptionsPage === 'function') {

@@ -8,3 +8,11 @@ contextBridge.exposeInMainWorld('surffishBramble', Object.freeze({
   openPopout: (url) => ipcRenderer.invoke('browser:bramble:popout-open', url),
   closePopout: () => ipcRenderer.invoke('browser:bramble:popout-close')
 }))
+
+// chrome.tabs for Bramble's popup and pages in Surffish tabs (the alias script installs the shim; the
+// main process only answers Bramble's popup and Bramble tabs). Same bridge Web Store extension pages use.
+if (globalThis.location && globalThis.location.protocol === 'chrome-extension:') {
+  contextBridge.exposeInMainWorld('surffishExtensionHost', Object.freeze({
+    tabs: (op, payload) => ipcRenderer.invoke('browser:extensions:host-tabs', op, payload)
+  }))
+}

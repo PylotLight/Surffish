@@ -21,6 +21,7 @@ import {
   sha256Hex
 } from './bramble-release'
 import { getMainWindow } from './window'
+import type { ExtensionTabsCaller } from './extension-tabs-host'
 import { anchoredPopupBounds, centredPopupAnchor } from '../shared/window-geometry'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { createRestrictedFetch } from './restricted-fetch'
@@ -677,6 +678,34 @@ export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | nul
     throw new Error('Only a Bramble UI page can open Bramble Setup / Restore.')
   }
   await openBrambleSetup()
+}
+
+/**
+ * chrome.tabs from Bramble's popup or one of its pages in a Surffish tab (Settings → Backups → Restore
+ * and Import call tabs.create), or null for any other sender (the offscreen host, web pages, frames).
+ */
+export function brambleTabsCallerForSender(sender: WebContents, senderFrame: Electron.WebFrameMain | null): ExtensionTabsCaller | null {
+  const extension = loadedExtension
+  if (!extension || !senderFrame || senderFrame !== sender.mainFrame || sender.isDestroyed()) return null
+  if (!isBrambleExtensionUrl(senderFrame.url, extension.url)) return null
+  const fromPopup = !!popupWindow && !popupWindow.isDestroyed() && popupWindow.webContents === sender
+  if (!fromPopup && !isBrambleExtensionTab(sender)) return null
+  const declared = (list: readonly string[]) => list.filter((entry) => !entry.startsWith('Optional: '))
+  return {
+    id: extension.id,
+    extensionUrl: extension.url,
+    access: { permissions: declared(state.permissions), hostPermissions: declared(state.hostPermissions) },
+    pagePreloadPath: resolveBramblePreload(),
+    owner: 'bramble',
+    sender,
+    // Like Chrome, switching tabs closes the toolbar popup (Bramble's openSetup also closes itself).
+    // Deferred so the popup still gets the reply it is awaiting.
+    onActiveTabSwitch: () => {
+      const current = popupWindow
+      if (!current) return
+      setImmediate(() => { if (popupWindow === current) disposePopup() })
+    }
+  }
 }
 
 /** True for Bramble's hidden offscreen host, the only page allowed to ask for the pop-out. */
