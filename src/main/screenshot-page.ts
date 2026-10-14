@@ -279,6 +279,10 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
   $('btn-copy').addEventListener('click', () => api.copy(null))
   $('btn-save').addEventListener('click', () => api.save(null))
   $('btn-annotate').addEventListener('click', () => api.annotate(true))
+  // The popover closes itself after a while untouched; hovering it holds it open.
+  $('preview').addEventListener('pointerenter', () => api.previewHover(true))
+  $('preview').addEventListener('pointerleave', () => api.previewHover(false))
+  $('preview').addEventListener('keydown', () => api.previewActivity())
 
   // ---------- annotate ----------
   const canvas = $('canvas')
@@ -603,6 +607,7 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
       cancelText()
       $('dims').textContent = image ? image.width + ' × ' + image.height + (payload.truncated ? ' · page cut off at the size limit' : '') : ''
       show('preview')
+      api.previewHover($('preview').matches(':hover'))
       setStatus(payload.message || '', payload.messageKind || '')
       $('btn-copy').focus()
     } else if (payload.mode === 'annotate') {
