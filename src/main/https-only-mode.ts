@@ -1,7 +1,7 @@
 import { webContents as allWebContents, type WebContents } from 'electron'
 import { httpsUpgradeTarget, isHttpsUpgradeFailure, normalizeHttpsExceptions } from '../shared/https-only'
 import { addRequestGate, onRequestError } from './request-gate'
-import { readSettingsFile, writeSettingsFile } from './user-json'
+import { readUserJson, writeSettingsFile } from './user-json'
 import { getTabInterstitial, setTabInterstitial } from './tab-interstitials'
 import { urlHostname } from '../shared/url-host'
 
@@ -52,7 +52,7 @@ function watchCommits(contentsId: number): void {
 }
 
 export function initializeHttpsOnly(): void {
-  const saved = readSettingsFile(FILE) as Partial<HttpsOnlyState> | null
+  const saved = readUserJson(FILE) as Partial<HttpsOnlyState> | null
   setState({ enabled: saved?.enabled === true, exceptions: Array.isArray(saved?.exceptions) ? saved.exceptions : [] }, false)
 
   addRequestGate((details) => {

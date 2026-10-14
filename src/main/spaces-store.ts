@@ -13,7 +13,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { deferWrite } from './deferred-writes'
-import { readSettingsFile, writeSettingsFile } from './user-json'
+import { readUserJson, writeSettingsFile } from './user-json'
 import { setPartitionRouteResolver } from './proxy'
 import { getProfileDatabase, reportStoreWriteError } from './store'
 import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
@@ -73,7 +73,7 @@ function readSaved(): unknown {
       console.error('Could not read Spaces from the database; using browser-spaces.json:', error)
     }
   }
-  const raw = readSettingsFile(FILE)
+  const raw = readUserJson(FILE)
   if (target) {
     deferWrite('spaces-import', () => {
       if (!settings) return

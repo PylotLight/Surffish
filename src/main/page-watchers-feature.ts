@@ -8,7 +8,7 @@ import {
 } from '../shared/page-watchers-feature'
 import { normalizeWatchUrl } from '../shared/page-watchers'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
-import { readSettingsFile, writeSettingsFile } from './user-json'
+import { readUserJson, writeSettingsFile } from './user-json'
 
 /**
  * "Enable page watchers" gate. This file is all main loads at startup for watchers: page-watchers.ts
@@ -26,7 +26,7 @@ let quitting = false
 const listeners = new Set<(enabled: boolean) => void>()
 
 function current(): PageWatchersFeatureSettings {
-  settings ??= parsePageWatchersFeature(readSettingsFile(PAGE_WATCHERS_FEATURE_FILE))
+  settings ??= parsePageWatchersFeature(readUserJson(PAGE_WATCHERS_FEATURE_FILE))
   return settings
 }
 

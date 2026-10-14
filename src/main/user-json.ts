@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeFileAtomic } from './atomic-file'
 
-/** Small private JSON files in userData (command palette, search keywords, feature settings…). */
+/** Small private JSON files in userData (command palette, search keywords, feature settings, spellcheck, HTTPS-only, kill switch, Spaces, Glance…). */
 export function readUserJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
   if (!existsSync(path)) return null
@@ -25,9 +25,6 @@ export function writeUserJson(filename: string, value: unknown, options: { prett
     return false
   }
 }
-
-/** Small JSON settings files in the profile (spellcheck, HTTPS-only, kill switch, Spaces, Glance…). */
-export const readSettingsFile = readUserJson
 
 /** Same as writeUserJson, indented (these files predate the compact ones and stay byte-identical). */
 export function writeSettingsFile(filename: string, value: unknown): boolean {

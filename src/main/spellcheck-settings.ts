@@ -1,7 +1,7 @@
 import type { Session } from 'electron'
 import { getBrowserSession, listPageSessions, onPageSessionCreated } from './browser-session'
 import { parseSpellcheckSettings, spellcheckEnabledFor, type SpellcheckSettings } from '../shared/spellcheck'
-import { readSettingsFile, writeSettingsFile } from './user-json'
+import { readUserJson, writeSettingsFile } from './user-json'
 
 const FILE = 'browser-spellcheck.json'
 let settings: SpellcheckSettings = parseSpellcheckSettings(null)
@@ -32,7 +32,7 @@ function applyAll(): void {
 }
 
 export function initializeSpellcheck(): void {
-  settings = parseSpellcheckSettings(readSettingsFile(FILE), osManaged ? undefined : getBrowserSession().availableSpellCheckerLanguages)
+  settings = parseSpellcheckSettings(readUserJson(FILE), osManaged ? undefined : getBrowserSession().availableSpellCheckerLanguages)
   // getPrivateSession() turns spelling off; this runs after and applies the user's choice.
   void onPageSessionCreated((target, info) => applyToSession(target, info.isPrivate))
 }
