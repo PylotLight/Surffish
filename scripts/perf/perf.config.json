@@ -72,7 +72,7 @@
     "startup.phases.extensionsReadyMs": { "kind": "noisy", "label": "deferred: extensions ready, page requests released", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
     "warm.startup.phases.toolbarReadyMs": { "kind": "noisy", "label": "warm start: toolbar rendered", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
     "warm.startup.firstPaintMs": { "kind": "noisy", "label": "warm start: first paint (New Tab page)", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
-    "sites.renderers": { "kind": "deterministic", "label": "renderers hosting 16 tabs over 4 sites", "unit": "", "abs": 1, "warnOnly": true, "$comment": "pages + iframes of the site tabs; same-site tabs share one process unless Settings turns it off (--process-per-site)" },
+    "sites.renderers": { "kind": "deterministic", "label": "renderers hosting 16 tabs over 4 sites", "unit": "", "abs": 1, "warnOnly": true, "$comment": "pages + iframes of the site tabs" },
     "sites.memMB": { "kind": "noisy", "label": "memory of those renderers", "unit": "MB", "abs": 30, "warnOnly": true },
     "adblock.frameStartBytes": { "kind": "deterministic", "label": "ad-filter CSS + scriptlets sent per navigation", "unit": "KB", "abs": 2048, "warnOnly": true, "$comment": "bench fixture: video.localhost, 18 scriptlets sharing helpers + site and generic CSS" },
     "adblock.frameStartMainMs": { "kind": "noisy", "label": "ad-filter frame-start main time per navigation", "unit": "ms", "abs": 2, "warnOnly": true },
