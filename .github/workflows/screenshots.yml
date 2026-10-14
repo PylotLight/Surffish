@@ -1,0 +1,85 @@
+name: readme screenshots
+
+# Manual only: Actions -> readme screenshots -> Run workflow (pick the branch).
+# Runs scripts/readme-screenshots.cjs on the self-hosted Mac (real window, native traffic lights)
+# and commits the PNGs to docs/screenshots/mac/ on the branch it ran on, for a human to pick,
+# optimise and move into docs/assets/. Same setup as the ci `macos smoke` job: plain git, one
+# bun install, no marketplace actions, no artifact upload. Unlike the smokes the window IS shown
+# (screencapture needs it on screen), so expect a Surffish window on the Mac for a minute or two.
+on:
+  workflow_dispatch:
+    inputs:
+      shots:
+        description: 'comma list of scenes (empty = all): hero,palette,split,reader,glance,history,settings,newtab'
+        required: false
+        default: ''
+
+concurrency:
+  group: readme-screenshots-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    name: screenshots (macos)
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
+      - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      - run: bun run build
+      - name: Take the screenshots
+        env:
+          README_SHOTS: ${{ inputs.shots }}
+          SMOKE_TIMEOUT_MS: "420000"
+        run: |
+          out="$PWD/docs/screenshots/mac"
+          rm -rf "$out"; mkdir -p "$out"
+          SURFFISH_SCREENSHOT_DIR="$out" bun run screenshots:readme 2>&1 | tee "$RUNNER_TEMP/shots.log"
+          {
+            echo "### readme screenshots (macOS)"
+            echo '```'
+            cat "$out/capture-method.txt" 2>/dev/null || echo "no capture-method.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          ls -la "$out"
+          ls "$out"/*.png >/dev/null
+      - name: Commit the screenshots back to ${{ github.ref_name }} (plain git push)
+        env:
+          TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -c http.extraheader="$auth" fetch -q --depth 1 origin "refs/heads/$BRANCH"
+          tmp="$RUNNER_TEMP/mac-shots"; rm -rf "$tmp"; cp -R docs/screenshots/mac "$tmp"
+          git checkout -q --force -B shots FETCH_HEAD
+          rm -rf docs/screenshots/mac; mkdir -p docs/screenshots; cp -R "$tmp" docs/screenshots/mac
+          git add -A docs/screenshots/mac
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git commit -q -m "docs: mac readme screenshots (raw, from $RUN_URL)"
+          git -c http.extraheader="$auth" push origin "HEAD:refs/heads/$BRANCH"

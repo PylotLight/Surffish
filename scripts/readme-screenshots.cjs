@@ -1,0 +1,358 @@
+// README screenshots: runs the production build in a throwaway profile, sets up a handful of scenes
+// and writes one PNG per scene to SURFFISH_SCREENSHOT_DIR.
+//   bun run build && SURFFISH_SCREENSHOT_DIR=/tmp/shots electron scripts/readme-screenshots.cjs
+// Linux: needs DISPLAY (xvfb-run) + ffmpeg, grabs the window from X (x11grab).
+// macOS: `screencapture -o -l <window id>` (real window, traffic lights, needs Screen Recording
+// permission for the calling process); if that fails it falls back to stitching the window's views
+// together with capturePage. The method used per shot goes to capture-method.txt next to the PNGs.
+// Pages are real public sites; one that doesn't load in time is replaced by a local fixture page.
+// README_SHOTS=hero,newtab,... runs a subset. README_SHOT_WIDTH/HEIGHT set the window (1440x900).
+const smoke = require('./smoke-harness.cjs')
+const { execFileSync } = require('node:child_process')
+const { createServer } = require('node:http')
+const { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } = require('node:fs')
+const { tmpdir } = require('node:os')
+const { join, resolve } = require('node:path')
+const { pathToFileURL } = require('node:url')
+const { app, BaseWindow, BrowserWindow, Menu, screen } = require('electron')
+const { ElectronBlocker } = require('@ghostery/adblocker-electron')
+
+const outDir = resolve(process.env.SURFFISH_SCREENSHOT_DIR || join(tmpdir(), 'surffish-readme-shots'))
+const userData = join(tmpdir(), `surffish-readme-shots-${process.pid}`)
+const WIDTH = Number(process.env.README_SHOT_WIDTH) || 1440
+const HEIGHT = Number(process.env.README_SHOT_HEIGHT) || 900
+const only = (process.env.README_SHOTS || '').split(',').map((s) => s.trim()).filter(Boolean)
+const delay = (ms) => new Promise((r) => setTimeout(r, ms))
+const log = (...args) => console.log(`[readme-shots +${((Date.now() - started) / 1000).toFixed(1)}s]`, ...args)
+const started = Date.now()
+
+const SITES = {
+  wiki: 'https://en.wikipedia.org/wiki/Surfing',
+  wiki2: 'https://en.wikipedia.org/wiki/Banzai_Pipeline',
+  hn: 'https://news.ycombinator.com/',
+  gh: 'https://github.com/PylotLight/Surffish',
+  mdn: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Proxy_servers_and_tunneling',
+  electron: 'https://www.electronjs.org/docs/latest/'
+}
+
+async function waitFor(predicate, description, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  let lastError
+  while (Date.now() < deadline) {
+    try {
+      const value = await predicate()
+      if (value) return value
+    } catch (error) { lastError = error }
+    await delay(100)
+  }
+  throw new Error(`Timed out waiting for ${description}.${lastError ? ` Last error: ${lastError.message}` : ''}`)
+}
+
+function surfaceFor(view) {
+  try { return new URL(view.webContents.getURL()).searchParams.get('surface') } catch { return null }
+}
+const viewsOf = (win) => win.contentView.children.filter((v) => v.webContents && !v.webContents.isDestroyed())
+const surface = (win, name) => viewsOf(win).find((v) => surfaceFor(v) === name)
+const mainWindow = () => BaseWindow.getAllWindows().find((w) => !w.isDestroyed() && surface(w, 'toolbar'))
+const evaluate = (view, js) => view.webContents.executeJavaScript(js)
+const api = (win, call) => evaluate(surface(win, 'toolbar'), `window.api.browser.${call}`)
+const pageViews = (win) => viewsOf(win).filter((v) => /^https?:/.test(v.webContents.getURL()) && v.getVisible())
+
+function menuItem(label) {
+  const walk = (items) => {
+    for (const item of items) {
+      if (item.label === label) return item
+      if (item.submenu) { const hit = walk(item.submenu.items); if (hit) return hit }
+    }
+    return null
+  }
+  const item = walk(Menu.getApplicationMenu()?.items ?? [])
+  if (!item) throw new Error(`no menu item "${label}"`)
+  return item
+}
+const clickMenu = (label) => menuItem(label).click()
+
+// --- local fallback page (used when a real site doesn't load) -------------------------------------
+let fixtureOrigin = ''
+const fixture = createServer((request, response) => {
+  const name = decodeURIComponent(request.url.slice(1)) || 'Page'
+  response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  response.end(`<!doctype html><meta charset="utf-8"><title>${name}</title><style>body{font:17px/1.6 system-ui;max-width:720px;margin:48px auto;padding:0 24px;color:#1d1d1f}h1{font-size:34px}</style><article><h1>${name}</h1>${'<p>Surfing is a surface water sport in which an individual, a surfer, uses a board to ride on the forward section, or face, of a moving wave of water, which usually carries the surfer towards the shore. Waves suitable for surfing are primarily found on ocean shores, but can also be found in standing waves in the open ocean, in lakes, and in rivers.</p>'.repeat(8)}</article>`)
+})
+
+function seedProfile() {
+  mkdirSync(userData, { recursive: true, mode: 0o700 })
+  const blocker = ElectronBlocker.parse('||surffish-readme-never-match.invalid^', smoke.ADBLOCK_CONFIG)
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
+  writeFileSync(join(userData, 'window-state.json'), JSON.stringify({ bounds: { x: 40, y: 40, width: WIDTH, height: HEIGHT }, maximized: false, fullScreen: false }))
+  writeFileSync(join(userData, 'browser-preferences.json'), `${JSON.stringify({
+    version: 1,
+    pinnedSites: [
+      { title: 'Wikipedia', url: 'https://en.wikipedia.org/', faviconUrl: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
+      { title: 'Hacker News', url: 'https://news.ycombinator.com/', faviconUrl: 'https://news.ycombinator.com/favicon.ico' },
+      { title: 'GitHub', url: 'https://github.com/', faviconUrl: 'https://github.com/favicon.ico' },
+      { title: 'MDN', url: 'https://developer.mozilla.org/', faviconUrl: 'https://developer.mozilla.org/favicon.ico' },
+      { title: 'YouTube', url: 'https://www.youtube.com/', faviconUrl: 'https://www.youtube.com/favicon.ico' }
+    ]
+  })}\n`, { mode: 0o600 })
+}
+
+// --- capture ----------------------------------------------------------------------------------------
+const methods = []
+let macScreencaptureWorks = process.platform === 'darwin' && process.env.README_SHOT_METHOD !== 'compose'
+
+function macWindowId(win) {
+  // BaseWindow has no getMediaSourceId in every Electron version; getNativeWindowHandle is an NSView*,
+  // so ask the window server for our pid's on-screen window with the matching size instead.
+  const swift = `import CoreGraphics
+let pid = Int32(CommandLine.arguments[1])!
+let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as! [[String: Any]]
+for w in list where (w[kCGWindowOwnerPID as String] as? Int32) == pid && (w[kCGWindowLayer as String] as? Int) == 0 {
+  let b = w[kCGWindowBounds as String] as! [String: Any]
+  print("\\(w[kCGWindowNumber as String]!) \\(b["Width"]!) \\(b["Height"]!)")
+}`
+  const file = join(userData, 'winid.swift')
+  const bin = join(userData, 'winid')
+  if (!existsSync(bin)) {
+    writeFileSync(file, swift)
+    execFileSync('swiftc', ['-O', '-o', bin, file], { timeout: 180000 })
+  }
+  const out = execFileSync(bin, [String(process.pid)], { encoding: 'utf8', timeout: 30000 })
+  const { width, height } = win.getBounds()
+  const rows = out.trim().split('\n').map((line) => line.split(' ').map(Number)).filter((r) => r.length === 3)
+  const hit = rows.find(([, w, h]) => Math.round(w) === width && Math.round(h) === height) ?? rows[0]
+  if (!hit) throw new Error(`no on-screen window for pid ${process.pid}: ${out}`)
+  return hit[0]
+}
+
+async function composeCapture(win) {
+  // Paint every visible view into one canvas at its bounds, bottom to top.
+  const { width, height } = win.getContentBounds()
+  const layers = []
+  for (const view of win.contentView.children) {
+    if (!view.webContents || view.webContents.isDestroyed() || !view.getVisible()) continue
+    const b = view.getBounds()
+    if (b.width <= 0 || b.height <= 0) continue
+    const image = await view.webContents.capturePage()
+    if (image.isEmpty()) continue
+    layers.push({ ...b, url: image.toDataURL() })
+  }
+  const scale = screen.getDisplayMatching(win.getBounds()).scaleFactor || 1
+  const painter = new BrowserWindow({ show: false, width: 200, height: 200, webPreferences: { offscreen: true } })
+  await painter.loadURL('data:text/html,<canvas></canvas>')
+  const dataUrl = await painter.webContents.executeJavaScript(`(async () => {
+    const layers = ${JSON.stringify(layers)}
+    const s = ${scale}
+    const c = document.querySelector('canvas'); c.width = ${width} * s; c.height = ${height} * s
+    const g = c.getContext('2d'); g.fillStyle = '#1c1c1e'; g.fillRect(0, 0, c.width, c.height)
+    for (const l of layers) {
+      const img = new Image(); img.src = l.url; await img.decode()
+      g.drawImage(img, l.x * s, l.y * s, l.width * s, l.height * s)
+    }
+    return c.toDataURL('image/png')
+  })()`)
+  painter.destroy()
+  return Buffer.from(dataUrl.split(',')[1], 'base64')
+}
+
+async function shoot(win, name) {
+  mkdirSync(outDir, { recursive: true })
+  const file = join(outDir, `${name}.png`)
+  await delay(Number(process.env.README_SHOT_SETTLE_MS) || 1200)
+  let method
+  if (process.platform === 'linux' && process.env.DISPLAY && process.env.README_SHOT_METHOD !== 'compose') {
+    const { x, y, width, height } = win.getBounds()
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'x11grab', '-draw_mouse', '0', '-video_size', `${width}x${height}`,
+      '-i', `${process.env.DISPLAY}.0+${x},${y}`, '-frames:v', '1', '-y', file])
+    method = 'x11grab'
+  } else if (macScreencaptureWorks) {
+    try {
+      const id = macWindowId(win)
+      execFileSync('screencapture', ['-o', '-x', '-l', String(id), file], { timeout: 30000 })
+      if (statSync(file).size < 20000) throw new Error(`screencapture wrote only ${statSync(file).size} bytes`)
+      method = `screencapture -o -l ${id}`
+      // Without Screen Recording permission macOS can hand back the wallpaper instead of failing,
+      // so keep the capturePage version next to it to compare.
+      writeFileSync(join(outDir, `${name}.compose.png`), await composeCapture(win))
+    } catch (error) {
+      log(`screencapture failed (${error.message.split('\n')[0]}), falling back to capturePage`)
+      macScreencaptureWorks = false
+    }
+  }
+  if (!method) {
+    writeFileSync(file, await composeCapture(win))
+    method = 'capturePage compose'
+  }
+  methods.push(`${name}.png ${method}`)
+  appendFileSync(join(outDir, 'capture-method.txt'), `${name}.png\t${method}\t${process.platform}\n`)
+  log(`wrote ${file} (${method})`)
+}
+
+// --- scene helpers ----------------------------------------------------------------------------------
+async function loaded(win, url, timeout = 25000) {
+  try {
+    await waitFor(() => pageViews(win).some((v) => v.webContents.getURL().startsWith(url.split('#')[0]) && !v.webContents.isLoading()), `${url} to load`, timeout)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Third-party banners (fundraising / photo contest notices) are not Surffish UI, so they go.
+const TIDY_CSS = '.mwe-popups, #siteNotice, #centralNotice, .cdx-message--notice, .frb, #frb-inline { display: none !important }'
+async function tidy(win) {
+  for (const view of pageViews(win)) {
+    if (view.webContents.getURL().includes('wikipedia.org')) await view.webContents.insertCSS(TIDY_CSS).catch(() => {})
+  }
+}
+
+async function openTab(win, url) {
+  const id = await api(win, `tabs.create(${JSON.stringify(url)})`)
+  if (!(await loaded(win, url))) {
+    log(`${url} did not load, using the fixture page`)
+    const name = new URL(url).pathname.split('/').filter(Boolean).pop() || new URL(url).hostname
+    await api(win, `navigate(${JSON.stringify(`${fixtureOrigin}/${name.replace(/_/g, ' ')}`)})`)
+    await delay(800)
+  }
+  return id
+}
+
+async function setChrome(win, state) {
+  await api(win, `chrome.set(${JSON.stringify(state)})`)
+  await delay(700)
+}
+
+async function closePopovers(win) {
+  for (const view of viewsOf(win)) view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+  await delay(400)
+}
+
+const scenes = {
+  async hero(win) {
+    await setChrome(win, { sidebarPinned: true, sidebarMode: 'tabs' })
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki)})`)
+    await loaded(win, SITES.wiki)
+    await tidy(win)
+    await shoot(win, 'hero')
+  },
+  async newtab(win) {
+    await api(win, 'tabs.create()')
+    await delay(2500)
+    await setChrome(win, { sidebarPinned: false })
+    await shoot(win, 'new-tab')
+    await setChrome(win, { sidebarPinned: true })
+  },
+  async palette(win) {
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.gh)})`)
+    await loaded(win, SITES.gh)
+    clickMenu('Command Palette…')
+    const toolbar = surface(win, 'toolbar')
+    await delay(800)
+    for (const ch of 'split') { toolbar.webContents.sendInputEvent({ type: 'char', keyCode: ch }); await delay(60) }
+    await shoot(win, 'command-palette')
+    await closePopovers(win)
+  },
+  async split(win) {
+    await setChrome(win, { sidebarPinned: false })
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.hn)})`)
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki2)})`)
+    await api(win, 'split.toggle()')
+    await delay(1500)
+    await tidy(win)
+    await shoot(win, 'split-view')
+    await api(win, 'split.toggle()').catch(() => {})
+    await delay(500)
+    await setChrome(win, { sidebarPinned: true })
+  },
+  async settings(win) {
+    await setChrome(win, { sidebarMode: 'settings' })
+    const content = surface(win, 'content')
+    await waitFor(() => evaluate(content, 'Boolean(document.querySelector(\'[aria-label="Local SOCKS5 port"]\'))'), 'the SOCKS5 proxy card', 10000)
+    // the proxy card, then the per-site routing and kill switch under it
+    await evaluate(content, `(() => { const el = document.querySelector('[aria-label="Local SOCKS5 port"]'); const card = el.closest('section, .settings-card, .settings-group') || el; card.scrollIntoView({ block: 'start' }); const scroller = card.closest('[class*="scroll"], main') ; if (scroller) scroller.scrollTop -= 24 })()`)
+    await delay(800)
+    await shoot(win, 'settings-proxy')
+  },
+  async history(win) {
+    await setChrome(win, { sidebarMode: 'tabs' })
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki2)})`)
+    for (const path of ['Big_wave_surfing', 'Jaws_(surf_break)', 'Nazar%C3%A9_Canyon', 'Teahupo%27o']) {
+      const url = `https://en.wikipedia.org/wiki/${path}`
+      await api(win, `navigate(${JSON.stringify(url)})`)
+      await loaded(win, url, 15000)
+    }
+    await tidy(win)
+    const toolbar = surface(win, 'toolbar')
+    const rect = await evaluate(toolbar, `(() => { const r = document.querySelector('[aria-label="Back"]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) } })()`)
+    toolbar.webContents.sendInputEvent({ type: 'mouseMove', x: rect.x, y: rect.y })
+    toolbar.webContents.sendInputEvent({ type: 'mouseDown', x: rect.x, y: rect.y, button: 'right', clickCount: 1 })
+    toolbar.webContents.sendInputEvent({ type: 'mouseUp', x: rect.x, y: rect.y, button: 'right', clickCount: 1 })
+    await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector(\'[aria-label="Back history"]\'))'), 'the Back history menu', 8000)
+    await shoot(win, 'history-menu')
+    await closePopovers(win)
+  },
+  async integrations(win) {
+    await setChrome(win, { sidebarMode: 'integrations' })
+    await delay(1500)
+    await shoot(win, 'settings-integrations')
+    await setChrome(win, { sidebarMode: 'tabs' })
+  },
+  async reader(win) {
+    await setChrome(win, { sidebarPinned: false })
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki)})`)
+    await loaded(win, SITES.wiki)
+    await api(win, 'toggleReader()')
+    await delay(2000)
+    await shoot(win, 'reader')
+    await api(win, 'toggleReader()').catch(() => {})
+    await setChrome(win, { sidebarPinned: true })
+  },
+  async glance(win) {
+    await api(win, `tabs.activate(${JSON.stringify(state.ids.hn)})`)
+    await loaded(win, SITES.hn)
+    const page = pageViews(win)[0]
+    const rect = await evaluate(page, `(() => { const a = [...document.querySelectorAll('.titleline > a, article a, p a')].find((el) => el.getBoundingClientRect().top > 60); if (!a) return null; a.href = ${JSON.stringify(SITES.electron)}; const r = a.getBoundingClientRect(); return { x: Math.round(r.x + 8), y: Math.round(r.y + r.height / 2) } })()`)
+    if (!rect) throw new Error('no link to Shift+click')
+    const base = { x: rect.x, y: rect.y, button: 'left', clickCount: 1, modifiers: ['shift'] }
+    page.webContents.sendInputEvent({ type: 'mouseMove', x: rect.x, y: rect.y, modifiers: ['shift'] })
+    page.webContents.sendInputEvent({ type: 'mouseDown', ...base })
+    page.webContents.sendInputEvent({ type: 'mouseUp', ...base })
+    await delay(4000)
+    await shoot(win, 'glance')
+    await closePopovers(win)
+  }
+}
+const state = { ids: {} }
+
+async function run() {
+  app.setPath('userData', userData)
+  seedProfile()
+  await new Promise((r) => fixture.listen(0, '127.0.0.1', r))
+  fixtureOrigin = `http://127.0.0.1:${fixture.address().port}`
+  mkdirSync(outDir, { recursive: true })
+  await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
+  await app.whenReady()
+  const win = await waitFor(() => mainWindow(), 'the window', 60000)
+  await waitFor(() => surface(win, 'toolbar') && surface(win, 'sidebar') && surface(win, 'content'), 'the renderer surfaces')
+  await waitFor(() => evaluate(surface(win, 'toolbar'), 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar')
+  win.setBounds({ x: 40, y: 40, width: WIDTH, height: HEIGHT })
+  log('window ready', JSON.stringify(win.getBounds()))
+  for (const key of ['mdn', 'gh', 'hn', 'wiki2', 'wiki']) state.ids[key] = await openTab(win, SITES[key])
+  // drop the start-up New Tab so the sidebar lists only real pages
+  const tabs = await api(win, 'tabs.get()')
+  for (const tab of tabs) if (!Object.values(state.ids).includes(tab.id)) await api(win, `tabs.close(${JSON.stringify(tab.id)})`)
+  const order = ['hero', 'palette', 'split', 'reader', 'glance', 'history', 'settings', 'integrations', 'newtab']
+  for (const name of order) {
+    if (only.length ? !only.includes(name) : name === 'integrations') continue
+    try {
+      log(`scene ${name}`)
+      await scenes[name](win)
+    } catch (error) {
+      log(`scene ${name} failed: ${error.stack || error.message}`)
+      appendFileSync(join(outDir, 'capture-method.txt'), `${name}\tFAILED ${String(error.message).split('\n')[0]}\t${process.platform}\n`)
+    }
+  }
+  log('done', methods.join('; '))
+}
+
+run().then(() => { fixture.close(); app.exit(0) }, (error) => { console.error(error); app.exit(1) })
