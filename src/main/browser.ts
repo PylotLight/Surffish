@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { stepZoomFactor } from '../shared/zoom'
@@ -46,6 +46,7 @@ import { onPermissionDenied } from './proxy'
 import { noteTabLoadError, tabLoadError } from './load-errors'
 import { isAbortedNavigation, parseLoadError, shouldShowFullPageError, type NavigateResult } from '../shared/navigation-errors'
 import { attachTabSafety } from './safety'
+import { noteTypedHttpsUpgrade } from './https-only-mode'
 import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitials'
 import { forgetCertificateState, onCertificateStateChanged, pageSecurityFor } from './certificates'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -3149,12 +3150,16 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     replaceTabView(tab, null, url)
     return tab.view ? { ok: true } : { ok: false, reason: 'cancelled' }
   }
+  const typedHttpFallback = typedHttpsFallbackUrl(input, url)
   if (tab.lastUrl === SURFFISH_QUICK_LINKS_URL && !tab.view) {
     tab.lastUrl = url
     tab.pendingUrl = url
     tab.error = null
     ensureTabLoaded(tab)
     if (!tab.view) return { ok: false, reason: 'cancelled' }
+    // ensureTabLoaded created the view (TS still narrows tab.view to null from the check above).
+    const loadedView = tab.view as WebContentsView | null
+    if (typedHttpFallback && loadedView) noteTypedHttpsUpgrade(loadedView.webContents, url, typedHttpFallback)
     publishState(tab.win)
     return { ok: true }
   }
@@ -3166,6 +3171,7 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
   try {
     if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION)
     else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION) await whenPageSessionReady(partitionForTab(tab))
+    if (typedHttpFallback) noteTypedHttpsUpgrade(contents, url, typedHttpFallback)
     await contents.loadURL(url)
     return { ok: true }
   } catch (error) {

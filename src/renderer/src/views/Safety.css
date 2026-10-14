@@ -61,6 +61,11 @@
   white-space: nowrap;
 }
 .omnibox-insecure-pill svg { width: 13px; height: 13px; }
+.omnibox-insecure-pill.is-local-network {
+  /* Plain http to a LAN device: still Not secure, but neutral like Chrome's grey label, not the internet-http red. */
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(235, 238, 243, 0.78);
+}
 .omnibox-insecure-pill.is-cert-bypassed {
   background: rgba(255, 80, 90, 0.24);
   color: #ffb0b6;

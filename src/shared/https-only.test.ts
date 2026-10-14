@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { httpFallbackUrl, httpsUpgradeTarget, isHttpsUpgradeFailure, isInsecurePageUrl, isLocalOrPrivateHost, normalizeHttpsExceptions } from './https-only.ts'
+import { CHROMIUM_HTTPS_UPGRADE_FEATURES, httpFallbackUrl, httpsUpgradeTarget, isHttpsUpgradeFailure, isInsecurePageUrl, isLocalOrPrivateHost, localHttpFallbackUrl, mergeFeatureList, normalizeHttpsExceptions, pageTransportSecurity } from './https-only.ts'
 
 const none = new Set<string>()
 
@@ -42,5 +42,41 @@ describe('misc', () => {
   })
   test('exceptions are hostnames, deduped', () => {
     expect(normalizeHttpsExceptions(['A.example', 'a.example', 'bad host', 'x/y', 3])).toEqual(['a.example'])
+  })
+  test('transport label: LAN http is its own (milder) Not secure; loopback is a secure context', () => {
+    expect(pageTransportSecurity('https://192.168.1.1/')).toBe('https')
+    expect(pageTransportSecurity('http://localhost:3000/')).toBe('loopback')
+    expect(pageTransportSecurity('http://[::1]/')).toBe('loopback')
+    for (const url of ['http://192.168.1.10/', 'http://10.1.2.3:8080/', 'http://printer.local/', 'http://nas/', 'http://[fd00::1]/', 'http://100.64.0.1/']) expect(pageTransportSecurity(url)).toBe('http-local-network')
+    expect(pageTransportSecurity('http://example.com/')).toBe('http')
+    expect(pageTransportSecurity('surffish://newtab')).toBe('other')
+    expect(pageTransportSecurity('not a url')).toBe('other')
+    expect(isInsecurePageUrl('http://192.168.1.10/')).toBe(true)
+    expect(isInsecurePageUrl('surffish://newtab')).toBe(false)
+  })
+})
+
+describe('localHttpFallbackUrl', () => {
+  test('offers http for a local host whose https failed (TLS, certificate, refused)', () => {
+    expect(localHttpFallbackUrl('https://192.168.1.10/', 'ERR_SSL_PROTOCOL_ERROR')).toBe('http://192.168.1.10/')
+    expect(localHttpFallbackUrl('https://192.168.1.10/setup?a=1', 'net::ERR_SSL_PROTOCOL_ERROR')).toBe('http://192.168.1.10/setup?a=1')
+    expect(localHttpFallbackUrl('https://nas.local/', 'ERR_CERT_AUTHORITY_INVALID')).toBe('http://nas.local/')
+    expect(localHttpFallbackUrl('https://10.0.0.2/', 'ERR_CONNECTION_REFUSED (-102)')).toBe('http://10.0.0.2/')
+  })
+  test('never for public hosts, explicit https ports, http pages or unrelated errors', () => {
+    expect(localHttpFallbackUrl('https://example.com/', 'ERR_SSL_PROTOCOL_ERROR')).toBeNull()
+    expect(localHttpFallbackUrl('https://192.168.1.10:8443/', 'ERR_SSL_PROTOCOL_ERROR')).toBeNull()
+    expect(localHttpFallbackUrl('http://192.168.1.10/', 'ERR_CONNECTION_REFUSED')).toBeNull()
+    expect(localHttpFallbackUrl('https://192.168.1.10/', 'ERR_NAME_NOT_RESOLVED')).toBeNull()
+    expect(localHttpFallbackUrl('https://192.168.1.10/', null)).toBeNull()
+  })
+})
+
+describe('Chromium upgrade features', () => {
+  test('merged into an existing --disable-features value once', () => {
+    expect(mergeFeatureList('', ['HttpsUpgrades'])).toBe('HttpsUpgrades')
+    expect(mergeFeatureList('Foo, HttpsUpgrades', ['HttpsUpgrades', 'Bar'])).toBe('Foo,HttpsUpgrades,Bar')
+    expect(CHROMIUM_HTTPS_UPGRADE_FEATURES).toContain('HttpsUpgrades')
+    expect(CHROMIUM_HTTPS_UPGRADE_FEATURES).toContain('HttpsFirstBalancedMode')
   })
 })

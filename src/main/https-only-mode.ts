@@ -25,6 +25,7 @@ interface PendingUpgrade {
   httpsUrl: string
   host: string
   at: number
+  source: 'https-only' | 'typed'
 }
 /** Upgrades in flight per WebContents id, so a failure can offer the original http:// URL. */
 const upgrades = new Map<number, PendingUpgrade>()
@@ -72,7 +73,7 @@ export function initializeHttpsOnly(): void {
       if (contents) showHttpsUnavailable(contents, previous, 'net::ERR_TOO_MANY_REDIRECTS')
       return { cancel: true }
     }
-    upgrades.set(details.webContentsId, { httpUrl: details.url, httpsUrl: target, host: hostOf(details.url), at: Date.now() })
+    upgrades.set(details.webContentsId, { httpUrl: details.url, httpsUrl: target, host: hostOf(details.url), at: Date.now(), source: 'https-only' })
     watchCommits(details.webContentsId)
     return { redirectURL: target }
   })
@@ -88,9 +89,21 @@ export function initializeHttpsOnly(): void {
   })
 }
 
+/**
+ * The address bar resolved a typed bare host ("example.com") to https:// (Chrome's HTTPS-Upgrades
+ * for typed navigations). If that secure load fails with a TLS, certificate or connection error,
+ * the tab offers Continue to HTTP, exactly like an HTTPS-only upgrade. Local hosts never get here:
+ * the address bar sends them straight to http://.
+ */
+export function noteTypedHttpsUpgrade(contents: WebContents, httpsUrl: string, httpUrl: string): void {
+  if (contents.isDestroyed()) return
+  upgrades.set(contents.id, { httpUrl, httpsUrl, host: hostOf(httpsUrl), at: Date.now(), source: 'typed' })
+  watchCommits(contents.id)
+}
+
 function showHttpsUnavailable(contents: WebContents, upgrade: PendingUpgrade, error: string): void {
   upgrades.delete(contents.id)
-  setTabInterstitial(contents, { kind: 'https-unavailable', url: upgrade.httpUrl, host: upgrade.host, error: error.replace(/^net::/, '') })
+  setTabInterstitial(contents, { kind: 'https-unavailable', url: upgrade.httpUrl, host: upgrade.host, error: error.replace(/^net::/, ''), source: upgrade.source, remember: state.enabled })
   // Leave the notice once the user goes somewhere else.
   const clear = (_event: unknown, url: string, isInPlace: boolean, isMainFrame: boolean): void => {
     if (!isMainFrame || isInPlace) return
@@ -121,7 +134,8 @@ export function removeHttpsOnlyException(host: unknown): HttpsOnlyState {
 export function continueToHttp(contents: WebContents): boolean {
   const shown = getTabInterstitial(contents)
   if (shown?.kind !== 'https-unavailable') return false
-  setState({ ...state, exceptions: [...state.exceptions, shown.host] }, true)
+  // Typed-host fallbacks only remember the host when HTTPS-only mode would upgrade it again.
+  if (state.enabled) setState({ ...state, exceptions: [...state.exceptions, shown.host] }, true)
   setTabInterstitial(contents, null)
   void contents.loadURL(shown.url).catch(() => undefined)
   return true

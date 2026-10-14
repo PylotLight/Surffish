@@ -80,12 +80,58 @@ export function isHttpsUpgradeFailure(error: string): boolean {
 
 /** Omnibox security label: plain http pages are "Not secure", except loopback (a secure context, as in Chrome). */
 export function isInsecurePageUrl(url: string): boolean {
+  const transport = pageTransportSecurity(url)
+  return transport === 'http' || transport === 'http-local-network'
+}
+
+/**
+ * How the address bar labels a page's transport: `https`, `loopback` (http on this computer, a
+ * secure context), `http-local-network` (plain http to a LAN device: still "Not secure", drawn in
+ * a milder style since the traffic stays on the local network), `http` (plain http over the
+ * internet) or `other` (surffish://, file://, unparsable).
+ */
+export type PageTransportSecurity = 'https' | 'loopback' | 'http-local-network' | 'http' | 'other'
+
+export function pageTransportSecurity(url: string): PageTransportSecurity {
+  let parsed: URL
   try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== 'http:') return false
-    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-    return !(host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\./.test(host))
+    parsed = new URL(url)
   } catch {
-    return false
+    return 'other'
   }
+  if (parsed.protocol === 'https:') return 'https'
+  if (parsed.protocol !== 'http:') return 'other'
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\./.test(host)) return 'loopback'
+  return isLocalOrPrivateHost(host) ? 'http-local-network' : 'http'
+}
+
+/**
+ * "Continue to http://…" for a failed https:// load of a local-network host (router, NAS, printer):
+ * the http:// URL to offer, or null. Offered for TLS/certificate failures and refused/dropped
+ * connections (a device that only listens on port 80), never for public hosts, where a failing
+ * https site must not be quietly downgraded.
+ */
+export function localHttpFallbackUrl(failedUrl: string, error: string | null | undefined): string | null {
+  if (!error || !isHttpsUpgradeFailure(error)) return null
+  let parsed: URL
+  try {
+    parsed = new URL(failedUrl)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !isLocalOrPrivateHost(parsed.hostname)) return null
+  // An explicit non-default https port (":8443") has no http twin to guess at.
+  if (parsed.port !== '') return null
+  return httpFallbackUrl(failedUrl)
+}
+
+/** Chromium features that upgrade http navigations on their own (disabled: Surffish owns upgrades). */
+export const CHROMIUM_HTTPS_UPGRADE_FEATURES = ['HttpsUpgrades', 'HttpsFirstModeV2', 'HttpsFirstModeV2ForEngagedSites', 'HttpsFirstBalancedMode', 'HttpsFirstModeIncognito', 'HttpsFirstModeV2ForTypicallySecureUsers'] as const
+
+/** A comma-separated --enable/--disable-features value with `extra` added once each. */
+export function mergeFeatureList(existing: string, extra: readonly string[]): string {
+  const names = existing.split(',').map((name) => name.trim()).filter(Boolean)
+  for (const name of extra) if (!names.includes(name)) names.push(name)
+  return names.join(',')
 }

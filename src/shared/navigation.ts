@@ -1,3 +1,4 @@
+import { httpFallbackUrl, isLocalOrPrivateHost } from './https-only'
 import type { SearchEngineId } from './types'
 
 export const DEFAULT_SEARCH_ENGINE: SearchEngineId = 'brave'
@@ -76,13 +77,35 @@ export function resolveNavigationTarget(input: string, engineId: SearchEngineId 
   try {
     const url = new URL(`https://${value}`)
     const host = url.hostname.replace(/^\[|\]$/g, '')
-    const looksLikeAddress = host === 'localhost' || host.endsWith('.localhost') || host.includes('.') || isIpv4(host) || host === '::1'
+    const looksLikeAddress = host === 'localhost' || host.endsWith('.localhost') || host.includes('.') || isIpv4(host) || host.includes(':')
     if (!looksLikeAddress) return searchFor(value, engineId)
-    if (isLoopback(url.hostname)) url.protocol = 'http:'
+    // Like Chrome: a typed local address (loopback, RFC 1918/CGNAT/link-local IPs, .local/.lan/
+    // .home.arpa/.internal names) opens over plain http. LAN devices (routers, NAS, printers)
+    // mostly serve http only, and the ones with https redirect there themselves. Public names
+    // try https first; the main process falls back to http if that fails (typedHttpsFallbackUrl).
+    if (isLoopback(url.hostname) || isLocalOrPrivateHost(url.hostname)) url.protocol = 'http:'
     return url.toString()
   } catch {
     return searchFor(value, engineId)
   }
+}
+
+/**
+ * When address-bar `input` had no scheme and resolveNavigationTarget gave it https:// (a public
+ * host name), the http:// URL to fall back to if the secure connection fails. Null for explicit
+ * schemes, searches and anything already http.
+ */
+export function typedHttpsFallbackUrl(input: string, resolvedUrl: string): string | null {
+  const value = input.trim()
+  if (!value || /\s/.test(value) || /^https?:/i.test(value) || /^[a-z][a-z\d+.-]*:\/\//i.test(value)) return null
+  try {
+    const resolved = new URL(resolvedUrl)
+    if (resolved.protocol !== 'https:') return null
+    if (new URL(`https://${value}`).host !== resolved.host) return null
+  } catch {
+    return null
+  }
+  return httpFallbackUrl(resolvedUrl)
 }
 
 export type PageMadeUrlKind = 'blob' | 'data'

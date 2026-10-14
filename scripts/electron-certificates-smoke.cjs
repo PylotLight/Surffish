@@ -8,6 +8,12 @@
 //      (a private tab gets the interstitial again).
 //   3. Local-network addresses skip the SOCKS proxy (fixed-servers and PAC configs), and a proxy
 //      failure is a full-page error with "Route <host> Direct".
+//   4. Plain-http local devices: a typed bare LAN IP / .lan name opens over http (port 80, no
+//      upgrade by Surffish or Chromium), as does a clicked link; the address bar says Not secure
+//      (the mild local-network pill), never a lock. An https:// load of a LAN device that only
+//      speaks http fails with ERR_SSL_PROTOCOL_ERROR: the error page shows no lock and offers
+//      "Continue to http://<host>". A typed bare public host tries https first and offers
+//      Continue to HTTP when that fails.
 // Runs the production build: `bun run build && bun run test:electron-certificates`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-certificates-smoke.cjs`).
 // Set SURFFISH_SMOKE_SCREENSHOTS=<dir> to save screenshots.
@@ -28,8 +34,11 @@ const userData = join(tmpdir(), `surffish-certificates-smoke-${process.pid}`)
 const screenshots = process.env.SURFFISH_SMOKE_SCREENSHOTS
 // "The OS trusts the test root": only the unpackaged build reads this (certificate-inspect.ts).
 process.env.SURFFISH_TEST_TRUST_ANCHORS = join(fixtures, 'test-root.pem')
-// Every *.surffish.test name is this machine (no DNS, no network).
-app.commandLine.appendSwitch('host-resolver-rules', 'MAP *.surffish.test 127.0.0.1')
+// Every *.surffish.test name is this machine (no DNS, no network). The LAN-device rules (port 80/443
+// of a fake 192.168.77.10 and nas.lan onto the plain-http fixture) are added once its port is known.
+const BASE_RESOLVER_RULES = 'MAP *.surffish.test 127.0.0.1'
+app.commandLine.appendSwitch('host-resolver-rules', BASE_RESOLVER_RULES)
+const LAN_IP = '192.168.77.10'
 
 const read = (name) => readFileSync(join(fixtures, name))
 const page = (title) => `<!doctype html><meta charset="utf-8"><title>${title}</title><body style="font:16px system-ui;padding:24px;background:#f6f7f9"><h1>${title}</h1><p>Served by the certificates smoke.</p></body>`
@@ -40,6 +49,14 @@ const handler = (title) => (request, response) => {
 const trustedServer = createTlsServer({ key: read('trusted-leaf.key'), cert: Buffer.concat([read('trusted-leaf.pem'), read('test-intermediate.pem')]) }, handler('UniFi Network (trusted chain)'))
 const selfSignedServer = createTlsServer({ key: read('self-signed.key'), cert: read('self-signed.pem') }, handler('UniFi OS (self-signed)'))
 const httpServer = createServer(handler('Plain fixture'))
+// A LAN device (router/NAS) that only speaks plain http, on "port 80" (and, mapped, on 443 too:
+// a TLS handshake against it fails with ERR_SSL_PROTOCOL_ERROR, like a device with nothing on 443).
+const lanRequests = []
+const lanServer = createServer((request, response) => {
+  lanRequests.push(`${request.headers.host} ${request.url}`)
+  response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+  response.end(`<!doctype html><meta charset="utf-8"><title>LAN device</title><body style="font:16px system-ui;padding:24px;background:#f6f7f9"><h1>LAN device ${request.url}</h1><p>Plain HTTP only.</p><a id="lan-link" href="http://${LAN_IP}/linked">Status page</a></body>`)
+})
 // A port that accepts nothing: the SOCKS proxy is "down".
 const deadProxy = createNetServer()
 
@@ -134,7 +151,15 @@ async function run() {
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   const listen = (server) => new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
-  await Promise.all([listen(trustedServer), listen(selfSignedServer), listen(httpServer), listen(deadProxy)])
+  await Promise.all([listen(trustedServer), listen(selfSignedServer), listen(httpServer), listen(deadProxy), listen(lanServer)])
+  const lanPort = lanServer.address().port
+  // Specific rules first (first match wins), then the *.surffish.test catch-all. Set before the
+  // network service starts (main isn't loaded yet).
+  app.commandLine.appendSwitch('host-resolver-rules', [
+    `MAP ${LAN_IP}:80 127.0.0.1:${lanPort}`, `MAP ${LAN_IP}:443 127.0.0.1:${lanPort}`, `MAP nas.lan:80 127.0.0.1:${lanPort}`,
+    `MAP public-http.surffish.test:80 127.0.0.1:${lanPort}`, `MAP public-http.surffish.test:443 127.0.0.1:${lanPort}`,
+    BASE_RESOLVER_RULES
+  ].join(', '))
   // The dead proxy: close it again so connects are refused (port stays free for a while).
   const deadPort = deadProxy.address().port
   await new Promise((resolvePromise) => deadProxy.close(resolvePromise))
@@ -298,6 +323,87 @@ async function run() {
   await evaluate(toolbar, `window.api.browser.proxy.routing.set({ proxies: [], rules: [] })`)
   await evaluate(toolbar, `window.api.browser.proxy.set({ enabled: false, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true })`)
 
+  // --- 4. Plain-http LAN devices
+  smoke.step('local http: typed LAN address loads over http')
+  const INPUT = 'document.querySelector(".omnibox input[type=text]")'
+  const typeAndGo = async (text) => {
+    toolbar.webContents.focus()
+    await evaluate(toolbar, `(() => { ${INPUT}.focus(); ${INPUT}.select(); return true })()`)
+    await waitFor(() => evaluate(toolbar, `document.activeElement === ${INPUT}`), 'the focused address bar')
+    await toolbar.webContents.insertText(text)
+    await waitFor(async () => (await evaluate(toolbar, `${INPUT}.value`)) === text, `the typed text ${text}`)
+    await evaluate(toolbar, `${INPUT}.form.requestSubmit()`)
+  }
+  const addressBar = () => evaluate(toolbar, `(() => ({ value: ${INPUT}.value, lock: Boolean(document.querySelector('.site-actions-button svg.site-actions-lock:not(.is-broken)')), brokenLock: Boolean(document.querySelector('.site-actions-button svg.site-actions-lock.is-broken')), pill: document.querySelector('.omnibox-insecure-pill')?.className ?? null, pillText: document.querySelector('.omnibox-insecure-pill')?.textContent ?? null }))()`)
+  const lanUrl = `http://${LAN_IP}/`
+  lanRequests.length = 0
+  await typeAndGo(LAN_IP)
+  await waitFor(async () => { const current = await state(); return current.url === lanUrl && !current.loading && current.error === null }, `the typed ${LAN_IP} to load over http`)
+  assert.ok(lanRequests.includes(`${LAN_IP} /`), `the device got a plain http request (saw ${JSON.stringify(lanRequests)})`)
+  const lanBar = await waitFor(async () => { const bar = await addressBar(); return bar.pill ? bar : null }, 'the Not secure pill on the LAN http page')
+  assert.equal(lanBar.lock, false, 'no lock on a plain http page')
+  assert.equal(lanBar.brokenLock, false)
+  assert.match(lanBar.pill, /is-local-network/, 'LAN http gets the mild Not secure pill')
+  assert.equal(lanBar.pillText, 'Not secure')
+  assert.equal(lanBar.value, lanUrl)
+  const lanMenu = await openSiteMenu()
+  assert.match(lanMenu.connection, /is-not-secure/)
+  assert.match(lanMenu.text, /local network uses plain HTTP/)
+  await closeSiteMenu()
+  await windowShot('local-http-lan-page.png')
+
+  smoke.step('local http: clicked link and typed .lan name stay on http')
+  const lanPage = await waitFor(() => require('electron').webContents.getAllWebContents().find((wc) => !wc.isDestroyed() && wc.getURL() === lanUrl), 'the LAN page webContents')
+  await lanPage.executeJavaScript('document.getElementById("lan-link").click()')
+  await waitFor(async () => { const current = await state(); return current.url === `${lanUrl}linked` && !current.loading && current.error === null }, 'the clicked LAN link to load over http')
+  assert.ok(lanRequests.includes(`${LAN_IP} /linked`))
+  await typeAndGo('nas.lan')
+  await waitFor(async () => { const current = await state(); return current.url === 'http://nas.lan/' && !current.loading && current.error === null }, 'the typed nas.lan to load over http')
+  assert.ok(lanRequests.includes('nas.lan /'))
+  assert.match((await addressBar()).pill ?? '', /is-local-network/)
+  // Internet http keeps the stronger Not secure pill.
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${httpOrigin}/start`)})`)
+  await waitFor(async () => { const current = await state(); return current.url === `${httpOrigin}/start` && !current.loading }, 'the loopback page')
+  assert.equal((await addressBar()).pill, null, 'loopback http is a secure context: no pill')
+
+  smoke.step('local http: https to an http-only device offers Continue to http')
+  const lanHttpsUrl = `https://${LAN_IP}/`
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(lanHttpsUrl)})`)
+  const tlsState = await waitFor(async () => { const current = await state(); return current.loadError && !current.loading ? current : null }, 'the TLS failure')
+  assert.equal(tlsState.loadError.name, 'ERR_SSL_PROTOCOL_ERROR')
+  assert.equal(tlsState.loadError.fullPage, true)
+  const tlsPage = await waitFor(() => evaluate(content, `(() => { const el = document.querySelector('.tab-interstitial.is-load-error.is-secure-connection'); return el ? { text: el.textContent, fallback: el.querySelector('button.http-fallback')?.textContent ?? null } : null })()`), 'the secure-connection error page')
+  assert.match(tlsPage.text, /Couldn’t connect securely/)
+  assert.equal(tlsPage.fallback, `Continue to http://${LAN_IP}`)
+  const errorBar = await addressBar()
+  assert.equal(errorBar.lock, false, 'no lock on an error page: nothing connected securely')
+  assert.equal(errorBar.pill, null)
+  const tlsMenu = await openSiteMenu()
+  assert.match(tlsMenu.connection, /is-error/)
+  assert.match(tlsMenu.text, /Page didn’t load/)
+  await closeSiteMenu()
+  await windowShot('local-http-continue-to-http.png')
+  lanRequests.length = 0
+  await evaluate(content, 'document.querySelector(".tab-interstitial button.http-fallback").click()')
+  await waitFor(async () => { const current = await state(); return current.url === lanUrl && !current.loading && current.error === null }, 'Continue to http to load the device over http')
+  assert.ok(lanRequests.includes(`${LAN_IP} /`))
+  await waitFor(async () => !(await evaluate(content, 'Boolean(document.querySelector(".tab-interstitial"))')), 'the error page to go away')
+
+  smoke.step('typed public host: https first, Continue to HTTP when it fails')
+  await typeAndGo('public-http.surffish.test')
+  const typedFallback = await waitFor(() => evaluate(content, `(() => { const el = document.querySelector('.tab-interstitial.is-https'); return el ? el.textContent : null })()`), 'the HTTPS-unavailable notice for the typed host')
+  assert.match(typedFallback, /public-http\.surffish\.test doesn’t support HTTPS/)
+  assert.match(typedFallback, /tried a secure connection first/)
+  assert.doesNotMatch(typedFallback, /remember this exception/, 'HTTPS-only mode is off: nothing to remember')
+  // Let the failed https load finish reporting (did-fail-load trails the notice by a beat) before
+  // clicking, as a person would; a click inside that window races the stale failure.
+  await waitFor(async () => { const current = await state(); return current.loadError?.url === 'https://public-http.surffish.test/' && !current.loading }, 'the typed host https failure to settle')
+  lanRequests.length = 0
+  await evaluate(content, '[...document.querySelectorAll(".tab-interstitial.is-https button")].find((button) => button.textContent === "Continue to HTTP").click()')
+  await waitFor(async () => { const current = await state(); return current.url === 'http://public-http.surffish.test/' && !current.loading && current.error === null }, 'Continue to HTTP for the typed public host').catch(async (error) => { throw new Error(`${error.message} state=${JSON.stringify(await state())} requests=${JSON.stringify(lanRequests)}`) })
+  assert.ok(lanRequests.includes('public-http.surffish.test /'))
+  assert.match((await addressBar()).pill ?? '', /^omnibox-insecure-pill$/, 'internet http keeps the regular Not secure pill')
+
   console.log('Certificates smoke passed.')
 }
 
@@ -305,6 +411,7 @@ run().then(() => {
   trustedServer.close()
   selfSignedServer.close()
   httpServer.close()
+  lanServer.close()
   app.exit(0)
 }).catch((error) => {
   console.error(error)

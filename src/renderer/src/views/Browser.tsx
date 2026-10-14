@@ -46,7 +46,7 @@ import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsC
 import { TabInterstitial } from './TabInterstitial'
 import { ProxyDownBanner } from './ProxyDownBanner'
 import { NetworkOverridesBadge } from './NetworkOverridesPanel'
-import { isInsecurePageUrl } from '../../../shared/https-only'
+import { isInsecurePageUrl, pageTransportSecurity } from '../../../shared/https-only'
 import { UpdateBadge } from './settings/UpdateBadge'
 import { formatVisitedAt } from '../lib/format'
 import { dismissPopovers, usePopoverDismiss } from '../lib/popover-dismiss'
@@ -667,7 +667,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   const activeOrigin = httpOrigin(browser.url)
   const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null
-  const siteConnection = isLocalNewTab ? null : siteConnectionSummary(certificateLoadError && browser.loadError ? browser.loadError.url : browser.url, browser.security, certificateLoadError)
+  // A full-page error (DNS, refused, TLS handshake…) means nothing loaded: no lock, no Not secure pill.
+  const pageLoadError = !certificateLoadError && browser.error && browser.loadError?.fullPage ? browser.loadError.name ?? (browser.loadError.code !== null ? `Error ${browser.loadError.code}` : 'ERR_FAILED') : null
+  const siteConnection = isLocalNewTab ? null : siteConnectionSummary((certificateLoadError || pageLoadError) && browser.loadError ? browser.loadError.url : browser.url, browser.security, certificateLoadError, pageLoadError)
+  const pageTransport = pageTransportSecurity(browser.url)
   const certificateBypassed = !isLocalNewTab && browser.security?.level === 'bypassed'
 
   function revealSidebar(): void {
@@ -1424,7 +1427,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               <div className="omnibox">
                 {browser.private && <span className="omnibox-private-pill" title="Private tab: nothing from this tab is saved"><PrivateGlyph /><span>Private</span></span>}
                 {certificateBypassed && <span className="omnibox-insecure-pill is-cert-bypassed" title={`Not secure: ${browser.security?.host ?? 'this site'}’s certificate isn’t valid${browser.security?.error ? ` (${browser.security.error})` : ''} and you chose to proceed`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><path d="M3 21 21 3" /></svg><span>Not secure</span></span>}
-                {!isLocalNewTab && isInsecurePageUrl(browser.url) && <span className="omnibox-insecure-pill" title="Not secure: this page uses plain HTTP, so it can be read or changed on the way"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg><span>Not secure</span></span>}
+                {!isLocalNewTab && !pageLoadError && isInsecurePageUrl(browser.url) && <span className={`omnibox-insecure-pill${pageTransport === 'http-local-network' ? ' is-local-network' : ''}`} title={pageTransport === 'http-local-network' ? 'Not secure: this device on your local network uses plain HTTP, so anyone on the same network can read or change it' : 'Not secure: this page uses plain HTTP, so it can be read or changed on the way'}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg><span>Not secure</span></span>}
                 <div className="site-actions-control" ref={siteActionsControlRef}>
                   <button
                     className={`omnibox-action-button site-actions-button${siteActionsOpen ? ' is-current' : ''}`}
