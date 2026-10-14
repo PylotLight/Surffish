@@ -361,7 +361,34 @@ async function run() {
 
   // Window open/close cycles: anything left behind is a leak.
   const count = () => ({ windows: BaseWindow.getAllWindows().length, webContents: webContents.getAllWebContents().length, shell: webContents.getAllWebContents().filter((c) => !c.isDestroyed() && surfaceOf(c)).length, ...memory() })
+  // Before each sample, every app-UI renderer gets a major GC and a critical memory-pressure
+  // notification (what macOS sends under pressure), so growth counts only memory that can't be
+  // reclaimed: a leak. Where the UI surfaces of several windows share one renderer (process-per-site),
+  // a closed window's documents stay in that renderer's V8 heap until the next major GC (~10 s of
+  // idle), and Blink's caches/allocator keep its native memory until pressure: +60-90 MB after 3
+  // cycles in the PR #159 build, +2-6 MB once reclaimed. The unreclaimed number is kept as
+  // windowCycles.memGrowthBeforeGcMB (diagnostic, not checked).
+  const collectShellGarbage = async () => {
+    const was = memory().totalMB
+    const seen = new Set()
+    for (const c of webContents.getAllWebContents()) {
+      if (c.isDestroyed() || !surfaceOf(c) || seen.has(c.getOSProcessId())) continue
+      seen.add(c.getOSProcessId())
+      try {
+        c.debugger.attach('1.3')
+        await c.debugger.sendCommand('HeapProfiler.collectGarbage')
+        await c.debugger.sendCommand('Memory.simulatePressureNotification', { level: 'critical' })
+      } catch (e) {
+        step(`window cycles: GC in the UI renderer skipped (${e.message})`)
+      } finally {
+        try { c.debugger.detach() } catch {}
+      }
+    }
+    await delay(500)
+    step(`window cycles: reclaimed in ${seen.size} UI renderer(s): ${was} -> ${memory().totalMB} MB`)
+  }
   await delay(500)
+  await collectShellGarbage()
   const before = count()
   for (let i = 0; i < WINDOW_CYCLES; i++) {
     await api('window.api.browser.tabs.newWindow(false)')
@@ -372,8 +399,10 @@ async function run() {
     await delay(300)
   }
   await delay(1500)
+  const afterBeforeGc = memory().totalMB
+  await collectShellGarbage()
   const after = count()
-  result.windowCycles = { cycles: WINDOW_CYCLES, processesGrowth: after.processes - before.processes, webContentsGrowth: after.webContents - before.webContents, shellGrowth: after.shell - before.shell, memGrowthMB: after.totalMB - before.totalMB }
+  result.windowCycles = { cycles: WINDOW_CYCLES, processesGrowth: after.processes - before.processes, webContentsGrowth: after.webContents - before.webContents, shellGrowth: after.shell - before.shell, memGrowthMB: after.totalMB - before.totalMB, memGrowthBeforeGcMB: afterBeforeGc - before.totalMB }
   step('window cycles')
 
   // Mixed sites: SITE_TABS tabs over SITES sites (*.localhost, separate sites to Chromium). How many
