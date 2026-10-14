@@ -394,13 +394,16 @@ async function run() {
   const shownAt = Date.now()
   await waitFor(() => !overlay.getVisible(), 'the idle preview to dismiss itself', 10000)
   assert.ok(Date.now() - shownAt >= 600, 'the preview stays up for the idle timeout first')
+  // Hover hold: a longer idle timeout, so the hover (two IPC round trips after the preview shows) can't
+  // lose the race against the countdown on a busy runner; holding still has to outlast it.
+  process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '2500'
   inner.webContents.focus()
   key(inner, 'S', [primary, 'shift'])
   await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for hover hold')
   await evaluate(overlay, 'document.getElementById("btn-visible").click()')
   await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for hover hold')
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerenter"))')
-  await delay(2000)
+  await delay(4000)
   assert.ok(overlay.getVisible(), 'hovering the preview holds it open')
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerleave"))')
   await waitFor(() => !overlay.getVisible(), 'the preview to dismiss after the pointer leaves', 10000)

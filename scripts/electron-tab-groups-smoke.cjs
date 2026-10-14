@@ -191,21 +191,34 @@ async function mainPhase() {
   assert.equal(await api(win, `commands.run(${json(`group.add:${groupId}`)})`), true, 'Add Tab to Group from the palette')
   assert.equal((await tabsOf(win)).find((tab) => tab.id === id.f).group?.id, groupId)
   // The tab menu: main resolves the row under the right-click with elementFromPoint.
-  menus = []
   await api(win, 'chrome.set({ sidebarPinned: true })')
-  // Wait until the row is really under its own centre (the pinned sidebar slides in), not a fixed delay:
-  // under load (2 smokes at a time on the Mac runner) 500 ms wasn't always enough.
+  // The synthetic right-click is resolved again in main (elementFromPoint) a moment after we look.
+  // Rows move while the pinned sidebar slides in and while the group re-sorts (tab f just joined
+  // it), so wait for the row to sit still under its own centre, and if main still saw another row
+  // (its menu has no "Remove from Group"), look again and re-send: a real right-click always hits
+  // what is under the pointer, only this replay can go stale.
   let sidebarView
   let box
-  await waitFor(async () => {
-    sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
-    box = await evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); const x = Math.round(r.x + 20); const y = Math.round(r.y + r.height / 2); return { x, y, hit: document.elementFromPoint(x, y)?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null } })()`)
-    return box.hit === id.f
-  }, 'the tab row under the pointer in the pinned sidebar').catch((error) => {
-    throw new Error(`${error.message} Last: ${surfaceFor(sidebarView)} view ${JSON.stringify(sidebarView?.getBounds())}, row ${JSON.stringify(box)}`)
-  })
-  sidebarView.webContents.emit('context-menu', { preventDefault() {} }, { x: box.x, y: box.y })
-  const tabMenu = await waitFor(() => menus.find((template) => template.some((item) => item.label === 'Remove from Group')), 'the tab menu with group items')
+  let tabMenu = null
+  const rowBox = () => evaluate(sidebarView, `(() => { const r = document.querySelector('[data-browser-tab-id=${json(id.f)}]').getBoundingClientRect(); const x = Math.round(r.x + 20); const y = Math.round(r.y + r.height / 2); return { x, y, hit: document.elementFromPoint(x, y)?.closest('[data-browser-tab-id]')?.getAttribute('data-browser-tab-id') ?? null } })()`)
+  for (let attempt = 1; attempt <= 4 && !tabMenu; attempt += 1) {
+    let previous = null
+    await waitFor(async () => {
+      sidebarView = viewsOf(win).filter((view) => ['sidebar', 'content'].includes(surfaceFor(view))).find((view) => view.getVisible() && view.getBounds().width > 0) ?? surface(win, 'sidebar')
+      box = await rowBox()
+      const settled = box.hit === id.f && previous !== null && previous.x === box.x && previous.y === box.y
+      previous = box
+      if (!settled) await delay(100)
+      return settled
+    }, 'the tab row to sit still under the pointer in the pinned sidebar').catch((error) => {
+      throw new Error(`${error.message} Last: ${surfaceFor(sidebarView)} view ${JSON.stringify(sidebarView?.getBounds())}, row ${JSON.stringify(box)}`)
+    })
+    menus = []
+    sidebarView.webContents.emit('context-menu', { preventDefault() {} }, { x: box.x, y: box.y })
+    tabMenu = await waitFor(() => menus.find((template) => template.some((item) => item.label === 'Remove from Group')), 'the tab menu with group items', 3000).catch(() => null)
+    if (!tabMenu) smoke.step(`right-click attempt ${attempt} built ${JSON.stringify(menus.map((template) => template.map((item) => item.label).filter(Boolean).slice(0, 4)))}; retrying`)
+  }
+  assert.ok(tabMenu, 'the tab menu with group items (Remove from Group)')
   assert.ok(tabMenu.some((item) => item.label === 'Add Tab to New Group'))
 
   // --- the archive keeps the group label
