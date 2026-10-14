@@ -1664,7 +1664,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   else tabs.push(tab)
   if (shouldActivate) {
     // The outgoing tab's picture, while it is still on screen (overview thumbnail + wake snapshot).
-    if (previous && previous.win === w && isActiveTab(previous)) void captureTabThumbnail(previous, true)
+    // A page still loading has nothing worth showing yet (and may not answer a capture for a while).
+    if (previous && previous.win === w && isActiveTab(previous) && previous.view && !previous.view.webContents.isLoading()) void captureTabThumbnail(previous, true)
     // The new tab replaces whatever was on screen (a split's panes go off screen together).
     const wasOnScreen = previous ? onScreenTabIds(w) : []
     if (tab.spaceId !== w.activeSpaceId) {
@@ -3447,7 +3448,9 @@ async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<vo
   try {
     const pageArea = forWake && !tab.extensionPageOrigin && !tab.pdfEditor ? pageBoundsOf(tab) : null
     const url = currentUrl(tab)
-    const image = await contents.capturePage()
+    // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
+    // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
+    const image = await contents.capturePage(undefined, { stayHidden: true })
     if (image.isEmpty() || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabThumbnails.set(tab.id, thumbnailDataUrl(image))
     if (pageArea && tab.view?.webContents === contents) rememberWakeSnapshot(tab.id, image, pageArea, url, tab.isPrivate)
