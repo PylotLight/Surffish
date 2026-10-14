@@ -2,9 +2,10 @@
  * Surffish's quick unlock panel, drawn over Bramble's popup in its own sandboxed WebContentsView
  * (never inside Bramble's page). Loaded as a data: URL with the bramble-quick-unlock.cjs preload.
  *
- * Modes (set by main): pin (PIN pad, optional Touch ID button) and rearm (after a restart in
- * memory-only mode: Surffish's own master password prompt, which re-arms the PIN). "Use master
- * password" hides the panel for this lock and leaves Bramble's own form in front.
+ * Modes (set by main): pin (PIN pad, optional Touch ID button) and notice (an error, e.g. after a
+ * lockout). There is deliberately no master password mode: when the PIN cannot be used, Bramble's
+ * own form is the only screen. "Use master password" hides the panel for this lock and leaves
+ * Bramble's own form in front.
  */
 export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
 <html lang="en">
@@ -34,7 +35,6 @@ export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
   .error { color: var(--error); min-height: 20px; text-align: center; max-width: 340px; }
   .shake { animation: shake 0.3s; }
   @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
-  input[type=password] { font: inherit; width: 260px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--fg); user-select: text; }
   [hidden] { display: none !important; }
   .brand { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 </style>
@@ -50,13 +50,6 @@ export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
       <div class="pad" id="pad" role="group" aria-label="PIN pad"></div>
       <button class="action" id="touch-id" type="button" hidden>Unlock with Touch ID</button>
     </div>
-  </section>
-  <section id="rearm-mode" hidden>
-    <form id="rearm-form" style="display:flex;flex-direction:column;align-items:center;gap:12px">
-      <p>Surffish restarted. Enter your master password once to unlock and turn your PIN back on.</p>
-      <input id="master" type="password" autocomplete="off" spellcheck="false" aria-label="Bramble master password" placeholder="Master password">
-      <button class="action primary" type="submit" id="rearm-submit">Unlock</button>
-    </form>
   </section>
   <div class="error" id="error" role="alert"></div>
   <button class="link" id="use-master" type="button">Use master password</button>
@@ -81,7 +74,7 @@ export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
     }
   };
   const setError = (text) => { $('error').textContent = text || ''; if (text) { dots.classList.remove('shake'); void dots.offsetWidth; dots.classList.add('shake'); } };
-  const setBusy = (value) => { busy = value; document.querySelectorAll('button, input').forEach((el) => { if (el.id !== 'use-master') el.disabled = value; }); };
+  const setBusy = (value) => { busy = value; document.querySelectorAll('button').forEach((el) => { if (el.id !== 'use-master') el.disabled = value; }); };
   const handle = (result) => {
     setBusy(false);
     if (!result) return;
@@ -117,24 +110,13 @@ export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
   });
   $('touch-id').onclick = () => { if (busy) return; setBusy(true); api.touchId().then(handle, () => handle({ status: 'error' })); };
   $('use-master').onclick = () => api.useMasterPassword();
-  $('rearm-form').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const field = $('master');
-    if (busy || !field.value) return;
-    setBusy(true);
-    const value = field.value;
-    field.value = '';
-    api.rearm(value).then(handle, () => handle({ status: 'error' }));
-  });
   api.onShow((state) => {
     mode = state.mode;
     touchId = !!state.touchId;
     pin = ''; render(); setBusy(false); setError(state.error || '');
     $('pin-hint').textContent = 'Enter your PIN';
     $('pin-mode').hidden = mode !== 'pin';
-    $('rearm-mode').hidden = mode !== 'rearm';
     $('touch-id').hidden = mode !== 'pin' || !touchId;
-    if (mode === 'rearm') setTimeout(() => $('master').focus(), 0);
     if (mode === 'pin' && touchId && state.autoTouchId) $('touch-id').click();
   });
   api.onResult(handle);

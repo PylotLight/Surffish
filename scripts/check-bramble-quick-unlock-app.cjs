@@ -7,7 +7,33 @@
 // Settings IPC, locks, opens the toolbar popup and drives Surffish's PIN panel: a wrong PIN, the
 // right PIN typed on the keyboard (Bramble must unlock), "Use master password", and the 5-strike
 // lockout. Set CHECK_SHOTS=<dir> to save screenshots of the panel.
+// Then a second Surffish process on the same profile checks the restart path of memory-only mode
+// (an enrolment written before the mode was switchable, so it should migrate where it can): no
+// Surffish master password screen at all, only Bramble's own form; a wrong master password typed
+// there re-arms nothing; the right one re-arms the PIN, and the PIN pad is back on the next lock.
+// Phase 3 (only where safeStorage works, e.g. macOS, or Linux under scripts/with-linux-keyring.sh):
+// a third restart is armed straight away (PIN pad, never the master password), and the Settings
+// switch goes to memory-only (PIN required, wrong PIN counted) and back.
+// The script drives itself: without CHECK_PHASE it runs the phases as child processes.
 'use strict'
+const { spawnSync } = require('node:child_process')
+const phase = process.env.CHECK_PHASE
+if (!phase) {
+  // Driver: never loads Surffish, so the children own the profile (single-instance lock).
+  const { app: driver } = require('electron')
+  const { tmpdir: tmp } = require('node:os')
+  const { join: joinPath } = require('node:path')
+  const shared = joinPath(tmp(), `surffish-bramble-quick-unlock-app-${process.pid}`)
+  let code = 0
+  for (const next of ['1', '2', '3']) {
+    const child = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, CHECK_PHASE: next, CHECK_ROOT: shared } })
+    if (child.status !== 0) { code = child.status || 1; break }
+  }
+  require('./smoke-profile.cjs').removeProfile(shared)
+  if (code === 0) console.log('BRAMBLE QUICK UNLOCK APP CHECK PASSED (all phases)')
+  driver.exit(code)
+  return
+}
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { existsSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
@@ -18,7 +44,7 @@ const { app, BaseWindow, BrowserWindow, webContents } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const dist = resolve(process.argv.slice(2).filter((arg) => !arg.startsWith('-')).at(-1) || '')
-const root = join(tmpdir(), `surffish-bramble-quick-unlock-app-${process.pid}`)
+const root = process.env.CHECK_ROOT || join(tmpdir(), `surffish-bramble-quick-unlock-app-${process.pid}`)
 const userData = join(root, 'user-data')
 const MASTER = 'a long Bramble master password for the quick unlock check'
 const PIN = '482916'
@@ -44,7 +70,11 @@ async function shot(contents, name) {
   writeFileSync(join(shots, `${name}.png`), image.toPNG())
 }
 
-async function run() {
+const configFile = join(userData, 'bramble-quick-unlock.json')
+const popupWindow = () => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed() && win.isVisible() && win.webContents.getURL().endsWith('/popup.html'))
+const overlayOf = (popup) => popup.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL().startsWith('data:text/html'))
+
+async function start() {
   assert.ok(existsSync(join(dist, 'manifest.json')), 'pass the unpacked Bramble Firefox build directory')
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
@@ -65,7 +95,21 @@ async function run() {
   await waitFor(() => evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
   const bramble = await waitFor(async () => { const state = await evaluate(toolbar, 'window.api.browser.bramble.get()'); return state.installed && state }, 'Bramble to load', 60000)
   smoke.step(`Bramble ${bramble.version} loaded`)
-  assert.equal(existsSync(join(userData, 'bramble-quick-unlock.json')), false)
+  const openPopup = async () => {
+    const state = await evaluate(toolbar, 'window.api.browser.bramble.open()')
+    try {
+      return await waitFor(popupWindow, 'the Bramble popup', 15000)
+    } catch (error) {
+      console.log('open() ->', JSON.stringify(state), BrowserWindow.getAllWindows().map((win) => `${win.getTitle()} ${win.isVisible()} ${win.webContents.getURL()}`))
+      throw error
+    }
+  }
+  return { toolbar, content, openPopup }
+}
+
+async function run() {
+  const { toolbar, content, openPopup } = await start()
+  assert.equal(existsSync(configFile), false)
 
   // 0. No vault yet: the enrol IPC refuses, and Settings disables "Set up PIN…" with a hint.
   const beforeVault = await evaluate(content, 'window.api.browser.bramble.quickUnlock.get()')
@@ -107,36 +151,36 @@ async function run() {
   await waitFor(() => evaluate(content, `(() => { const b = ${setupButton}; return !!b && !b.disabled && !document.querySelector('.bramble-quick-unlock-needs-vault') })()`), 'Set up PIN enabled once the vault exists')
   smoke.step(`Settings enabled setup after the vault was created (${stillMounted ? 'live, without remounting' : 'after reopening Integrations'})`)
 
-  // 2. Enrol through the Settings IPC (what Settings → Integrations → Quick unlock calls).
-  const bad = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol({ masterPassword: 'x', pin: '12', confirmPin: '12', touchId: false, requireMasterAfterRestart: true })`)
+  // 2. Enrol through the Settings IPC (what Settings → Integrations → Quick unlock calls). No
+  // restart mode given: persisted wherever safeStorage can protect the key (macOS Keychain),
+  // memory-only where it cannot (headless Linux has no keyring, so basic_text is refused).
+  const bad = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol({ masterPassword: 'x', pin: '12', confirmPin: '12', touchId: false })`)
   assert.equal(bad.ok, false)
-  const enrolled = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol(${JSON.stringify({ masterPassword: MASTER, pin: PIN, confirmPin: PIN, touchId: false, requireMasterAfterRestart: true })})`)
+  const enrolled = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol(${JSON.stringify({ masterPassword: MASTER, pin: PIN, confirmPin: PIN, touchId: false })})`)
   assert.equal(enrolled.ok, true, JSON.stringify(enrolled))
   assert.equal(enrolled.state.armed, true)
-  const onDisk = readFileSync(join(userData, 'bramble-quick-unlock.json'), 'utf8')
+  const persisted = enrolled.state.persistAvailable
+  assert.equal(enrolled.state.requireMasterAfterRestart, !persisted, 'persisted is the default when secure storage exists')
+  const onDisk = readFileSync(configFile, 'utf8')
   assert.equal(onDisk.includes(MASTER), false, 'no plaintext master password on disk')
-  assert.equal(JSON.parse(onDisk).pin, undefined, 'memory-only by default: no PIN slot on disk')
-  smoke.step('PIN enrolled (memory-only)')
+  assert.equal(JSON.parse(onDisk).pin === undefined, !persisted, persisted ? 'persisted: PIN slot on disk' : 'memory-only: no PIN slot on disk')
+  smoke.step(`PIN enrolled (${persisted ? 'persisted, the default' : 'memory-only: no secure key storage here'})`)
   // Settings → Integrations shows the section (lazy chunk) with its live status.
   await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "integrations" })')
   await waitFor(() => evaluate(content, `!!document.querySelector('.bramble-quick-unlock-settings') && document.querySelector('.bramble-quick-unlock-settings').textContent.includes('Turn off quick unlock')`), 'the Quick unlock settings section')
   await evaluate(content, `document.querySelector('.bramble-quick-unlock-settings').scrollIntoView(); true`)
   await delay(300)
   await shot(content, 'settings-enabled')
+  // The restart-mode switch is in Settings after setup (enabled while armed, unless there is no
+  // secure storage to switch to persisted with).
+  const toggle = `document.querySelector('.bramble-quick-unlock-require-master')`
+  const toggleState = await evaluate(content, `(() => { const t = ${toggle}; return t && { checked: t.checked, disabled: t.disabled } })()`)
+  assert.ok(toggleState, 'the Require master password switch is shown after setup')
+  assert.deepEqual(toggleState, { checked: !persisted, disabled: !persisted })
+  smoke.step('restart-mode switch shown in Settings after setup')
 
   const lock = () => evaluate(options, `new Promise((done) => chrome.runtime.sendMessage({ type: 'CRYPTO_LOCK' }, () => done(true)))`)
   const isLocked = async () => (await evaluate(options, `new Promise((done) => chrome.runtime.sendMessage({ type: 'CRYPTO_IS_LOCKED' }, (r) => done(r)))`)).data === true
-  const popupWindow = () => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed() && win.isVisible() && win.webContents.getURL().endsWith('/popup.html'))
-  const overlayOf = (popup) => popup.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && view.webContents.getURL().startsWith('data:text/html'))
-  const openPopup = async () => {
-    const state = await evaluate(toolbar, 'window.api.browser.bramble.open()')
-    try {
-      return await waitFor(popupWindow, 'the Bramble popup', 15000)
-    } catch (error) {
-      console.log('open() ->', JSON.stringify(state), BrowserWindow.getAllWindows().map((win) => `${win.getTitle()} ${win.isVisible()} ${win.webContents.getURL()}`))
-      throw error
-    }
-  }
 
   // 3. Locked popup: Surffish's PIN panel appears over Bramble's unlock form.
   await lock()
@@ -144,6 +188,7 @@ async function run() {
   let popup = await openPopup()
   let overlay = await waitFor(() => overlayOf(popup), 'the quick unlock panel over the popup', 30000)
   await waitFor(() => evaluate(overlay.webContents, `!document.getElementById('pin-mode').hidden`), 'the PIN pad')
+  assert.equal(await evaluate(overlay.webContents, `!!document.getElementById('rearm-mode') || !!document.querySelector('input')`), false, 'no Surffish master password screen exists')
   const [pw, ph] = popup.getContentSize()
   const bounds = overlay.getBounds()
   assert.deepEqual([bounds.width, bounds.height], [pw, ph], 'the panel covers the popup')
@@ -199,11 +244,145 @@ async function run() {
 
   // 8. Disable removes the file.
   assert.equal((await evaluate(content, 'window.api.browser.bramble.quickUnlock.disable()')).ok, true)
-  assert.equal(existsSync(join(userData, 'bramble-quick-unlock.json')), false)
-  console.log('BRAMBLE QUICK UNLOCK APP CHECK PASSED')
+  assert.equal(existsSync(configFile), false)
+  smoke.step('disable removed the file')
+
+  // 9. For phase 2: a memory-only enrolment as written before the mode was switchable.
+  const memoryOnly = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol(${JSON.stringify({ masterPassword: MASTER, pin: PIN, confirmPin: PIN, touchId: false, requireMasterAfterRestart: true })})`)
+  assert.equal(memoryOnly.ok, true, JSON.stringify(memoryOnly))
+  const legacy = JSON.parse(readFileSync(configFile, 'utf8'))
+  assert.equal(legacy.restartModeChosen, true)
+  delete legacy.restartModeChosen
+  writeFileSync(configFile, JSON.stringify(legacy), { mode: 0o600 })
+  await lock()
+  smoke.step('memory-only enrolment left for the restart phase')
+  console.log('BRAMBLE QUICK UNLOCK APP CHECK PHASE 1 PASSED')
 }
 
-run().then(() => app.exit(0), (error) => {
-  console.error('BRAMBLE QUICK UNLOCK APP CHECK FAILED:', error && error.stack ? error.stack : error)
+/** Phase 2: Surffish restarted with that memory-only enrolment. */
+async function restartPhase() {
+  const { content, openPopup } = await start()
+  const get = () => evaluate(content, 'window.api.browser.bramble.quickUnlock.get()')
+  const before = await get()
+  assert.deepEqual([before.enabled, before.armed, before.canRearm, before.migratesOnRearm], [true, false, true, true], JSON.stringify(before))
+  assert.equal(before.notice, null, 'Settings explains re-arming from canRearm; no duplicate notice')
+  smoke.step('after restart: enabled, not armed, re-armable (and due to migrate)')
+
+  // Settings: the switch can't move until quick unlock is armed; the hint says how to arm it.
+  await evaluate(content, 'window.api.browser.chrome.set({ sidebarMode: "integrations" })').catch(() => {})
+  const toggle = `document.querySelector('.bramble-quick-unlock-require-master')`
+  await waitFor(() => evaluate(content, `(() => { const t = ${toggle}; return !!t && t.disabled && !!document.querySelector('.bramble-quick-unlock-rearm-hint') })()`), 'the disabled switch with the re-arm hint')
+  await evaluate(content, `document.querySelector('.bramble-quick-unlock-settings').scrollIntoView(); true`)
+  await delay(300)
+  await shot(content, 'settings-after-restart')
+  smoke.step('Settings: switch disabled until armed, re-arm hint shown')
+
+  // Locked popup: Bramble's own form only, no Surffish overlay of any kind.
+  const popup = await openPopup()
+  const isLocked = async () => (await evaluate(popup.webContents, `new Promise((done) => chrome.runtime.sendMessage({ type: 'CRYPTO_IS_LOCKED' }, (r) => done(r)))`)).data === true
+  assert.equal(await isLocked(), true)
+  await waitFor(() => evaluate(popup.webContents, `!!document.querySelector('form input[name="masterPassword"]')`), 'Bramble’s own unlock form', 30000)
+  await delay(1500)
+  assert.equal(overlayOf(popup), undefined, 'no Surffish screen over Bramble’s form when not armed')
+  await shot(popup.webContents, 'restart-bramble-form')
+  smoke.step('no Surffish overlay: Bramble’s own unlock form is in front')
+
+  // The user types into Bramble's form (main world, like a real keyboard would).
+  const typeIntoBramble = (value) => evaluate(popup.webContents, `(() => {
+    const input = document.querySelector('form input[name="masterPassword"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    input.focus();
+    setter.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.form.querySelector('button[type="submit"]').click();
+    return true;
+  })()`)
+  await typeIntoBramble('definitely not the master password')
+  await waitFor(() => evaluate(popup.webContents, `document.querySelector('input[name="masterPassword"]')?.getAttribute('aria-invalid') === 'true'`), 'Bramble to reject the wrong password', 30000)
+  await delay(1200)
+  const afterWrong = await get()
+  assert.equal(afterWrong.armed, false, 'a wrong master password re-arms nothing')
+  assert.equal(afterWrong.failedAttempts, 0)
+  smoke.step('wrong master password in Bramble’s form: nothing re-armed')
+
+  await waitFor(() => evaluate(popup.webContents, `(() => { const b = document.querySelector('form button[type="submit"]'); return !!b && !b.disabled })()`), 'the form to be ready again')
+  await typeIntoBramble(MASTER)
+  await waitFor(async () => !(await isLocked()), 'Bramble to unlock from its own form', 30000)
+  const armed = await waitFor(async () => { const state = await get(); return state.armed && state }, 'quick unlock to re-arm from what Bramble was given', 15000)
+  const file = JSON.parse(readFileSync(configFile, 'utf8'))
+  assert.equal(JSON.stringify(file).includes(MASTER), false)
+  if (armed.persistAvailable) {
+    assert.deepEqual([armed.requireMasterAfterRestart, typeof file.pin, file.rearm], [false, 'object', undefined], 'migrated to persisted')
+  } else {
+    assert.deepEqual([armed.requireMasterAfterRestart, typeof file.rearm, file.pin], [true, 'object', undefined], 'no secure storage: stays memory-only')
+  }
+  smoke.step(`right master password in Bramble’s form re-armed the PIN (${armed.persistAvailable ? 'migrated to persisted' : 'still memory-only: no secure storage here'})`)
+
+  // Next lock: the PIN pad is back, and the PIN unlocks.
+  await evaluate(popup.webContents, `new Promise((done) => chrome.runtime.sendMessage({ type: 'CRYPTO_LOCK' }, () => done(true)))`)
+  const overlay = await waitFor(() => overlayOf(popup), 'the PIN pad after re-arming', 30000)
+  await waitFor(() => evaluate(overlay.webContents, `!document.getElementById('pin-mode').hidden`), 'the PIN pad')
+  await shot(overlay.webContents, 'restart-pin-pad')
+  for (const key of [...PIN, 'Enter']) await evaluate(overlay.webContents, `document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true })); true`)
+  await waitFor(async () => !(await isLocked()), 'Bramble to unlock from the PIN', 30000)
+  smoke.step('PIN pad back on the next lock; PIN unlocked Bramble')
+
+  // Settings: armed now, so the switch is usable (to persisted only where secure storage exists).
+  await waitFor(() => evaluate(content, `(() => { const t = ${toggle}; return !!t && t.disabled === ${!armed.persistAvailable && armed.requireMasterAfterRestart} && !document.querySelector('.bramble-quick-unlock-rearm-hint') })()`), 'the switch state once armed')
+  // Turning memory-only on needs the PIN; already on here, so it is a no-op that records the choice.
+  const keep = await evaluate(content, `window.api.browser.bramble.quickUnlock.setRequireMaster({ require: ${armed.requireMasterAfterRestart} })`)
+  assert.equal(keep.ok, true, JSON.stringify(keep))
+  assert.equal(JSON.parse(readFileSync(configFile, 'utf8')).restartModeChosen, true)
+  smoke.step('Settings switch usable once armed')
+  console.log('BRAMBLE QUICK UNLOCK APP CHECK PHASE 2 PASSED')
+}
+
+
+/** Phase 3: restarted again after the migration. */
+async function persistedPhase() {
+  const { content, openPopup } = await start()
+  const get = () => evaluate(content, 'window.api.browser.bramble.quickUnlock.get()')
+  const state = await get()
+  if (state.requireMasterAfterRestart) {
+    assert.equal(state.persistAvailable, false)
+    smoke.step('no secure key storage here: persisted phase skipped (run under scripts/with-linux-keyring.sh to cover it)')
+    console.log('BRAMBLE QUICK UNLOCK APP CHECK PHASE 3 SKIPPED')
+    return
+  }
+  assert.deepEqual([state.enabled, state.armed, state.notice], [true, true, null], JSON.stringify(state))
+  smoke.step('after another restart: armed straight away')
+  const popup = await openPopup()
+  const isLocked = async () => (await evaluate(popup.webContents, `new Promise((done) => chrome.runtime.sendMessage({ type: 'CRYPTO_IS_LOCKED' }, (r) => done(r)))`)).data === true
+  assert.equal(await isLocked(), true)
+  const overlay = await waitFor(() => overlayOf(popup), 'the PIN pad straight after a restart', 30000)
+  await waitFor(() => evaluate(overlay.webContents, `!document.getElementById('pin-mode').hidden`), 'the PIN pad')
+  for (const key of [...PIN, 'Enter']) await evaluate(overlay.webContents, `document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true })); true`)
+  await waitFor(async () => !(await isLocked()), 'Bramble to unlock from the PIN', 30000)
+  smoke.step('PIN unlocked Bramble with no master password since the restart')
+
+  const set = (input) => evaluate(content, `window.api.browser.bramble.quickUnlock.setRequireMaster(${JSON.stringify(input)})`)
+  const noPin = await set({ require: true })
+  assert.equal(noPin.ok, false)
+  const wrong = await set({ require: true, pin: '000000' })
+  assert.equal(wrong.ok, false)
+  assert.match(wrong.error, /Wrong PIN/)
+  assert.equal(wrong.state.failedAttempts, 1)
+  const on = await set({ require: true, pin: PIN })
+  assert.equal(on.ok, true, JSON.stringify(on))
+  let file = JSON.parse(readFileSync(configFile, 'utf8'))
+  assert.deepEqual([file.requireMasterAfterRestart, file.restartModeChosen, file.pin, file.deviceKey, typeof file.rearm, file.failedAttempts], [true, true, undefined, undefined, 'object', 0])
+  assert.equal(on.state.armed, true)
+  smoke.step('Settings: memory-only on (needs the PIN; a wrong one is counted)')
+  const off = await set({ require: false })
+  assert.equal(off.ok, true, JSON.stringify(off))
+  file = JSON.parse(readFileSync(configFile, 'utf8'))
+  assert.deepEqual([file.requireMasterAfterRestart, typeof file.pin, typeof file.deviceKey, file.rearm], [false, 'object', 'string', undefined])
+  assert.equal(JSON.stringify(file).includes(MASTER), false)
+  smoke.step('Settings: back to persisted')
+  console.log('BRAMBLE QUICK UNLOCK APP CHECK PHASE 3 PASSED')
+}
+
+;(phase === '3' ? persistedPhase() : phase === '2' ? restartPhase() : run()).then(() => app.exit(0), (error) => {
+  console.error(`BRAMBLE QUICK UNLOCK APP CHECK FAILED (phase ${phase}):`, error && error.stack ? error.stack : error)
   app.exit(1)
-}).finally(() => smoke.removeProfile?.(root))
+}).finally(() => { if (!process.env.CHECK_ROOT) smoke.removeProfile?.(root) })
