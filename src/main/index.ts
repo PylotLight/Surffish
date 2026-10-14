@@ -1,4 +1,6 @@
-// First: scopes every IPC handler registered after it to the sender's window (multi-window).
+// First: log and count main-process errors instead of Electron's modal error dialog (crash-guard.ts).
+import './crash-guard'
+// Then: scopes every IPC handler registered after it to the sender's window (multi-window).
 import { installIpcWindowScope } from './ipc-window-scope'
 import { app } from 'electron'
 import { dirname, join } from 'node:path'

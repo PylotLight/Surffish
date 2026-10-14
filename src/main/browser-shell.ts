@@ -367,12 +367,22 @@ export function isToolbarRenderer(contents: WebContents): boolean {
 
 /** Broadcast to every window's app surfaces (history, bookmarks, settings and other app-wide changes). */
 export function sendToMainWindowRenderers(channel: string, ...args: unknown[]): void {
-  for (const contents of getMainWindowRenderers()) contents.send(channel, ...args)
+  for (const contents of getMainWindowRenderers()) sendIfAlive(contents, channel, args)
+}
+
+/**
+ * A surface whose renderer just died (it reloads itself, see crash-guard.ts) has no frame to send
+ * to; skip it instead of Electron logging "Render frame was disposed" for every broadcast meanwhile.
+ * It asks for fresh state when it loads again.
+ */
+function sendIfAlive(contents: WebContents, channel: string, args: unknown[]): void {
+  if (contents.isCrashed()) return
+  contents.send(channel, ...args)
 }
 
 /** Send to one window's app surfaces (its tabs, page state, find bar, chrome state). */
 export function sendToWindowRenderers(window: BaseWindow, channel: string, ...args: unknown[]): void {
-  for (const contents of getWindowRenderers(window)) contents.send(channel, ...args)
+  for (const contents of getWindowRenderers(window)) sendIfAlive(contents, channel, args)
 }
 
 export function getBrowserChromeState(window?: BaseWindow | null): BrowserChromeState {

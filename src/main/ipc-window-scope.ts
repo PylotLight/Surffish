@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { runInWindow, windowForContents } from './window-scope'
+import { reportMainError } from './crash-guard'
 
 type IpcListener = (event: Electron.IpcMainEvent, ...args: any[]) => void
 type IpcHandler = (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown
@@ -14,10 +15,21 @@ export function installIpcWindowScope(): void {
   if (installed) return
   installed = true
   const wrapped = new WeakMap<(...args: any[]) => unknown, (...args: any[]) => unknown>()
-  const wrapListener = (listener: IpcListener): IpcListener => {
+  const wrapListener = (listener: IpcListener, channel: string): IpcListener => {
     const existing = wrapped.get(listener)
     if (existing) return existing as IpcListener
-    const scopedListener: IpcListener = (event, ...args) => runInWindow(windowForContents(event.sender), () => listener(event, ...args))
+    // A listener that throws (bad or missing input from a renderer) or rejects is logged and
+    // counted here, at its channel, instead of surfacing as an uncaught main-process error.
+    const scopedListener: IpcListener = (event, ...args) => {
+      try {
+        const result: unknown = runInWindow(windowForContents(event.sender), () => listener(event, ...args))
+        if (result && typeof (result as Promise<unknown>).then === 'function') {
+          ;(result as Promise<unknown>).then(undefined, (error: unknown) => reportMainError('ipcListenerErrors', error, `ipc listener "${channel}"`))
+        }
+      } catch (error) {
+        reportMainError('ipcListenerErrors', error, `ipc listener "${channel}"`)
+      }
+    }
     wrapped.set(listener, scopedListener)
     return scopedListener
   }
@@ -26,9 +38,9 @@ export function installIpcWindowScope(): void {
   const originalRemoveListener = ipcMain.removeListener.bind(ipcMain)
   const originalHandle = ipcMain.handle.bind(ipcMain)
   const originalHandleOnce = ipcMain.handleOnce.bind(ipcMain)
-  ipcMain.on = ((channel: string, listener: IpcListener) => originalOn(channel, wrapListener(listener))) as typeof ipcMain.on
+  ipcMain.on = ((channel: string, listener: IpcListener) => originalOn(channel, wrapListener(listener, channel))) as typeof ipcMain.on
   ipcMain.addListener = ipcMain.on
-  ipcMain.once = ((channel: string, listener: IpcListener) => originalOnce(channel, wrapListener(listener))) as typeof ipcMain.once
+  ipcMain.once = ((channel: string, listener: IpcListener) => originalOnce(channel, wrapListener(listener, channel))) as typeof ipcMain.once
   ipcMain.removeListener = ((channel: string, listener: IpcListener) => originalRemoveListener(channel, (wrapped.get(listener) as IpcListener | undefined) ?? listener)) as typeof ipcMain.removeListener
   ipcMain.off = ipcMain.removeListener
   ipcMain.handle = ((channel: string, handler: IpcHandler) => originalHandle(channel, (event, ...args) => runInWindow(windowForContents(event.sender), () => handler(event, ...args)))) as typeof ipcMain.handle

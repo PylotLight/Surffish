@@ -111,7 +111,42 @@ export function spellingMenuItems(params: Pick<ContextMenuParamsInput, 'isEditab
   return items
 }
 
-export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, options: ContextMenuTemplateOptions, actions: ContextMenuActions): MenuItemConstructorOptions[] {
+const NO_EDIT_FLAGS: ContextMenuParamsInput['editFlags'] = {
+  canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canDelete: false, canSelectAll: false, canEditRichly: false
+}
+
+const text = (value: unknown): string => typeof value === 'string' ? value : ''
+
+/**
+ * Fill in whatever a partial `context-menu` event left out. Chromium always sends every field, but
+ * synthetic events (an `emit('context-menu', …)` from a test or a forwarded right-click) can carry
+ * only x/y, and a TypeError here used to escape as an unhandled rejection with no menu shown.
+ */
+export function normalizeContextMenuParams(params: Partial<ContextMenuParamsInput> | null | undefined): ContextMenuParamsInput {
+  const input = params ?? {}
+  const finite = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0
+  return {
+    ...input,
+    x: finite(input.x),
+    y: finite(input.y),
+    isEditable: input.isEditable === true,
+    editFlags: { ...NO_EDIT_FLAGS, ...(input.editFlags ?? {}) },
+    selectionText: text(input.selectionText),
+    linkURL: text(input.linkURL),
+    srcURL: text(input.srcURL),
+    mediaType: input.mediaType ?? 'none',
+    hasImageContents: input.hasImageContents === true,
+    misspelledWord: text(input.misspelledWord),
+    dictionarySuggestions: Array.isArray(input.dictionarySuggestions) ? input.dictionarySuggestions.filter((entry): entry is string => typeof entry === 'string') : [],
+    spellcheckEnabled: input.spellcheckEnabled === true,
+    pageURL: text(input.pageURL),
+    suggestedFilename: text(input.suggestedFilename),
+    ...(typeof input.linkText === 'string' ? { linkText: input.linkText } : {})
+  }
+}
+
+export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInput, options: ContextMenuTemplateOptions, actions: ContextMenuActions): MenuItemConstructorOptions[] {
+  const params = normalizeContextMenuParams(rawParams)
   const items: MenuItemConstructorOptions[] = []
   const flags = params.editFlags
 
