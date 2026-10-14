@@ -14,14 +14,14 @@ Your favorites, history, and preferences are stored locally. Address suggestions
 
 ## Install on macOS
 
-The Homebrew tap and macOS packaging are prepared, but Surffish does not yet have a published release or an installable Cask. These commands will work after the first release archives and matching Cask with real SHA-256 hashes are published:
+Surffish ships as an Apple silicon zip on [GitHub Releases](https://github.com/PylotLight/Surffish/releases), and this repository doubles as its Homebrew tap:
 
 ```bash
 brew tap pylotlight/surffish https://github.com/PylotLight/Surffish.git
 brew install --cask surffish
 ```
 
-Surffish is currently planned as an unsigned, non-notarized app. If macOS blocks a downloaded copy with a “damaged” warning, first make sure it came from the official [Surffish releases](https://github.com/PylotLight/Surffish/releases) and that you trust it. Then remove the quarantine attribute and open the app again:
+Surffish is an unsigned, non-notarized app. If macOS blocks a downloaded copy with a “damaged” warning, first make sure it came from the official [Surffish releases](https://github.com/PylotLight/Surffish/releases) and that you trust it. Then remove the quarantine attribute and open the app again:
 
 ```bash
 xattr -cr /Applications/Surffish.app

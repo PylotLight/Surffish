@@ -2,7 +2,13 @@
 
 ## The proxy is on but pages do not load
 
-Make sure the SSH dynamic-forwarding command is still running on the same computer, and that its `-D` port matches Surffish's **SOCKS5** settings. **Test port** checks only whether a TCP service is listening; it does not test the SOCKS handshake or SSH destination. Turn **Use proxy** off to test a direct connection.
+Surffish only talks to a local SOCKS5 endpoint; it does not start SSH for you. A typical one:
+
+```bash
+ssh -N -D 127.0.0.1:1080 user@your-ssh-host
+```
+
+Make sure the SSH dynamic-forwarding command is still running on the same computer, and that its `-D` port matches Surffish's **SOCKS5** settings. **Test port** checks only whether a TCP service is listening; it does not test the SOCKS handshake or SSH destination. Turn the **SOCKS5 proxy** switch off in **Settings → General** to test a direct connection.
 
 ## Address bar does not open the expected page
 
@@ -10,7 +16,7 @@ Press Enter after typing. Domain-like hosts are opened as URLs; ordinary text is
 
 ## Ads still appear or a page request fails
 
-Network filtering blocks matching subresource requests, not cosmetic page elements. Surffish allows `googlevideo.com` delivery hosts so YouTube playback is not interrupted; ads delivered through those shared hosts may remain. Use the **Network** inspector to review requests and Electron's native Web inspector for Chromium page/runtime investigation. The separate Diagnostics page has been removed; the filtering engine refreshes its lists at startup when the cache is stale.
+Filtering blocks matching requests and applies uBO cosmetic and scriptlet rules; the per-site switch turns it off for one site. Surffish allows `googlevideo.com` delivery hosts so YouTube playback is not interrupted; ads delivered through those shared hosts may remain. Use the **Network** inspector to review requests and Electron's native Web inspector for Chromium page/runtime investigation. The filtering engine refreshes its lists at startup when the cache is stale, then every 8 hours.
 
 ## A download is interrupted, canceled, or missing
 

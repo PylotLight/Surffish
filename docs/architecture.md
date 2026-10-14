@@ -5,7 +5,7 @@ Surffish uses a trusted Electron main process, a native `BaseWindow` view tree, 
 ```text
                      ┌── local full-app renderer (New Tab, settings, full panels)
 BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
-                     ├── glass sidebar renderer (zero-width hidden / 320px overlay)
+                     ├── glass sidebar renderer (zero-width hidden / user-sized overlay)
                      └── per-tab remote WebContentsViews (full-width page, lower layer)
                                       │
                                       └── shared persistent SOCKS5 browser session
@@ -17,10 +17,11 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 - Persisted browser preferences are read as one snapshot and broadcast to all three local surfaces, keeping pins and the selected search engine coherent when the visible renderer changes.
 - `src/main/browser.ts` — lazy per-tab page views, configurable tab hibernation, active-tab switching, full-width page bounds, navigation, and restoration of the last open tabs.
 - `src/main/network-inspector.ts` — opt-in per-tab Chromium DevTools Protocol Network capture, a 1,000-request in-memory ring, and on-demand request/response detail lookup.
-- `src/main/deferred-writes.ts` — coalesces hot-path JSON writes (session tabs, history, favicon cache, downloads) and flushes them on quit. New frequently-updated stores should go through `deferWrite`.
-- `src/main/browser-persistence.ts` — app-data persistence for open tab URLs, active tab, and browser preferences including the tab-sleep interval.
+- `src/main/deferred-writes.ts` — coalesces hot-path writes (session tabs, history, favicon cache, downloads) and flushes them on quit, before `surffish.db` closes. New frequently-updated stores should go through `deferWrite`.
+- `src/main/store/` — the profile's SQLite database (`surffish.db`) for history, the window/tab session, bookmarks, preferences and Spaces, with JSON files kept as fallback copies; see [Profile storage](storage.md).
+- `src/main/browser-persistence.ts` — open windows/tabs, active tab, and browser preferences (tab-sleep interval, site settings, zoom), saved through `src/main/store/` with the JSON fallback.
 - `src/main/session-cookies.ts` — encrypted snapshot/restore of session-only cookies using Electron safeStorage when OS-backed encryption is available.
-- `src/main/history.ts` — validated, bounded browsing history persisted in the app's user-data directory.
+- `src/main/history.ts` — validated, bounded browsing history, stored in `surffish.db` (falls back to `browsing-history.json`).
 - `src/main/proxy.ts` — validates loopback-only SOCKS5 settings, persists them, and configures the persistent site session.
 - `src/main/ipc.ts` — browser IPC guarded to the three trusted local renderer views; toolbar geometry reports are accepted only from the toolbar surface.
 - `src/preload/index.ts` — narrow, typed browser API exposed through `contextBridge` to the local renderers only.
