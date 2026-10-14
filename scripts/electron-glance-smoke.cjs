@@ -280,7 +280,10 @@ async function run() {
   await clickElement(startAgain, '#peek', ['shift'])
   const toSplit = await openedGlance('/peek', 'a glance to split')
   await smoke.evaluate(toSplit, 'window.__splitMarker = 7; true')
-  await smoke.evaluate(glanceChromes()[0], 'window.glance.split(); true')
+  // Splitting closes the glance header itself, so its webContents can be destroyed before the reply arrives.
+  await smoke.evaluate(glanceChromes()[0], 'window.glance.split(); true').catch((error) => {
+    if (!error.destroyed) throw error
+  })
   const split = await waitFor(async () => { const snapshot = await smoke.evaluate(toolbar, 'window.api.browser.split.get()'); return snapshot.visible && snapshot.splits[0] }, 'a split with the glance page')
   const splitTabs = await tabs()
   assert.equal(splitTabs.length, 2)
