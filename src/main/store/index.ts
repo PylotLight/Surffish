@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'node:path'
-import { StoreOpenError, SurffishDatabase } from './database'
+import { beginShutdownWrites } from '../deferred-writes'
+import { isStoreClosedError, StoreOpenError, SurffishDatabase } from './database'
 
 /**
  * The profile database for this run, opened lazily on first use.
@@ -71,8 +72,25 @@ export function getProfileStoreStatus(): ProfileStoreStatus {
   return status!
 }
 
+/**
+ * Close surffish.db at quit, after every queued write has landed. Deferred writes are flushed
+ * here first (and run at once from then on), so a save timer can't fire against a closed database
+ * whichever 'quit' listener Electron calls first. `app.exit()` (smokes, crash paths) skips
+ * 'will-quit' but still emits 'quit', so this covers it too.
+ */
 export function closeProfileDatabase(): void {
-  database?.close()
+  if (!database?.isOpen) return
+  beginShutdownWrites()
+  database.close()
+}
+
+/**
+ * Log a failed database write unless it only failed because the database closed at quit: the
+ * caller keeps its JSON copy, and that file (newer than the import stamp) wins at the next start.
+ */
+export function reportStoreWriteError(message: string, error: unknown): void {
+  if (isStoreClosedError(error)) return
+  console.error(message, error)
 }
 
 function installQuitHook(): void {

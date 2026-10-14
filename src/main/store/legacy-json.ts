@@ -84,7 +84,8 @@ export function writeLegacyJson(path: string, value: unknown): boolean {
  *   reads the database, which has the newer data.
  */
 export function settleDualWrite(db: SurffishDatabase | null, filename: string, path: string, databaseSaved: boolean, jsonSaved: boolean): void {
-  if (!db) return
+  // Closed at quit: the JSON file was just written, so it no longer matches the stamp and wins anyway.
+  if (!db || !db.isOpen) return
   try {
     if (databaseSaved && jsonSaved) markLegacyFileImported(db, filename, path)
     else if (!databaseSaved) db.deleteMeta(metaKey(filename))

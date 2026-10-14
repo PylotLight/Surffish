@@ -5,7 +5,7 @@ import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BrowsingHistoryEntry } from '../shared/types'
 import { normalizeFaviconUrl } from '../shared/persistence'
-import { getProfileDatabase } from './store'
+import { getProfileDatabase, reportStoreWriteError } from './store'
 import { HistoryStore } from './store/history-store'
 import { importLegacyHistory, LEGACY_HISTORY_FILE, parseLegacyHistory, scrubLegacyHistory } from './store/history-legacy'
 import { readLegacyJson } from './store/legacy-json'
@@ -54,7 +54,7 @@ function write(run: (target: HistoryStore) => void): void {
   try {
     run(target)
   } catch (error) {
-    console.error('History database write failed; falling back to browsing-history.json:', error)
+    reportStoreWriteError('History database write failed; falling back to browsing-history.json:', error)
     sqlStore = null
     persistHistory()
   }

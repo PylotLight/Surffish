@@ -25,6 +25,21 @@ export class StoreOpenError extends Error {
   }
 }
 
+/**
+ * A read or write after `close()` (the app is quitting). Callers that also keep a JSON copy treat
+ * it as "the database has gone for this run" and skip the error log: see `isStoreClosedError`.
+ */
+export class StoreClosedError extends Error {
+  constructor(readonly path: string) {
+    super(`surffish.db is closed (${path})`)
+    this.name = 'StoreClosedError'
+  }
+}
+
+export function isStoreClosedError(error: unknown): error is StoreClosedError {
+  return error instanceof StoreClosedError
+}
+
 export interface OpenStoreOptions {
   /** File path, or ':memory:' for tests. */
   path: string
@@ -118,6 +133,7 @@ export class SurffishDatabase {
 
   /** A cached prepared statement. */
   statement(sql: string): StatementSync {
+    this.assertOpen()
     let statement = this.statements.get(sql)
     if (!statement) {
       statement = this.db.prepare(sql)
@@ -139,11 +155,13 @@ export class SurffishDatabase {
   }
 
   exec(sql: string): void {
+    this.assertOpen()
     this.db.exec(sql)
   }
 
   /** Run `fn` in one transaction (nested calls join the outer one). Rolls back if it throws. */
   transaction<T>(fn: () => T): T {
+    this.assertOpen()
     if (this.depth > 0) {
       this.depth += 1
       try { return fn() } finally { this.depth -= 1 }
@@ -211,6 +229,7 @@ export class SurffishDatabase {
 
   /** Fold WAL back into the main file (TRUNCATE also shrinks the -wal to zero, e.g. after Clear history). */
   checkpoint(mode: 'PASSIVE' | 'TRUNCATE' = 'PASSIVE'): void {
+    if (this.closed) return
     try {
       this.db.exec(`PRAGMA wal_checkpoint(${mode})`)
     } catch (error) {
@@ -220,18 +239,22 @@ export class SurffishDatabase {
 
   close(): void {
     if (this.closed) return
-    this.closed = true
     try {
       this.setMeta('hlc_last', this.clock.last())
       this.db.exec('PRAGMA optimize')
       this.checkpoint('PASSIVE')
     } catch { /* closing anyway */ }
+    this.closed = true
     this.statements.clear()
     this.db.close()
   }
 
   get isOpen(): boolean {
     return !this.closed
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new StoreClosedError(this.path)
   }
 
   private ensureDeviceId(options: OpenStoreOptions): string {

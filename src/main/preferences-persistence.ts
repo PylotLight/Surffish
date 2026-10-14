@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import type { BrowserPreferences } from '../shared/persistence'
 import { cancelDeferredWrite, deferWrite } from './deferred-writes'
-import { getProfileDatabase } from './store'
+import { getProfileDatabase, reportStoreWriteError } from './store'
 import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
 import { PreferencesTable } from './store/preferences-store'
 
@@ -42,7 +42,7 @@ function saveToDatabase(preferences: BrowserPreferences): boolean {
     target.save(preferences)
     return true
   } catch (error) {
-    console.error('Could not save preferences to the database (browser-preferences.json still has them):', error)
+    reportStoreWriteError('Could not save preferences to the database (browser-preferences.json still has them):', error)
     table = null
     return false
   }

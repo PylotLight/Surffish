@@ -21,7 +21,7 @@ import type { SavedWindowState } from '../shared/window-geometry'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
 import { createFileTextCache, isOwnerOnlyMode } from '../shared/write-skip'
-import { getProfileDatabase } from './store'
+import { getProfileDatabase, reportStoreWriteError } from './store'
 import { SessionStore } from './store/session-store'
 import { legacyFileNeedsImport, markLegacyFileImported } from './store/legacy-json'
 import { loadPreferencesSource, savePreferencesCopies } from './preferences-persistence'
@@ -171,7 +171,7 @@ function saveSessionToDatabase(saved: SavedWindowsSession): boolean {
     store.save(saved)
     return true
   } catch (error) {
-    console.error('Could not save the session to the database (browser-session.json still has it):', error)
+    reportStoreWriteError('Could not save the session to the database (browser-session.json still has it):', error)
     return false
   }
 }
