@@ -113,6 +113,89 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
     });
   }
   const extensionApi = globalThis.browser;
+  // Electron 44 never fires chrome.storage.onChanged in an extension service worker (pages get it),
+  // so Bramble's background missed e.g. an auto-lock timeout change until its next restart. The
+  // always-running offscreen page relays storage changes to the worker, which replays them to the
+  // listeners Bramble registered. Only the "local" area is relayed (prefs, vault metadata): the
+  // "session" area holds key material and Bramble's worker already re-reads it directly. Large
+  // values (vault blobs) travel as keys only, which is all Bramble's worker listeners read.
+  // Replaying stops once the native event is seen in the worker (a future Electron fix).
+  const STORAGE_MESSAGE = '__surffishBrambleStorageChanged';
+  const STORAGE_MAX_VALUE_CHARS = 64 * 1024;
+  const isStorageRelay = (message) => !!message && typeof message === 'object' && Object.prototype.hasOwnProperty.call(message, STORAGE_MESSAGE);
+  const extensionContext = typeof globalThis.document === 'undefined' || globalThis.location?.protocol === 'chrome-extension:';
+  const runtimeOnMessage = extensionApi?.runtime?.onMessage;
+  const addRuntimeListener = runtimeOnMessage && typeof runtimeOnMessage.addListener === 'function' ? runtimeOnMessage.addListener.bind(runtimeOnMessage) : null;
+  if (extensionContext && addRuntimeListener && !runtimeOnMessage.__surffishStorageFiltered) {
+    const removeRuntimeListener = runtimeOnMessage.removeListener.bind(runtimeOnMessage);
+    const hasRuntimeListener = runtimeOnMessage.hasListener.bind(runtimeOnMessage);
+    const wrapped = new WeakMap();
+    try {
+      Object.defineProperty(runtimeOnMessage, '__surffishStorageFiltered', { value: true });
+      Object.defineProperty(runtimeOnMessage, 'addListener', {
+        configurable: true,
+        value: (listener) => {
+          if (typeof listener !== 'function') return addRuntimeListener(listener);
+          let wrapper = wrapped.get(listener);
+          if (!wrapper) {
+            wrapper = function (message, sender, sendResponse) { return isStorageRelay(message) ? undefined : listener.call(this, message, sender, sendResponse); };
+            wrapped.set(listener, wrapper);
+          }
+          return addRuntimeListener(wrapper);
+        }
+      });
+      Object.defineProperty(runtimeOnMessage, 'removeListener', { configurable: true, value: (listener) => removeRuntimeListener(wrapped.get(listener) || listener) });
+      Object.defineProperty(runtimeOnMessage, 'hasListener', { configurable: true, value: (listener) => hasRuntimeListener(wrapped.get(listener) || listener) });
+    } catch {}
+  }
+  const storageOnChanged = extensionApi?.storage?.onChanged;
+  if (typeof globalThis.document === 'undefined' && storageOnChanged && addRuntimeListener && !storageOnChanged.__surffishRelay) {
+    const listeners = new Set();
+    let nativeEvents = false;
+    const nativeAdd = storageOnChanged.addListener.bind(storageOnChanged);
+    const nativeRemove = storageOnChanged.removeListener.bind(storageOnChanged);
+    try {
+      nativeAdd(() => { nativeEvents = true; });
+      Object.defineProperty(storageOnChanged, '__surffishRelay', { value: true });
+      Object.defineProperty(storageOnChanged, 'addListener', { configurable: true, value: (listener) => { if (typeof listener === 'function') listeners.add(listener); return nativeAdd(listener); } });
+      Object.defineProperty(storageOnChanged, 'removeListener', { configurable: true, value: (listener) => { listeners.delete(listener); return nativeRemove(listener); } });
+      Object.defineProperty(storageOnChanged, 'hasListener', { configurable: true, value: (listener) => listeners.has(listener) });
+      Object.defineProperty(storageOnChanged, 'hasListeners', { configurable: true, value: () => listeners.size > 0 });
+      const offscreenUrl = extensionApi.runtime.getURL('offscreen.html');
+      addRuntimeListener((message, sender) => {
+        if (!isStorageRelay(message) || nativeEvents) return undefined;
+        // Only Bramble's own offscreen page relays. (Electron reports a tab even for extension pages,
+        // so the check is the sender URL: a content script's sender URL is the web page's.)
+        if (!sender || sender.id !== extensionApi.runtime.id || typeof sender.url !== 'string' || sender.url.split('#')[0] !== offscreenUrl) return undefined;
+        const relay = message[STORAGE_MESSAGE];
+        if (!relay || typeof relay !== 'object' || relay.area !== 'local' || !relay.changes || typeof relay.changes !== 'object') return undefined;
+        for (const listener of [...listeners]) {
+          try { listener(relay.changes, relay.area); } catch (error) { try { console.error(error); } catch {} }
+        }
+        return undefined;
+      });
+    } catch {}
+  }
+  if (typeof globalThis.document !== 'undefined' && globalThis.location?.protocol === 'chrome-extension:' &&
+      globalThis.location.pathname === '/offscreen.html' && storageOnChanged && extensionApi?.runtime?.sendMessage) {
+    const small = (value) => {
+      if (value === undefined) return true;
+      try { const text = JSON.stringify(value); return typeof text !== 'string' || text.length <= STORAGE_MAX_VALUE_CHARS; } catch { return false; }
+    };
+    storageOnChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes) return;
+      const relayed = {};
+      for (const key of Object.keys(changes)) {
+        const change = changes[key] || {};
+        relayed[key] = small(change.oldValue) && small(change.newValue) ? change : {};
+      }
+      if (Object.keys(relayed).length === 0) return;
+      try {
+        const sent = extensionApi.runtime.sendMessage({ [STORAGE_MESSAGE]: { area, changes: relayed } });
+        if (sent && typeof sent.catch === 'function') sent.catch(() => {});
+      } catch {}
+    });
+  }
   if (typeof globalThis.document === 'undefined' && extensionApi && typeof extensionApi.offscreen === 'undefined') {
     try {
       Object.defineProperty(extensionApi, 'offscreen', {

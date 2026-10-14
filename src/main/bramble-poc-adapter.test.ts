@@ -203,3 +203,97 @@ test('alias shims chrome.windows in the worker and forwards the pop-out to the o
   listener?.({ type: 'unrelated' })
   assert.deepEqual(calls, ['open chrome-extension://abc/popup.html?detached=1', 'close'])
 })
+
+// ---------------------------------------------------------------------------
+// storage.onChanged relay (Electron never fires it in the extension service worker)
+
+function fakeEvent<T extends (...args: never[]) => unknown>() {
+  const listeners: T[] = []
+  return {
+    listeners,
+    addListener: (listener: T) => { listeners.push(listener) },
+    removeListener: (listener: T) => { listeners.splice(listeners.indexOf(listener), 1) },
+    hasListener: (listener: T) => listeners.includes(listener),
+    fire: (...args: Parameters<T>) => { for (const listener of [...listeners]) listener(...args) }
+  }
+}
+
+function fakeChrome(id = 'bramble') {
+  const sent: unknown[] = []
+  return {
+    sent,
+    chrome: {
+      runtime: {
+        id,
+        getURL: (path: string) => `chrome-extension://${id}/${path.replace(/^\//, '')}`,
+        onMessage: fakeEvent<(message: unknown, sender: unknown, sendResponse: () => void) => unknown>(),
+        sendMessage: (message: unknown) => { sent.push(message); return Promise.resolve() }
+      },
+      storage: { onChanged: fakeEvent<(changes: Record<string, unknown>, area: string) => void>() }
+    }
+  }
+}
+
+test('worker: storage changes relayed by Bramble’s offscreen page reach Bramble’s onChanged listeners', async () => {
+  const { chrome } = fakeChrome()
+  const context: Record<string, unknown> = { chrome, console }
+  context.globalThis = context
+  const { runInNewContext } = await import('node:vm')
+  runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, context)
+  const seen: Array<[unknown, string]> = []
+  const bramble = (changes: unknown, area: string): void => { seen.push([changes, area]) }
+  chrome.storage.onChanged.addListener(bramble)
+  const runtimeSeen: unknown[] = []
+  chrome.runtime.onMessage.addListener((message: unknown) => { runtimeSeen.push(message) })
+  const relay = { __surffishBrambleStorageChanged: { area: 'local', changes: { 'pref.autoLockMinutes': { newValue: 1, oldValue: 15 } } } }
+  const offscreen = { id: 'bramble', url: 'chrome-extension://bramble/offscreen.html', tab: { id: 1 } }
+
+  chrome.runtime.onMessage.fire(relay, offscreen, () => {})
+  assert.deepEqual(seen, [[{ 'pref.autoLockMinutes': { newValue: 1, oldValue: 15 } }, 'local']])
+  assert.deepEqual(runtimeSeen, [], 'Bramble’s own message listeners never see the relay')
+
+  // Not from the offscreen page (a content script on a web page, another page, another extension): ignored.
+  chrome.runtime.onMessage.fire(relay, { id: 'bramble', url: 'https://evil.example/', tab: { id: 2 } }, () => {})
+  chrome.runtime.onMessage.fire(relay, { id: 'bramble', url: 'chrome-extension://bramble/popup.html' }, () => {})
+  chrome.runtime.onMessage.fire(relay, { id: 'other', url: 'chrome-extension://bramble/offscreen.html' }, () => {})
+  chrome.runtime.onMessage.fire({ __surffishBrambleStorageChanged: { area: 'session', changes: { k: {} } } }, offscreen, () => {})
+  assert.equal(seen.length, 1)
+
+  // Ordinary messages still reach Bramble.
+  chrome.runtime.onMessage.fire({ type: 'CRYPTO_IS_LOCKED' }, offscreen, () => {})
+  assert.deepEqual(runtimeSeen, [{ type: 'CRYPTO_IS_LOCKED' }])
+
+  // A removed listener stops receiving; once the native event works, relays are ignored.
+  chrome.storage.onChanged.removeListener(bramble)
+  chrome.runtime.onMessage.fire(relay, offscreen, () => {})
+  assert.equal(seen.length, 1)
+  chrome.storage.onChanged.addListener(bramble)
+  chrome.storage.onChanged.fire({ native: {} }, 'local')
+  chrome.runtime.onMessage.fire(relay, offscreen, () => {})
+  assert.deepEqual(seen.at(-1), [{ native: {} }, 'local'])
+  assert.equal(seen.length, 2)
+})
+
+test('offscreen page: relays local-area changes to the worker, with large values reduced to keys and no session area', async () => {
+  const { chrome, sent } = fakeChrome()
+  const context: Record<string, unknown> = { chrome, console, document: {}, location: { protocol: 'chrome-extension:', pathname: '/offscreen.html' } }
+  context.globalThis = context
+  const { runInNewContext } = await import('node:vm')
+  runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, context)
+  chrome.storage.onChanged.fire({ 'pref.autoLockMinutes': { newValue: 5 }, 'vault-blob-b64:1': { newValue: 'x'.repeat(200_000) } }, 'local')
+  chrome.storage.onChanged.fire({ 'vek:1': { newValue: 'secret key material' } }, 'session')
+  // Objects built inside the vm realm: compare their JSON.
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ __surffishBrambleStorageChanged: { area: 'local', changes: { 'pref.autoLockMinutes': { newValue: 5 }, 'vault-blob-b64:1': {} } } }])
+})
+
+test('other extension pages and content scripts do not relay', async () => {
+  for (const location of [{ protocol: 'chrome-extension:', pathname: '/popup.html' }, { protocol: 'https:', pathname: '/offscreen.html' }]) {
+    const { chrome, sent } = fakeChrome()
+    const context: Record<string, unknown> = { chrome, console, document: {}, location }
+    context.globalThis = context
+    const { runInNewContext } = await import('node:vm')
+    runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, context)
+    chrome.storage.onChanged.fire({ 'pref.autoLockMinutes': { newValue: 5 } }, 'local')
+    assert.deepEqual(sent, [], JSON.stringify(location))
+  }
+})
