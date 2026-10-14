@@ -1,3 +1,6 @@
+// These open the overlay with chrome.set({ sidebarHovered: true }) while the real cursor sits
+// elsewhere; the cursor poll (src/main/sidebar-reveal-guard.ts) would rightly close it again.
+process.env.SURFFISH_SIDEBAR_CURSOR_POLL ??= 'off'
 // Overlay sidebar legibility over busy live pages: which backdrop path is in force, that it is
 // opaque enough (or blurred) to read, and before/after screenshots. No xdotool needed: the
 // sidebar is revealed through the chrome-state API the hover handler uses.

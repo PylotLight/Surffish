@@ -375,14 +375,20 @@ async function run() {
   await waitFor(() => evaluate(rendererViews.toolbar, 'document.querySelector(".browser-layout")?.classList.contains("is-sidebar-visible")'), 'shared visible sidebar state on the toolbar')
   await delay(300)
 
-  // Keep the native view temporarily wide enough to capture pointer motion after the panel edge moves.
+  // The drag keeps its implicit mouse capture on the sidebar view, so the view (whose own background
+  // is the native blur/tint underlay) follows the live width instead of widening for the drag.
   const resizeRect = await evaluate(rendererViews.sidebar, `(() => { const r = document.querySelector('.sidebar-resize-handle').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`)
   const resizeStart = screenPointForElement(rendererViews.sidebar, resizeRect)
   const widthBeforeResize = rendererViews.sidebar.getBounds().width
   const widthAfterResize = Math.min(392, contentSize[0])
   pointerMove(resizeStart.x, resizeStart.y + 100)
   pointerDown(resizeStart.x, resizeStart.y + 100)
-  await waitFor(() => rendererViews.sidebar.getBounds().width === Math.min(520, contentSize[0]), 'the native overlay to provide a temporary drag hit-test surface')
+  await waitFor(async () => (await evaluate(rendererViews.toolbar, 'window.api.browser.chrome.get()')).sidebarResizing === true, 'the drag to start')
+  assert.equal(rendererViews.sidebar.getBounds().width, widthBeforeResize, 'starting a drag must not widen the overlay view (its underlay would show at full size)')
+  const widthMidResize = widthBeforeResize + 30
+  pointerMove(resizeStart.x + 30, resizeStart.y + 100)
+  await waitFor(() => evaluate(rendererViews.sidebar, `document.querySelector('.sidebar-resize-handle')?.getAttribute('aria-valuenow') === ${JSON.stringify(String(widthMidResize))}`), 'the sidebar width to follow the drag mid-way')
+  await waitFor(() => rendererViews.sidebar.getBounds().width === widthMidResize, 'the overlay view (and its underlay) to track the live drag width')
   pointerMove(resizeStart.x + widthAfterResize - widthBeforeResize, resizeStart.y + 100)
   await waitFor(() => evaluate(rendererViews.sidebar, `document.querySelector('.sidebar-resize-handle')?.getAttribute('aria-valuenow') === ${JSON.stringify(String(widthAfterResize))}`), 'the sidebar width to follow the captured drag')
   pointerUp()
@@ -444,6 +450,32 @@ async function run() {
   assert.equal(fixturePageView.getBounds().width, contentSize[0], 'hover reveal keeps the live page full width')
   pointerMove(mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350)
   await waitFor(() => !rendererViews.sidebar.getVisible(), 'the hover-only sidebar to hide again')
+
+  // Reveal locks main releases on its own (src/main/sidebar-reveal-guard.ts).
+  const chromeState = () => evaluate(rendererViews.toolbar, 'window.api.browser.chrome.get()')
+  const pagePoint = { x: mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), y: mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350 }
+  // 1) A drag whose mouseup the sidebar never saw (released outside the window) plus keyboard focus
+  //    in the sidebar: the view stays at the panel width, and one click on the page lets go of both.
+  pointerMove(mainWindow.getContentBounds().x + 5, mainWindow.getContentBounds().y + pageAfterHide.y + 150)
+  await waitFor(() => rendererViews.sidebar.getVisible() && rendererViews.sidebar.getBounds().x === 0, 'hover to reopen the sidebar for the stuck-drag check')
+  rendererViews.sidebar.webContents.focus()
+  await evaluate(rendererViews.sidebar, `(() => { document.querySelector('.sidebar-resize-handle')?.focus(); return window.api.browser.chrome.set({ sidebarResizing: true }) })()`)
+  await waitFor(async () => { const state = await chromeState(); return state.sidebarResizing && state.sidebarFocused }, 'a stuck drag and sidebar focus')
+  assert.equal(rendererViews.sidebar.getBounds().width, widthAfterResize, 'a drag in progress never widens the overlay view (no full-size underlay)')
+  pointerMove(pagePoint.x, pagePoint.y)
+  await delay(700)
+  assert.equal(rendererViews.sidebar.getVisible(), true, 'keyboard focus in the sidebar still holds it while only the pointer has left')
+  pointerClick(pagePoint.x, pagePoint.y)
+  await waitFor(async () => { const state = await chromeState(); return !state.sidebarResizing && !state.sidebarFocused && !state.sidebarHovered }, 'a click on the page to release the drag, focus and hover holds')
+  await waitFor(() => !rendererViews.sidebar.getVisible(), 'the sidebar to hide after a click on the page')
+  // 2) A hover the sidebar never saw the pointer leave (it exited over the toolbar, an iframe, or
+  //    the hover was set while the pointer was elsewhere): no view reports a move, the cursor poll does.
+  const toolbarPoint = { x: mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10), y: mainWindow.getContentBounds().y + 20 }
+  pointerMove(toolbarPoint.x, toolbarPoint.y)
+  await delay(300)
+  await evaluate(rendererViews.content, 'window.api.browser.chrome.set({ sidebarHovered: true })')
+  await waitFor(() => rendererViews.sidebar.getVisible(), 'a hover reveal with the pointer over the toolbar')
+  await waitFor(async () => !(await chromeState()).sidebarHovered && !rendererViews.sidebar.getVisible(), 'the cursor poll to release a hover whose mouseleave never came', 5000)
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
   // Hover-reveal the panel (the old toolbar toggle is gone), then pin it open via the footer control.

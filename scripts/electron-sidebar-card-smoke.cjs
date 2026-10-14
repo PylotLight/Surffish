@@ -1,3 +1,6 @@
+// These open the overlay with chrome.set({ sidebarHovered: true }) while the real cursor sits
+// elsewhere; the cursor poll (src/main/sidebar-reveal-guard.ts) would rightly close it again.
+process.env.SURFFISH_SIDEBAR_CURSOR_POLL ??= 'off'
 // The sidebar card must sit on exactly the same window pixels whether the content renderer draws
 // it in-page (New Tab, full panels) or the overlay sidebar view draws it above a live page:
 // x/y/width/height, radius, border, shadow, and the window-control / pinned / tab-list offsets.
