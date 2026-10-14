@@ -44,7 +44,7 @@ export function TabInterstitial({ interstitial, canGoBack }: { interstitial: Bro
       <div className="tab-interstitial-card">
         <svg className="tab-interstitial-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="10.5" width="14" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.6-1.6" /><path d="M12 14v2.5" /></svg>
         <h1>{interstitial.host} doesn’t support HTTPS</h1>
-        <p>HTTPS-only mode tried a secure connection and it failed. If you continue, the page loads over plain HTTP: anyone on the network path can read or change it. Surffish will remember this exception for {interstitial.host}.</p>
+        <p>{interstitial.source === 'typed' ? 'Surffish tried a secure connection first and it failed.' : 'HTTPS-only mode tried a secure connection and it failed.'} If you continue, the page loads over plain HTTP: anyone on the network path can read or change it.{interstitial.remember !== false ? ` Surffish will remember this exception for ${interstitial.host}.` : ''}</p>
         <code>{interstitial.error}</code>
         <div className="tab-interstitial-actions">
           {canGoBack && <button className="settings-action secondary" type="button" onClick={() => run('back')}>Go back</button>}

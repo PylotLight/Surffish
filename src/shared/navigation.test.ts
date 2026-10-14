@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from './navigation.ts'
 
 test('keeps explicit HTTP and HTTPS URLs as URLs', () => {
   assert.equal(resolveNavigationTarget('https://example.org/path'), 'https://example.org/path')
@@ -15,6 +15,38 @@ test('adds HTTPS to domain-like addresses', () => {
 test('uses HTTP for loopback development addresses', () => {
   assert.equal(resolveNavigationTarget('localhost:3000'), 'http://localhost:3000/')
   assert.equal(resolveNavigationTarget('127.0.0.1:8080'), 'http://127.0.0.1:8080/')
+})
+
+test('uses HTTP for typed local-network addresses (like Chrome), HTTPS for public ones', () => {
+  assert.equal(resolveNavigationTarget('192.168.1.10'), 'http://192.168.1.10/')
+  assert.equal(resolveNavigationTarget('192.168.1.10/admin?x=1'), 'http://192.168.1.10/admin?x=1')
+  assert.equal(resolveNavigationTarget('10.0.0.5:8080'), 'http://10.0.0.5:8080/')
+  assert.equal(resolveNavigationTarget('172.20.1.1'), 'http://172.20.1.1/')
+  assert.equal(resolveNavigationTarget('169.254.10.1'), 'http://169.254.10.1/')
+  assert.equal(resolveNavigationTarget('100.100.1.2'), 'http://100.100.1.2/')
+  assert.equal(resolveNavigationTarget('printer.local'), 'http://printer.local/')
+  assert.equal(resolveNavigationTarget('nas.lan'), 'http://nas.lan/')
+  assert.equal(resolveNavigationTarget('router.home.arpa'), 'http://router.home.arpa/')
+  assert.equal(resolveNavigationTarget('grafana.internal:3000'), 'http://grafana.internal:3000/')
+  assert.equal(resolveNavigationTarget('[fd00::1]'), 'http://[fd00::1]/')
+  // Public and look-alike addresses still try https first.
+  assert.equal(resolveNavigationTarget('172.32.0.1'), 'https://172.32.0.1/')
+  assert.equal(resolveNavigationTarget('8.8.8.8'), 'https://8.8.8.8/')
+  assert.equal(resolveNavigationTarget('local.example.com'), 'https://local.example.com/')
+  // Explicit schemes are never changed.
+  assert.equal(resolveNavigationTarget('http://192.168.1.10'), 'http://192.168.1.10/')
+  assert.equal(resolveNavigationTarget('https://192.168.1.1'), 'https://192.168.1.1/')
+})
+
+test('typed bare public hosts fall back to http when https fails; nothing else does', () => {
+  assert.equal(typedHttpsFallbackUrl('example.org', 'https://example.org/'), 'http://example.org/')
+  assert.equal(typedHttpsFallbackUrl(' example.org/a?b=1 ', 'https://example.org/a?b=1'), 'http://example.org/a?b=1')
+  assert.equal(typedHttpsFallbackUrl('https://example.org', 'https://example.org/'), null)
+  assert.equal(typedHttpsFallbackUrl('http://example.org', 'http://example.org/'), null)
+  assert.equal(typedHttpsFallbackUrl('192.168.1.10', 'http://192.168.1.10/'), null)
+  assert.equal(typedHttpsFallbackUrl('cats', 'https://search.brave.com/search?q=cats'), null)
+  assert.equal(typedHttpsFallbackUrl('best coffee', 'https://search.brave.com/search?q=best+coffee'), null)
+  assert.equal(typedHttpsFallbackUrl('gh', 'https://github.com/'), null)
 })
 
 test('sends ordinary text to Brave Search by default', () => {

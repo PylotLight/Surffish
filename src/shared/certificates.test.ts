@@ -104,8 +104,15 @@ describe('site menu connection summary', () => {
   test('plain HTTP is not secure (no certificate); loopback is local; other schemes have no section', () => {
     expect(siteConnectionSummary('http://example.com/', null)).toMatchObject({ kind: 'not-secure', certificateRow: null })
     expect(siteConnectionSummary('http://localhost:3000/', null)).toMatchObject({ kind: 'local', certificateRow: null })
+    expect(siteConnectionSummary('http://192.168.1.10/', null)).toMatchObject({ kind: 'not-secure', certificateRow: null, detail: expect.stringContaining('local network') })
     expect(siteConnectionSummary('surffish://newtab', null)).toBeNull()
     expect(siteConnectionSummary('', null)).toBeNull()
+  })
+  test('an error page has no lock: nothing connected (the https scheme alone vouches for nothing)', () => {
+    expect(siteConnectionSummary('https://192.168.1.10/', null, null, 'ERR_SSL_PROTOCOL_ERROR')).toMatchObject({ kind: 'error', title: 'Page didn’t load', certificateRow: null, detail: expect.stringContaining('ERR_SSL_PROTOCOL_ERROR') })
+    expect(siteConnectionSummary('https://nas.lan/', null, null, 'ERR_NAME_NOT_RESOLVED')?.kind).toBe('error')
+    // A certificate error page keeps its own "not private" section.
+    expect(siteConnectionSummary('https://192.168.1.1/', null, 'ERR_CERT_AUTHORITY_INVALID', null)?.kind).toBe('not-secure')
   })
   test('viewer verdicts', () => {
     expect(certificateVerdict({ status: 'secure', error: null })).toMatchObject({ valid: true, title: 'Certificate is valid' })

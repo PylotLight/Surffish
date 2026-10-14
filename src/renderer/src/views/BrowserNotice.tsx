@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { describeLoadError, type BrowserLoadError } from '../../../shared/navigation-errors'
 import { describeCertificateError, type SiteCertificateInfo } from '../../../shared/certificates'
+import { localHttpFallbackUrl } from '../../../shared/https-only'
 import { CertificateViewer } from './lazy-views'
 import './BrowserNotice.css'
 import './Safety.css'
@@ -66,6 +67,20 @@ function retry(url: string): void {
   void window.api.browser.navigate(url).catch(() => undefined)
 }
 
+/** A local-network device that failed over https: offer its plain-http address (routers, NAS, printers). */
+function httpFallbackLabel(httpUrl: string): string {
+  try {
+    const url = new URL(httpUrl)
+    return `Continue to http://${url.host}`
+  } catch {
+    return 'Continue to HTTP'
+  }
+}
+
+function continueToHttp(httpUrl: string): void {
+  void window.api.browser.navigate(httpUrl).catch(() => undefined)
+}
+
 /** "Back to <page>" when the failed load never replaced the page; else history back. */
 function BackAction({ loadError, canGoBack }: { loadError: BrowserLoadError; canGoBack: boolean }): React.JSX.Element | null {
   if (loadError.pageBehind) {
@@ -96,12 +111,14 @@ function GenericLoadErrorPage({ loadError, canGoBack }: { loadError: BrowserLoad
   const [routeError, setRouteError] = useState('')
   const [routing, setRouting] = useState(false)
   const offerDirect = copy.kind === 'proxy' && loadError.viaProxy && host !== ''
+  const httpFallback = localHttpFallbackUrl(loadError.url, loadError.name)
   return (
     <section className={`tab-interstitial is-load-error is-${copy.kind}`} role="alert" aria-label={copy.title}>
       <div className="tab-interstitial-card">
         {copy.kind === 'proxy' ? TUNNEL_ICON : GLOBE_ICON}
         <h1>{copy.title}</h1>
         <p>{copy.detail}</p>
+        {httpFallback && <p className="tab-interstitial-hint">{`${host} is on your local network. Devices like routers, NAS boxes and printers often only serve plain HTTP.`}</p>}
         {copy.codeLabel && <code>{copy.codeLabel}</code>}
         {routeError && <p className="tab-interstitial-error" role="status">{routeError}</p>}
         <div className="tab-interstitial-actions">
@@ -114,7 +131,8 @@ function GenericLoadErrorPage({ loadError, canGoBack }: { loadError: BrowserLoad
               .catch((error: unknown) => setRouteError(error instanceof Error ? error.message : String(error)))
               .finally(() => setRouting(false))
           }}>Route Direct</button>}
-          <button className="settings-action primary" type="button" onClick={() => retry(loadError.url)}>Retry</button>
+          <button className={`settings-action ${httpFallback ? 'secondary' : 'primary'}`} type="button" onClick={() => retry(loadError.url)}>Retry</button>
+          {httpFallback && <button className="settings-action primary http-fallback" type="button" title={`Load ${httpFallback} over plain HTTP (not encrypted)`} onClick={() => continueToHttp(httpFallback)}>{httpFallbackLabel(httpFallback)}</button>}
         </div>
       </div>
     </section>
@@ -134,6 +152,7 @@ function CertificateErrorPage({ loadError, canGoBack }: { loadError: BrowserLoad
   const [viewer, setViewer] = useState(false)
   const [proceeding, setProceeding] = useState(false)
   const errorName = loadError.name ?? (loadError.code !== null ? `Error ${loadError.code}` : '')
+  const httpFallback = localHttpFallbackUrl(loadError.url, loadError.name)
   // A new failure (another host or certificate) closes the details.
   useEffect(() => {
     setAdvanced(false)
@@ -175,9 +194,10 @@ function CertificateErrorPage({ loadError, canGoBack }: { loadError: BrowserLoad
                 <div><dt>SHA-256</dt><dd className="is-mono">{leaf.fingerprintSha256}</dd></div>
               </dl>
             )}
-            {details && (
+            {(details || httpFallback) && (
               <div className="cert-advanced-links">
-                <button type="button" className="cert-link" onClick={() => setViewer((open) => !open)}>{viewer ? 'Hide certificate' : 'View certificate'}</button>
+                {details && <button type="button" className="cert-link" onClick={() => setViewer((open) => !open)}>{viewer ? 'Hide certificate' : 'View certificate'}</button>}
+                {httpFallback && <button type="button" className="cert-link http-fallback" title={`Load ${httpFallback} over plain HTTP (not encrypted)`} onClick={() => continueToHttp(httpFallback)}>{httpFallbackLabel(httpFallback)}</button>}
               </div>
             )}
             {viewer && details && <div className="cert-advanced-viewer"><CertificateViewer info={details} /></div>}

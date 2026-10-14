@@ -135,7 +135,17 @@ export interface BrowserState {
 export type BrowserTabInterstitial =
   | { kind: 'crashed'; reason: string; label: string; /** Crashed again right after auto-reloading; we stopped retrying. */ repeated: boolean }
   | { kind: 'unresponsive' }
-  | { kind: 'https-unavailable'; /** The http:// URL the user asked for. */ url: string; host: string; error: string }
+  | {
+    kind: 'https-unavailable'
+    /** The http:// URL the user asked for (or typed without a scheme). */
+    url: string
+    host: string
+    error: string
+    /** What tried https: HTTPS-only mode, or the address bar trying https first for a typed bare host. */
+    source?: 'https-only' | 'typed'
+    /** Continue to HTTP saves a per-host HTTPS-only exception (only while HTTPS-only mode is on). */
+    remember?: boolean
+  }
 
 /** Find-in-page result for the active tab, from Electron's `found-in-page`. */
 export interface BrowserFindResult {

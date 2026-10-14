@@ -3,6 +3,7 @@ import { installIpcWindowScope } from './ipc-window-scope'
 import { app } from 'electron'
 import { dirname, join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
+import { CHROMIUM_HTTPS_UPGRADE_FEATURES, mergeFeatureList } from '../shared/https-only'
 import { registerIpc } from './ipc'
 import { registerDiagnosticsIpc } from './diagnostics'
 import { registerBookmarkIpc } from './bookmarks-ipc'
@@ -54,6 +55,11 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
 registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
+// Surffish owns http→https upgrades (HTTPS-only mode, typed-host https-first with Continue to HTTP)
+// and never upgrades local-network hosts. Keep Chromium's own HTTPS-Upgrades / HTTPS-First off so
+// a plain-http LAN device can't be silently switched to TLS underneath us. (Electron 44's content
+// layer doesn't ship Chrome's upgrade throttle; this is a guard against it arriving in an update.)
+app.commandLine.appendSwitch('disable-features', mergeFeatureList(app.commandLine.getSwitchValue('disable-features'), CHROMIUM_HTTPS_UPGRADE_FEATURES))
 
 // Worst case (first run downloading filter lists waits up to 8 s, plus extensions) before pages load anyway.
 const STARTUP_HOLD_TIMEOUT_MS = 20_000

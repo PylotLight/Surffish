@@ -3,6 +3,7 @@
  * details the site-info viewer shows, and the per-session "proceed anyway" exceptions.
  * Pure (no Node or Electron imports), so the renderer can use the types and helpers too.
  */
+import { isLocalOrPrivateHost } from './https-only'
 
 /**
  * How the active page's HTTPS connection was trusted.
@@ -248,7 +249,7 @@ export function certificateVerdict(info: { status: SiteCertificateStatus; error:
 }
 
 export interface SiteConnectionSummary {
-  kind: 'secure' | 'not-secure' | 'local'
+  kind: 'secure' | 'not-secure' | 'local' | 'error'
   title: string
   detail: string
   /** Label of the row that opens the certificate viewer (null: no certificate to show). */
@@ -264,12 +265,17 @@ function isLoopbackPageHost(host: string): boolean {
  * The site menu's Connection section for the active page. `certificateError` is set when the tab
  * shows a certificate error page for `url`.
  */
-export function siteConnectionSummary(url: string, security: BrowserPageSecurity | null | undefined, certificateError: string | null = null): SiteConnectionSummary | null {
+export function siteConnectionSummary(url: string, security: BrowserPageSecurity | null | undefined, certificateError: string | null = null, loadError: string | null = null): SiteConnectionSummary | null {
   let parsed: URL
   try {
     parsed = new URL(url)
   } catch {
     return null
+  }
+  // The tab shows an error page (no certificate involved): nothing loaded, so no lock and no
+  // "Connection is secure". The scheme alone says nothing about a connection that never happened.
+  if (loadError !== null && certificateError === null) {
+    return { kind: 'error', title: 'Page didn’t load', detail: `No connection was made to ${parsed.hostname || 'this site'} (${loadError}), so there’s nothing to vouch for.`, certificateRow: null }
   }
   if (parsed.protocol === 'https:') {
     if (certificateError !== null) return { kind: 'not-secure', title: 'Connection is not private', detail: describeCertificateError(certificateError), certificateRow: 'Certificate is not valid' }
@@ -280,6 +286,7 @@ export function siteConnectionSummary(url: string, security: BrowserPageSecurity
   }
   if (parsed.protocol === 'http:') {
     if (isLoopbackPageHost(parsed.hostname)) return { kind: 'local', title: 'Local page', detail: 'This page is served from this computer over plain HTTP.', certificateRow: null }
+    if (isLocalOrPrivateHost(parsed.hostname)) return { kind: 'not-secure', title: 'Connection is not secure', detail: 'This device on your local network uses plain HTTP: anyone on the same network can read or change what you send.', certificateRow: null }
     return { kind: 'not-secure', title: 'Connection is not secure', detail: 'This site uses plain HTTP: anyone on the network path can read or change what you send.', certificateRow: null }
   }
   return null

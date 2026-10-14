@@ -1619,6 +1619,7 @@
 .site-connection-head strong { color: #a4edbd; font-weight: 600; }
 .site-connection.is-not-secure .site-connection-head strong { color: #ffb4b9; }
 .site-connection.is-local .site-connection-head strong { color: rgba(245, 247, 250, 0.92); }
+.site-connection.is-error .site-connection-head strong { color: rgba(245, 247, 250, 0.92); }
 .site-connection-detail {
   margin: 0;
   color: rgba(235, 240, 245, 0.6);
