@@ -1,4 +1,5 @@
 import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'electron'
+import { capturePageWithin } from './capture-page'
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
 import { DEFAULT_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
@@ -565,12 +566,7 @@ export async function captureLocalNewTabPage(rect: { x: number; y: number; width
   if (!shell || !shell.activePageIsLocalNewTab || rect.width <= 0 || rect.height <= 0) return null
   const contents = shell.views.content.webContents
   if (contents.isDestroyed() || !shell.views.content.getVisible()) return null
-  try {
-    const image = await contents.capturePage(rect)
-    return image.isEmpty() ? null : image
-  } catch {
-    return null
-  }
+  return capturePageWithin(contents, rect)
 }
 
 /** Focus whichever shell surface is showing the page area (the New Tab page lives in the content renderer). */

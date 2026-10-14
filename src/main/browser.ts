@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { capturePageWithin } from './capture-page'
 import { shouldHandOffSignIn, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
 import { hasGoogleSessionCookie, isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
 import { Buffer } from 'node:buffer'
@@ -3473,8 +3474,8 @@ async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<vo
     const url = currentUrl(tab)
     // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
     // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
-    const image = await contents.capturePage(undefined, { stayHidden: true })
-    if (image.isEmpty() || contents.isDestroyed() || !allTabs().includes(tab)) return
+    const image = await capturePageWithin(contents, undefined, { stayHidden: true })
+    if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabThumbnails.set(tab.id, thumbnailDataUrl(image))
     if (pageArea && tab.view?.webContents === contents) rememberWakeSnapshot(tab.id, image, pageArea, url, tab.isPrivate)
   } catch {

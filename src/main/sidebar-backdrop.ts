@@ -1,4 +1,5 @@
 import { ipcMain, type BaseWindow, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { capturePageWithin } from './capture-page'
 import {
   DEFAULT_SIDEBAR_BACKDROP_SETTINGS,
   normalizeSidebarBackdropSettings,
@@ -170,8 +171,10 @@ async function capture(window: BaseWindow): Promise<void> {
     for (const region of regions) {
       const page = pages[region.index]
       if (!page || page.contents.isDestroyed()) continue
-      const image = await page.contents.capturePage(region.capture)
-      if (image.isEmpty()) continue
+      // Bounded: a page switched away mid-capture is detached, and its capture would never settle,
+      // leaving `capturing` set and the backdrop frozen for the rest of the window's life.
+      const image = await capturePageWithin(page.contents, region.capture)
+      if (!image) continue
       const size = image.getSize()
       const small = image.resize({ width: Math.max(8, Math.round(size.width * SIDEBAR_SNAPSHOT_SCALE)), quality: 'good' })
       images.push({ dataUrl: `data:image/jpeg;base64,${small.toJPEG(72).toString('base64')}`, ...region.target })
