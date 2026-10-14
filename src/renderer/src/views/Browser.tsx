@@ -73,7 +73,7 @@ import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigat
 // Rarely opened views load on first use (lazy-views); the hooks the always-on UI needs stay eager.
 import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
-  DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, PrivacySettings,
+  DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, BrambleQuickUnlockSettings, PrivacySettings,
   MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
@@ -1976,6 +1976,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {bramblePoc.notice && <p className="settings-message" role="status">{bramblePoc.notice}</p>}
                   {bramblePoc.error && <p className="settings-message is-error" role="alert">{bramblePoc.error}</p>}
                 </SettingsGroup>
+                {bramblePoc.installed && <BrambleQuickUnlockSettings />}
                 <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
                 </>}
                 {/* Lazy chunk: Integrations opening on Extensions never loads the Feeds view. */}

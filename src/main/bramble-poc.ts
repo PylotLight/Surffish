@@ -64,6 +64,22 @@ const state: BrambleExtensionState = {
 }
 let loadedExtension: LoadedBrambleExtension | null = null
 let popupWindow: BrowserWindow | null = null
+/** Set while Surffish's quick unlock shows the Touch ID sheet, which takes focus from the popup. */
+let popupBlurHold = false
+// Must match QUICK_UNLOCK_CONFIG_FILE in bramble-quick-unlock.ts (kept here so checking it never loads that module).
+const QUICK_UNLOCK_CONFIG_FILENAME = 'bramble-quick-unlock.json'
+
+/**
+ * Hand a Bramble popup to the PIN / Touch ID quick unlock, but only when it has been set up: the
+ * module (and its crypto) is imported on demand, so profiles without it pay one existsSync per popup.
+ */
+function attachQuickUnlock(popup: BrowserWindow): void {
+  const extension = loadedExtension
+  if (!extension || !existsSync(join(app.getPath('userData'), QUICK_UNLOCK_CONFIG_FILENAME))) return
+  void import('./bramble-quick-unlock')
+    .then((module) => module.attachBrambleQuickUnlock(popup, extension.url, { setBlurHold: (hold) => { popupBlurHold = hold } }))
+    .catch((error: unknown) => console.warn('[bramble] quick unlock unavailable:', error instanceof Error ? error.message : String(error)))
+}
 let offscreenWindow: BrowserWindow | null = null
 
 function isAllowedBrambleReleaseUrl(url: URL): boolean {
@@ -360,6 +376,7 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor, requestedPageUrl?: str
     if (popupWindow.isMinimized()) popupWindow.restore()
     popupWindow.show()
     popupWindow.focus()
+    attachQuickUnlock(popupWindow)
     updateState({ popupOpen: true, error: null })
     return
   }
@@ -408,6 +425,7 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor, requestedPageUrl?: str
     updateState({ popupOpen: true })
   })
   popup.on('blur', () => {
+    if (popupBlurHold) return
     if (!popup.isDestroyed() && popup.isVisible()) popup.close()
   })
   popup.webContents.on('before-input-event', (event, input) => {
@@ -420,6 +438,7 @@ function showBrambleLauncher(anchor?: BramblePopupAnchor, requestedPageUrl?: str
     updateState({ error: `Could not open Bramble’s UI: ${error instanceof Error ? error.message : String(error)}` })
     if (!popup.isDestroyed()) popup.close()
   })
+  attachQuickUnlock(popup)
 }
 
 function releaseArchivePath(version: string, sha256: string): string {
