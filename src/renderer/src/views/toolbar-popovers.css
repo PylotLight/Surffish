@@ -150,3 +150,102 @@
 .browser-chrome .reading-list-header strong { font-size: var(--pop-title); }
 .browser-chrome .reading-list-meta,
 .browser-chrome .reading-list-excerpt { font-size: var(--pop-meta); }
+
+/* ---- Back/Forward history menu (press-and-hold or right-click Back/Forward) ---- */
+.browser-chrome .browser-nav-buttons { position: relative; }
+.browser-chrome .nav-history-menu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: min(560px, var(--popover-room, 560px));
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(24px) saturate(160%);
+  font-size: var(--pop-body);
+  -webkit-app-region: no-drag;
+  animation: nav-history-menu-in 140ms ease-out;
+}
+.browser-chrome .nav-history-menu.is-forward { left: 30px; }
+@keyframes nav-history-menu-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+/* The rows scroll; the separator and Show Full History stay put (min-height 0 lets the flex child shrink). */
+.browser-chrome .nav-history-menu-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+.browser-chrome .nav-history-menu-item {
+  display: flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.9);
+  font: inherit;
+  font-size: var(--pop-body);
+  text-align: left;
+  cursor: pointer;
+}
+.browser-chrome .nav-history-menu-item:hover,
+.browser-chrome .nav-history-menu-item:focus-visible {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+  outline: 0;
+}
+.browser-chrome .nav-history-menu-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 4px;
+  color: rgba(245, 247, 250, 0.7);
+}
+.browser-chrome .nav-history-menu-icon img { width: 16px; height: 16px; object-fit: contain; }
+.browser-chrome .nav-history-menu-icon > span {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 10px;
+  font-weight: 650;
+}
+.browser-chrome .nav-history-menu-icon svg { width: 15px; height: 15px; }
+.browser-chrome .nav-history-menu-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-chrome .nav-history-menu-separator {
+  height: 1px;
+  flex: 0 0 auto;
+  margin: 2px 4px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.browser-chrome .nav-history-menu-full { flex: 0 0 auto; color: rgba(245, 247, 250, 0.8); }
+.browser-chrome .browser-nav-buttons .toolbar-button.is-current { background: rgba(255, 255, 255, 0.1); color: #fff; }

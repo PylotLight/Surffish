@@ -60,6 +60,7 @@ import { glanceApi } from './glance-settings'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 import type { SiteCertificateInfo } from '../shared/certificates'
+import type { BrowserNavHistoryMenu, NavHistoryDirection, NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 
 const api = {
   platform: process.platform,
@@ -194,6 +195,11 @@ const api = {
       showNative: (): Promise<boolean> => ipcRenderer.invoke('browser:certificate:show-native')
     },
     forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
+    /** The Back/Forward press-and-hold menu: the active tab's history entries in one direction, and going to one. */
+    navHistory: {
+      list: (direction: NavHistoryDirection): Promise<BrowserNavHistoryMenu> => ipcRenderer.invoke('browser:nav-history:list', direction),
+      go: (index: number, disposition: NavHistoryOpenDisposition = 'current'): Promise<boolean> => ipcRenderer.invoke('browser:nav-history:go', index, disposition)
+    },
     reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
     stop: (): Promise<void> => ipcRenderer.invoke('browser:stop'),
     /** Edit PDF on a PDF tab, Back to Viewer in the editor. */
