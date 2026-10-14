@@ -175,6 +175,18 @@ export function isWakeSnapshotPassthroughTarget(element: { tagName: string; id?:
   return WAKE_SNAPSHOT_PASSTHROUGH_CLASSES.some((name) => element.classList?.contains(name) ?? false)
 }
 
+/**
+ * Input that may change how a page looks, so its last picture (overview thumbnail, wake snapshot)
+ * is stale: presses, scrolls, touches and typing. Hover moves don't count, nor do shortcut chords
+ * (Ctrl/Cmd held: switching tabs by keyboard must not invalidate the tab being left) or releases.
+ */
+export function inputMayChangePage(input: { type: string; modifiers?: readonly string[] }): boolean {
+  const { type } = input
+  if (type === 'mouseDown' || type === 'mouseWheel' || type.startsWith('gesture') || type.startsWith('touch')) return true
+  if (type !== 'rawKeyDown' && type !== 'keyDown' && type !== 'char') return false
+  return !(input.modifiers ?? []).some((modifier) => ['control', 'ctrl', 'meta', 'cmd', 'command'].includes(modifier))
+}
+
 /** Point inside a rect (window coordinates). */
 export function pointInRect(x: number, y: number, rect: { x: number; y: number; width: number; height: number }): boolean {
   return x >= rect.x && y >= rect.y && x < rect.x + rect.width && y < rect.y + rect.height

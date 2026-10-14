@@ -207,6 +207,58 @@ async function run() {
   waking.off('input-event', onInput)
   await waitFor(async () => (await tabFor('wake'))?.title === 'Fixture wake' && !(await tabFor('wake')).loading, 'the slow wake page to finish', 15000)
 
+  // ---------------------------------------------------------------- 1c. an unchanged tab keeps its picture
+  smoke.step('wake snapshot: leaving a tab nothing changed on reuses its picture (no capture), a press makes a new one')
+  const captures = new Map()
+  const contentsProto = Object.getPrototypeOf(pageFor('wake'))
+  const realCapture = contentsProto.capturePage
+  contentsProto.capturePage = function countCapture(...args) {
+    captures.set(this.getURL(), (captures.get(this.getURL()) || 0) + 1)
+    return realCapture.apply(this, args)
+  }
+  // Every tab counts as looked at (no 1.5 s dwell per switch); captures still follow the same rules.
+  process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS = '0'
+  const wakeCaptures = () => captures.get(url('wake')) || 0
+  const activate = async (name) => {
+    await evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify((await tabFor(name)).id)})`)
+    await waitFor(async () => (await tabFor(name))?.active, `the ${name} tab active`)
+  }
+  // The press in 1b changed the page: the first switch away captures it.
+  await delay(300)
+  await activate('front')
+  await delay(800)
+  assert.equal(wakeCaptures(), 1, 'a changed page is captured when it leaves the screen')
+  await activate('wake')
+  await delay(300)
+  await activate('front')
+  await delay(800)
+  assert.equal(wakeCaptures(), 1, `an unchanged page keeps its last picture (captures ${wakeCaptures()})`)
+  // ...which is still what shows when it wakes.
+  assert.equal(await evaluate(toolbar, `window.api.browser.diagnostics.discardTab(${JSON.stringify((await tabFor('wake')).id)})`), true)
+  await waitFor(async () => (await tabFor('wake'))?.sleeping, 'the wake tab to sleep again')
+  wakeDelayMs = 1500
+  await evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify((await tabFor('wake')).id)})`)
+  await waitFor(() => snapshotState(), 'the reused wake snapshot to show', 2400, 10)
+  await waitFor(async () => (await snapshotState()) === null, 'the reused snapshot to be removed after paint', 10000, 10)
+  await waitFor(async () => (await tabFor('wake'))?.title === 'Fixture wake' && !(await tabFor('wake')).loading, 'the wake page to finish again', 15000)
+  // A new page (the woken view) is captured afresh; after that, a press changes it again.
+  await delay(300)
+  await activate('front')
+  await delay(800)
+  const afterWake = wakeCaptures()
+  assert.equal(afterWake, 2, `the woken page is captured when it leaves (captures ${afterWake})`)
+  await activate('wake')
+  await delay(300)
+  pageFor('wake').sendInputEvent({ type: 'mouseDown', x: 300, y: 300, button: 'left', clickCount: 1 })
+  pageFor('wake').sendInputEvent({ type: 'mouseUp', x: 300, y: 300, button: 'left', clickCount: 1 })
+  await delay(300)
+  await activate('front')
+  await delay(800)
+  assert.equal(wakeCaptures(), afterWake + 1, `a press makes the next switch capture again (captures ${wakeCaptures()})`)
+  contentsProto.capturePage = realCapture
+  delete process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS
+  await activate('wake')
+
   // ---------------------------------------------------------------- 2. preconnect while typing
   smoke.step('preconnect: typing debounced to one origin preconnect')
   const INPUT = 'document.querySelector(".browser-toolbar input[type=text]")'
