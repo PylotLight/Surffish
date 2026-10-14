@@ -458,6 +458,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   function moveSidebarResize(event: ReactPointerEvent<HTMLDivElement>): void {
     const resize = sidebarResizeRef.current
     if (!resize || resize.pointerId !== event.pointerId) return
+    // The button went up somewhere this document never heard about (outside the view or window):
+    // the drag is over, don't keep resizing (and holding the sidebar) on plain moves.
+    if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) return finishSidebarResize(event)
     event.preventDefault()
     const width = normalizeSidebarWidth(resize.startWidth + event.clientX - resize.startX)
     if (width === resize.width) return

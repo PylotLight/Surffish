@@ -1,11 +1,12 @@
 import type { BaseWindow, WebContents, WebContentsView, WebFrameMain } from 'electron'
 import type { BrowserChromeMetrics, BrowserChromeState, BrowserSidebarMode } from '../shared/types'
-import { DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
+import { DEFAULT_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../shared/persistence'
 import { SIDEBAR_CARD, sidebarCardInset, sidebarCardMaxWidth } from '../shared/sidebar-card'
 import { POPOVER_DISMISS_CHANNEL, sidebarModeAfterTabSwitch, surfacePressDismissReason, windowBlurDismissesPopovers, type PopoverDismissReason, type ToolbarPopoverState } from '../shared/popover-dismiss'
 import { isAuthorizedShellIpcSender } from './renderer-security'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
 import { SidebarOverlayMotion } from './sidebar-motion'
+import { SidebarRevealGuard } from './sidebar-reveal-guard'
 
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
@@ -53,6 +54,10 @@ interface ShellState {
   dismissOnSidebarPress: (event: Electron.Event, mouseEvent: { type: string }) => void
   /** Last active tab main published for this window (a change closes the History panel, in order). */
   lastActiveTabId: string | null
+  /** Releases hover/focus/drag holds the renderer missed (sidebar-reveal-guard.ts). Null until attached. */
+  revealGuard: SidebarRevealGuard | null
+  /** What the next layout is for, for the sidebar lock debug log. */
+  layoutCause: string | null
 }
 
 export type SidebarOverlayEvent = 'shown' | 'hidden' | 'prefetch'
@@ -143,7 +148,7 @@ function currentContentSize(shell: ShellState): { width: number; height: number 
 
 function applyShellLayout(shell: ShellState): void {
   if (shell.window.isDestroyed() || shells.get(shell.window) !== shell) return
-  const { views: shellViews, chromeState, toolbarMetrics } = shell
+  const { views: shellViews, toolbarMetrics } = shell
   const { width, height } = currentContentSize(shell)
   const overlayMode = shouldUseNativeOverlays(shell)
   const sidebarVisible = isSidebarVisible(shell)
@@ -163,10 +168,13 @@ function applyShellLayout(shell: ShellState): void {
   // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts).
   const inset = shell.sidebarFrame ? sidebarCardInset(height, { ...SIDEBAR_CARD, inset: shell.sidebarFrame.inset }) : 0
   // The view keeps its card width while closed (slid out and hidden, see sidebar-motion.ts), so a
-  // reveal never resizes the sidebar renderer. Never wider than the card may get.
+  // reveal never resizes the sidebar renderer. Never wider than the card may get. During a width
+  // drag it follows the live width too: the view's own background is the native blur/tint, so a
+  // view widened for the drag showed that underlay at full size (the drag keeps its implicit
+  // mouse capture on the sidebar view, so it doesn't need the extra hit-test area).
   shell.sidebarMotion.layout({
     y: inset,
-    width: Math.min(chromeState.sidebarResizing ? MAX_SIDEBAR_WIDTH : chromeState.sidebarWidth, sidebarCardMaxWidth(width)),
+    width: overlaySidebarWidth(shell, width),
     height: Math.max(0, height - inset * 2)
   })
   // Open/close slides along one timeline while live pages stay on screen; entering or leaving
@@ -180,6 +188,14 @@ function applyShellLayout(shell: ShellState): void {
     emitSidebarOverlay(shell, 'shown')
   }
   shell.syncPageBounds?.(width, height, overlayMode, shell.window)
+  const cause = shell.layoutCause ?? 'layout'
+  shell.layoutCause = null
+  shell.revealGuard?.noteChromeChanged(cause)
+}
+
+/** The overlay sidebar view's width: the sidebar width, never wider than the card may get. */
+function overlaySidebarWidth(shell: ShellState, windowWidth = currentContentSize(shell).width): number {
+  return Math.min(shell.chromeState.sidebarWidth, sidebarCardMaxWidth(windowWidth))
 }
 
 const WINDOW_LAYOUT_EVENTS = ['resize', 'maximize', 'unmaximize', 'restore', 'enter-full-screen', 'leave-full-screen'] as const
@@ -215,6 +231,8 @@ export function attachBrowserShell(
     sidebarFrame: null,
     sidebarOverlayShown: false,
     lastActiveTabId: null,
+    revealGuard: null,
+    layoutCause: null,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
     dismissOnSidebarPress: (_event, mouseEvent) => dismissToolbarPopoversOnPress(shell, 'sidebar', mouseEvent.type)
   }
@@ -224,6 +242,7 @@ export function attachBrowserShell(
       if (!shell.sidebarOverlayShown) return
       shell.sidebarOverlayShown = false
       emitSidebarOverlay(shell, 'hidden')
+      shell.revealGuard?.noteChromeChanged('overlay hidden')
     }
   })
   shells.set(window, shell)
@@ -234,6 +253,14 @@ export function attachBrowserShell(
   views.sidebar.webContents.on('before-mouse-event', shell.dismissOnSidebarPress)
   window.on('closed', () => detachBrowserShell(window))
   applyShellLayout(shell)
+  shell.revealGuard = new SidebarRevealGuard({
+    window,
+    sidebarContents: views.sidebar.webContents,
+    getChrome: () => shell.chromeState,
+    patchChrome: (patch, cause) => setBrowserChromeState(patch, window, cause),
+    overlayShown: () => shell.sidebarOverlayShown && shouldUseNativeOverlays(shell),
+    sidebarWidth: () => overlaySidebarWidth(shell)
+  })
 }
 
 // Surfaces of closed windows: their last in-flight IPC calls are dropped quietly (see ipc-retired.ts).
@@ -254,6 +281,8 @@ export function detachBrowserShell(window?: BaseWindow): void {
     const sidebarContents = shell.views.sidebar.webContents
     if (!sidebarContents.isDestroyed()) sidebarContents.removeListener('before-mouse-event', shell.dismissOnSidebarPress)
     clearPointerTimers(shell)
+    shell.revealGuard?.dispose()
+    shell.revealGuard = null
     shell.sidebarMotion.dispose()
     shell.syncPageBounds = null
     for (const contents of shell.renderers.keys()) retiredRenderers.add(contents)
@@ -310,7 +339,7 @@ export function getBrowserChromeState(window?: BaseWindow | null): BrowserChrome
   return { ...(shell?.chromeState ?? DEFAULT_CHROME_STATE) }
 }
 
-export function setBrowserChromeState(input: unknown, window?: BaseWindow | null): BrowserChromeState {
+export function setBrowserChromeState(input: unknown, window?: BaseWindow | null, cause?: string): BrowserChromeState {
   const shell = shellFor(window)
   if (!shell) return getBrowserChromeState(window)
   if (typeof input !== 'object' || input === null) return getBrowserChromeState(shell.window)
@@ -325,6 +354,7 @@ export function setBrowserChromeState(input: unknown, window?: BaseWindow | null
   if (typeof patch.sidebarWidth === 'number' && Number.isFinite(patch.sidebarWidth)) next.sidebarWidth = normalizeSidebarWidth(patch.sidebarWidth)
   if (typeof patch.sidebarResizing === 'boolean') next.sidebarResizing = patch.sidebarResizing
   shell.chromeState = next
+  shell.layoutCause = cause ?? `set ${Object.keys(patch).filter((key) => key.startsWith('sidebar')).map((key) => `${key}=${String(patch[key])}`).join(' ')}`
   if (next.sidebarPinned || next.sidebarHovered || next.sidebarFocused || next.sidebarResizing || next.sidebarMode !== 'tabs') clearPointerTimers(shell)
   applyShellLayout(shell)
   sendToWindowRenderers(shell.window, 'browser:chrome-state', getBrowserChromeState(shell.window))
@@ -353,6 +383,9 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
   const shell = shellFor(window)
   if (!shell) return
   dismissToolbarPopoversOnPress(shell, 'page', input.type)
+  // A press on the page lets go of hover/focus/drag holds; any move or release reaching the page
+  // ends a sidebar drag whose mouseup the sidebar never saw.
+  shell.revealGuard?.handlePageMouse(input)
   const { chromeState } = shell
   if (!shouldUseNativeOverlays(shell) || chromeState.sidebarMode !== 'tabs') {
     clearPointerTimers(shell)
@@ -374,7 +407,7 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
         shell.revealTimer = setTimeout(() => {
           shell.revealTimer = null
           if (shouldUseNativeOverlays(shell) && shell.chromeState.sidebarMode === 'tabs' && !isSidebarVisible(shell)) {
-            setBrowserChromeState({ sidebarHovered: true }, shell.window)
+            setBrowserChromeState({ sidebarHovered: true }, shell.window, 'page edge hover reveal')
           }
         }, REVEAL_DELAY_MS)
       }
@@ -391,7 +424,7 @@ export function handleBrowserPageMouseEvent(input: { type: string; x: number }, 
         shell.pageExitTimer = null
         const state = shell.chromeState
         if (shouldUseNativeOverlays(shell) && state.sidebarMode === 'tabs' && state.sidebarHovered && !state.sidebarPinned && !state.sidebarFocused) {
-          setBrowserChromeState({ sidebarHovered: false }, shell.window)
+          setBrowserChromeState({ sidebarHovered: false }, shell.window, 'pointer moved onto the page')
         }
       }, PAGE_EXIT_DELAY_MS)
     }
