@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { canSeeTabDetails, filterTabsForQuery, isAllowedExtensionTabUrl, matchesChromePattern, toChromeTab, type ExtensionTabRecord } from './extension-tabs.ts'
+import { canSeeTabDetails, filterTabsForQuery, isAllowedExtensionTabUrl, matchesChromePattern, planExtensionTabReveal, toChromeTab, type ExtensionTabRecord } from './extension-tabs.ts'
 
 const tabs: ExtensionTabRecord[] = [
   { id: 5, index: 0, active: true, pinned: false, url: 'https://news.ycombinator.com/news', title: 'Hacker News', faviconUrl: null, loading: false, sleeping: false },
@@ -55,4 +55,13 @@ test('extensions may open web pages and their own pages only', () => {
   assert.equal(isAllowedExtensionTabUrl('javascript:alert(1)', id), false)
   assert.equal(isAllowedExtensionTabUrl('https://user:pw@example.com/', id), false)
   assert.equal(isAllowedExtensionTabUrl(undefined, id), false)
+})
+
+test('bringing an extension tab forward closes covering panels and raises its window', () => {
+  assert.deepEqual(planExtensionTabReveal({ sidebarMode: 'tabs', minimized: false, visible: true }), { closePanel: false, restore: false, show: false, focus: true })
+  for (const mode of ['settings', 'integrations', 'downloads', 'bookmarks', 'history', 'feeds']) {
+    assert.equal(planExtensionTabReveal({ sidebarMode: mode, minimized: false, visible: true }).closePanel, true, mode)
+  }
+  assert.deepEqual(planExtensionTabReveal({ sidebarMode: 'tabs', minimized: true, visible: true }), { closePanel: false, restore: true, show: true, focus: true })
+  assert.deepEqual(planExtensionTabReveal({ sidebarMode: 'tabs', minimized: false, visible: false }), { closePanel: false, restore: false, show: true, focus: true })
 })

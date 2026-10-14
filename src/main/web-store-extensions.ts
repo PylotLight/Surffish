@@ -847,6 +847,7 @@ export function handleExtensionTabsCall(entry: LoadedEntry, op: unknown, payload
         ? createExtensionTab(url, active, { extensionUrl: entry.extension.url, preloadPath: resolvePreload('extension-host.cjs'), owner: 'web-store' })
         : createExtensionTab(url, active)
       if (!tab) throw new Error('Could not open a tab.')
+      if (active) closePopupAfterTabSwitch(entry)
       return toChromeTab(tab, access)
     }
     case 'update': {
@@ -858,6 +859,7 @@ export function handleExtensionTabsCall(entry: LoadedEntry, op: unknown, payload
         pinned: typeof payload.pinned === 'boolean' ? payload.pinned : undefined
       })
       if (!tab) throw new Error(`No tab with id: ${String(payload.tabId)}.`)
+      if (payload.active === true) closePopupAfterTabSwitch(entry)
       return toChromeTab(tab, access)
     }
     case 'reload':
@@ -871,6 +873,18 @@ export function handleExtensionTabsCall(entry: LoadedEntry, op: unknown, payload
     default:
       throw new Error('Unsupported tabs operation.')
   }
+}
+
+/**
+ * Chrome closes an extension's toolbar popup once the active tab changes; so does Surffish. Deferred a
+ * tick so the popup still gets the IPC reply it is awaiting.
+ */
+function closePopupAfterTabSwitch(entry: LoadedEntry): void {
+  const current = popup
+  if (current?.id !== entry.extension.id) return
+  setImmediate(() => {
+    if (popup === current) disposePopup()
+  })
 }
 
 export function openOptionsFromExtensionPage(entry: LoadedEntry): boolean {
