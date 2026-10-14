@@ -30,6 +30,11 @@ export interface BrambleQuickUnlockState {
   maxAttempts: number
   /** Last thing that happened worth telling the user (reset after lockout, master changed, …). */
   notice: string | null
+  /**
+   * Whether Bramble has a vault to unlock (read from its extension storage). Setup is only offered
+   * when 'present'; 'unknown' means Bramble is not loaded or its storage could not be read.
+   */
+  vault: BrambleVaultStatus
 }
 
 export interface BrambleQuickUnlockEnrolInput {
@@ -41,6 +46,79 @@ export interface BrambleQuickUnlockEnrolInput {
 }
 
 export type QuickUnlockResult = { ok: true; state: BrambleQuickUnlockState } | { ok: false; error: string; state: BrambleQuickUnlockState }
+
+export const QUICK_UNLOCK_NEEDS_VAULT = 'Create your Bramble vault first.'
+
+// ---------------------------------------------------------------------------
+// Does Bramble have a vault?
+//
+// Bramble 1.29 keeps everything in chrome.storage.local: `vault.registry` is `{ vaults: [{ id,
+// label, createdAt }] }`, and each vault's encrypted blob is a base64 string under
+// `vault-blob-b64:<id>` (pre-registry builds used a bare `vault-blob-b64`, which Bramble migrates
+// on first run). A registry entry alone is not a vault: Bramble registers the id just before it
+// writes the blob, and prunes ids that never got one. So a vault exists when one registered id (or
+// the legacy key) has a non-empty blob, the same thing Bramble's own unlock screen needs.
+
+export type BrambleVaultStatus = 'present' | 'absent' | 'unknown'
+
+export const BRAMBLE_VAULT_REGISTRY_KEY = 'vault.registry'
+export const BRAMBLE_VAULT_BLOB_KEY = 'vault-blob-b64'
+
+/** What the probe script returns: registered vault ids and which blob keys hold data. Never blob contents. */
+export interface BrambleVaultProbe {
+  vaultIds: string[]
+  blobs: Record<string, boolean>
+}
+
+/**
+ * Runs in one of Bramble's own extension pages (its offscreen document) and returns a
+ * BrambleVaultProbe, or null when there is no extension storage. Read-only; only booleans leave.
+ */
+export const BRAMBLE_VAULT_PROBE_SCRIPT = `(() => {
+  const api = globalThis.chrome && globalThis.chrome.storage ? globalThis.chrome : globalThis.browser;
+  const local = api && api.storage && api.storage.local;
+  if (!local) return Promise.resolve(null);
+  const get = (keys) => new Promise((resolve, reject) => {
+    try {
+      const pending = local.get(keys, (items) => {
+        const error = api.runtime && api.runtime.lastError;
+        if (error) reject(new Error(error.message)); else resolve(items || {});
+      });
+      if (pending && typeof pending.then === 'function') pending.then((items) => resolve(items || {}), reject);
+    } catch (error) { reject(error); }
+  });
+  return get(${JSON.stringify(BRAMBLE_VAULT_REGISTRY_KEY)}).then((items) => {
+    const registry = items[${JSON.stringify(BRAMBLE_VAULT_REGISTRY_KEY)}];
+    const vaults = registry && Array.isArray(registry.vaults) ? registry.vaults : [];
+    const vaultIds = vaults.map((vault) => vault && vault.id).filter((id) => typeof id === 'string' && id.length > 0);
+    const keys = [${JSON.stringify(BRAMBLE_VAULT_BLOB_KEY)}].concat(vaultIds.map((id) => ${JSON.stringify(BRAMBLE_VAULT_BLOB_KEY)} + ':' + id));
+    return get(keys).then((blobs) => {
+      const present = {};
+      for (const key of keys) present[key] = typeof blobs[key] === 'string' && blobs[key].length > 0;
+      return { vaultIds, blobs: present };
+    });
+  });
+})()`
+
+/** Pure decision on a probe result. Anything malformed is 'unknown', never 'present'. */
+export function classifyBrambleVaultProbe(probe: unknown): BrambleVaultStatus {
+  if (typeof probe !== 'object' || probe === null) return 'unknown'
+  const { vaultIds, blobs } = probe as Partial<BrambleVaultProbe>
+  if (!Array.isArray(vaultIds) || typeof blobs !== 'object' || blobs === null) return 'unknown'
+  if (blobs[BRAMBLE_VAULT_BLOB_KEY] === true) return 'present'
+  for (const id of vaultIds) {
+    if (typeof id === 'string' && id && blobs[`${BRAMBLE_VAULT_BLOB_KEY}:${id}`] === true) return 'present'
+  }
+  return 'absent'
+}
+
+export const QUICK_UNLOCK_VAULT_UNKNOWN = 'Surffish could not check Bramble’s vault. Make sure Bramble is loaded, then try again.'
+
+/** Why PIN setup is not allowed right now (null when Bramble has a vault). Shared by Settings and the enrol IPC. */
+export function quickUnlockSetupBlocker(vault: unknown): string | null {
+  if (vault === 'present') return null
+  return vault === 'absent' ? QUICK_UNLOCK_NEEDS_VAULT : QUICK_UNLOCK_VAULT_UNKNOWN
+}
 
 export function quickUnlockPinError(pin: string, confirmPin: string): string | null {
   if (!QUICK_UNLOCK_PIN_PATTERN.test(pin)) return 'Use a PIN of 4 to 8 digits.'

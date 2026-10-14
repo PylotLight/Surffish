@@ -2,7 +2,8 @@
 // (needs the Bramble build, like check-bramble-poc.ts). Run the production build first:
 //   bun run build && electron scripts/check-bramble-quick-unlock-app.cjs <unpacked bramble_firefox_X.zip dir>
 //   (headless Linux: xvfb-run -a electron --no-sandbox scripts/check-bramble-quick-unlock-app.cjs <dir>)
-// Creates a vault through Bramble's own setup page in a Surffish tab, enrols a PIN through the
+// First checks that PIN setup is refused (IPC) and disabled (Settings) while Bramble has no vault,
+// and that Settings enables it once the vault exists. Then creates a vault through Bramble's own setup page in a Surffish tab, enrols a PIN through the
 // Settings IPC, locks, opens the toolbar popup and drives Surffish's PIN panel: a wrong PIN, the
 // right PIN typed on the keyboard (Bramble must unlock), "Use master password", and the 5-strike
 // lockout. Set CHECK_SHOTS=<dir> to save screenshots of the panel.
@@ -66,6 +67,22 @@ async function run() {
   smoke.step(`Bramble ${bramble.version} loaded`)
   assert.equal(existsSync(join(userData, 'bramble-quick-unlock.json')), false)
 
+  // 0. No vault yet: the enrol IPC refuses, and Settings disables "Set up PIN…" with a hint.
+  const beforeVault = await evaluate(content, 'window.api.browser.bramble.quickUnlock.get()')
+  assert.equal(beforeVault.vault, 'absent', JSON.stringify(beforeVault))
+  const noVault = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol(${JSON.stringify({ masterPassword: MASTER, pin: PIN, confirmPin: PIN, touchId: false, requireMasterAfterRestart: true })})`)
+  assert.equal(noVault.ok, false)
+  assert.match(noVault.error, /Create your Bramble vault first/)
+  assert.equal(noVault.state.enabled, false)
+  assert.equal(existsSync(join(userData, 'bramble-quick-unlock.json')), false, 'nothing written without a vault')
+  const setupButton = `[...document.querySelectorAll('.bramble-quick-unlock-settings button')].find((b) => /Set up PIN/.test(b.textContent))`
+  await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "integrations" })')
+  await waitFor(() => evaluate(content, `(() => { const b = ${setupButton}; return !!b && b.disabled && document.querySelector('.bramble-quick-unlock-settings').textContent.includes('Create your Bramble vault first') })()`), 'Set up PIN disabled with the vault hint')
+  await evaluate(content, `document.querySelector('.bramble-quick-unlock-settings').scrollIntoView(); true`)
+  await delay(300)
+  await shot(content, 'settings-no-vault')
+  smoke.step('no vault: enrol refused, Set up PIN disabled')
+
   // 1. Vault through Bramble's own setup page (opens in a Surffish tab).
   await evaluate(toolbar, 'window.api.browser.bramble.setup()')
   const options = await waitFor(() => webContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL().startsWith('chrome-extension://') && contents.getURL().includes('/options.html')), 'Bramble options tab')
@@ -83,6 +100,12 @@ async function run() {
   await waitFor(() => evaluate(options, `[...document.querySelectorAll('button')].some((b) => /saved it/i.test(b.textContent))`), 'the recovery code screen', 60000)
   await evaluate(options, `[...document.querySelectorAll('button')].find((b) => /saved it/i.test(b.textContent)).click(); true`)
   smoke.step('vault created')
+  assert.equal((await evaluate(content, 'window.api.browser.bramble.quickUnlock.get()')).vault, 'present')
+  // Settings picks the new vault up on its own (re-checks while it shows the hint).
+  const stillMounted = await evaluate(content, `!!(${setupButton})`)
+  if (!stillMounted) await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "integrations" })')
+  await waitFor(() => evaluate(content, `(() => { const b = ${setupButton}; return !!b && !b.disabled && !document.querySelector('.bramble-quick-unlock-needs-vault') })()`), 'Set up PIN enabled once the vault exists')
+  smoke.step(`Settings enabled setup after the vault was created (${stillMounted ? 'live, without remounting' : 'after reopening Integrations'})`)
 
   // 2. Enrol through the Settings IPC (what Settings → Integrations → Quick unlock calls).
   const bad = await evaluate(content, `window.api.browser.bramble.quickUnlock.enrol({ masterPassword: 'x', pin: '12', confirmPin: '12', touchId: false, requireMasterAfterRestart: true })`)

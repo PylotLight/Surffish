@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { quickUnlockPinError, type BrambleQuickUnlockState } from '../../../../shared/bramble-quick-unlock'
+import { quickUnlockPinError, quickUnlockSetupBlocker, type BrambleQuickUnlockState } from '../../../../shared/bramble-quick-unlock'
 import { SettingsGroup, SettingsRow } from './SettingsControls'
 
 /**
  * Settings → Integrations → Bramble → Quick unlock. Surffish-only: a PIN (and Touch ID on a Mac)
  * that unlocks Bramble's popup by typing the master password for you. Setup asks for the master
- * password once, here, in Surffish's own form.
+ * password once, here, in Surffish's own form. Setup is only offered once Bramble has a vault.
  */
+
+/** While Bramble has no vault, re-check this often so the section unlocks as soon as one is created. */
+const VAULT_RECHECK_MS = 2000
 export function BrambleQuickUnlockSettings(): React.JSX.Element {
   const [state, setState] = useState<BrambleQuickUnlockState | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
@@ -25,6 +28,25 @@ export function BrambleQuickUnlockSettings(): React.JSX.Element {
     return unsubscribe
   }, [])
 
+  // No vault yet (or Bramble still loading): re-check while this section is on screen, and when the
+  // window regains focus, so creating the vault in Bramble's tab enables setup without a reload.
+  const vault = state?.vault
+  useEffect(() => {
+    if (vault === undefined || vault === 'present') return
+    const api = window.api.browser.bramble.quickUnlock
+    let cancelled = false
+    const recheck = (): void => {
+      void api.get().then((next) => { if (!cancelled) setState(next) }).catch(() => {})
+    }
+    const timer = window.setInterval(recheck, VAULT_RECHECK_MS)
+    window.addEventListener('focus', recheck)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', recheck)
+    }
+  }, [vault])
+
   function resetForm(): void {
     setMasterPassword('')
     setPin('')
@@ -34,6 +56,8 @@ export function BrambleQuickUnlockSettings(): React.JSX.Element {
 
   async function enrol(event: React.FormEvent): Promise<void> {
     event.preventDefault()
+    const blocked = quickUnlockSetupBlocker(state?.vault)
+    if (blocked) { setError(blocked); return }
     const pinError = quickUnlockPinError(pin, confirmPin)
     if (!masterPassword) { setError('Enter your Bramble master password.'); return }
     if (pinError) { setError(pinError); return }
@@ -78,6 +102,17 @@ export function BrambleQuickUnlockSettings(): React.JSX.Element {
 
   const status = !state ? undefined : !state.enabled ? 'Off' : state.armed ? (state.touchIdEnabled ? 'PIN + Touch ID' : 'PIN') : 'Needs master password once'
   const enabled = state?.enabled === true
+  const setupBlocker = state ? quickUnlockSetupBlocker(state.vault) : null
+  const vaultHint = setupBlocker && (
+    <>
+      <p className="settings-help bramble-quick-unlock-needs-vault" role="status">{setupBlocker}</p>
+      {state?.vault === 'absent' && (
+        <div className="settings-actions">
+          <button className="settings-action secondary" type="button" onClick={() => void window.api.browser.bramble.setup().catch(() => {})}>Create your Bramble vault…</button>
+        </div>
+      )}
+    </>
+  )
   return (
     <SettingsGroup title="Quick unlock for Bramble" status={status} statusOn={state?.armed === true} className="bramble-quick-unlock-settings">
       <p className="settings-help">Unlock Bramble’s popup with a PIN{state?.touchIdAvailable ? ' or Touch ID' : ''} instead of your master password. Surffish keeps your master password encrypted on this device and types it into Bramble for you; Bramble itself is unchanged. A PIN is weaker than your master password: use it only on a device you trust.</p>
@@ -91,16 +126,20 @@ export function BrambleQuickUnlockSettings(): React.JSX.Element {
             <span className="settings-row-value">{state.failedAttempts} of {state.maxAttempts}</span>
           </SettingsRow>
           <div className="settings-actions">
-            <button className="settings-action secondary" type="button" disabled={busy} onClick={() => { resetForm(); setTouchId(state.touchIdEnabled); setRequireMaster(state.requireMasterAfterRestart); setSetupOpen(true) }}>Change PIN…</button>
+            <button className="settings-action secondary" type="button" disabled={busy || !!setupBlocker} onClick={() => { resetForm(); setTouchId(state.touchIdEnabled); setRequireMaster(state.requireMasterAfterRestart); setSetupOpen(true) }}>Change PIN…</button>
             {state.touchIdEnabled && <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void turnOffTouchId()}>Turn off Touch ID</button>}
             <button className="settings-action secondary" type="button" disabled={busy} onClick={() => void disable()}>Turn off quick unlock</button>
           </div>
+          {vaultHint}
         </>
       )}
       {!enabled && !setupOpen && (
-        <div className="settings-actions">
-          <button className="settings-action primary" type="button" disabled={!state || busy} onClick={() => { resetForm(); setTouchId(false); setRequireMaster(true); setSetupOpen(true) }}>Set up PIN…</button>
-        </div>
+        <>
+          <div className="settings-actions">
+            <button className="settings-action primary" type="button" disabled={!state || busy || !!setupBlocker} title={setupBlocker ?? undefined} onClick={() => { resetForm(); setTouchId(false); setRequireMaster(true); setSetupOpen(true) }}>Set up PIN…</button>
+          </div>
+          {vaultHint}
+        </>
       )}
       {setupOpen && state && (
         <form className="bramble-quick-unlock-form" onSubmit={(event) => void enrol(event)} autoComplete="off">
@@ -123,8 +162,9 @@ export function BrambleQuickUnlockSettings(): React.JSX.Element {
           </SettingsRow>
           <div className="settings-actions">
             <button className="settings-action secondary" type="button" disabled={busy} onClick={() => { resetForm(); setSetupOpen(false) }}>Cancel</button>
-            <button className="settings-action primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Turn on quick unlock'}</button>
+            <button className="settings-action primary" type="submit" disabled={busy || !!setupBlocker}>{busy ? 'Saving…' : 'Turn on quick unlock'}</button>
           </div>
+          {vaultHint}
         </form>
       )}
       {error && <p className="settings-message is-error" role="alert">{error}</p>}
