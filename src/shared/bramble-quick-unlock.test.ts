@@ -11,8 +11,12 @@ import {
   classifyFillOutcome,
   isBrambleUnlockPageUrl,
   quickUnlockPinError,
+  MASTER_CAPTURE_INSTALL_SCRIPT,
+  MASTER_CAPTURE_STOP_SCRIPT,
+  MASTER_CAPTURE_TAKE_SCRIPT,
   type UnlockPageSnapshot
 } from './bramble-quick-unlock.ts'
+import vm from 'node:vm'
 
 const EXTENSION = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/'
 
@@ -164,4 +168,47 @@ test('setup blocker: PIN setup (UI and enrol IPC) needs Bramble to have a vault'
   assert.equal(quickUnlockSetupBlocker('unknown'), QUICK_UNLOCK_VAULT_UNKNOWN)
   assert.equal(quickUnlockSetupBlocker(undefined), QUICK_UNLOCK_VAULT_UNKNOWN)
   assert.equal(quickUnlockSetupBlocker(true), QUICK_UNLOCK_VAULT_UNKNOWN)
+})
+
+// A tiny stand-in for Surffish's isolated world of Bramble's popup: one context (globals persist
+// between executeJavaScriptInIsolatedWorld calls) and a document that records submit listeners.
+function isolatedWorld() {
+  const listeners: Array<{ listener: (event: unknown) => void; capture: boolean }> = []
+  const document = { addEventListener: (type: string, listener: (event: unknown) => void, capture: boolean) => { if (type === 'submit') listeners.push({ listener, capture }) } }
+  const context = vm.createContext({ document })
+  const run = (code: string): unknown => vm.runInContext(code, context)
+  const form = (fields: Array<{ name: string; value: string }>) => ({ querySelectorAll: () => fields })
+  const submit = (target: unknown): void => { for (const { listener } of listeners) listener({ target }) }
+  return { run, form, submit, listeners }
+}
+
+test('re-arm capture: keeps the value submitted through Bramble’s single-field unlock form, once', () => {
+  const world = isolatedWorld()
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), null, 'nothing before the listener is installed')
+  world.run(MASTER_CAPTURE_INSTALL_SCRIPT)
+  world.run(MASTER_CAPTURE_INSTALL_SCRIPT)
+  assert.equal(world.listeners.length, 1, 'installing twice adds one listener')
+  assert.equal(world.listeners[0]?.capture, true, 'capture phase: runs before Bramble’s handler can stop it')
+  world.submit(world.form([{ name: 'masterPassword', value: 'wrong one' }]))
+  world.submit(world.form([{ name: 'masterPassword', value: 'the master password' }]))
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), 'the master password', 'the newest submit wins')
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), null, 'taking clears it')
+})
+
+test('re-arm capture: ignores setup / change-password forms, empty values, and stops when told', () => {
+  const world = isolatedWorld()
+  world.run(MASTER_CAPTURE_INSTALL_SCRIPT)
+  world.submit(world.form([{ name: 'masterPassword', value: 'new' }, { name: 'confirmPassword', value: 'new' }]))
+  world.submit(world.form([{ name: 'currentPassword', value: 'old' }]))
+  world.submit(world.form([{ name: 'masterPassword', value: '' }]))
+  world.submit(null)
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), null)
+  world.submit(world.form([{ name: 'masterPassword', value: 'typed' }]))
+  world.run(MASTER_CAPTURE_STOP_SCRIPT)
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), null, 'stop forgets what was collected')
+  world.submit(world.form([{ name: 'masterPassword', value: 'our own fill' }]))
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), null, 'stopped: Surffish’s own fill is never collected')
+  world.run(MASTER_CAPTURE_INSTALL_SCRIPT)
+  world.submit(world.form([{ name: 'masterPassword', value: 'again' }]))
+  assert.equal(world.run(MASTER_CAPTURE_TAKE_SCRIPT), 'again')
 })

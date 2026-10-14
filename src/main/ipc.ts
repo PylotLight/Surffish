@@ -413,6 +413,10 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return (await quickUnlock()).setQuickUnlockTouchId(enabled)
   })
+  ipcMain.handle('browser:bramble:quick-unlock:set-require-master', async (event, input: unknown) => {
+    assertMainRenderer(event)
+    return (await quickUnlock()).setQuickUnlockRequireMaster(input)
+  })
   ipcMain.handle('browser:extensions:get', (event) => {
     assertMainRenderer(event)
     return getWebStoreExtensionsState()

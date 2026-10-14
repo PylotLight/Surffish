@@ -7,7 +7,6 @@ if (globalThis.location && globalThis.location.protocol === 'data:') {
     ready: () => ipcRenderer.send('bramble-quick-unlock:ready'),
     submitPin: (pin) => ipcRenderer.invoke('bramble-quick-unlock:pin', String(pin)),
     touchId: () => ipcRenderer.invoke('bramble-quick-unlock:touch-id'),
-    rearm: (masterPassword) => ipcRenderer.invoke('bramble-quick-unlock:rearm', String(masterPassword)),
     useMasterPassword: () => ipcRenderer.send('bramble-quick-unlock:use-master'),
     onShow: (listener) => { ipcRenderer.on('bramble-quick-unlock:show', (_event, state) => listener(state)) },
     onResult: (listener) => { ipcRenderer.on('bramble-quick-unlock:result', (_event, result) => listener(result)) }

@@ -17,8 +17,10 @@ export interface BrambleQuickUnlockState {
   enabled: boolean
   /** A wrapped secret is available right now (false after a restart in memory-only mode). */
   armed: boolean
-  /** Not armed, but typing the master password into Surffish's prompt re-arms it. */
+  /** Not armed, but unlocking once with the master password in Bramble's own form re-arms it. */
   canRearm: boolean
+  /** That re-arm also moves an older memory-only setup to "PIN keeps working after restarts". */
+  migratesOnRearm: boolean
   touchIdEnabled: boolean
   /** Running on a Mac that can prompt for Touch ID. */
   touchIdAvailable: boolean
@@ -42,7 +44,14 @@ export interface BrambleQuickUnlockEnrolInput {
   pin: string
   confirmPin: string
   touchId: boolean
-  requireMasterAfterRestart: boolean
+  /** Omitted: persisted (PIN survives restarts) when secure key storage exists, memory-only otherwise. */
+  requireMasterAfterRestart?: boolean
+}
+
+/** Settings toggle after setup. Turning memory-only on needs the current PIN. */
+export interface BrambleQuickUnlockRequireMasterInput {
+  require: boolean
+  pin?: string
 }
 
 export type QuickUnlockResult = { ok: true; state: BrambleQuickUnlockState } | { ok: false; error: string; state: BrambleQuickUnlockState }
@@ -255,3 +264,49 @@ export function buildUnlockFillScript(secret: string): string {
   return true;
 })()`
 }
+
+// ---------------------------------------------------------------------------
+// Re-arming from Bramble's own form (memory-only mode after a restart)
+//
+// Surffish shows no master password screen of its own. When quick unlock is enabled but not armed,
+// main installs a capture-phase submit listener in its isolated world of Bramble's popup (the
+// same world the fill runs in; Bramble's own scripts cannot see it). It keeps only the last value
+// submitted through a form with exactly one password field named masterPassword, i.e. the unlock
+// form, never setup or change-password. Main takes (and clears) it, waits for Bramble to unlock
+// with it, and the vault re-arms only if it opens the PIN-under-master slot.
+
+const CAPTURE_STATE = '__surffishQuickUnlockCapture'
+
+export const MASTER_CAPTURE_INSTALL_SCRIPT = `(() => {
+  const state = globalThis.${CAPTURE_STATE} || (globalThis.${CAPTURE_STATE} = { value: null, active: false, installed: false });
+  state.active = true;
+  if (!state.installed) {
+    state.installed = true;
+    document.addEventListener('submit', (event) => {
+      if (!state.active) return;
+      const form = event.target;
+      if (!form || typeof form.querySelectorAll !== 'function') return;
+      const fields = form.querySelectorAll('input[type="password"], input[name="masterPassword"]');
+      if (fields.length !== 1 || fields[0].name !== 'masterPassword') return;
+      const value = fields[0].value;
+      if (typeof value === 'string' && value) state.value = value;
+    }, true);
+  }
+  return true;
+})()`
+
+/** Returns the last submitted value (or null) and forgets it. */
+export const MASTER_CAPTURE_TAKE_SCRIPT = `(() => {
+  const state = globalThis.${CAPTURE_STATE};
+  if (!state || typeof state.value !== 'string') return null;
+  const value = state.value;
+  state.value = null;
+  return value;
+})()`
+
+/** Stop collecting and forget anything collected (quick unlock armed again, or our own fill). */
+export const MASTER_CAPTURE_STOP_SCRIPT = `(() => {
+  const state = globalThis.${CAPTURE_STATE};
+  if (state) { state.active = false; state.value = null; }
+  return true;
+})()`

@@ -8,6 +8,12 @@
  * Touch ID) decrypts the master password here, and Surffish types it into Bramble's form and
  * submits it, exactly as if the user had typed it. Bramble's code and crypto are never touched.
  *
+ * Only one unlock screen is ever in front: Surffish's PIN pad while quick unlock is armed, or
+ * Bramble's own form otherwise ("Use master password" on the pad, or not armed). Surffish has no
+ * master password screen of its own. In memory-only mode after a restart the user unlocks with
+ * Bramble's own form, and Surffish watches that form (from the same isolated world it fills it
+ * from) for the master password it was given; if it opens the re-arm slot, the PIN is back on.
+ *
  * Loaded lazily (first Settings call, or a Bramble popup opening while bramble-quick-unlock.json
  * exists), so a profile that never enables it pays nothing at startup.
  */
@@ -18,6 +24,9 @@ import { fileURLToPath } from 'node:url'
 import {
   BRAMBLE_VAULT_PROBE_SCRIPT,
   buildUnlockFillScript,
+  MASTER_CAPTURE_INSTALL_SCRIPT,
+  MASTER_CAPTURE_STOP_SCRIPT,
+  MASTER_CAPTURE_TAKE_SCRIPT,
   classifyBrambleVaultProbe,
   classifyBrambleUnlockScreen,
   classifyFillOutcome,
@@ -118,6 +127,7 @@ export async function getQuickUnlockState(): Promise<BrambleQuickUnlockState> {
     enabled: status.enabled,
     armed: status.armed,
     canRearm: status.canRearm,
+    migratesOnRearm: status.migratesOnRearm,
     touchIdEnabled: status.touchIdEnabled,
     touchIdAvailable: touchIdAvailable(),
     requireMasterAfterRestart: status.requireMasterAfterRestart,
@@ -157,12 +167,16 @@ export function enrolQuickUnlock(input: unknown): Promise<QuickUnlockResult> {
     if (blocker) throw new Error(blocker)
     const wantsTouchId = value.touchId === true
     if (wantsTouchId && !touchIdAvailable()) throw new Error('Touch ID is not available on this Mac.')
+    // Persisted (PIN survives restarts) is the default wherever safeStorage can protect the key.
+    const requireMasterAfterRestart = typeof value.requireMasterAfterRestart === 'boolean'
+      ? value.requireMasterAfterRestart
+      : !await secureStorageAvailable()
     await getVault().enrol({
       masterPassword: value.masterPassword,
       pin: value.pin,
       confirmPin: value.confirmPin,
       touchId: wantsTouchId,
-      requireMasterAfterRestart: value.requireMasterAfterRestart !== false
+      requireMasterAfterRestart
     })
   })
 }
@@ -178,6 +192,15 @@ export function setQuickUnlockTouchId(enabled: unknown): Promise<QuickUnlockResu
   return result(() => getVault().setTouchIdEnabled(enabled === true))
 }
 
+/** Settings toggle: "Require master password after Surffish restarts". Turning it on needs the PIN. */
+export function setQuickUnlockRequireMaster(input: unknown): Promise<QuickUnlockResult> {
+  return result(async () => {
+    const value = (typeof input === 'object' && input !== null ? input : {}) as { require?: unknown; pin?: unknown }
+    if (typeof value.require !== 'boolean') throw new Error('Not a valid setting.')
+    await getVault().setRequireMasterAfterRestart(value.require, typeof value.pin === 'string' ? value.pin : undefined)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // The panel over Bramble's popup
 
@@ -186,7 +209,7 @@ export interface QuickUnlockPopupHooks {
   setBlurHold(hold: boolean): void
 }
 
-type OverlayMode = 'pin' | 'rearm' | 'notice'
+type OverlayMode = 'pin' | 'notice'
 type PanelResult = { status: 'ok' } | { status: 'wrong'; attemptsLeft: number } | { status: 'error'; message: string }
 
 class PopupSession {
@@ -224,11 +247,17 @@ class PopupSession {
   }
 
   private async detect(): Promise<void> {
-    if (this.detecting || this.filling || this.popup.isDestroyed() || !this.popup.isVisible()) return
+    if (this.detecting || this.filling || this.popup.isDestroyed()) return
     this.detecting = true
     try {
       const status = getVault().status()
-      if (!status.enabled || (!status.armed && !status.canRearm)) {
+      // Not armed but re-armable (memory-only after a restart): Bramble's own form is the only
+      // screen; collect what the user submits to it. Runs even while the popup is hidden, so a
+      // submit right before the popup hides is not lost.
+      if (status.enabled && !status.armed && status.canRearm) await this.observeMasterPassword()
+      else await this.stopObserving()
+      if (this.popup.isDestroyed() || !this.popup.isVisible()) return
+      if (!status.enabled || !status.armed) {
         if (this.shown && !this.noticeShown) this.hide()
         return
       }
@@ -244,9 +273,69 @@ class PopupSession {
       const touchId = status.touchIdArmed && touchIdAvailable()
       const autoTouchId = touchId && !this.autoOffered
       this.autoOffered = true
-      await this.show(status.armed ? 'pin' : 'rearm', { touchId, autoTouchId })
+      await this.show('pin', { touchId, autoTouchId })
     } finally {
       this.detecting = false
+    }
+  }
+
+  /** The capture listener is active in the popup's current document. */
+  private captureActive = false
+
+  /** Armed again (or quick unlock off): stop collecting and drop anything collected. */
+  private async stopObserving(): Promise<void> {
+    this.observedMaster = null
+    if (!this.captureActive) return
+    this.captureActive = false
+    const contents = this.popup.webContents
+    if (contents.isDestroyed()) return
+    try {
+      await contents.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code: MASTER_CAPTURE_STOP_SCRIPT }])
+    } catch { /* gone */ }
+  }
+
+  /** A master password the user submitted to Bramble's form, waiting for Bramble's verdict. */
+  private observedMaster: { value: string; deadline: number } | null = null
+
+  /**
+   * Memory-only re-arm without a Surffish screen. A capture listener in Surffish's isolated world
+   * (never Bramble's world) keeps the last value submitted through Bramble's single-field unlock
+   * form; main takes it, waits until Bramble has actually unlocked with it, and only then offers it
+   * to the vault, which re-arms only if it opens the PIN-under-master slot. Anything else is dropped.
+   */
+  private async observeMasterPassword(): Promise<void> {
+    const contents = this.popup.webContents
+    if (contents.isDestroyed() || contents.isLoading()) return
+    let taken: unknown = null
+    try {
+      taken = await contents.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code: MASTER_CAPTURE_TAKE_SCRIPT }])
+    } catch {
+      taken = null
+    }
+    // A newer submit replaces the one still waiting (wrong password, then the right one).
+    if (typeof taken === 'string' && taken) this.observedMaster = { value: taken, deadline: Date.now() + OUTCOME_TIMEOUT_MS }
+    const pending = this.observedMaster
+    if (pending) {
+      const outcome = classifyFillOutcome(await this.snapshot(), this.extensionUrl)
+      if (outcome === 'unlocked') {
+        this.observedMaster = null
+        try {
+          const secret = await getVault().rearmWithMasterPassword(pending.value)
+          if (secret) {
+            secret.fill(0)
+            void publish()
+          }
+        } catch { /* stays not armed */ }
+        return
+      }
+      if (outcome === 'rejected' || Date.now() > pending.deadline) this.observedMaster = null
+    }
+    // Keep the listener installed on whatever document the popup shows (idempotent).
+    if (classifyBrambleUnlockScreen(await this.snapshot(), this.extensionUrl) === 'unlock') {
+      try {
+        await contents.executeJavaScriptInIsolatedWorld(ISOLATED_WORLD_ID, [{ code: MASTER_CAPTURE_INSTALL_SCRIPT }])
+        this.captureActive = true
+      } catch { /* page navigating */ }
     }
   }
 
@@ -324,6 +413,8 @@ class PopupSession {
       return { status: 'error', message: 'Bramble’s window closed.' }
     }
     this.filling = true
+    // Never let our own fill's submit be collected as something the user typed.
+    await this.stopObserving()
     try {
       const before = classifyBrambleUnlockScreen(await this.snapshot(), this.extensionUrl)
       if (before !== 'unlock') return { status: 'error', message: 'Bramble is not showing its unlock screen.' }
@@ -430,14 +521,6 @@ function registerOverlayIpc(): void {
     }
     const secret = await getVault().unlockWithDeviceKey()
     if (!secret) return { status: 'error', message: 'Touch ID unlock is not set up. Enter your PIN.' }
-    return session.fill(secret)
-  })
-  ipcMain.handle('bramble-quick-unlock:rearm', async (event, masterPassword: unknown): Promise<PanelResult> => {
-    const session = sessionFor(event)
-    if (!session) throw new Error('Not available.')
-    const secret = typeof masterPassword === 'string' && masterPassword ? await getVault().rearmWithMasterPassword(masterPassword) : null
-    if (!secret) return { status: 'error', message: 'That is not the master password quick unlock was set up with. Use Bramble’s own form if it changed, then set up quick unlock again.' }
-    void publish()
     return session.fill(secret)
   })
 }

@@ -5,7 +5,7 @@ import {
   BrambleQuickUnlockVault,
   LOCKED_OUT_NOTICE,
   MASTER_CHANGED_NOTICE,
-  RESTART_NOTICE,
+  NEEDS_ARMED_TO_PERSIST,
   type DeviceKeyProtector,
   type QuickUnlockPersistence,
   type StoredQuickUnlock
@@ -33,16 +33,24 @@ function fakeKeychain(available = true): DeviceKeyProtector & { keychain: Buffer
   }
 }
 
+/** persist defaults to true: persisted (PIN survives restarts) is the default mode. */
 async function enrolled(options: { persist?: boolean; touchId?: boolean } = {}): Promise<{ vault: BrambleQuickUnlockVault; file: MemoryFile; keychain: ReturnType<typeof fakeKeychain> }> {
   const file = new MemoryFile()
   const keychain = fakeKeychain()
   const vault = new BrambleQuickUnlockVault(file, keychain)
-  await vault.enrol({ masterPassword: MASTER, pin: '135790', confirmPin: '135790', touchId: options.touchId ?? false, requireMasterAfterRestart: !options.persist, kdf: FAST })
+  await vault.enrol({ masterPassword: MASTER, pin: '135790', confirmPin: '135790', touchId: options.touchId ?? false, requireMasterAfterRestart: options.persist === false, kdf: FAST })
   return { vault, file, keychain }
 }
 
-test('memory-only (default): nothing that can unlock Bramble is written to disk', async () => {
-  const { vault, file } = await enrolled()
+/** A memory-only file as written before the mode was switchable (no restartModeChosen). */
+async function legacyMemoryOnly(touchId = false): Promise<{ file: MemoryFile; keychain: ReturnType<typeof fakeKeychain> }> {
+  const { file, keychain } = await enrolled({ persist: false, touchId })
+  delete file.value!.restartModeChosen
+  return { file, keychain }
+}
+
+test('memory-only: nothing that can unlock Bramble is written to disk', async () => {
+  const { vault, file } = await enrolled({ persist: false })
   assert.equal(vault.status().armed, true)
   const onDisk = JSON.stringify(file.value)
   assert.equal(onDisk.includes(MASTER), false)
@@ -55,10 +63,11 @@ test('memory-only (default): nothing that can unlock Bramble is written to disk'
 })
 
 test('memory-only after a restart: not armed until the master password re-arms the same PIN', async () => {
-  const { file, keychain } = await enrolled({ touchId: true })
+  const { file, keychain } = await enrolled({ persist: false, touchId: true })
+  assert.equal(file.value?.restartModeChosen, true, 'chosen at setup: never migrated')
   const restarted = new BrambleQuickUnlockVault(file, keychain)
   await restarted.load()
-  assert.deepEqual([restarted.status().armed, restarted.status().canRearm, restarted.status().notice], [false, true, RESTART_NOTICE])
+  assert.deepEqual([restarted.status().armed, restarted.status().canRearm, restarted.status().notice], [false, true, null])
   assert.equal((await restarted.attemptPin('135790')).status, 'unavailable')
   assert.equal(await restarted.rearmWithMasterPassword('wrong master', FAST), null)
   assert.equal((await restarted.rearmWithMasterPassword(MASTER, FAST))?.toString(), MASTER)
@@ -67,6 +76,84 @@ test('memory-only after a restart: not armed until the master password re-arms t
   const result = await restarted.attemptPin('135790')
   assert.equal(result.status === 'ok' && result.secret.toString(), MASTER)
   assert.equal((await restarted.unlockWithDeviceKey())?.toString(), MASTER)
+  // An explicit memory-only choice stays memory-only.
+  assert.equal(file.value?.requireMasterAfterRestart, true)
+  assert.equal(file.value?.pin, undefined)
+  assert.equal(file.value?.deviceKey, undefined)
+  const again = new BrambleQuickUnlockVault(file, keychain)
+  await again.load()
+  assert.equal(again.status().armed, false)
+})
+
+test('persisted is the default for a new profile', async () => {
+  const vault = new BrambleQuickUnlockVault(new MemoryFile(), fakeKeychain())
+  assert.equal(vault.status().requireMasterAfterRestart, false)
+})
+
+test('migration: an older memory-only enrolment moves to persisted the first time it is armed', async () => {
+  const { file, keychain } = await legacyMemoryOnly(true)
+  const restarted = new BrambleQuickUnlockVault(file, keychain)
+  await restarted.load()
+  assert.deepEqual([restarted.status().armed, restarted.status().canRearm, restarted.status().migratesOnRearm], [false, true, true])
+  assert.equal(await restarted.rearmWithMasterPassword('not it', FAST), null)
+  assert.equal(file.value?.requireMasterAfterRestart, true, 'a wrong password changes nothing')
+  assert.equal((await restarted.rearmWithMasterPassword(MASTER, FAST))?.toString(), MASTER)
+  assert.equal(file.value?.requireMasterAfterRestart, false)
+  assert.ok(file.value?.deviceKey && file.value.pin && file.value.touch)
+  assert.equal(file.value?.rearm, undefined, 'the re-arm slot is no longer needed')
+  assert.equal(JSON.stringify(file.value).includes(MASTER), false)
+  // From now on: armed straight after a restart, PIN and Touch ID, never the master password.
+  const next = new BrambleQuickUnlockVault(file, keychain)
+  await next.load()
+  assert.deepEqual([next.status().armed, next.status().touchIdArmed, next.status().notice], [true, true, null])
+  const result = await next.attemptPin('135790')
+  assert.equal(result.status === 'ok' && result.secret.toString(), MASTER)
+})
+
+test('migration: without secure key storage the enrolment is armed but stays memory-only', async () => {
+  const { file } = await legacyMemoryOnly()
+  const restarted = new BrambleQuickUnlockVault(file, fakeKeychain(false))
+  await restarted.load()
+  assert.equal((await restarted.rearmWithMasterPassword(MASTER, FAST))?.toString(), MASTER)
+  assert.equal(restarted.status().armed, true)
+  assert.equal(file.value?.requireMasterAfterRestart, true)
+  assert.ok(file.value?.rearm)
+})
+
+test('Settings: switching to persisted needs quick unlock armed', async () => {
+  const { file, keychain } = await enrolled({ persist: false })
+  const restarted = new BrambleQuickUnlockVault(file, keychain)
+  await restarted.load()
+  await assert.rejects(restarted.setRequireMasterAfterRestart(false), (error: Error) => error.message === NEEDS_ARMED_TO_PERSIST)
+  assert.equal(file.value?.requireMasterAfterRestart, true)
+  await restarted.rearmWithMasterPassword(MASTER, FAST)
+  assert.equal(file.value?.requireMasterAfterRestart, true, 'explicit memory-only is not migrated')
+  await restarted.setRequireMasterAfterRestart(false)
+  assert.equal(file.value?.requireMasterAfterRestart, false)
+  assert.equal(file.value?.rearm, undefined)
+  const next = new BrambleQuickUnlockVault(file, keychain)
+  await next.load()
+  assert.equal(next.status().armed, true)
+})
+
+test('Settings: switching to memory-only needs the PIN (counted) and stays the user’s choice', async () => {
+  const { vault, file, keychain } = await enrolled({ touchId: true })
+  await assert.rejects(vault.setRequireMasterAfterRestart(true), /Enter your PIN/)
+  await assert.rejects(vault.setRequireMasterAfterRestart(true, '000000', FAST), /Wrong PIN. 4 tries left/)
+  assert.equal(file.value?.failedAttempts, 1)
+  await vault.setRequireMasterAfterRestart(true, '135790', FAST)
+  assert.equal(file.value?.failedAttempts, 0)
+  assert.equal(file.value?.requireMasterAfterRestart, true)
+  assert.equal(file.value?.restartModeChosen, true)
+  assert.deepEqual([file.value?.deviceKey, file.value?.pin, file.value?.touch], [undefined, undefined, undefined])
+  assert.equal(file.value?.rearm?.kind, 'master')
+  assert.equal(vault.status().armed, true, 'still armed for this session')
+  const restarted = new BrambleQuickUnlockVault(file, keychain)
+  await restarted.load()
+  assert.deepEqual([restarted.status().armed, restarted.status().migratesOnRearm], [false, false])
+  assert.equal((await restarted.rearmWithMasterPassword(MASTER, FAST))?.toString(), MASTER)
+  assert.equal(file.value?.requireMasterAfterRestart, true, 'turned back on by the user: not migrated again')
+  assert.equal(restarted.status().touchIdArmed, true)
 })
 
 test('persisted mode survives a restart through the keychain-protected device key', async () => {
@@ -94,6 +181,7 @@ test('persisting is refused without secure OS key storage', async () => {
   await assert.rejects(vault.enrol({ masterPassword: MASTER, pin: '1234', confirmPin: '1234', touchId: false, requireMasterAfterRestart: false, kdf: FAST }), /no secure key storage/)
   await vault.enrol({ masterPassword: MASTER, pin: '1234', confirmPin: '1234', touchId: false, requireMasterAfterRestart: true, kdf: FAST })
   assert.equal(vault.status().armed, true)
+  await assert.rejects(vault.setRequireMasterAfterRestart(false), /no secure key storage/)
 })
 
 test('enrolment validates the PIN and its confirmation', async () => {
@@ -124,7 +212,7 @@ test('five wrong PINs wipe the slot; the counter is persisted on every attempt',
 })
 
 test('a correct PIN resets the counter', async () => {
-  const { vault, file } = await enrolled()
+  const { vault, file } = await enrolled({ persist: false })
   await vault.attemptPin('111111')
   await vault.attemptPin('222222')
   assert.equal(file.value?.failedAttempts, 2)
