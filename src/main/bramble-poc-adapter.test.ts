@@ -297,3 +297,45 @@ test('other extension pages and content scripts do not relay', async () => {
     assert.deepEqual(sent, [], JSON.stringify(location))
   }
 })
+
+test('alias gives Bramble’s popup and options pages chrome.tabs through Surffish (Settings → Restore / Import)', async () => {
+  const { runInNewContext } = await import('node:vm')
+  const calls: Array<[string, unknown]> = []
+  const host = {
+    tabs: async (op: string, payload: unknown) => {
+      calls.push([op, payload])
+      return op === 'query' ? [{ id: 5, url: 'https://example.com/' }] : op === 'create' ? { id: 9 } : undefined
+    }
+  }
+  const page = (pathname: string, protocol = 'chrome-extension:') => {
+    const { chrome } = fakeChrome()
+    // Electron's own chrome.tabs in extension pages: query/update/get, no create/remove.
+    const native = { query: async () => [{ id: 1, url: null }], update: async () => ({}), get: async () => ({}) }
+    const context: Record<string, unknown> = { URL, console, document: {}, navigator: {}, location: { protocol, pathname }, surffishExtensionHost: host, chrome: { ...chrome, tabs: native } }
+    context.globalThis = context
+    runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, context)
+    return context as { browser: { tabs: Record<string, (...args: unknown[]) => Promise<unknown>> }; chrome: { tabs: Record<string, unknown> } }
+  }
+
+  const popup = page('/popup.html')
+  // Bramble 1.29: openSetup('restore') → browser.tabs.create({ url: runtime.getURL('options.html?screen=restore') }).
+  assert.deepEqual(JSON.parse(JSON.stringify(await popup.browser.tabs.create!({ url: 'chrome-extension://bramble/options.html?screen=restore' }))), { id: 9 })
+  await popup.browser.tabs.create!({ url: 'options.html?screen=import' })
+  const queried = await popup.browser.tabs.query!({ active: true, currentWindow: true })
+  assert.deepEqual(JSON.parse(JSON.stringify(queried)), [{ id: 5, url: 'https://example.com/' }])
+  await new Promise((done) => (popup.browser.tabs.remove as unknown as (id: number, callback: () => void) => void)(9, () => done(undefined)))
+  assert.deepEqual(calls.map(([op]) => op), ['create', 'create', 'query', 'remove'])
+  assert.equal((calls[0]![1] as { url: string }).url, 'chrome-extension://bramble/options.html?screen=restore')
+  assert.equal((calls[1]![1] as { url: string }).url, 'chrome-extension://bramble/options.html?screen=import', 'relative URLs resolve against the extension')
+
+  calls.length = 0
+  const options = page('/options.html')
+  assert.equal(typeof options.browser.tabs.create, 'function')
+  await options.browser.tabs.getCurrent!()
+  assert.deepEqual(calls.map(([op]) => op), ['getCurrent'])
+
+  // Not in the hidden offscreen host, and not in content scripts on web pages (Electron's tabs stay).
+  for (const other of [page('/offscreen.html'), page('/', 'https:')]) {
+    assert.equal(other.chrome.tabs.create, undefined)
+  }
+})

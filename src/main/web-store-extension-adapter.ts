@@ -9,6 +9,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, posix, relative, resolve, sep } from 'node:path'
 import type { ExtensionSourceFile } from '../shared/extension-compat'
+import { EXTENSION_PAGE_TABS_SHIM } from './extension-tabs-shim.ts'
 
 export const EXTENSION_SHIM_FILE = 'surffish-extension-shim.js'
 export const EXTENSION_BACKGROUND_WRAPPER_FILE = 'surffish-extension-background.js'
@@ -119,32 +120,7 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
   // tabs + openOptionsPage in popups/options pages: Electron does not know Surffish's tab model
   // (tabs.query sees no tabs, tabs.create is missing), so ask Surffish over its preload bridge.
   const host = globalThis.surffishExtensionHost;
-  if (isExtensionPage && host && typeof host.tabs === 'function') {
-    const tabs = api.tabs || {};
-    if (!api.tabs) define(api, 'tabs', tabs);
-    const run = (op, payload, callback) => settle(Promise.resolve(host.tabs(op, payload)), callback);
-    const resolveUrl = (url) => typeof url === 'string' ? new URL(url, api.runtime.getURL('/')).href : undefined;
-    const props = (value) => {
-      const input = value && typeof value === 'object' ? value : {};
-      return { url: resolveUrl(input.url), active: typeof input.active === 'boolean' ? input.active : (typeof input.selected === 'boolean' ? input.selected : undefined), pinned: typeof input.pinned === 'boolean' ? input.pinned : undefined };
-    };
-    define(tabs, 'query', (queryInfo, callback) => run('query', queryInfo && typeof queryInfo === 'object' ? JSON.parse(JSON.stringify(queryInfo)) : {}, callback));
-    define(tabs, 'get', (tabId, callback) => run('get', { tabId }, callback));
-    define(tabs, 'getCurrent', (callback) => settle(Promise.resolve(undefined), callback));
-    define(tabs, 'create', (createProperties, callback) => run('create', props(createProperties), callback));
-    define(tabs, 'update', (...args) => {
-      const callback = lastFunction(args);
-      const tabId = typeof args[0] === 'number' ? args[0] : undefined;
-      const updateProperties = typeof args[0] === 'number' ? args[1] : args[0];
-      return run('update', { tabId, ...props(updateProperties) }, callback);
-    });
-    define(tabs, 'reload', (...args) => {
-      const callback = lastFunction(args);
-      const tabId = typeof args[0] === 'number' ? args[0] : undefined;
-      const options = args.find((entry) => entry && typeof entry === 'object');
-      return run('reload', { tabId, bypassCache: !!(options && options.bypassCache) }, callback);
-    });
-    define(tabs, 'remove', (tabIds, callback) => run('remove', { tabIds: Array.isArray(tabIds) ? tabIds : [tabIds] }, callback));
+  if (isExtensionPage && (${EXTENSION_PAGE_TABS_SHIM})(api, host)) {
     if (typeof host.openOptionsPage === 'function') {
       define(api.runtime, 'openOptionsPage', (callback) => settle(Promise.resolve(host.openOptionsPage()), callback));
     }

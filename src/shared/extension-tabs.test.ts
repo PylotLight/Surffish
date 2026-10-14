@@ -31,6 +31,21 @@ test('tabs.query filters on active/pinned/url/status/title', () => {
   assert.equal(filterTabsForQuery(tabs, null).length, 3)
 })
 
+test('tabs.query currentWindow / lastFocusedWindow narrow to the window the user last used', () => {
+  // Two Surffish windows, each with an active tab: { active, currentWindow } must be one tab.
+  const twoWindows: ExtensionTabRecord[] = [
+    { ...tabs[0]!, currentWindow: false },
+    { ...tabs[1]!, active: true, currentWindow: true },
+    { ...tabs[2]!, currentWindow: true }
+  ]
+  assert.deepEqual(filterTabsForQuery(twoWindows, { active: true, currentWindow: true }).map((tab) => tab.id), [6])
+  assert.deepEqual(filterTabsForQuery(twoWindows, { active: true, lastFocusedWindow: true }).map((tab) => tab.id), [6])
+  assert.deepEqual(filterTabsForQuery(twoWindows, { currentWindow: false }).map((tab) => tab.id), [5])
+  assert.deepEqual(filterTabsForQuery(twoWindows, { active: true }).map((tab) => tab.id), [5, 6])
+  // When the current window is unknown the key is ignored rather than hiding every tab.
+  assert.deepEqual(filterTabsForQuery(tabs, { active: true, currentWindow: true }).map((tab) => tab.id), [5])
+})
+
 test('url/title are exposed only with tabs, activeTab on the active tab, or host access', () => {
   const mhn = { permissions: ['activeTab', 'storage'], hostPermissions: ['*://news.ycombinator.com/*'] }
   assert.equal(canSeeTabDetails(mhn, tabs[0]!), true)

@@ -2204,6 +2204,12 @@ function extensionTabId(tab: BrowserTab): number {
   return id
 }
 
+/** Whether the tab is in the window the user last used; left out when that is not known. */
+function currentWindowFlag(tab: BrowserTab): { currentWindow?: boolean } {
+  const current = currentWindowState()
+  return current ? { currentWindow: tab.win === current } : {}
+}
+
 function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord {
   const contents = tab.view?.webContents
   const live = contents && !contents.isDestroyed()
@@ -2211,6 +2217,7 @@ function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord 
     id: extensionTabId(tab),
     index,
     active: isActiveTab(tab),
+    ...currentWindowFlag(tab),
     pinned: tab.pinned,
     url: currentUrl(tab),
     title: pageTitle(tab),
@@ -2231,6 +2238,12 @@ function findTabByExtensionId(id: number | undefined): BrowserTab | undefined {
 /** Extensions never see private tabs (like Chrome's default "not allowed in Incognito"). */
 export function listExtensionTabs(): ExtensionTabRecord[] {
   return windowStates.flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab, index) => extensionTabRecord(tab, index)))
+}
+
+/** The (non-private) Surffish tab showing `contents`, for tabs.getCurrent from an extension page. */
+export function getExtensionTabForContents(contents: WebContents): ExtensionTabRecord | null {
+  const tab = tabForContents(contents)
+  return tab && !tab.isPrivate ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
 }
 
 export function getExtensionTab(id: number | undefined): ExtensionTabRecord | null {

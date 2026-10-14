@@ -45,11 +45,10 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload, clearDownloadHistory, openDownloadsFolder } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather } from './new-tab-weather'
-import { checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
+import { brambleTabsCallerForSender, checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
 import {
   checkWebStoreExtensionUpdate,
   getWebStoreExtensionsState,
-  handleExtensionTabsCall,
   installFromStorePage,
   installWebStoreExtension,
   openOptionsFromExtensionPage,
@@ -57,8 +56,10 @@ import {
   openWebStoreExtensionPopup,
   setWebStoreExtensionEnabled,
   uninstallWebStoreExtension,
-  webStoreExtensionForSender
+  webStoreExtensionForSender,
+  webStoreTabsCallerForSender
 } from './web-store-extensions'
+import { handleExtensionTabsCall } from './extension-tabs-host'
 import { registerNetworkToolsIpc } from './network-tools-ipc'
 import { registerSplitViewIpc } from './split-view-ipc'
 import { registerSpacesIpc } from './spaces-ipc'
@@ -436,11 +437,12 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return openWebStoreExtensionOptions(id)
   })
-  // From a Web Store extension's own popup/options page (extension-host.cjs).
+  // chrome.tabs from an extension's own popup/options page: Web Store extensions (extension-host.cjs)
+  // and Bramble (bramble-poc.cjs). Each owner checks the sender is one of its extension's pages.
   ipcMain.handle('browser:extensions:host-tabs', (event, op: unknown, payload: unknown) => {
-    const entry = webStoreExtensionForSender(event.sender, event.senderFrame)
-    if (!entry) throw new Error('Only an installed extension’s own page can use this bridge.')
-    return handleExtensionTabsCall(entry, op, payload)
+    const caller = webStoreTabsCallerForSender(event.sender, event.senderFrame) ?? brambleTabsCallerForSender(event.sender, event.senderFrame)
+    if (!caller) throw new Error('Only an installed extension’s own page can use this bridge.')
+    return handleExtensionTabsCall(caller, op, payload)
   })
   ipcMain.handle('browser:extensions:host-options', (event) => {
     const entry = webStoreExtensionForSender(event.sender, event.senderFrame)

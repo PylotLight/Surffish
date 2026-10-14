@@ -20,20 +20,16 @@ import {
   parseChromeWebStoreInput
 } from '../shared/chrome-web-store'
 import { analyzeExtensionCompatibility, compatibilityLabel, type ExtensionCompatibility, type ExtensionDnrSummary } from '../shared/extension-compat'
-import { filterTabsForQuery, isAllowedExtensionTabUrl, toChromeTab, type ExtensionAccess } from '../shared/extension-tabs'
+import { isAllowedExtensionTabUrl, type ExtensionAccess } from '../shared/extension-tabs'
+import type { ExtensionTabsCaller } from './extension-tabs-host'
 import { anchoredPopupBounds } from '../shared/window-geometry'
 import { getBrowserSession } from './browser-session'
 import {
   closeExtensionPageTabs,
   createExtensionTab,
   getBrowserTabUrlByWebContentsId,
-  getExtensionTab,
   isExtensionPageTab,
-  listExtensionTabs,
-  openExtensionPageTab,
-  reloadExtensionTab,
-  removeExtensionTabs,
-  updateExtensionTab
+  openExtensionPageTab
 } from './browser'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getMainWindow } from './window'
@@ -822,56 +818,18 @@ function accessFor(entry: LoadedEntry): ExtensionAccess {
   }
 }
 
-export function handleExtensionTabsCall(entry: LoadedEntry, op: unknown, payloadInput: unknown): unknown {
-  const payload = isRecord(payloadInput) ? payloadInput : {}
-  const access = accessFor(entry)
-  const id = entry.extension.id
-  const tabId = typeof payload.tabId === 'number' && Number.isSafeInteger(payload.tabId) ? payload.tabId : undefined
-  const checkedUrl = (value: unknown): string | undefined => {
-    if (value === undefined) return undefined
-    if (!isAllowedExtensionTabUrl(value, id)) throw new Error('Extensions can only open web pages or their own pages in Surffish.')
-    return value
-  }
-  switch (op) {
-    case 'query':
-      return filterTabsForQuery(listExtensionTabs(), payload).map((tab) => toChromeTab(tab, access))
-    case 'get': {
-      const tab = tabId === undefined ? null : getExtensionTab(tabId)
-      if (!tab) throw new Error(`No tab with id: ${String(payload.tabId)}.`)
-      return toChromeTab(tab, access)
-    }
-    case 'create': {
-      const url = checkedUrl(payload.url)
-      const active = payload.active !== false
-      const tab = url !== undefined && url.startsWith(entry.extension.url)
-        ? createExtensionTab(url, active, { extensionUrl: entry.extension.url, preloadPath: resolvePreload('extension-host.cjs'), owner: 'web-store' })
-        : createExtensionTab(url, active)
-      if (!tab) throw new Error('Could not open a tab.')
-      if (active) closePopupAfterTabSwitch(entry)
-      return toChromeTab(tab, access)
-    }
-    case 'update': {
-      const url = checkedUrl(payload.url)
-      if (url?.startsWith('chrome-extension:')) throw new Error('Open extension pages with tabs.create.')
-      const tab = updateExtensionTab(tabId, {
-        url,
-        active: typeof payload.active === 'boolean' ? payload.active : undefined,
-        pinned: typeof payload.pinned === 'boolean' ? payload.pinned : undefined
-      })
-      if (!tab) throw new Error(`No tab with id: ${String(payload.tabId)}.`)
-      if (payload.active === true) closePopupAfterTabSwitch(entry)
-      return toChromeTab(tab, access)
-    }
-    case 'reload':
-      if (!reloadExtensionTab(tabId, payload.bypassCache === true)) throw new Error(`No tab with id: ${String(payload.tabId)}.`)
-      return undefined
-    case 'remove': {
-      const ids = Array.isArray(payload.tabIds) ? payload.tabIds.filter((value): value is number => typeof value === 'number' && Number.isSafeInteger(value)) : []
-      removeExtensionTabs(ids)
-      return undefined
-    }
-    default:
-      throw new Error('Unsupported tabs operation.')
+/** The chrome.tabs caller for a Web Store extension's own popup/options page, or null. */
+export function webStoreTabsCallerForSender(sender: WebContents, senderFrame: Electron.WebFrameMain | null): ExtensionTabsCaller | null {
+  const entry = webStoreExtensionForSender(sender, senderFrame)
+  if (!entry) return null
+  return {
+    id: entry.extension.id,
+    extensionUrl: entry.extension.url,
+    access: accessFor(entry),
+    pagePreloadPath: resolvePreload('extension-host.cjs'),
+    owner: 'web-store',
+    sender,
+    onActiveTabSwitch: () => closePopupAfterTabSwitch(entry)
   }
 }
 
