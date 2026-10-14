@@ -1,0 +1,9 @@
+# screen recording permission: not granted
+hero.png	capturePage compose	darwin
+command-palette.png	capturePage compose	darwin
+split-view.png	capturePage compose	darwin
+reader.png	capturePage compose	darwin
+glance.png	capturePage compose	darwin
+history-menu.png	capturePage compose	darwin
+settings-proxy.png	capturePage compose	darwin
+new-tab.png	capturePage compose	darwin
