@@ -22,13 +22,46 @@ const SPARKS = [
   [12, 18], [22, 9], [35, 22], [47, 7], [63, 14], [74, 6], [86, 19], [93, 10], [7, 40], [91, 44], [16, 62], [84, 66]
 ]
 
-/** The fish riding the orbit ring (SMIL motion: SVG motion paths on <g> are patchy in CSS). */
+// One lap of the fish. The ring's dashes drift the same way at half speed, so the fish laps the
+// dash pattern once every RING_SECONDS: that's the period its fade in/out of the gaps repeats on.
+const FISH_SECONDS = 9
+const RING_SECONDS = FISH_SECONDS * 2
+// The ring's dash pattern (pathLength 100): dash 0–62, gap, dash 68–70, gap, dash 76–86, gap 86–100.
+const RING_DASHES = '62 6 2 6 10 14'
+// Fish opacity against its position in the dash pattern (= keyTime × 100, see RING_SECONDS):
+// it slips under the water at each gap and surfaces again at the next dash; the 2-unit dash is a
+// quick half-glimpse. Ramps straddle each dash edge by ~1.5 units (about a third of the fish).
+const FISH_FADE: ReadonlyArray<readonly [number, number]> = [
+  [0, 0.5], [1.5, 1], [60.5, 1], [63.5, 0], [67, 0], [69, 0.6], [71, 0], [74.5, 0], [77.5, 1], [84.5, 1], [87.5, 0], [98.5, 0], [100, 0.5]
+]
+const FISH_FADE_TIMES = FISH_FADE.map(([at]) => at / 100).join(';')
+const FISH_FADE_VALUES = FISH_FADE.map(([, value]) => value).join(';')
+
+/** The orbit ring; its dash drift is SMIL so it shares a clock with the fish (the fade depends on it). */
+function Ring({ still, front }: { still: boolean; front?: boolean }): JSX.Element {
+  return (
+    <path d={ORBIT} className={`surffish-egg-ring${front ? ' is-front' : ''}`} pathLength={100} strokeDasharray={RING_DASHES} mask={front ? 'url(#surffish-egg-front-mask)' : undefined}>
+      {!still && <animate attributeName="stroke-dashoffset" from="0" to="-100" dur={`${RING_SECONDS}s`} repeatCount="indefinite" />}
+    </path>
+  )
+}
+
+/**
+ * The fish riding the orbit ring, nose first (SMIL motion: SVG motion paths on <g> are patchy in
+ * CSS). It fades out over the ring's gaps and swims with a small bob and tail wag.
+ */
 function FishRider({ still }: { still: boolean }): JSX.Element {
   return (
     <g className="surffish-egg-fish-rider" transform={still ? 'translate(250 78) rotate(160)' : undefined}>
-      {!still && <animateMotion dur="9s" repeatCount="indefinite" rotate="auto" path={ORBIT} keyPoints="1;0" keyTimes="0;1" calcMode="linear" />}
-      <path d={FISH} fill="url(#surffish-egg-fish)" />
-      <circle cx="22" cy="-3" r="2.6" fill="#05223f" />
+      {!still && <animateMotion dur={`${FISH_SECONDS}s`} repeatCount="indefinite" rotate="auto" path={ORBIT} calcMode="linear" />}
+      {!still && <animate attributeName="opacity" dur={`${RING_SECONDS}s`} repeatCount="indefinite" keyTimes={FISH_FADE_TIMES} values={FISH_FADE_VALUES} calcMode="linear" />}
+      <g>
+        {/* Bob across the line (local y is perpendicular to the path) and wag a little. */}
+        {!still && <animateTransform attributeName="transform" type="translate" values="0 0;0 -5;0 0;0 5;0 0" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;0.25;0.5;0.75;1" keySplines=".45 0 .55 1;.45 0 .55 1;.45 0 .55 1;.45 0 .55 1" />}
+        {!still && <animateTransform attributeName="transform" type="rotate" values="0;-7;0;7;0" dur="0.9s" repeatCount="indefinite" additive="sum" calcMode="spline" keyTimes="0;0.25;0.5;0.75;1" keySplines=".45 0 .55 1;.45 0 .55 1;.45 0 .55 1;.45 0 .55 1" />}
+        <path d={FISH} fill="url(#surffish-egg-fish)" />
+        <circle cx="22" cy="-3" r="2.6" fill="#05223f" />
+      </g>
     </g>
   )
 }
@@ -73,16 +106,26 @@ export default function SurffishEgg({ onClose }: { onClose: () => void }): JSX.E
                 <stop offset="0" stopColor="#3aa0ff" />
                 <stop offset="1" stopColor="#9ef0ff" />
               </linearGradient>
-              <clipPath id="surffish-egg-back-half">
-                <rect x="-400" y="-200" width="800" height="188" />
-              </clipPath>
-              <clipPath id="surffish-egg-front-half">
-                <rect x="-400" y="-12" width="800" height="212" />
-              </clipPath>
+              {/* Depth: the half of the ring behind the logo is dimmer. A soft band (not a hard clip)
+                  so the fish fades from back to front instead of snapping at a seam. */}
+              <linearGradient id="surffish-egg-depth" gradientUnits="userSpaceOnUse" x1="0" y1="-44" x2="0" y2="20">
+                <stop offset="0" stopColor="#000" />
+                <stop offset="1" stopColor="#fff" />
+              </linearGradient>
+              <linearGradient id="surffish-egg-depth-back" gradientUnits="userSpaceOnUse" x1="0" y1="-44" x2="0" y2="20">
+                <stop offset="0" stopColor="#fff" />
+                <stop offset="1" stopColor="#000" />
+              </linearGradient>
+              <mask id="surffish-egg-back-mask" maskUnits="userSpaceOnUse" x="-400" y="-200" width="800" height="400">
+                <rect x="-400" y="-200" width="800" height="400" fill="url(#surffish-egg-depth-back)" />
+              </mask>
+              <mask id="surffish-egg-front-mask" maskUnits="userSpaceOnUse" x="-400" y="-200" width="800" height="400">
+                <rect x="-400" y="-200" width="800" height="400" fill="url(#surffish-egg-depth)" />
+              </mask>
             </defs>
             <g transform="rotate(-18)">
-              <path d={ORBIT} className="surffish-egg-ring" pathLength={100} />
-              <g clipPath="url(#surffish-egg-back-half)" opacity="0.55"><FishRider still={still} /></g>
+              <Ring still={still} />
+              <g mask="url(#surffish-egg-back-mask)" opacity="0.55"><FishRider still={still} /></g>
             </g>
           </svg>
           <div className="surffish-egg-logo">
@@ -91,8 +134,8 @@ export default function SurffishEgg({ onClose }: { onClose: () => void }): JSX.E
           </div>
           <svg className="surffish-egg-orbit is-front" viewBox="-400 -200 800 400">
             <g transform="rotate(-18)">
-              <path d={ORBIT} className="surffish-egg-ring is-front" pathLength={100} clipPath="url(#surffish-egg-front-half)" />
-              <g clipPath="url(#surffish-egg-front-half)"><FishRider still={still} /></g>
+              <Ring still={still} front />
+              <g mask="url(#surffish-egg-front-mask)"><FishRider still={still} /></g>
             </g>
           </svg>
         </div>
