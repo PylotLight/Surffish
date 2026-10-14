@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('surffishScreenshot', {
   scrollAuto: (on) => ipcRenderer.send('screenshot:scroll-auto', Boolean(on)),
   onScrollState: (callback) => subscribe('screenshot:scroll-state', callback),
   cancel: () => ipcRenderer.send('screenshot:cancel'),
+  previewHover: (hovered) => ipcRenderer.send('screenshot:preview-hover', Boolean(hovered)),
+  previewActivity: () => ipcRenderer.send('screenshot:preview-activity'),
   copy: (bytes) => ipcRenderer.send('screenshot:copy', bytesOrNull(bytes)),
   save: (bytes) => ipcRenderer.send('screenshot:save', bytesOrNull(bytes)),
   annotate: (open) => ipcRenderer.send('screenshot:annotate', Boolean(open)),

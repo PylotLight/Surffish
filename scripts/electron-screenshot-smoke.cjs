@@ -16,6 +16,8 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 const userData = join(tmpdir(), `surffish-screenshot-smoke-${process.pid}`)
 const savePath = join(userData, 'smoke-shot.png')
 process.env.SURFFISH_SCREENSHOT_SMOKE_SAVE_PATH = savePath
+// Keep the preview up for the slow phases; the idle-dismiss phase at the end shortens it.
+process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '600000'
 const primary = process.platform === 'darwin' ? 'meta' : 'control'
 const PAGE_HEIGHT = 3000
 const server = createServer((request, response) => {
@@ -381,6 +383,27 @@ async function run() {
   assert.equal(await evaluate(inner, 'getComputedStyle(document.querySelector("#s > header")).visibility'), 'visible', 'the sticky header is shown again')
   key(overlay, 'Escape')
   await waitFor(() => !overlay.getVisible(), 'Esc to close')
+
+  // --- the preview dismisses itself when left alone, and hovering holds it open
+  process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '800'
+  inner.webContents.focus()
+  key(inner, 'S', [primary, 'shift'])
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for idle dismiss')
+  await evaluate(overlay, 'document.getElementById("btn-visible").click()')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for idle dismiss')
+  const shownAt = Date.now()
+  await waitFor(() => !overlay.getVisible(), 'the idle preview to dismiss itself', 10000)
+  assert.ok(Date.now() - shownAt >= 600, 'the preview stays up for the idle timeout first')
+  inner.webContents.focus()
+  key(inner, 'S', [primary, 'shift'])
+  await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for hover hold')
+  await evaluate(overlay, 'document.getElementById("btn-visible").click()')
+  await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for hover hold')
+  await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerenter"))')
+  await delay(2000)
+  assert.ok(overlay.getVisible(), 'hovering the preview holds it open')
+  await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerleave"))')
+  await waitFor(() => !overlay.getVisible(), 'the preview to dismiss after the pointer leaves', 10000)
 
   console.log('Electron screenshot smoke passed.')
 }

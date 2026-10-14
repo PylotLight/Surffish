@@ -79,6 +79,8 @@ const SCROLL_POLL_MS = 150
 const ISOLATED_WORLD_ID = 2026
 const MAX_INCOMING_PNG_BYTES = 256 * 1024 * 1024
 const STITCH_SETTLE_MS = 90
+/** The preview popover dismisses itself after this long untouched (paused while the pointer is over it). */
+const PREVIEW_IDLE_MS = 20_000
 
 // One overlay serves every window: it moves to whichever window takes a screenshot (one capture at a time).
 let ownerWindow: BaseWindow | null = null
@@ -90,6 +92,33 @@ let pendingShow: Record<string, unknown> | null = null
 let session: Session | null = null
 let ipcRegistered = false
 let busy = false
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+let previewHovered = false
+let previewSaving = false
+
+function previewIdleMs(): number {
+  // Smoke tests (unpackaged builds only) shorten or stretch the timeout.
+  const override = !app.isPackaged ? Number(process.env['SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS']) : NaN
+  return Number.isFinite(override) && override > 0 ? override : PREVIEW_IDLE_MS
+}
+
+function clearPreviewTimer(): void {
+  if (previewTimer) clearTimeout(previewTimer)
+  previewTimer = null
+}
+
+/** (Re)start the idle countdown while the preview is showing and nobody is using it. */
+function armPreviewTimer(): void {
+  clearPreviewTimer()
+  if (session?.mode !== 'preview' || previewHovered || previewSaving) return
+  const current = session
+  previewTimer = setTimeout(() => {
+    previewTimer = null
+    if (session !== current || session.mode !== 'preview' || previewHovered || previewSaving) return
+    // Only hand focus back to the page if the popover still had it (don't steal it from wherever the user went).
+    endSession(liveView()?.webContents.isFocused() ?? false)
+  }, previewIdleMs())
+}
 
 function preloadPath(): string | null {
   const path = join(dirname(fileURLToPath(import.meta.url)), '../preload/screenshot.cjs')
@@ -353,6 +382,7 @@ function ensureView(): WebContentsView | null {
       // Keep Cmd+C/S/Z from the app menu (Copy, Save Edited PDF…, Undo); the page decides.
       event.preventDefault()
       if (!input.isAutoRepeat) created.webContents.send('screenshot:key', action)
+      armPreviewTimer()
       return
     }
     // Enter is plain; everything else Cmd/Ctrl goes to the browser (Cmd+Shift+S closes the tool).
@@ -391,6 +421,14 @@ function registerIpc(): void {
   ipcMain.on('screenshot:cancel', (event) => {
     if (fromOverlay(event)) endSession()
   })
+  ipcMain.on('screenshot:preview-hover', (event, hovered: unknown) => {
+    if (!fromOverlay(event)) return
+    previewHovered = hovered === true
+    armPreviewTimer()
+  })
+  ipcMain.on('screenshot:preview-activity', (event) => {
+    if (fromOverlay(event)) armPreviewTimer()
+  })
   ipcMain.on('screenshot:visible', (event) => {
     if (!fromOverlay(event) || session?.mode !== 'select' || !session.frozen) return
     showPreview(session.frozen, false)
@@ -425,6 +463,7 @@ function registerIpc(): void {
     if (!fromOverlay(event) || !session?.shot) return
     if (open === true && session.mode === 'preview') {
       session.mode = 'annotate'
+      clearPreviewTimer()
       layout()
       liveView()?.webContents.focus()
       send({ mode: 'annotate', isPrivate: session.target.isPrivate })
@@ -441,6 +480,7 @@ function registerIpc(): void {
     if (!fromOverlay(event) || !session?.shot) return
     const image = bytes === null || bytes === undefined ? session.shot : incomingImage(bytes)
     if (!image) return sendStatus('Could not read the annotated image.', 'error')
+    armPreviewTimer()
     void clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(image.png)], { type: 'image/png' }) })])
       .then(() => sendStatus('Copied to the clipboard', 'ok'), () => sendStatus('Could not copy the screenshot.', 'error'))
   })
@@ -462,6 +502,7 @@ function showPreview(image: PixelImage, truncated: boolean, message = ''): void 
   session.shot = image
   session.truncated = truncated
   session.mode = 'preview'
+  previewHovered = false
   // The frozen frame is no longer needed once something is captured.
   session.frozen = null
   layout()
@@ -474,6 +515,7 @@ function showPreview(image: PixelImage, truncated: boolean, message = ''): void 
     message,
     messageKind: message ? 'ok' : ''
   })
+  armPreviewTimer()
 }
 
 /** Device pixels per page DIP, so annotation strokes look the same size on 1x and Retina. */
@@ -516,9 +558,18 @@ async function saveScreenshot(image: PixelImage): Promise<void> {
   }
   // Smoke tests (unpackaged builds only) save without the native dialog.
   const smokePath = !app.isPackaged ? process.env['SURFFISH_SCREENSHOT_SMOKE_SAVE_PATH'] : undefined
-  const result = smokePath
-    ? { canceled: false, filePath: smokePath }
-    : ownerWindow && !ownerWindow.isDestroyed() ? await dialog.showSaveDialog(ownerWindow, options) : await dialog.showSaveDialog(options)
+  // Don't let the preview time out from under the Save dialog.
+  previewSaving = true
+  clearPreviewTimer()
+  let result: Electron.SaveDialogReturnValue
+  try {
+    result = smokePath
+      ? { canceled: false, filePath: smokePath }
+      : ownerWindow && !ownerWindow.isDestroyed() ? await dialog.showSaveDialog(ownerWindow, options) : await dialog.showSaveDialog(options)
+  } finally {
+    previewSaving = false
+    if (session === current) armPreviewTimer()
+  }
   if (result.canceled || !result.filePath) return
   const target = withPngExtension(result.filePath)
   try {
@@ -536,6 +587,8 @@ function endSession(refocus = true): void {
   const ending = session
   session = null
   pendingShow = null
+  clearPreviewTimer()
+  previewHovered = false
   ending?.dispose()
   const current = liveView()
   if (current) {
