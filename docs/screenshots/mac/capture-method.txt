@@ -1,9 +1,0 @@
-# screen recording permission: not granted
-hero.png	capturePage compose	darwin
-palette	FAILED UnknownVizError	darwin
-split	FAILED Current display surface not available for capture	darwin
-reader	FAILED Current display surface not available for capture	darwin
-glance	FAILED UnknownVizError	darwin
-history-menu.png	capturePage compose	darwin
-settings-proxy.png	capturePage compose	darwin
-new-tab.png	capturePage compose	darwin

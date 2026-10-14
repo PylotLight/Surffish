@@ -13,11 +13,6 @@ on:
         description: 'comma list of scenes (empty = all): hero,palette,split,reader,glance,history,settings,newtab'
         required: false
         default: ''
-  # TEMPORARY: workflow_dispatch only works once this file is on main, so the first runs come from
-  # pushes to the PR branch. Remove before merge.
-  push:
-    branches: [docs/product-readme]
-    paths: ['.github/workflows/screenshots.yml', 'scripts/readme-screenshots.cjs']
 
 concurrency:
   group: readme-screenshots-${{ github.ref }}
