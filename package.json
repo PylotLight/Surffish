@@ -1,6 +1,6 @@
 {
   "name": "surffish",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "author": "PylotLight",
   "description": "A compact Electron browser with a local SOCKS5 proxy toggle",
   "private": true,
