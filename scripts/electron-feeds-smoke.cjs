@@ -268,7 +268,13 @@ async function run() {
   assert.equal(settings.ok, false)
 
   // --- persisted, owner-only
-  await waitFor(() => existsSync(join(userData, 'feeds.json')) && JSON.parse(readFileSync(join(userData, 'feeds.json'), 'utf8')).feeds.length === 2, 'feeds.json to be written', 10000)
+  // Writes are coalesced: an older file can already hold two feeds (before the third was added), so
+  // wait for the one that carries the rename too.
+  await waitFor(() => {
+    if (!existsSync(join(userData, 'feeds.json'))) return false
+    const saved = JSON.parse(readFileSync(join(userData, 'feeds.json'), 'utf8'))
+    return saved.feeds.length === 2 && saved.feeds.find((feed) => feed.id === rssId)?.customTitle === 'Patches'
+  }, 'feeds.json to be written', 10000)
   const stored = JSON.parse(readFileSync(join(userData, 'feeds.json'), 'utf8'))
   assert.equal(stored.feeds.find((feed) => feed.id === rssId).customTitle, 'Patches')
   assert.equal(stored.feeds.find((feed) => feed.id === rssId).etag, '"rss-v2"')

@@ -186,8 +186,15 @@ async function run() {
   glance.navigationHistory.goBack()
   await waitFor(() => pathOf(glance) === '/peek' && !glance.isLoading(), 'back to /peek inside the glance')
   await waitFor(() => smoke.evaluate(glance, 'Boolean(document.querySelector("#inner"))'), 'the /peek links')
-  await clickElement(glance, '#inner')
-  await waitFor(() => pathOf(glance) === '/inner' && !glance.isLoading(), 'a plain link to load inside the glance')
+  // Right after a back navigation (often a back/forward-cache restore) the page can drop a synthetic
+  // click that lands before it is hit-testable again; a real user just clicks again, so do we.
+  await waitFor(async () => {
+    if (pathOf(glance) === '/peek' && !glance.isLoading()) {
+      await clickElement(glance, '#inner')
+      await delay(700)
+    }
+    return pathOf(glance) === '/inner' && !glance.isLoading()
+  }, 'a plain link to load inside the glance')
   assert.equal(glance.id, glanceId, 'same glance webContents')
   assert.equal((await tabs()).length, 1, 'still no new tab')
   assert.equal((await state()).url, `${origin}/start`, 'the tab is untouched')

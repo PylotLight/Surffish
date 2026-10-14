@@ -364,7 +364,11 @@ async function run() {
   // Internet http keeps the stronger Not secure pill.
   await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${httpOrigin}/start`)})`)
   await waitFor(async () => { const current = await state(); return current.url === `${httpOrigin}/start` && !current.loading }, 'the loopback page')
-  assert.equal((await addressBar()).pill, null, 'loopback http is a secure context: no pill')
+  // The toolbar re-renders from the state broadcast a frame after main reports the new URL: wait for
+  // the previous page's pill to go rather than reading the bar once.
+  await waitFor(async () => { const bar = await addressBar(); return bar.pill === null }, 'loopback http is a secure context: no pill').catch(async (error) => {
+    throw new Error(`${error.message} Bar: ${JSON.stringify(await addressBar())}`)
+  })
 
   smoke.step('local http: https to an http-only device offers Continue to http')
   const lanHttpsUrl = `https://${LAN_IP}/`

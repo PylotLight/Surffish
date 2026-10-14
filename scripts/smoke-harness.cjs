@@ -131,10 +131,23 @@ function step(message) {
  */
 function evaluate(contents, code, timeout = waitMs) {
   let timer
+  let onDestroyed
+  const label = String(code).replace(/\s+/g, ' ').slice(0, 120)
   const timedOut = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`executeJavaScript did not settle within ${Math.round(timeout / 1000)}s on ${describeContents(contents)}: ${String(code).replace(/\s+/g, ' ').slice(0, 120)}`)), timeout)
+    timer = setTimeout(() => reject(new Error(`executeJavaScript did not settle within ${Math.round(timeout / 1000)}s on ${describeContents(contents)}: ${label}`)), timeout)
   })
-  return Promise.race([contents.executeJavaScript(code), timedOut]).finally(() => clearTimeout(timer))
+  // executeJavaScript never settles once its webContents is destroyed (a window that closes as a
+  // result of the very call, e.g. closing its last tab). Fail at once with a recognisable error
+  // (`error.destroyed`) instead of waiting out the whole budget.
+  const destroyed = new Promise((_resolve, reject) => {
+    onDestroyed = () => reject(Object.assign(new Error(`webContents was destroyed before executeJavaScript settled: ${label}`), { destroyed: true }))
+    if (contents.isDestroyed()) onDestroyed()
+    else contents.once('destroyed', onDestroyed)
+  })
+  return Promise.race([contents.isDestroyed() ? destroyed : contents.executeJavaScript(code), timedOut, destroyed]).finally(() => {
+    clearTimeout(timer)
+    if (!contents.isDestroyed()) contents.removeListener('destroyed', onDestroyed)
+  })
 }
 
 /**

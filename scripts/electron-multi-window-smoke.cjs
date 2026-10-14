@@ -63,7 +63,7 @@ async function evaluate(view, expression) {
   try {
     return await smoke.evaluate(view.webContents, expression)
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`)
+    throw Object.assign(new Error(`${expression.slice(0, 120)}: ${error.message}`), { destroyed: error.destroyed === true })
   }
 }
 const step = (message) => smoke.step(`${phase}: ${message}`)
@@ -155,7 +155,10 @@ async function mainPhase() {
 
   // --- closing the last tab of a window (not the final one) closes the window, no prompt
   step('closing the torn-out window\'s last tab')
-  await evaluate(surface(third, 'toolbar'), `window.api.browser.tabs.close(${JSON.stringify(threeId)})`)
+  // Closing the last tab closes this window, toolbar included: its reply can be lost with it.
+  await evaluate(surface(third, 'toolbar'), `window.api.browser.tabs.close(${JSON.stringify(threeId)})`).catch((error) => {
+    if (!error.destroyed) throw error
+  })
   await waitFor(() => third.isDestroyed(), 'window 3 to close with its last tab')
 
   // --- a private window: its tabs are private, and it is never saved
