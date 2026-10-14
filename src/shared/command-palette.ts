@@ -5,6 +5,7 @@
 import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './types'
 import { parseKeywordSearch, type CustomSearchEngine } from './search-keywords'
 import type { ArchivedTab } from './tab-archive'
+import { displayHost } from './url-host'
 
 export type PaletteMode = 'all' | 'tabs'
 
@@ -161,14 +162,6 @@ export function parseRecentCommandIds(value: unknown): string[] {
 // ---------------------------------------------------------------------------
 // Results
 
-function hostOf(value: string): string {
-  try {
-    return new URL(value).hostname.replace(/^www\./i, '')
-  } catch {
-    return value
-  }
-}
-
 function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value)
 }
@@ -221,9 +214,9 @@ function archivedItems(sources: PaletteSources, query: string, limit: number, we
   const items: PaletteItem[] = []
   ;(sources.archivedTabs ?? []).forEach((tab, index) => {
     if (openUrls.has(withoutHash(tab.url))) return
-    const score = query ? matchFields(query, [tab.title, hostOf(tab.url), tab.url], [1, 0.9, 0.5]) : 500 - index
+    const score = query ? matchFields(query, [tab.title, displayHost(tab.url), tab.url], [1, 0.9, 0.5]) : 500 - index
     if (score === null) return
-    items.push({ kind: 'archived', key: `archived:${tab.id}`, title: tab.title || tab.url, subtitle: `Archived ${archivedAge(tab.archivedAt, now)} · ${hostOf(tab.url)}`, archivedId: tab.id, url: tab.url, faviconUrl: tab.faviconUrl, score: score * weight })
+    items.push({ kind: 'archived', key: `archived:${tab.id}`, title: tab.title || tab.url, subtitle: `Archived ${archivedAge(tab.archivedAt, now)} · ${displayHost(tab.url)}`, archivedId: tab.id, url: tab.url, faviconUrl: tab.faviconUrl, score: score * weight })
   })
   return items.sort((a, b) => b.score - a.score).slice(0, limit)
 }
@@ -239,9 +232,9 @@ export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
 
   if (sources.mode === 'tabs') {
     sources.tabs.forEach((tab, index) => {
-      const score = query ? matchFields(query, [tab.title, tab.url, hostOf(tab.url)], [1, 0.6, 0.9]) : 1000 - index
+      const score = query ? matchFields(query, [tab.title, tab.url, displayHost(tab.url)], [1, 0.6, 0.9]) : 1000 - index
       if (score === null) return
-      items.push({ kind: 'tab', key: `tab:${tab.id}`, title: tab.title || tab.url, subtitle: tab.active ? `Current tab · ${hostOf(tab.url)}` : hostOf(tab.url), tabId: tab.id, faviconUrl: tab.faviconUrl, score })
+      items.push({ kind: 'tab', key: `tab:${tab.id}`, title: tab.title || tab.url, subtitle: tab.active ? `Current tab · ${displayHost(tab.url)}` : displayHost(tab.url), tabId: tab.id, faviconUrl: tab.faviconUrl, score })
     })
     const open = query ? items.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS) : items.slice(0, MAX_RESULTS)
     // Archived tabs form their own group after the open ones.
@@ -268,18 +261,18 @@ export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
   }
 
   for (const tab of sources.tabs) {
-    const score = matchFields(query, [tab.title, hostOf(tab.url), tab.url], [1, 0.9, 0.5])
+    const score = matchFields(query, [tab.title, displayHost(tab.url), tab.url], [1, 0.9, 0.5])
     if (score === null) continue
-    items.push({ kind: 'tab', key: `tab:${tab.id}`, title: tab.title || tab.url, subtitle: `Switch to tab · ${hostOf(tab.url)}`, tabId: tab.id, faviconUrl: tab.faviconUrl, score: score * KIND_WEIGHT.tab })
+    items.push({ kind: 'tab', key: `tab:${tab.id}`, title: tab.title || tab.url, subtitle: `Switch to tab · ${displayHost(tab.url)}`, tabId: tab.id, faviconUrl: tab.faviconUrl, score: score * KIND_WEIGHT.tab })
   }
 
   const seenUrls = new Set(sources.tabs.map((tab) => tab.url))
   for (const site of sources.pinnedSites) {
     if (!isHttpUrl(site.url) || seenUrls.has(site.url)) continue
-    const score = matchFields(query, [site.title, hostOf(site.url), site.url], [1, 0.9, 0.5])
+    const score = matchFields(query, [site.title, displayHost(site.url), site.url], [1, 0.9, 0.5])
     if (score === null) continue
     seenUrls.add(site.url)
-    items.push({ kind: 'site', key: `site:${site.url}`, title: site.title || hostOf(site.url), subtitle: `Favorite · ${hostOf(site.url)}`, url: site.url, faviconUrl: site.faviconUrl ?? null, source: 'favorite', score: score * KIND_WEIGHT.favorite })
+    items.push({ kind: 'site', key: `site:${site.url}`, title: site.title || displayHost(site.url), subtitle: `Favorite · ${displayHost(site.url)}`, url: site.url, faviconUrl: site.faviconUrl ?? null, source: 'favorite', score: score * KIND_WEIGHT.favorite })
   }
 
   // Before history, so a page that was archived shows as Archived (restores its back list) rather than History.
@@ -293,11 +286,11 @@ export function buildPaletteItems(sources: PaletteSources): PaletteItem[] {
   for (const entry of sources.history) {
     if (historyCount >= MAX_HISTORY_RESULTS) break
     if (!isHttpUrl(entry.url) || seenUrls.has(entry.url)) continue
-    const score = matchFields(query, [entry.title, hostOf(entry.url), entry.url], [1, 0.9, 0.5])
+    const score = matchFields(query, [entry.title, displayHost(entry.url), entry.url], [1, 0.9, 0.5])
     if (score === null) continue
     seenUrls.add(entry.url)
     historyCount += 1
-    items.push({ kind: 'site', key: `history:${entry.url}`, title: entry.title || hostOf(entry.url), subtitle: `History · ${hostOf(entry.url)}`, url: entry.url, faviconUrl: entry.faviconUrl ?? null, source: 'history', score: score * KIND_WEIGHT.history })
+    items.push({ kind: 'site', key: `history:${entry.url}`, title: entry.title || displayHost(entry.url), subtitle: `History · ${displayHost(entry.url)}`, url: entry.url, faviconUrl: entry.faviconUrl ?? null, source: 'history', score: score * KIND_WEIGHT.history })
   }
 
   items.sort((a, b) => b.score - a.score)

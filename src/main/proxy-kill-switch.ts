@@ -15,7 +15,7 @@ import {
 } from '../shared/proxy-guard'
 import { activeProxyEndpoints, effectiveRouteForUrl, endpointKey, type ActiveProxyEndpoint, type ProxyRoutingInput } from '../shared/proxy-routing'
 import { addRequestGate, onRequestError } from './request-gate'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 import { getAllRoutingInputs, getProxyRoutingInput, onProxyRoutingChanged, routingInputForSession } from './proxy'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { setUpdateNetworkGuard } from './updates'

@@ -8,7 +8,7 @@ import {
 } from '../shared/page-watchers-feature'
 import { normalizeWatchUrl } from '../shared/page-watchers'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 
 /**
  * "Enable page watchers" gate. This file is all main loads at startup for watchers: page-watchers.ts

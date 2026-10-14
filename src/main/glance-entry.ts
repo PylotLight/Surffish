@@ -1,7 +1,7 @@
 import { ipcMain, type BaseWindow, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { GLANCE_SETTINGS_FILE, isGlanceableUrl, parseGlanceSettings, type GlanceSettings } from '../shared/glance'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 
 /**
  * Glance entry point: everything main loads at startup for Glance. The sheet itself (views, header

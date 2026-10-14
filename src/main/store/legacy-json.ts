@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { writeFileAtomic } from '../atomic-file'
 import type { SurffishDatabase } from './database'
 
 /**
@@ -62,14 +62,10 @@ export function readLegacyJson(path: string): unknown {
 
 /** Atomic owner-only rewrite (used to apply a privacy delete to the legacy copy too). */
 export function writeLegacyJson(path: string, value: unknown): boolean {
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
-    writeFileSync(temporaryPath, JSON.stringify(value), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
-    renameSync(temporaryPath, path)
+    writeFileAtomic(path, JSON.stringify(value))
     return true
   } catch (error) {
-    try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
     console.error(`Could not rewrite ${path}:`, error)
     return false
   }

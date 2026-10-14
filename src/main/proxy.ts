@@ -30,7 +30,7 @@ import {
   type SiteRouteState
 } from '../shared/proxy-routing'
 import { getDomain } from 'tldts-experimental'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 

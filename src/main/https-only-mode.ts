@@ -1,8 +1,9 @@
 import { webContents as allWebContents, type WebContents } from 'electron'
 import { httpsUpgradeTarget, isHttpsUpgradeFailure, normalizeHttpsExceptions } from '../shared/https-only'
 import { addRequestGate, onRequestError } from './request-gate'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 import { getTabInterstitial, setTabInterstitial } from './tab-interstitials'
+import { urlHostname } from '../shared/url-host'
 
 /**
  * HTTPS-only mode (off by default). Top-level http:// navigations are redirected to https://
@@ -36,14 +37,6 @@ function setState(next: HttpsOnlyState, persist: boolean): void {
   if (persist) writeSettingsFile(FILE, state)
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.toLowerCase()
-  } catch {
-    return ''
-  }
-}
-
 const watched = new Set<number>()
 /** A committed page ends the upgrade attempt, so the next visit isn't mistaken for a redirect loop. */
 function watchCommits(contentsId: number): void {
@@ -73,7 +66,7 @@ export function initializeHttpsOnly(): void {
       if (contents) showHttpsUnavailable(contents, previous, 'net::ERR_TOO_MANY_REDIRECTS')
       return { cancel: true }
     }
-    upgrades.set(details.webContentsId, { httpUrl: details.url, httpsUrl: target, host: hostOf(details.url), at: Date.now(), source: 'https-only' })
+    upgrades.set(details.webContentsId, { httpUrl: details.url, httpsUrl: target, host: urlHostname(details.url), at: Date.now(), source: 'https-only' })
     watchCommits(details.webContentsId)
     return { redirectURL: target }
   })
@@ -82,7 +75,7 @@ export function initializeHttpsOnly(): void {
     if (details.resourceType !== 'mainFrame' || typeof details.webContentsId !== 'number') return
     const upgrade = upgrades.get(details.webContentsId)
     if (!upgrade || Date.now() - upgrade.at > UPGRADE_MEMORY_MS) return
-    if (hostOf(details.url) !== upgrade.host || !details.url.startsWith('https:')) return
+    if (urlHostname(details.url) !== upgrade.host || !details.url.startsWith('https:')) return
     if (!isHttpsUpgradeFailure(details.error)) return
     const contents = allWebContents.fromId(details.webContentsId)
     if (contents) showHttpsUnavailable(contents, upgrade, details.error)
@@ -97,7 +90,7 @@ export function initializeHttpsOnly(): void {
  */
 export function noteTypedHttpsUpgrade(contents: WebContents, httpsUrl: string, httpUrl: string): void {
   if (contents.isDestroyed()) return
-  upgrades.set(contents.id, { httpUrl, httpsUrl, host: hostOf(httpsUrl), at: Date.now(), source: 'typed' })
+  upgrades.set(contents.id, { httpUrl, httpsUrl, host: urlHostname(httpsUrl), at: Date.now(), source: 'typed' })
   watchCommits(contents.id)
 }
 
@@ -107,7 +100,7 @@ function showHttpsUnavailable(contents: WebContents, upgrade: PendingUpgrade, er
   // Leave the notice once the user goes somewhere else.
   const clear = (_event: unknown, url: string, isInPlace: boolean, isMainFrame: boolean): void => {
     if (!isMainFrame || isInPlace) return
-    if (hostOf(url) === upgrade.host && url.startsWith('https:')) return
+    if (urlHostname(url) === upgrade.host && url.startsWith('https:')) return
     contents.removeListener('did-start-navigation', clear)
     if (getTabInterstitial(contents)?.kind === 'https-unavailable') setTabInterstitial(contents, null)
   }

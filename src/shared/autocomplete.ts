@@ -1,4 +1,5 @@
 import type { BrowserTabSummary, BrowsingHistoryEntry, PinnedSite } from './types'
+import { displayHost } from './url-host'
 
 export type AddressSuggestionSource = 'Pinned site' | 'Bookmark' | 'Open tab' | 'History'
 
@@ -14,14 +15,6 @@ function normalizedUrl(value: string): string | null {
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
   } catch {
     return null
-  }
-}
-
-function hostLabel(value: string): string {
-  try {
-    return new URL(value).hostname.replace(/^www\./i, '')
-  } catch {
-    return value
   }
 }
 
@@ -50,7 +43,7 @@ export function buildAddressSuggestions(
   for (const candidate of candidates) {
     const url = normalizedUrl(candidate.url)
     if (!url || seen.has(url)) continue
-    const haystack = `${candidate.title} ${candidate.url} ${hostLabel(candidate.url)}`.toLocaleLowerCase()
+    const haystack = `${candidate.title} ${candidate.url} ${displayHost(candidate.url)}`.toLocaleLowerCase()
     if (!haystack.includes(query)) continue
     matches.push({ ...candidate, url })
     seen.add(url)

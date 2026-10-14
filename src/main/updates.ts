@@ -1,6 +1,5 @@
 import { app, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   DEFAULT_UPDATE_FEED_URL,
@@ -30,6 +29,7 @@ import { getBrowserSession } from './browser-session'
 import { isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { getBrowserTabWebContents, openExternalBrowserTab } from './browser'
 import { getMainWindow } from './window'
+import { writeUserJson } from './user-json'
 
 /**
  * Update notifications from the releases Atom feed. Main process only: renderers never fetch.
@@ -80,17 +80,7 @@ function loadPreferences(): void {
 
 /** 0600: a custom feed URL may carry a token. */
 function savePreferences(): void {
-  const directory = app.getPath('userData')
-  const path = join(directory, PREFERENCES_FILE)
-  const temporary = `${path}.${randomUUID()}.tmp`
-  try {
-    mkdirSync(directory, { recursive: true })
-    writeFileSync(temporary, JSON.stringify(preferences), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    renameSync(temporary, path)
-  } catch (error) {
-    try { rmSync(temporary, { force: true }) } catch { /* best-effort cleanup */ }
-    console.error(`Could not save ${PREFERENCES_FILE}:`, error)
-  }
+  writeUserJson(PREFERENCES_FILE, preferences)
 }
 
 function currentVersion(): string {

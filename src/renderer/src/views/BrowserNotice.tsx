@@ -5,6 +5,7 @@ import { localHttpFallbackUrl } from '../../../shared/https-only'
 import { CertificateViewer } from './lazy-views'
 import './BrowserNotice.css'
 import './Safety.css'
+import { urlHostname } from '../../../shared/url-host'
 
 type NoticeTone = 'error' | 'warning'
 
@@ -55,14 +56,6 @@ export function LoadErrorNotice({ loadError, onDismiss }: { loadError: BrowserLo
   )
 }
 
-function hostOf(url: string | null | undefined): string {
-  try {
-    return url ? new URL(url).hostname : ''
-  } catch {
-    return ''
-  }
-}
-
 function retry(url: string): void {
   void window.api.browser.navigate(url).catch(() => undefined)
 }
@@ -84,7 +77,7 @@ function continueToHttp(httpUrl: string): void {
 /** "Back to <page>" when the failed load never replaced the page; else history back. */
 function BackAction({ loadError, canGoBack }: { loadError: BrowserLoadError; canGoBack: boolean }): React.JSX.Element | null {
   if (loadError.pageBehind) {
-    const host = hostOf(loadError.pageBehind)
+    const host = urlHostname(loadError.pageBehind)
     return <button className="settings-action secondary" type="button" onClick={() => void window.api.browser.dismissLoadError().catch(() => undefined)}>{host ? `Back to ${host}` : 'Back to page'}</button>
   }
   return canGoBack ? <button className="settings-action secondary" type="button" onClick={() => void window.api.browser.back()}>Go back</button> : null
@@ -107,7 +100,7 @@ export function LoadErrorPage({ loadError, canGoBack }: { loadError: BrowserLoad
 
 function GenericLoadErrorPage({ loadError, canGoBack }: { loadError: BrowserLoadError; canGoBack: boolean }): React.JSX.Element {
   const copy = describeLoadError(loadError)
-  const host = hostOf(loadError.url)
+  const host = urlHostname(loadError.url)
   const [routeError, setRouteError] = useState('')
   const [routing, setRouting] = useState(false)
   const offerDirect = copy.kind === 'proxy' && loadError.viaProxy && host !== ''
@@ -146,7 +139,7 @@ function formatShortDate(iso: string): string {
 
 /** Chrome-style certificate interstitial: Advanced → details, view certificate, proceed (unsafe). */
 function CertificateErrorPage({ loadError, canGoBack }: { loadError: BrowserLoadError; canGoBack: boolean }): React.JSX.Element {
-  const host = hostOf(loadError.url) || 'this site'
+  const host = urlHostname(loadError.url) || 'this site'
   const [advanced, setAdvanced] = useState(false)
   const [info, setInfo] = useState<SiteCertificateInfo | null | 'loading'>(null)
   const [viewer, setViewer] = useState(false)

@@ -1,3 +1,5 @@
+import { urlHostname } from './url-host'
+
 // Shared, side-effect free helpers for Reader view. Detection runs Mozilla Readability's
 // isProbablyReaderable in an isolated world of the page; extraction runs Readability itself there.
 // The article is rendered on a privileged scheme, on an in-memory session with no network; its
@@ -112,14 +114,6 @@ function text(value: unknown, max: number): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : ''
 }
 
-function hostOf(value: string): string {
-  try {
-    return new URL(value).hostname
-  } catch {
-    return ''
-  }
-}
-
 export type ExtractedArticleResult = { ok: true; article: ReaderArticle } | { ok: false; error: string }
 
 /** Validate what came back from the page's world: shapes, sizes and a non-empty body. */
@@ -139,9 +133,9 @@ export function parseExtractedArticle(value: unknown, pageUrl: string): Extracte
     ok: true,
     article: {
       url: pageUrl,
-      title: text(record.title, 500) || hostOf(pageUrl) || 'Article',
+      title: text(record.title, 500) || urlHostname(pageUrl) || 'Article',
       byline: text(record.byline, 300),
-      siteName: text(record.siteName, 200) || hostOf(pageUrl),
+      siteName: text(record.siteName, 200) || urlHostname(pageUrl),
       excerpt: text(record.excerpt, 600),
       lang: /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) ? lang : '',
       dir,

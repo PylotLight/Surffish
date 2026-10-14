@@ -1,7 +1,7 @@
 import type { Session } from 'electron'
 import { getBrowserSession, listPageSessions, onPageSessionCreated } from './browser-session'
 import { parseSpellcheckSettings, spellcheckEnabledFor, type SpellcheckSettings } from '../shared/spellcheck'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readSettingsFile, writeSettingsFile } from './user-json'
 
 const FILE = 'browser-spellcheck.json'
 let settings: SpellcheckSettings = parseSpellcheckSettings(null)
