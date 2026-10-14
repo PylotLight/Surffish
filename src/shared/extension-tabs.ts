@@ -144,3 +144,36 @@ export function isAllowedExtensionTabUrl(candidate: unknown, extensionId: string
     return false
   }
 }
+
+/** What a browser window looks like when an extension asks to bring one of its tabs forward. */
+export interface ExtensionRevealWindowState {
+  /** The window's sidebar mode: anything but 'tabs' is a panel drawn over (or beside) the page. */
+  sidebarMode: string
+  minimized: boolean
+  visible: boolean
+}
+
+/** The steps that put a tab in front of the user. */
+export interface ExtensionTabRevealPlan {
+  /** Close Settings / Downloads / Bookmarks / History so the tab's page is what the window shows. */
+  closePanel: boolean
+  restore: boolean
+  show: boolean
+  focus: true
+}
+
+/**
+ * runtime.openOptionsPage, or tabs.update/create with active: true, from an extension page: Chrome
+ * switches to the tab and its window comes forward (focusing an already open options page instead of
+ * doing nothing). Surffish shows one window to extensions, so the tab's own window always gets focus.
+ * A Settings or Downloads panel would otherwise keep covering the page, so it closes, the way clicking
+ * a tab in the sidebar closes it.
+ */
+export function planExtensionTabReveal(window: ExtensionRevealWindowState): ExtensionTabRevealPlan {
+  return {
+    closePanel: window.sidebarMode !== 'tabs',
+    restore: window.minimized,
+    show: window.minimized || !window.visible,
+    focus: true
+  }
+}

@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import type { ExtensionTabRecord } from '../shared/extension-tabs'
+import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
@@ -2021,7 +2021,7 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
   if (!tab) {
     const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath, owner }, undefined, false, false, normalWindowState())
     if (!id) return null
-    tab = getTab(id)
+    tab = findTab(id)
   } else {
     tab.extensionPreloadPath = preloadPath
     tab.extensionPageOwner = owner
@@ -2040,19 +2040,38 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
         ensureTabLoaded(tab)
       }
     }
-    activateTabInternal(tab.id)
   }
   if (!tab) return null
+  // Already open (Bramble's "Create your vault" with the setup tab from earlier) or just created:
+  // either way the tab comes forward in its window, over any Settings panel, like Chrome does.
+  revealTabForExtension(tab)
   persistOpenTabs()
-  const home = tab.win
-  if (isLiveWindow(home)) {
-    home.window.show()
-    home.window.focus()
-    const contents = activeTabOf(home)?.view?.webContents
-    if (contents && !contents.isDestroyed()) contents.focus()
-  }
-  publishState(home)
+  publishState(tab.win)
   return tab.id
+}
+
+/**
+ * Put a tab in front of the user for an extension (runtime.openOptionsPage, tabs.update/create with
+ * active: true): the tab active in its window, any full panel (Settings, Downloads, Bookmarks) closed
+ * so the page is what shows, and the window restored, raised and focused. Activating alone left the
+ * tab hidden behind an open Settings panel or in a window behind the current one.
+ */
+function revealTabForExtension(tab: BrowserTab): void {
+  activateTabInternal(tab.id)
+  const home = tab.win
+  if (!isLiveWindow(home)) return
+  const window = home.window
+  const plan = planExtensionTabReveal({
+    sidebarMode: getBrowserChromeState(window).sidebarMode,
+    minimized: window.isMinimized(),
+    visible: window.isVisible()
+  })
+  if (plan.closePanel) setBrowserChromeState({ sidebarMode: 'tabs' }, window)
+  if (plan.restore) window.restore()
+  if (plan.show) window.show()
+  window.focus()
+  const contents = activeTabOf(home)?.view?.webContents
+  if (contents && !contents.isDestroyed()) contents.focus()
 }
 
 /** Open Bramble UI only through this main-process-only path, never through address-bar navigation. */
@@ -2164,7 +2183,7 @@ export function updateExtensionTab(id: number | undefined, update: { url?: strin
     if (contents && !contents.isDestroyed()) void contents.loadURL(update.url).catch(() => {})
     else if (isActiveTab(tab) || update.active) ensureTabLoaded(tab)
   }
-  if (update.active) activateTabInternal(tab.id)
+  if (update.active) revealTabForExtension(tab)
   persistOpenTabs()
   publishState(tab.win)
   return extensionTabRecord(tab, tab.win.tabs.indexOf(tab))
@@ -2176,8 +2195,11 @@ export function createExtensionTab(url: string | undefined, active: boolean, ext
     ? openExtensionPageTab(url, extensionPage.extensionUrl, extensionPage.preloadPath, extensionPage.owner)
     : createTab(url, selectedSearchEngine, active, false, false, false, undefined, undefined, false, false, normalWindowState())
   if (!id) return null
+  const tab = findTab(id)
+  // Extension pages were already brought forward by openExtensionPageTab.
+  if (tab && active && !extensionPage) revealTabForExtension(tab)
   persistOpenTabs()
-  const tab = getTab(id)
+  if (tab) publishState(tab.win)
   return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
 }
 

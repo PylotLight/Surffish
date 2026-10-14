@@ -138,7 +138,7 @@ const SHIMMED_APIS: ReadonlyArray<{ prefix: string; label: string }> = [
   { prefix: 'tabs.query', label: 'tabs.query/update/reload from popups/options (Surffish tabs)' },
   { prefix: 'tabs.update', label: 'tabs.query/update/reload from popups/options (Surffish tabs)' },
   { prefix: 'tabs.reload', label: 'tabs.query/update/reload from popups/options (Surffish tabs)' },
-  { prefix: 'runtime.openOptionsPage', label: 'runtime.openOptionsPage (opens a Surffish tab)' }
+  { prefix: 'runtime.openOptionsPage', label: 'runtime.openOptionsPage (opens a Surffish tab, or switches to it when open)' }
 ]
 
 const GAP_API_LABELS: Record<string, string> = {
