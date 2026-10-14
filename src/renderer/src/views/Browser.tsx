@@ -65,6 +65,7 @@ import { WORLD_CITIES } from '../../../shared/world-cities'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
+import { ReadingListButton } from './reading-list/ReadingListButton'
 import { BookmarksBar } from './bookmarks/BookmarksBar'
 import { SpacesSwitcher, useSpaces } from './spaces/SpacesSwitcher'
 import { SPACE_COLOR_VALUES } from '../../../shared/spaces'
@@ -372,6 +373,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [bookmarkPopoverOpen, setBookmarkPopoverOpen] = useState(false)
   // Bookmarks dropdown (next to the address bar) and the optional bookmarks bar (⌘⇧B, off by default).
   const [bookmarksMenuOpen, setBookmarksMenuOpen] = useState(false)
+  const [readingListOpen, setReadingListOpen] = useState(false)
   const [bookmarksBarMenuOpen, setBookmarksBarMenuOpen] = useState(false)
   const [bookmarksMenuLayout, setBookmarksMenuLayout] = useState(0)
   const bumpBookmarksMenuLayout = useCallback(() => setBookmarksMenuLayout((value) => value + 1), [])
@@ -984,7 +986,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   useEffect(() => window.api.browser.onDismissPopovers(dismissPopovers), [])
 
   // Toolbar view sized to the toolbar + open popovers (useToolbarPopovers.ts).
-  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
   const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
@@ -1540,6 +1542,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onShowManager={() => setSidebarMode('bookmarks')}
                   onOpenChange={setBookmarksMenuOpen}
                   onLayout={bumpBookmarksMenuLayout}
+                />}
+                {surface !== 'sidebar' && <ReadingListButton
+                  url={isLocalNewTab ? '' : browser.url}
+                  title={browser.title}
+                  isPrivate={browser.private}
+                  onOpenChange={setReadingListOpen}
                 />}
                 <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>

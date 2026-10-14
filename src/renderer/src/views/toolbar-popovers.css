@@ -111,3 +111,36 @@
 .history-sidebar .history-item time {
   font-size: var(--pop-meta);
 }
+
+/* ---- Reading List: toolbar button + unread badge (popover styles load with its chunk) ---- */
+.reading-list-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.reading-list-button { position: relative; }
+.reading-list-badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #5fcf8f;
+  color: #0d1a12;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+.browser-chrome .reading-list-popover {
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(560px, var(--popover-room, 560px));
+  font-size: var(--pop-body);
+}
+.browser-chrome .reading-list-header strong { font-size: var(--pop-title); }
+.browser-chrome .reading-list-meta,
+.browser-chrome .reading-list-excerpt { font-size: var(--pop-meta); }

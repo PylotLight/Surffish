@@ -45,6 +45,7 @@ import { DEFAULT_SPACE_ID } from '../shared/spaces'
 import { isCommandHiddenByWatchers } from '../shared/page-watchers-feature'
 import { pageWatchersEnabled } from './page-watchers-feature'
 import { revealFeeds } from './feeds-ipc'
+import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -102,6 +103,12 @@ const COMMANDS: BrowserCommand[] = [
     run: () => { const tab = activeTab(); if (tab) setBrowserTabMuted(tab.id, !tab.muted) }
   },
   tabCommand('tab.bookmark', 'bookmark', () => (activeIsBookmarked() ? 'Remove Bookmark' : 'Bookmark Tab'), { keywords: ['favorite', 'favourite', 'star'], enabled: activeIsWebPage }),
+  {
+    id: 'readingList.add', title: 'Add to Reading List', accelerator: TAB_COMMAND_SHORTCUTS.readingList.accelerator, section: 'Tab',
+    keywords: ['read later', 'save for later', 'look at later', 'todo', 'queue', 'pocket', 'instapaper'], refocusPage: true,
+    enabled: () => activeIsWebPage() && !activeTab()?.private, run: () => addTabToReadingList(activeTab()?.id)
+  },
+  { id: 'readingList.show', title: 'Open Reading List', section: 'View', keywords: ['read later', 'saved for later', 'unread', 'reading list', 'queue'], run: () => showReadingList() },
   tabCommand('view.bookmarksBar', 'bookmarksBar', () => (isBookmarksBarVisible() ? 'Hide Bookmarks Bar' : 'Show Bookmarks Bar'), { section: 'View', keywords: ['favourites', 'favorites', 'toolbar'], refocusPage: false }),
   tabCommand('tab.copyLink', 'copyLink', 'Copy Link', { keywords: ['url', 'address'], enabled: activeIsWebPage }),
   tabCommand('tab.copyCleanLink', 'copyCleanLink', 'Copy Clean Link', { keywords: ['url', 'tracking', 'utm', 'strip'], enabled: activeIsWebPage }),

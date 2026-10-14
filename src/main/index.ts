@@ -31,6 +31,7 @@ import { disposePageWatchersFeature, initializePageWatchersFeature, registerPage
 import { initializeBrowserSafety } from './safety'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
+import { registerReadingListIpc } from './reading-list-ipc'
 
 installIpcWindowScope()
 app.setName(APP_NAME)
@@ -93,6 +94,7 @@ app.whenReady().then(async () => {
   registerReaderIpc()
   registerPageWatcherIpc()
   registerFeedIpc()
+  registerReadingListIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {

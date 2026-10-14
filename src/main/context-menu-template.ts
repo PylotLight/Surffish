@@ -10,7 +10,7 @@ import type { SearchEngineId } from '../shared/types'
 
 export type ContextMenuParamsInput = Pick<ContextMenuParams,
   'x' | 'y' | 'isEditable' | 'editFlags' | 'selectionText' | 'linkURL' | 'srcURL' | 'mediaType' | 'hasImageContents'
-  | 'misspelledWord' | 'dictionarySuggestions' | 'spellcheckEnabled' | 'pageURL' | 'suggestedFilename'>
+  | 'misspelledWord' | 'dictionarySuggestions' | 'spellcheckEnabled' | 'pageURL' | 'suggestedFilename'> & Partial<Pick<ContextMenuParams, 'linkText'>>
 
 export interface ContextMenuTemplateOptions {
   pageActions: boolean
@@ -23,6 +23,8 @@ export interface ContextMenuTemplateOptions {
   hasScreenshot?: boolean
   hasReaderView?: boolean
   canWatchPage?: boolean
+  /** Offer "Add Page/Link to Reading List" (never in private tabs). */
+  canAddToReadingList?: boolean
   canGoBack: boolean
   canGoForward: boolean
 }
@@ -54,6 +56,7 @@ export interface ContextMenuActions {
   takeScreenshot?(): void
   readerView?(): void
   watchPage?(mode: 'page' | 'pick'): void
+  addToReadingList?(target: 'page' | { url: string; title?: string }): void
 }
 
 /** Chrome shows a handful of guesses; more than this is noise in a context menu. */
@@ -155,6 +158,10 @@ export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, 
       { label: 'Copy Link Address', click: () => actions.writeClipboard(linkUrl) },
       { label: 'Copy Clean Link', toolTip: 'Copy without tracking parameters (utm_*, fbclid, gclid…)', click: () => actions.writeClipboard(cleanLinkUrl(linkUrl)) }
     )
+    if (options.pageActions && options.canAddToReadingList) {
+      const linkTitle = params.linkText?.trim() || undefined
+      items.push({ label: 'Add Link to Reading List', toolTip: 'Save the link to read later, without opening it', click: () => actions.addToReadingList?.({ url: linkUrl, ...(linkTitle ? { title: linkTitle } : {}) }) })
+    }
   }
   if (params.mediaType === 'image' && params.hasImageContents) {
     // Works for blob:/data: images too, so it doesn't need an http src like the items below.
@@ -202,6 +209,7 @@ export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, 
     if (options.pdfDocument && options.hasEditPdf) items.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
     if (options.hasScreenshot) items.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
     if (!options.pdfDocument && options.hasReaderView) items.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
+    if (options.canAddToReadingList && pageUrl && !linkUrl) items.push({ label: 'Add Page to Reading List', accelerator: 'CmdOrCtrl+Shift+L', registerAccelerator: false, click: () => actions.addToReadingList?.('page') })
     if (!options.pdfDocument && options.canWatchPage && pageUrl) {
       items.push(
         { label: 'Watch This Page for Changes…', click: () => actions.watchPage?.('page') },

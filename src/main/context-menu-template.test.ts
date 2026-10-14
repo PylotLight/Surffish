@@ -128,3 +128,26 @@ describe('reader view and page watchers', () => {
     expect(pdf).not.toContain('Reader View')
   })
 })
+
+describe('Reading List items', () => {
+  test('a link offers Add Link to Reading List (with the link text as the title) only when allowed', () => {
+    const calls: unknown[] = []
+    const withReadingList = { ...actions(), addToReadingList: (target: unknown) => { calls.push(target) } }
+    const link = params({ linkURL: 'https://example.com/story#top', linkText: '  A story  ' })
+    expect(labels(buildBrowserContextMenuTemplate(link, PAGE, withReadingList))).not.toContain('Add Link to Reading List')
+    const items = buildBrowserContextMenuTemplate(link, { ...PAGE, canAddToReadingList: true }, withReadingList)
+    click(items.find((item) => item.label === 'Add Link to Reading List'))
+    expect(calls).toEqual([{ url: 'https://example.com/story#top', title: 'A story' }])
+    expect(labels(items)).not.toContain('Add Page to Reading List')
+  })
+
+  test('a page offers Add Page to Reading List; never without permission or on non-web pages', () => {
+    const calls: unknown[] = []
+    const withReadingList = { ...actions(), addToReadingList: (target: unknown) => { calls.push(target) } }
+    const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, canAddToReadingList: true }, withReadingList)
+    click(items.find((item) => item.label === 'Add Page to Reading List'))
+    expect(calls).toEqual(['page'])
+    expect(labels(buildBrowserContextMenuTemplate(params(), PAGE, withReadingList))).not.toContain('Add Page to Reading List')
+    expect(labels(buildBrowserContextMenuTemplate(params({ pageURL: 'about:blank' }), { ...PAGE, canAddToReadingList: true }, withReadingList))).not.toContain('Add Page to Reading List')
+  })
+})
