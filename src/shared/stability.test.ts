@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { countStabilityEvent, emptyStabilityCounters, errorSignature, LogThrottle, RecoveryBudget, STABILITY_RECENT_LIMIT, stabilityFailureTotal } from './stability'
+import { BRIDGE_RELOAD_LIMIT, BRIDGE_RELOAD_WINDOW_MS, countStabilityEvent, emptyStabilityCounters, errorSignature, LogThrottle, RecoveryBudget, STABILITY_RECENT_LIMIT, stabilityFailureTotal } from './stability'
 
 describe('stability counters', () => {
   test('count, summarise and cap the recent list', () => {
@@ -53,5 +53,14 @@ describe('RecoveryBudget', () => {
     expect(budget.tryTake(10)).toBe(true)
     expect(budget.tryTake(20)).toBe(false)
     expect(budget.tryTake(1001)).toBe(true)
+  })
+
+  test('extension bridge crash loop (reload every 1 s) stops after the limit, recovers after the window', () => {
+    const budget = new RecoveryBudget(BRIDGE_RELOAD_LIMIT, BRIDGE_RELOAD_WINDOW_MS)
+    const taken: boolean[] = []
+    for (let crash = 0; crash < 10; crash += 1) taken.push(budget.tryTake(crash * 1000))
+    expect(taken.filter(Boolean).length).toBe(BRIDGE_RELOAD_LIMIT)
+    expect(taken.slice(BRIDGE_RELOAD_LIMIT).every((ok) => !ok)).toBe(true)
+    expect(budget.tryTake(BRIDGE_RELOAD_WINDOW_MS + 5000)).toBe(true)
   })
 })
