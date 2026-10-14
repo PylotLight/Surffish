@@ -16,10 +16,12 @@ A search result is eligible only when its file metadata includes a creator, a la
 
 The two offline fallbacks are bundled WebP copies of CC0 1.0 files:
 
-| Bundled fallback | Creator | Commons source and license |
-| --- | --- | --- |
-| `forest-lake.webp` — “Landscape-nature-forest-lake” | Pixel.la Free Stock Photos | [Commons file page](https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg) · [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
-| `tranquil-mountain-lake.webp` — “Tranquil mountain lake” | Andrew Spencer | [Commons file page](https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg) · [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (the Commons record notes publication under CC0 before 5 June 2017) |
+The files live in `src/renderer/src/assets/quick-links-backgrounds/`. CC0 needs no attribution; the credits are shown anyway.
+
+| Bundled fallback | Creator | Original source | Commons source and license |
+| --- | --- | --- | --- |
+| `forest-lake.webp` — “Landscape-nature-forest-lake” | Pixel.la Free Stock Photos | [Flickr 24300004076](https://www.flickr.com/photos/137643065@N06/24300004076/) | [Commons file page](https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg) · [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `tranquil-mountain-lake.webp` — “Tranquil mountain lake” | Andrew Spencer | [Unsplash g1GfGwh1FOg](https://unsplash.com/photos/g1GfGwh1FOg) | [Commons file page](https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg) · [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (the Commons record notes publication under CC0 before 5 June 2017) |
 
 ## Official reference material
 

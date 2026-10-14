@@ -24,4 +24,4 @@ Electron `DownloadItem` objects exist only during the current app session. When 
 xvfb-run -a bun run test:electron-downloads
 ```
 
-The UI guide contains real app-window captures with synthetic history: [Downloads popup](screenshots/downloads-popover.png) and [full Downloads page](screenshots/downloads-page.png).
+App-window captures with synthetic history: [Downloads popup](screenshots/downloads-popover.png) and [full Downloads page](screenshots/downloads-page.png).

@@ -55,26 +55,25 @@ The first creates a vault through Bramble’s setup form, checks the storage rel
 1. Build and launch Surffish. Open **Settings → Integrations → Bramble password manager** and choose **Check for updates**; confirm the version/status is shown.
 2. Click **Install**. Review the native confirmation’s version, digest statement, and permissions; choose **Cancel** and verify the install state stays unchanged. Repeat and choose **Install Bramble**.
 3. Confirm Integrations shows the installed version and effective site/API permissions. Use the Bramble toolbar icon; confirm it opens the 500×550 compact popup anchored beneath the icon and dismisses on outside focus or Escape.
-4. Choose **Setup / customize** in Integrations. Confirm Bramble’s options/setup page opens in a separate resizable window. Create a disposable local vault and verify it can be locked and unlocked from the popup.
+4. Choose **Setup / customize** in Integrations. Confirm Bramble’s options/setup page opens in a regular Surffish browser tab. Create a disposable local vault and verify it can be locked and unlocked from the popup.
 5. With the app offline, restart Surffish and confirm the already installed extension still loads from the locally retained archive. Reconnect, use **Check for updates**, and confirm the Settings status/error is informative.
 6. For an update test, use an upstream release newer than the installed version. Cancel at the permission prompt once; verify the old popup and vault remain usable. Then confirm the update; verify the new version is shown and the prior vault is still present.
 
 ## Automated checks
 
 ```sh
-cd /path/to/Surffish
-npm test
-npm run typecheck
-npm run build
+bun run test
+bun run typecheck
+bun run build
 ```
 
 The unit suite includes Bramble release selection, URL allow-list, GitHub/SHA256SUMS digest verification, ZIP extraction, and path-traversal rejection. The existing adapter tests verify the Firefox build adaptation and the existing UI/bridge smoke harness remains available:
 
 ```sh
-npm run test:bramble-poc -- /path/to/bramble/packages/platform-extension/dist-firefox
-npm run test:bramble-app-poc -- /path/to/bramble/packages/platform-extension/dist-firefox
-xvfb-run -a npm run test:electron-extensions
-xvfb-run -a npm run test:electron-host-bridge
+bun run test:bramble-poc -- /path/to/bramble/packages/platform-extension/dist-firefox
+bun run test:bramble-app-poc -- /path/to/bramble/packages/platform-extension/dist-firefox
+xvfb-run -a bun run test:electron-extensions
+xvfb-run -a bun run test:electron-host-bridge
 ```
 
 Those two Bramble app-probe commands need a built upstream `dist-firefox` folder because they exercise the existing app integration against local source. That is a maintainer/test requirement only; normal Surffish users install from the GitHub release in Settings.

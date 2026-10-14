@@ -62,4 +62,6 @@ No badge text or dynamic icons, no `contextMenus`, `notifications` (calls succee
 
 `bun scripts/fetch-web-store-extension.ts modern-for-hn|i-still-dont-care-about-cookies [out-dir] [--raw] [--probe]` downloads, verifies, and stages an extension as Surffish would. `--probe` then runs `scripts/electron-real-extension-probe.cjs` on it (needs a display; use `xvfb-run` on Linux).
 
+`bun run check:password-extension -- bitwarden|bramble <unpacked-dir>` statically scans an unpacked build's manifest and `chrome.*`/`browser.*` references for APIs Electron lacks, without running it. `bun run test:electron-extensions` runs inert MV2/MV3/Firefox-shaped fixtures in the installed Electron runtime, and `bun run test:electron-host-bridge` checks the extension tab/frame-id mapping against real tabs (both in Linux CI). `bun run probe:electron-extension-real -- /path/to/unpacked` loads a real unpacked extension unmodified and reports what fails.
+
 `bun run test:electron-extension-dnr` (after `bun run build`) installs a small generated DNR + webNavigation + scripting extension into a throwaway profile and checks blocking, redirects, header changes, a dynamic allow rule and cookie-banner hiding in a page and an iframe. `SURFFISH_DNR_SMOKE_EXTENSION=<dir staged by fetch-web-store-extension.ts>` runs it against the real extension.

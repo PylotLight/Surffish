@@ -13,7 +13,7 @@ bun run test
 bun run build
 ```
 
-`bun run dev` installs dependencies on first start and when the dependency manifests change. To run the native sidebar-overlay integration check on Linux with a virtual display:
+`bun run dev` installs dependencies on first start and when the dependency manifests change, and cleans up the terminal on exit (`bun run dev:bare` is plain `electron-vite dev`). `bun run start` launches the built app from `out/`; `bun run clean` removes `out/`. To run the native sidebar-overlay integration check on Linux with a virtual display:
 
 ```bash
 xvfb-run -a bun run test:electron-sidebar-overlay
@@ -46,14 +46,17 @@ The k3s runner has passwordless sudo, so CI runs sandboxed. Chromium picks the u
 ## Further technical references
 
 - [Architecture](architecture.md)
+- [Profile storage (surffish.db)](storage.md)
 - [Browser, profile, and proxy notes](browser-and-proxy.md)
-- [Browser UI and native overlay notes](browser-ui-overhaul.md)
-- [Sidebar overlay limitation and alternatives](sidebar-overlay-limitation.md)
+- [UI motion, swipe intent and view flashes](ui-motion.md)
+- [Spaces](spaces.md) and [Tab groups](tab-groups.md)
 - [Downloads manager](downloads-manager.md)
+- [Feeds](feeds.md)
+- [Chrome Web Store extensions](chrome-web-store-extensions.md)
 - [Bramble integration](bramble-integration.md)
-- [Extension compatibility roadmap](extensions-roadmap.md)
 - [New Tab photo sources and cache](new-tab-photo-sources.md)
-- [Quick Links background images](quick-links-backgrounds.md)
 - [Third-party assets and licenses](third-party-assets.md)
+- [Perf check and CI](perf.md)
+- [macOS builds and releases](releasing.md)
 - [Troubleshooting](troubleshooting.md)
 - [macOS WebKit evaluation](native-webkit-evaluation.md)

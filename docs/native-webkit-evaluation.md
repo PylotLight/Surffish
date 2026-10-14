@@ -23,7 +23,7 @@ cd src/native/macos
 swift run SurffishNative
 ```
 
-The project also has a `macos-15` GitHub Actions job. A locally packaged `.app` is optional: `./Scripts/package-and-run.sh` applies an **ad-hoc** signature only. Neither SwiftPM development nor local ad-hoc signing requires a paid Apple Developer membership. This is distinct from Developer ID distribution, notarization, Mac App Store publication, and Apple-managed entitlements. Linux cannot compile or run WebKit; the native CI job and the user's Mac provide the Apple runtime.
+CI's `native-macos` job runs these tests and builds the prototype on the self-hosted Mac runner. A locally packaged `.app` is optional: `./Scripts/package-and-run.sh` applies an **ad-hoc** signature only. Neither SwiftPM development nor local ad-hoc signing requires a paid Apple Developer membership. This is distinct from Developer ID distribution, notarization, Mac App Store publication, and Apple-managed entitlements. Linux cannot compile or run WebKit; the native CI job and the user's Mac provide the Apple runtime.
 
 ## Extension installation and realistic fit
 
