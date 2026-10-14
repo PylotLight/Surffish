@@ -47,6 +47,7 @@
     "test:electron-address-bar-sync": "electron scripts/electron-address-bar-sync-smoke.cjs",
     "test:electron-blob-links": "electron scripts/electron-blob-links-smoke.cjs",
     "test:electron-glance": "electron scripts/electron-glance-smoke.cjs",
+    "test:electron-user-agent": "electron scripts/electron-user-agent-smoke.cjs",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
     "test:electron-extension-dnr": "electron scripts/electron-extension-dnr-smoke.cjs",
     "bench:dnr": "bun scripts/bench-dnr.ts",

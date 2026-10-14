@@ -175,8 +175,19 @@ export function isWebPageUrl(value: string | undefined | null): value is string 
   }
 }
 
-/** Drop Electron's `Electron/x` and app-name tokens so sites see plain Chrome. */
+const CHROME_UA_SHAPE = /^(Mozilla\/5\.0 \([^)]*\)) (AppleWebKit\/\S+ \(KHTML, like Gecko\)) .*?\bChrome\/(\d+)[\d.]*\b.*?(Safari\/\S+)$/
+
+/**
+ * The user agent Chrome itself sends: `Mozilla/5.0 (<platform>) AppleWebKit/537.36 (KHTML, like
+ * Gecko) Chrome/<major>.0.0.0 Safari/537.36`. Drops Electron's `Electron/x` and app-name tokens
+ * (whatever the app/profile is called) and applies Chrome's UA reduction (minor versions zeroed;
+ * the full version stays available through userAgentData high-entropy hints, as in Chrome).
+ * Idempotent. Bot checks such as Cloudflare Turnstile compare this string across the page, its
+ * workers and request headers, so every one of them must get exactly this value.
+ */
 export function chromeUserAgent(value: string): string {
+  const shape = CHROME_UA_SHAPE.exec(value.trim())
+  if (shape) return `${shape[1]} ${shape[2]} Chrome/${shape[3]}.0.0.0 ${shape[4]}`
   return value
     .replace(/\s(?:Electron|surffish)\/\S+/gi, '')
     .replace(/\s{2,}/g, ' ')

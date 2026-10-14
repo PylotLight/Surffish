@@ -143,9 +143,18 @@ test('isWebPageUrl accepts only http(s)', () => {
   assert.equal(isWebPageUrl(null), false)
 })
 
-test('browser user agent drops Electron and app tokens but keeps Chrome', () => {
+test('browser user agent is exactly what Chrome sends: no Electron or app tokens, reduced version', () => {
+  const chrome = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
   const raw = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) surffish/0.1.0 Chrome/152.0.7977.130 Electron/44.7.0 Safari/537.36'
-  assert.equal(chromeUserAgent(raw), 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.130 Safari/537.36')
+  assert.equal(chromeUserAgent(raw), chrome)
+  // Packaged (productName) and dev-profile app names, with spaces, are dropped too.
+  assert.equal(chromeUserAgent(raw.replace('surffish/0.1.0', 'Surffish/0.1.7')), chrome)
+  assert.equal(chromeUserAgent(raw.replace('surffish/0.1.0', 'Surffish Dev/0.1.7')), chrome)
+  // Idempotent: the session UA is cleaned again on top of the already-clean app fallback.
+  assert.equal(chromeUserAgent(chrome), chrome)
+  const linux = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) surffish/0.0 Chrome/152.0.7977.130 Electron/44.5.1 Safari/537.36'
+  assert.equal(chromeUserAgent(linux), 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36')
+  assert.doesNotMatch(chromeUserAgent(linux), /Electron|surffish/i)
 })
 
 test('the ad blocker never blocks extension resources or hosts extensions rely on', () => {
