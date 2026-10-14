@@ -62,7 +62,8 @@ export function getPageSession(partition: string = BROWSER_SESSION_PARTITION): E
   const info = infoFor(partition)
   const created = info.isPrivate ? session.fromPartition(partition, { cache: false }) : session.fromPartition(partition)
   // YouTube and Google serve different player/ad code paths to unknown clients; uBO's YouTube
-  // fixes target real Chrome, so look like Chrome (every page session the same).
+  // fixes target real Chrome, so look like Chrome (every page session the same). It must equal
+  // app.userAgentFallback (set in index.ts), which workers use: bot checks compare the two.
   const base = info.isDefault ? created.getUserAgent() : getPageSession(BROWSER_SESSION_PARTITION).getUserAgent()
   created.setUserAgent(info.isDefault ? chromeUserAgent(base) : base)
   if (info.isPrivate) created.setSpellCheckerEnabled(false)

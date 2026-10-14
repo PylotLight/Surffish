@@ -37,6 +37,7 @@ import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
 import { registerReadingListIpc } from './reading-list-ipc'
 import { registerGlanceIpc } from './glance-entry'
+import { chromeUserAgent } from './adblock-policy'
 
 installIpcWindowScope()
 app.setName(APP_NAME)
@@ -51,6 +52,11 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
   app.setName(profileName)
   app.setPath('userData', join(app.getPath('appData'), profileName))
 }
+// One user agent everywhere, before any session or page exists. Sessions get theirs from
+// browser-session.ts, but service workers and the workers inside cross-site iframes (Cloudflare
+// Turnstile's challenges.cloudflare.com frame) use this app-wide fallback, which otherwise still says
+// `Electron/x Surffish/x`; challenges see two different browsers and never pass.
+app.userAgentFallback = chromeUserAgent(app.userAgentFallback)
 // Privileged schemes must be registered before ready.
 registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
