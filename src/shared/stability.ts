@@ -96,6 +96,10 @@ export function errorSignature(error: unknown): string {
   }
 }
 
+/** An extension's bridge page is reloaded after a crash at most this many times per window. */
+export const BRIDGE_RELOAD_LIMIT = 3
+export const BRIDGE_RELOAD_WINDOW_MS = 60_000
+
 /** At most `limit` attempts inside `windowMs`; older attempts age out. */
 export class RecoveryBudget {
   private attempts: number[] = []

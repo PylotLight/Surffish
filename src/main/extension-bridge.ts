@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { extensionDnrEnabledRulesets, forgetExtensionDnrTab, updateExtensionDnrState } from './extension-dnr'
 import { EXTENSION_BRIDGE_PAGE } from './web-store-extension-adapter'
+import { BRIDGE_RELOAD_LIMIT, BRIDGE_RELOAD_WINDOW_MS, RecoveryBudget } from '../shared/stability'
 
 export const BRIDGE_UP_CHANNEL = 'surffish:extension-bridge:up'
 export const BRIDGE_CALL_CHANNEL = 'surffish:extension-bridge:call'
@@ -47,6 +48,8 @@ interface Bridge extends BridgeOptions {
   view: WebContentsView
   ready: boolean
   queue: unknown[]
+  /** Crash reloads left for this bridge: a page that keeps crashing is not reloaded forever. */
+  reloads: RecoveryBudget
 }
 
 const bridges = new Map<string, Bridge>()
@@ -240,7 +243,7 @@ export function startExtensionBridge(options: BridgeOptions): void {
       backgroundThrottling: false
     }
   })
-  const bridge: Bridge = { ...options, view, ready: false, queue: [] }
+  const bridge: Bridge = { ...options, view, ready: false, queue: [], reloads: new RecoveryBudget(BRIDGE_RELOAD_LIMIT, BRIDGE_RELOAD_WINDOW_MS) }
   bridges.set(options.id, bridge)
   const contents = view.webContents
   contents.on('will-navigate', (event) => event.preventDefault())
@@ -249,6 +252,11 @@ export function startExtensionBridge(options: BridgeOptions): void {
     // Reload the relay once the renderer is gone (e.g. extension process crash).
     if (bridges.get(options.id) !== bridge) return
     bridge.ready = false
+    if (!bridge.reloads.tryTake()) {
+      // Crash loop: stop reloading; the bridge comes back when the extension is reloaded or re-enabled.
+      console.warn(`[extensions] the Surffish bridge for ${options.id} keeps crashing (${BRIDGE_RELOAD_LIMIT} times in ${BRIDGE_RELOAD_WINDOW_MS / 1000} s); not reloading it again`)
+      return
+    }
     setTimeout(() => {
       if (bridges.get(options.id) === bridge && !contents.isDestroyed()) void contents.loadURL(`${options.extensionUrl}${EXTENSION_BRIDGE_PAGE}`).catch(() => {})
     }, 1000)
