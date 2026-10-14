@@ -7,7 +7,8 @@
 // and switches the sidebar to the snapshot blur (capturePage can't see the native one). The method
 // used per shot goes to capture-method.txt next to the PNGs. README_SHOT_SIDEBAR=native|snapshot|solid
 // and README_SHOT_METHOD=compose|screencapture override the choices.
-// Pages are real public sites; one that doesn't load in time is replaced by a local fixture page.
+// Pages are real public sites (GitHub, Linear, Apple, Hacker News, a GitHub blog post). Each gets one
+// retry, then waits for its favicon; one that still doesn't load is replaced by a local fixture page.
 // README_SHOTS=hero,newtab,... runs a subset. README_SHOT_WIDTH/HEIGHT set the window (1440x900).
 const smoke = require('./smoke-harness.cjs')
 const { execFileSync } = require('node:child_process')
@@ -29,13 +30,15 @@ const log = (...args) => console.log(`[readme-shots +${((Date.now() - started) /
 const started = Date.now()
 
 const SITES = {
-  wiki: 'https://en.wikipedia.org/wiki/Surfing',
-  wiki2: 'https://en.wikipedia.org/wiki/Banzai_Pipeline',
-  hn: 'https://news.ycombinator.com/',
   gh: 'https://github.com/PylotLight/Surffish',
-  mdn: 'https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Proxy_servers_and_tunneling',
+  linear: 'https://linear.app/',
+  apple: 'https://www.apple.com/',
+  hn: 'https://news.ycombinator.com/',
+  article: process.env.README_SHOT_ARTICLE || 'https://github.blog/engineering/architecture-optimization/improving-site-performance-by-shipping-more-css/',
   electron: 'https://www.electronjs.org/docs/latest/'
 }
+// sidebar order (top to bottom) for the tabs every scene shares
+const TAB_ORDER = ['gh', 'linear', 'apple', 'hn']
 
 async function waitFor(predicate, description, timeout = 30000) {
   const deadline = Date.now() + timeout
@@ -90,11 +93,10 @@ function seedProfile() {
   writeFileSync(join(userData, 'browser-preferences.json'), `${JSON.stringify({
     version: 1,
     pinnedSites: [
-      { title: 'Wikipedia', url: 'https://en.wikipedia.org/', faviconUrl: 'https://en.wikipedia.org/static/favicon/wikipedia.ico' },
-      { title: 'Hacker News', url: 'https://news.ycombinator.com/', faviconUrl: 'https://news.ycombinator.com/favicon.ico' },
       { title: 'GitHub', url: 'https://github.com/', faviconUrl: 'https://github.com/favicon.ico' },
-      { title: 'MDN', url: 'https://developer.mozilla.org/', faviconUrl: 'https://developer.mozilla.org/favicon.ico' },
-      { title: 'YouTube', url: 'https://www.youtube.com/', faviconUrl: 'https://www.youtube.com/favicon.ico' }
+      { title: 'Linear', url: 'https://linear.app/', faviconUrl: 'https://linear.app/favicon.ico' },
+      { title: 'Apple', url: 'https://www.apple.com/', faviconUrl: 'https://www.apple.com/favicon.ico' },
+      { title: 'Hacker News', url: 'https://news.ycombinator.com/', faviconUrl: 'https://news.ycombinator.com/favicon.ico' }
     ]
   })}\n`, { mode: 0o600 })
 }
@@ -209,23 +211,58 @@ async function loaded(win, url, timeout = 25000) {
   }
 }
 
-// Third-party banners (fundraising / photo contest notices) are not Surffish UI, so they go.
-const TIDY_CSS = '.mwe-popups, #siteNotice, #centralNotice, .cdx-message--notice, .frb, #frb-inline { display: none !important }'
+// Third-party banners (cookie / sign-up prompts) are not Surffish UI, so they go.
+const TIDY_CSS = {
+  'github.com': '.js-notice, .flash-full, .js-cookie-consent-banner, cookie-consent-link, #ghcc { display: none !important }',
+  'github.blog': '#ghcc, .cookie-consent, [class*="cookie"] { display: none !important }',
+  'apple.com': '#ac-gn-segmentbar, .ac-gn-segmentbar, #globalnav-segmentbar { display: none !important }'
+}
 async function tidy(win) {
   for (const view of pageViews(win)) {
-    if (view.webContents.getURL().includes('wikipedia.org')) await view.webContents.insertCSS(TIDY_CSS).catch(() => {})
+    let host = ''
+    try { host = new URL(view.webContents.getURL()).hostname } catch {}
+    for (const [domain, css] of Object.entries(TIDY_CSS)) {
+      if (host === domain || host.endsWith(`.${domain}`)) await view.webContents.insertCSS(css).catch(() => {})
+    }
   }
+}
+
+const tabInfo = async (win, id) => (await api(win, 'tabs.get()')).find((tab) => tab.id === id)
+
+/** Load url in tab id (already navigating there): one retry, then wait for the favicon to land. */
+async function settle(win, id, url, timeout = 30000) {
+  let ok = await loaded(win, url, timeout)
+  if (!ok) {
+    log(`${url} did not load in ${timeout / 1000}s, retrying once`)
+    await api(win, `tabs.activate(${JSON.stringify(id)})`)
+    await api(win, `navigate(${JSON.stringify(url)})`)
+    ok = await loaded(win, url, timeout + 15000)
+  }
+  if (!ok) return false
+  // real page load: document complete and some content painted
+  const view = pageViews(win).find((v) => v.webContents.getURL().startsWith(url.split('#')[0]))
+  if (view) {
+    await waitFor(() => evaluate(view, 'document.readyState === "complete" && document.body && document.body.innerText.length > 200'), `${url} content`, 15000).catch(() => log(`${url}: content wait timed out`))
+  }
+  await waitFor(async () => (await tabInfo(win, id))?.faviconUrl, `${url} favicon`, 15000).catch(() => log(`${url}: no favicon after 15s`))
+  return true
 }
 
 async function openTab(win, url) {
   const id = await api(win, `tabs.create(${JSON.stringify(url)})`)
-  if (!(await loaded(win, url))) {
-    log(`${url} did not load, using the fixture page`)
+  if (!(await settle(win, id, url))) {
+    log(`${url} did not load after a retry, using the fixture page`)
     const name = new URL(url).pathname.split('/').filter(Boolean).pop() || new URL(url).hostname
-    await api(win, `navigate(${JSON.stringify(`${fixtureOrigin}/${name.replace(/_/g, ' ')}`)})`)
+    await api(win, `navigate(${JSON.stringify(`${fixtureOrigin}/${name.replace(/[_-]/g, ' ')}`)})`)
     await delay(800)
   }
   return id
+}
+
+async function activate(win, key) {
+  await api(win, `tabs.activate(${JSON.stringify(state.ids[key])})`)
+  await loaded(win, SITES[key], 10000)
+  await tidy(win)
 }
 
 async function setChrome(win, state) {
@@ -239,24 +276,21 @@ async function closePopovers(win) {
 }
 
 const scenes = {
+  // New Tab with its photo, the tab sidebar open over it as a card
   async hero(win) {
-    await setChrome(win, { sidebarPinned: true, sidebarMode: 'tabs' })
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki)})`)
-    await loaded(win, SITES.wiki)
-    await tidy(win)
-    await shoot(win, 'hero')
-  },
-  async newtab(win) {
     await setChrome(win, { sidebarMode: 'tabs' })
-    await api(win, 'tabs.create()')
+    state.newTab = await api(win, 'tabs.create()')
     await delay(2500)
-    await setChrome(win, { sidebarPinned: false })
-    await shoot(win, 'new-tab')
     await setChrome(win, { sidebarPinned: true })
+    await delay(1200) // photo fade-in
+    await shoot(win, 'hero')
+    // close it so later sidebars list only the real pages (newtab opens a fresh one)
+    await api(win, `tabs.close(${JSON.stringify(state.newTab)})`).catch(() => {})
+    await delay(500)
   },
   async palette(win) {
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.gh)})`)
-    await loaded(win, SITES.gh)
+    await setChrome(win, { sidebarPinned: true })
+    await activate(win, 'gh')
     clickMenu('Command Palette…')
     const toolbar = surface(win, 'toolbar')
     await delay(800)
@@ -264,12 +298,13 @@ const scenes = {
     await shoot(win, 'command-palette')
     await closePopovers(win)
   },
+  // GitHub repo on the left, Linear on the right
   async split(win) {
     await setChrome(win, { sidebarPinned: false })
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.hn)})`)
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki2)})`)
+    await activate(win, 'linear')
+    await activate(win, 'gh')
     await api(win, 'split.toggle()')
-    await delay(1500)
+    await delay(2500)
     await tidy(win)
     await shoot(win, 'split-view')
     await api(win, 'split.toggle()').catch(() => {})
@@ -277,6 +312,7 @@ const scenes = {
     await setChrome(win, { sidebarPinned: true })
   },
   async settings(win) {
+    await activate(win, 'gh')
     await setChrome(win, { sidebarMode: 'settings' })
     const content = surface(win, 'content')
     await waitFor(() => evaluate(content, 'Boolean(document.querySelector(\'[aria-label="Local SOCKS5 port"]\'))'), 'the SOCKS5 proxy card', 10000)
@@ -284,14 +320,16 @@ const scenes = {
     await evaluate(content, `(() => { const el = document.querySelector('[aria-label="Local SOCKS5 port"]'); const card = el.closest('section, .settings-card, .settings-group') || el; card.scrollIntoView({ block: 'start' }); const scroller = card.closest('[class*="scroll"], main') ; if (scroller) scroller.scrollTop -= 24 })()`)
     await delay(800)
     await shoot(win, 'settings-proxy')
-  },
-  async history(win) {
     await setChrome(win, { sidebarMode: 'tabs' })
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki2)})`)
-    for (const path of ['Big_wave_surfing', 'Jaws_(surf_break)', 'Nazar%C3%A9_Canyon', 'Teahupo%27o']) {
-      const url = `https://en.wikipedia.org/wiki/${path}`
+  },
+  // the Apple tab walked Hacker News -> GitHub -> Linear -> back to Apple, then Back's menu
+  async history(win) {
+    await setChrome(win, { sidebarMode: 'tabs', sidebarPinned: true })
+    await activate(win, 'apple')
+    const id = state.ids.apple
+    for (const url of [SITES.hn, SITES.gh, SITES.linear, SITES.apple]) {
       await api(win, `navigate(${JSON.stringify(url)})`)
-      await loaded(win, url, 15000)
+      await settle(win, id, url, 20000)
     }
     await tidy(win)
     const toolbar = surface(win, 'toolbar')
@@ -300,6 +338,7 @@ const scenes = {
     toolbar.webContents.sendInputEvent({ type: 'mouseDown', x: rect.x, y: rect.y, button: 'right', clickCount: 1 })
     toolbar.webContents.sendInputEvent({ type: 'mouseUp', x: rect.x, y: rect.y, button: 'right', clickCount: 1 })
     await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector(\'[aria-label="Back history"]\'))'), 'the Back history menu', 8000)
+    await delay(1500) // favicons in the menu
     await shoot(win, 'history-menu')
     await closePopovers(win)
   },
@@ -309,19 +348,21 @@ const scenes = {
     await shoot(win, 'settings-integrations')
     await setChrome(win, { sidebarMode: 'tabs' })
   },
+  // a GitHub blog post in reader view (its own tab, closed afterwards)
   async reader(win) {
     await setChrome(win, { sidebarPinned: false })
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.wiki)})`)
-    await loaded(win, SITES.wiki)
+    const id = await openTab(win, SITES.article)
+    await tidy(win)
+    await delay(1000)
     await api(win, 'toggleReader()')
-    await delay(2000)
+    await delay(2500)
     await shoot(win, 'reader')
     await api(win, 'toggleReader()').catch(() => {})
+    await api(win, `tabs.close(${JSON.stringify(id)})`).catch(() => {})
     await setChrome(win, { sidebarPinned: true })
   },
   async glance(win) {
-    await api(win, `tabs.activate(${JSON.stringify(state.ids.hn)})`)
-    await loaded(win, SITES.hn)
+    await activate(win, 'hn')
     const page = pageViews(win)[0]
     const rect = await evaluate(page, `(() => { const a = [...document.querySelectorAll('.titleline > a, article a, p a')].find((el) => el.getBoundingClientRect().top > 60); if (!a) return null; a.href = ${JSON.stringify(SITES.electron)}; const r = a.getBoundingClientRect(); return { x: Math.round(r.x + 8), y: Math.round(r.y + r.height / 2) } })()`)
     if (!rect) throw new Error('no link to Shift+click')
@@ -329,9 +370,19 @@ const scenes = {
     page.webContents.sendInputEvent({ type: 'mouseMove', x: rect.x, y: rect.y, modifiers: ['shift'] })
     page.webContents.sendInputEvent({ type: 'mouseDown', ...base })
     page.webContents.sendInputEvent({ type: 'mouseUp', ...base })
-    await delay(4000)
+    await delay(5000)
     await shoot(win, 'glance')
     await closePopovers(win)
+  },
+  // New Tab on its own: photo, clock and favourites, sidebar tucked away
+  async newtab(win) {
+    await setChrome(win, { sidebarMode: 'tabs' })
+    await api(win, 'tabs.create()')
+    await delay(2500)
+    await setChrome(win, { sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })
+    await delay(1200)
+    await shoot(win, 'new-tab')
+    await setChrome(win, { sidebarPinned: true })
   }
 }
 const state = { ids: {} }
@@ -366,10 +417,11 @@ async function run() {
   await waitFor(() => evaluate(surface(win, 'toolbar'), 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar')
   win.setBounds({ x: 40, y: 40, width: WIDTH, height: HEIGHT })
   log('window ready', JSON.stringify(win.getBounds()))
-  for (const key of ['mdn', 'gh', 'hn', 'wiki2', 'wiki']) state.ids[key] = await openTab(win, SITES[key])
+  for (const key of TAB_ORDER) state.ids[key] = await openTab(win, SITES[key])
   // drop the start-up New Tab so the sidebar lists only real pages
   const tabs = await api(win, 'tabs.get()')
   for (const tab of tabs) if (!Object.values(state.ids).includes(tab.id)) await api(win, `tabs.close(${JSON.stringify(tab.id)})`)
+  // hero first: the sidebar lists only the shared tabs plus its New Tab
   const order = ['hero', 'palette', 'split', 'reader', 'glance', 'history', 'settings', 'integrations', 'newtab']
   for (const name of order) {
     if (only.length ? !only.includes(name) : name === 'integrations') continue
