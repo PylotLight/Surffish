@@ -2,9 +2,11 @@
 // and writes one PNG per scene to SURFFISH_SCREENSHOT_DIR.
 //   bun run build && SURFFISH_SCREENSHOT_DIR=/tmp/shots electron scripts/readme-screenshots.cjs
 // Linux: needs DISPLAY (xvfb-run) + ffmpeg, grabs the window from X (x11grab).
-// macOS: `screencapture -o -l <window id>` (real window, traffic lights, needs Screen Recording
-// permission for the calling process); if that fails it falls back to stitching the window's views
-// together with capturePage. The method used per shot goes to capture-method.txt next to the PNGs.
+// macOS: `screencapture -o -l <window id>` (real window, native sidebar blur) when the process has
+// Screen Recording permission; otherwise it stitches the window's views together with capturePage
+// and switches the sidebar to the snapshot blur (capturePage can't see the native one). The method
+// used per shot goes to capture-method.txt next to the PNGs. README_SHOT_SIDEBAR=native|snapshot|solid
+// and README_SHOT_METHOD=compose|screencapture override the choices.
 // Pages are real public sites; one that doesn't load in time is replaced by a local fixture page.
 // README_SHOTS=hero,newtab,... runs a subset. README_SHOT_WIDTH/HEIGHT set the window (1440x900).
 const smoke = require('./smoke-harness.cjs')
@@ -125,6 +127,15 @@ for w in list where (w[kCGWindowOwnerPID as String] as? Int32) == pid && (w[kCGW
   return hit[0]
 }
 
+/** macOS: does this process have Screen Recording permission (CGPreflightScreenCaptureAccess)? */
+function macScreenRecordingAllowed() {
+  const file = join(userData, 'preflight.swift')
+  writeFileSync(file, 'import CoreGraphics\nprint(CGPreflightScreenCaptureAccess() ? "yes" : "no")\n')
+  const bin = join(userData, 'preflight')
+  execFileSync('swiftc', ['-O', '-o', bin, file], { timeout: 180000 })
+  return execFileSync(bin, { encoding: 'utf8', timeout: 30000 }).trim() === 'yes'
+}
+
 async function composeCapture(win) {
   // Paint every visible view into one canvas at its bounds, bottom to top.
   const { width, height } = win.getContentBounds()
@@ -168,14 +179,14 @@ async function shoot(win, name) {
   } else if (macScreencaptureWorks) {
     try {
       const id = macWindowId(win)
-      execFileSync('screencapture', ['-o', '-x', '-l', String(id), file], { timeout: 30000 })
+      execFileSync('screencapture', ['-o', '-x', '-l', String(id), file], { timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'] })
       if (statSync(file).size < 20000) throw new Error(`screencapture wrote only ${statSync(file).size} bytes`)
       method = `screencapture -o -l ${id}`
       // Without Screen Recording permission macOS can hand back the wallpaper instead of failing,
       // so keep the capturePage version next to it to compare.
       writeFileSync(join(outDir, `${name}.compose.png`), await composeCapture(win))
     } catch (error) {
-      log(`screencapture failed (${error.message.split('\n')[0]}), falling back to capturePage`)
+      log(`screencapture failed (${error.message.split('\n')[0]}; stderr: ${String(error.stderr || '').trim() || 'none'}), falling back to capturePage`)
       macScreencaptureWorks = false
     }
   }
@@ -236,6 +247,7 @@ const scenes = {
     await shoot(win, 'hero')
   },
   async newtab(win) {
+    await setChrome(win, { sidebarMode: 'tabs' })
     await api(win, 'tabs.create()')
     await delay(2500)
     await setChrome(win, { sidebarPinned: false })
@@ -325,8 +337,25 @@ const scenes = {
 const state = { ids: {} }
 
 async function run() {
+  mkdirSync(outDir, { recursive: true })
   app.setPath('userData', userData)
   seedProfile()
+  if (macScreencaptureWorks) {
+    try {
+      const allowed = macScreenRecordingAllowed()
+      log(`Screen Recording permission (CGPreflightScreenCaptureAccess): ${allowed ? 'granted' : 'NOT granted'}`)
+      appendFileSync(join(outDir, 'capture-method.txt'), `# screen recording permission: ${allowed ? 'granted' : 'not granted'}\n`)
+      // README_SHOT_METHOD=screencapture tries it anyway (the preflight can miss a permission granted to a parent)
+      if (!allowed && process.env.README_SHOT_METHOD !== 'screencapture') macScreencaptureWorks = false
+    } catch (error) {
+      log(`preflight failed: ${error.message.split('\n')[0]}`)
+    }
+  }
+  // The native macOS sidebar blur is a compositor effect capturePage can't see (the sidebar comes out
+  // see-through), so captures that may fall back to capturePage use the in-renderer snapshot blur.
+  if (process.env.README_SHOT_SIDEBAR) process.env.SURFFISH_SIDEBAR_BACKDROP = process.env.README_SHOT_SIDEBAR
+  else if (!macScreencaptureWorks) process.env.SURFFISH_SIDEBAR_BACKDROP = 'snapshot'
+  mkdirSync(outDir, { recursive: true })
   await new Promise((r) => fixture.listen(0, '127.0.0.1', r))
   fixtureOrigin = `http://127.0.0.1:${fixture.address().port}`
   mkdirSync(outDir, { recursive: true })
