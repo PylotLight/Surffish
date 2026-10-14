@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { cancelDeferredWrite, deferWrite } from './deferred-writes'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { writeFileAtomic } from './atomic-file'
 import { join } from 'node:path'
 import {
   normalizeHttpOrigin,
@@ -59,21 +59,15 @@ function readJson(filename: string): unknown {
 }
 
 function writeJson(filename: string, value: unknown): boolean {
-  const directory = app.getPath('userData')
-  const path = join(directory, filename)
+  const path = join(app.getPath('userData'), filename)
   const text = JSON.stringify(value)
   if (lastFileText.isUnchanged(path, text, existsSync)) return true
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
-    mkdirSync(directory, { recursive: true })
-    writeFileSync(temporaryPath, text, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
-    renameSync(temporaryPath, path)
+    writeFileAtomic(path, text)
     lastFileText.remember(path, text)
     return true
   } catch (error) {
     lastFileText.forget(path)
-    try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
     console.error(`Could not save ${filename}:`, error)
     return false
   }

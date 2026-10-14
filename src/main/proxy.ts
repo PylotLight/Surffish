@@ -30,7 +30,7 @@ import {
   type SiteRouteState
 } from '../shared/proxy-routing'
 import { getDomain } from 'tldts-experimental'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readUserJson, writeSettingsFile } from './user-json'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
@@ -281,7 +281,7 @@ export function onPermissionDenied(listener: PermissionDeniedListener): () => vo
 /** Called after app.whenReady and before any browser content is created. */
 export async function initializeBrowserProxy(): Promise<BrowserProxySettings> {
   currentSettings = readSettings()
-  currentRouting = parseProxyRouting(readSettingsFile(ROUTING_FILE))
+  currentRouting = parseProxyRouting(readUserJson(ROUTING_FILE))
   installWebRTCPolicyHook()
   applyWebRTCPolicyToAll(routingInput())
   await onPageSessionCreated((target, info) => {

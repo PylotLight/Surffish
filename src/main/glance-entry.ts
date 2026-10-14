@@ -1,7 +1,7 @@
 import { ipcMain, type BaseWindow, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { GLANCE_SETTINGS_FILE, isGlanceableUrl, parseGlanceSettings, type GlanceSettings } from '../shared/glance'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readUserJson, writeSettingsFile } from './user-json'
 
 /**
  * Glance entry point: everything main loads at startup for Glance. The sheet itself (views, header
@@ -66,7 +66,7 @@ let loadingModule: Promise<GlanceModule> | null = null
 const hoverListeners = new Set<(hover: GlanceLinkHover) => void>()
 
 function current(): GlanceSettings {
-  settings ??= parseGlanceSettings(readSettingsFile(GLANCE_SETTINGS_FILE))
+  settings ??= parseGlanceSettings(readUserJson(GLANCE_SETTINGS_FILE))
   return settings
 }
 

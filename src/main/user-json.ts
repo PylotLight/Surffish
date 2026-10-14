@@ -1,9 +1,9 @@
 import { app } from 'electron'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeFileAtomic } from './atomic-file'
 
-/** Small private JSON files in userData (command palette, search keywords). */
+/** Small private JSON files in userData (command palette, search keywords, feature settings, spellcheck, HTTPS-only, kill switch, Spaces, Glance…). */
 export function readUserJson(filename: string): unknown {
   const path = join(app.getPath('userData'), filename)
   if (!existsSync(path)) return null
@@ -15,20 +15,18 @@ export function readUserJson(filename: string): unknown {
   }
 }
 
-/** Atomic write (temp file + rename), owner-only permissions. */
-export function writeUserJson(filename: string, value: unknown): boolean {
-  const directory = app.getPath('userData')
-  const path = join(directory, filename)
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
+/** Atomic owner-only write; true when the file was saved. `pretty` keeps hand-editable settings files indented. */
+export function writeUserJson(filename: string, value: unknown, options: { pretty?: boolean } = {}): boolean {
   try {
-    mkdirSync(directory, { recursive: true })
-    writeFileSync(temporaryPath, JSON.stringify(value), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
-    renameSync(temporaryPath, path)
+    writeFileAtomic(join(app.getPath('userData'), filename), options.pretty ? `${JSON.stringify(value, null, 2)}\n` : JSON.stringify(value))
     return true
   } catch (error) {
-    try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
     console.error(`Could not save ${filename}:`, error)
     return false
   }
+}
+
+/** Same as writeUserJson, indented (these files predate the compact ones and stay byte-identical). */
+export function writeSettingsFile(filename: string, value: unknown): boolean {
+  return writeUserJson(filename, value, { pretty: true })
 }

@@ -15,7 +15,7 @@ import {
 } from '../shared/proxy-guard'
 import { activeProxyEndpoints, effectiveRouteForUrl, endpointKey, type ActiveProxyEndpoint, type ProxyRoutingInput } from '../shared/proxy-routing'
 import { addRequestGate, onRequestError } from './request-gate'
-import { readSettingsFile, writeSettingsFile } from './safety-store'
+import { readUserJson, writeSettingsFile } from './user-json'
 import { getAllRoutingInputs, getProxyRoutingInput, onProxyRoutingChanged, routingInputForSession } from './proxy'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { setUpdateNetworkGuard } from './updates'
@@ -199,7 +199,7 @@ function blocksUrl(url: string, input: ProxyRoutingInput = routing): boolean {
 }
 
 export function initializeProxyKillSwitch(): void {
-  const saved = readSettingsFile(FILE) as { killSwitch?: unknown } | null
+  const saved = readUserJson(FILE) as { killSwitch?: unknown } | null
   killSwitch = saved?.killSwitch === true
   routing = getProxyRoutingInput()
   syncEndpoints()

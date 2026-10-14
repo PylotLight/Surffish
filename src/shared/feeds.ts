@@ -11,6 +11,7 @@ import {
   httpUrlOrEmpty,
   releaseNotesToText
 } from './update-feed'
+import { displayHost } from './url-host'
 
 export const FEED_INTERVALS = [5, 15, 30, 60, 180, 360, 1440] as const
 export type FeedIntervalMinutes = (typeof FEED_INTERVALS)[number]
@@ -324,10 +325,6 @@ export function redactFeedAddress(input: string): string {
   }
 }
 
-export function feedHostLabel(url: string): string {
-  try { return new URL(url).hostname.replace(/^www\./, '') } catch { return url }
-}
-
 const GITHUB_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,99})$/
 
 /** "owner/repo", "github.com/owner/repo", or any github.com URL inside a repo. */
@@ -466,7 +463,7 @@ export interface FeedListItem extends StoredFeedItem {
 }
 
 export function feedDisplayTitle(feed: Pick<Feed, 'customTitle' | 'feedTitle' | 'url'>): string {
-  return feed.customTitle || feed.feedTitle || feedHostLabel(feed.url)
+  return feed.customTitle || feed.feedTitle || displayHost(feed.url)
 }
 
 export function effectiveIntervalMinutes(feed: Pick<Feed, 'intervalMinutes' | 'url'>, settings: FeedSettings): number {

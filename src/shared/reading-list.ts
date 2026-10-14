@@ -1,3 +1,5 @@
+import { displayHost } from './url-host'
+
 /**
  * Reading List: pages saved to look at later. Not bookmarks: an item is something to get through
  * (unread → read), it sits in one flat list newest first, and saving a page you already saved moves
@@ -150,13 +152,8 @@ export function countUnread(items: readonly Pick<ReadingListItem, 'readAt'>[]): 
   return count
 }
 
-export function readingListHost(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./i, '')
-  } catch {
-    return url
-  }
-}
+/** The site label for a saved link (hostname without "www."). */
+export const readingListHost = displayHost
 
 /** Unread or all, then a case-insensitive match on title, site, host, URL and excerpt (every word must match). */
 export function filterReadingList(items: readonly ReadingListItem[], filter: ReadingListFilter, query = ''): ReadingListItem[] {

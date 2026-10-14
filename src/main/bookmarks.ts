@@ -1,6 +1,5 @@
 import { app } from 'electron'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { deferWrite, cancelDeferredWrite } from './deferred-writes'
 import { sendToMainWindowRenderers } from './browser-shell'
@@ -36,6 +35,7 @@ import type { BookmarkNode, BookmarksSnapshot, PinnedSite } from '../shared/type
 import { getProfileDatabase, reportStoreWriteError } from './store'
 import { BookmarkTable } from './store/bookmark-store'
 import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
+import { writeUserJson } from './user-json'
 
 /**
  * The bookmark tree lives in surffish.db (`bookmarks`, see store/bookmark-store.ts) and in
@@ -77,23 +77,6 @@ function readJsonFile(filename: string): { exists: boolean; value: unknown; erro
   } catch (error) {
     console.warn(`Could not read ${filename}:`, error)
     return { exists: true, value: null, error: true }
-  }
-}
-
-function writeJsonFile(filename: string, value: unknown): boolean {
-  const directory = app.getPath('userData')
-  const path = join(directory, filename)
-  const temporaryPath = `${path}.${randomUUID()}.tmp`
-  try {
-    mkdirSync(directory, { recursive: true })
-    writeFileSync(temporaryPath, JSON.stringify(value), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    if (process.platform !== 'win32') chmodSync(temporaryPath, 0o600)
-    renameSync(temporaryPath, path)
-    return true
-  } catch (error) {
-    try { rmSync(temporaryPath, { force: true }) } catch { /* best-effort cleanup */ }
-    console.error(`Could not save ${filename}:`, error)
-    return false
   }
 }
 
@@ -140,12 +123,12 @@ function saveEdit(current: BookmarkStore): void {
   // The database just failed: bookmarks.json becomes the only copy, so bring it up to date now.
   settleDualWrite(getProfileDatabase(), BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), false, false)
   cancelDeferredWrite('bookmarks-json')
-  writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(current))
+  writeUserJson(BOOKMARKS_FILE, serializeBookmarkStore(current))
 }
 
 /** Write both copies, then record whether bookmarks.json matches the database. */
 function writeStore(current: BookmarkStore): void {
-  const jsonSaved = writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(current))
+  const jsonSaved = writeUserJson(BOOKMARKS_FILE, serializeBookmarkStore(current))
   const hadTable = sqlTable() !== null
   const databaseSaved = saveToDatabase(current)
   if (hadTable) settleDualWrite(getProfileDatabase(), BOOKMARKS_FILE, filePath(BOOKMARKS_FILE), databaseSaved, jsonSaved)
@@ -178,7 +161,7 @@ function loadStore(): BookmarkStore {
     }
   }
   store = migratePinnedSitesToBookmarks(legacyPinnedSites())
-  writeJsonFile(BOOKMARKS_FILE, serializeBookmarkStore(store))
+  writeUserJson(BOOKMARKS_FILE, serializeBookmarkStore(store))
   scheduleImport()
   return store
 }

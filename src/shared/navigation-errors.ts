@@ -1,3 +1,5 @@
+import { urlHostname } from './url-host'
+
 /**
  * Navigation results and friendly copy for Chromium net errors.
  *
@@ -117,15 +119,6 @@ export function isAbortedNavigation(error: unknown): boolean {
   return typeof error === 'string' && parseLoadError(error).name === 'ERR_ABORTED'
 }
 
-function hostOf(url: string): string {
-  try {
-    const host = new URL(url).hostname
-    return host || ''
-  } catch {
-    return ''
-  }
-}
-
 function kindFor(code: number | null, name: string | null): LoadErrorKind {
   const n = name ?? ''
   if (n === 'ERR_NAME_NOT_RESOLVED' || n === 'ERR_NAME_RESOLUTION_FAILED') return 'dns'
@@ -152,7 +145,7 @@ export function describeLoadError(input: { code?: number | null; name?: string |
   const parsed = parseLoadError(input.message)
   const code = input.code ?? parsed.code
   const name = input.name ?? parsed.name ?? (code !== null ? NAMES_BY_CODE[code] ?? null : null)
-  const host = hostOf(input.url ?? '')
+  const host = urlHostname(input.url)
   const site = host || 'the site'
   const viaProxy = input.viaProxy === true
   const kind = kindFor(code, name)
