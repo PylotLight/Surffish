@@ -40,6 +40,16 @@ test('deterministic metrics fail just past 5%', () => {
   expect(verdict(det, config, 1000, 900, 'linux')).toBe('better')
 })
 
+test('warnOnly metrics never fail, deterministic or noisy', () => {
+  expect(verdict({ ...det, warnOnly: true }, config, 1000, 2000, 'linux')).toBe('warn')
+  expect(verdict({ ...det, warnOnly: true }, config, 1000, 1050, 'linux')).toBe('ok')
+  expect(verdict({ ...det, warnOnly: true }, config, 1000, 500, 'linux')).toBe('better')
+  expect(verdict({ ...noisy, warnOnly: true }, config, 100, 200, 'linux')).toBe('warn')
+  for (const key of ['sites.renderers', 'sites.memMB', 'adblock.frameStartBytes', 'adblock.frameStartMainMs', 'adblock.frameUpdates', 'adblock.sameDocFrameStarts']) {
+    expect(config.metrics[key]?.warnOnly).toBe(true)
+  }
+})
+
 test('absolute slack ignores tiny changes from zero', () => {
   const idle: MetricSpec = { ...det, abs: 2 }
   expect(verdict(idle, config, 0, 2, 'linux')).toBe('ok')

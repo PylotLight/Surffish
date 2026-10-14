@@ -12,6 +12,8 @@ export interface MetricSpec {
   group?: string
   /** Per-platform override of the platform's noisyFail (e.g. a metric that only warns on linux). */
   platforms?: Record<string, { noisyFail?: boolean }>
+  /** Never fails, on any platform: a regression past failPct is reported as a warning (new metrics on probation). */
+  warnOnly?: boolean
 }
 export interface PerfConfig {
   defaults: Record<Kind, { abs?: number; warnPct?: number; failPct?: number }>
@@ -61,7 +63,7 @@ export function verdict(spec: MetricSpec, config: PerfConfig, base: number, head
   if (spec.kind === 'deterministic') {
     if (over(d.failPct)) return spec.warnOnly ? 'warn' : 'fail'
   } else {
-    if (noisyFail && over(d.failPct)) return 'fail'
+    if (noisyFail && !spec.warnOnly && over(d.failPct)) return 'fail'
     if (over(d.warnPct) || over(d.failPct)) return 'warn'
   }
   // Improvements beyond the same margins are worth calling out.

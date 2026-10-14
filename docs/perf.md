@@ -49,6 +49,8 @@ fixture site, then:
 | tab switch | activate → view attached → two frames painted in the tab (median of 12) |
 | new site tab first paint, New Tab page shown | create → first contentful paint (median of 5); blank tab → New Tab page painted (median of 3) |
 | processes / webContents left, memory growth after window cycles | open and close a second window 3 times; anything left behind is a leak |
+| renderers hosting 16 tabs over 4 sites, memory of those renderers | 16 tabs on `site0..3.localhost` (separate sites to Chromium): distinct processes hosting their pages and iframes, and those processes' memory. Same-site tabs share a renderer unless *Share processes between tabs of the same site* is off (`--process-per-site`; `SURFFISH_PROCESS_PER_SITE=0\|1` overrides) |
+| ad-filter CSS + scriptlets sent per navigation, frame-start main time, DOM-update IPC, injections on same-document navigations | 4 navigations to `video.localhost`, which the fixture engine gives site CSS, 300+ generic rules and 18 scriptlets sharing uBO-style helpers: size of the frame-start payloads, main-process time answering them, frame-update IPCs, then `pushState`/hash changes (must inject nothing) |
 
 The tab counts, idle window and cycle count are in `perf.config.json` → `bench` (trim `tabsMax`
 if the job gets too slow).
@@ -115,6 +117,10 @@ while a slower build is slower in every run, so the minimum still moves with a r
 the measured runs, each side gets one discarded start-up-only launch (`warmup` in the config,
 `PERF_WARMUP` or `--warmup N`): the first Electron launch on a fresh pod also builds the font and
 shader caches.
+
+Metrics marked `"warnOnly": true` never fail on any platform (a would-be failure shows as a warning).
+New metrics start that way until a few weeks of CI show how much they move on identical code:
+currently the mixed-sites and ad-filter cosmetics rows.
 
 Improvements past the same margins show as "better". Per-metric overrides go on the metric entry
 (`"failPct"`, `"warnPct"`, `"abs"`); per-platform behaviour under `platforms`.
