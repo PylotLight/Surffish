@@ -9,6 +9,8 @@ import { registerBookmarkIpc } from './bookmarks-ipc'
 import { registerWindowIpc } from './window-menu'
 import { initializeTabArchive, registerTabArchiveIpc } from './tab-archive'
 import { disposeMemorySaver, initializeMemorySaver, registerMemorySaverIpc } from './memory-saver'
+import { registerPreconnectIpc } from './preconnect'
+import { registerWakeSnapshotIpc } from './wake-snapshot'
 import { initializeBrowserProxy } from './proxy'
 import { initializeScreenSharing } from './screen-share'
 import { initializeSpacesStore } from './spaces-store'
@@ -95,6 +97,8 @@ app.whenReady().then(async () => {
   registerWindowIpc()
   registerTabArchiveIpc()
   registerMemorySaverIpc()
+  registerPreconnectIpc()
+  registerWakeSnapshotIpc()
   registerReaderIpc()
   registerPageWatcherIpc()
   registerFeedIpc()

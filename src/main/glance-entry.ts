@@ -151,7 +151,7 @@ export function getGlanceContentsIds(): { page: number[]; chrome: number[] } {
   return glanceModule?.glanceContentsIds() ?? { page: [], chrome: [] }
 }
 
-/** Subscribe to link hovers (tab pages and glances). For a later preconnect pass; nothing listens yet. */
+/** Subscribe to link hovers (tab pages and glances). preconnect.ts preconnects hovers inside a glance. */
 export function onGlanceLinkHover(listener: (hover: GlanceLinkHover) => void): () => void {
   hoverListeners.add(listener)
   return () => hoverListeners.delete(listener)

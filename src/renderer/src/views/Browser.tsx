@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { Debouncer, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
 import { addressDisplayValue } from '../../../shared/address-bar-sync'
 import { useAddressBarSync } from './useAddressBarSync'
 import { FAVOURITES_FOLDER_ID } from '../../../shared/bookmarks'
@@ -75,7 +76,7 @@ import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigat
 import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
   DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, BrambleQuickUnlockSettings, PrivacySettings,
-  MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
+  MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
 import { PageWatchersToggle, CertificateViewer, GlanceSettings } from './lazy-views'
@@ -999,6 +1000,28 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   useEffect(() => window.api.browser.onDismissPopovers(dismissPopovers), [])
 
   // Toolbar view sized to the toolbar + open popovers (useToolbarPopovers.ts).
+  // Speculative preconnect while typing (shared/preconnect.ts): ~150 ms after the last keystroke,
+  // main opens one socket to the top suggestion's (or the typed URL's / search engine's) origin.
+  const preconnectTypingRef = useRef<Debouncer<{ input: string; top: string | null }> | null>(null)
+  useEffect(() => {
+    if (surface === 'sidebar') return
+    const debouncer = new Debouncer<{ input: string; top: string | null }>(TYPING_DEBOUNCE_MS, ({ input, top }) => window.api.browser.preconnect.typed(input, top))
+    preconnectTypingRef.current = debouncer
+    return () => {
+      debouncer.cancel()
+      preconnectTypingRef.current = null
+    }
+  }, [surface])
+  const topSuggestionUrl = addressSuggestions[0]?.url ?? null
+  useEffect(() => {
+    const debouncer = preconnectTypingRef.current
+    if (!debouncer) return
+    if (!suggestionsActive || !typedInputQualifies(address) || address === addressDisplayValue(browser.url, isLocalNewTab)) {
+      debouncer.cancel()
+      return
+    }
+    debouncer.push({ input: address, top: topSuggestionUrl })
+  }, [suggestionsActive, address, topSuggestionUrl, browser.url, isLocalNewTab])
   useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
@@ -1866,6 +1889,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                   <MemorySaverSettings />
+                  <PreloadPagesSettings />
                   <SettingsRow label="Saved session" hint="Tabs restore on next launch. Tokens, codes and other credential-like URL parts are stripped before saving.">
                     <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear</button>
                   </SettingsRow>

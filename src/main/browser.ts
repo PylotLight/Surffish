@@ -37,6 +37,8 @@ import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focuse
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
+import { noteLinkHover } from './preconnect'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, forgetWakeSnapshotTab, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -162,6 +164,12 @@ const tabThumbnails = new Map<string, string>()
 // Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
 let newTabThumbnail: string | null = null
 const THUMBNAIL_WIDTH = 640
+/** When each tab last came on screen as the active tab (wake snapshots skip tabs only passed through). */
+const tabShownAt = new WeakMap<BrowserTab, number>()
+/** A tab must have been the active tab this long before leaving for its picture to be kept (wake-snapshot.ts). */
+const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500
+/** Preconnect cooldown key for the private session (its partition name is ''). */
+const PRIVATE_PRECONNECT_KEY = '(private)'
 const FAVICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
 const faviconFetches = new Map<string, Promise<string | null>>()
 
@@ -771,6 +779,8 @@ function activateTabInternal(id: string): boolean {
   if (!tab) return false
   const w = tab.win
   if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe()
+  // A wake snapshot belongs to the tab it was shown for; switching away takes it down at once.
+  endWakeSnapshot(w.window, id)
   // Opening a tab from another Space (palette, archive, extensions, a moved tab) shows that Space.
   const spaceChanged = tab.spaceId !== w.activeSpaceId
   if (spaceChanged) {
@@ -787,9 +797,11 @@ function activateTabInternal(id: string): boolean {
     hideLinkStatus(false, w.window)
     if (w.findState.open) closeFindBar(false, w)
   }
-  // Best effort: grab the outgoing tab while it is still on screen for the tab overview.
-  if (previous && previous.id !== id) void captureTabThumbnail(previous)
+  // Best effort: grab the outgoing tab while it is still on screen for the tab overview, and keep
+  // a larger copy to show if it is asleep the next time it is opened (wake-snapshot.ts).
+  if (previous && previous.id !== id) void captureTabThumbnail(previous, wasShownLongEnough(previous))
   w.activeTabId = id
+  if (previous?.id !== id) tabShownAt.set(tab, Date.now())
   w.recentTabIds = noteRecentTab(w.recentTabIds, id)
   // Everything that left the screen starts its sleep clock; everything on it (both panes of a split) wakes.
   const nowOnScreen = onScreenTabIds(w)
@@ -798,7 +810,10 @@ function activateTabInternal(id: string): boolean {
     if (gone && gone.win === w) markTabInactive(gone)
   }
   const shown = nowOnScreen.map((shownId) => findTab(shownId)).filter((candidate): candidate is BrowserTab => candidate?.win === w)
+  // Woken from sleep onto the screen alone (not in a split): its snapshot covers the reload.
+  const wakeUrl = shown.length === 1 && shown[0] === tab && !tab.view ? (tab.pendingUrl || tab.lastUrl) : null
   for (const pane of shown) {
+    if (pane.view === null && (pane !== tab || wakeUrl === null)) dropWakeSnapshot(pane.id)
     cancelSleepTimer(pane)
     pane.inactiveSince = null
     pane.pauseAutoplayUntilVisited = false
@@ -819,6 +834,11 @@ function activateTabInternal(id: string): boolean {
     recoverCrashedTabOnActivate(contents)
   }
   applyTabBounds(w)
+  if (wakeUrl && tab.view && !tab.pdfEditor && !readerViewFor(tab.view.webContents)) {
+    presentWakeSnapshot(w.window, tab.id, tab.view.webContents, pageBoundsOf(tab), wakeUrl)
+  } else if (wakeUrl) {
+    dropWakeSnapshot(tab.id)
+  }
   publishState(w)
   if (spaceChanged) publishSpaces(w)
   return true
@@ -1051,9 +1071,13 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     if (isCurrentContents() && !isActiveTab(tab) && isTabOnScreen(tab)) focusSplitPane(tab.id, false)
   })
   contents.on('update-target-url', (_event, url) => {
-    if (isTabOnScreen(tab) && isCurrentContents()) showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
-    // Hook for a later preconnect-on-hover pass (glance-entry.ts); a no-op with no listeners.
-    if (isCurrentContents()) emitGlanceLinkHover(contents, url)
+    if (!isCurrentContents()) return
+    // Link hovers for Glance's hook (glance-entry.ts); a no-op with no listeners.
+    emitGlanceLinkHover(contents, url)
+    if (!isTabOnScreen(tab)) return
+    showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
+    // Resting on a link for ~200 ms preconnects its origin in this tab's own session.
+    noteLinkHover(contents, url, () => networkContextForTab(tab))
   })
   contents.on('found-in-page', (_event, result) => {
     const { findState } = tab.win
@@ -1644,6 +1668,10 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
   else tabs.push(tab)
   if (shouldActivate) {
+    // The outgoing tab's picture, while it is still on screen (overview thumbnail + wake snapshot).
+    // A page still loading has nothing worth showing yet (and may not answer a capture for a while).
+    // Only for a page someone was looking at: opening tabs in a burst (restore, open all) pays nothing.
+    if (previous && previous.win === w && isActiveTab(previous) && previous.view && !previous.view.webContents.isLoading() && wasShownLongEnough(previous)) void captureTabThumbnail(previous, true)
     // The new tab replaces whatever was on screen (a split's panes go off screen together).
     const wasOnScreen = previous ? onScreenTabIds(w) : []
     if (tab.spaceId !== w.activeSpaceId) {
@@ -1653,6 +1681,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     }
     w.spaceActiveTabs.set(tab.spaceId, tab.id)
     w.activeTabId = tab.id
+    tabShownAt.set(tab, Date.now())
     w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
     for (const goneId of wasOnScreen) {
       const gone = findTab(goneId)
@@ -1872,6 +1901,7 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
       tabThumbnails.delete(tab.id)
+      forgetWakeSnapshotTab(tab.id)
       const view = tab.view
       tab.view = null
       if (view) {
@@ -2822,6 +2852,26 @@ export function setBrowserSearchEngine(engine: SearchEngineId): void {
   selectedSearchEngine = engine
 }
 
+/** The search engine the address bar uses right now. */
+export function getSelectedSearchEngine(): SearchEngineId {
+  return selectedSearchEngine
+}
+
+/**
+ * The active tab's network (its page session and partition), for speculative preconnects: the
+ * IPC sender's window, else the focused one. Null with no window or no active tab.
+ */
+export function getActiveTabNetworkContext(): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
+  const tab = activeTabOf(currentWindowState())
+  if (!tab || tab.pdfEditor || tab.extensionPageOrigin) return null
+  return { session: pageSessionForTab(tab), partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab), isPrivate: tab.isPrivate }
+}
+
+function networkContextForTab(tab: BrowserTab): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
+  if (tab.pdfEditor || tab.extensionPageOrigin) return null
+  return { session: pageSessionForTab(tab), partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab), isPrivate: tab.isPrivate }
+}
+
 export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | null {
   if (!isTabSleepMinutes(value)) return null
   tabSleepMinutes = value
@@ -2899,6 +2949,8 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (!allowLeavingPdfEditor(tab, 'Close Tab')) return
   if (tab.pdfEditor) tab.pdfEditor.dirty = false
   tabThumbnails.delete(id)
+  endWakeSnapshotForTab(id)
+  forgetWakeSnapshotTab(id)
   const wasActive = w.activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   if (wasActive) hideLinkStatus(false, w.window)
@@ -2943,6 +2995,7 @@ function hasOtherWindows(w: BrowserWindowState): boolean {
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
   privateSiteZoom.clear()
+  dropPrivateWakeSnapshots()
   forgetPrivateDownloads()
   forgetCertificateState(PRIVATE_PARTITION)
   void clearPrivateSession()
@@ -3376,6 +3429,12 @@ export function updateBrowserPageScale(contents: WebContents, input: unknown): v
   if (tab) tab.pageScale = input
 }
 
+function wasShownLongEnough(tab: BrowserTab): boolean {
+  const shownAt = tabShownAt.get(tab)
+  // Never stamped: the tab was on screen from start-up (restored session), so it counts as seen.
+  return shownAt === undefined || Date.now() - shownAt >= WAKE_SNAPSHOT_MIN_SHOWN_MS
+}
+
 function isLocalNewTab(tab: BrowserTab): boolean {
   return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
 }
@@ -3386,7 +3445,7 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
   return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
 }
 
-async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
+async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<void> {
   const { browserBounds } = tab.win
   if (!isActiveTab(tab) || browserBounds.width <= 0 || browserBounds.height <= 0) return
   if (isLocalNewTab(tab)) {
@@ -3400,9 +3459,14 @@ async function captureTabThumbnail(tab: BrowserTab): Promise<void> {
   const contents = tab.view?.webContents
   if (!contents || contents.isDestroyed()) return
   try {
-    const image = await contents.capturePage()
+    const pageArea = forWake && !tab.extensionPageOrigin && !tab.pdfEditor ? pageBoundsOf(tab) : null
+    const url = currentUrl(tab)
+    // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
+    // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
+    const image = await contents.capturePage(undefined, { stayHidden: true })
     if (image.isEmpty() || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabThumbnails.set(tab.id, thumbnailDataUrl(image))
+    if (pageArea && tab.view?.webContents === contents) rememberWakeSnapshot(tab.id, image, pageArea, url, tab.isPrivate)
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.
   }
@@ -3857,6 +3921,7 @@ function focusSplitPane(id: string | undefined, focusContents = true): boolean {
     hideLinkStatus(false, w.window)
     if (w.findState.open) closeFindBar(false, w)
     w.activeTabId = tab.id
+    tabShownAt.set(tab, Date.now())
     w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
     applyTabBounds(w)
     publishState(w)
