@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
+import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { stepZoomFactor } from '../shared/zoom'
@@ -87,6 +87,8 @@ interface BrowserTab {
   isPrivate: boolean
   /** The built-in viewer is showing a PDF (refreshed on frame loads so the toolbar can offer Edit PDF). */
   showingPdf: boolean
+  /** Opened by a page for a blob:/data: URL: closes again if all it did was start a download (as in Chrome). */
+  closeIfOnlyDownload?: boolean
   /** Set while the tab shows the PDF editor instead of the page; the view then runs on the editor session. */
   pdfEditor: PdfEditorTabState | null
   /** Back/forward list to restore instead of a plain load (a tab brought back from the archive). */
@@ -543,7 +545,8 @@ function persistOpenTabs(): void {
   if (windows.length === 0) return
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
   const saved = windows.map((w) => {
-    const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:'))
+    // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
+    const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
     const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
@@ -656,6 +659,8 @@ function cancelSleepTimer(tab: BrowserTab): void {
 /** `keepPausedMedia`: timed sleep leaves a paused media session (Now Playing / media keys) alone; Hibernate Tab doesn't. */
 function hibernateTab(tab: BrowserTab, keepPausedMedia = true): void {
   if (isTabOnScreen(tab) || !tab.view) return
+  // A blob: page can't be loaded again from main (it only resolves for the page that made it), so it stays awake.
+  if (pageMadeUrlKind(currentUrl(tab)) === 'blob') return
   const contents = tab.view.webContents
   if (!contents.isDestroyed() && (contents.isCurrentlyAudible() || (keepPausedMedia && tabHoldsMediaSession(contents)))) {
     cancelSleepTimer(tab)
@@ -949,13 +954,18 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
   return true
 }
 
-function createTabView(tab: BrowserTab): WebContentsView | null {
+/**
+ * `opened`: the contents Chromium already made for a page's window.open / target=_blank (see
+ * openPageMadeTab). It keeps the opener's process, session and window.opener, which a blob: URL
+ * needs to resolve; its webPreferences are the opener's, so ours below are not applied.
+ */
+function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebContents; webPreferences?: Electron.WebPreferences }): WebContentsView | null {
   if (!isLiveWindow(tab.win)) return null
   if (tab.pdfEditor) return createPdfEditorView(tab)
   const needsBrowserViewPreload = process.platform === 'darwin' || tab.pauseAutoplayUntilVisited
   const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
   const preload = tab.extensionPreloadPath ?? browserViewPreload
-  const view = new WebContentsView({
+  const view = opened ? new WebContentsView({ webContents: opened.webContents, ...(opened.webPreferences ? { webPreferences: opened.webPreferences } : {}) }) : new WebContentsView({
     webPreferences: {
       ...(preload ? { preload } : {}),
       nodeIntegration: false,
@@ -1054,6 +1064,18 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
       openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
       return { action: 'deny' }
     }
+    // blob:/data: links and window.open(blobUrl): let Chromium make the new contents (same process,
+    // session and opener, or the blob won't resolve) and adopt it as a tab. Same popup rules as http(s).
+    if (!tab.extensionPageOrigin && pageMadeUrlKind(details.url) && isLiveWindow(tab.win)) {
+      const inTab = details.disposition === 'background-tab' || details.disposition === 'foreground-tab' || getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs
+      if (!inTab) return { action: 'deny' }
+      const activate = details.disposition !== 'background-tab'
+      return {
+        action: 'allow',
+        outlivesOpener: true,
+        createWindow: (options) => openPageMadeTab(tab, details.url, activate, options)
+      }
+    }
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
       if (tab.extensionPageOwner === 'web-store') {
@@ -1081,6 +1103,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('will-navigate', (event, url) => {
     if (isExtensionPage(tab, url)) return
+    // A page's own blob:/data: link. Chromium still blocks top-level data: documents (downloads pass).
+    if (!tab.extensionPageOrigin && pageMadeUrlKind(url)) return
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
     if (!tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
   })
@@ -1146,6 +1170,8 @@ function createTabView(tab: BrowserTab): WebContentsView | null {
   })
   contents.on('did-navigate', (_event, url) => {
     if (!isCurrentContents()) return
+    // Something committed: no longer a tab that only exists for a download.
+    tab.closeIfOnlyDownload = false
     applySavedZoom(tab, url)
     const { findState } = tab.win
     if (findState.open && findState.tabId === tab.id) {
@@ -1227,6 +1253,33 @@ function removeDestroyedTab(tab: BrowserTab): void {
     else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w)
   }
   publishState(w)
+}
+
+/**
+ * A page opened a blob:/data: URL in a new tab. `options.webContents` is the contents Chromium
+ * already created for it (Electron's createWindow contract: return exactly that one); it navigates
+ * itself, so the tab never loads anything from main.
+ */
+function openPageMadeTab(opener: BrowserTab, url: string, activate: boolean, options: Electron.BrowserWindowConstructorOptions): Electron.WebContents {
+  const opened = (options as { webContents?: Electron.WebContents }).webContents
+  const id = createTab(undefined, selectedSearchEngine, activate, true, false, false, undefined, undefined, opener.isPrivate, false, opener.win, opener.spaceId)
+  const tab = id ? findTab(id) : undefined
+  if (!tab || !opened) {
+    // Can't happen while the opener's window is live (checked before allowing); hand back a dead end.
+    if (tab) closeBrowserTab(tab.id, false)
+    return opened ?? new WebContentsView().webContents
+  }
+  tab.lastUrl = url
+  tab.pendingUrl = ''
+  tab.faviconUrl = null
+  tab.closeIfOnlyDownload = true
+  const view = createTabView(tab, { webContents: opened, webPreferences: options.webPreferences })
+  if (view && isActiveTab(tab)) tab.inactiveSince = null
+  applyTabBounds(tab.win)
+  if (isActiveTab(tab)) view?.webContents.focus()
+  else scheduleTabSleep(tab)
+  publishState(tab.win)
+  return opened
 }
 
 /**
@@ -1943,6 +1996,20 @@ export function markBrowserDownloadStarted(webContentsId: number): void {
   const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
   if (!tab) return
   tab.downloadStartedForCurrentLoad = true
+  // A page's target=_blank blob:/data: link that turned out to be a download: drop the empty tab
+  // (nothing ever committed in it) and go back to the page, like Chrome.
+  const contents = tab.view?.webContents
+  if (tab.closeIfOnlyDownload && contents && !contents.isDestroyed() && contents.navigationHistory.length() <= 1) {
+    tab.closeIfOnlyDownload = false
+    const w = tab.win
+    const back = w.activeTabId === tab.id ? w.recentTabIds.find((recent) => recent !== tab.id && findTab(recent)?.win === w) : undefined
+    setImmediate(() => {
+      if (!findTab(tab.id)) return
+      closeBrowserTab(tab.id, false)
+      if (back && findTab(back)) activateTabInternal(back)
+    })
+    return
+  }
   if (tab.error !== null) {
     tab.error = null
     publishState(tab.win)

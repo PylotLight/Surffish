@@ -84,3 +84,23 @@ export function resolveNavigationTarget(input: string, engineId: SearchEngineId 
     return searchFor(value, engineId)
   }
 }
+
+export type PageMadeUrlKind = 'blob' | 'data'
+
+/**
+ * blob: (URL.createObjectURL) and data: URLs a page opens itself: a link click, target=_blank or
+ * window.open. Never from the address bar (resolveNavigationTarget still refuses them there).
+ * Chromium keeps its own rules on top: a blob only resolves in the storage partition (and opener)
+ * that made it, and page-initiated top-level data: documents are blocked unless they download.
+ * Only blobs minted by a web or local-file page count; opaque-origin blobs (blob:null/...) don't.
+ */
+export function pageMadeUrlKind(input: string): PageMadeUrlKind | null {
+  if (/^data:/i.test(input)) return 'data'
+  if (!/^blob:/i.test(input)) return null
+  try {
+    const inner = new URL(input.slice('blob:'.length))
+    return inner.protocol === 'https:' || inner.protocol === 'http:' || inner.protocol === 'file:' ? 'blob' : null
+  } catch {
+    return null
+  }
+}

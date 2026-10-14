@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isBrowserTabSleeping, isYouTubeUrl, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
+import { isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 
 test('keeps explicit HTTP and HTTPS URLs as URLs', () => {
   assert.equal(resolveNavigationTarget('https://example.org/path'), 'https://example.org/path')
@@ -49,4 +49,22 @@ test('recognizes YouTube destinations without matching lookalike hosts or scheme
   assert.equal(isYouTubeUrl('https://notyoutube.com/watch?v=abc'), false)
   assert.equal(isYouTubeUrl('javascript:https://youtube.com/'), false)
   assert.equal(isYouTubeUrl('not a URL'), false)
+})
+
+test('recognizes page-made blob: and data: URLs only', () => {
+  assert.equal(pageMadeUrlKind('blob:https://example.com/0f8a6c1e-1111-4222-8333-444455556666'), 'blob')
+  assert.equal(pageMadeUrlKind('blob:http://127.0.0.1:8080/abc'), 'blob')
+  assert.equal(pageMadeUrlKind('blob:file:///abc'), 'blob')
+  assert.equal(pageMadeUrlKind('data:application/pdf;base64,JVBERi0='), 'data')
+  assert.equal(pageMadeUrlKind('DATA:text/plain,hi'), 'data')
+  assert.equal(pageMadeUrlKind('blob:null/abc'), null)
+  assert.equal(pageMadeUrlKind('blob:chrome-extension://abc/def'), null)
+  assert.equal(pageMadeUrlKind('blob:'), null)
+  assert.equal(pageMadeUrlKind('https://example.com/blob:x'), null)
+  assert.equal(pageMadeUrlKind('javascript:alert(1)'), null)
+})
+
+test('the address bar never opens blob: or data: URLs', () => {
+  assert.match(resolveNavigationTarget('blob:https://example.com/abc') ?? '', /^https:\/\/search\.brave\.com\//)
+  assert.equal(resolveNavigationTarget('data:text/html,<h1>hi</h1>'), null)
 })
