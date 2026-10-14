@@ -14,13 +14,23 @@ bun run release --dry-run  # build + verify only, publishes nothing (still check
 ```
 
 It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
-1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can edit and push it.
+1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can rewrite it to the [release notes rules](#release-notes) and push it.
 2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
 3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `unzip -tq`, then the SHA-256.
 4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
 5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip (REST calls via `curl --proxy "$SURFFISH_GH_PROXY"` with `SURFFISH_GH_TOKEN`/`GITHUB_TOKEN` when `SURFFISH_GH_PROXY` is set, which the release workflow uses on the Mac runner; otherwise through your fish `ghp` function, or plain gh with `SURFFISH_GH=gh`), and renders, commits and pushes `Casks/surffish.rb`.
 
 The manual steps below are what it automates.
+
+## Release notes
+
+`docs/releases/vX.Y.Z.md` is published verbatim as the GitHub release body. Start from [docs/releases/TEMPLATE.md](releases/TEMPLATE.md); [docs/releases/v0.1.5.md](releases/v0.1.5.md) is the reference example. The draft `bun run release` writes from commit subjects is only raw material and needs rewriting to these rules:
+
+- **Voice**: neutral, public-facing, third person ("Surffish now…", "Toolbar popovers close on…"). No first person, and never address the maintainer or reader casually ("you", "your", "we"). No asides, jokes or internal shorthand.
+- **Intro**: a one-line summary of the headline changes under the `# Surffish vX.Y.Z` title.
+- **Sections**, in this order, omitting any that are empty: New, Fixed, Data and storage, Performance, CI, Packaging.
+- **Order**: user-facing changes first; internal, test and CI changes terse and at the bottom.
+- **Bullets**: bold the feature name in New (`**Feeds**: …`), name menu paths in bold (Settings → **General**), quote extension and product names ("I still don't care about cookies"), and end each bullet with its PR numbers in parentheses (#120) or (#119, #122).
 
 ## Builds: ARM64 zip only
 
