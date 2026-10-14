@@ -86,7 +86,18 @@
       "out/**/*",
       "package.json",
       "!**/node_modules/**/*.map",
-      "!**/node_modules/**/*.umd.min.js"
+      "!**/node_modules/**/*.umd.min.js",
+      "!**/node_modules/**/*.ts",
+      "!**/node_modules/**/*.d.cts",
+      "!**/node_modules/**/*.d.mts",
+      "!**/node_modules/**/*.tsbuildinfo",
+      "!**/node_modules/**/*.md",
+      "!**/node_modules/@ghostery/*/dist/commonjs/**",
+      "!**/node_modules/@remusao/*/dist/commonjs/**",
+      "!**/node_modules/tldts-experimental/dist/es6/**",
+      "!**/node_modules/tldts-experimental/dist/index.*.min.js",
+      "!**/node_modules/tldts-experimental/dist/cjs/src/**",
+      "!**/node_modules/tldts-core/dist/**"
     ],
     "asarUnpack": [
       "out/native/**/*.node",
