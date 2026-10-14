@@ -54,6 +54,8 @@ interface ShellState {
   dismissOnSidebarPress: (event: Electron.Event, mouseEvent: { type: string }) => void
   /** Last active tab main published for this window (a change closes the History panel, in order). */
   lastActiveTabId: string | null
+  /** When `lastActiveTabId` became the active tab (epoch ms), published as `BrowserState.activeTabSince`. */
+  activeTabSince: number
   /** Releases hover/focus/drag holds the renderer missed (sidebar-reveal-guard.ts). Null until attached. */
   revealGuard: SidebarRevealGuard | null
   /** What the next layout is for, for the sidebar lock debug log. */
@@ -231,6 +233,7 @@ export function attachBrowserShell(
     sidebarFrame: null,
     sidebarOverlayShown: false,
     lastActiveTabId: null,
+    activeTabSince: 0,
     revealGuard: null,
     layoutCause: null,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
@@ -373,9 +376,18 @@ export function noteActiveTabForHistoryPanel(activeTabId: string | null | undefi
   if (!shell || !activeTabId) return
   const previous = shell.lastActiveTabId
   shell.lastActiveTabId = activeTabId
+  if (previous !== activeTabId) shell.activeTabSince = Date.now()
   const mode = shell.chromeState.sidebarMode
   const next = sidebarModeAfterTabSwitch(mode, previous, activeTabId)
   if (next !== mode) setBrowserChromeState({ sidebarMode: next }, shell.window)
+}
+
+/**
+ * When the window's active tab became active (epoch ms; 0 before the first one), stamped in order
+ * with whatever main sends next (a Reading List / bookmark popover it opens right after a switch).
+ */
+export function activeTabSinceFor(window?: BaseWindow | null): number {
+  return shellFor(window)?.activeTabSince ?? 0
 }
 
 /** Track mouse input delivered to the full-width live page without placing a hit-test view above it. */

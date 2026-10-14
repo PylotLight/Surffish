@@ -27,6 +27,40 @@ export function normalizeDismissReason(value: unknown): PopoverDismissReason {
 }
 
 /**
+ * A dismiss request inside a renderer (the `POPOVER_DISMISS_EVENT` detail). `since` only comes with
+ * `tab-switch`: when main made the new tab active (`BrowserState.activeTabSince`).
+ */
+export interface PopoverDismissRequest {
+  reason: PopoverDismissReason
+  since?: number
+}
+
+/** A dismiss event's detail: a bare reason (older callers, main's IPC) or a `PopoverDismissRequest`. */
+export function readDismissRequest(detail: unknown): PopoverDismissRequest {
+  if (typeof detail === 'object' && detail !== null) {
+    const candidate = detail as { reason?: unknown; since?: unknown }
+    const reason = normalizeDismissReason(candidate.reason)
+    return typeof candidate.since === 'number' && Number.isFinite(candidate.since) && candidate.since > 0 ? { reason, since: candidate.since } : { reason }
+  }
+  return { reason: normalizeDismissReason(detail) }
+}
+
+/**
+ * Does a tab switch close a popover that opened at `openedAt` (epoch ms, `Date.now()` in the
+ * renderer)? Only one that was already open when main switched the tab (`switchedAt`, epoch ms in
+ * main; same machine, same clock). The renderer hears of the switch from the tab broadcast, which
+ * main coalesces to one per frame, so it can land after a popover main opened right after the
+ * switch (close a tab, then Open Reading List or ⌘D): that popover belongs to the new tab and stays.
+ * No stamp (unknown switch time) closes, as before. Same millisecond counts as "opened after": an
+ * IPC hop plus a React commit can't fit before it, while a press made in the same millisecond as
+ * the switch could only be a script.
+ */
+export function tabSwitchClosesPopover(openedAt: number, switchedAt: number | undefined): boolean {
+  if (typeof switchedAt !== 'number' || !Number.isFinite(switchedAt) || switchedAt <= 0) return true
+  return openedAt < switchedAt
+}
+
+/**
  * What kind of thing is being dismissed:
  * - `popover`: hangs below the toolbar inside the toolbar view; closes on every reason.
  * - `panel`: the History panel, drawn in the sidebar view; a press on the sidebar is a press

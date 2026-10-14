@@ -995,7 +995,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
   useHistoryPanelDismiss(sidebarMode === 'history' && surface === 'toolbar', historyButtonRef, closeHistoryPanel)
   useHistoryPanelDismiss(sidebarMode === 'history' && surface === 'sidebar', sidebarRef, closeHistoryPanel)
-  useDismissOnTabSwitch(surface === 'sidebar' ? '' : activeTabId)
+  useDismissOnTabSwitch(surface === 'sidebar' ? '' : activeTabId, browser.activeTabSince)
 
   useEffect(() => () => {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)

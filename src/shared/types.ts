@@ -118,6 +118,13 @@ export interface BrowserState {
   interstitial: BrowserTabInterstitial | null
   /** Details for `error` when it is a page-load failure (friendly copy, Retry, in-page error). */
   loadError: BrowserLoadError | null
+  /**
+   * When main made the current tab the active one (epoch ms, `Date.now()` in main). A renderer
+   * learns of a tab switch from the per-frame coalesced tab broadcast, which can land after a
+   * popover main opened *after* the switch; this stamp lets that late switch skip such a popover
+   * (shared/popover-dismiss.ts `tabSwitchClosesPopover`).
+   */
+  activeTabSince?: number
 }
 
 export type BrowserTabInterstitial =
