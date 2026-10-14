@@ -1,33 +1,223 @@
+<div align="center">
+
+<img src="src/resources/icons/surffish-256.png" width="96" alt="Surffish icon">
+
 # Surffish
 
-![Surffish New Tab with pinned favorites beside the open glass sidebar](docs/screenshots/surffish-cover-new-tab.png)
+**A calmer desktop browser for macOS.**
 
-**A calmer desktop browser.** Surffish brings your tabs, favorite sites, and everyday browsing tools together in one focused workspace.
+Tabs in a glass sidebar, uBlock Origin's filter lists built in, and a SOCKS5 switch for when you're on someone else's network.
 
-## Browse your way
+[![Latest release](https://img.shields.io/github/v/release/PylotLight/Surffish?style=flat-square&label=release)](https://github.com/PylotLight/Surffish/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20silicon-111?style=flat-square&logo=apple)](#install)
+[![License: MIT](https://img.shields.io/github/license/PylotLight/Surffish?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/PylotLight/Surffish/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/PylotLight/Surffish/actions/workflows/ci.yml)
+[![Electron 44](https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![Bun](https://img.shields.io/badge/built%20with-Bun-000?style=flat-square&logo=bun)](https://bun.sh/)
 
-- **A sidebar that fits:** keep tabs and favorites close, reveal the sidebar from the edge, or pin it open. Drag its edge to choose a width that feels right.
-- **A fresh New Tab:** enjoy nature photography, local time, and quick links to your favorite and frequently visited sites.
-- **Glance:** Shift+click a link to peek at it in a sheet over the page; Esc closes it, ⌘/Ctrl+Enter keeps it as a tab.
-- **Everyday tools built in:** search suggestions, browsing history, downloads, ad and tracker blocking, Picture in Picture, and optional SOCKS5 proxy support.
+[![Download for macOS](https://img.shields.io/badge/Download-macOS%20(Apple%20silicon)-0A84FF?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/PylotLight/Surffish/releases/latest)
+[![Install with Homebrew](https://img.shields.io/badge/Install-Homebrew-FBB040?style=for-the-badge&logo=homebrew&logoColor=black)](#install)
 
-Your favorites, history, and preferences are stored locally. Address suggestions are based on your own tabs, favorites, and history—not a remote suggestion service. Surffish is an actively developing browser; its privacy and proxy features are not an audited anonymity service.
+[Quick start](#quick-start) · [Features](#what-it-does) · [Screenshots](#screenshots) · [Install](#install) · [Privacy](#privacy) · [FAQ](#faq) · [Development](#development)
 
-## Install on macOS
+<br>
 
-Surffish ships as an Apple silicon zip on [GitHub Releases](https://github.com/PylotLight/Surffish/releases), and this repository doubles as its Homebrew tap:
+<img src="docs/assets/hero.webp" alt="Surffish showing a Wikipedia article with the glass tab sidebar open on the left" width="100%">
+
+<sub>Wikipedia in Surffish, with the tab sidebar pinned open.</sub>
+
+</div>
+
+<br>
+
+Surffish is a Chromium browser (via Electron) built around one window and a sidebar. Tabs, pinned sites and tab groups live in a glass card on the left that slides in from the edge, or stays put if you pin it.
+
+The things you'd normally add with extensions are already there: ad and tracker blocking from uBlock Origin's own lists, reader view, split view, a command palette, link previews, screenshots, a reading list, RSS feeds and page watchers. Chrome Web Store extensions still install when you want one.
+
+It's also a quick way to browse through an SSH tunnel. Point it at a local SOCKS5 port, route only the sites you choose, and turn on a kill switch so nothing slips out direct if the tunnel drops.
+
+## Quick start
 
 ```bash
 brew tap pylotlight/surffish https://github.com/PylotLight/Surffish.git
 brew install --cask surffish
 ```
 
-Surffish is an unsigned, non-notarized app. If macOS blocks a downloaded copy with a “damaged” warning, first make sure it came from the official [Surffish releases](https://github.com/PylotLight/Surffish/releases) and that you trust it. Then remove the quarantine attribute and open the app again:
+Or grab `Surffish-<version>-mac-arm64.zip` from the [latest release](https://github.com/PylotLight/Surffish/releases/latest), unzip it and drag **Surffish.app** to Applications.
+
+Surffish isn't signed or notarized yet, so the first launch needs one extra step. See [macOS says the app is damaged](#faq).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/new-tab.webp" alt="New Tab page with a landscape photo, clock and favourite sites"><br><b>New Tab.</b> A rotating nature photo, the time, and your pinned and most visited sites.</td>
+    <td width="50%"><img src="docs/assets/command-palette.webp" alt="Command palette open with the query split"><br><b>Command palette (⌘K).</b> Every command, open tab and search engine in one box.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/split-view.webp" alt="Two pages side by side in split view"><br><b>Split view (⇧⌘=).</b> Two tabs side by side with a draggable divider.</td>
+    <td><img src="docs/assets/glance.webp" alt="A link preview sheet floating over Hacker News"><br><b>Glance.</b> Shift-click a link to peek at it in a sheet. Esc closes it, ⌘↩ keeps it as a tab.</td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/reader.webp" alt="Reader view of a Wikipedia article"><br><b>Reader view (⌥⌘R).</b> Just the article, with your own type size and theme.</td>
+    <td><img src="docs/assets/history-menu.webp" alt="Back button history menu listing recent pages"><br><b>Back/Forward history.</b> Hold or right-click Back or Forward to jump several pages at once.</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/assets/settings-proxy.webp" alt="Settings showing the SOCKS5 proxy, local network and kill switch options, and network rules"><br><b>SOCKS5 and network rules.</b> One local proxy for everything, extra proxies or Direct for specific sites, LAN addresses direct, and a kill switch.</td>
+  </tr>
+</table>
+
+## What it does
+
+| Feature | What you get | Shortcut / where |
+|---|---|---|
+| **Sidebar tabs** | Vertical tabs in a glass card that reveals from the window edge. Pin it open and drag its edge to resize. | Pin button at the bottom of the sidebar |
+| **Tab groups** | Named, coloured groups. Cmd-click or Shift-click tabs to select several, then group, pin, move or close them together. | Select tabs, then ⌘G |
+| **Tab overview & search** | A grid of every open tab, plus a palette that only searches tabs. | ⇧⌘\\ · ⇧⌘A |
+| **Command palette** | Commands, open tabs and search keywords (`yt lofi`, or a bang anywhere: `lofi !yt`) in one place. | ⌘K |
+| **Split view** | Two tabs side by side. Swap panes, pop one out, or move focus between them. | ⇧⌘= · ⌥⌘← / ⌥⌘→ |
+| **Glance** | Shift-click a link to open it in a floating sheet over the current tab. Keep it as a real tab without reloading. | Shift-click · ⌘↩ to keep |
+| **Ad and tracker blocking** | uBlock Origin's default lists plus EasyList, EasyPrivacy, Peter Lowe's list and URLhaus, with cosmetic and scriptlet rules. Turn it off per site. | On by default · per site in Settings → This site |
+| **SOCKS5 proxy** | Route all traffic through a local SOCKS5 port (an `ssh -D` tunnel, for example). LAN addresses go direct by default. | Settings → General |
+| **Per-site routing & kill switch** | Send specific sites through other proxies or Direct. The kill switch blocks proxied traffic if the proxy stops answering. | Settings → General → Network rules · This site |
+| **Private tabs & windows** | An in-memory session that never writes history or the saved session. | ⌥⌘N tab · ⇧⌘N window |
+| **Reader view** | The article on its own, with font, size and theme controls. | ⌥⌘R |
+| **Reading list** | Save pages for later, separate from bookmarks, with an unread count. | ⇧⌘L |
+| **Bookmarks** | Bookmark manager, optional bookmarks bar, and import from Chrome, Brave, Edge, Arc, Firefox, Safari or an HTML export. | ⌘D · ⌥⌘B manager · ⇧⌘B bar |
+| **History** | Local history with search, plus a Back/Forward menu for jumping several pages. | ⌘Y · hold or right-click Back/Forward |
+| **Chrome Web Store extensions** | Paste a store link, or click **Add to Surffish** on the store page. Extensions with an action get a toolbar button. | Settings → Integrations → Extensions |
+| **Bramble password manager** | Built-in integration with the Bramble extension, with a Surffish PIN (and Touch ID) quick unlock so you don't retype the master password. | Settings → Integrations |
+| **Screenshots** | Region, visible area, full page, or a scrolling capture you stop where you like. Copy, save or annotate. | ⇧⌘S |
+| **Downloads** | Pause, resume, open and reveal downloads from a toolbar popover. | ⇧⌘J |
+| **PDF viewer & editor** | Built-in viewer. Edit mode fills forms, annotates, and rotates, reorders or deletes pages, then saves a copy. | ⇧⌘E · ⌘S to save |
+| **Feeds** | RSS, Atom and JSON Feed reader, page feed discovery, and presets for a GitHub repo's releases, commits, tags or Actions runs. | Settings → Integrations → Feeds |
+| **Page watchers** | Watch part of a page and get told when it changes. Can be switched off entirely. | Settings → Watchers |
+| **Spaces** | Separate sets of tabs, each with its own cookies and proxy. Off by default. | Settings → General → Enable Spaces · ⌃1–⌃9 |
+| **Tab sleep & auto-archive** | Background tabs sleep after a while and old ones archive themselves (restorable). Tabs playing or paused on media are left alone. | Settings → General |
+| **Task manager** | CPU and memory per tab and process, and a way to kill a stuck one. | ⇧Esc |
+| **Network inspector** | Opt-in request log for every tab, with HAR export and request mocks. Off by default. | Settings → General → Developer |
+| **Updates** | Checks the GitHub releases feed and tells you when a new version is out. | Surffish menu → Check for Updates… |
+| **The usual** | Find in page, per-site zoom, HTTPS-only mode, copy clean link (tracking parameters stripped), Picture in Picture, default browser, reopen closed tab. | ⌘F · ⌘= / ⌘- · ⌥⇧⌘C · ⇧⌘T |
+
+Shortcuts are the macOS ones. Running from source on Linux, ⌘ is Ctrl (History is Ctrl+H, Downloads Ctrl+J).
+
+## Install
+
+Surffish ships as an Apple silicon zip on [GitHub Releases](https://github.com/PylotLight/Surffish/releases), and this repo is its own Homebrew tap. It needs macOS 13 Ventura or newer on an M-series Mac.
+
+**Homebrew** (recommended, updates with `brew upgrade`):
+
+```bash
+brew tap pylotlight/surffish https://github.com/PylotLight/Surffish.git
+brew install --cask surffish
+```
+
+**Manual:** download `Surffish-<version>-mac-arm64.zip` from the [latest release](https://github.com/PylotLight/Surffish/releases/latest), unzip, and move **Surffish.app** to `/Applications`.
+
+There are no Intel Mac, Windows or Linux builds. The app runs from source on Linux for development and CI.
+
+## Privacy
+
+- **Your data stays on your Mac.** History, the open-tabs session, bookmarks, the reading list and preferences live in one SQLite database (`surffish.db`) in your profile folder. There's no account and no sync service.
+- **Address bar suggestions are local.** They come from your own tabs, bookmarks and history, not from a remote suggestion service. Typed searches go to the search engine you pick.
+- **Network calls Surffish makes on its own:** filter list updates (from uBlock Origin's asset server and the list publishers, at startup when stale and then every 8 hours), New Tab photos, the GitHub releases feed for update checks, and any feeds or page watchers you add. Preloading (on by default, Settings → General → Tabs) opens a connection to a site while you type its address or hover a link to it, never in private tabs.
+- **The proxy is a tunnel, not anonymity.** SOCKS5 support routes traffic through an endpoint you control. It's not an audited anonymity tool. WebRTC is kept from leaking your real IP while the proxy is on.
+
+## FAQ
+
+<details>
+<summary><b>macOS says Surffish "is damaged and can't be opened"</b></summary>
+
+<br>
+
+Surffish is unsigned and not notarized, so Gatekeeper blocks a downloaded copy. First make sure it came from the [official releases](https://github.com/PylotLight/Surffish/releases). Then clear the quarantine flag and open it again:
 
 ```bash
 xattr -cr /Applications/Surffish.app
 ```
 
-You can also Control-click the app and choose **Open** on first launch. Clearing quarantine bypasses that Gatekeeper download check; do it only for a copy you trust. Homebrew no longer provides a `--no-quarantine` install option.
+You can also Control-click the app and choose **Open** on first launch. Clearing quarantine skips Gatekeeper's download check, so only do it for a copy you trust. Homebrew no longer has a `--no-quarantine` option, so the same step applies to Cask installs.
 
-For development setup, architecture, and technical notes, see the [developer documentation](docs/development.md). Release and packaging notes are in [docs/releasing.md](docs/releasing.md).
+</details>
+
+<details>
+<summary><b>How do I browse through an SSH tunnel?</b></summary>
+
+<br>
+
+Surffish doesn't start SSH for you. Open a dynamic forward in a terminal and leave it running:
+
+```bash
+ssh -N -D 127.0.0.1:1080 user@your-ssh-host
+```
+
+Then go to **Settings → General → SOCKS5 proxy**, check the host and port (`127.0.0.1` and `1080` by default), and turn the switch on. **Test port** only checks that something is listening on that port. It doesn't test the SSH connection behind it.
+
+To send only some sites through the tunnel, leave the main switch off and add **Network rules** instead, or open the **This site** panel on a page and pick a route. Turn on **Kill switch** if a proxied site should fail closed when the tunnel drops.
+
+</details>
+
+<details>
+<summary><b>Do Chrome extensions work?</b></summary>
+
+<br>
+
+Many do. Install from **Settings → Integrations → Extensions** by pasting a Chrome Web Store link or ID, or click **Add to Surffish** on the store page. Surffish shims the APIs Electron is missing (tab events, `declarativeNetRequest` rules, `webNavigation` and so on), and lists anything only partly supported. Extensions that rely on Chrome-only APIs, or on Chrome's sign-in, may not work.
+
+</details>
+
+<details>
+<summary><b>Where is my data stored?</b></summary>
+
+<br>
+
+In `~/Library/Application Support/Surffish`. The main file is `surffish.db` (SQLite, with `-wal`/`-shm` next to it), with small JSON files for some settings. Delete the folder to reset Surffish completely. Dev builds use a separate `Surffish Dev` folder, so they can run alongside the installed app.
+
+</details>
+
+<details>
+<summary><b>Why Electron and not a "real" browser fork?</b></summary>
+
+<br>
+
+Electron gives a current Chromium engine with a small, readable codebase on top, so features land quickly and the whole app stays hackable in TypeScript. The trade-off is that a few Chrome features (Chrome sync, some extension APIs) aren't available. A native WebKit build was prototyped and is kept as an experiment in `src/native/macos`.
+
+</details>
+
+## Documentation
+
+- [Development](docs/development.md): setup, scripts, smoke tests, Electron gotchas
+- [Architecture](docs/architecture.md): main process, renderer surfaces, how the window is put together
+- [Profile storage](docs/storage.md): the `surffish.db` schema and JSON fallbacks
+- [Bramble quick unlock](docs/bramble-quick-unlock.md): how the PIN and Touch ID unlock works
+- [Performance checks](docs/perf.md): what the per-PR perf job measures
+- [Troubleshooting](docs/troubleshooting.md)
+- [Releasing](docs/releasing.md) and [release notes](docs/releases/)
+- [Third-party assets](docs/third-party-assets.md)
+
+## Development
+
+You need [Bun](https://bun.sh/) (version pinned in `.bun-version`).
+
+```bash
+git clone https://github.com/PylotLight/Surffish.git
+cd Surffish
+bun install
+bun run dev
+```
+
+`bun run test` runs the unit tests, `bun run typecheck` type-checks, and the `test:electron-*` scripts run Electron smoke tests against a production build. More in [docs/development.md](docs/development.md).
+
+## Contributing
+
+Issues and PRs are welcome. Keep PRs to one change, and include a smoke test or screenshot for UI changes. CI runs on self-hosted runners and doesn't run for pull requests from forks, so a maintainer will run it for you.
+
+## License
+
+[MIT](LICENSE). Third-party assets (the Bramble icon, New Tab photos) carry their own licenses, listed in [docs/third-party-assets.md](docs/third-party-assets.md).
+
+<br>
+
+<div align="center">
+<sub>If Surffish makes your browsing a bit calmer, a ⭐ helps other people find it.</sub>
+</div>

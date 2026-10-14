@@ -1,7 +1,7 @@
 name: readme screenshots
 
 # Manual only: Actions -> readme screenshots -> Run workflow (pick the branch).
-# Runs scripts/readme-screenshots.cjs on the self-hosted Mac (real window, native traffic lights)
+# Runs scripts/readme-screenshots.cjs on the self-hosted Mac (real macOS rendering and fonts)
 # and commits the PNGs to docs/screenshots/mac/ on the branch it ran on, for a human to pick,
 # optimise and move into docs/assets/. Same setup as the ci `macos smoke` job: plain git, one
 # bun install, no marketplace actions, no artifact upload. Unlike the smokes the window IS shown
@@ -13,11 +13,6 @@ on:
         description: 'comma list of scenes (empty = all): hero,palette,split,reader,glance,history,settings,newtab'
         required: false
         default: ''
-  # TEMPORARY: workflow_dispatch only works once this file is on main, so the first runs come from
-  # pushes to the PR branch. Remove before merge.
-  push:
-    branches: [docs/product-readme]
-    paths: ['.github/workflows/screenshots.yml', 'scripts/readme-screenshots.cjs']
 
 concurrency:
   group: readme-screenshots-${{ github.ref }}

@@ -21,6 +21,15 @@ xvfb-run -a bun run test:electron-sidebar-overlay
 
 Set `SURFFISH_SCREENSHOT_DIR=/path/to/output` to have that test save full-window Electron captures for review.
 
+## README screenshots
+
+`scripts/readme-screenshots.cjs` (`bun run screenshots:readme` after `bun run build`) opens a throwaway profile, sets up each README scene (sidebar tabs, palette, split view, reader, Glance, Back history menu, proxy settings, New Tab) on real public sites, and writes one PNG per scene to `SURFFISH_SCREENSHOT_DIR`. A site that doesn't load in time is swapped for a local fixture page. `README_SHOTS=hero,palette` runs a subset.
+
+- **Linux:** run it under Xvfb (`xvfb-run -a bun run screenshots:readme`); it grabs the window with ffmpeg's x11grab.
+- **macOS:** the manual **readme screenshots** workflow (Actions → readme screenshots → Run workflow, pick the branch) runs it on the self-hosted Mac and commits the PNGs to `docs/screenshots/mac/` on that branch. The window is shown on screen while it runs. With Screen Recording permission for the runner it uses `screencapture -l` (native sidebar blur); without it, it stitches the window's views with `capturePage` and switches the sidebar to the snapshot blur. `capture-method.txt` records which one ran.
+
+The README uses resized WebP copies in `docs/assets/` (`magick in.png -resize 1600x -quality 80 out.webp`); delete the raw PNGs before merging.
+
 ## Architecture
 
 Surffish is an Electron desktop browser with a React renderer. The main process owns the browser session, tabs, site permissions, network filtering, and persisted preferences. Trusted local UI surfaces use context isolation and a restricted preload API; remote pages run in separate `WebContentsView`s.
