@@ -215,7 +215,8 @@ async function loaded(win, url, timeout = 25000) {
 const TIDY_CSS = {
   'github.com': '.js-notice, .flash-full, .js-cookie-consent-banner, cookie-consent-link, #ghcc { display: none !important }',
   'github.blog': '#ghcc, .cookie-consent, [class*="cookie"] { display: none !important }',
-  'apple.com': '#ac-gn-segmentbar, .ac-gn-segmentbar, #globalnav-segmentbar { display: none !important }'
+  // the "choose another country or region" bar Apple shows visitors from outside the US
+  'apple.com': '#ac-localeswitcher, #ac-gn-segmentbar, .ac-gn-segmentbar, #globalnav-segmentbar { display: none !important }'
 }
 async function tidy(win) {
   for (const view of pageViews(win)) {
@@ -377,6 +378,8 @@ const scenes = {
   // New Tab on its own: photo, clock and favourites, sidebar tucked away
   async newtab(win) {
     await setChrome(win, { sidebarMode: 'tabs' })
+    // the reader / glance pages would land in Most visited without favicons; Favourites only
+    await api(win, 'history.clear()').catch((error) => log(`history.clear failed: ${error.message}`))
     await api(win, 'tabs.create()')
     await delay(2500)
     await setChrome(win, { sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })
