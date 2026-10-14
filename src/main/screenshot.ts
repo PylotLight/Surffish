@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { capturePageWithin } from './capture-page'
 import { writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -158,11 +159,8 @@ function dataUrl(image: PixelImage): string {
 
 async function captureVisible(contents: WebContents): Promise<PixelImage | null> {
   if (contents.isDestroyed()) return null
-  try {
-    return toPixelImage(await contents.capturePage())
-  } catch {
-    return null
-  }
+  const image = await capturePageWithin(contents)
+  return image ? toPixelImage(image) : null
 }
 
 type CdpSend = (method: string, params?: Record<string, unknown>) => Promise<unknown>
