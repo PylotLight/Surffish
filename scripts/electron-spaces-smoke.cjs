@@ -52,11 +52,34 @@ const surface = (win, name) => viewsOf(win).find((view) => surfaceFor(view) === 
 const windows = () => BaseWindow.getAllWindows().filter((win) => !win.isDestroyed() && surface(win, 'toolbar'))
 const pageView = (win, path) => viewsOf(win).find((view) => { try { return new URL(view.webContents.getURL()).pathname === path && view.getVisible() } catch { return false } })
 
+// Bounded (smoke.evaluate): a renderer that never answers fails this call with what it was running
+// and on which page, instead of stalling a waitFor loop silently until the hard limit.
 async function evaluate(view, expression) {
   try {
-    return await view.webContents.executeJavaScript(expression)
+    return await smoke.evaluate(view.webContents, expression)
   } catch (error) {
     throw new Error(`${expression.slice(0, 120)}: ${error.message}`)
+  }
+}
+const step = (message) => smoke.step(`${phase}: ${message}`)
+
+/** What the window shows right now (Space + tab paths), for a failure message. */
+async function describeWindow(win) {
+  try {
+    const [spaces, tabs] = await Promise.all([spacesOf(win), tabsOf(win)])
+    const names = Object.fromEntries(spaces.spaces.map((space) => [space.id, space.name]))
+    return `active Space ${names[spaces.activeSpaceId] ?? spaces.activeSpaceId}, tabs ${JSON.stringify(paths(tabs))}, counts ${JSON.stringify(spaces.tabCounts ?? {})}`
+  } catch (error) {
+    return `window state unavailable (${error.message})`
+  }
+}
+
+/** waitFor, but a timeout also says what the window showed at the end. */
+async function waitForWindow(win, predicate, description, timeout) {
+  try {
+    return await waitFor(predicate, description, timeout)
+  } catch (error) {
+    throw new Error(`${error.message} Window: ${await describeWindow(win)}`)
   }
 }
 
@@ -123,12 +146,14 @@ async function mainPhase() {
   // An old (pre-Spaces) session: everything must land in Default.
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [`${origin}/a`, `${origin}/b`], activeIndex: 0, pinnedTabs: [] }))
   writeFileSync(join(userData, 'window-state.json'), JSON.stringify({ bounds: { x: 40, y: 40, width: 1200, height: 760 }, maximized: false, fullScreen: false }))
+  step('starting the app on an old (pre-Spaces) session')
   await startApp()
 
   const win = await waitFor(() => windows()[0], 'the window')
   await ready(win)
   await waitFor(async () => (await tabsOf(win)).length === 2, 'the restored tabs')
 
+  step('checking Spaces are off by default')
   // --- off by default: no switcher, no Space commands, no "Move to Space"
   let spaces = await spacesOf(win)
   assert.equal(spaces.enabled, false, 'Spaces are off by default')
@@ -137,6 +162,7 @@ async function mainPhase() {
   assert.equal((await spaceCommands(win)).length, 0, 'no Space commands while off')
   assert.equal(await api(win, 'spaces.create()'), null, 'creating a Space needs Spaces on')
 
+  step('turning Spaces on and creating Work')
   // --- turn on; create Work (separate logins): the window switches to it with a New Tab
   assert.equal(await api(win, 'spaces.setEnabled(true)'), true)
   await waitFor(() => switcherShown(win), 'the switcher')
@@ -148,6 +174,7 @@ async function mainPhase() {
   assert.equal(tabs.length, 1, 'a new Space starts with one New Tab')
   assert.ok(!paths(tabs).includes('/a'), 'Default tabs are not listed in Work')
 
+  step('partition isolation (Work login)')
   // --- partition isolation: log in on Work, Default can't see it
   await api(win, `tabs.create(${JSON.stringify(`${origin}/login?as=work`)})`)
   assert.equal(await pageCookie(win, '/login'), 'who=work', 'Work has its cookie')
@@ -155,6 +182,7 @@ async function mainPhase() {
   assert.equal((await workSession.cookies.get({ name: 'who' })).length, 1, 'cookie in the Work partition')
   assert.equal((await session.fromPartition('persist:surffish-browser').cookies.get({ name: 'who' })).length, 0, 'not in the profile partition')
 
+  step('switching to Default with the shortcut')
   // --- shortcut: Ctrl+1 (macOS) / Ctrl+Shift+1 switches to Default, landing on its last tab
   const toolbar = surface(win, 'toolbar')
   toolbar.webContents.focus()
@@ -174,6 +202,7 @@ async function mainPhase() {
   await api(win, `tabs.create(${JSON.stringify(`${origin}/check`)})`)
   assert.equal(await pageCookie(win, '/check'), '', 'Default does not see the Work login')
 
+  step('moving a tab to Work')
   // --- move a tab to Work: it leaves Default, reloads in Work's session (sees the login)
   await api(win, `tabs.create(${JSON.stringify(`${origin}/moved`)})`)
   await waitFor(() => pageView(win, '/moved'), '/moved on screen')
@@ -186,6 +215,7 @@ async function mainPhase() {
   spaces = await waitFor(async () => { const value = await spacesOf(win); return value.activeSpaceId === workId ? value : null }, 'activating a tab in another Space switches to it')
   assert.equal(await pageCookie(win, '/moved'), 'who=work', 'the moved tab runs in the Work session')
 
+  step('moving a split to Fun')
   // --- a split moves as a unit: split /moved with /other in Work, send it to Fun
   const funId = await api(win, 'spaces.create({ name: "Fun" })')
   await api(win, `spaces.switch(${JSON.stringify(workId)})`)
@@ -197,7 +227,7 @@ async function mainPhase() {
   assert.ok(!paths(tabs).includes('/moved') && !paths(tabs).includes('/other'), 'both panes left Work')
   assert.ok(paths(tabs).includes('/login'), 'the rest of Work stays')
   await api(win, `spaces.switch(${JSON.stringify(funId)})`)
-  tabs = await waitFor(async () => { const value = await tabsOf(win); return paths(value).includes('/moved') ? value : null }, 'the split in Fun')
+  tabs = await waitForWindow(win, async () => { const value = await tabsOf(win); return paths(value).includes('/moved') ? value : null }, 'the split in Fun')
   assert.equal(tabs.filter((tab) => tab.split).length, 2, 'still a split in Fun')
   // Fun shares the profile session: no Work login there.
   assert.equal(await pageCookie(win, '/moved'), '', 'Fun (shared session) does not see the Work login')
@@ -210,6 +240,7 @@ async function mainPhase() {
     writeFileSync(process.env.SURFFISH_SMOKE_SHOT, (await sidebar.webContents.capturePage()).toPNG())
   }
 
+  step('archiving a tab in Fun')
   // --- the archive records the Space
   await api(win, `tabs.create(${JSON.stringify(`${origin}/archived`)})`)
   const archivedTab = (await tabsOf(win)).find((tab) => tab.url.endsWith('/archived'))
@@ -223,19 +254,30 @@ async function mainPhase() {
   assert.ok((await tabsOf(win)).every((tab) => !tab.url.endsWith('/a')), 'Default tabs are not in Fun\'s list')
 
   // --- leave Work active for the restore phase
+  step('waiting for the Spaces session on disk')
   await api(win, `spaces.switch(${JSON.stringify(workId)})`)
+  // Poll on content: Work active, both split panes saved in Fun, one split. An earlier debounced
+  // snapshot can already have Work active and a Fun tab without the split's tabs in place.
+  let lastSaved = null
   await waitFor(() => {
     const value = sessionFile()
     const saved = value.windows?.[0]
-    return saved?.spaces?.activeSpace === workId && saved.spaces.tabSpaces.includes(funId) && saved.splits?.length === 1 ? value : null
-  }, 'Spaces saved in the session file', 8000)
+    lastSaved = saved ?? null
+    if (saved?.spaces?.activeSpace !== workId || saved.splits?.length !== 1) return null
+    const spaceOf = (path) => saved.spaces.tabSpaces[saved.tabs.findIndex((url) => { try { return new URL(url).pathname === path } catch { return false } })]
+    return spaceOf('/moved') === funId && spaceOf('/other') === funId ? value : null
+  }, 'Spaces saved in the session file', 8000).catch((error) => {
+    throw new Error(`${error.message} Last saved window: ${JSON.stringify(lastSaved)}`)
+  })
   assert.ok(existsSync(join(userData, 'browser-spaces.json')), 'Space definitions saved')
   await workSession.cookies.flushStore()
 
+  step('relaunching (restore phase)')
   app.releaseSingleInstanceLock()
   const exitCode = await new Promise((resolvePromise) => {
-    const child = spawn(process.execPath, [...process.execArgv, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : []), __filename, '--phase=restore', `--user-data=${userData}`, `--origin=${origin}`, `--work=${workId}`, `--fun=${funId}`], { stdio: 'inherit' })
-    child.on('exit', (code) => resolvePromise(code))
+    // childEnv: the child's hard limit ends before ours, so a hung restore reports its own state.
+    const child = spawn(process.execPath, [...process.execArgv, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : []), __filename, '--phase=restore', `--user-data=${userData}`, `--origin=${origin}`, `--work=${workId}`, `--fun=${funId}`], { stdio: 'inherit', env: smoke.childEnv() })
+    child.on('exit', (code, signal) => resolvePromise(code ?? signal))
   })
   server.close()
   assert.equal(exitCode, 0, 'the restore phase passed')
@@ -246,27 +288,32 @@ async function mainPhase() {
 async function restorePhase() {
   const workId = argValue('work')
   const funId = argValue('fun')
+  step('starting the app on the saved Spaces session')
   await startApp()
   const win = await waitFor(() => windows()[0], 'the restored window')
   await ready(win)
+  step('window ready; checking the restored Spaces')
 
   // --- restore: the active Space, each Space's tabs, the split in Fun
   let spaces = await waitFor(async () => { const value = await spacesOf(win); return value.enabled ? value : null }, 'Spaces on after relaunch')
   assert.equal(spaces.activeSpaceId, workId, 'Work is the active Space again')
   assert.deepEqual(spaces.spaces.map((space) => space.name), ['Default', 'Work', 'Fun'])
-  let tabs = await waitFor(async () => { const value = await tabsOf(win); return value.length > 0 ? value : null }, 'Work tabs')
+  let tabs = await waitForWindow(win, async () => { const value = await tabsOf(win); return value.length > 0 ? value : null }, 'Work tabs')
   assert.ok(!paths(tabs).includes('/a'), 'Work shows only its tabs')
-  await api(win, `spaces.switch(${JSON.stringify(funId)})`)
-  tabs = await waitFor(async () => { const value = await tabsOf(win); return paths(value).includes('/moved') ? value : null }, 'Fun tabs')
+  step('switching to Fun')
+  assert.equal(await api(win, `spaces.switch(${JSON.stringify(funId)})`), true, 'switched to Fun')
+  tabs = await waitForWindow(win, async () => { const value = await tabsOf(win); return paths(value).includes('/moved') ? value : null }, 'Fun tabs')
   assert.equal(tabs.filter((tab) => tab.split).length, 2, 'the split came back in Fun')
+  step('switching to Default')
   await api(win, 'spaces.switch("default")')
-  tabs = await waitFor(async () => { const value = await tabsOf(win); return paths(value).includes('/a') ? value : null }, 'Default tabs')
+  tabs = await waitForWindow(win, async () => { const value = await tabsOf(win); return paths(value).includes('/a') ? value : null }, 'Default tabs')
   assert.deepEqual(paths(tabs).filter((path) => path !== '/check'), ['/a', '/b'])
 
   // The Work login survived the restart in its own partition.
   const workSession = session.fromPartition(`persist:surffish-space-${workId}`)
   assert.equal((await workSession.cookies.get({ name: 'who' })).length, 1, 'Work login kept')
 
+  step('deleting Work')
   // --- delete Work: asks first, closes its tabs, wipes its partition
   asked.length = 0
   assert.equal(await api(win, `spaces.remove(${JSON.stringify(workId)})`), true)
@@ -276,6 +323,7 @@ async function restorePhase() {
   assert.equal(spaces.tabCounts[workId] ?? 0, 0, 'Work tabs closed')
   await waitFor(async () => (await workSession.cookies.get({ name: 'who' })).length === 0, 'Work partition wiped')
 
+  step('turning Spaces off')
   // --- turn Spaces off: asks, then everything merges into Default and the UI goes away
   asked.length = 0
   assert.equal(await api(win, 'spaces.setEnabled(false)'), false)

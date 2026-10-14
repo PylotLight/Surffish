@@ -33,7 +33,7 @@ import {
 import { MAX_PINNED_SITES, parseBrowserPreferences } from '../shared/persistence'
 import { exportNetscapeBookmarks } from '../shared/bookmark-import'
 import type { BookmarkNode, BookmarksSnapshot, PinnedSite } from '../shared/types'
-import { getProfileDatabase } from './store'
+import { getProfileDatabase, reportStoreWriteError } from './store'
 import { BookmarkTable } from './store/bookmark-store'
 import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
 
@@ -128,7 +128,7 @@ function saveToDatabase(current: BookmarkStore): boolean {
     target.save(current)
     return true
   } catch (error) {
-    console.error('Could not save bookmarks to the database (bookmarks.json still has them):', error)
+    reportStoreWriteError('Could not save bookmarks to the database (bookmarks.json still has them):', error)
     table = null
     return false
   }

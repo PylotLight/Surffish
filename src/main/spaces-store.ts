@@ -15,7 +15,7 @@ import { BROWSER_SESSION_PARTITION } from './browser-session'
 import { deferWrite } from './deferred-writes'
 import { readSettingsFile, writeSettingsFile } from './safety-store'
 import { setPartitionRouteResolver } from './proxy'
-import { getProfileDatabase } from './store'
+import { getProfileDatabase, reportStoreWriteError } from './store'
 import { databaseCopyIsCurrent, settleDualWrite } from './store/legacy-json'
 import { SpacesTable } from './store/spaces-table'
 import {
@@ -53,7 +53,7 @@ function saveToDatabase(value: SpacesSettings): boolean {
     target.save(value)
     return true
   } catch (error) {
-    console.error('Could not save Spaces to the database (browser-spaces.json still has them):', error)
+    reportStoreWriteError('Could not save Spaces to the database (browser-spaces.json still has them):', error)
     table = null
     return false
   }

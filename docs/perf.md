@@ -5,8 +5,10 @@ Every PR gets a perf comparison against its base: CI builds both, runs the same 
 medians (cold-start times use the best run, see below). Deterministic metrics fail the check
 on a regression; timing and memory metrics mostly warn, because shared runners are noisy.
 
-- `perf (linux)`: k3s runner pod under xvfb (software rendering, ~2 vCPU). Writes the table to
-  the job's step summary and keeps one sticky PR comment up to date.
+- `perf (linux)`: k3s runner pod under xvfb (software rendering). The pods see 16 CPUs (`nproc`)
+  but are limited to 8 by their cgroup quota (`cpu.max` 800000/100000), and other jobs share the
+  node, so timings still vary. Writes the table to the job's step summary and keeps one sticky PR
+  comment up to date.
 - `perf (macos)`: opt-in, on the self-hosted Mac (real GPU, macOS memory accounting). Runs only on
   PRs with the `perf-mac` label or from a manual *Run workflow*. Timing and memory never fail there
   (the machine is in use); deterministic metrics still can. Step summary always; PR comment only
