@@ -286,7 +286,7 @@ export function spaceRoutingInput(input: ProxyRoutingInput, choice: SpaceProxyCh
   // point them at a synthetic named entry (a name users can't type, see PROXY_NAME_PATTERN).
   const proxies = movesPrimary ? [...base.proxies, { name: SPACE_MAIN_PROXY_NAME, host: input.primary.host, port: input.primary.port }] : base.proxies
   return {
-    primary: { enabled: true, host, port },
+    primary: { ...base.primary, enabled: true, host, port },
     proxies,
     rules: base.rules.map((rule) => {
       // Direct rules can't punch through a proxied Space: they take the Space's route ('proxy' = the Space's primary now).

@@ -95,13 +95,19 @@
 
 /* ---- Site menu (globe) ---- */
 .browser-chrome .site-actions-menu {
-  width: 236px;
+  width: 280px;
   max-height: min(480px, var(--popover-room, 480px));
   overflow-y: auto;
 }
 .browser-chrome .site-actions-menu button {
   min-height: 34px;
   font-size: var(--pop-body);
+}
+/* Certificate viewer inside the site menu (its own styles load with the lazy chunk). */
+.browser-chrome .site-actions-menu.is-certificate {
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(600px, var(--popover-room, 600px));
+  padding: 10px 12px 12px;
 }
 
 /* ---- History panel (opened from the toolbar, drawn in the sidebar) ---- */

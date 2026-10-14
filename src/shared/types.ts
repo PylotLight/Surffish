@@ -1,3 +1,4 @@
+import type { BrowserPageSecurity } from './certificates'
 import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
 import type { TabGroupInfo } from './tab-groups'
@@ -94,6 +95,8 @@ export interface BrowserProxySettings {
   enabled: boolean
   host: string
   port: number
+  /** Local-network addresses (192.168.x, 10.x, `*.local`, …) skip the proxy. Default on. */
+  bypassLocalNetwork: boolean
 }
 export interface BrowserProxyTestResult {
   reachable: boolean
@@ -118,6 +121,8 @@ export interface BrowserState {
   interstitial: BrowserTabInterstitial | null
   /** Details for `error` when it is a page-load failure (friendly copy, Retry, in-page error). */
   loadError: BrowserLoadError | null
+  /** How the active page's HTTPS certificate was trusted (null: not HTTPS, unknown, or an error page). */
+  security?: BrowserPageSecurity | null
   /**
    * When main made the current tab the active one (epoch ms, `Date.now()` in main). A renderer
    * learns of a tab switch from the per-frame coalesced tab broadcast, which can land after a

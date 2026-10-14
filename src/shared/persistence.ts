@@ -37,7 +37,7 @@ const SESSION_SECRET_QUERY_KEYS = new Set([
   'session', 'session_id', 'sid', 'ticket', 'assertion', 'jwt', 'samlresponse', 'state', 'signature', 'sig',
   'x_amz_credential', 'x_amz_signature', 'x_amz_security_token'
 ].map((key) => key.replaceAll('_', '')))
-export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080 }
+export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = { enabled: false, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true }
 
 export interface SavedBrowserSession {
   urls: string[]
@@ -129,7 +129,8 @@ export function parseBrowserProxySettings(value: unknown): BrowserProxySettings 
   if (typeof record.enabled !== 'boolean' || !LOCAL_PROXY_HOSTS.has(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
     return { ...DEFAULT_BROWSER_PROXY_SETTINGS }
   }
-  return { enabled: record.enabled, host, port }
+  // Saved before the setting existed: on, like the default.
+  return { enabled: record.enabled, host, port, bypassLocalNetwork: record.bypassLocalNetwork !== false }
 }
 
 function safeHttpUrl(value: unknown): string | null {

@@ -8,7 +8,8 @@ function run(events: ProxyHealthEvent[], start: ProxyHealth = INITIAL_PROXY_HEAL
 describe('proxy config', () => {
   test('a single socks5 server and no DIRECT fallback', () => {
     const config = buildProxyConfig({ enabled: true, host: '127.0.0.1', port: 1080 })
-    expect(config).toEqual({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080', proxyBypassRules: '<local>' })
+    expect(config).toEqual({ mode: 'fixed_servers', proxyRules: 'socks5://127.0.0.1:1080', proxyBypassRules: '<local>;*.local;10.0.0.0/8;172.16.0.0/12;192.168.0.0/16;169.254.0.0/16;fc00::/7;fe80::/10' })
+    expect(buildProxyConfig({ enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: false }).proxyBypassRules).toBe('<local>')
     expect(proxyRulesHaveDirectFallback(config.proxyRules)).toBe(false)
     expect(buildProxyConfig({ enabled: true, host: '::1', port: 9050 }).proxyRules).toBe('socks5://[::1]:9050')
     expect(buildProxyConfig({ enabled: false, host: '127.0.0.1', port: 1080 })).toEqual({ mode: 'direct' })

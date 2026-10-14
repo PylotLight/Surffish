@@ -26,8 +26,12 @@ import {
   setBrowserFindQuery,
   stepFind,
   zoomActiveBrowserTab,
-  togglePdfEditor
+  togglePdfEditor,
+  dismissActiveLoadError,
+  activeTabHasLoadError,
+  getActiveTabWebContents
 } from './browser'
+import { certificateInfoFor, proceedPastCertificateError, showNativeCertificate } from './certificates'
 import { isSearchEngineId } from '../shared/navigation'
 import { registerCommandIpc } from './command-ipc'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
@@ -458,6 +462,22 @@ export function registerIpc(): void {
   ipcMain.handle('browser:forward', (event) => { assertMainRenderer(event); browserForward() })
   ipcMain.handle('browser:reload', (event) => { assertMainRenderer(event); browserReload() })
   ipcMain.handle('browser:stop', (event) => { assertMainRenderer(event); browserStop() })
+  ipcMain.handle('browser:load-error:dismiss', (event) => { assertMainRenderer(event); return dismissActiveLoadError() })
+  ipcMain.handle('browser:certificate:info', (event) => {
+    assertMainRenderer(event)
+    return certificateInfoFor(getActiveTabWebContents(), activeTabHasLoadError())
+  })
+  ipcMain.handle('browser:certificate:proceed', async (event) => {
+    assertMainRenderer(event)
+    const url = proceedPastCertificateError(getActiveTabWebContents())
+    if (!url) return false
+    await navigateBrowser(url)
+    return true
+  })
+  ipcMain.handle('browser:certificate:show-native', (event) => {
+    assertMainRenderer(event)
+    return showNativeCertificate(getActiveTabWebContents(), activeTabHasLoadError())
+  })
   ipcMain.handle('browser:zoom', (event, action: unknown) => { assertMainRenderer(event); zoomActiveBrowserTab(action) })
   ipcMain.handle('browser:find:get', (event) => { assertMainRenderer(event); return getBrowserFindState() })
   ipcMain.handle('browser:find:query', (event, text: unknown) => { assertMainRenderer(event); setBrowserFindQuery(text) })

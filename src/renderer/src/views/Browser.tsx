@@ -78,7 +78,8 @@ import {
   MemorySaverSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
-import { PageWatchersToggle } from './lazy-views'
+import { PageWatchersToggle, CertificateViewer } from './lazy-views'
+import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
 import { usePageWatchersEnabled, useUnseenWatcherCount } from './settings/useWatchers'
@@ -91,7 +92,7 @@ import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from '
 import './SidebarBackdrop.css'
 import './motion.css'
 
-const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080 }
+const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
 const COMMON_TIME_ZONES = [
   'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'Asia/Kolkata', 'Asia/Tokyo', 'Asia/Singapore',
@@ -418,6 +419,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
+  /** The site menu's certificate viewer: null = menu, 'loading' / info = viewer open. */
+  const [certificateView, setCertificateView] = useState<SiteCertificateInfo | 'loading' | 'missing' | null>(null)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -661,6 +664,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface, isLocalNewTab, newTabPreferences.weatherEnabled, newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
+  const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null
+  const siteConnection = isLocalNewTab ? null : siteConnectionSummary(certificateLoadError && browser.loadError ? browser.loadError.url : browser.url, browser.security, certificateLoadError)
+  const certificateBypassed = !isLocalNewTab && browser.security?.level === 'bypassed'
 
   function revealSidebar(): void {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -984,6 +990,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   // Closes on any press outside it, the page view included (see usePopoverDismiss), not only the globe.
   usePopoverDismiss(siteActionsOpen, siteActionsControlRef, () => setSiteActionsOpen(false), { returnFocusRef: siteActionsButtonRef })
+  useEffect(() => {
+    if (!siteActionsOpen) setCertificateView(null)
+  }, [siteActionsOpen])
 
   // Main saw a press on the page view (a separate WebContentsView this document never hears).
   useEffect(() => window.api.browser.onDismissPopovers(dismissPopovers), [])
@@ -1390,6 +1399,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               </div>
               <div className="omnibox">
                 {browser.private && <span className="omnibox-private-pill" title="Private tab: nothing from this tab is saved"><PrivateGlyph /><span>Private</span></span>}
+                {certificateBypassed && <span className="omnibox-insecure-pill is-cert-bypassed" title={`Not secure: ${browser.security?.host ?? 'this site'}’s certificate isn’t valid${browser.security?.error ? ` (${browser.security.error})` : ''} and you chose to proceed`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /><path d="M3 21 21 3" /></svg><span>Not secure</span></span>}
                 {!isLocalNewTab && isInsecurePageUrl(browser.url) && <span className="omnibox-insecure-pill" title="Not secure: this page uses plain HTTP, so it can be read or changed on the way"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg><span>Not secure</span></span>}
                 <div className="site-actions-control" ref={siteActionsControlRef}>
                   <button
@@ -1403,9 +1413,34 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     title={activeOrigin ? `Site actions for ${activeOrigin}` : 'Site actions'}
                     onClick={() => setSiteActionsOpen((open) => !open)}
                   >
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.8 12h16.4M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5Z" /></svg>
+                    {siteConnection?.kind === 'secure'
+                      ? <svg className="site-actions-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" /></svg>
+                      : siteConnection?.kind === 'not-secure' && browser.url.startsWith('https:')
+                        ? <svg className="site-actions-lock is-broken" viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" /><path d="M4 21 20 4" /></svg>
+                        : <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.8 12h16.4M12 3.5c2.3 2.4 3.4 5.2 3.4 8.5s-1.1 6.1-3.4 8.5c-2.3-2.4-3.4-5.2-3.4-8.5S9.7 5.9 12 3.5Z" /></svg>}
                   </button>
-                  {siteActionsOpen && <div id="site-actions-menu" className="site-actions-menu" role="menu" aria-label="Site actions">
+                  {siteActionsOpen && certificateView !== null && <div id="site-actions-menu" className="site-actions-menu is-certificate" role="dialog" aria-label="Certificate viewer">
+                    {certificateView === 'loading'
+                      ? <p className="site-connection-detail">Loading certificate…</p>
+                      : certificateView === 'missing'
+                        ? <div className="site-connection-missing"><button type="button" className="site-connection-back" onClick={() => setCertificateView(null)}>‹ Back</button><p className="site-connection-detail">No certificate details were captured for this page yet. Reload the page, then open this again.</p></div>
+                        : <CertificateViewer info={certificateView} onBack={() => setCertificateView(null)} />}
+                  </div>}
+                  {siteActionsOpen && certificateView === null && <div id="site-actions-menu" className="site-actions-menu" role="menu" aria-label="Site actions">
+                    {siteConnection && <div className={`site-connection is-${siteConnection.kind}`}>
+                      <div className="site-connection-head">
+                        <strong>{siteConnection.title}</strong>
+                        <span className="site-connection-detail">{siteConnection.detail}</span>
+                      </div>
+                      {siteConnection.certificateRow && <button type="button" role="menuitem" className="site-connection-cert" onClick={() => {
+                        setCertificateView('loading')
+                        void window.api.browser.certificate.info().then((info) => setCertificateView(info ?? 'missing')).catch(() => setCertificateView('missing'))
+                      }}>
+                        <span className="site-actions-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="5" width="16" height="12" rx="2" /><path d="M8 9h8M8 12.5h5" /><path d="m15 15.5 1.5 4 1.2-1.6 1.8.4-1.5-3.6" /></svg></span>
+                        <span>{siteConnection.certificateRow}</span>
+                        <span className="site-connection-chevron" aria-hidden="true">›</span>
+                      </button>}
+                    </div>}
                     <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
                       setSiteActionsOpen(false)
                       selectSettingsSection('site')
@@ -1856,6 +1891,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
                     </label>
                   </div>
+                  <SettingsRow label="Local network goes direct" hint="Private addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, link-local) and .local names skip the proxy, so your router, NAS or printer opens like in other browsers. Turn off to send them through the tunnel too. Applies when you Save.">
+                    <input type="checkbox" className="settings-switch" checked={proxy.bypassLocalNetwork !== false} onChange={(event) => setProxy((current) => ({ ...current, bypassLocalNetwork: event.target.checked }))} aria-label="Connect to local network addresses directly" />
+                  </SettingsRow>
                   <ProxyKillSwitchSetting />
                   <div className="settings-actions">
                     <p className="settings-help">Start a tunnel first: <code>ssh -N -D 127.0.0.1:1080 user@host</code></p>

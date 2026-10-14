@@ -7,6 +7,21 @@ export interface ProxyEndpoint {
   enabled: boolean
   host: string
   port: number
+  /**
+   * Local-network addresses (private / link-local IPs, `*.local`) connect directly instead of
+   * through the proxy, like other proxy-aware browsers. Absent means on (the default).
+   */
+  bypassLocalNetwork?: boolean
+}
+
+/**
+ * Chromium bypass entries for the local network: private IPv4 (RFC 1918), link-local, IPv6 unique
+ * local / link-local, and mDNS `.local` names. IP ranges only match IP literals (no DNS lookup).
+ */
+export const LOCAL_NETWORK_BYPASS_RULES = ['*.local', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', 'fc00::/7', 'fe80::/10'] as const
+
+export function bypassesLocalNetwork(settings: Pick<ProxyEndpoint, 'bypassLocalNetwork'>): boolean {
+  return settings.bypassLocalNetwork !== false
 }
 
 export interface ProxyConfigShape {
@@ -22,7 +37,8 @@ export interface ProxyConfigShape {
 export function buildProxyConfig(settings: ProxyEndpoint): ProxyConfigShape {
   if (!settings.enabled) return { mode: 'direct' }
   const host = settings.host.includes(':') && !settings.host.startsWith('[') ? `[${settings.host}]` : settings.host
-  return { mode: 'fixed_servers', proxyRules: `socks5://${host}:${settings.port}`, proxyBypassRules: '<local>' }
+  const bypass = bypassesLocalNetwork(settings) ? ['<local>', ...LOCAL_NETWORK_BYPASS_RULES] : ['<local>']
+  return { mode: 'fixed_servers', proxyRules: `socks5://${host}:${settings.port}`, proxyBypassRules: bypass.join(';') }
 }
 
 export function proxyRulesHaveDirectFallback(rules: string | undefined): boolean {

@@ -88,11 +88,13 @@ test('falls back to the default search engine for invalid preferences', () => {
 })
 
 test('defaults fresh profiles to direct browsing while preserving valid saved SOCKS choices', () => {
-  assert.deepEqual(DEFAULT_BROWSER_PROXY_SETTINGS, { enabled: false, host: '127.0.0.1', port: 1080 })
+  assert.deepEqual(DEFAULT_BROWSER_PROXY_SETTINGS, { enabled: false, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true })
   assert.deepEqual(parseBrowserProxySettings(null), DEFAULT_BROWSER_PROXY_SETTINGS)
   assert.deepEqual(parseBrowserProxySettings({ enabled: true, host: 'localhost', port: 1080 }), {
-    enabled: true, host: 'localhost', port: 1080
+    enabled: true, host: 'localhost', port: 1080, bypassLocalNetwork: true
   })
+  // The local-network bypass defaults on for older files and keeps an explicit off.
+  assert.equal(parseBrowserProxySettings({ enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: false }).bypassLocalNetwork, false)
   assert.deepEqual(parseBrowserProxySettings({ enabled: true, host: 'proxy.example', port: 1080 }), DEFAULT_BROWSER_PROXY_SETTINGS)
 })
 

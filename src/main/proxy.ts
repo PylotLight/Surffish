@@ -67,7 +67,7 @@ function validateSettings(input: unknown): BrowserProxySettings {
   if (typeof candidate.enabled !== 'boolean') throw new Error('Choose whether the SOCKS5 proxy is enabled.')
   if (!LOOPBACK_HOSTS.has(host)) throw new Error('For safety, this sample accepts only localhost SOCKS proxies.')
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Enter a port between 1 and 65535.')
-  return { enabled: candidate.enabled, host, port }
+  return { enabled: candidate.enabled, host, port, bypassLocalNetwork: candidate.bypassLocalNetwork !== false }
 }
 
 function readSettings(): BrowserProxySettings {
@@ -95,7 +95,7 @@ function routingInput(settings: BrowserProxySettings = currentSettings, routing:
 function failClosedConfig(input: ProxyRoutingInput): RoutingProxyConfig {
   const proxied = activeProxyEndpoints(input)[0]
   if (!proxied) return { mode: 'direct' }
-  return buildRoutingProxyConfig({ primary: { enabled: true, host: proxied.host, port: proxied.port }, proxies: [], rules: [] })
+  return buildRoutingProxyConfig({ primary: { enabled: true, host: proxied.host, port: proxied.port, bypassLocalNetwork: input.primary.bypassLocalNetwork }, proxies: [], rules: [] })
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
