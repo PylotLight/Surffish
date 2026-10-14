@@ -5,18 +5,6 @@
   flex: 0 0 auto;
   -webkit-app-region: no-drag;
 }
-.downloads-toolbar-button {
-  color: rgba(245, 247, 250, 0.76);
-}
-.downloads-toolbar-button.is-open,
-.downloads-toolbar-button[aria-expanded='true'] {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-}
-.downloads-toolbar-button svg {
-  width: 17px;
-  height: 17px;
-}
 .downloads-panel {
   color: rgba(248, 250, 252, 0.95);
   -webkit-app-region: no-drag;

@@ -1,0 +1,113 @@
+/* ---- Toolbar icon buttons (right side of the toolbar) ----
+ * Bookmarks, Reading List, History, extension actions (Bramble + pinned Web Store extensions), the
+ * Extensions puzzle and Downloads all share one hit box, one glyph size and one stroke weight, so
+ * nothing looks too big or too small next to its neighbours. Change the size here, not per button.
+ * Loaded eagerly with the toolbar: per-button sizes must not live in a lazy chunk (Downloads' svg
+ * size used to sit in DownloadsPanel.css, so until the panel was first opened it filled the button).
+ */
+.browser-toolbar-trailing {
+  /* Square hit box for every icon button. */
+  --toolbar-icon-hit: 30px;
+  /* Line glyphs (24-unit viewBox) and extension action images (bitmaps that fill their box). */
+  --toolbar-icon-size: 18px;
+  --toolbar-ext-icon-size: 18px;
+  --toolbar-icon-stroke: 1.7px;
+  --toolbar-icon-gap: 2px;
+  --toolbar-icon-radius: 9px;
+  --toolbar-icon-color: rgba(245, 247, 250, 0.78);
+  --toolbar-icon-hover-bg: rgba(255, 255, 255, 0.1);
+  --toolbar-icon-open-bg: rgba(255, 255, 255, 0.12);
+}
+
+/* Even spacing across the panel group, extension actions, the puzzle and Downloads. */
+.browser-toolbar-trailing,
+.browser-toolbar-trailing .omnibox-actions,
+.browser-toolbar-trailing .extension-toolbar-buttons {
+  gap: var(--toolbar-icon-gap);
+}
+.browser-toolbar-trailing .toolbar-brand {
+  margin-left: 4px;
+}
+
+.browser-toolbar-trailing :is(
+  .omnibox-action-button,
+  .bramble-toolbar-button,
+  .extension-toolbar-button,
+  .extension-overflow-button,
+  .downloads-toolbar-button
+) {
+  flex: 0 0 var(--toolbar-icon-hit);
+  width: var(--toolbar-icon-hit);
+  height: var(--toolbar-icon-hit);
+  padding: 0;
+  border: 0;
+  border-radius: var(--toolbar-icon-radius);
+  background: transparent;
+  color: var(--toolbar-icon-color);
+}
+
+.browser-toolbar-trailing :is(
+  .omnibox-action-button,
+  .bramble-toolbar-button,
+  .extension-toolbar-button,
+  .extension-overflow-button,
+  .downloads-toolbar-button
+):is(:hover:not(:disabled), :focus-visible) {
+  background: var(--toolbar-icon-hover-bg);
+  color: #fff;
+  outline: 0;
+}
+
+/* Popup/menu open: one neutral pill for every button that opens one. */
+.browser-toolbar-trailing :is(
+  .bramble-toolbar-button[aria-expanded='true'],
+  .extension-toolbar-button.is-open,
+  .extension-overflow-button.is-open,
+  .downloads-toolbar-button.is-open,
+  .downloads-toolbar-button[aria-expanded='true']
+) {
+  background: var(--toolbar-icon-open-bg);
+  color: #fff;
+}
+
+/* Sidebar panels shown (History) / panel popovers open keep their green "current" tint. */
+.browser-toolbar-trailing .omnibox-action-button.is-current {
+  background: rgba(126, 226, 168, 0.11);
+  color: #a4edbd;
+}
+
+.browser-toolbar-trailing :is(
+  .omnibox-action-button,
+  .extension-overflow-button,
+  .downloads-toolbar-button
+) > svg {
+  display: block;
+  width: var(--toolbar-icon-size);
+  height: var(--toolbar-icon-size);
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--toolbar-icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.browser-toolbar-trailing :is(.bramble-toolbar-icon, .extension-toolbar-button .extension-toolbar-icon) {
+  display: block;
+  width: var(--toolbar-ext-icon-size);
+  height: var(--toolbar-ext-icon-size);
+  object-fit: contain;
+}
+
+.browser-toolbar-trailing .extension-toolbar-button .extension-toolbar-fallback {
+  width: var(--toolbar-ext-icon-size);
+  height: var(--toolbar-ext-icon-size);
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .browser-toolbar-trailing {
+    --toolbar-icon-hit: 28px;
+    --toolbar-icon-gap: 1px;
+  }
+}

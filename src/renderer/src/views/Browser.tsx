@@ -88,6 +88,7 @@ import { useUnreadFeedCount } from './settings/useFeeds'
 import './Browser.css'
 import './bookmarks/bookmarks.css'
 import './toolbar-popovers.css'
+import './toolbar-icons.css'
 import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from './SidebarBackdrop'
 import './SidebarBackdrop.css'
 import './motion.css'
@@ -1646,7 +1647,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   title="Downloads"
                   onClick={() => setDownloadsPopupOpen((open) => !open)}
                 >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3.5v11" /><path d="m7.5 10 4.5 4.5 4.5-4.5" /><path d="M5 16.5v3h14v-3" /></svg>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v12" /><path d="m7 10.5 5 5 5-5" /><path d="M4.5 16v3a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>
                 </button>
                 {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
                   setDownloadsPopupOpen(false)
