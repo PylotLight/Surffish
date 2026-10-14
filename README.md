@@ -56,14 +56,11 @@ Surffish isn't signed or notarized yet, so the first launch needs one extra step
   </tr>
   <tr>
     <td><img src="docs/assets/split-view.webp" alt="The Surffish GitHub repo and linear.app side by side in split view"><br><b>Split view (⇧⌘=).</b> Two tabs side by side with a draggable divider.</td>
-    <td><img src="docs/assets/glance.webp" alt="A link preview sheet floating over Hacker News"><br><b>Glance.</b> Shift-click a link to peek at it in a sheet. Esc closes it, ⌘↩ keeps it as a tab.</td>
-  </tr>
-  <tr>
     <td><img src="docs/assets/reader.webp" alt="Reader view of a GitHub blog post"><br><b>Reader view (⌥⌘R).</b> Just the article, with your own type size and theme.</td>
-    <td><img src="docs/assets/history-menu.webp" alt="Back button history menu listing Linear, GitHub, Hacker News and Apple"><br><b>Back/Forward history.</b> Hold or right-click Back or Forward to jump several pages at once.</td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/assets/settings-proxy.webp" alt="Settings showing the SOCKS5 proxy, local network and kill switch options, and network rules"><br><b>SOCKS5 and network rules.</b> One local proxy for everything, extra proxies or Direct for specific sites, LAN addresses direct, and a kill switch.</td>
+    <td><img src="docs/assets/history-menu.webp" alt="Back button history menu listing Linear, GitHub, Hacker News and Apple"><br><b>Back/Forward history.</b> Hold or right-click Back or Forward to jump several pages at once.</td>
+    <td><img src="docs/assets/settings-proxy.webp" alt="Settings showing the SOCKS5 proxy, local network and kill switch options, and network rules"><br><b>SOCKS5 and network rules.</b> One local proxy for everything, extra proxies or Direct for specific sites, LAN addresses direct, and a kill switch.</td>
   </tr>
 </table>
 

@@ -425,7 +425,7 @@ async function run() {
   const tabs = await api(win, 'tabs.get()')
   for (const tab of tabs) if (!Object.values(state.ids).includes(tab.id)) await api(win, `tabs.close(${JSON.stringify(tab.id)})`)
   // hero first: the sidebar lists only the shared tabs plus its New Tab
-  const order = ['hero', 'palette', 'split', 'reader', 'glance', 'history', 'settings', 'integrations', 'newtab']
+  const order = ['hero', 'palette', 'split', 'reader', 'history', 'settings', 'integrations', 'newtab']
   for (const name of order) {
     if (only.length ? !only.includes(name) : name === 'integrations') continue
     try {
