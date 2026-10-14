@@ -40,7 +40,7 @@ import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage } from '../shared/wake-snapshot'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, forgetWakeSnapshotTab, hasWakeSnapshot, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, scaleForWakeSnapshot } from './wake-snapshot'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -1314,7 +1314,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     setTimeout(() => {
       // Overview open and tab switches capture fresh shots anyway; only seed tabs that have none,
       // so ordinary page loads don't pay for a full-page capture + JPEG encode on the main thread.
-      if (isCurrentContents() && isActiveTab(tab) && !isTabOverviewOpen(tab.win.window) && !tabThumbnails.has(tab.id)) void captureTabThumbnail(tab)
+      if (isCurrentContents() && isActiveTab(tab) && !isTabOverviewOpen(tab.win.window) && !tabThumbnails.has(tab.id) && !pendingPictures.has(tab.id)) void captureTabThumbnail(tab)
     }, 700)
   })
   contents.on('destroyed', () => {
@@ -1933,8 +1933,7 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     w.activeTabId = null
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
-      tabThumbnails.delete(tab.id)
-      forgetWakeSnapshotTab(tab.id)
+      forgetTabPicture(tab.id)
       const view = tab.view
       tab.view = null
       if (view) {
@@ -2977,9 +2976,8 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (index < 0) return
   if (!allowLeavingPdfEditor(tab, 'Close Tab')) return
   if (tab.pdfEditor) tab.pdfEditor.dirty = false
-  tabThumbnails.delete(id)
   endWakeSnapshotForTab(id)
-  forgetWakeSnapshotTab(id)
+  forgetTabPicture(id)
   const wasActive = w.activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   if (wasActive) hideLinkStatus(false, w.window)
@@ -3024,6 +3022,7 @@ function hasOtherWindows(w: BrowserWindowState): boolean {
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
   privateSiteZoom.clear()
+  for (const [id, job] of [...pendingPictures]) if (job.wake?.isPrivate) cancelTabPictureEncode(id)
   dropPrivateWakeSnapshots()
   forgetPrivateDownloads()
   forgetCertificateState(PRIVATE_PARTITION)
@@ -3517,6 +3516,67 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
   return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
 }
 
+/**
+ * A capture waiting to be encoded (overview thumbnail, plus the wake snapshot when one is wanted).
+ * Encoding runs TAB_PICTURE_ENCODE_DELAY_MS after the switch, so the tab coming on screen gets its
+ * frames first, and it scales once: capture -> wake-snapshot width -> thumbnail width, rather than
+ * resizing the full-size capture twice. The tab overview flushes pending encodes before it reads.
+ */
+interface PendingTabPicture {
+  tab: BrowserTab
+  image: Electron.NativeImage
+  wake: { pageArea: { width: number; height: number }; url: string; isPrivate: boolean } | null
+  timer: ReturnType<typeof setTimeout>
+}
+const pendingPictures = new Map<string, PendingTabPicture>()
+const TAB_PICTURE_ENCODE_DELAY_MS = 300
+
+function scheduleTabPictureEncode(tab: BrowserTab, image: Electron.NativeImage, wake: PendingTabPicture['wake']): void {
+  cancelTabPictureEncode(tab.id)
+  const timer = setTimeout(() => encodeTabPicture(tab.id), TAB_PICTURE_ENCODE_DELAY_MS)
+  pendingPictures.set(tab.id, { tab, image, wake, timer })
+}
+
+function cancelTabPictureEncode(id: string): void {
+  const job = pendingPictures.get(id)
+  if (!job) return
+  clearTimeout(job.timer)
+  pendingPictures.delete(id)
+}
+
+function encodeTabPicture(id: string): void {
+  const job = pendingPictures.get(id)
+  if (!job) return
+  cancelTabPictureEncode(id)
+  if (!allTabs().includes(job.tab)) return
+  try {
+    const scaled = job.wake ? scaleForWakeSnapshot(job.image) : job.image
+    if (job.wake) keepWakeSnapshot(id, scaled, job.wake.pageArea, job.wake.url, job.wake.isPrivate)
+    tabThumbnails.set(id, thumbnailDataUrl(scaled))
+  } catch (error) {
+    console.warn('[tab picture] could not encode:', error)
+  }
+}
+
+/** The tab overview is about to read thumbnails: encode every capture still waiting. */
+function flushTabPictureEncodes(): void {
+  for (const id of [...pendingPictures.keys()]) encodeTabPicture(id)
+}
+
+/** The tab closed: its thumbnail and wake snapshot go, including a capture still waiting to be encoded. */
+function forgetTabPicture(id: string): void {
+  cancelTabPictureEncode(id)
+  tabThumbnails.delete(id)
+  dropWakeSnapshot(id)
+}
+
+/** A wake snapshot of `url` fitting `pageArea` is stored or waiting to be encoded. */
+function hasCurrentWakePicture(id: string, url: string, pageArea: { width: number; height: number }): boolean {
+  const pending = pendingPictures.get(id)?.wake
+  if (pending) return pending.url === url && pending.pageArea.width === pageArea.width && pending.pageArea.height === pageArea.height
+  return hasWakeSnapshot(id, url, pageArea)
+}
+
 async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<void> {
   const { browserBounds } = tab.win
   if (!isActiveTab(tab) || browserBounds.width <= 0 || browserBounds.height <= 0) return
@@ -3535,15 +3595,15 @@ async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<vo
     const pageArea = forWake && tabCanSleep(tab) ? bounds : null
     const url = currentUrl(tab)
     // Nothing changed since the last picture: the thumbnail (and wake snapshot, if one is wanted) still stand.
-    if (tabThumbnails.has(tab.id) && tabPictureIsCurrent(tab, contents, url, bounds) && (!pageArea || hasWakeSnapshot(tab.id, url, pageArea))) return
+    if ((tabThumbnails.has(tab.id) || pendingPictures.has(tab.id)) && tabPictureIsCurrent(tab, contents, url, bounds) && (!pageArea || hasCurrentWakePicture(tab.id, url, pageArea))) return
     const taken = { revision: tabPictureRevision.get(tab) ?? 0, contents, url, width: bounds.width, height: bounds.height, at: Date.now() }
     // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
     // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
     const image = await capturePageWithin(contents, undefined, { stayHidden: true })
     if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return
-    tabThumbnails.set(tab.id, thumbnailDataUrl(image))
     tabPictureTaken.set(tab, taken)
-    if (pageArea && tab.view?.webContents === contents) rememberWakeSnapshot(tab.id, image, pageArea, url, tab.isPrivate)
+    const wake = pageArea && tab.view?.webContents === contents ? { pageArea, url, isPrivate: tab.isPrivate } : null
+    scheduleTabPictureEncode(tab, image, wake)
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.
   }
@@ -3555,6 +3615,7 @@ async function getTabOverviewItems(w: BrowserWindowState): Promise<TabOverviewIt
     // Fresh shot of what is on screen right now; don't hold the gesture up for a slow page.
     await Promise.race([captureTabThumbnail(active), new Promise((resolve) => setTimeout(resolve, 120))])
   }
+  flushTabPictureEncodes()
   return getTabSummaries(w).map((summary) => ({
     id: summary.id,
     url: summary.url,
