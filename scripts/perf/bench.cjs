@@ -85,6 +85,8 @@ app.on('web-contents-created', (_e, contents) => {
   const send = contents.send.bind(contents)
   contents.send = (channel, ...a) => { bump(`send ${channel}`, a); return send(channel, ...a) }
 })
+// The bench's own timers (event-loop monitor below) use the unpatched setTimeout, so they never count as app timer fires.
+const rawSetTimeout = global.setTimeout
 // Main-process timer fires (setTimeout/setInterval), by call site.
 const timers = new Map()
 for (const name of ['setTimeout', 'setInterval']) {
@@ -96,8 +98,80 @@ for (const name of ['setTimeout', 'setInterval']) {
     return orig.call(this, function (...a) { if (counting && line) timers.set(where, (timers.get(where) || 0) + 1); return fn.apply(this, a) }, ms, ...rest)
   }
 }
+// CPU of the main process's UI thread in ms (where the app's JS, IPC and view work run and where input
+// waits), µs resolution where getAppMetrics() counts the whole process in 10 ms ticks. Compositor/IO
+// threads are left out: they vary run to run on the pods (31-54 ms per switch on identical code) and
+// don't block input. Falls back to the whole process on an Electron without process.threadCpuUsage.
+const mainCpuMs = () => { const u = process.threadCpuUsage ? process.threadCpuUsage() : process.cpuUsage(); return (u.user + u.system) / 1000 }
 const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0)
 const top = (m, n = 8) => Object.fromEntries([...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n))
+
+// ---- main-process responsiveness: event-loop blocks ----
+// A 10 ms tick on the unpatched setTimeout; how late each tick fires is how long the main thread was
+// busy (JS or native work on the UI thread: IPC, capturePage results, JPEG encodes, view layout).
+// Input, IPC and paint scheduling for every window wait behind such a block, so this is what a
+// user feels as a hitch. A tick later than LONG_TASK_MS counts as a long task (like the renderer's
+// Long Tasks API); blockedMs sums the part of each long task over LONG_TASK_MS (total blocking time).
+// Only on while a phase is measured: never during idle, so idle CPU and timer counts stay clean.
+const LOOP_TICK_MS = 10
+const LONG_TASK_MS = 50
+const loop = { on: false, phase: '', stats: new Map(), hang: { maxBlockMs: 0, phase: '' } }
+const loopStats = () => ({ maxBlockMs: 0, longTasks: 0, blockedMs: 0, ticks: 0 })
+function loopTick() {
+  const t0 = performance.now()
+  rawSetTimeout(() => {
+    if (!loop.on) return
+    const lag = Math.max(0, performance.now() - t0 - LOOP_TICK_MS)
+    const s = loop.stats.get(loop.phase)
+    s.ticks++
+    if (lag > s.maxBlockMs) s.maxBlockMs = lag
+    if (lag > LONG_TASK_MS) { s.longTasks++; s.blockedMs += lag - LONG_TASK_MS }
+    if (lag > loop.hang.maxBlockMs) { loop.hang.maxBlockMs = lag; loop.hang.phase = loop.phase }
+    loopTick()
+  }, LOOP_TICK_MS)
+}
+function startLoop(phase) {
+  loop.phase = phase
+  if (!loop.stats.has(phase)) loop.stats.set(phase, loopStats())
+  if (!loop.on) { loop.on = true; loopTick() }
+}
+/** Stop monitoring; the phase's {maxBlockMs, longTasks, blockedMs}. */
+function stopLoop(phase = loop.phase) {
+  loop.on = false
+  const s = loop.stats.get(phase) || loopStats()
+  return { maxBlockMs: round(s.maxBlockMs), longTasks: s.longTasks, blockedMs: round(s.blockedMs) }
+}
+
+// ---- shell UI jank: long animation frames in the toolbar/sidebar/content renderers ----
+// The Long Animation Frames API (Chromium 123+) reports every frame (or task) that took over 50 ms
+// from start to paint in that renderer: a hitch in the toolbar or sidebar while tabs switch, open
+// or close. No rAF loop, so measuring costs the renderers nothing between long frames. Event Timing
+// entries (input -> next paint, 16 ms+) are kept too, for the keyboard tab switch.
+const SHELL_OBSERVER = `(() => {
+  if (window.__perfFrames) return true
+  const f = window.__perfFrames = { loaf: [], events: [] }
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) f.loaf.push([performance.timeOrigin + e.startTime, e.duration, e.blockingDuration || 0]) }).observe({ type: 'long-animation-frame' }) } catch { f.noLoaf = true }
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) f.events.push([performance.timeOrigin + e.startTime, e.duration, e.name]) }).observe({ type: 'event', durationThreshold: 16 }) } catch {}
+  return true
+})()`
+async function observeShell() {
+  for (const c of webContents.getAllWebContents()) {
+    if (c.isDestroyed() || !surfaceOf(c)) continue
+    await c.executeJavaScript(SHELL_OBSERVER).catch(() => {})
+  }
+}
+/** Long frames in every shell renderer between two epoch times: count, longest, summed blocking. */
+async function shellJank(t0, t1) {
+  let longFrames = 0; let maxFrameMs = 0; let blockingMs = 0
+  for (const c of webContents.getAllWebContents()) {
+    if (c.isDestroyed() || !surfaceOf(c)) continue
+    const entries = await c.executeJavaScript(`(window.__perfFrames?.loaf || []).filter((e) => e[0] >= ${t0} && e[0] < ${t1})`).catch(() => [])
+    // A long frame with no blocking time is a renderer waiting for its turn to draw (hidden or
+    // throttled surface), not a hitch: count only frames whose tasks blocked input.
+    for (const [, d, b] of entries) { if (!(b > 0)) continue; longFrames++; maxFrameMs = Math.max(maxFrameMs, d); blockingMs += b }
+  }
+  return { shellLongFrames: longFrames, shellMaxFrameMs: round(maxFrameMs), shellBlockingMs: round(blockingMs) }
+}
 
 // ---- fixture site ----
 const PAGE = (n) => `<!doctype html><meta charset="utf-8"><title>Page ${n}</title><style>body{font:16px system-ui;margin:40px}</style>
@@ -293,6 +367,7 @@ async function run() {
   result.startup.ipcCount = ipc.count
   result.startup.ipcTop = top(ipc.channels, 12)
   result.mem1 = memory()
+  await observeShell()
 
   await openTabs(1, TABS_MID - 1)
   await delay(1500)
@@ -302,11 +377,13 @@ async function run() {
   // IPC while opening the next batch of tabs (20 by default).
   resetIpc(); counting = true
   const c0 = cpuSeconds(); const w0 = Date.now()
+  startLoop('openTabs')
   await openTabs(TABS_MID, TABS_MAX - TABS_MID)
   await delay(1000)
   counting = false
   const c1 = cpuSeconds()
-  result.openTabs = { tabs: TABS_MAX - TABS_MID, ipcCount: ipc.count, ipcBytes: ipc.bytes, wallMs: Date.now() - w0, mainCpuMs: Math.round((c1.main - c0.main) * 1000), top: top(ipc.channels) }
+  const openLoop = stopLoop()
+  result.openTabs = { tabs: TABS_MAX - TABS_MID, ipcCount: ipc.count, ipcBytes: ipc.bytes, wallMs: Date.now() - w0, mainCpuMs: Math.round((c1.main - c0.main) * 1000), loop: openLoop, ...(await shellJank(w0, Date.now())), top: top(ipc.channels) }
   await delay(1500)
   result.memMax = { tabs: TABS_MAX, ...memory() }
   step(`${TABS_MAX} tabs`)
@@ -325,6 +402,8 @@ async function run() {
   const tabs = (await api('window.api.browser.tabs.get()')).filter((t) => /\/p\d+$/.test(t.url)).slice(0, TABS_MID)
   const byPath = (p) => webContents.getAllWebContents().find((c) => !c.isDestroyed() && c.getURL().endsWith(p))
   const sw = []
+  const s0 = cpuSeconds(); const sm0 = mainCpuMs(); const sw0 = Date.now()
+  startLoop('tabSwitch')
   for (let i = 0; i < SWITCHES; i++) {
     const tab = tabs[i % tabs.length]
     const wc = byPath(new URL(tab.url).pathname)
@@ -334,30 +413,129 @@ async function run() {
     sw.push(performance.now() - s)
     await delay(100)
   }
-  result.tabSwitch = { medianMs: round(median(sw)), samples: sw.length }
+  const s1 = cpuSeconds(); const sm1 = mainCpuMs()
+  const switchLoop = stopLoop()
+  result.tabSwitch = {
+    medianMs: round(median(sw)), samples: sw.length,
+    // Main/shell CPU per switch: the activation, the outgoing tab's capture (overview thumbnail, wake
+    // snapshot) and the broadcasts the shell renders.
+    mainCpuMsPerSwitch: round((sm1 - sm0) / SWITCHES), shellCpuMsPerSwitch: round(((s1.shell - s0.shell) * 1000) / SWITCHES),
+    loop: switchLoop, ...(await shellJank(sw0, Date.now()))
+  }
   step('tab switch')
+
+  // Keyboard tab switch (Ctrl/Cmd+1..3 sent to the page, like a user): keystroke -> the tab's view
+  // attached -> two frames painted. The bench marks every tab as on screen long enough for its picture
+  // to be kept (SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS=0), and waits KEY_SWITCH_GAP_MS between keys so
+  // the deferred wake-snapshot encode lands inside the switch that caused it: main CPU per switch is
+  // then the full cost of leaving a tab you were reading. Three tabs, cycled twice: the second
+  // cycle leaves tabs that haven't changed since their last picture.
+  const KEY_SWITCHES = cfg.keySwitches ?? 5
+  const KEY_SWITCH_GAP_MS = 420
+  const primary = process.platform === 'darwin' ? 'meta' : 'control'
+  const visiblePage = () => [...attached()].find(([c, v]) => !c.isDestroyed() && !surfaceOf(c) && v.getVisible())?.[0]
+  process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS = '0'
+  const ks = []
+  const k0 = mainCpuMs(); const kw0 = Date.now()
+  startLoop('keySwitch')
+  for (let i = 0; i < KEY_SWITCHES; i++) {
+    const n = (i % 3) + 1
+    const wc = byPath(`/p${n - 1}`)
+    const from = visiblePage()
+    if (!wc || !from) break
+    const s = performance.now()
+    from.sendInputEvent({ type: 'keyDown', keyCode: String(n), modifiers: [primary] })
+    from.sendInputEvent({ type: 'keyUp', keyCode: String(n), modifiers: [primary] })
+    const ok = await waitFor(() => attached().get(wc)?.getVisible(), 'key switch', 3000).then(() => true, () => false)
+    if (ok) { await twoFrames(wc); if (from !== wc) ks.push(performance.now() - s) }
+    await delay(Math.max(0, KEY_SWITCH_GAP_MS - (performance.now() - s)))
+  }
+  await delay(100)
+  const k1 = mainCpuMs()
+  const keyLoop = stopLoop()
+  delete process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS
+  result.keySwitch = {
+    medianMs: round(median(ks)), samples: ks.length,
+    mainCpuMsPerSwitch: ks.length ? round((k1 - k0) / ks.length) : NaN,
+    loop: keyLoop, ...(await shellJank(kw0, Date.now()))
+  }
+  step(`key switch ${JSON.stringify(result.keySwitch)}`)
+
+  // Pointer over a page: moving the mouse and scrolling with the wheel. Every mouse event a page gets
+  // also reaches main (before-mouse-event: sidebar edge reveal, popover dismiss), and real input is
+  // routed through the main (UI) thread, so main CPU and blocks here are what pointer input costs.
+  const page = visiblePage()
+  if (page) {
+    await page.executeJavaScript(`(() => { window.__perfScrolls = 0; addEventListener('scroll', () => window.__perfScrolls++, { passive: true }); scrollTo(0, 0); return true })()`).catch(() => {})
+    const bounds = attached().get(page)?.getBounds() || { width: 800, height: 600 }
+    const POINTER_EVENTS = 48
+    const pc0 = mainCpuMs(); const pw0 = Date.now()
+    startLoop('pointer')
+    for (let i = 0; i < POINTER_EVENTS; i++) {
+      const x = Math.round(bounds.width * (0.3 + 0.4 * (i / POINTER_EVENTS))); const y = Math.round(bounds.height / 2)
+      if (i % 4 === 3) page.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: 0, deltaY: i < POINTER_EVENTS / 2 ? -100 : 100, canScroll: true })
+      else page.sendInputEvent({ type: 'mouseMove', x, y })
+      await delay(8)
+    }
+    await delay(200)
+    const pc1 = mainCpuMs()
+    const pointerLoop = stopLoop()
+    const scrolls = await page.executeJavaScript('window.__perfScrolls || 0').catch(() => 0)
+    result.pointer = { events: POINTER_EVENTS, scrollEvents: scrolls, mainCpuMs: round(pc1 - pc0), loop: pointerLoop, ...(await shellJank(pw0, Date.now())) }
+    step(`pointer ${JSON.stringify(result.pointer)}`)
+  }
 
   // New tab with a site: create -> first contentful paint in the new tab.
   const nt = []
+  const created = []
+  const nw0 = Date.now()
+  startLoop('newTab')
   for (let i = 0; i < NEW_TABS; i++) {
     const s = performance.now()
-    await api(`window.api.browser.tabs.create(${JSON.stringify(`${origin}/n${i}`)})`)
+    created.push(await api(`window.api.browser.tabs.create(${JSON.stringify(`${origin}/n${i}`)})`))
     const wc = await waitFor(() => byPath(`/n${i}`), 'new tab', 10000)
     const paint = await fcpOf(wc)
     nt.push(paint - (performance.timeOrigin + s))
-    await delay(150)
+    await delay(100)
   }
   const blank = []
   for (let i = 0; i < 3; i++) {
     const s = performance.now()
-    await api('window.api.browser.tabs.create()')
+    created.push(await api('window.api.browser.tabs.create()'))
     await waitFor(() => attached().get(content.webContents)?.getVisible(), 'new tab page', 5000)
     await twoFrames(content.webContents)
     blank.push(performance.now() - s)
-    await delay(150)
+    await delay(100)
   }
-  result.newTab = { siteFirstPaintMs: round(median(nt)), newTabPageMs: round(median(blank)) }
+  const newTabLoop = stopLoop()
+  result.newTab = { siteFirstPaintMs: round(median(nt)), newTabPageMs: round(median(blank)), loop: newTabLoop, ...(await shellJank(nw0, Date.now())) }
   step('new tab')
+
+  // Closing tabs: the tabs the new-tab step opened, one at a time, each close activating the next
+  // (close -> next tab on screen, the shell re-rendering its list).
+  const toClose = created.filter(Boolean).reverse()
+  const cl = []
+  const cc0 = mainCpuMs(); const cw0 = Date.now()
+  startLoop('closeTabs')
+  for (const t of toClose) {
+    const s = performance.now()
+    await api(`window.api.browser.tabs.close(${JSON.stringify(t)})`)
+    const shown = visiblePage() ?? (attached().get(content.webContents)?.getVisible() ? content.webContents : null)
+    if (shown) await twoFrames(shown).catch(() => {})
+    cl.push(performance.now() - s)
+    await delay(100)
+  }
+  const cc1 = mainCpuMs()
+  const closeLoop = stopLoop()
+  result.closeTabs = { closed: cl.length, medianMs: round(median(cl)), mainCpuMsPerClose: cl.length ? round((cc1 - cc0) / cl.length) : NaN, loop: closeLoop, ...(await shellJank(cw0, Date.now())) }
+  step(`close tabs ${JSON.stringify(result.closeTabs)}`)
+  // Shell jank over every tab operation above (open, switch by API and by key, new tab, close).
+  const tabOps = ['openTabs', 'tabSwitch', 'keySwitch', 'newTab', 'closeTabs'].map((k) => result[k]).filter(Boolean)
+  result.shell = {
+    longFrames: tabOps.reduce((n, r) => n + (r.shellLongFrames || 0), 0),
+    blockingMs: round(tabOps.reduce((n, r) => n + (r.shellBlockingMs || 0), 0)),
+    maxFrameMs: round(Math.max(0, ...tabOps.map((r) => r.shellMaxFrameMs || 0)))
+  }
 
   // Window open/close cycles: anything left behind is a leak.
   const count = () => ({ windows: BaseWindow.getAllWindows().length, webContents: webContents.getAllWebContents().length, shell: webContents.getAllWebContents().filter((c) => !c.isDestroyed() && surfaceOf(c)).length, ...memory() })
@@ -384,26 +562,30 @@ async function run() {
         try { c.debugger.detach() } catch {}
       }
     }
-    await delay(500)
+    await delay(300)
     step(`window cycles: reclaimed in ${seen.size} UI renderer(s): ${was} -> ${memory().totalMB} MB`)
   }
-  await delay(500)
+  await delay(200)
   await collectShellGarbage()
   const before = count()
+  startLoop('windowCycles')
   for (let i = 0; i < WINDOW_CYCLES; i++) {
     await api('window.api.browser.tabs.newWindow(false)')
     const w2 = await waitFor(() => BaseWindow.getAllWindows().find((w) => w !== win && w.isVisible()), 'second window', 15000)
     await delay(400)
     w2.close()
     await waitFor(() => BaseWindow.getAllWindows().length === 1, 'window closed', 15000)
-    await delay(300)
+    await delay(200)
   }
-  await delay(1500)
+  const windowLoop = stopLoop()
+  await delay(600)
   const afterBeforeGc = memory().totalMB
   await collectShellGarbage()
   const after = count()
-  result.windowCycles = { cycles: WINDOW_CYCLES, processesGrowth: after.processes - before.processes, webContentsGrowth: after.webContents - before.webContents, shellGrowth: after.shell - before.shell, memGrowthMB: after.totalMB - before.totalMB, memGrowthBeforeGcMB: afterBeforeGc - before.totalMB }
+  result.windowCycles = { cycles: WINDOW_CYCLES, processesGrowth: after.processes - before.processes, webContentsGrowth: after.webContents - before.webContents, shellGrowth: after.shell - before.shell, memGrowthMB: after.totalMB - before.totalMB, memGrowthBeforeGcMB: afterBeforeGc - before.totalMB, loop: windowLoop }
   step('window cycles')
+  // Hang detection: the longest the main thread was blocked in any measured phase (after start-up).
+  result.hang = { maxBlockMs: round(loop.hang.maxBlockMs), phase: loop.hang.phase, longTasks: [...loop.stats.values()].reduce((n, s) => n + s.longTasks, 0) }
 
   // Mixed sites: SITE_TABS tabs over SITES sites (*.localhost, separate sites to Chromium). How many
   // renderers host them (their pages and iframes) and those processes' memory.
@@ -411,7 +593,7 @@ async function run() {
   const isSiteTab = (c) => /\/\/site\d+\.localhost:\d+\/s\d+$/.test(c.getURL())
   for (let i = 0; i < SITE_TABS; i++) await api(`window.api.browser.tabs.create(${JSON.stringify(siteTabUrl(i))})`)
   await waitFor(() => webContents.getAllWebContents().filter((c) => !c.isDestroyed() && isSiteTab(c) && !c.isLoading()).length >= SITE_TABS, 'site tabs loaded', 60000)
-  await delay(1500)
+  await delay(1000)
   const sitePids = new Set()
   for (const c of webContents.getAllWebContents()) {
     if (c.isDestroyed() || !isSiteTab(c)) continue
@@ -428,12 +610,12 @@ async function run() {
   for (let i = 0; i < ADBLOCK_NAVS; i++) {
     await api(`window.api.browser.navigate(${JSON.stringify(videoUrl(i))})`)
     await waitFor(() => webContents.getAllWebContents().find((c) => !c.isDestroyed() && isVideo(c, i) && !c.isLoading()), `video ${i}`, 15000)
-    await delay(300)
+    await delay(150)
   }
   const navStarts = adblock.starts
   const video = webContents.getAllWebContents().find((c) => !c.isDestroyed() && isVideo(c, ADBLOCK_NAVS - 1))
   if (video) await video.executeJavaScript(`for (let i = 0; i < 3; i++) history.pushState({}, '', '/spa' + i); location.hash = 'x'`)
-  await delay(500)
+  await delay(300)
   adblock.counting = false
   result.adblock = {
     navigations: ADBLOCK_NAVS,

@@ -24,6 +24,10 @@
     "darwin": { "noisyFail": false }
   },
   "groups": {
+    "responsiveness": {
+      "title": "Responsiveness during tab operations (warn-only)",
+      "note": "Main-thread blocks come from a 10 ms tick in the main process (how late it fires = how long the UI thread was busy; long task = over 50 ms), on only while a phase runs. Main-thread CPU = the browser process's UI thread (process.threadCpuUsage), where app JS, IPC and view work run. Keyboard switch = Ctrl/Cmd+1..3 sent to the page, every tab counted as read long enough for its wake snapshot, 420 ms between keys so the deferred encode lands in the switch that caused it. Shell long frames = Long Animation Frames with blocking time in the toolbar/sidebar/content renderers during opening, switching, new tabs and closing. Hang check = the longest block in any phase after start-up."
+    },
     "phases": {
       "title": "Cold start by phase (warn-only)",
       "note": "Each row is ms from process start to that point (best of the runs; the bench's own profile seeding is cut out). Main-process marks come from `traceStartup()` in src/main/startup-defer.ts, the toolbar from its `surffish:first-commit` mark (it sits hidden behind the New Tab page, so it has no paint of its own); a build without them shows –. Warm start = a start-up-only launch on the profile the warm-up left behind (V8 code cache, HTTP cache, window state already there)."
@@ -60,6 +64,20 @@
     "windowCycles.processesGrowth": { "kind": "leak", "label": "processes left after 3 window open/close", "unit": "" },
     "windowCycles.webContentsGrowth": { "kind": "leak", "label": "webContents left after 3 window open/close", "unit": "" },
     "windowCycles.memGrowthMB": { "kind": "noisy", "label": "memory growth after 3 window open/close", "unit": "MB", "abs": 40 },
+    "tabSwitch.mainCpuMsPerSwitch": { "kind": "noisy", "label": "main-thread CPU per tab switch", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
+    "tabSwitch.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, switching tabs", "unit": "ms", "abs": 25, "warnOnly": true, "group": "responsiveness" },
+    "keySwitch.medianMs": { "kind": "noisy", "label": "keyboard tab switch, key to painted", "unit": "ms", "abs": 20, "warnOnly": true, "group": "responsiveness" },
+    "keySwitch.mainCpuMsPerSwitch": { "kind": "noisy", "label": "main-thread CPU leaving a tab you were reading (capture, thumbnail, wake snapshot)", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
+    "openTabs.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, opening 20 tabs", "unit": "ms", "abs": 30, "warnOnly": true, "group": "responsiveness" },
+    "openTabs.loop.longTasks": { "kind": "noisy", "label": "main-thread long tasks (over 50 ms), opening 20 tabs", "unit": "", "abs": 3, "warnOnly": true, "group": "responsiveness" },
+    "closeTabs.medianMs": { "kind": "noisy", "label": "close tab to next tab painted", "unit": "ms", "abs": 20, "warnOnly": true, "group": "responsiveness" },
+    "closeTabs.mainCpuMsPerClose": { "kind": "noisy", "label": "main-thread CPU per tab close", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
+    "closeTabs.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, closing tabs", "unit": "ms", "abs": 25, "warnOnly": true, "group": "responsiveness" },
+    "pointer.mainCpuMs": { "kind": "noisy", "label": "main-thread CPU for 48 mouse moves and wheel scrolls over a page", "unit": "ms", "abs": 10, "warnOnly": true, "group": "responsiveness" },
+    "shell.longFrames": { "kind": "noisy", "label": "shell long frames (toolbar/sidebar) during tab operations", "unit": "", "abs": 3, "warnOnly": true, "group": "responsiveness" },
+    "shell.blockingMs": { "kind": "noisy", "label": "shell blocking time during tab operations", "unit": "ms", "abs": 50, "warnOnly": true, "group": "responsiveness" },
+    "hang.maxBlockMs": { "kind": "noisy", "label": "hang check: longest main-thread block, any phase", "unit": "ms", "abs": 50, "warnOnly": true, "group": "responsiveness" },
+    "hang.longTasks": { "kind": "noisy", "label": "main-thread long tasks, all phases", "unit": "", "abs": 5, "warnOnly": true, "group": "responsiveness" },
     "startup.phases.mainLoadedMs": { "kind": "noisy", "label": "main JS loaded (out/main/index.js evaluated)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
     "startup.phases.electronReadyMs": { "kind": "noisy", "label": "Electron ready (app 'ready' event)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
     "startup.phases.profileReadyMs": { "kind": "noisy", "label": "profile ready (proxy, safety, cookies, downloads)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },

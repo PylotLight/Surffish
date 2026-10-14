@@ -3435,7 +3435,14 @@ export function updateBrowserPageScale(contents: WebContents, input: unknown): v
 function wasShownLongEnough(tab: BrowserTab): boolean {
   const shownAt = tabShownAt.get(tab)
   // Never stamped: the tab was on screen from start-up (restored session), so it counts as seen.
-  return shownAt === undefined || Date.now() - shownAt >= WAKE_SNAPSHOT_MIN_SHOWN_MS
+  return shownAt === undefined || Date.now() - shownAt >= wakeSnapshotMinShownMs()
+}
+
+/** WAKE_SNAPSHOT_MIN_SHOWN_MS; the perf bench lowers it (SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS) to time the full switch-away cost without dwelling 1.5 s per tab. */
+function wakeSnapshotMinShownMs(): number {
+  const override = process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS
+  const ms = override ? Number(override) : NaN
+  return Number.isFinite(ms) && ms >= 0 ? ms : WAKE_SNAPSHOT_MIN_SHOWN_MS
 }
 
 function isLocalNewTab(tab: BrowserTab): boolean {
