@@ -5,20 +5,33 @@
 import { app } from 'electron'
 import module from 'node:module'
 import { join } from 'node:path'
+import { compileCacheDirectoryFor, pruneOtherCompileCaches } from './compile-cache-dir'
 
 // Same as APP_NAME in shared/config; not imported, so this entry shares no chunk with the app.
 const APP_NAME = 'Surffish'
 
 /** The OS cache directory (purgeable, outside the profile, so dev and release builds share it safely). */
-function compileCacheDirectory(): string {
+function compileCacheRoot(): string {
   if (process.platform === 'darwin') return join(app.getPath('home'), 'Library', 'Caches', APP_NAME, 'node-compile-cache')
   if (process.platform === 'linux') return join(process.env['XDG_CACHE_HOME'] || join(app.getPath('home'), '.cache'), APP_NAME, 'node-compile-cache')
   return join(app.getPath('temp'), APP_NAME, 'node-compile-cache')
 }
 
-if (!process.env['SURFFISH_NO_COMPILE_CACHE']) {
+// Read once: the version (and the root, from app paths) must be the same when pruning later.
+function compileCacheTarget(): { root: string; version: string } | null {
+  if (process.env['SURFFISH_NO_COMPILE_CACHE']) return null
   try {
-    module.enableCompileCache?.(compileCacheDirectory())
+    return { root: compileCacheRoot(), version: app.getVersion() }
+  } catch {
+    return null
+  }
+}
+
+const compileCache = compileCacheTarget()
+
+if (compileCache) {
+  try {
+    module.enableCompileCache?.(compileCacheDirectoryFor(compileCache.root, compileCache.version))
   } catch {
     // An unwritable cache directory only costs the speed-up.
   }
@@ -27,11 +40,13 @@ if (!process.env['SURFFISH_NO_COMPILE_CACHE']) {
 await import('./index')
 
 // Node writes the cache at exit; also write what start-up compiled once it has settled, so a crash
-// or a killed process still leaves a warm cache for the next launch.
+// or a killed process still leaves a warm cache for the next launch. Then drop older versions' caches
+// (and the pre-versioned layout), which nothing reads after an update.
 setTimeout(() => {
   try {
     module.flushCompileCache?.()
   } catch {
     // Best effort.
   }
+  if (compileCache) pruneOtherCompileCaches(compileCache.root, compileCache.version)
 }, 15_000).unref?.()
