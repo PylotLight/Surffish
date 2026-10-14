@@ -390,6 +390,24 @@ export function registerIpc(): void {
     writeBrambleClipboardText(value)
     return true
   })
+  // Quick unlock (PIN / Touch ID) for Bramble: the module loads on the first call, never at startup.
+  const quickUnlock = (): Promise<typeof import('./bramble-quick-unlock')> => import('./bramble-quick-unlock')
+  ipcMain.handle('browser:bramble:quick-unlock:get', async (event) => {
+    assertMainRenderer(event)
+    return (await quickUnlock()).getQuickUnlockState()
+  })
+  ipcMain.handle('browser:bramble:quick-unlock:enrol', async (event, input: unknown) => {
+    assertMainRenderer(event)
+    return (await quickUnlock()).enrolQuickUnlock(input)
+  })
+  ipcMain.handle('browser:bramble:quick-unlock:disable', async (event) => {
+    assertMainRenderer(event)
+    return (await quickUnlock()).disableQuickUnlock()
+  })
+  ipcMain.handle('browser:bramble:quick-unlock:set-touch-id', async (event, enabled: unknown) => {
+    assertMainRenderer(event)
+    return (await quickUnlock()).setQuickUnlockTouchId(enabled)
+  })
   ipcMain.handle('browser:extensions:get', (event) => {
     assertMainRenderer(event)
     return getWebStoreExtensionsState()

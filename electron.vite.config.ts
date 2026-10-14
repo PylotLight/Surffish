@@ -47,6 +47,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/extension-bridge.cjs'),
       join(outputDirectory, 'extension-bridge.cjs')
     )
+    // Surffish's quick unlock panel over Bramble's popup.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/bramble-quick-unlock.cjs'),
+      join(outputDirectory, 'bramble-quick-unlock.cjs')
+    )
     // Built-in PDF editor page bridge.
     copyFileSync(
       resolve(projectDirectory, 'src/preload/pdf-editor.cjs'),

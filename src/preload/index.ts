@@ -28,6 +28,7 @@ import type {
   WebStoreExtensionsState
 } from '../shared/types'
 import type { DownloadEntry } from '../shared/downloads'
+import type { BrambleQuickUnlockEnrolInput, BrambleQuickUnlockState, QuickUnlockResult } from '../shared/bramble-quick-unlock'
 import type { NavigateResult } from '../shared/navigation-errors'
 import type { SpellcheckSettings } from '../shared/spellcheck'
 import type { ProxyGuardStatus } from '../shared/proxy-guard'
@@ -291,6 +292,18 @@ const api = {
         const listener = (_event: Electron.IpcRendererEvent, state: BrambleExtensionState): void => callback(state)
         ipcRenderer.on('browser:bramble:changed', listener)
         return () => ipcRenderer.removeListener('browser:bramble:changed', listener)
+      },
+      /** Surffish's PIN / Touch ID quick unlock for Bramble (Settings → Integrations). */
+      quickUnlock: {
+        get: (): Promise<BrambleQuickUnlockState> => ipcRenderer.invoke('browser:bramble:quick-unlock:get'),
+        enrol: (input: BrambleQuickUnlockEnrolInput): Promise<QuickUnlockResult> => ipcRenderer.invoke('browser:bramble:quick-unlock:enrol', input),
+        disable: (): Promise<QuickUnlockResult> => ipcRenderer.invoke('browser:bramble:quick-unlock:disable'),
+        setTouchId: (enabled: boolean): Promise<QuickUnlockResult> => ipcRenderer.invoke('browser:bramble:quick-unlock:set-touch-id', enabled),
+        onChange: (callback: (state: BrambleQuickUnlockState) => void): (() => void) => {
+          const listener = (_event: Electron.IpcRendererEvent, state: BrambleQuickUnlockState): void => callback(state)
+          ipcRenderer.on('browser:bramble:quick-unlock:changed', listener)
+          return () => ipcRenderer.removeListener('browser:bramble:quick-unlock:changed', listener)
+        }
       }
     },
     extensions: {

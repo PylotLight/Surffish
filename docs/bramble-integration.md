@@ -21,7 +21,33 @@ The Firefox ZIP does **not** publish a detached maintainer signature on GitHub. 
 
 Bramble asks for broad `<all_urls>` access so its content scripts can match websites for autofill and its passkey bridge. The confirmation dialog lists upstream-declared API/site permissions; Settings shows the effective permissions in the adapted install. Surffish removes Firefox’s `identity` permission because Electron does not provide Bramble’s Firefox identity/OAuth flow. Bramble’s Google Drive/OAuth backup is therefore unavailable in Surffish. The existing local vault and encrypted backup/restore behavior remain in Bramble’s own UI.
 
-Surffish does not read, log, or store Bramble’s master password. Vault data belongs to Bramble’s extension storage in the persistent Surffish browser profile. Removing or changing extension files does not itself delete that data; use Bramble’s vault-management UI for vault deletion.
+Surffish does not read, log, or store Bramble’s master password unless you turn on **Quick unlock** (below). Vault data belongs to Bramble’s extension storage in the persistent Surffish browser profile. Removing or changing extension files does not itself delete that data; use Bramble’s vault-management UI for vault deletion.
+
+### storage.onChanged in Bramble’s worker
+
+Electron 44 never delivers `chrome.storage.onChanged` to an extension’s MV3 service worker (extension pages get it; even the worker’s own writes are not reported to it). Bramble’s background reschedules its `vault:autolock` alarm from that event, so a new auto-lock timeout used to apply only after the next unlock or worker restart. Surffish’s Bramble shim (`surffish-bramble-browser-alias.js`) has Bramble’s always-running offscreen page relay **local-area** changes to the worker, which replays them to the listeners Bramble registered. Session-area changes (key material) are not relayed; large values (vault blobs) are relayed as keys only. The replay stops if the native event ever starts firing in the worker.
+
+## Quick unlock (PIN / Touch ID)
+
+Bramble has no PIN unlock ([flythenimbus/bramble#88](https://github.com/flythenimbus/bramble/issues/88)) and its own Touch ID slot is a WebAuthn credential that Electron cannot create. **Settings → Integrations → Quick unlock for Bramble** adds a Surffish-only PIN (4–8 digits) and, on a Mac with Touch ID, a Touch ID button. It is layered on the unmodified extension:
+
+- **Setup:** you type the master password once into Surffish’s own form. Main encrypts it with AES-256-GCM under `HKDF(scrypt(PIN, salt) ‖ deviceKey)`; the Touch ID slot uses `HKDF(deviceKey)` behind `systemPreferences.promptTouchID`. The 32-byte device key is random; it is written to disk only encrypted by Electron `safeStorage` (Keychain on macOS). (Argon2id is used when the runtime supports it; Electron 44’s BoringSSL does not, so it is scrypt N=2^17, r=8.)
+- **Require master password after Surffish restarts** (default on): the PIN and Touch ID slots live in main-process memory only. On disk there is just the PIN wrapped under the master password, so after a restart Surffish’s panel asks for the master password once and the PIN works again. Off: the slots and the safeStorage-protected device key are kept in `bramble-quick-unlock.json` (0600), so the PIN survives restarts.
+- **Unlock:** when Bramble’s popup shows its master-password form (detected read-only from an isolated world: one `masterPassword` field in a form, no confirm field), Surffish draws its own PIN panel over the popup in a separate sandboxed view. A correct PIN decrypts the master password in main, which fills Bramble’s field (native value setter + input event, so React sees it) and submits the form. **Use master password** hides the panel for that lock screen.
+- **Lockout:** each attempt is written to disk as a failure before the PIN is checked and refunded on success, so killing Surffish never yields a free guess. Five wrong PINs wipe every slot; set it up again with the master password.
+- **Master password changed:** if Bramble rejects the filled password, Surffish wipes quick unlock and says so.
+- The panel covers the toolbar popup and the autofill “Vault locked” pop-out (both are that popup). Bramble’s options page in a tab is not covered; it shares the popup’s unlock state.
+
+Threat model: a PIN is much weaker than a master password. Someone who can run code as you, or read Surffish’s memory while it runs, can get the master password. A copied profile alone is not enough: in the default mode nothing that opens Bramble is on disk, and in persisted mode the blob is also bound to the Keychain-protected device key, so the PIN space cannot be brute-forced offline from the file.
+
+Checks against a real Bramble build (not in CI; they need the build):
+
+```sh
+xvfb-run -a electron --no-sandbox scripts/check-bramble-quick-unlock.cjs /path/to/bramble_firefox_X
+bun run build && xvfb-run -a electron --no-sandbox scripts/check-bramble-quick-unlock-app.cjs /path/to/bramble_firefox_X
+```
+
+The first creates a vault through Bramble’s setup form, checks the storage relay (auto-lock alarm moves to the new timeout at once), and fills wrong and right passwords into the real popup. The second drives the whole feature in the built app: enrol, PIN panel over the locked popup, wrong PIN, right PIN typed on the keyboard, “Use master password”, the five-strike wipe.
 
 ## Manual smoke test
 
