@@ -257,6 +257,7 @@ async function run() {
   const coldPerRequest = cold.evaluated > 0 ? cold.gateMicroseconds / cold.evaluated : 0
   const warmPerRequest = stats.evaluated > cold.evaluated ? (stats.gateMicroseconds - cold.gateMicroseconds) / (stats.evaluated - cold.evaluated) : 0
   console.log(`DNR gate: ${stats.rules} rules, ${stats.evaluated} requests evaluated, ${stats.blocked} blocked, ${stats.redirected} redirected, ${stats.allowed} allowed; ${warmPerRequest.toFixed(1)} µs per request warm (${coldPerRequest.toFixed(1)} µs over the first ${cold.evaluated}, incl. JIT warm-up) in the main-process webRequest handler`)
+  if (stats.headerMicroseconds !== undefined) console.log(`DNR header hooks: ${stats.headerMicroseconds.toFixed(0)} µs total, ${stats.headerRequests} requests changed, ${stats.headerMatchesReused} matches reused from the gate`)
   console.log('Electron extension DNR smoke passed.')
 }
 

@@ -27,6 +27,7 @@ import {
   manifestDnrRulesets,
   parseDnrRules,
   type CompiledDnrRule,
+  type DnrMatch,
   type DnrRequest,
   type DnrRulesetDeclaration,
   type HeaderRecord
@@ -74,15 +75,27 @@ export interface ExtensionDnrStats {
   headerRequests: number
   /** Total time spent in the DNR request gate, in microseconds. */
   gateMicroseconds: number
+  /** Total time spent in the DNR header hooks (request + response headers), in microseconds. */
+  headerMicroseconds: number
+  /** Header-hook matches answered from the gate's match of the same request (not matched again). */
+  headerMatchesReused: number
 }
 
 const extensions = new Map<string, ExtensionDnr>()
 const allowAllByContents = new Map<number, number>()
-const stats: ExtensionDnrStats = { extensions: 0, rules: 0, rejectedRules: 0, evaluated: 0, blocked: 0, redirected: 0, allowed: 0, headerRequests: 0, gateMicroseconds: 0 }
+const stats: ExtensionDnrStats = { extensions: 0, rules: 0, rejectedRules: 0, evaluated: 0, blocked: 0, redirected: 0, allowed: 0, headerRequests: 0, gateMicroseconds: 0, headerMicroseconds: 0, headerMatchesReused: 0 }
 let profileSession: Session | null = null
 let removeGate: (() => void) | null = null
 let removeRequestHeaders: (() => void) | null = null
 let removeResponseHeaders: (() => void) | null = null
+/**
+ * Each request's matches, from the request gate, for the header hooks of the same request
+ * (onBeforeSendHeaders, then onHeadersReceived): the rules are matched once per request, not three
+ * times. Keyed by request id and checked against the URL (a redirect is a new match); bounded,
+ * oldest first, since blocked or failed requests never reach the last hook that drops them.
+ */
+const requestMatches = new Map<number, { url: string; byExtension: Map<string, DnrMatch> }>()
+const MAX_REMEMBERED_REQUESTS = 512
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -184,6 +197,8 @@ function rebuild(entry: ExtensionDnr): void {
 }
 
 function refreshHooks(): void {
+  // Rules changed (or an extension came or went): matches remembered from the gate are stale.
+  requestMatches.clear()
   const all = [...extensions.values()]
   stats.extensions = all.length
   stats.rules = all.reduce((sum, entry) => sum + entry.matcher.size, 0)
@@ -334,13 +349,17 @@ function dnrGate(details: RequestGateDetails): Electron.CallbackResponse | null 
     if (request.type === 'main_frame' && request.tabId !== undefined) allowAllByContents.delete(request.tabId)
     let redirect: string | null = null
     let allowed = false
+    let remembered: Map<string, DnrMatch> | null = null
     for (const entry of extensions.values()) {
       if (entry.matcher.size === 0) continue
-      const rule = entry.matcher.match(request).rule
+      const match = entry.matcher.match(request)
+      if (removeRequestHeaders || removeResponseHeaders) (remembered ??= rememberMatches(details.id, request.url)).set(entry.id, match)
+      const rule = match.rule
       if (!rule || !actionAllowed(entry, rule, request)) continue
       switch (rule.action.type) {
         case 'block':
           stats.blocked += 1
+          if (remembered) requestMatches.delete(details.id)
           return { cancel: true }
         case 'redirect':
         case 'upgradeScheme':
@@ -370,14 +389,37 @@ function dnrGate(details: RequestGateDetails): Electron.CallbackResponse | null 
   }
 }
 
+function rememberMatches(id: number, url: string): Map<string, DnrMatch> {
+  const byExtension = new Map<string, DnrMatch>()
+  requestMatches.delete(id)
+  requestMatches.set(id, { url, byExtension })
+  if (requestMatches.size > MAX_REMEMBERED_REQUESTS) requestMatches.delete(requestMatches.keys().next().value as number)
+  return byExtension
+}
+
 function headerHook(details: Electron.OnBeforeSendHeadersListenerDetails | Electron.OnHeadersReceivedListenerDetails, headers: HeaderRecord, which: 'requestHeaders' | 'responseHeaders'): HeaderRecord | null {
+  const started = process.hrtime.bigint()
+  try {
+    return applyHeaderRules(details, headers, which)
+  } finally {
+    stats.headerMicroseconds += Number(process.hrtime.bigint() - started) / 1000
+  }
+}
+
+function applyHeaderRules(details: Electron.OnBeforeSendHeadersListenerDetails | Electron.OnHeadersReceivedListenerDetails, headers: HeaderRecord, which: 'requestHeaders' | 'responseHeaders'): HeaderRecord | null {
   const request = requestFor(details)
   if (!request) return null
+  const remembered = requestMatches.get(details.id)
+  const known = remembered?.url === request.url ? remembered.byExtension : null
+  // Response headers are the last hook a request reaches.
+  if (which === 'responseHeaders') requestMatches.delete(details.id)
   let current = headers
   let changed = false
   for (const entry of extensions.values()) {
     if (which === 'requestHeaders' ? !entry.matcher.hasRequestHeaderRules : !entry.matcher.hasResponseHeaderRules) continue
-    const match = entry.matcher.match(request)
+    const reused = known?.get(entry.id)
+    if (reused) stats.headerMatchesReused += 1
+    const match = reused ?? entry.matcher.match(request)
     const rules = match.headerRules.filter((rule) => actionAllowed(entry, rule, request))
     if (rules.length === 0) continue
     const next = applyDnrHeaderRules(current, rules, which)
