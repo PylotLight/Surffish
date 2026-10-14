@@ -47,8 +47,6 @@ export const READING_LIST_URL_MAX = 8_192
 /** A removed item's tombstone is kept this long so the delete can reach a sync peer. */
 export const READING_LIST_TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-export const EMPTY_READING_LIST: ReadingListSnapshot = { items: [], unread: 0 }
-
 /** The page address to save, or null when it isn't a web page (about:, file:, data:, the New Tab…). */
 export function normalizeReadingListUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null

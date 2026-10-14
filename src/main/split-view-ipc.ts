@@ -4,7 +4,6 @@ import {
   dropTabIntoSplit,
   focusAdjacentSplitPane,
   getBrowserSplitState,
-  openBrowserTabInSplitView,
   popOutBrowserSplitPane,
   splitBrowserTabWith,
   swapBrowserSplitPanes,
@@ -31,7 +30,6 @@ const optionalId = (value: unknown): string | undefined => typeof value === 'str
 export function registerSplitViewIpc(): void {
   handle('browser:split:get', () => getBrowserSplitState())
   handle('browser:split:with', (id, otherId) => typeof id === 'string' && typeof otherId === 'string' && splitBrowserTabWith(id, otherId))
-  handle('browser:split:open', (id) => typeof id === 'string' && openBrowserTabInSplitView(id))
   handle('browser:split:toggle', () => toggleBrowserSplitView())
   handle('browser:split:unsplit', (id) => unsplitBrowserTab(optionalId(id)))
   handle('browser:split:swap', (id) => swapBrowserSplitPanes(optionalId(id)))

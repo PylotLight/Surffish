@@ -331,11 +331,3 @@ export function importBookmarks(sourceLabel: string, items: readonly ImportedBoo
 export function exportBookmarksHtml(): string {
   return exportNetscapeBookmarks(toImportedTree(loadStore()), { toolbarFolderTitle: FAVOURITES_FOLDER_TITLE })
 }
-
-/** Flush now (tests / quit paths); normal edits go through deferWrite. */
-export function flushBookmarks(): void {
-  cancelDeferredWrite('bookmarks')
-  cancelDeferredWrite('bookmarks-import')
-  cancelDeferredWrite('bookmarks-json')
-  if (store) writeStore(store)
-}

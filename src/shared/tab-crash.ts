@@ -32,11 +32,6 @@ export function canAutoReload(record: TabCrashRecord, now: number): boolean {
   return recent(record.autoReloads, now).length < MAX_AUTO_RELOADS
 }
 
-/** A user-driven reload starts the count again. */
-export function resetCrashRecord(): TabCrashRecord {
-  return emptyCrashRecord()
-}
-
 const REASONS: Record<string, string> = {
   'crashed': 'the page crashed',
   'oom': 'it ran out of memory',

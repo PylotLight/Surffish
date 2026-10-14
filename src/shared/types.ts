@@ -248,31 +248,6 @@ export interface BrambleExtensionState {
   iconDataUrl: string | null
 }
 
-export interface AdblockBlockedRequest {
-  timestamp: number
-  requestHost: string
-  pageHost: string
-  resourceType: string
-}
-
-export interface AdblockDiagnostics {
-  status: 'starting' | 'active' | 'updating' | 'degraded'
-  blockingEnabled: boolean
-  source: 'none' | 'updated' | 'cache' | 'stale-cache' | 'empty'
-  lastUpdatedAt: number | null
-  blockedRequests: number
-  allowedRequests: number
-  networkFilterCount: number
-  /** Element-hiding and scriptlet rules loaded in the engine. */
-  cosmeticFilterCount: number
-  /** Scriptlets (uBO `+js` page fixes, e.g. YouTube ad removal) injected since launch. */
-  pageFixInjections: number
-  loadedListCount: number
-  loadedLists: string[]
-  recentBlockedRequests: AdblockBlockedRequest[]
-  lastError: string | null
-}
-
 export type NetworkRequestState = 'pending' | 'complete' | 'failed'
 
 export interface NetworkHeader {

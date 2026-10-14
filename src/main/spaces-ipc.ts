@@ -5,7 +5,6 @@ import {
   applyBrowserSpaceSessions,
   countBrowserTabsInSpace,
   countBrowserTabsOutsideDefaultSpace,
-  cycleBrowserSpace,
   deleteBrowserSpace,
   getBrowserSpacesSnapshot,
   mergeAllSpacesIntoDefault,
@@ -189,15 +188,8 @@ function showSpaceMenu(event: IpcMainInvokeEvent, id: unknown): boolean {
 export function registerSpacesIpc(): void {
   handle('browser:spaces:get', () => getBrowserSpacesSnapshot())
   handle('browser:spaces:switch', (_event, id) => typeof id === 'string' && switchBrowserSpace(id))
-  handle('browser:spaces:cycle', (_event, offset) => (offset === -1 || offset === 1) && cycleBrowserSpace(offset))
   handle('browser:spaces:create', (_event, input) => createBrowserSpace(input))
   handle('browser:spaces:update', (_event, id, patch) => updateBrowserSpace(id, patch))
-  handle('browser:spaces:reorder', (_event, id, toIndex) => {
-    if (typeof id !== 'string' || typeof toIndex !== 'number') return false
-    saveSpacesSettings(moveSpace(getSpacesSettings(), id, toIndex))
-    publishBrowserSpaces()
-    return true
-  })
   handle('browser:spaces:delete', (_event, id) => deleteBrowserSpaceWithConfirm(id))
   handle('browser:spaces:set-enabled', (_event, enabled) => setBrowserSpacesEnabled(enabled))
   handle('browser:spaces:move-tab', (_event, tabId, spaceId) => typeof tabId === 'string' && typeof spaceId === 'string' && moveBrowserTabToSpace(tabId, spaceId))

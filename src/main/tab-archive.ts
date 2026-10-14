@@ -200,12 +200,6 @@ export function initializeTabArchive(): void {
   })
 }
 
-export function disposeTabArchive(): void {
-  if (checkTimer) clearInterval(checkTimer)
-  checkTimer = null
-  setBrowserTabMenuExtras(null)
-}
-
 function assertMainRenderer(event: IpcMainInvokeEvent): void {
   if (!isMainWindowRenderer(event.sender, event.senderFrame)) {
     throw new Error('This browser operation is available only to the app window.')

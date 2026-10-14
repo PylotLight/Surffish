@@ -51,8 +51,6 @@ export const MAX_PROXY_RULES = 500
 export const PROXY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,31}$/
 const LOOPBACK_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 
-export const EMPTY_PROXY_ROUTING: ProxyRoutingSettings = { proxies: [], rules: [] }
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

@@ -115,19 +115,6 @@ async function verifyRouting(target: Electron.Session, input: ProxyRoutingInput)
   }
 }
 
-type ProxySettingsListener = (settings: BrowserProxySettings) => void
-const proxySettingsListeners = new Set<ProxySettingsListener>()
-
-/** Hear about the applied proxy settings (at startup and after every change). */
-export function onProxySettingsChanged(listener: ProxySettingsListener): () => void {
-  proxySettingsListeners.add(listener)
-  return () => { proxySettingsListeners.delete(listener) }
-}
-
-function notifyProxySettings(): void {
-  for (const listener of proxySettingsListeners) listener({ ...currentSettings })
-  notifyRouting()
-}
 
 type ProxyRoutingListener = (input: ProxyRoutingInput) => void
 const routingListeners = new Set<ProxyRoutingListener>()
@@ -305,7 +292,7 @@ export async function setBrowserProxySettings(input: unknown): Promise<BrowserPr
   persistSettings(settings)
   currentSettings = settings
   applyWebRTCPolicyToAll(routingInput())
-  notifyProxySettings()
+  notifyRouting()
   return { ...currentSettings }
 }
 

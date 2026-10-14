@@ -663,10 +663,6 @@ function useWindow(win: BaseWindow | null): void {
   if (existing) bindContentsToWindow(existing.webContents, win)
 }
 
-export function isScreenshotOpen(): boolean {
-  return session !== null
-}
-
 /** Diagnostics: the overlay's web contents id once it has been created. */
 export function getScreenshotContentsId(): number | null {
   return liveView()?.webContents.id ?? null

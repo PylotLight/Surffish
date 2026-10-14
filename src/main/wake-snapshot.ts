@@ -55,7 +55,6 @@ interface Presentation {
 const store = new WakeSnapshotStore<StoredSnapshot>()
 const presentations = new Map<BaseWindow, Presentation>()
 let nextToken = 1
-let shownCount = 0
 let registered = false
 /** Bumped when private browsing ends, so a private snapshot still waiting to be encoded never lands. */
 let privateEpoch = 0
@@ -124,15 +123,6 @@ export function forgetWakeSnapshotTab(tabId: string): void {
 export function dropPrivateWakeSnapshots(): void {
   store.deleteWhere((entry) => entry.isPrivate)
   privateEpoch += 1
-}
-
-export function hasWakeSnapshot(tabId: string): boolean {
-  return store.has(tabId)
-}
-
-/** Diagnostics / smokes: how many snapshots are held and their total size. */
-export function getWakeSnapshotStats(): { count: number; bytes: number; shown: number; showing: number } {
-  return { count: store.size, bytes: store.totalBytes, shown: shownCount, showing: presentations.size }
 }
 
 function clearTimers(presentation: Presentation): void {
@@ -274,7 +264,6 @@ export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: Web
     rect: presentation.rect
   }
   toolbar.send(WAKE_SNAPSHOT_SHOW_CHANNEL, message)
-  shownCount += 1
   return true
 }
 

@@ -5,10 +5,8 @@ import type { NewSpaceInput, SpaceDefinition, SpacePatch, SpacesSnapshot } from 
 export const spacesApi = {
   get: (): Promise<SpacesSnapshot> => ipcRenderer.invoke('browser:spaces:get'),
   switch: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:spaces:switch', id),
-  cycle: (offset: -1 | 1): Promise<boolean> => ipcRenderer.invoke('browser:spaces:cycle', offset),
   create: (input?: NewSpaceInput): Promise<string | null> => ipcRenderer.invoke('browser:spaces:create', input),
   update: (id: string, patch: SpacePatch): Promise<SpaceDefinition | null> => ipcRenderer.invoke('browser:spaces:update', id, patch),
-  reorder: (id: string, toIndex: number): Promise<boolean> => ipcRenderer.invoke('browser:spaces:reorder', id, toIndex),
   /** Asks first (native dialog) when the Space has tabs. */
   remove: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:spaces:delete', id),
   /** Turning off with tabs in other Spaces asks first; resolves to the setting in force afterwards. */

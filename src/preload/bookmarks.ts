@@ -10,7 +10,6 @@ export const bookmarksApi = {
   update: (id: string, patch: { title?: string; url?: string; parentId?: string }): Promise<BookmarkNode> => ipcRenderer.invoke('browser:bookmarks:update', id, patch),
   move: (ids: string[], parentId: string, index?: number): Promise<number> => ipcRenderer.invoke('browser:bookmarks:move', ids, parentId, index),
   remove: (ids: string[]): Promise<number> => ipcRenderer.invoke('browser:bookmarks:delete', ids),
-  bookmarkAllTabs: (): Promise<{ folderId: string; title: string; added: number } | null> => ipcRenderer.invoke('browser:bookmarks:bookmark-all-tabs'),
   contextMenu: (request: { type: 'folder' | 'bookmark'; fixed?: boolean; childCount?: number }): Promise<BookmarkMenuAction | null> => ipcRenderer.invoke('browser:bookmarks:context-menu', request),
   importSources: (): Promise<BookmarkImportSource[]> => ipcRenderer.invoke('browser:bookmarks:import-sources'),
   importFrom: (id: string, options: { bookmarks: boolean; history: boolean }): Promise<BookmarkImportSummary> => ipcRenderer.invoke('browser:bookmarks:import', id, options),

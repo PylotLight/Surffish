@@ -125,10 +125,8 @@ const api = {
         return () => ipcRenderer.removeListener('browser:updates:reveal', listener)
       }
     },
-    getTabSleepMinutes: (): Promise<TabSleepMinutes> => ipcRenderer.invoke('browser:tab-sleep:get'),
     setTabSleepMinutes: (minutes: TabSleepMinutes): Promise<TabSleepMinutes | null> => ipcRenderer.invoke('browser:tab-sleep:set', minutes),
     newTabPage: {
-      get: (): Promise<NewTabPageId> => ipcRenderer.invoke('browser:new-tab-page:get'),
       set: (page: NewTabPageId): Promise<NewTabPageId | null> => ipcRenderer.invoke('browser:new-tab-page:set', page)
     },
     newTabPreferences: {

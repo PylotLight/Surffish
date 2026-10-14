@@ -49,10 +49,6 @@ export function groupSelectedBrowserTabs(win: BaseWindow | null = currentBrowser
   return groupId
 }
 
-export function hasBrowserTabSelection(win: BaseWindow | null = currentBrowserWindow()): boolean {
-  return getSelectedBrowserTabIds(win).length >= 2
-}
-
 /** Move the selected tabs (with their splits) into one new window, in order. */
 function moveSelectedTabsToNewWindow(ids: readonly string[], win: BaseWindow): void {
   const [first, ...rest] = ids

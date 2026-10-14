@@ -80,13 +80,11 @@ import { getMainWindow } from './window'
 import { registerSafetyIpc } from './safety'
 import {
   clearSavedBrowserSession,
-  getBrowserNewTabPage,
   getBrowserSiteFaviconCache,
   getBrowserPinnedSites,
   getBrowserSiteSettings,
   getBrowserSearchEngine,
   getBrowserPreferencesSnapshot,
-  getBrowserTabSleepMinutes,
   saveBrowserNewTabPage,
   saveBrowserPinnedSites,
   saveBrowserSiteSettings,
@@ -227,10 +225,6 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     return makeDefaultBrowser()
   })
-  ipcMain.handle('browser:tab-sleep:get', (event) => {
-    assertMainRenderer(event)
-    return getBrowserTabSleepMinutes()
-  })
   ipcMain.handle('browser:tab-sleep:set', (event, value: unknown) => {
     assertMainRenderer(event)
     const saved = setBrowserTabSleepMinutes(value)
@@ -239,10 +233,6 @@ export function registerIpc(): void {
       sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
     }
     return saved
-  })
-  ipcMain.handle('browser:new-tab-page:get', (event) => {
-    assertMainRenderer(event)
-    return getBrowserNewTabPage()
   })
   ipcMain.handle('browser:new-tab-page:set', (event, value: unknown) => {
     assertMainRenderer(event)

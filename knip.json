@@ -1,0 +1,52 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "bun": false,
+  "entry": [
+    "electron.vite.config.ts",
+    "src/main/boot.ts",
+    "src/main/index.ts",
+    "src/main/adblock-engine.ts",
+    "src/preload/index.ts",
+    "src/preload/*.cjs",
+    "src/renderer/src/main.tsx",
+    "src/renderer/src/pdf-editor/main.ts",
+    "src/renderer/src/reader/main.ts",
+    "scripts/**/*.{ts,cjs,mjs,js}",
+    "src/**/*.test.{ts,cjs}"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx,cjs,mjs,js}",
+    "scripts/**/*.{ts,cjs,mjs,js}"
+  ],
+  "ignore": [
+    "src/native/**"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "ignoreDependencies": [
+    "node-api-headers",
+    "lightningcss"
+  ],
+  "ignoreBinaries": [
+    "check"
+  ],
+  "ignoreIssues": {
+    "src/main/certificate-inspect.ts": [
+      "exports"
+    ],
+    "src/main/extension-runtime-support.ts": [
+      "exports"
+    ],
+    "src/main/feeds.ts": [
+      "exports"
+    ],
+    "src/main/glance.ts": [
+      "exports"
+    ],
+    "src/main/page-watchers.ts": [
+      "exports"
+    ],
+    "src/main/reading-list.ts": [
+      "exports"
+    ]
+  }
+}

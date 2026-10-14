@@ -48,11 +48,6 @@ function loadWatcherModule(): Promise<WatcherModule> {
   return loadingModule
 }
 
-/** Only for a test or diagnostics: is the scheduler module in memory? */
-export function isPageWatcherModuleLoaded(): boolean {
-  return watcherModule !== null
-}
-
 async function start(options: { startupHold: boolean }): Promise<void> {
   if (started || quitting) return
   started = true

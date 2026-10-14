@@ -11,8 +11,6 @@ export const splitViewApi = {
   get: (): Promise<SplitViewSnapshot> => ipcRenderer.invoke('browser:split:get'),
   /** `id` left, `otherId` right. */
   with: (id: string, otherId: string): Promise<boolean> => ipcRenderer.invoke('browser:split:with', id, otherId),
-  /** Show `id` next to the active tab. */
-  open: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:split:open', id),
   toggle: (): Promise<boolean> => ipcRenderer.invoke('browser:split:toggle'),
   unsplit: (id?: string): Promise<boolean> => ipcRenderer.invoke('browser:split:unsplit', id),
   swap: (id?: string): Promise<boolean> => ipcRenderer.invoke('browser:split:swap', id),

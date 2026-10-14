@@ -68,12 +68,6 @@ function live(contents: WebContents | null | undefined): contents is WebContents
   return Boolean(contents && !contents.isDestroyed())
 }
 
-function glanceFor(window: BaseWindow | null): Glance | null {
-  if (window) return glances.get(window) ?? null
-  if (glances.size === 1) return [...glances.values()][0] ?? null
-  return null
-}
-
 function fromChrome(event: IpcMainEvent): Glance | null {
   for (const glance of glances.values()) if (glance.chrome.webContents === event.sender) return glance
   return null
@@ -334,23 +328,6 @@ function promote(glance: Glance, activate: boolean): string | null {
     return null
   }
   return id
-}
-
-export function isGlanceOpenIn(window: BaseWindow | null): boolean {
-  const glance = glanceFor(window)
-  return Boolean(glance && !glance.ended)
-}
-
-export function closeGlanceIn(window: BaseWindow | null): boolean {
-  const glance = glanceFor(window)
-  if (!glance) return false
-  endGlance(glance, true)
-  return true
-}
-
-export function promoteGlanceIn(window: BaseWindow | null): string | null {
-  const glance = glanceFor(window)
-  return glance ? promote(glance, true) : null
 }
 
 /** The source tab left the screen (tab switch, closed, slept): the glance goes with it. */

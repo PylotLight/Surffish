@@ -8,8 +8,8 @@ import { readUserJson, writeSettingsFile } from './user-json'
  * page, key handling) lives in glance.ts, imported the first time a glance opens, so the feature
  * costs nothing at launch. browser.ts supplies the tab side through setGlanceHost.
  *
- * Hooks for later work (preconnect on hover): onGlanceLinkHover fires for every link hovered in a
- * tab page or inside a glance, with the session it would load in; openGlance opens one.
+ * onGlanceLinkHover fires for every link hovered in a tab page or inside a glance, with the session
+ * it would load in (preconnect.ts warms the origin from it); openGlance opens one.
  */
 
 type GlanceModule = typeof import('./glance')
@@ -106,11 +106,6 @@ function loadGlanceModule(): Promise<GlanceModule> {
   return loadingModule
 }
 
-/** Only for tests / diagnostics: is the glance module in memory? */
-export function isGlanceModuleLoaded(): boolean {
-  return glanceModule !== null
-}
-
 /**
  * Open `url` in a glance over the tab whose page is `sourceContents` (replacing any glance already
  * open in that window). Resolves true once the glance is showing.
@@ -127,18 +122,6 @@ export async function openGlance(sourceContents: WebContents, url: string): Prom
     console.warn('Could not open Glance:', error)
     return false
   }
-}
-
-export function isGlanceOpen(window?: BaseWindow | null): boolean {
-  return glanceModule?.isGlanceOpenIn(window ?? null) ?? false
-}
-
-export function closeGlance(window?: BaseWindow | null): boolean {
-  return glanceModule?.closeGlanceIn(window ?? null) ?? false
-}
-
-export function promoteGlance(window?: BaseWindow | null): string | null {
-  return glanceModule?.promoteGlanceIn(window ?? null) ?? null
 }
 
 /** browser.ts: a window's active tab may have changed (closes a glance whose tab left the screen). */

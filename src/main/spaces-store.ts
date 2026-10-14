@@ -33,7 +33,6 @@ import {
 const FILE = 'browser-spaces.json'
 let settings: SpacesSettings | null = null
 let table: SpacesTable | null | undefined
-const listeners = new Set<(settings: SpacesSettings) => void>()
 
 function sqlTable(): SpacesTable | null {
   if (table !== undefined) return table
@@ -106,18 +105,11 @@ export function getSpace(id: string | null | undefined): SpaceDefinition | undef
   return findSpace(current(), id)
 }
 
-/** Save and announce new settings (already validated by the shared helpers). */
+/** Save new settings (already validated by the shared helpers). */
 export function saveSpacesSettings(next: SpacesSettings): void {
   settings = parseSpacesSettings(serializeSpacesSettings(next))
   const jsonSaved = writeSettingsFile(FILE, serializeSpacesSettings(settings))
   if (sqlTable()) settleDualWrite(getProfileDatabase(), FILE, filePath(), saveToDatabase(settings), jsonSaved)
-  const snapshot = getSpacesSettings()
-  for (const listener of listeners) listener(snapshot)
-}
-
-export function onSpacesSettingsChanged(listener: (settings: SpacesSettings) => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
 }
 
 /** The partition a Space's normal tabs use (Default, unknown Spaces and Spaces off: the profile one). */

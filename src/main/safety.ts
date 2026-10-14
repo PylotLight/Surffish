@@ -42,8 +42,6 @@ function handle(channel: string, listener: (...args: unknown[]) => unknown): voi
   })
 }
 
-export type TabRecoveryAction = 'reload' | 'wait' | 'kill' | 'continue-http' | 'back'
-
 function runTabRecovery(action: unknown): boolean {
   const contents = getActiveTabWebContents()
   if (!contents || contents.isDestroyed()) return false

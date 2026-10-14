@@ -34,8 +34,3 @@ export function tabHoldsMediaSession(contents: WebContents | null | undefined, n
 export function tabMediaHoldRecheckMs(contents: WebContents, now = Date.now()): number {
   return mediaHoldRecheckMs(activity.get(contents) ?? NO_MEDIA_ACTIVITY, now)
 }
-
-/** Test/diagnostics view of a page's tracked state. */
-export function tabMediaActivity(contents: WebContents): MediaActivity {
-  return activity.get(contents) ?? NO_MEDIA_ACTIVITY
-}

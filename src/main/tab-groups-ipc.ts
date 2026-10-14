@@ -10,7 +10,6 @@ import {
   moveBrowserTab,
   moveBrowserTabGroup,
   moveBrowserTabGroupToWindow,
-  newBrowserTabInGroup,
   removeBrowserTabsFromGroup,
   setTabGroupMenuHook,
   showBrowserTabGroupMenu,
@@ -66,7 +65,6 @@ export function registerTabGroupsIpc(): void {
   handle('browser:tab-groups:toggle', (_event, groupId) => typeof groupId === 'string' && toggleBrowserTabGroupCollapsed(groupId))
   handle('browser:tab-groups:ungroup', (_event, groupId) => typeof groupId === 'string' && ungroupBrowserTabGroup(groupId))
   handle('browser:tab-groups:close', (_event, groupId) => typeof groupId === 'string' && closeBrowserTabGroupWithConfirm(groupId))
-  handle('browser:tab-groups:new-tab', (_event, groupId) => typeof groupId === 'string' ? newBrowserTabInGroup(groupId) : null)
   handle('browser:tab-groups:move', (_event, groupId, beforeId) => typeof groupId === 'string' && moveBrowserTabGroup(groupId, optionalString(beforeId)))
   handle('browser:tab-groups:move-to-new-window', (_event, groupId) => typeof groupId === 'string' && moveBrowserTabGroupToWindow(groupId, null))
   handle('browser:tab-groups:drop-outside', (_event, groupId) => typeof groupId === 'string' && dropBrowserTabGroupOutside(groupId))

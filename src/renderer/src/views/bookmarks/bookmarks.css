@@ -287,10 +287,6 @@
 .bookmark-row.is-dragging {
   opacity: 0.45;
 }
-.bookmark-row-count {
-  color: rgba(245, 247, 250, 0.36);
-  font-size: 10.5px;
-}
 .bookmark-row.is-drop-inside,
 .bookmarks-folder-row.is-drop-inside,
 .bookmarks-manager-row.is-drop-inside {
@@ -323,18 +319,6 @@
   padding: 4px 0;
   color: rgba(245, 247, 250, 0.32);
   font-size: 11px;
-}
-.bookmark-row-more {
-  display: block;
-  width: 100%;
-  min-height: 26px;
-  border: 0;
-  background: transparent;
-  color: rgba(170, 225, 192, 0.85);
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
 }
 
 /* Manager page */
