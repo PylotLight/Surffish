@@ -57,7 +57,7 @@ one-off cost at first history access.
 - Downgrading to a build without the database shows history as of the upgrade (the JSON copy
   isn't written once the database is in use).
 
-## Schema (v1)
+## Schema (v2)
 
 Every synced table has `id` (UUID, v7 for new rows), `device_id`, `created_at`, `updated_at`,
 `hlc` (hybrid logical clock stamp, `src/shared/sync-clock.ts`) and, except history,
@@ -74,6 +74,7 @@ Every synced table has `id` (UUID, v7 for new rows), `device_id`, `created_at`, 
 | `bookmarks` | folder/URL tree | `position` is a fractional index so concurrent moves merge; no FK on `parent_id` (children can arrive before folders) |
 | `spaces` | Spaces | `separate_storage`, `proxy` JSON |
 | `session_windows` / `session_tabs` / `tab_groups` / `session_splits` | open windows and tabs | rows belong to their `device_id`; another device's rows are its "tabs on other devices" |
+| `reading_list` (v2) | Reading List: pages saved for later | `added_at`, `read_at` (NULL = unread); `snapshot`/`snapshot_at` hold an offline Reader copy that is **device-local** (not in the oplog payload, and saving it doesn't bump `hlc`); remove = tombstone with url/title/excerpt/snapshot blanked; no unique index on `url` (two devices can save the same page before syncing; the app de-duplicates on read). See docs/reading-list.md |
 
 ## Change log and sync
 

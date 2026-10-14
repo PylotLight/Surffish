@@ -40,8 +40,14 @@ export const SYNCED_TABLES: Record<string, { entity: string; columns: readonly s
   session_windows: { entity: 'session_window', columns: ['id', 'position', 'focused', 'geometry', 'active_space_id', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   session_tabs: { entity: 'session_tab', columns: ['id', 'window_id', 'position', 'url', 'title', 'favicon_url', 'pinned', 'active', 'space_id', 'group_id', 'last_active_at', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
   tab_groups: { entity: 'tab_group', columns: ['id', 'window_id', 'name', 'color', 'collapsed', 'position', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_splits: { entity: 'session_split', columns: ['id', 'window_id', 'tab_ids', 'sizes', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] }
+  session_splits: { entity: 'session_split', columns: ['id', 'window_id', 'tab_ids', 'sizes', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
+  // v2. `snapshot`/`snapshot_at` are left out on purpose: the saved Reader copy is a per-device cache
+  // (it can be large), so it never rides the change log; a peer re-captures its own.
+  reading_list: { entity: 'reading_item', columns: ['id', 'url', 'title', 'favicon_url', 'site_name', 'excerpt', 'added_at', 'read_at', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] }
 }
+
+/** Tables whose change-log triggers v1 created (a later table's triggers ship with its own migration). */
+const V1_SYNCED_TABLES = ['history_visits', 'bookmarks', 'settings', 'spaces', 'session_windows', 'session_tabs', 'tab_groups', 'session_splits'] as const
 
 function oplogTriggers(table: string): string {
   const spec = SYNCED_TABLES[table]!
@@ -206,11 +212,39 @@ CREATE TRIGGER history_visits_oplog_purge AFTER DELETE ON history_visits
 BEGIN
   DELETE FROM oplog WHERE entity = 'history_visit' AND entity_id = OLD.id;
 END;
-${Object.keys(SYNCED_TABLES).map(oplogTriggers).join('\n')}
+${V1_SYNCED_TABLES.map(oplogTriggers).join('\n')}
+`
+
+/**
+ * v2: the Reading List (save for later; not bookmarks). One row per saved page, keyed by a UUIDv7.
+ * `added_at` is when the user saved it (re-saving the same page moves it back to the top and marks
+ * it unread), `read_at` NULL = unread. A removed item is a tombstone with url/title/excerpt blanked
+ * and the snapshot dropped. No unique index on url: two devices can save the same page before they
+ * sync, and the app de-duplicates on read instead of failing the merge.
+ */
+const V2 = `
+CREATE TABLE reading_list (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  favicon_url TEXT,
+  site_name TEXT,
+  excerpt TEXT,
+  added_at INTEGER NOT NULL,
+  read_at INTEGER,
+  snapshot TEXT,
+  snapshot_at INTEGER,
+  ${SYNC_COLUMNS},
+  deleted_at INTEGER
+) WITHOUT ROWID;
+CREATE INDEX reading_list_added ON reading_list (added_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX reading_list_url ON reading_list (url) WHERE deleted_at IS NULL;
+${oplogTriggers('reading_list')}
 `
 
 export const MIGRATIONS: readonly Migration[] = [
-  { version: 1, name: 'initial schema: meta, devices, oplog, settings, history, bookmarks, spaces, session', sql: V1 }
+  { version: 1, name: 'initial schema: meta, devices, oplog, settings, history, bookmarks, spaces, session', sql: V1 },
+  { version: 2, name: 'reading list', sql: V2 }
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version

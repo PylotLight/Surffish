@@ -27,6 +27,8 @@ export interface BrowserContextMenuOptions {
   readerView?: () => void
   /** Offer "Watch This Page for Changes…" (never for private tabs). */
   watchPage?: (mode: 'page' | 'pick') => void
+  /** Offer "Add Page/Link to Reading List" (never for private tabs). */
+  addToReadingList?: (target: 'page' | { url: string; title?: string }) => void
 }
 
 function runMenuTask(task: Promise<void>): void {
@@ -112,6 +114,7 @@ export function showBrowserContextMenu(
     hasScreenshot: Boolean(options.takeScreenshot),
     hasReaderView: Boolean(options.readerView),
     canWatchPage: Boolean(options.watchPage),
+    canAddToReadingList: Boolean(options.addToReadingList),
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward()
   }, {
@@ -140,7 +143,8 @@ export function showBrowserContextMenu(
     backToViewer: options.pdfEditor?.backToViewer,
     takeScreenshot: options.takeScreenshot,
     readerView: options.readerView,
-    watchPage: options.watchPage
+    watchPage: options.watchPage,
+    addToReadingList: options.addToReadingList
   })
   if (items.length === 0) return false
 

@@ -10,6 +10,7 @@ import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
 import { onPageWatchersEnabledChange, pageWatchersEnabled, revealPageWatchers } from './page-watchers-feature'
 import { revealFeeds } from './feeds-ipc'
+import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 
@@ -139,7 +140,10 @@ export function installAppMenu(): void {
         tabItem('Bookmark All Tabs…', 'bookmarkAllTabs'),
         { type: 'separator' },
         tabItem('Bookmark Manager', 'bookmarks'),
-        tabItem('Show/Hide Bookmarks Bar', 'bookmarksBar')
+        tabItem('Show/Hide Bookmarks Bar', 'bookmarksBar'),
+        { type: 'separator' },
+        tabItem('Add to Reading List', 'readingList'),
+        { label: 'Show Reading List', click: () => { showReadingList() } }
       ]
     },
     {

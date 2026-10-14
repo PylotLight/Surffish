@@ -431,7 +431,7 @@ function createReaderView(page: WebContents, preload: string): WebContentsView {
 }
 
 /** Extract the article from `page` and show it in Reader view. */
-export async function openReaderMode(page: WebContents | null = host?.activePage() ?? null): Promise<boolean> {
+export async function openReaderMode(page: WebContents | null = host?.activePage() ?? null, options: { quiet?: boolean } = {}): Promise<boolean> {
   if (!host || !page || page.isDestroyed()) return false
   const state = stateFor(page)
   if (!state) return false
@@ -456,28 +456,67 @@ export async function openReaderMode(page: WebContents | null = host?.activePage
     if (page.isDestroyed() || state.navigation !== navigation || page.getURL() !== pageUrl) return false
     const parsed = parseExtractedArticle(raw, pageUrl)
     if (!parsed.ok) {
-      host.notify(parsed.error)
+      if (!options.quiet) host.notify(parsed.error)
       return false
     }
-    const view = createReaderView(page, preload)
-    const document: ReaderDocument = {
-      token: randomUUID(),
-      page,
-      view,
-      article: parsed.article,
-      isPrivate: host.isPrivate(page),
-      // The tab's own session (private tabs: the in-memory private one): cookies, proxy, ad filtering.
-      sourceSession: page.session
-    }
-    state.document = document
-    documentsByToken.set(document.token, document)
-    host.changed(page)
-    void view.webContents.loadURL(READER_URL).catch((error: unknown) => console.warn('[reader] could not load the reader page:', error))
-    if (host.activePage() === page) view.webContents.focus()
+    showReaderDocument(page, state, preload, parsed.article)
     return true
   } finally {
     state.opening = false
   }
+}
+
+function showReaderDocument(page: WebContents, state: PageState, preload: string, article: ReaderArticle): void {
+  if (!host) return
+  const view = createReaderView(page, preload)
+  const document: ReaderDocument = {
+    token: randomUUID(),
+    page,
+    view,
+    article,
+    isPrivate: host.isPrivate(page),
+    // The tab's own session (private tabs: the in-memory private one): cookies, proxy, ad filtering.
+    sourceSession: page.session
+  }
+  state.document = document
+  documentsByToken.set(document.token, document)
+  host.changed(page)
+  void view.webContents.loadURL(READER_URL).catch((error: unknown) => console.warn('[reader] could not load the reader page:', error))
+  if (host.activePage() === page) view.webContents.focus()
+}
+
+/**
+ * Extract the article from `page` without showing it (Reading List keeps it as an offline copy).
+ * Null when the page has no article. Runs the same isolated-world Readability as Reader view.
+ */
+export async function extractReaderArticle(page: WebContents | null): Promise<ReaderArticle | null> {
+  if (!page || page.isDestroyed()) return null
+  const pageUrl = page.getURL()
+  if (!/^https?:\/\//i.test(pageUrl) || isShowingPdf(page)) return null
+  let raw: unknown
+  try {
+    raw = await page.executeJavaScriptInIsolatedWorld(READER_WORLD_ID, [{ code: (await import('./reader-extract-script')).EXTRACT_SCRIPT }])
+  } catch {
+    return null
+  }
+  if (page.isDestroyed() || page.getURL() !== pageUrl) return null
+  const parsed = parseExtractedArticle(raw, pageUrl)
+  return parsed.ok ? parsed.article : null
+}
+
+/**
+ * Show an article saved earlier (a Reading List offline copy) in Reader view over `page`, whatever
+ * the page itself managed to load. Links and "Back to page" behave as in normal Reader view.
+ */
+export function openReaderWithArticle(page: WebContents | null, article: ReaderArticle): boolean {
+  if (!host || !page || page.isDestroyed()) return false
+  const state = stateFor(page)
+  if (!state || state.opening) return false
+  if (state.document) disposeDocument(state)
+  const preload = readerPreloadPath()
+  if (!preload) return false
+  showReaderDocument(page, state, preload, article)
+  return true
 }
 
 /** Back to page: drop the reader view; the original page was never unloaded. */

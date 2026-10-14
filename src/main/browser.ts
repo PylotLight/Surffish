@@ -38,6 +38,7 @@ import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
+import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
 import { onPermissionDenied } from './proxy'
 import { noteTabLoadError, tabLoadError } from './load-errors'
@@ -606,6 +607,13 @@ export function bookmarkAllBrowserTabs(w = currentWindowState()): { folderId: st
   return { folderId: result.folder.id, title: result.folder.title, added: result.added }
 }
 
+/** The page a tab shows (the active tab without an id), for features that save it (Reading List). */
+export function getBrowserTabPageInfo(id?: string | null): { id: string; url: string; title: string; faviconUrl: string | null; private: boolean } | null {
+  const tab = getTab(id)
+  if (!tab) return null
+  return { id: tab.id, url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl, private: tab.isPrivate }
+}
+
 function applyTabBounds(w: BrowserWindowState): void {
   const { browserBounds } = w
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0
@@ -820,6 +828,10 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     takeScreenshot: isBrowserPage && isActiveTab(tab) ? () => { void runInWindow(tab.win.window, () => takeScreenshot('choose')) } : undefined,
     readerView: isBrowserPage && editorTab === undefined && readerStateFor(contents) !== null ? () => { void toggleReaderMode(contents) } : undefined,
     // Never offered for private tabs: a watcher would re-fetch the page outside the private session.
+    // Not in private tabs (see addTabToReadingList).
+    addToReadingList: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate
+      ? (target) => { if (target === 'page') addTabToReadingList(tab.id); else addLinkToReadingList(target.url, target.title) }
+      : undefined,
     watchPage: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate && canWatchPage(contents.getURL())
       ? (mode) => { void watchPageFromTab(contents, mode, pageTitle(tab)) }
       : undefined
@@ -853,6 +865,8 @@ function showBrowserTabContextMenu(id: string): void {
   const items: MenuItemConstructorOptions[] = [
     { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin), click: () => toggleTabBookmark(id) },
     { label: 'Bookmark All Tabs…', ...tabMenuAccelerator('bookmarkAllTabs'), click: () => { bookmarkAllBrowserTabs() } },
+    // Never for private tabs: the Reading List keeps (and will sync) what it saves.
+    { label: 'Add to Reading List', ...tabMenuAccelerator('readingList'), enabled: Boolean(origin) && !tab.isPrivate, click: () => addTabToReadingList(id) },
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
@@ -2231,6 +2245,7 @@ export type TabCommand =
   | 'bookmarkAllTabs' | 'bookmarks' | 'bookmarksBar'
   | 'screenshot'
   | 'splitView' | 'focusPaneLeft' | 'focusPaneRight'
+  | 'readingList'
 
 interface CommandShortcut {
   key: string
@@ -2280,7 +2295,9 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   // Split the tab with the last used one (or unsplit); the arrows move focus between panes.
   splitView: { key: '=', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+=' },
   focusPaneLeft: { key: 'arrowleft', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Left' },
-  focusPaneRight: { key: 'arrowright', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Right' }
+  focusPaneRight: { key: 'arrowright', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Right' },
+  // Safari/Orion use Cmd+Shift+D, which is Bookmark All Tabs here (Chrome's binding); Cmd/Ctrl+Shift+L is free.
+  readingList: { key: 'l', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+L' }
 }
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
@@ -2345,6 +2362,9 @@ export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
     case 'focusPaneLeft':
     case 'focusPaneRight':
       focusAdjacentSplitPane(command === 'focusPaneLeft' ? -1 : 1)
+      return
+    case 'readingList':
+      addTabToReadingList(tabId)
       return
   }
   const tab = tabId ? getTab(tabId) : undefined

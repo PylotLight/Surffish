@@ -13,11 +13,12 @@ export const TOOLBAR_POPOVER_SELECTOR = [
   '#command-palette',
   '#bookmark-popover',
   '#browser-notice',
-  '.bookmarks-menu-panel'
+  '.bookmarks-menu-panel',
+  '#reading-list-popover'
 ].join(', ')
 
 /** Popovers proper (light-dismissed); the find bar, palette and notices manage themselves. */
-const LIGHT_DISMISS_SELECTOR = '#downloads-popup, #site-actions-menu, #extensions-menu, #bookmark-popover, .bookmarks-menu-panel'
+const LIGHT_DISMISS_SELECTOR = '#downloads-popup, #site-actions-menu, #extensions-menu, #bookmark-popover, .bookmarks-menu-panel, #reading-list-popover'
 
 /**
  * Where an element sits as laid out, ignoring transforms: an entry animation (scale 0.98,
