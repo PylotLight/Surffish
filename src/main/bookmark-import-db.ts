@@ -1,38 +1,45 @@
-import type { Database, SqlJsStatic } from 'sql.js'
+import { closeSync, openSync, readSync, writeSync } from 'node:fs'
+import type { DatabaseSync } from 'node:sqlite'
 import { chromiumTimeToMs, macAbsoluteTimeToMs, prTimeToMs, type FirefoxBookmarkRow, type ImportedHistoryEntry } from '../shared/bookmark-import'
+import { loadSqlite } from './store/database'
 
 /**
- * SQLite readers for other browsers' history/bookmark databases, run with sql.js (wasm) so
- * packaged builds need no native module. Callers always hand in a *copy* of the database file:
- * the browser may hold the live one locked.
+ * SQLite readers for other browsers' history/bookmark databases, run with the built-in node:sqlite
+ * (Electron 44's main process is Node 24; Bun implements the same API for tests). Callers always
+ * hand in a *copy* of the database file: the browser may hold the live one locked.
  */
 
 export const MAX_IMPORTED_HISTORY = 5000
 
+export type ImportDatabase = DatabaseSync
+
 /**
- * Open database bytes in memory. WAL-mode files (Firefox, Safari) are flipped to the legacy
- * journal format in the header first: sql.js has no shared memory for WAL, and the main file
- * is complete without the -wal sidecar (minus whatever the browser hasn't checkpointed yet).
+ * Open a copied database file read-only. WAL-mode files (Firefox, Safari) are flipped to the legacy
+ * journal format in the copy's header first: a read-only WAL open needs the -shm/-wal sidecars, and
+ * the main file is complete without them (minus whatever the browser hasn't checkpointed yet).
  */
-export function openSqliteBytes(SQL: SqlJsStatic, bytes: Uint8Array): Database {
-  const copy = new Uint8Array(bytes)
-  if (copy.length >= 100 && new TextDecoder().decode(copy.subarray(0, 15)) === 'SQLite format 3') {
-    if (copy[18] === 2) copy[18] = 1
-    if (copy[19] === 2) copy[19] = 1
-  }
-  return new SQL.Database(copy)
+export function openSqliteCopy(path: string): ImportDatabase {
+  const sqlite = loadSqlite()
+  if (!sqlite) throw new Error('node:sqlite is not available in this runtime')
+  useLegacyJournalHeader(path)
+  return new sqlite.DatabaseSync(path, { readOnly: true })
 }
 
-function rows<T>(db: Database, sql: string, params: Array<string | number> = []): T[] {
-  const statement = db.prepare(sql)
+function useLegacyJournalHeader(path: string): void {
+  const fd = openSync(path, 'r+')
   try {
-    statement.bind(params)
-    const result: T[] = []
-    while (statement.step()) result.push(statement.getAsObject() as T)
-    return result
+    const header = Buffer.alloc(20)
+    if (readSync(fd, header, 0, 20, 0) < 20 || header.toString('latin1', 0, 15) !== 'SQLite format 3') return
+    if (header[18] !== 2 && header[19] !== 2) return
+    const versions = Buffer.from([header[18] === 2 ? 1 : header[18]!, header[19] === 2 ? 1 : header[19]!])
+    writeSync(fd, versions, 0, 2, 18)
   } finally {
-    statement.free()
+    closeSync(fd)
   }
+}
+
+function rows<T>(db: ImportDatabase, sql: string, params: Array<string | number> = []): T[] {
+  return db.prepare(sql).all(...params) as T[]
 }
 
 function historyEntries(raw: Array<{ url: unknown; title: unknown; visited: unknown }>, toMs: (value: unknown) => number | undefined): ImportedHistoryEntry[] {
@@ -47,22 +54,22 @@ function historyEntries(raw: Array<{ url: unknown; title: unknown; visited: unkn
 }
 
 /** Chromium `History`: one entry per URL at its last visit time. */
-export function readChromiumHistory(db: Database, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
+export function readChromiumHistory(db: ImportDatabase, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
   return historyEntries(rows(db, `
-    SELECT url, title, last_visit_time AS visited FROM urls
+    SELECT url, title, CAST(last_visit_time AS TEXT) AS visited FROM urls
     WHERE hidden = 0 AND last_visit_time > 0 AND (url LIKE 'http://%' OR url LIKE 'https://%')
-    ORDER BY last_visit_time DESC LIMIT ?`, [limit]), (value) => chromiumTimeToMs(typeof value === 'number' ? String(Math.trunc(value)) : value))
+    ORDER BY last_visit_time DESC LIMIT ?`, [limit]), chromiumTimeToMs)
 }
 
 /** Firefox `places.sqlite` bookmarks (folders, bookmarks; separators and tags are dropped later). */
-export function readFirefoxBookmarks(db: Database): FirefoxBookmarkRow[] {
+export function readFirefoxBookmarks(db: ImportDatabase): FirefoxBookmarkRow[] {
   return rows<FirefoxBookmarkRow>(db, `
     SELECT b.id AS id, b.type AS type, b.parent AS parent, b.position AS position, b.title AS title,
            b.guid AS guid, p.url AS url, b.dateAdded AS dateAdded
     FROM moz_bookmarks b LEFT JOIN moz_places p ON p.id = b.fk`)
 }
 
-export function readFirefoxHistory(db: Database, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
+export function readFirefoxHistory(db: ImportDatabase, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
   return historyEntries(rows(db, `
     SELECT url, title, last_visit_date AS visited FROM moz_places
     WHERE last_visit_date IS NOT NULL AND hidden = 0 AND (url LIKE 'http://%' OR url LIKE 'https://%')
@@ -70,7 +77,7 @@ export function readFirefoxHistory(db: Database, limit = MAX_IMPORTED_HISTORY): 
 }
 
 /** Safari `History.db`: latest visit per item, with that visit's title. */
-export function readSafariHistory(db: Database, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
+export function readSafariHistory(db: ImportDatabase, limit = MAX_IMPORTED_HISTORY): ImportedHistoryEntry[] {
   return historyEntries(rows(db, `
     SELECT i.url AS url, (SELECT v2.title FROM history_visits v2 WHERE v2.history_item = i.id ORDER BY v2.visit_time DESC LIMIT 1) AS title,
            MAX(v.visit_time) AS visited

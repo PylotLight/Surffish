@@ -83,12 +83,10 @@ async function seedChromeProfile() {
       other: { type: 'folder', name: 'Other bookmarks', children: [] }
     }
   }))
-  const initSqlJs = require('sql.js')
-  const SQL = await initSqlJs()
-  const db = new SQL.Database()
+  const { DatabaseSync } = process.getBuiltinModule('node:sqlite')
+  const db = new DatabaseSync(join(profile, 'History'))
   db.exec(`CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL);
     INSERT INTO urls (url, title, last_visit_time) VALUES ('https://history-one.test/', 'History one', ${chrome(Date.UTC(2024, 1, 1))}), ('https://history-two.test/', 'History two', ${chrome(Date.UTC(2024, 1, 2))});`)
-  writeFileSync(join(profile, 'History'), Buffer.from(db.export()))
   db.close()
 }
 
@@ -102,9 +100,8 @@ async function run() {
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
   // An older profile: the 12-site strip lives in preferences and there is no bookmarks.json yet.
   writeFileSync(join(userData, 'browser-preferences.json'), JSON.stringify({ version: 1, pinnedSites: [{ title: 'Seed', url: 'https://seed.test/' }] }))
-  // Not awaited here: sql.js init is async, and awaiting it before importing the app let Electron
-  // become ready first (then the app's registerSchemesAsPrivileged throws). The fixture is only read
-  // when the import below runs.
+  // Not awaited here: awaiting before importing the app could let Electron become ready first (then
+  // the app's registerSchemesAsPrivileged throws). The fixture is only read when the import below runs.
   const chromeProfileSeeded = seedChromeProfile()
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const origin = `http://127.0.0.1:${server.address().port}`

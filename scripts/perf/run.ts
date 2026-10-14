@@ -52,7 +52,7 @@ const total = (files: string[]) => files.reduce((n, f) => n + sizeOf(f), 0)
 /**
  * Main-process JS evaluated at launch: index.js and everything it imports statically, plus a
  * top-level `await import()` in index.js itself (the boot entry that turns on the compile cache
- * before importing the app). Lazy `import()`s elsewhere (reader, sql.js, ...) don't count.
+ * before importing the app). Lazy `import()`s elsewhere (reader, page watchers, ...) don't count.
  */
 export function mainStartupFiles(mainDir: string): string[] {
   const seen = new Set<string>()

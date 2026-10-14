@@ -157,7 +157,6 @@
     "@types/node": "^26.6.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^6.1.1",
     "dompurify": "^3.4.17",
     "electron": "^44.5.1",
@@ -169,7 +168,6 @@
     "pdfjs-dist": "6.4.299",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "sql.js": "^1.14.2",
     "vite": "^8.3.2"
   },
   "dependencies": {
