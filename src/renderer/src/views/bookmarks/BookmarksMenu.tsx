@@ -171,7 +171,7 @@ export function BookmarksMenuButton({ bookmarks, cachedIcons, barVisible, onTogg
         title="Bookmarks"
         onClick={() => setOpen((value) => !value)}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10a1 1 0 0 1 1 1v14l-6-3.6-6 3.6v-14a1 1 0 0 1 1-1Z" /></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4-6.5 4v-16a1 1 0 0 1 1-1Z" /></svg>
       </button>
       {open && (
         <BookmarksMenuPanel
