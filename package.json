@@ -44,6 +44,7 @@
     "test:electron-tab-groups": "electron scripts/electron-tab-groups-smoke.cjs",
     "test:electron-nav-errors": "electron scripts/electron-nav-errors-smoke.cjs",
     "test:electron-address-bar-sync": "electron scripts/electron-address-bar-sync-smoke.cjs",
+    "test:electron-blob-links": "electron scripts/electron-blob-links-smoke.cjs",
     "test:electron-adblock": "electron scripts/electron-adblock-smoke.cjs",
     "test:electron-extension-dnr": "electron scripts/electron-extension-dnr-smoke.cjs",
     "bench:dnr": "bun scripts/bench-dnr.ts",
