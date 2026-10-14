@@ -34,6 +34,7 @@ export const SiteRouteSettings = deferred(() => settings().then((m) => m.SiteRou
 export const UpdateSettings = deferred(() => settings().then((m) => m.UpdateSettings))
 export const TabArchiveSettings = deferred(() => settings().then((m) => m.TabArchiveSettings))
 export const MemorySaverSettings = deferred(() => settings().then((m) => m.MemorySaverSettings))
+export const PreloadPagesSettings = deferred(() => settings().then((m) => m.PreloadPagesSettings))
 export const SpacesSettings = deferred(() => settings().then((m) => m.SpacesSettings))
 export const ExtensionsSettings = deferred(() => settings().then((m) => m.ExtensionsSettings))
 export const BookmarkImportPanel = deferred(() => settings().then((m) => m.BookmarkImportPanel))

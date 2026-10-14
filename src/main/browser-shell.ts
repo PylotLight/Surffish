@@ -88,6 +88,37 @@ function emitSidebarOverlay(shell: ShellState, event: SidebarOverlayEvent): void
 const shells = new Map<BaseWindow, ShellState>()
 
 /** The shell an implicit call is for: the given window, else the current one (sender / focused). */
+const pageCovers = new WeakSet<BaseWindow>()
+let pageCoverLostListener: ((window: BaseWindow) => void) | null = null
+
+/** wake-snapshot.ts: hear when a layout change (New Tab, a full panel) ends a page cover. */
+export function setPageCoverLostListener(listener: ((window: BaseWindow) => void) | null): void {
+  pageCoverLostListener = listener
+}
+
+/**
+ * Stretch the toolbar surface over the whole window (true) or give it back its own height
+ * (false). Only while live pages show with the overlay surfaces; returns whether it covers now.
+ */
+export function setToolbarPageCover(window: BaseWindow, cover: boolean): boolean {
+  const shell = shells.get(window)
+  if (!shell || shell.window.isDestroyed()) return false
+  const covering = cover && shouldUseNativeOverlays(shell)
+  if (covering === pageCovers.has(window)) return covering
+  if (covering) pageCovers.add(window)
+  else pageCovers.delete(window)
+  applyShellLayout(shell)
+  return covering
+}
+
+/** The window's toolbar surface while it is the visible overlay (live pages), else null. */
+export function getOverlayToolbarContents(window: BaseWindow): WebContents | null {
+  const shell = shells.get(window)
+  if (!shell || !shouldUseNativeOverlays(shell)) return null
+  const contents = shell.views.toolbar.webContents
+  return contents.isDestroyed() ? null : contents
+}
+
 function shellFor(window?: BaseWindow | null): ShellState | null {
   const target = window ?? currentBrowserWindow()
   const shell = target ? shells.get(target) : undefined
@@ -162,7 +193,14 @@ function applyShellLayout(shell: ShellState): void {
   shellViews.content.setBounds({ x: 0, y: 0, width, height })
   shellViews.content.setVisible(!overlayMode)
 
-  shellViews.toolbar.setBounds({ x: 0, y: 0, width, height: toolbarExtent })
+  // A wake snapshot (wake-snapshot.ts) is drawn by the toolbar surface over the page area, so the
+  // toolbar view covers the whole window while one shows. Leaving overlay mode ends it.
+  if (!overlayMode && pageCovers.has(shell.window)) {
+    pageCovers.delete(shell.window)
+    pageCoverLostListener?.(shell.window)
+  }
+  const coversPage = overlayMode && pageCovers.has(shell.window)
+  shellViews.toolbar.setBounds({ x: 0, y: 0, width, height: coversPage ? height : toolbarExtent })
   shellViews.toolbar.setVisible(overlayMode)
 
   // With the native blur on, the view is cut to the card itself (the blur covers the whole view);

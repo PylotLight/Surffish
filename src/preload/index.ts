@@ -45,6 +45,8 @@ type DiagnosticsUpdate = DiagnosticsPayload | null
 import { bookmarksApi } from './bookmarks'
 import { tabArchiveApi } from './tab-archive'
 import { memorySaverApi } from './memory-saver'
+import { preconnectApi } from './preconnect'
+import { wakeSnapshotApi } from './wake-snapshot'
 import { networkToolsApi, proxyRoutingApi } from './network-tools'
 import { splitViewApi } from './split-view'
 import { spacesApi } from './spaces'
@@ -150,6 +152,8 @@ const api = {
     bookmarks: bookmarksApi,
     tabArchive: tabArchiveApi,
     memorySaver: memorySaverApi,
+    preconnect: preconnectApi,
+    wakeSnapshot: wakeSnapshotApi,
     watchers: watchersApi,
     feeds: feedsApi,
     readingList: readingListApi,

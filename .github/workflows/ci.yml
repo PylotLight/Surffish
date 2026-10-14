@@ -47,7 +47,7 @@ jobs:
         # per lane, so each lane's smokes finish in ~30 s at two at a time.
         - lane: A
           unit: false
-          tests: "test:electron-watchers-toggle test:electron-glance test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-certificates"
+          tests: "test:electron-watchers-toggle test:electron-glance test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-certificates test:electron-perceived-perf"
         - lane: B
           unit: false
           tests: "test:electron-spaces test:electron-toolbar-popovers test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-network-tools test:electron-tab-archive test:electron-media-session test:electron-sqlite-store test:electron-sqlite-session test:electron-feeds"
