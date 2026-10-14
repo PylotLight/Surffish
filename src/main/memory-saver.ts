@@ -11,7 +11,7 @@ import {
   type MemorySample,
   type MemorySaverSettings
 } from '../shared/memory-saver'
-import { getBrowserTabArchiveCandidates, getBrowserTabWebContents, suspendBrowserTab } from './browser'
+import { getBrowserTabArchiveCandidates, getBrowserTabWebContents, setBrowserMemorySaverActive, suspendBrowserTab } from './browser'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeUserJson } from './user-json'
 
@@ -100,6 +100,7 @@ export async function checkMemoryPressure(): Promise<number> {
 }
 
 function applySchedule(): void {
+  setBrowserMemorySaverActive(current().enabled)
   if (current().enabled && !timer) {
     timer = setInterval(() => { void checkMemoryPressure().catch((error: unknown) => console.warn('Memory saver check failed:', error)) }, MEMORY_CHECK_INTERVAL_MS)
     timer.unref?.()

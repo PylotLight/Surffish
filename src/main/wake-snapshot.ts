@@ -53,6 +53,8 @@ interface Presentation {
 }
 
 const store = new WakeSnapshotStore<StoredSnapshot>()
+/** Snapshots taken but not encoded yet (rememberWakeSnapshot's deferred encode), by tab. */
+const pendingEncodes = new Map<string, { url: string; width: number; height: number; isPrivate: boolean }>()
 const presentations = new Map<BaseWindow, Presentation>()
 let nextToken = 1
 let registered = false
@@ -84,17 +86,27 @@ const WAKE_SNAPSHOT_ENCODE_DELAY_MS = 300
 export function rememberWakeSnapshot(tabId: string, image: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
   // Encode after the tab that just came on screen has had its frames (keeps the switch/new-tab paint fast).
   const epoch = privateEpoch
+  const job = { url, width: pageSize.width, height: pageSize.height, isPrivate }
+  pendingEncodes.set(tabId, job)
   setTimeout(() => {
+    // Dropped (tab closed, woken another way, private browsing ended) or superseded by a newer picture.
+    if (pendingEncodes.get(tabId) !== job) return
+    pendingEncodes.delete(tabId)
     if (isPrivate && epoch !== privateEpoch) return
     encodeWakeSnapshot(tabId, image, pageSize, url, isPrivate)
   }, WAKE_SNAPSHOT_ENCODE_DELAY_MS)
 }
 
-/** Tabs closed before their deferred encode ran (their snapshot must never land). */
-const closedBeforeEncode = new Set<string>()
+/**
+ * Whether the tab already has a snapshot of `url` that would still fit `pageArea` (stored, or taken
+ * and waiting for its encode): a tab that hasn't changed since doesn't need another one.
+ */
+export function hasWakeSnapshot(tabId: string, url: string, pageArea: { width: number; height: number }): boolean {
+  const entry = pendingEncodes.get(tabId) ?? store.get(tabId)
+  return entry !== undefined && wakeSnapshotMatchesUrl(entry.url, url) && wakeSnapshotFits({ width: entry.width, height: entry.height }, pageArea)
+}
 
 function encodeWakeSnapshot(tabId: string, image: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
-  if (closedBeforeEncode.delete(tabId)) return
   try {
     if (image.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0)) return
     const size = image.getSize()
@@ -110,18 +122,19 @@ function encodeWakeSnapshot(tabId: string, image: NativeImage, pageSize: { width
 
 export function dropWakeSnapshot(tabId: string): void {
   store.delete(tabId)
+  pendingEncodes.delete(tabId)
 }
 
 /** The tab closed: drop its snapshot, including one still waiting to be encoded. */
 export function forgetWakeSnapshotTab(tabId: string): void {
   store.delete(tabId)
-  closedBeforeEncode.add(tabId)
-  setTimeout(() => closedBeforeEncode.delete(tabId), WAKE_SNAPSHOT_ENCODE_DELAY_MS + 100)
+  pendingEncodes.delete(tabId)
 }
 
 /** Private browsing ended: nothing from it may outlive it. */
 export function dropPrivateWakeSnapshots(): void {
   store.deleteWhere((entry) => entry.isPrivate)
+  for (const [tabId, job] of [...pendingEncodes]) if (job.isPrivate) pendingEncodes.delete(tabId)
   privateEpoch += 1
 }
 

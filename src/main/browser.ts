@@ -39,7 +39,8 @@ import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, forgetWakeSnapshotTab, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
+import { inputMayChangePage } from '../shared/wake-snapshot'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, forgetWakeSnapshotTab, hasWakeSnapshot, presentWakeSnapshot, rememberWakeSnapshot } from './wake-snapshot'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -171,6 +172,22 @@ const THUMBNAIL_WIDTH = 640
 const tabShownAt = new WeakMap<BrowserTab, number>()
 /** A tab must have been the active tab this long before leaving for its picture to be kept (wake-snapshot.ts). */
 const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500
+/**
+ * Leaving a tab captures it (capturePage) and encodes an overview thumbnail plus a wake snapshot: the
+ * biggest main-process cost of a tab switch. A page that nothing has changed since its last picture
+ * (no input, navigation, load, title, zoom, find or media playing; same page size) keeps that picture
+ * for up to this long, so flipping between tabs you are reading doesn't redo it. Pages can change on
+ * their own (timers, animation), so an unchanged-looking picture still expires.
+ */
+const TAB_PICTURE_MAX_AGE_MS = 60_000
+/** Bumped by anything that may change how a tab's page looks (tabPictureChanged). */
+const tabPictureRevision = new WeakMap<BrowserTab, number>()
+/** The last picture taken of each tab: what it showed and when. */
+const tabPictureTaken = new WeakMap<BrowserTab, { revision: number; contents: WebContents; url: string; width: number; height: number; at: number }>()
+/** Tabs whose page is playing media right now (always treated as changed). */
+const tabsPlayingMedia = new WeakSet<BrowserTab>()
+/** Memory saver on (memory-saver.ts pushes it): background tabs may be discarded, so they may need a wake snapshot. */
+let memorySaverActive = true
 /** Preconnect cooldown key for the private session (its partition name is ''). */
 const PRIVATE_PRECONNECT_KEY = '(private)'
 const FAVICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
@@ -1048,6 +1065,19 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   attachTabSafety(contents)
   if (!tab.extensionPageOrigin) attachReaderDetection(contents)
   const isCurrentContents = (): boolean => tab.view?.webContents === contents
+  // Anything that may change how the page looks invalidates its last picture (captureTabThumbnail).
+  const pictureChanged = (): void => { if (isCurrentContents()) tabPictureChanged(tab) }
+  contents.on('input-event', (_event, input) => { if (inputMayChangePage(input)) pictureChanged() })
+  contents.on('did-navigate', pictureChanged)
+  contents.on('did-navigate-in-page', pictureChanged)
+  contents.on('did-stop-loading', pictureChanged)
+  contents.on('did-frame-finish-load', pictureChanged)
+  contents.on('page-title-updated', pictureChanged)
+  contents.on('zoom-changed', pictureChanged)
+  contents.on('found-in-page', pictureChanged)
+  contents.on('media-started-playing', () => { if (isCurrentContents()) tabsPlayingMedia.add(tab) })
+  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab) } })
+  contents.once('destroyed', () => tabsPlayingMedia.delete(tab))
   contents.on('before-mouse-event', (_event, mouseEvent) => {
     if (!isCurrentContents()) return
     if (tab.win.splits.length > 0) {
@@ -3433,6 +3463,37 @@ export function updateBrowserPageScale(contents: WebContents, input: unknown): v
   if (tab) tab.pageScale = input
 }
 
+function tabPictureChanged(tab: BrowserTab): void {
+  tabPictureRevision.set(tab, (tabPictureRevision.get(tab) ?? 0) + 1)
+}
+
+/** Memory saver (memory-saver.ts) turned on or off. */
+export function setBrowserMemorySaverActive(active: boolean): void {
+  memorySaverActive = active
+}
+
+/**
+ * Whether a background tab can ever be put to sleep or discarded without the user asking (timed
+ * sleep, memory saver): only then is a wake snapshot worth encoding when it leaves the screen.
+ * (A tab hibernated by hand without one just reloads as before.)
+ */
+function tabCanSleep(tab: BrowserTab): boolean {
+  if (tab.extensionPageOrigin || tab.pdfEditor) return false
+  return tabSleepMinutes > 0 || (memorySaverActive && !tab.pinned)
+}
+
+/** The tab's last picture still shows its page as it is now (see TAB_PICTURE_MAX_AGE_MS). */
+function tabPictureIsCurrent(tab: BrowserTab, contents: WebContents, url: string, size: { width: number; height: number }): boolean {
+  const taken = tabPictureTaken.get(tab)
+  return taken !== undefined
+    && taken.contents === contents
+    && taken.revision === (tabPictureRevision.get(tab) ?? 0)
+    && taken.url === url
+    && taken.width === size.width && taken.height === size.height
+    && Date.now() - taken.at < TAB_PICTURE_MAX_AGE_MS
+    && !tabsPlayingMedia.has(tab)
+}
+
 function wasShownLongEnough(tab: BrowserTab): boolean {
   const shownAt = tabShownAt.get(tab)
   // Never stamped: the tab was on screen from start-up (restored session), so it counts as seen.
@@ -3470,13 +3531,18 @@ async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<vo
   const contents = tab.view?.webContents
   if (!contents || contents.isDestroyed()) return
   try {
-    const pageArea = forWake && !tab.extensionPageOrigin && !tab.pdfEditor ? pageBoundsOf(tab) : null
+    const bounds = pageBoundsOf(tab)
+    const pageArea = forWake && tabCanSleep(tab) ? bounds : null
     const url = currentUrl(tab)
+    // Nothing changed since the last picture: the thumbnail (and wake snapshot, if one is wanted) still stand.
+    if (tabThumbnails.has(tab.id) && tabPictureIsCurrent(tab, contents, url, bounds) && (!pageArea || hasWakeSnapshot(tab.id, url, pageArea))) return
+    const taken = { revision: tabPictureRevision.get(tab) ?? 0, contents, url, width: bounds.width, height: bounds.height, at: Date.now() }
     // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
     // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
     const image = await capturePageWithin(contents, undefined, { stayHidden: true })
     if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabThumbnails.set(tab.id, thumbnailDataUrl(image))
+    tabPictureTaken.set(tab, taken)
     if (pageArea && tab.view?.webContents === contents) rememberWakeSnapshot(tab.id, image, pageArea, url, tab.isPrivate)
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.

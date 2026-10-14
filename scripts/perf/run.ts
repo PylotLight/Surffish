@@ -124,7 +124,7 @@ function sample(app: { label: string; dir: string }, n: number, launch: Launch =
       const toolbar = s.startup?.phases?.toolbarReadyMs
       if (launch === 'warmup') { console.error(`[perf] ${app.label} warm-up ok (${secs}s, first paint ${s.startup?.firstPaintMs}ms, discarded)`); rmSync(out, { force: true }); return s }
       if (launch === 'warm-start') { console.error(`[perf] ${app.label} warm start ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms toolbar=${toolbar}ms`); rmSync(out, { force: true }); return s }
-      console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms toolbar=${toolbar}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms`)
+      console.error(`[perf] ${app.label} run ${n} ok (${secs}s) firstPaint=${s.startup?.firstPaintMs}ms toolbar=${toolbar}ms ipcOpen=${s.openTabs?.ipcCount} mem30=${s.memMax?.totalMB}MB switch=${s.tabSwitch?.medianMs}ms leaveTabCpu=${s.keySwitch?.mainCpuMsPerSwitch}ms hang=${s.hang?.maxBlockMs}ms@${s.hang?.phase}`)
       rmSync(out, { force: true })
       return s
     }

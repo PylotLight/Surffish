@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  inputMayChangePage,
   isWakeSnapshotPassthroughTarget,
   nextWakeSnapshotPhase,
   parseWakeSnapshotInput,
@@ -109,6 +110,15 @@ describe('wake snapshot input', () => {
     expect(isWakeSnapshotPassthroughTarget(null)).toBe(true)
     expect(isWakeSnapshotPassthroughTarget(element('button', ['toolbar-button']))).toBe(false)
     expect(isWakeSnapshotPassthroughTarget(element('li', ['address-suggestion']))).toBe(false)
+  })
+
+  test('only input that can change the page invalidates its picture', () => {
+    for (const type of ['mouseDown', 'mouseWheel', 'gestureScrollUpdate', 'touchStart', 'char', 'rawKeyDown', 'keyDown']) expect(inputMayChangePage({ type })).toBe(true)
+    for (const type of ['mouseMove', 'mouseEnter', 'mouseLeave', 'mouseUp', 'keyUp', 'contextMenu']) expect(inputMayChangePage({ type })).toBe(false)
+    // Ctrl/Cmd chords are shortcuts (Ctrl+Tab, Cmd+1): leaving a tab by keyboard keeps its picture.
+    expect(inputMayChangePage({ type: 'rawKeyDown', modifiers: ['control'] })).toBe(false)
+    expect(inputMayChangePage({ type: 'keyDown', modifiers: ['meta', 'shift'] })).toBe(false)
+    expect(inputMayChangePage({ type: 'char', modifiers: ['shift'] })).toBe(true)
   })
 
   test('point in rect', () => {
