@@ -151,3 +151,23 @@ describe('Reading List items', () => {
     expect(labels(buildBrowserContextMenuTemplate(params({ pageURL: 'about:blank' }), { ...PAGE, canAddToReadingList: true }, withReadingList))).not.toContain('Add Page to Reading List')
   })
 })
+
+describe('Glance item', () => {
+  test('a link offers Open Link in Glance right after the tab items, only when allowed', () => {
+    const link = params({ linkURL: 'https://example.com/story' })
+    expect(labels(buildBrowserContextMenuTemplate(link, PAGE, actions()))).not.toContain('Open Link in Glance')
+    const fns = { ...actions(), openInGlance: mock(() => undefined) }
+    const items = buildBrowserContextMenuTemplate(link, { ...PAGE, canOpenInGlance: true }, fns)
+    const all = labels(items)
+    expect(all.indexOf('Open Link in Glance')).toBe(all.indexOf('Open Link in Background Tab') + 1)
+    click(items.find((item) => item.label === 'Open Link in Glance'))
+    expect(fns.openInGlance).toHaveBeenCalledWith('https://example.com/story')
+  })
+
+  test('never on non-http links, without a link, or off site pages', () => {
+    const options = { ...PAGE, canOpenInGlance: true }
+    expect(labels(buildBrowserContextMenuTemplate(params({ linkURL: 'javascript:alert(1)' }), options, actions()))).not.toContain('Open Link in Glance')
+    expect(labels(buildBrowserContextMenuTemplate(params(), options, actions()))).not.toContain('Open Link in Glance')
+    expect(labels(buildBrowserContextMenuTemplate(params({ linkURL: 'https://example.com/' }), { ...options, pageActions: false }, actions()))).not.toContain('Open Link in Glance')
+  })
+})

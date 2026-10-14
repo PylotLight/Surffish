@@ -13,6 +13,7 @@ import { getBrowserChromeState, getMainWindowRenderers, isMainWindowRenderer, se
 import { getLinkStatusContentsIds } from './link-status'
 import { getTabOverviewContentsIds } from './tab-overview'
 import { getScreenshotContentsIds } from './screenshot'
+import { getGlanceContentsIds } from './glance-entry'
 
 /**
  * Diagnostics / Task Manager. Samples app.getAppMetrics() every 2 s, only while a Diagnostics
@@ -95,6 +96,9 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
   const linkStatusIds = new Set(getLinkStatusContentsIds())
   const overviewIds = new Set(getTabOverviewContentsIds())
   const screenshotIds = new Set(getScreenshotContentsIds())
+  const glanceIds = getGlanceContentsIds()
+  const glancePages = new Set(glanceIds.page)
+  const glanceChrome = new Set(glanceIds.chrome)
   for (const contents of allWebContents.getAllWebContents()) {
     if (contents.isDestroyed() || claimed.has(contents.id)) continue
     const pid = safeOsPid(contents)
@@ -117,6 +121,10 @@ export function collectDiagnosticsOccupants(): { occupants: DiagnosticsOccupant[
       occupants.push({ pid, kind: 'overlay', label: 'link status' })
     } else if (overviewIds.has(contents.id)) {
       occupants.push({ pid, kind: 'overlay', label: 'tab overview' })
+    } else if (glancePages.has(contents.id)) {
+      occupants.push({ pid, kind: 'overlay', label: `Glance: ${hostOf(url) || 'page'}`, detail: 'link peek' })
+    } else if (glanceChrome.has(contents.id)) {
+      occupants.push({ pid, kind: 'overlay', label: 'glance header' })
     } else if (screenshotIds.has(contents.id)) {
       occupants.push({ pid, kind: 'overlay', label: 'screenshot' })
     } else if (url.startsWith('chrome-extension://')) {

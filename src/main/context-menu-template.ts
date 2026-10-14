@@ -25,6 +25,8 @@ export interface ContextMenuTemplateOptions {
   canWatchPage?: boolean
   /** Offer "Add Page/Link to Reading List" (never in private tabs). */
   canAddToReadingList?: boolean
+  /** Offer "Open Link in Glance" (a peek over the page, without a new tab). */
+  canOpenInGlance?: boolean
   canGoBack: boolean
   canGoForward: boolean
 }
@@ -43,6 +45,7 @@ export interface ContextMenuActions {
   copyImageAt(x: number, y: number): void
   openInNewTab(url: string): void
   openInBackgroundTab(url: string): void
+  openInGlance?(url: string): void
   saveUrl(url: string, suggestedFilename: string): void
   savePage(): void
   goBack(): void
@@ -154,6 +157,7 @@ export function buildBrowserContextMenuTemplate(params: ContextMenuParamsInput, 
     items.push(
       { label: 'Open Link in New Tab', click: () => actions.openInNewTab(linkUrl) },
       { label: 'Open Link in Background Tab', click: () => actions.openInBackgroundTab(linkUrl) },
+      ...(options.pageActions && options.canOpenInGlance ? [{ label: 'Open Link in Glance', toolTip: 'Peek at the link over this page without opening a tab (Shift+click)', click: () => actions.openInGlance?.(linkUrl) }] : []),
       { label: 'Save Link As…', click: () => actions.saveUrl(linkUrl, params.suggestedFilename || 'download') },
       { label: 'Copy Link Address', click: () => actions.writeClipboard(linkUrl) },
       { label: 'Copy Clean Link', toolTip: 'Copy without tracking parameters (utm_*, fbclid, gclid…)', click: () => actions.writeClipboard(cleanLinkUrl(linkUrl)) }

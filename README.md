@@ -8,6 +8,7 @@
 
 - **A sidebar that fits:** keep tabs and favorites close, reveal the sidebar from the edge, or pin it open. Drag its edge to choose a width that feels right.
 - **A fresh New Tab:** enjoy nature photography, local time, and quick links to your favorite and frequently visited sites.
+- **Glance:** Shift+click a link to peek at it in a sheet over the page; Esc closes it, ⌘/Ctrl+Enter keeps it as a tab.
 - **Everyday tools built in:** search suggestions, browsing history, downloads, ad and tracker blocking, Picture in Picture, and optional SOCKS5 proxy support.
 
 Your favorites, history, and preferences are stored locally. Address suggestions are based on your own tabs, favorites, and history—not a remote suggestion service. Surffish is an actively developing browser; its privacy and proxy features are not an audited anonymity service.

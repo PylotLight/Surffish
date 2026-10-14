@@ -14,6 +14,8 @@ export interface BrowserContextMenuOptions {
   searchEngine: SearchEngineId
   openInNewTab: (url: string) => void
   openInBackgroundTab: (url: string) => void
+  /** Offer "Open Link in Glance" on links (site tabs only). */
+  openInGlance?: (url: string) => void
   /** The page is a PDF in the built-in viewer: offer Save PDF As… and print through the viewer. */
   pdfDocument?: boolean
   printPage?: () => void
@@ -115,6 +117,7 @@ export function showBrowserContextMenu(
     hasReaderView: Boolean(options.readerView),
     canWatchPage: Boolean(options.watchPage),
     canAddToReadingList: Boolean(options.addToReadingList),
+    canOpenInGlance: Boolean(options.openInGlance),
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward()
   }, {
@@ -131,6 +134,7 @@ export function showBrowserContextMenu(
     copyImageAt: (x, y) => contents.copyImageAt(x, y),
     openInNewTab: options.openInNewTab,
     openInBackgroundTab: options.openInBackgroundTab,
+    openInGlance: options.openInGlance,
     saveUrl: (url, suggestedFilename) => runMenuTask(saveUrl(contents, options.window, url, suggestedFilename)),
     savePage: () => runMenuTask(savePage(contents, options.window, pageFilename(params.pageURL))),
     goBack: () => contents.navigationHistory.goBack(),
