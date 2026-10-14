@@ -2,21 +2,20 @@
 .surffish-egg {
   position: fixed;
   z-index: 2147483000;
-  top: 14px;
-  left: 14px;
-  right: 14px;
+  /* Edge to edge: the whole window becomes the scene, and the macOS traffic lights sit on top of
+     it (an inset card left the toolbar peeking out around them). */
+  top: 0;
+  left: 0;
+  right: 0;
   /* The toolbar view is only as tall as what it draws, so 100vh would be circular: main reports
      the window height (--shell-window-height); other surfaces fill their own viewport. */
-  height: calc(var(--shell-window-height, 100vh) - 28px);
+  height: var(--shell-window-height, 100vh);
   overflow: hidden;
   container-type: size;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 26px;
   background:
     radial-gradient(120% 80% at 50% 0%, rgba(84, 170, 255, 0.28), transparent 60%),
     radial-gradient(90% 60% at 50% 110%, rgba(0, 210, 255, 0.35), transparent 70%),
     linear-gradient(180deg, #071426 0%, #0a2a4a 55%, #06325a 100%);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.16);
   color: #eaf6ff;
   cursor: pointer;
   outline: none;
@@ -24,7 +23,7 @@
   animation: surffish-egg-in 420ms cubic-bezier(0.2, 0.9, 0.25, 1.15) both;
 }
 @keyframes surffish-egg-in {
-  from { opacity: 0; transform: scale(0.94) translateY(-10px); }
+  from { opacity: 0; transform: scale(1.03); }
   to { opacity: 1; transform: none; }
 }
 
@@ -84,15 +83,10 @@
   stroke: rgba(190, 235, 255, 0.55);
   stroke-width: 5;
   stroke-linecap: round;
-  stroke-dasharray: 62 6 2 6 10 14;
-  animation: surffish-egg-ring 14s linear infinite;
   filter: drop-shadow(0 0 6px rgba(140, 215, 255, 0.7));
 }
 .surffish-egg-ring.is-front {
   stroke: rgba(225, 248, 255, 0.85);
-}
-@keyframes surffish-egg-ring {
-  to { stroke-dashoffset: -100; }
 }
 .surffish-egg-fish-rider {
   filter: drop-shadow(0 0 8px rgba(120, 220, 255, 0.9));
