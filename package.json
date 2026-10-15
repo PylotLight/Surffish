@@ -54,6 +54,7 @@
     "test:electron-mini-window": "electron scripts/electron-mini-window-smoke.cjs",
     "test:electron-mini-window-dock": "electron scripts/electron-mini-window-dock-smoke.cjs",
     "test:electron-mini-window-grouping": "electron scripts/electron-mini-window-grouping-smoke.cjs",
+    "test:electron-mini-window-header": "electron scripts/electron-mini-window-header-smoke.cjs",
     "test:electron-local-ai": "electron scripts/electron-local-ai-smoke.cjs",
     "test:electron-nav-history-menu": "electron scripts/electron-nav-history-menu-smoke.cjs",
     "test:electron-user-agent": "electron scripts/electron-user-agent-smoke.cjs",

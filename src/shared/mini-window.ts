@@ -28,6 +28,22 @@ export interface MiniWindowSettings {
   peekOnHover: boolean
   /** How several mini windows group (MiniWindowGrouping). */
   grouping: MiniWindowGrouping
+  /** Where the auto-hiding header (and tab strip) shows (MiniWindowHeaderPlacement). */
+  headerPlacement: MiniWindowHeaderPlacement
+}
+
+/**
+ * Where the mini window's auto-hiding header (and its tab strip) shows when revealed:
+ * - 'float': in a separate always-on-top panel attached outside the window, above its top edge
+ *   (below its bottom edge when there is no room above), so it never covers the page.
+ * - 'push': inside the window, and the page moves down (and shrinks) while it shows.
+ * - 'overlay': inside the window, over the top of the page (the original behaviour).
+ */
+export type MiniWindowHeaderPlacement = 'float' | 'push' | 'overlay'
+export const MINI_WINDOW_HEADER_PLACEMENTS: readonly MiniWindowHeaderPlacement[] = ['float', 'push', 'overlay']
+
+export function isMiniWindowHeaderPlacement(value: unknown): value is MiniWindowHeaderPlacement {
+  return typeof value === 'string' && (MINI_WINDOW_HEADER_PLACEMENTS as readonly string[]).includes(value)
 }
 
 /**
@@ -42,7 +58,7 @@ export interface MiniWindowSettings {
 export type MiniWindowGrouping = 'tabs' | 'stack' | 'separate'
 export const MINI_WINDOW_GROUPINGS: readonly MiniWindowGrouping[] = ['tabs', 'stack', 'separate']
 
-export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' }
+export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' }
 
 export function isMiniWindowGrouping(value: unknown): value is MiniWindowGrouping {
   return typeof value === 'string' && (MINI_WINDOW_GROUPINGS as readonly string[]).includes(value)
@@ -126,7 +142,9 @@ export function parseMiniWindowSettings(value: unknown): MiniWindowSettings {
   const peekOnHover = typeof record.peekOnHover === 'boolean' ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
   // Settings saved before grouping existed (one window per tab) take the default.
   const grouping = isMiniWindowGrouping(record.grouping) ? record.grouping : DEFAULT_MINI_WINDOW_SETTINGS.grouping
-  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, grouping }
+  // Settings saved before the header placement existed take the default (float above the window).
+  const headerPlacement = isMiniWindowHeaderPlacement(record.headerPlacement) ? record.headerPlacement : DEFAULT_MINI_WINDOW_SETTINGS.headerPlacement
+  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, grouping, headerPlacement }
 }
 
 /** Accelerators compared on what they press (CommandOrControl counts as Command on macOS, Control elsewhere). */
@@ -201,6 +219,49 @@ export const MINI_WINDOW_TAB_STRIP_HEIGHT = 28
 /** Height of the revealed header: the header row, plus the tab strip when the window holds several tabs. */
 export function miniHeaderHeight(tabCount: number, grouping: MiniWindowGrouping): number {
   return MINI_WINDOW_HEADER_HEIGHT + (grouping === 'tabs' && tabCount > 1 ? MINI_WINDOW_TAB_STRIP_HEIGHT : 0)
+}
+
+/** How the revealed header sits: in a panel above or below the window, pushing the page down, or over it. */
+export type MiniHeaderLayout = { kind: 'above' | 'below'; panel: MiniRect } | { kind: 'push' } | { kind: 'overlay' }
+
+/** The header panel's bounds on `side` of a window at `window` (same x and width, `height` tall, touching its edge). */
+export function miniHeaderPanelRect(window: MiniRect, height: number, side: 'above' | 'below'): MiniRect {
+  return { x: window.x, y: side === 'above' ? window.y - height : window.y + window.height, width: window.width, height }
+}
+
+/**
+ * Where the revealed header goes for `placement`. 'float': above the window when the panel fits inside
+ * the work area there (and the window is not docked to the top edge), else below (unless docked to the
+ * bottom edge), else it pushes the page instead. `lockedSide`: keep this side regardless of room (while
+ * the window is being dragged by its header, so it never flips under the pointer).
+ */
+export function planMiniHeader(placement: MiniWindowHeaderPlacement, window: MiniRect, height: number, workArea: MiniRect, dockEdge: string | null, lockedSide: 'above' | 'below' | null = null): MiniHeaderLayout {
+  if (placement === 'overlay') return { kind: 'overlay' }
+  if (placement === 'push') return { kind: 'push' }
+  if (lockedSide) return { kind: lockedSide, panel: miniHeaderPanelRect(window, height, lockedSide) }
+  if (dockEdge !== 'top' && window.y - height >= workArea.y) return { kind: 'above', panel: miniHeaderPanelRect(window, height, 'above') }
+  if (dockEdge !== 'bottom' && window.y + window.height + height <= workArea.y + workArea.height) return { kind: 'below', panel: miniHeaderPanelRect(window, height, 'below') }
+  return { kind: 'push' }
+}
+
+/** Is a pointer `y` px from the top of a window `height` tall in the zone that reveals the header (its bottom edge when the header floats below)? */
+export function inMiniRevealZone(kind: MiniHeaderLayout['kind'], y: number, height: number, zone = MINI_WINDOW_REVEAL_ZONE): boolean {
+  if (y < 0 || y >= height) return false
+  return kind === 'below' ? y >= height - zone : y <= zone
+}
+
+/** The page's bounds inside a window of `size`: everything, except 'push' moves it under the revealed header. */
+export function miniPageBounds(kind: MiniHeaderLayout['kind'], revealed: boolean, size: { width: number; height: number }, headerHeight: number): MiniRect {
+  if (kind !== 'push' || !revealed) return { x: 0, y: 0, width: size.width, height: size.height }
+  const top = Math.min(headerHeight, Math.max(0, size.height - 1))
+  return { x: 0, y: top, width: size.width, height: size.height - top }
+}
+
+/** The smallest rect holding both. */
+export function unionMiniRect(a: MiniRect, b: MiniRect): MiniRect {
+  const x = Math.min(a.x, b.x)
+  const y = Math.min(a.y, b.y)
+  return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y }
 }
 
 /** Saved geometry is keyed by display (its work area), so each monitor remembers its own spot. */
@@ -351,11 +412,12 @@ function inside(point: { x: number; y: number }, rect: MiniRect): boolean {
 
 /**
  * Grouping 'tabs': the window a window dropped with its header at `point` merges into, i.e. the
- * first of `others` whose header band (its top MINI_WINDOW_REVEAL_ZONE px) is under the point; null
- * when none. Only the header band counts, so overlapping two windows never merges them by accident.
+ * first of `others` whose header band (its top MINI_WINDOW_REVEAL_ZONE px, plus `above` px over its
+ * top edge where a floating header sits) is under the point; null when none. Only the header band
+ * counts, so overlapping two windows never merges them by accident.
  */
-export function miniMergeTarget<T extends { bounds: MiniRect }>(point: { x: number; y: number }, others: readonly T[]): T | null {
-  return others.find((other) => inside(point, { ...other.bounds, height: Math.min(other.bounds.height, MINI_WINDOW_REVEAL_ZONE) })) ?? null
+export function miniMergeTarget<T extends { bounds: MiniRect }>(point: { x: number; y: number }, others: readonly T[], above = 0): T | null {
+  return others.find((other) => inside(point, { ...other.bounds, y: other.bounds.y - above, height: Math.min(other.bounds.height, MINI_WINDOW_REVEAL_ZONE) + above })) ?? null
 }
 
 export type MiniTabDrop<T> = { kind: 'merge'; into: T } | { kind: 'split' } | { kind: 'none' }

@@ -27,20 +27,25 @@ import {
   miniMergeTarget,
   miniSplitBounds,
   miniTabDrop,
-  planMiniRegroup
+  planMiniRegroup,
+  inMiniRevealZone,
+  miniHeaderPanelRect,
+  miniPageBounds,
+  planMiniHeader,
+  unionMiniRect
 } from './mini-window'
 
 const workArea = { x: 0, y: 25, width: 1440, height: 875 }
 
 describe('mini window settings', () => {
   test('defaults: no pinned page, the default shortcut, opaque', () => {
-    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
-    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
+    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
+    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
   })
 
   test('tuck to edge is on and peek off by default; booleans are kept', () => {
     expect(parseMiniWindowSettings({ tuckToEdge: false, peekOnHover: true })).toMatchObject({ tuckToEdge: false, peekOnHover: true })
-    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
+    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
   })
 
   test('an explicit empty shortcut turns it off', () => {
@@ -199,7 +204,7 @@ describe('several mini windows', () => {
 describe('grouping', () => {
   test('settings from before grouping (the #203 format) read as tabs; bad values fall back', () => {
     const v203 = { defaultUrl: 'https://claude.ai/', shortcut: 'CommandOrControl+Shift+Space', opacity: 0.9, tuckToEdge: true, peekOnHover: true }
-    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, grouping: 'tabs' })
+    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, grouping: 'tabs', headerPlacement: 'float' })
     expect(parseMiniWindowSettings({ grouping: 'stack' }).grouping).toBe('stack')
     expect(parseMiniWindowSettings({ grouping: 'separate' }).grouping).toBe('separate')
     expect(parseMiniWindowSettings({ grouping: 'piles' }).grouping).toBe('tabs')
@@ -256,5 +261,82 @@ describe('grouping', () => {
     const windows = [{ id: 1, tabs: 3, dockKey: '7:right' }, { id: 2, tabs: 1, dockKey: null }, { id: 3, tabs: 2, dockKey: null }]
     expect(planMiniRegroup('stack', windows)).toEqual({ merge: [], split: [1, 3] })
     expect(planMiniRegroup('separate', windows)).toEqual({ merge: [], split: [1, 3] })
+  })
+})
+
+describe('header placement', () => {
+  const wa = { x: 0, y: 25, width: 1440, height: 875 }
+  const win = { x: 600, y: 300, width: 420, height: 400 }
+
+  test('settings without a header placement (the #206 format) read as float; bad values fall back', () => {
+    const v206 = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' as const }
+    expect(parseMiniWindowSettings(v206)).toEqual({ ...v206, headerPlacement: 'float' })
+    expect(parseMiniWindowSettings({ headerPlacement: 'push' }).headerPlacement).toBe('push')
+    expect(parseMiniWindowSettings({ headerPlacement: 'overlay' }).headerPlacement).toBe('overlay')
+    expect(parseMiniWindowSettings({ headerPlacement: 'sideways' }).headerPlacement).toBe('float')
+  })
+
+  test('float sits above the window, touching its top edge, same x and width', () => {
+    expect(planMiniHeader('float', win, 64, wa, null)).toEqual({ kind: 'above', panel: { x: 600, y: 236, width: 420, height: 64 } })
+    // Exactly enough room still fits.
+    expect(planMiniHeader('float', { ...win, y: wa.y + 36 }, 36, wa, null).kind).toBe('above')
+  })
+
+  test('no room above (top of the work area, or docked to the top edge) flips it below', () => {
+    expect(planMiniHeader('float', { ...win, y: wa.y + 10 }, 36, wa, null)).toEqual({ kind: 'below', panel: { x: 600, y: 435, width: 420, height: 36 } })
+    expect(planMiniHeader('float', win, 36, wa, 'top')).toEqual({ kind: 'below', panel: miniHeaderPanelRect(win, 36, 'below') })
+    // Docked to a side or the bottom: above is fine.
+    expect(planMiniHeader('float', win, 36, wa, 'right').kind).toBe('above')
+    expect(planMiniHeader('float', win, 36, wa, 'bottom').kind).toBe('above')
+  })
+
+  test('no room either side falls back to push', () => {
+    const tall = { x: 0, y: wa.y, width: 420, height: wa.height }
+    expect(planMiniHeader('float', tall, 36, wa, null)).toEqual({ kind: 'push' })
+    expect(planMiniHeader('float', { ...win, y: wa.y + 10, height: wa.height - 20 }, 36, wa, null)).toEqual({ kind: 'push' })
+    // Docked to the top with the bottom out of room.
+    expect(planMiniHeader('float', { ...win, y: wa.y, height: wa.height - 20 }, 36, wa, 'top')).toEqual({ kind: 'push' })
+    // Docked to the bottom with no room above.
+    expect(planMiniHeader('float', { ...win, y: wa.y + 20, height: wa.height - 20 }, 36, wa, 'bottom')).toEqual({ kind: 'push' })
+  })
+
+  test('a locked side (dragging by the header) never flips, even off the work area', () => {
+    expect(planMiniHeader('float', { ...win, y: wa.y }, 36, wa, null, 'above')).toEqual({ kind: 'above', panel: { x: 600, y: wa.y - 36, width: 420, height: 36 } })
+    expect(planMiniHeader('float', win, 36, wa, null, 'below').kind).toBe('below')
+  })
+
+  test('push and overlay ignore room', () => {
+    expect(planMiniHeader('push', win, 36, wa, null)).toEqual({ kind: 'push' })
+    expect(planMiniHeader('overlay', { ...win, y: wa.y }, 36, wa, 'top')).toEqual({ kind: 'overlay' })
+  })
+
+  test('the reveal zone is the top edge, or the bottom edge when the header floats below', () => {
+    expect(inMiniRevealZone('above', 10, 400)).toBe(true)
+    expect(inMiniRevealZone('above', 200, 400)).toBe(false)
+    expect(inMiniRevealZone('push', 44, 400)).toBe(true)
+    expect(inMiniRevealZone('overlay', 45, 400)).toBe(false)
+    expect(inMiniRevealZone('below', 10, 400)).toBe(false)
+    expect(inMiniRevealZone('below', 380, 400)).toBe(true)
+    expect(inMiniRevealZone('above', -1, 400)).toBe(false)
+    expect(inMiniRevealZone('below', 400, 400)).toBe(false)
+  })
+
+  test('push moves the page under the revealed header; everything else gives it the whole window', () => {
+    const size = { width: 420, height: 400 }
+    expect(miniPageBounds('push', true, size, 64)).toEqual({ x: 0, y: 64, width: 420, height: 336 })
+    expect(miniPageBounds('push', false, size, 64)).toEqual({ x: 0, y: 0, width: 420, height: 400 })
+    expect(miniPageBounds('overlay', true, size, 64)).toEqual({ x: 0, y: 0, width: 420, height: 400 })
+    expect(miniPageBounds('above', true, size, 64)).toEqual({ x: 0, y: 0, width: 420, height: 400 })
+    // Never a zero-height page.
+    expect(miniPageBounds('push', true, { width: 300, height: 30 }, 64).height).toBe(1)
+  })
+
+  test('union and the merge band over a floating header', () => {
+    expect(unionMiniRect({ x: 600, y: 236, width: 420, height: 64 }, win)).toEqual({ x: 600, y: 236, width: 420, height: 464 })
+    const others = [{ id: 'a', bounds: win }]
+    expect(miniMergeTarget({ x: 700, y: 280 }, others)).toBeNull()
+    expect(miniMergeTarget({ x: 700, y: 280 }, others, MINI_WINDOW_HEADER_HEIGHT)?.id).toBe('a')
+    expect(miniMergeTarget({ x: 700, y: 250 }, others, MINI_WINDOW_HEADER_HEIGHT)).toBeNull()
+    expect(miniMergeTarget({ x: 700, y: 320 }, others, MINI_WINDOW_HEADER_HEIGHT)?.id).toBe('a')
   })
 })
