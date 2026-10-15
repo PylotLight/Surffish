@@ -38,7 +38,7 @@ import { forgetArchivedTabsSince } from './tab-archive-store'
  * Electron can't clear cookies, storage or cache by date, so for a time range those are
  * cleared for the sites visited in that range (from Surffish history), like "sites you used".
  */
-const STORAGE_TYPES = ['backgroundFetch', 'fileSystems', 'indexedDB', 'localStorage', 'serviceWorkers', 'webSQL'] as const
+const STORAGE_TYPES = ['backgroundFetch', 'fileSystems', 'indexedDB', 'localStorage', 'serviceWorkers'] as const
 
 function siteOf(host: string): string {
   return getDomain(host, { allowPrivateDomains: true }) ?? host
