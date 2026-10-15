@@ -14,15 +14,16 @@
 // - No createMediaElementSource of our own (cross-origin media would go silent), and mute is left
 //   to Chromium's per-tab flag: volume 0 is not mute.
 //
-// The level comes from main synchronously when the frame starts, and later over
-// `surffish:tab-volume:set`. The main-world part listens on a random, per-frame event name.
+// The level is asked from main synchronously the first time the frame uses media (so a page with
+// none costs no IPC), and pushed later over `surffish:tab-volume:set`. The two worlds talk over a
+// random, per-frame event name.
 const { ipcRenderer, webFrame } = require('electron')
 
 const GET_CHANNEL = 'surffish:tab-volume:get'
 const SET_CHANNEL = 'surffish:tab-volume:set'
 
 /** Runs in the page's main world (serialised with toString); must not reference anything outside. */
-function installTabVolume(eventName, initialVolume) {
+function installTabVolume(eventName) {
   'use strict'
   const w = window
   const Media = w.HTMLMediaElement
@@ -58,7 +59,16 @@ function installTabVolume(eventName, initialVolume) {
   const seenEvents = new WeakSet()
   const elements = new Set()
   const roots = new Set()
-  let tabVolume = clamp(initialVolume)
+  let tabVolume = 1
+  /** The tab's level was asked for (or pushed). Asked on first media use, so pages without media cost no IPC. */
+  let known = false
+
+  function ensureKnown() {
+    if (known) return
+    known = true
+    // The isolated world answers synchronously (sendSync) by dispatching `eventName` back.
+    try { apply(nativeDispatch, w, [new EventCtor(eventName + '?')]) } catch { /* keep 100% */ }
+  }
 
   function clamp(value) {
     const number = Number(value)
@@ -88,7 +98,9 @@ function installTabVolume(eventName, initialVolume) {
   }
 
   function track(element) {
-    if (!element || pageVolume.has(element)) return
+    if (!element) return
+    ensureKnown()
+    if (pageVolume.has(element)) return
     const current = readNative(element)
     if (current === null) return
     pageVolume.set(element, current)
@@ -214,6 +226,7 @@ function installTabVolume(eventName, initialVolume) {
       if (!(context instanceof Realtime)) return null
       let gain = gains.get(context)
       if (!gain) {
+        ensureKnown()
         gain = new Gain(context, { gain: tabVolume })
         apply(nativeConnect, gain, [node])
         gains.set(context, gain)
@@ -279,6 +292,7 @@ function installTabVolume(eventName, initialVolume) {
     let detail
     try { detail = apply(customDetail, event, []) } catch { return }
     const next = clamp(detail)
+    known = true
     if (next === tabVolume) return
     tabVolume = next
     for (const element of liveElements()) {
@@ -289,7 +303,7 @@ function installTabVolume(eventName, initialVolume) {
   }])
 }
 
-function readInitialVolume() {
+function askVolume() {
   try {
     const value = ipcRenderer.sendSync(GET_CHANNEL)
     return typeof value === 'number' && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1
@@ -305,10 +319,22 @@ function randomEventName() {
 }
 
 const eventName = randomEventName()
-let current = readInitialVolume()
+let current = 1
+function deliver(volume) {
+  try {
+    window.dispatchEvent(new CustomEvent(eventName, { detail: volume }))
+  } catch {
+    // The frame may be going away.
+  }
+}
+// The main world's first media use: ask main now (synchronously, before the element plays).
+window.addEventListener(`${eventName}?`, () => {
+  current = askVolume()
+  deliver(current)
+})
 try {
   // Main world, synchronous, before the page's own scripts (and not subject to its CSP).
-  const result = webFrame.executeJavaScript(`(${installTabVolume.toString()})(${JSON.stringify(eventName)}, ${current})`)
+  const result = webFrame.executeJavaScript(`(${installTabVolume.toString()})(${JSON.stringify(eventName)})`)
   if (result && typeof result.catch === 'function') result.catch(() => {})
 } catch {
   // Never break the page.
@@ -319,9 +345,5 @@ ipcRenderer.on(SET_CHANNEL, (_event, value) => {
   const next = Math.min(1, Math.max(0, value))
   if (next === current) return
   current = next
-  try {
-    window.dispatchEvent(new CustomEvent(eventName, { detail: next }))
-  } catch {
-    // The frame may be going away.
-  }
+  deliver(next)
 })

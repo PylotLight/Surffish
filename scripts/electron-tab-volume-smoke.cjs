@@ -7,7 +7,8 @@
 //      own values; the AudioContext's destination gets a gain at 0.5; the routed element is left at
 //      the page's volume (the gain turns it down once); the page sees no volumechange for our writes
 //      and one for its own; bad values still throw; volume 0 is not mute.
-//   2. A frame that starts later (reload) gets the level at once; the level is remembered per site
+//   2. A frame that starts later (reload) gets the level at once (asked on first media use; pages with
+//      no media never ask); the level is remembered per site
 //      (a second tab on the same site gets it, another site starts at 100%, coming back restores it).
 //   3. The sidebar row of a playing tab has the speaker with a hover slider; the wheel steps it 5%.
 //   4. ⌘K Volume Up / Volume Down step 10%.
@@ -26,7 +27,7 @@ const { mkdirSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, webContents: allWebContents } = require('electron')
+const { app, BaseWindow, ipcMain, webContents: allWebContents } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 // No sound card on CI; players still play. Media may start without a gesture (the fixture plays on load).
@@ -171,6 +172,9 @@ async function run() {
   const url = (name) => `${origin}/${name}`
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [url('start')], activeIndex: 0 }))
 
+  // Which pages asked main for their level (only frames that use media should).
+  const asks = []
+  ipcMain.on('surffish:tab-volume:get', (event) => { try { asks.push(event.senderFrame?.url ?? '') } catch { asks.push('') } })
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
   const mainWindow = await waitFor(() => BaseWindow.getAllWindows()[0], 'the main window')
@@ -250,6 +254,10 @@ async function run() {
   await waitFor(async () => (await api('siteVolume.list()')).some((site) => site.origin === origin && site.volume === 0.4), 'the level saved for the site')
   await api(`tabs.create(${JSON.stringify(`${origin}/other`)})`)
   await waitFor(async () => (await tabAt(`${origin}/other`))?.volume === 0.4, 'a second tab on the same site starts at its saved level')
+  await pageFor(`${origin}/other`)
+  await delay(200)
+  assert.ok(asks.some((frame) => frame === url('media')), 'the media page asked for its level')
+  assert.ok(!asks.some((frame) => frame === `${origin}/other` || frame === url('start')), `pages without media never ask (${JSON.stringify(asks)})`)
   await api(`tabs.activate(${JSON.stringify(tab.id)})`)
   await page.loadURL(`${frameOrigin}/elsewhere`)
   await waitFor(async () => (await tabs()).find((entry) => entry.id === tab.id)?.volume === undefined, 'another site starts at 100%')
