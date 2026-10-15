@@ -34,6 +34,7 @@ import { attachNetworkInspector, detachNetworkInspector } from './network-inspec
 import { createBroadcastQueue } from '../shared/tab-broadcast'
 import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
 import { activeTabSinceFor, captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { attachPagePopups, type PagePopupHost, userPopupResponse } from './page-popups'
 import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
@@ -1014,6 +1015,18 @@ function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boole
   return true
 }
 
+/** What a tab's popups need from the browser: links out of them open as tabs in the tab's window. */
+function pagePopupHost(tab: BrowserTab): PagePopupHost {
+  return {
+    openTab: (url, activate) => {
+      if (!isLiveWindow(tab.win)) return
+      if (!activate) return openBackgroundTab(url, tab.isPrivate, tab.win)
+      if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)) persistOpenTabs()
+    },
+    handOffSignIn: (contents, url) => !tab.isPrivate && handOffGoogleSignIn(contents, url)
+  }
+}
+
 /** A site tab's webPreferences (Glance pages get the same, so a promoted glance is a normal tab). */
 function tabWebPreferences(tab: BrowserTab, pauseAutoplay = tab.pauseAutoplayUntilVisited): Electron.WebPreferences {
   const needsBrowserViewPreload = process.platform === 'darwin' || pauseAutoplay
@@ -1132,6 +1145,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
       if (isCurrentContents() && !isTabOnScreen(tab)) hibernateTab(tab)
     })
   })
+  if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab))
   guardPageDragRegions(contents)
   trackTabMediaSession(contents)
   contents.on('media-started-playing', () => {
@@ -1166,6 +1180,12 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
         outlivesOpener: true,
         createWindow: (options) => openPageMadeTab(tab, details.url, activate, options)
       }
+    }
+    // A sized window.open right after a click or key press (Disqus/OAuth sign-in, 3-D Secure): a
+    // real popup that keeps window.opener, like Chrome. "Open pop-ups in tabs" keeps them as tabs.
+    if (!tab.extensionPageOrigin && !getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
+      const popup = userPopupResponse(contents, details)
+      if (popup) return popup
     }
     const target = resolveNavigationTarget(details.url, selectedSearchEngine)
     if (target && /^https?:\/\//i.test(target)) {
