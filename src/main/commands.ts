@@ -51,7 +51,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -212,6 +212,12 @@ const COMMANDS: BrowserCommand[] = [
     keywords: ['mini window', 'group', 'grouping', ...extra], refocusPage: true,
     enabled: () => getMiniWindowSettings().grouping !== grouping,
     run: () => setMiniWindowGrouping(grouping)
+  }))),
+  ...(([['float', 'Float Above', ['outside', 'above', 'never covers', 'panel']], ['push', 'Push Content', ['push', 'reflow', 'move page down']], ['overlay', 'Overlay', ['over the page', 'cover']]] as const).map(([placement, label, extra]): BrowserCommand => ({
+    id: `miniWindow.header.${placement}`, title: `Mini Window Header: ${label}`, section: 'Settings',
+    keywords: ['mini window', 'header', 'title bar', 'tab strip', ...extra], refocusPage: true,
+    enabled: () => getMiniWindowSettings().headerPlacement !== placement,
+    run: () => setMiniWindowHeaderPlacement(placement)
   }))),
   // Split view
   {

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('miniWindow', {
   close: () => ipcRenderer.send('mini-window:close'),
   hover: (inside) => ipcRenderer.send('mini-window:hover', Boolean(inside)),
   tuck: () => ipcRenderer.send('mini-window:tuck'),
+  // Floating header (a panel outside the window): press and release of a drag that moves the window.
+  dragHeader: (active) => ipcRenderer.send('mini-window:header-drag', Boolean(active)),
   // Tab strip (grouping 'tabs').
   activateTab: (tabId) => ipcRenderer.send('mini-window:activate-tab', String(tabId)),
   closeTab: (tabId) => ipcRenderer.send('mini-window:close-tab', String(tabId)),

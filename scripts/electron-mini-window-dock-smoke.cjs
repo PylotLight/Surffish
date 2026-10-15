@@ -145,6 +145,8 @@ async function run() {
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const origin = `http://127.0.0.1:${server.address().port}`
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [`${origin}/start`, `${origin}/chat`, `${origin}/idle`], activeIndex: 1 }))
+  // Header inside the window (the original 'overlay' placement), so the header view is the mini window's; 'float' / 'push': electron-mini-window-header-smoke.cjs.
+  writeFileSync(join(userData, 'browser-mini-window.json'), JSON.stringify({ headerPlacement: 'overlay' }))
 
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()

@@ -4,10 +4,12 @@ import {
   MINI_WINDOW_SETTINGS_FILE,
   clashingAppShortcut,
   isMiniWindowGrouping,
+  isMiniWindowHeaderPlacement,
   normalizeAccelerator,
   normalizeMiniWindowUrl,
   parseMiniWindowSettings,
   type MiniWindowGrouping,
+  type MiniWindowHeaderPlacement,
   type MiniWindowSettings
 } from '../shared/mini-window'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
@@ -139,6 +141,11 @@ export function setMiniWindowGrouping(grouping: MiniWindowGrouping): boolean {
   return updateMiniWindowSettings({ grouping }).ok
 }
 
+/** Settings → Mini window header (also the Window menu and the palette). Moves open headers live, no reloads. */
+export function setMiniWindowHeaderPlacement(headerPlacement: MiniWindowHeaderPlacement): boolean {
+  return updateMiniWindowSettings({ headerPlacement }).ok
+}
+
 /** Put every mini window's tab back into the browser. */
 export function returnAllMiniWindows(): boolean {
   return miniModule?.returnAll() ?? false
@@ -254,6 +261,10 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
   if ('grouping' in patch) {
     if (!isMiniWindowGrouping(patch.grouping)) return { ok: false, error: 'Invalid settings' }
     next.grouping = patch.grouping
+  }
+  if ('headerPlacement' in patch) {
+    if (!isMiniWindowHeaderPlacement(patch.headerPlacement)) return { ok: false, error: 'Invalid settings' }
+    next.headerPlacement = patch.headerPlacement
   }
   const shortcutChanged = next.shortcut !== current().shortcut
   settings = parseMiniWindowSettings(next)

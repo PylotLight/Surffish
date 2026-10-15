@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, type MiniWindowGrouping, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
+import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, type MiniWindowGrouping, type MiniWindowHeaderPlacement, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './SettingsControls'
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC')
@@ -10,7 +10,7 @@ interface Status { shortcut: string; registered: boolean; error: string | null }
 /**
  * Settings → General → Mini window: the page the global shortcut opens (empty: pop out the current
  * tab), the shortcut itself (press keys to record, Clear to turn it off), how several mini windows
- * group, tuck to screen edge (and peek on hover) and opacity.
+ * group, where the header shows, tuck to screen edge (and peek on hover) and opacity.
  */
 
 const GROUPING_HINTS: Record<MiniWindowGrouping, string> = {
@@ -18,6 +18,12 @@ const GROUPING_HINTS: Record<MiniWindowGrouping, string> = {
   stack: 'Each tab gets its own mini window. Windows tucked to the same screen edge share one edge tab and slide out together, stacked along the edge.',
   separate: 'Each tab gets its own mini window with its own edge tab.'
 }
+const HEADER_HINTS: Record<MiniWindowHeaderPlacement, string> = {
+  float: 'The header and tab strip show just above the mini window (below it when there is no room above), so they never cover the page.',
+  push: 'The header and tab strip show inside the mini window and move the page down while they are visible.',
+  overlay: 'The header and tab strip slide over the top of the page while the pointer is near them.'
+}
+
 export function MiniWindowSettings(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
@@ -118,6 +124,19 @@ export function MiniWindowSettings(): React.JSX.Element {
           <option value="tabs">Tabs</option>
           <option value="stack">Stack</option>
           <option value="separate">Separate</option>
+        </select>
+      </SettingsRow>
+      <SettingsRow label="Mini window header" hint={HEADER_HINTS[settings?.headerPlacement ?? 'float']}>
+        <select
+          className="settings-select"
+          value={settings?.headerPlacement ?? 'float'}
+          disabled={!settings}
+          aria-label="Mini window header"
+          onChange={(event) => update({ headerPlacement: event.target.value as MiniWindowHeaderPlacement })}
+        >
+          <option value="float">Float above</option>
+          <option value="push">Push content</option>
+          <option value="overlay">Overlay</option>
         </select>
       </SettingsRow>
       <SettingsRow

@@ -1,10 +1,13 @@
 /**
- * The mini window's header: a slim draggable strip over the top of the page (favicon + title + host,
- * Back, Reload, Tuck to Edge, Return to Browser, Close). It is collapsed to nothing until the pointer comes near
- * the top of the window (mini-window.ts resizes the view), so the page gets the whole window.
+ * The mini window's header: a slim draggable strip (favicon + title + host, Back, Reload, Tuck to Edge,
+ * Return to Browser, Close). It is hidden until the pointer comes near the window's edge
+ * (mini-window.ts). Where it shows follows Settings → Mini window header: in a panel of its own just
+ * outside the window ('float', body.floating: dragged by pointer events that main follows, since the
+ * panel isn't the window), or inside the window over / pushing down the page.
  * With grouping 'tabs' and two or more tabs, a compact tab strip sits under it (favicon, title, close;
  * click to switch, drag a tab out of the window to split it off or onto another mini window to move it)
  * and a Return All button joins the row.
+ * Button hints show in place of the title (never as native tooltips, which would cover the tab strip).
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
 export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
@@ -21,6 +24,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   #icon[hidden] { display: none; }
   #text { min-width: 0; display: flex; flex-direction: column; }
   #title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hint { display: none; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.hinting #hint { display: block; }
+  body.hinting #text { display: none; }
+  body.floating header, body.floating #strip { -webkit-app-region: no-drag; }
   #url { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #badge { display: none; font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; flex: none; }
   body.private #badge { display: inline-block; }
@@ -50,14 +57,14 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
 </style></head>
 <body>
 <header id="bar">
-  <button id="back" title="Back" aria-label="Back" disabled>&#8249;</button>
-  <button id="reload" title="Reload" aria-label="Reload">&#8635;</button>
-  <div id="where"><img id="icon" alt="" hidden><div id="text"><div id="title"></div><div id="url"></div></div></div>
+  <button id="back" data-hint="Back" aria-label="Back" disabled>&#8249;</button>
+  <button id="reload" data-hint="Reload" aria-label="Reload">&#8635;</button>
+  <div id="where"><img id="icon" alt="" hidden><div id="text"><div id="title"></div><div id="url"></div></div><div id="hint" aria-hidden="true"></div></div>
   <span id="badge">Private</span>
-  <button id="tuck" title="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-  <button id="return" title="Return to Browser" aria-label="Return to Browser">&#8689;</button>
-  <button id="returnAll" title="Return All Tabs to Browser" aria-label="Return All Tabs to Browser">&#8648;</button>
-  <button id="close" title="Close" aria-label="Close Mini Window">&#215;</button>
+  <button id="tuck" data-hint="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button id="return" data-hint="Return to Browser" aria-label="Return to Browser">&#8689;</button>
+  <button id="returnAll" data-hint="Return All Tabs to Browser" aria-label="Return All Tabs to Browser">&#8648;</button>
+  <button id="close" data-hint="Close" aria-label="Close Mini Window">&#215;</button>
   <div id="progress"></div>
 </header>
 <nav id="strip" aria-label="Mini window tabs"></nav>
@@ -71,9 +78,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     document.body.classList.toggle('loading', Boolean(state.loading))
     document.body.classList.toggle('private', Boolean(state.private))
     document.body.classList.toggle('crashed', Boolean(state.crashed))
+    document.body.classList.toggle('floating', Boolean(state.floating))
     const tuck = document.getElementById('tuck')
     tuck.hidden = !state.tuck
-    if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.title = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
+    if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.dataset.hint = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
     if (state.faviconUrl && icon.getAttribute('src') !== state.faviconUrl) { icon.hidden = false; icon.src = state.faviconUrl }
     else if (!state.faviconUrl) icon.hidden = true
     renderTabs(Array.isArray(state.tabs) ? state.tabs : [])
@@ -85,7 +93,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     document.body.classList.toggle('tabbed', tabs.length > 1)
     // With a strip, the header's close button closes the tab on screen (the rest stay).
     const closeButton = document.getElementById('close')
-    closeButton.title = tabs.length > 1 ? 'Close Tab' : 'Close'
+    closeButton.dataset.hint = tabs.length > 1 ? 'Close Tab' : 'Close'
     closeButton.setAttribute('aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
     if (dragTab) return
     strip.replaceChildren(...tabs.map((tab) => {
@@ -142,7 +150,50 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
       return item
     }))
   }
+  // Button hints: shown in the title's place (a native tooltip would drop over the tab strip).
+  const hint = document.getElementById('hint')
+  let hinted = null
+  function showHint(button) {
+    hinted = button
+    hint.textContent = button.dataset.hint || button.getAttribute('aria-label') || ''
+    document.body.classList.toggle('hinting', Boolean(hint.textContent))
+  }
+  function hideHint(button) {
+    if (hinted !== button) return
+    hinted = null
+    document.body.classList.remove('hinting')
+  }
+  for (const button of document.querySelectorAll('header button')) {
+    button.addEventListener('mouseenter', () => showHint(button))
+    button.addEventListener('mouseleave', () => hideHint(button))
+    button.addEventListener('focus', () => showHint(button))
+    button.addEventListener('blur', () => hideHint(button))
+  }
   const bar = document.getElementById('bar')
+  // Floating (a panel outside the window): pressing the header or strip background drags the window;
+  // main follows the pointer until it is let go.
+  let dragging = null
+  function startDrag(event) {
+    if (!document.body.classList.contains('floating') || event.button !== 0 || dragging !== null) return
+    if (event.target.closest('button, .tab')) return
+    dragging = { id: event.pointerId, target: event.currentTarget }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    window.miniWindow.dragHeader(true)
+  }
+  function endDrag(event) {
+    if (!dragging || dragging.id !== event.pointerId) return
+    const target = dragging.target
+    dragging = null
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
+    window.miniWindow.dragHeader(false)
+  }
+  for (const surface of [bar, strip]) {
+    surface.addEventListener('pointerdown', startDrag)
+    surface.addEventListener('pointerup', endDrag)
+    surface.addEventListener('pointercancel', endDrag)
+    surface.addEventListener('lostpointercapture', endDrag)
+  }
+  window.addEventListener('blur', () => { if (dragging) { dragging = null; window.miniWindow.dragHeader(false) } })
   bar.addEventListener('mouseenter', () => window.miniWindow.hover(true))
   bar.addEventListener('mouseleave', () => window.miniWindow.hover(false))
   strip.addEventListener('mouseenter', () => window.miniWindow.hover(true))

@@ -11,20 +11,26 @@ import {
   MINI_WINDOW_REVEAL_ZONE,
   cascadeMiniBounds,
   freeMiniSlot,
+  inMiniRevealZone,
   initialMiniBounds,
   miniDisplayKey,
   miniHeaderHeight,
   miniHeaderUrl,
   miniMergeTarget,
+  miniPageBounds,
   miniSplitBounds,
   miniTabDrop,
   parseMiniGeometry,
   parseMiniSlots,
+  planMiniHeader,
   planMiniRegroup,
   snapMiniToCorner,
+  unionMiniRect,
   withMiniSlot,
+  type MiniHeaderLayout,
   type MiniRect,
   type MiniWindowGrouping,
+  type MiniWindowHeaderPlacement,
   type MiniWindowHeaderState,
   type MiniWindowSettings
 } from '../shared/mini-window'
@@ -53,6 +59,13 @@ import { notifyBrowserWindowsChanged } from './window-scope'
  * window's header or dock to an edge holding one to merge); 'stack' keeps windows apart but groups
  * the ones docked to one edge behind one handle (mini-window-dock.ts); 'separate' is one window per
  * tab. Switching regroups open windows by moving views only (no reloads). The cap counts tabs.
+ *
+ * Header placement (Settings → Mini window header, live): 'float' puts the header view in a panel of
+ * its own (same level / Spaces behaviour as the window) attached just above the window, or below it
+ * when there is no room above, so it never covers the page; it moves with the window, and pressing it
+ * drags the window (main follows the pointer). 'push' keeps it in the window and moves the page down
+ * while it shows; 'overlay' lays it over the page. The header view moves between the window and the
+ * panel without reloading.
  */
 
 interface Mini {
@@ -80,6 +93,21 @@ interface Mini {
   /** Moves before this are ours (corner snap), not a user drop. */
   ownMoveUntil: number
   closed: boolean
+  /** Header page loaded (it is attached only then). */
+  headerLoaded: boolean
+  /** Where the header view is attached: the window itself or the floating panel. */
+  mount: 'window' | 'panel' | null
+  /** 'float': the panel the header lives in (created on first need, closed with the window). */
+  panel: BaseWindow | null
+  /** Where the revealed header goes right now (planMiniHeader), kept current as the window moves. */
+  plan: MiniHeaderLayout
+  /** The page's top inside the window ('push' while revealed: under the header), and the window's content size. */
+  pageTop: number
+  size: { width: number; height: number }
+  /** 'push': no reveal before this (just hidden), so the page never bounces under a resting pointer. */
+  revealBlockedUntil: number
+  /** Dragging the window by its floating header: main follows the pointer from where it was pressed. */
+  headerDrag: { timer: ReturnType<typeof setInterval>; startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number } | null
 }
 
 const IS_MAC = process.platform === 'darwin'
@@ -87,6 +115,11 @@ const HEADER_READY_TIMEOUT_MS = 3000
 const HIDE_DELAY_MS = 700
 const POLL_MS = 300
 const GEOMETRY_SAVE_DELAY_MS = 400
+/** 'push': after hiding, reveals wait this long (no bounce while the page settles under the pointer). */
+const PUSH_REVEAL_COOLDOWN_MS = 250
+const HEADER_DRAG_POLL_MS = 16
+const HEADER_DRAG_MAX_MS = 15_000
+const HEADER_DRAG_THRESHOLD = 3
 
 /** Open mini windows, oldest first. */
 const minis: Mini[] = []
@@ -99,6 +132,11 @@ const OWN_MOVE_GRACE_MS = 500
 function grouping(): MiniWindowGrouping {
   return getMiniWindowSettings().grouping
 }
+
+function headerPlacement(): MiniWindowHeaderPlacement {
+  return getMiniWindowSettings().headerPlacement
+}
+let appliedPlacement: MiniWindowHeaderPlacement = headerPlacement()
 setDockGrouping(grouping)
 
 function tabsOf(m: Mini): MiniWindowTab[] {
@@ -200,12 +238,132 @@ function openingBounds(slot: number): MiniRect {
 // ---------------------------------------------------------------------------
 // Layout and the auto-hiding header.
 
+function sameRect(a: MiniRect, b: MiniRect): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+}
+
+function within(point: { x: number; y: number }, rect: MiniRect): boolean {
+  return point.x >= rect.x && point.x < rect.x + rect.width && point.y >= rect.y && point.y < rect.y + rect.height
+}
+
+function floats(plan: MiniHeaderLayout): plan is Extract<MiniHeaderLayout, { panel: MiniRect }> {
+  return plan.kind === 'above' || plan.kind === 'below'
+}
+
+/** Where the revealed header goes for the window where it is now (the side kept while dragging by it). */
+function updatePlan(m: Mini): void {
+  const bounds = m.window.getBounds()
+  const workArea = screen.getDisplayMatching(bounds).workArea
+  m.plan = planMiniHeader(headerPlacement(), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
+}
+
+/** The floating header's panel: frameless, never focused, at the window's level and on every Space like it. */
+function ensurePanel(m: Mini): BaseWindow {
+  if (m.panel && !m.panel.isDestroyed()) return m.panel
+  const panel = new BaseWindow({
+    width: Math.max(1, m.size.width),
+    height: MINI_WINDOW_HEADER_HEIGHT,
+    title: 'Mini Window Header',
+    ...(IS_MAC ? { type: 'panel' } : {}),
+    frame: false,
+    transparent: true,
+    show: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    acceptFirstMouse: true,
+    backgroundColor: '#00000000'
+  })
+  if (IS_MAC) {
+    panel.setAlwaysOnTop(true, 'floating')
+    panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  } else {
+    panel.setAlwaysOnTop(true)
+  }
+  if (process.platform !== 'linux') panel.setOpacity(getMiniWindowSettings().opacity)
+  panel.on('closed', () => {
+    if (m.panel !== panel) return
+    m.panel = null
+    // Closed under us: the header goes back on the next layout (into a new panel or the window).
+    if (m.mount === 'panel') m.mount = null
+  })
+  m.panel = panel
+  return panel
+}
+
+function hidePanel(m: Mini): void {
+  if (m.panel && !m.panel.isDestroyed() && m.panel.isVisible()) m.panel.hide()
+}
+
+/** The panel and the header view leave together (the header goes back into the window first when it is staying). */
+function closePanel(m: Mini): void {
+  const panel = m.panel
+  if (!panel) return
+  if (m.mount === 'panel') {
+    if (!panel.isDestroyed()) panel.contentView.removeChildView(m.header)
+    m.mount = null
+  }
+  m.panel = null
+  if (!panel.isDestroyed()) panel.close()
+}
+
+/** Attach the header view to the window or the panel (moving the view; the header page never reloads). */
+function mountHeader(m: Mini, where: 'window' | 'panel'): void {
+  if (!m.headerLoaded || m.mount === where || m.closed || m.window.isDestroyed()) return
+  const from = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
+  const to = where === 'panel' ? ensurePanel(m) : m.window
+  if (from && !from.isDestroyed()) from.contentView.removeChildView(m.header)
+  to.contentView.addChildView(m.header)
+  m.mount = where
+  sendHeaderState(m)
+}
+
+/** Floating and revealed: the panel sits on its side of the window (same x and width), shown without focus. */
+function positionPanel(m: Mini): void {
+  if (!floats(m.plan) || !m.revealed || m.mount !== 'panel' || !m.window.isVisible() || m.dock.isTucked()) return hidePanel(m)
+  const panel = ensurePanel(m)
+  if (!sameRect(panel.getBounds(), m.plan.panel)) panel.setBounds(m.plan.panel)
+  if (!panel.isVisible()) {
+    panel.showInactive()
+    if (IS_MAC) panel.setAlwaysOnTop(true, 'floating')
+  }
+}
+
+/** The window moved (dragged, slid along an edge, snapped): a revealed floating header follows it. */
+function followPanel(m: Mini): void {
+  if (m.closed || m.window.isDestroyed()) return
+  const before = m.plan.kind
+  updatePlan(m)
+  // Flipped across the window's edge (or between floating and push): lay it out again.
+  if (m.revealed && floats(m.plan) !== (before === 'above' || before === 'below')) return layout(m)
+  positionPanel(m)
+}
+
 function layout(m: Mini): void {
   if (m.closed || m.window.isDestroyed()) return
   const [width = 0, height = 0] = m.window.getContentSize()
-  // The page fills the window; the header overlays its top while revealed.
-  host().setPageBounds(m.window, { x: 0, y: 0, width, height })
-  m.header.setBounds({ x: 0, y: 0, width, height: m.revealed ? headerHeight(m) : 0 })
+  m.size = { width, height }
+  updatePlan(m)
+  const tall = headerHeight(m)
+  // The page fills the window; 'push' moves it under the revealed header, 'overlay' runs it under it.
+  const page = miniPageBounds(m.plan.kind, m.revealed, m.size, tall)
+  m.pageTop = page.y
+  host().setPageBounds(m.window, page)
+  if (floats(m.plan)) {
+    mountHeader(m, 'panel')
+    m.header.setBounds({ x: 0, y: 0, width, height: tall })
+    positionPanel(m)
+  } else {
+    mountHeader(m, 'window')
+    m.header.setBounds({ x: 0, y: 0, width, height: m.revealed ? tall : 0 })
+    hidePanel(m)
+  }
   rewirePage(m)
 }
 
@@ -233,27 +391,92 @@ function setRevealed(m: Mini, revealed: boolean): void {
     m.pollTimer ??= setInterval(() => pollPointer(m), POLL_MS)
   } else {
     stopPolling(m)
+    stopHeaderDrag(m)
     m.hovered = false
+    if (m.plan.kind === 'push') m.revealBlockedUntil = Date.now() + PUSH_REVEAL_COOLDOWN_MS
   }
   layout(m)
 }
 
 function scheduleHide(m: Mini): void {
-  if (!m.revealed || m.hovered || m.hideTimer) return
+  if (!m.revealed || m.hovered || m.hideTimer || m.headerDrag) return
   m.hideTimer = setTimeout(() => {
     m.hideTimer = null
-    if (!m.hovered) setRevealed(m, false)
+    if (!m.hovered && !m.headerDrag) setRevealed(m, false)
   }, HIDE_DELAY_MS)
 }
 
-/** Pointer position relative to the window's content: inside the reveal zone keeps the header up. */
+/** The edge zone that reveals the header (the bottom edge when it floats below; the whole header while it is inside the window). */
+function inRevealZone(m: Mini, y: number): boolean {
+  const zone = floats(m.plan) ? MINI_WINDOW_REVEAL_ZONE : Math.max(MINI_WINDOW_REVEAL_ZONE, m.revealed ? headerHeight(m) : 0)
+  return inMiniRevealZone(m.plan.kind, y, m.size.height, zone)
+}
+
+/** Pointer in the window's reveal zone, or on the floating header, keeps the header up. */
 function pollPointer(m: Mini): void {
   if (m.closed || m.window.isDestroyed()) return stopPolling(m)
   const point = screen.getCursorScreenPoint()
   const bounds = m.window.getContentBounds()
-  const inside = point.x >= bounds.x && point.x < bounds.x + bounds.width && point.y >= bounds.y && point.y < bounds.y + bounds.height
-  if (inside && point.y - bounds.y <= Math.max(MINI_WINDOW_REVEAL_ZONE, headerHeight(m))) cancelHide(m)
+  const onWindow = within(point, bounds) && inRevealZone(m, point.y - bounds.y)
+  const onPanel = Boolean(m.panel && !m.panel.isDestroyed() && m.panel.isVisible() && within(point, m.panel.getBounds()))
+  // The pointer position says whether it is on the header (its mouseleave can go missing, e.g. from a never-focused panel).
+  m.hovered = m.mount === 'panel' ? onPanel : within(point, bounds) && point.y - bounds.y < headerHeight(m)
+  if (onWindow || onPanel || m.headerDrag) cancelHide(m)
   else scheduleHide(m)
+}
+
+// ---------------------------------------------------------------------------
+// Dragging the window by its floating header (the panel can't drag the window natively).
+
+function stopHeaderDrag(m: Mini): void {
+  if (m.headerDrag) clearInterval(m.headerDrag.timer)
+  m.headerDrag = null
+}
+
+function startHeaderDrag(m: Mini): void {
+  if (m.closed || m.window.isDestroyed() || m.mount !== 'panel') return
+  stopHeaderDrag(m)
+  lastActive = m
+  cancelHide(m)
+  const drag: NonNullable<Mini['headerDrag']> = {
+    startCursor: screen.getCursorScreenPoint(),
+    startBounds: m.window.getBounds(),
+    side: floats(m.plan) ? m.plan.kind : null,
+    moved: false,
+    startedAt: Date.now(),
+    timer: setInterval(() => {
+      if (m.headerDrag !== drag) return
+      if (m.closed || m.window.isDestroyed() || Date.now() - drag.startedAt > HEADER_DRAG_MAX_MS) return endHeaderDrag(m)
+      const cursor = screen.getCursorScreenPoint()
+      const dx = cursor.x - drag.startCursor.x
+      const dy = cursor.y - drag.startCursor.y
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < HEADER_DRAG_THRESHOLD) return
+      drag.moved = true
+      const next = { ...drag.startBounds, x: drag.startBounds.x + dx, y: drag.startBounds.y + dy }
+      if (sameRect(m.window.getBounds(), next)) return
+      m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+      m.window.setBounds(next)
+      followPanel(m)
+      // Docked: its handle follows ('stack': the rest of the group comes along the edge).
+      m.dock.follow()
+      scheduleGeometrySave(m)
+    }, HEADER_DRAG_POLL_MS)
+  }
+  m.headerDrag = drag
+}
+
+/** Let go: a drop like any window drag (merge onto a header, dock at an edge, snap to a corner), then the header may flip. */
+function endHeaderDrag(m: Mini): void {
+  const drag = m.headerDrag
+  if (!drag) return
+  stopHeaderDrag(m)
+  if (!drag.moved || m.closed || m.window.isDestroyed()) return
+  m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+  droppedMini(m, screen.getCursorScreenPoint())
+  if (!m.closed && !m.window.isDestroyed()) {
+    layout(m)
+    pollPointer(m)
+  }
 }
 
 function onPage<T extends unknown[]>(m: Mini, contents: WebContents, event: string, listener: (...args: T) => void): void {
@@ -277,8 +500,13 @@ function rewirePage(m: Mini): void {
   m.page = contents
   onPage(m, contents, 'before-mouse-event', (_event: Electron.Event, input: Electron.MouseInputEvent) => {
     if (input.type === 'mouseMove' || input.type === 'mouseEnter') {
-      if (input.y <= MINI_WINDOW_REVEAL_ZONE) setRevealed(m, true)
-      else scheduleHide(m)
+      // In window coordinates ('push' moves the page under the header).
+      if (inRevealZone(m, input.y + m.pageTop)) {
+        if (m.revealed) cancelHide(m)
+        else if (Date.now() >= m.revealBlockedUntil) setRevealed(m, true)
+      } else {
+        scheduleHide(m)
+      }
     } else if (input.type === 'mouseLeave') {
       scheduleHide(m)
     }
@@ -295,7 +523,7 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean }> } | null {
+function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; floating: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean }> } | null {
   const info = host().header(m.window)
   if (!info) return null
   const tuckEdge = m.dock.tuckEdge()
@@ -309,8 +537,14 @@ function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; tuck:
     loading: info.loading,
     canGoBack: info.canGoBack,
     private: info.private,
-    crashed: isTabCrashed(m.page)
+    crashed: isTabCrashed(m.page),
+    floating: m.mount === 'panel'
   }
+}
+
+function sendHeaderState(m: Mini): void {
+  const state = live(m.header.webContents) ? headerState(m) : null
+  if (state) m.header.webContents.send('mini-window:state', state)
 }
 
 function refreshHeaderOf(m: Mini): void {
@@ -382,6 +616,12 @@ function registerIpc(): void {
     if (!m || typeof tabId !== 'string' || typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
     dropTabOutside(m, tabId, { x: Math.round(x), y: Math.round(y) })
   })
+  ipcMain.on('mini-window:header-drag', (event, active: unknown) => {
+    const m = fromHeader(event)
+    if (!m) return
+    if (active === true) startHeaderDrag(m)
+    else endHeaderDrag(m)
+  })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
     if (!m) return
@@ -418,7 +658,10 @@ function headerDocumentUrl(): string {
 function applyWindowSettings(m: Mini, settings: MiniWindowSettings): void {
   if (m.closed || m.window.isDestroyed()) return
   // Linux has no window opacity; macOS and Windows do.
-  if (process.platform !== 'linux') m.window.setOpacity(settings.opacity)
+  if (process.platform !== 'linux') {
+    m.window.setOpacity(settings.opacity)
+    if (m.panel && !m.panel.isDestroyed()) m.panel.setOpacity(settings.opacity)
+  }
   m.dock.applySettings()
 }
 
@@ -501,7 +744,15 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     headerReady: header.ready,
     dock,
     ownMoveUntil: 0,
-    closed: false
+    closed: false,
+    headerLoaded: false,
+    mount: null,
+    panel: null,
+    plan: { kind: 'overlay' },
+    pageTop: 0,
+    size: { width: bounds.width, height: bounds.height },
+    revealBlockedUntil: 0,
+    headerDrag: null
   }
   minis.push(m)
   lastActive = m
@@ -522,38 +773,28 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   })
   void header.ready.then(() => {
     if (m.closed || window.isDestroyed()) return
-    window.contentView.addChildView(header.view)
+    m.headerLoaded = true
     layout(m)
     refreshHeaderOf(m)
   })
+  // Hidden (Show/Hide, tucked away): the header goes with it.
+  window.on('hide', () => setRevealed(m, false))
   window.on('resize', () => {
     layout(m)
     if (m.dock.ignoringMoves()) return
     m.dock.follow()
     scheduleGeometrySave(m)
   })
-  // Dropped: on another collection's header it merges ('tabs'); against a screen edge it docks and
-  // tucks away (into the collection already there, 'tabs'); near a corner it snaps into it.
-  const dropped = (): void => {
-    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
-    if (grouping() === 'tabs') {
-      const target = miniMergeTarget(dropPoint(m), othersOnScreen(m))
-      if (target && mergeInto(m, target.mini, true)) return
-    }
-    if (m.dock.afterDrop()) {
-      const key = grouping() === 'tabs' ? m.dock.groupKey() : null
-      const peer = key ? liveMinis().find((other) => other !== m && host().header(other.window) && other.dock.groupKey() === key) : undefined
-      if (peer && mergeInto(m, peer, false)) return
-    } else {
-      snapToCorner(m)
-    }
-    scheduleGeometrySave(m)
-  }
   // macOS/Windows say when a drag ends ('moved'); Linux only streams 'move', so act after it settles.
   // Moves the dock makes itself (sliding, placing) are not drops.
+  const dropped = (): void => {
+    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
+    droppedMini(m, null)
+  }
   if (process.platform === 'linux') {
     let settle: ReturnType<typeof setTimeout> | null = null
     window.on('move', () => {
+      followPanel(m)
       if (m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
       m.dock.follow()
       if (settle) clearTimeout(settle)
@@ -562,6 +803,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     })
   } else {
     window.on('move', () => {
+      followPanel(m)
       if (m.dock.ignoringMoves()) return
       m.dock.follow()
       scheduleGeometrySave(m)
@@ -572,6 +814,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     m.closed = true
     cancelHide(m)
     stopPolling(m)
+    stopHeaderDrag(m)
     if (m.geometryTimer) {
       clearTimeout(m.geometryTimer)
       m.geometryTimer = null
@@ -580,6 +823,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     m.dock.dispose()
     // A closed BaseWindow doesn't destroy its views' webContents.
     if (live(header.view.webContents)) header.view.webContents.close()
+    // The floating header's panel goes with its window.
+    closePanel(m)
     const index = minis.indexOf(m)
     if (index >= 0) minis.splice(index, 1)
     if (lastActive === m) lastActive = null
@@ -605,6 +850,7 @@ function present(m: Mini, focus: boolean): void {
   // Re-assert the level: some window managers drop it while a window is hidden.
   if (IS_MAC) m.window.setAlwaysOnTop(true, 'floating')
   else m.window.setAlwaysOnTop(true)
+  if (m.panel && !m.panel.isDestroyed() && m.panel.isVisible()) m.panel.setAlwaysOnTop(true, IS_MAC ? 'floating' : undefined)
   // Docked: its handle shows with it.
   m.dock.follow()
 }
@@ -670,6 +916,35 @@ function dropPoint(m: Mini): { x: number; y: number } {
   return onWindow ? cursor : { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + MINI_WINDOW_HEADER_HEIGHT / 2) }
 }
 
+/**
+ * A window drag (its header) let go: on another collection's header it merges ('tabs'); against a
+ * screen edge it docks and tucks away (into the collection already there, 'tabs'); near a corner it
+ * snaps into it. `point`: where the floating header was let go (else where the pointer / header is).
+ */
+function droppedMini(m: Mini, point: { x: number; y: number } | null): void {
+  if (m.closed || m.window.isDestroyed()) return
+  if (grouping() === 'tabs') {
+    // A floating header sits over the other windows' top edges: that band counts as their header too.
+    const above = headerPlacement() === 'float' ? MINI_WINDOW_HEADER_HEIGHT : 0
+    const target = miniMergeTarget(point ?? dropPoint(m), othersOnScreen(m), above)
+    if (target && mergeInto(m, target.mini, true)) return
+  }
+  if (m.dock.afterDrop()) {
+    const key = grouping() === 'tabs' ? m.dock.groupKey() : null
+    const peer = key ? liveMinis().find((other) => other !== m && host().header(other.window) && other.dock.groupKey() === key) : undefined
+    if (peer && mergeInto(m, peer, false)) return
+  } else {
+    snapToCorner(m)
+  }
+  scheduleGeometrySave(m)
+}
+
+/** What a dragged tab let go "inside its own window" means: the window plus its floating header. */
+function ownArea(m: Mini): MiniRect {
+  const bounds = m.window.getBounds()
+  return m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? unionMiniRect(bounds, m.panel.getBounds()) : bounds
+}
+
 /** The other mini windows on screen, with their bounds (merge targets). */
 function othersOnScreen(m: Mini): Array<{ mini: Mini; bounds: MiniRect }> {
   return liveMinis().filter((other) => other !== m && showing(other) && host().header(other.window)).map((other) => ({ mini: other, bounds: other.window.getBounds() }))
@@ -718,7 +993,7 @@ function splitOff(m: Mini, tabId: string, bounds: MiniRect, dock: { dock: MiniDo
 /** A tab dragged out of `m`'s strip and let go at `point`: onto another window it moves there, elsewhere it splits off. */
 function dropTabOutside(m: Mini, tabId: string, point: { x: number; y: number }): void {
   if (!tabsOf(m).some((tab) => tab.tabId === tabId)) return
-  const drop = miniTabDrop(point, m.window.getBounds(), tabsOf(m).length, othersOnScreen(m))
+  const drop = miniTabDrop(point, ownArea(m), tabsOf(m).length, othersOnScreen(m))
   if (drop.kind === 'merge') {
     if (tabsOf(m).find((tab) => tab.tabId === tabId)?.active) unwirePage(m)
     if (host().adoptTab(tabId, drop.into.mini.window)) {
@@ -888,6 +1163,16 @@ export function applySettings(settings: MiniWindowSettings): void {
   if (settings.grouping !== appliedGrouping) {
     appliedGrouping = settings.grouping
     regroup(settings.grouping)
+  }
+  if (settings.headerPlacement !== appliedPlacement) {
+    appliedPlacement = settings.headerPlacement
+    // The header moves between the window and its panel (no reload); a panel no longer needed closes.
+    for (const m of liveMinis()) {
+      setRevealed(m, false)
+      layout(m)
+      if (settings.headerPlacement !== 'float') closePanel(m)
+      refreshHeaderOf(m)
+    }
   }
   for (const m of liveMinis()) applyWindowSettings(m, settings)
 }
