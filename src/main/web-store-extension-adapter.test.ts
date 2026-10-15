@@ -285,3 +285,162 @@ test('bridge page relays events to the worker and reports DNR state to Surffish'
   assert.deepEqual(plain(messaging.sent), [{ __surffishBridge: { type: 'event', name: 'onCommitted', details: { tabId: 3, frameId: 0, url: 'https://a.test/' } } }])
 })
 
+
+function fakeEvent<T extends (...args: never[]) => unknown>() {
+  const listeners: T[] = []
+  return {
+    listeners,
+    addListener(listener: T) { listeners.push(listener) },
+    removeListener(listener: T) { const index = listeners.indexOf(listener); if (index >= 0) listeners.splice(index, 1) },
+    hasListener(listener: T) { return listeners.includes(listener) },
+    fire(...args: Parameters<T>) { for (const listener of [...listeners]) listener(...args) }
+  }
+}
+
+const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms))
+
+test('shim (worker, service-worker preload): events, calls and DNR state go over the direct channel', async () => {
+  const { chrome } = fakeChrome()
+  const messaging = fakeRuntimeMessaging()
+  const runtime = chrome.runtime as Record<string, unknown>
+  runtime.onMessage = messaging.onMessage
+  runtime.sendMessage = messaging.sendMessage
+  let enabled: string[] = []
+  const dynamic: unknown[] = []
+  ;(chrome as Record<string, unknown>).declarativeNetRequest = {
+    updateDynamicRules: async (options: { addRules?: unknown[] }) => { dynamic.push(...(options.addRules ?? [])) },
+    getDynamicRules: async () => dynamic,
+    getSessionRules: async () => [],
+    getEnabledRulesets: async () => enabled,
+    updateEnabledRulesets: async (options: { enableRulesetIds: string[]; disableRulesetIds: string[] }) => { enabled = [...enabled.filter((id) => !options.disableRulesetIds.includes(id)), ...options.enableRulesetIds] }
+  }
+  const toMain = [] as Array<Record<string, unknown>>
+  const calls: unknown[] = []
+  let hostListener = null as ((message: unknown) => void) | null
+  const host = {
+    send: (message: Record<string, unknown>) => { toMain.push(JSON.parse(JSON.stringify(message))) },
+    call: async (method: string, args: unknown) => { calls.push([method, args]); return [{ frameId: 0 }] },
+    onMessage: (listener: (message: unknown) => void) => { hostListener = listener }
+  }
+  const globalObject: Record<string, unknown> = { chrome, surffishExtensionWorker: host }
+  globalObject.globalThis = globalObject
+  runShim(globalObject)
+  assert.ok(hostListener, 'the shim listens on the worker channel')
+
+  const webNavigation = (chrome as unknown as { webNavigation: Record<string, { addListener(fn: (details: Record<string, unknown>) => void): void } & { getAllFrames?: unknown }> }).webNavigation
+  const committed: unknown[] = []
+  webNavigation.onCommitted!.addListener((details) => committed.push(details.url))
+  webNavigation.onCommitted!.addListener(() => {})
+  assert.deepEqual(toMain, [{ type: 'listen', name: 'onCommitted' }], 'the first listener per event is reported once')
+
+  hostListener!({ type: 'init', enabledRulesets: ['ruleset_1'], webNavigation: true })
+  await tick(5)
+  assert.deepEqual(enabled, ['ruleset_1'], 'manifest rulesets mirrored into the native API')
+  const state = toMain.find((message) => message.type === 'dnr-state') as Record<string, unknown>
+  assert.deepEqual(state.enabledRulesets, ['ruleset_1'])
+  assert.deepEqual(toMain[1], { type: 'ready', listening: ['onCommitted'] }, 'ready comes first (queued events flow at once) and lists the listened events')
+  assert.equal(toMain.at(-1)!.type, 'dnr-state')
+
+  hostListener!({ type: 'event', name: 'onCommitted', details: { tabId: 1, frameId: 0, url: 'https://a.test/' } })
+  assert.deepEqual(committed, ['https://a.test/'])
+
+  const frames = await (webNavigation as unknown as { getAllFrames(details: unknown): Promise<unknown> }).getAllFrames({ tabId: 1 })
+  assert.deepEqual(plain(frames), [{ frameId: 0 }])
+  assert.deepEqual(plain(calls), [['webNavigation.getAllFrames', { tabId: 1 }]])
+
+  toMain.length = 0
+  await (chrome as unknown as { declarativeNetRequest: { updateDynamicRules(o: unknown): Promise<void> } }).declarativeNetRequest.updateDynamicRules({ addRules: [{ id: 7 }] })
+  await tick(5)
+  assert.equal(messaging.sent.length, 0, 'no runtime message to a bridge page')
+  assert.deepEqual(((toMain.at(-1) as Record<string, unknown>).dynamicRules as unknown[]).length, 1, 'the worker reports the new rules itself')
+
+  // A rule change in one of the extension's pages: the page tells the worker, the worker reports.
+  toMain.length = 0
+  for (const listener of messaging.listeners) listener({ __surffishBridge: { type: 'dnr-changed' } }, { id: ID, url: `chrome-extension://${ID}/options.html` }, () => {})
+  await tick(5)
+  assert.equal(toMain.at(-1)!.type, 'dnr-state')
+  // ...but not when the message comes from a content script on a web page.
+  toMain.length = 0
+  for (const listener of messaging.listeners) listener({ __surffishBridge: { type: 'dnr-changed' } }, { id: ID, url: 'https://evil.test/' }, () => {})
+  await tick(5)
+  assert.equal(toMain.length, 0)
+})
+
+function storageChrome() {
+  const { chrome, store } = fakeChrome()
+  const messaging = fakeRuntimeMessaging()
+  const runtime = chrome.runtime as Record<string, unknown>
+  runtime.onMessage = messaging.onMessage
+  runtime.sendMessage = messaging.sendMessage
+  const onChanged = fakeEvent<(changes: Record<string, unknown>, area: string) => void>()
+  ;(chrome.storage as Record<string, unknown>).onChanged = onChanged
+  return { chrome, store, messaging, onChanged }
+}
+
+test('shim (worker): storage.onChanged fires for the worker’s own writes and for changes relayed by its pages, once', async () => {
+  const { chrome, messaging } = storageChrome()
+  const globalObject: Record<string, unknown> = { chrome }
+  globalObject.globalThis = globalObject
+  runShim(globalObject)
+  const storage = chrome.storage as unknown as { local: { set(items: unknown, cb?: () => void): Promise<void> | undefined; remove(keys: unknown): Promise<void>; clear(): Promise<void> }; onChanged: { addListener(fn: (changes: Record<string, unknown>, area: string) => void): void; hasListeners(): boolean } }
+  const events: unknown[] = []
+  storage.onChanged.addListener((changes, area) => events.push([area, plain(changes)]))
+  assert.equal(storage.onChanged.hasListeners(), true)
+
+  await storage.local.set({ a: 1, b: { x: 1 } })
+  await storage.local.set({ a: 1 })
+  assert.deepEqual(events, [['local', { a: { newValue: 1 }, b: { newValue: { x: 1 } } }]], 'own write reported; an unchanged value is not')
+  await new Promise<void>((resolve) => storage.local.set({ a: 2 }, resolve))
+  assert.deepEqual(events.at(-1), ['local', { a: { oldValue: 1, newValue: 2 } }], 'callback form, with oldValue')
+
+  // Two open pages relay the same native event for the worker's write: dropped (already reported).
+  const relay = (area: string, changes: unknown, url = `chrome-extension://${ID}/popup.html`) => {
+    for (const listener of messaging.listeners) listener({ __surffishBridge: { type: 'storage-changed', area, changes } }, { id: ID, url }, () => {})
+  }
+  const before = events.length
+  relay('local', { a: { oldValue: 1, newValue: 2 } })
+  relay('local', { a: { oldValue: 1, newValue: 2 } }, `chrome-extension://${ID}/options.html`)
+  assert.equal(events.length, before, 'the worker’s own write is not reported twice')
+
+  // A page's own write: reported once even if two pages relay it.
+  relay('local', { theme: { newValue: 'dark' } })
+  relay('local', { theme: { newValue: 'dark' } }, `chrome-extension://${ID}/options.html`)
+  assert.deepEqual(events.slice(before), [['local', { theme: { newValue: 'dark' } }]])
+  // Not from a content script.
+  relay('local', { spoofed: { newValue: 1 } }, 'https://evil.test/')
+  assert.equal(events.length, before + 1)
+
+  await storage.local.remove('a')
+  assert.deepEqual(events.at(-1), ['local', { a: { oldValue: 2 } }])
+  await storage.local.clear()
+  assert.deepEqual(events.at(-1), ['local', { b: { oldValue: { x: 1 } } }])
+})
+
+test('shim (worker): replays stop once the native storage event fires', async () => {
+  const { chrome, onChanged } = storageChrome()
+  const globalObject: Record<string, unknown> = { chrome }
+  globalObject.globalThis = globalObject
+  runShim(globalObject)
+  const storage = chrome.storage as unknown as { local: { set(items: unknown): Promise<void> }; onChanged: { addListener(fn: (changes: Record<string, unknown>, area: string) => void): void } }
+  const events: unknown[] = []
+  storage.onChanged.addListener((changes, area) => events.push([area, plain(changes)]))
+  onChanged.fire({ n: { newValue: 1 } }, 'local')
+  assert.equal(events.length, 1, 'native event delivered to the listener')
+  await storage.local.set({ q: 1 })
+  assert.equal(events.length, 1, 'no synthetic event once Electron fires its own')
+})
+
+test('shim (page): relays native storage changes to the worker, large values as keys only, not from the bridge page', () => {
+  for (const pathname of ['/popup.html', '/surffish-bridge.html']) {
+    const { chrome, messaging, onChanged } = storageChrome()
+    const globalObject: Record<string, unknown> = { chrome, document: {}, location: { protocol: 'chrome-extension:', pathname } }
+    globalObject.globalThis = globalObject
+    runShim(globalObject)
+    onChanged.fire({ small: { newValue: 1 }, big: { newValue: 'x'.repeat(300_000) } }, 'local')
+    if (pathname === '/surffish-bridge.html') {
+      assert.equal(messaging.sent.length, 0)
+      continue
+    }
+    assert.deepEqual(plain(messaging.sent), [{ __surffishBridge: { type: 'storage-changed', area: 'local', changes: { small: { newValue: 1 }, big: {} } } }])
+  }
+})

@@ -37,6 +37,7 @@ import { parseCrx } from './crx'
 import { extractExtensionZip } from './bramble-release'
 import { createRestrictedFetch } from './restricted-fetch'
 import { activateStagedDirectory, assertExtensionIdentity, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
+import { ensureExtensionWorkerPreload } from './extension-worker-preload'
 import { setExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
 import {
   collectDnrRulesets,
@@ -264,11 +265,25 @@ function stopRuntimeSupport(id: string): void {
 // ---------------------------------------------------------------------------
 // Loading
 
+/**
+ * Before loading an extension that needs runtime support: register the service-worker preload so
+ * its worker's first start already has Surffish's channel (see extension-bridge.ts).
+ */
+function prepareWorkerChannel(directory: string): void {
+  try {
+    const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8').replace(/^\uFEFF/, '')) as unknown
+    if (isRecord(manifest) && needsRuntimeSupport(manifest)) ensureExtensionWorkerPreload(getBrowserSession())
+  } catch {
+    // Unreadable manifest: loading reports the error.
+  }
+}
+
 async function loadInstalled(record: InstalledRecord): Promise<LoadedEntry> {
   const directory = extensionDirectory(record.id, record.version)
   if (!existsSync(join(directory, 'manifest.json'))) throw new Error(`The files for ${record.name} ${record.version} are missing. Reinstall it from the Chrome Web Store.`)
   // Refresh Surffish's shim so fixes reach extensions staged by an older Surffish.
   writeExtensionShimFiles(directory)
+  prepareWorkerChannel(directory)
   const browserSession = getBrowserSession()
   const extension = await loadExtensionWithFreshWorker(browserSession, directory, stampPath(record.id), extensionWorkerFiles(directory))
   try {
@@ -462,6 +477,7 @@ async function activatePrepared(prepared: PreparedPackage): Promise<void> {
   unloadExtension(id)
   try {
     activation = activateStagedDirectory(staged.stagedDirectory, finalDirectory)
+    prepareWorkerChannel(finalDirectory)
     const extension = await loadExtensionWithFreshWorker(browserSession, finalDirectory, stampPath(id), extensionWorkerFiles(finalDirectory))
     try {
       assertExtensionIdentity(id, extension.id, 'Chrome Web Store package')

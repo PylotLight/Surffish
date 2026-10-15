@@ -52,6 +52,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/extension-bridge.cjs'),
       join(outputDirectory, 'extension-bridge.cjs')
     )
+    // Service-worker preload: direct IPC into extension workers (replaces the bridge page when it can).
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/extension-worker.cjs'),
+      join(outputDirectory, 'extension-worker.cjs')
+    )
     // Surffish's quick unlock panel over Bramble's popup.
     copyFileSync(
       resolve(projectDirectory, 'src/preload/bramble-quick-unlock.cjs'),
