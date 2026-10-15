@@ -2820,6 +2820,14 @@
 @media (max-width: 760px) {
   .omnibox-wrap { --omnibox-nav-width: 96px; }
 }
+/* Never under the right-aligned icons: their width varies (extensions, badges, the ad-blocker
+   count), measured into --toolbar-trailing-width by Browser.tsx. */
+.browser-chrome .omnibox-wrap {
+  max-width: min(calc(100% - 300px), calc(100% - 2 * var(--toolbar-trailing-width, 140px) - 40px));
+}
+@media (max-width: 1000px) {
+  .browser-chrome .omnibox-wrap { max-width: none; }
+}
 .browser-toolbar-leading:empty {
   min-width: 0;
 }

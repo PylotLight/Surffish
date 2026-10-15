@@ -1032,6 +1032,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
     debouncer.push({ input: address, top: topSuggestionUrl })
   }, [suggestionsActive, address, topSuggestionUrl, browser.url, isLocalNewTab])
+  // The centered address bar shrinks to keep clear of the right-aligned icons, whose width varies
+  // (extension icons, badges, the ad-blocker count): Browser.css reads --toolbar-trailing-width.
+  useEffect(() => {
+    const chrome = browserChromeRef.current
+    const trailing = chrome?.querySelector<HTMLElement>('.browser-toolbar-trailing')
+    if (!chrome || !trailing) return
+    const update = (): void => chrome.style.setProperty('--toolbar-trailing-width', `${Math.ceil(trailing.getBoundingClientRect().width)}px`)
+    const observer = new ResizeObserver(update)
+    observer.observe(trailing)
+    update()
+    return () => observer.disconnect()
+  }, [surface])
   useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
