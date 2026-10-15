@@ -4,7 +4,7 @@
 
 # Surffish
 
-**A calmer desktop browser for macOS.**
+**Surf without the noise.**
 
 Tabs in a glass sidebar, uBlock Origin's filter lists built in, and a SOCKS5 switch for when you're on someone else's network.
 
@@ -216,5 +216,5 @@ Issues and PRs are welcome. Keep PRs to one change, and include a smoke test or 
 <br>
 
 <div align="center">
-<sub>If Surffish makes your browsing a bit calmer, a ⭐ helps other people find it.</sub>
+<sub>If Surffish makes your browsing a bit quieter, a ⭐ helps other people find it.</sub>
 </div>
