@@ -13,5 +13,7 @@ export const preconnectApi = {
     return () => ipcRenderer.removeListener('browser:preconnect:changed', listener)
   },
   /** Debounced address-bar text and the top suggestion's URL; main resolves and preconnects the origin. */
-  typed: (input: string, topSuggestionUrl: string | null): void => ipcRenderer.send('browser:preconnect:typed', input, topSuggestionUrl)
+  typed: (input: string, topSuggestionUrl: string | null): void => ipcRenderer.send('browser:preconnect:typed', input, topSuggestionUrl),
+  /** The pointer rested on a sleeping tab in the sidebar (dwell already timed); main warms the origin it will wake to. */
+  hoverSleepingTab: (tabId: string): void => ipcRenderer.send('browser:preconnect:tab-hover', tabId)
 }

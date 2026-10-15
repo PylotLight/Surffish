@@ -21,7 +21,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
-import { Debouncer, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
+import { Debouncer, HOVER_DWELL_MS, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
 import { addressDisplayValue } from '../../../shared/address-bar-sync'
 import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
 import { useAddressBarSync } from './useAddressBarSync'
@@ -1023,6 +1023,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       preconnectTypingRef.current = null
     }
   }, [surface])
+  // Resting on a sleeping tab in the sidebar warms the origin it will wake to (main checks it sleeps).
+  const sleepingTabHoverRef = useRef<Debouncer<string> | null>(null)
+  useEffect(() => {
+    const debouncer = new Debouncer<string>(HOVER_DWELL_MS, (id) => window.api.browser.preconnect.hoverSleepingTab(id))
+    sleepingTabHoverRef.current = debouncer
+    return () => {
+      debouncer.cancel()
+      sleepingTabHoverRef.current = null
+    }
+  }, [])
   const topSuggestionUrl = addressSuggestions[0]?.url ?? null
   useEffect(() => {
     const debouncer = preconnectTypingRef.current
@@ -1337,6 +1347,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 aria-grabbed={tabDrag.draggingId === tab.id ? true : undefined}
                 tabIndex={0}
                 title={withTabUsageHint(tab.sleeping ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload` : tab.title, tabUsage[tab.id])}
+                onMouseEnter={tab.sleeping ? () => sleepingTabHoverRef.current?.push(tab.id) : undefined}
+                onMouseLeave={tab.sleeping ? () => sleepingTabHoverRef.current?.cancel() : undefined}
                 onClick={(event) => {
                   if (tabSelection.handleClick(event, tab.id)) return
                   void window.api.browser.tabs.activate(tab.id)

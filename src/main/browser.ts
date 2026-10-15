@@ -40,8 +40,8 @@ import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
-import { inputMayChangePage } from '../shared/wake-snapshot'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, scaleForWakeSnapshot } from './wake-snapshot'
+import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot } from './wake-snapshot'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -711,10 +711,24 @@ function hibernateTab(tab: BrowserTab, reason: BrowserTabSleep, keepPausedMedia 
   }
   tab.lastUrl = currentUrl(tab)
   tab.pendingUrl = tab.lastUrl
+  const history = sleepHistoryOf(contents, tab.lastUrl)
   disposeTabView(tab)
   tab.sleep = reason
+  // Waking restores the back/forward list with Chromium's page state (scroll position, form
+  // values) as a history load that prefers the HTTP cache, instead of a fresh loadURL at the top.
+  tab.restoreHistory = history
   persistOpenTabs()
   publishState(tab.win)
+}
+
+/** The tab's back/forward list to wake it with (null when it can't come back to `url` that way). */
+function sleepHistoryOf(contents: Electron.WebContents, url: string): BrowserTab['restoreHistory'] {
+  try {
+    if (contents.isDestroyed()) return null
+    return restorableSleepHistory(contents.navigationHistory.getAllEntries(), contents.navigationHistory.getActiveIndex(), url)
+  } catch {
+    return null
+  }
 }
 
 function scheduleTabSleep(tab: BrowserTab): void {
@@ -738,6 +752,8 @@ function openBackgroundTab(url: string, isPrivate = false, w = currentWindowStat
 
 function disposeTabView(tab: BrowserTab): void {
   cancelSleepTimer(tab)
+  // A view replaced or dropped for another load never comes back through an older history.
+  tab.restoreHistory = null
   const view = tab.view
   if (!view) return
   // Clear the reference first so its destroyed event cannot remove the logical tab.
@@ -2308,6 +2324,7 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
     if (currentUrl(tab) !== url) {
       tab.lastUrl = url
       tab.pendingUrl = url
+      tab.restoreHistory = null
       tab.error = null
       const contents = tab.view?.webContents
       if (contents && !contents.isDestroyed()) {
@@ -2471,6 +2488,7 @@ export function updateExtensionTab(id: number | undefined, update: { url?: strin
   if (update.url) {
     tab.lastUrl = update.url
     tab.pendingUrl = update.url
+    tab.restoreHistory = null
     tab.error = null
     const contents = tab.view?.webContents
     if (contents && !contents.isDestroyed()) void contents.loadURL(update.url).catch(() => {})
@@ -2929,6 +2947,18 @@ export function getActiveTabNetworkContext(): { session: Electron.Session; parti
   const tab = activeTabOf(currentWindowState())
   if (!tab || tab.pdfEditor || tab.extensionPageOrigin) return null
   return { session: pageSessionForTab(tab), partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab), isPrivate: tab.isPrivate }
+}
+
+/**
+ * A sleeping tab the pointer rests on in the sidebar: the URL it will wake to and its network, so
+ * preconnect.ts can warm the origin before the click. Null for awake/private/local tabs.
+ */
+export function getSleepingTabPreconnectTarget(id: string): { url: string; context: { session: Electron.Session; partition: string; isPrivate: boolean } } | null {
+  const tab = findTab(id)
+  if (!tab || tab.view || tab.isPrivate) return null
+  const url = tab.pendingUrl || tab.lastUrl
+  const context = url ? networkContextForTab(tab) : null
+  return context ? { url, context } : null
 }
 
 function networkContextForTab(tab: BrowserTab): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
@@ -3556,8 +3586,9 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
 /**
  * A capture waiting to be encoded (overview thumbnail, plus the wake snapshot when one is wanted).
  * Encoding runs TAB_PICTURE_ENCODE_DELAY_MS after the switch, so the tab coming on screen gets its
- * frames first, and it scales once: capture -> wake-snapshot width -> thumbnail width, rather than
- * resizing the full-size capture twice. The tab overview flushes pending encodes before it reads.
+ * frames first. The small thumbnail is made first; the wake snapshot (device pixels, the big
+ * encode) follows on its own task, so main never blocks for both at once. The tab overview flushes
+ * pending encodes before it reads.
  */
 interface PendingTabPicture {
   tab: BrowserTab
@@ -3587,12 +3618,17 @@ function encodeTabPicture(id: string): void {
   cancelTabPictureEncode(id)
   if (!allTabs().includes(job.tab)) return
   try {
-    const scaled = job.wake ? scaleForWakeSnapshot(job.image) : job.image
-    if (job.wake) keepWakeSnapshot(id, scaled, job.wake.pageArea, job.wake.url, job.wake.isPrivate)
-    tabThumbnails.set(id, thumbnailDataUrl(scaled))
+    tabThumbnails.set(id, thumbnailDataUrl(job.image))
   } catch (error) {
     console.warn('[tab picture] could not encode:', error)
   }
+  const { wake, image, tab } = job
+  if (!wake) return
+  setImmediate(() => {
+    // Closed meanwhile, or a newer capture is already waiting: this one is stale.
+    if (!allTabs().includes(tab) || pendingPictures.has(id)) return
+    keepWakeSnapshot(id, image, wake.pageArea, wake.url, wake.isPrivate)
+  })
 }
 
 /** The tab overview is about to read thumbnails: encode every capture still waiting. */
