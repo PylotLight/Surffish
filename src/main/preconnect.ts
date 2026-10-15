@@ -8,7 +8,7 @@ import {
   typedPreconnectUrl,
   type PreconnectSettings
 } from '../shared/preconnect'
-import { getActiveTabNetworkContext, getSelectedSearchEngine } from './browser'
+import { getActiveTabNetworkContext, getSelectedSearchEngine, getSleepingTabPreconnectTarget } from './browser'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { onGlanceLinkHover } from './glance-entry'
 import { getProxyGuardStatus } from './proxy-kill-switch'
@@ -29,7 +29,7 @@ export interface PreconnectContext {
   isPrivate: boolean
 }
 
-export type PreconnectReason = 'typing' | 'hover' | 'glance'
+export type PreconnectReason = 'typing' | 'hover' | 'glance' | 'sleeping-tab'
 
 const FILE = 'preconnect.json'
 let settings: PreconnectSettings | null = null
@@ -120,6 +120,14 @@ export function registerPreconnectIpc(): void {
       const context = getActiveTabNetworkContext()
       return context && context.session === hover.session ? context : null
     })
+  })
+  // The pointer rested on a sleeping tab in the sidebar (dwell timed in the renderer): warm the
+  // origin it will wake to, in its own session, so the click's reload skips DNS/TCP/TLS.
+  ipcMain.on('browser:preconnect:tab-hover', (event, tabId: unknown) => {
+    if (!isMainWindowRenderer(event.sender, event.senderFrame)) return
+    if (typeof tabId !== 'string' || !current().enabled) return
+    const target = getSleepingTabPreconnectTarget(tabId)
+    if (target) speculativePreconnect(target.url, target.context, 'sleeping-tab')
   })
   // Address bar, already debounced in the renderer: the typed text and the top suggestion's URL.
   ipcMain.on('browser:preconnect:typed', (event, input: unknown, topSuggestionUrl: unknown) => {

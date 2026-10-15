@@ -10,13 +10,18 @@
  * Pure rules live here; main/wake-snapshot.ts does the capture and the presentation.
  */
 
-/** Snapshots are downscaled to at most this many pixels wide (a placeholder, not a screenshot). */
-export const WAKE_SNAPSHOT_MAX_WIDTH = 1280
-export const WAKE_SNAPSHOT_JPEG_QUALITY = 60
+/**
+ * Snapshots keep the capture's own device pixels (capturePage returns the page area at the
+ * display's scale, 2x on Retina) so text stays readable while the page reloads; only a capture
+ * wider than this (a 5K/6K display) is scaled down. The overview thumbnail is made separately.
+ */
+export const WAKE_SNAPSHOT_MAX_WIDTH = 3840
+/** JPEG quality: 80 at device pixels keeps small grey text crisp (60 and a 1280 px cap blurred it). */
+export const WAKE_SNAPSHOT_JPEG_QUALITY = 80
 /** Every snapshot together never holds more than this (least recently taken go first). */
-export const WAKE_SNAPSHOT_MAX_TOTAL_BYTES = 24 * 1024 * 1024
+export const WAKE_SNAPSHOT_MAX_TOTAL_BYTES = 32 * 1024 * 1024
 /** A single snapshot over this is not worth keeping (a huge, noisy page). */
-export const WAKE_SNAPSHOT_MAX_BYTES = 1536 * 1024
+export const WAKE_SNAPSHOT_MAX_BYTES = 3 * 1024 * 1024
 /** Cross-fade length once the page has painted. */
 export const WAKE_SNAPSHOT_FADE_MS = 180
 /** The picture never stays longer than this, painted or not. */
@@ -132,6 +137,17 @@ export function wakeSnapshotMatchesUrl(snapshotUrl: string, targetUrl: string): 
   }
   const a = strip(snapshotUrl)
   return a !== null && a === strip(targetUrl)
+}
+
+/**
+ * The back/forward list a tab goes to sleep with, for waking it with navigationHistory.restore
+ * (scroll position and form values ride in each entry's page state): only when its active entry
+ * is the page the tab will wake to, else null (wake falls back to loading the URL).
+ */
+export function restorableSleepHistory<T extends { url: string }>(entries: readonly T[], index: number, url: string): { entries: T[]; index: number } | null {
+  if (!Number.isInteger(index) || index < 0 || index >= entries.length) return null
+  if (!url || entries[index]?.url !== url) return null
+  return { entries: [...entries], index }
 }
 
 export type WakeSnapshotPhase = 'showing' | 'fading' | 'gone'

@@ -38,6 +38,8 @@ const server = createServer((request, response) => {
         <a id="one" href="${linkOrigin}/one" style="position:absolute;left:40px;top:40px;display:block;width:300px;height:60px;background:#eef">one</a>
         <a id="two" href="${linkOrigin.replace('localhost', '127.0.0.2')}/two" style="position:absolute;left:40px;top:160px;display:block;width:300px;height:60px;background:#efe">two</a>
       </body>`)
+    } else if (name === 'long') {
+      response.end(`<!doctype html><meta charset="utf-8"><title>Fixture long</title><body style="margin:0;font:18px sans-serif">${Array.from({ length: 200 }, (_, i) => `<p>line ${i}</p>`).join('')}</body>`)
     } else {
       response.end(`<!doctype html><meta charset="utf-8"><title>Fixture ${name}</title><p>${name}</p>`)
     }
@@ -341,6 +343,30 @@ async function run() {
   const on = await evaluate(toolbar, 'window.api.browser.preconnect.set({ enabled: true })')
   assert.equal(on.enabled, true)
   assert.equal((await evaluate(toolbar, 'window.api.browser.preconnect.get()')).enabled, true, 'the choice is read back')
+
+  // ---------------------------------------------------------------- 4. waking keeps scroll + history; hover warms it
+  smoke.step('wake: scroll position and back/forward come back; resting on a sleeping tab preconnects its origin')
+  await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(url('hist'))})`)
+  await waitFor(async () => (await tabFor('hist'))?.title === 'Fixture hist' && !(await tabFor('hist')).loading, 'the hist page')
+  await pageFor('hist').loadURL(url('long'))
+  await waitFor(async () => (await tabFor('long'))?.title === 'Fixture long' && !(await tabFor('long')).loading, 'the long page')
+  const longPage = pageFor('long')
+  await evaluate(longPage, 'window.scrollTo(0, 1200); true')
+  // Chromium commits page state (scroll) to the navigation entry about once a second.
+  await delay(1600)
+  await activate('front')
+  const longId = (await tabFor('long')).id
+  assert.equal(await evaluate(toolbar, `window.api.browser.diagnostics.discardTab(${JSON.stringify(longId)})`), true)
+  await waitFor(async () => (await tabFor('long'))?.sleeping, 'the long tab to sleep')
+  const beforeHover = preconnects.length
+  await evaluate(toolbar, `window.api.browser.preconnect.hoverSleepingTab(${JSON.stringify(longId)})`)
+  await waitFor(() => preconnects.length > beforeHover, 'a preconnect for the hovered sleeping tab', 3000, 10)
+  assert.equal(preconnects[beforeHover].url, origin, `the sleeping tab's origin (${preconnects[beforeHover].url})`)
+  await activate('long')
+  await waitFor(() => pageFor('long') && !pageFor('long').isLoading(), 'the long page to wake')
+  await waitFor(async () => (await evaluate(pageFor('long'), 'window.scrollY')) > 1100, 'the scroll position to come back', 5000)
+  assert.equal(pageFor('long').navigationHistory.length(), 2, 'the back/forward list survived the sleep')
+  assert.ok(pageFor('long').navigationHistory.canGoBack(), 'back still goes to the previous page')
 
   smoke.step('preconnect: never from a private tab')
   await evaluate(toolbar, `window.api.browser.tabs.createPrivate(${JSON.stringify(url('private'))})`)

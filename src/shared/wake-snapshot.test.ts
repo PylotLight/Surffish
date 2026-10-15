@@ -5,6 +5,9 @@ import {
   nextWakeSnapshotPhase,
   parseWakeSnapshotInput,
   pointInRect,
+  restorableSleepHistory,
+  WAKE_SNAPSHOT_JPEG_QUALITY,
+  WAKE_SNAPSHOT_MAX_BYTES,
   WAKE_SNAPSHOT_MAX_TOTAL_BYTES,
   WAKE_SNAPSHOT_MAX_WIDTH,
   WakeSnapshotStore,
@@ -54,9 +57,28 @@ describe('wake snapshot store', () => {
 
   test('defaults are memory-bounded', () => {
     expect(WAKE_SNAPSHOT_MAX_TOTAL_BYTES).toBeLessThanOrEqual(32 * 1024 * 1024)
-    expect(wakeSnapshotWidth(2880)).toBe(WAKE_SNAPSHOT_MAX_WIDTH)
-    expect(wakeSnapshotWidth(800)).toBe(800)
+    expect(WAKE_SNAPSHOT_MAX_BYTES).toBeLessThanOrEqual(WAKE_SNAPSHOT_MAX_TOTAL_BYTES / 8)
     expect(wakeSnapshotWidth(0)).toBe(0)
+  })
+
+  test('readable: a Retina capture keeps its device pixels, only 5K+ is scaled down', () => {
+    // A 1440-pt-wide page area on a 2x display is a 2880 px capture: kept as is (it was cut to 1280).
+    expect(wakeSnapshotWidth(2880)).toBe(2880)
+    expect(wakeSnapshotWidth(800)).toBe(800)
+    expect(wakeSnapshotWidth(5120)).toBe(WAKE_SNAPSHOT_MAX_WIDTH)
+    expect(WAKE_SNAPSHOT_MAX_WIDTH).toBeGreaterThanOrEqual(3840)
+    expect(WAKE_SNAPSHOT_JPEG_QUALITY).toBeGreaterThanOrEqual(80)
+  })
+
+  test('sleep history: restored only when its active entry is the page the tab wakes to', () => {
+    const entries = [{ url: 'https://a.test/' }, { url: 'https://a.test/article', pageState: 'xyz' }]
+    expect(restorableSleepHistory(entries, 1, 'https://a.test/article')).toEqual({ entries, index: 1 })
+    expect(restorableSleepHistory(entries, 1, 'https://a.test/other')).toBeNull()
+    expect(restorableSleepHistory(entries, 2, 'https://a.test/article')).toBeNull()
+    expect(restorableSleepHistory(entries, -1, 'https://a.test/')).toBeNull()
+    expect(restorableSleepHistory([], 0, 'https://a.test/')).toBeNull()
+    // A copy: later changes to the live list don't leak into the sleeping tab's.
+    expect(restorableSleepHistory(entries, 0, 'https://a.test/')?.entries).not.toBe(entries)
   })
 })
 
