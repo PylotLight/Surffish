@@ -190,9 +190,15 @@ lifecycle scripts (electron's `install-electron`). Every CI job therefore:
   `install-electron`, electron-vite) run under Bun's Node compatibility mode;
 - runs `bun install` through `scripts/ci/watch-node.sh`, which samples the process table during
   the install and fails if any real Node.js process shows up (the log says so either way);
-- on the Mac also sets `ELECTRON_SKIP_BINARY_DOWNLOAD=1`. Electron 44's `install.js` doesn't read
-  it; what keeps it from downloading is that `node_modules/electron/dist` is already installed on
-  the persistent runner (the same `electronDist` that release builds package from).
+- on the Mac runs `bun install` through `scripts/ci/bun-install-mac.sh`. The runner's `.env` points
+  `HTTP(S)_PROXY` at a `socks5://` proxy, which Bun can't use (`UnsupportedProxyProtocol downloading
+  tarball …` for any package not already installed), so the script drops a SOCKS proxy for bun only;
+  the runner's network reaches the npm registry and Electron's downloads directly. When the Electron
+  pin changes, the root `postinstall` (`install-electron`, under the bun shim) fetches that version's
+  binary once into `node_modules/electron/dist` (the `electronDist` release builds package from). The
+  script then checks the binary is there for the locked version and fails otherwise, because Electron
+  45+ downloads a missing binary lazily on the first `require('electron')`. No other step downloads
+  Electron, and there is still never a second `bun install` on the Mac.
 
 The perf bench launches the Electron binary directly (`require('electron')`), not through the
 `.bin/electron` wrapper. A repo-wide `bunfig.toml` `[run] bun = true` was left out on purpose: it
