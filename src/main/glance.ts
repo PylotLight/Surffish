@@ -218,7 +218,9 @@ function createChromeView(window: BaseWindow): { view: WebContentsView; ready: P
     return null
   }
   const view = new WebContentsView({
-    webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, transparent: true, backgroundThrottling: false }
+    // Header/backdrop chrome only. The glance page keeps wake locks: it can be promoted to a tab with
+    // the same webContents, and webPreferences can't change after creation.
+    webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, transparent: true, backgroundThrottling: false, disableWakeLocks: true }
   })
   view.setBackgroundColor('#00000000')
   view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

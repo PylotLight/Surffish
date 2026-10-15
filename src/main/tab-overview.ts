@@ -186,7 +186,8 @@ function ensureView(overview: TabOverview): WebContentsView | null {
       contextIsolation: true,
       nodeIntegration: false,
       transparent: true,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      disableWakeLocks: true
     }
   })
   overview.view = view

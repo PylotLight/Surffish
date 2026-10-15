@@ -159,6 +159,8 @@ async function run() {
   assert.equal((await state()).url, `${origin}/start`, 'the tab still shows the start page')
   const top = mainWindow.contentView.children.slice(-2).map((view) => view.webContents)
   assert.ok(isGlanceChrome(top[0]) && top[1] === glance, 'header/backdrop view then the page, above every shell surface')
+  assert.equal(top[0].getLastWebPreferences()?.disableWakeLocks, true, 'the glance header/backdrop view takes no wake locks (Electron 45 disableWakeLocks)')
+  assert.notEqual(glance.getLastWebPreferences()?.disableWakeLocks, true, 'the glance page keeps wake locks (it can become a tab)')
   const pageBounds = mainWindow.contentView.children.at(-1).getBounds()
   assert.ok(pageBounds.width > 900 && pageBounds.width < 1200 && pageBounds.x > 0, `the card is ~85% of the window (${JSON.stringify(pageBounds)})`)
   await waitFor(() => glance.isFocused(), 'keyboard focus in the glance page')

@@ -235,6 +235,8 @@ export function startExtensionBridge(options: BridgeOptions): void {
   const view = new WebContentsView({
     webPreferences: {
       session: options.session,
+      // Hidden bridge page, never on screen: no wake locks.
+      disableWakeLocks: true,
       preload: preloadPath(),
       contextIsolation: true,
       sandbox: true,

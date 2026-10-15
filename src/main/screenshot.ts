@@ -365,7 +365,8 @@ function ensureView(): WebContentsView | null {
       nodeIntegration: false,
       transparent: true,
       backgroundThrottling: false,
-      spellcheck: false
+      spellcheck: false,
+      disableWakeLocks: true
     }
   })
   created.setBackgroundColor('#00000000')

@@ -181,6 +181,8 @@ async function renderPage(url: string, selector: string | null): Promise<WatchTe
     height: 900,
     webPreferences: {
       offscreen: true,
+      // Hidden page read for its text: its media or Screen Wake Lock must never keep the Mac awake.
+      disableWakeLocks: true,
       session: getBrowserSession(),
       sandbox: true,
       contextIsolation: true,
