@@ -16,7 +16,8 @@ name: electron bump
 # itself; those check runs land on the PR's head commit. Re-run that dispatch (Actions -> ci -> Run
 # workflow, branch chore/electron-bump) after pushing to the branch by hand, or close and reopen the PR
 # from your own account to get normal pull_request runs. Creating the PR needs "Allow GitHub Actions
-# to create and approve pull requests" (Settings -> Actions -> General).
+# to create and approve pull requests" (Settings -> Actions -> General); without it the job keeps one
+# tracking issue with a compare link instead, and still runs ci on the branch.
 on:
   schedule:
     - cron: '17 20 * * *' # 07:17 Melbourne (AEDT), daily
@@ -35,6 +36,10 @@ on:
         description: Only report what would change
         type: boolean
         default: false
+      run_ci:
+        description: Start ci on the bump branch (off for testing this workflow without CI)
+        type: boolean
+        default: true
 
 concurrency:
   group: electron-bump
@@ -43,6 +48,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
   actions: write
 
 jobs:
@@ -55,6 +61,7 @@ jobs:
       ELECTRON_BUMP_POLICY: ${{ inputs.policy || vars.ELECTRON_BUMP_POLICY || 'beta' }}
       ELECTRON_BUMP_VERSION: ${{ inputs.version }}
       DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      RUN_CI: ${{ (github.event_name != 'workflow_dispatch' || inputs.run_ci) && 'true' || 'false' }}
       GH_TOKEN: ${{ github.token }}
       API: ${{ github.api_url }}/repos/${{ github.repository }}
     steps:
@@ -100,6 +107,12 @@ jobs:
             curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/pulls/$PR" -d '{"state":"closed"}' >/dev/null
             echo "closed stale bump PR #$PR"
           fi
+          if [ "$DRY_RUN" != true ]; then
+            for n in $(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$API/issues?state=open&creator=github-actions%5Bbot%5D&per_page=50" | jq -r '.[] | select(.pull_request == null) | select(.title | test("^Electron .* is available \\(bump branch ready\\)$")) | .number'); do
+              curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/issues/$n" -d '{"state":"closed","state_reason":"not_planned"}' >/dev/null
+              echo "closed stale tracking issue #$n"
+            done
+          fi
       - name: Pin, update bun.lock, push the branch
         id: push
         if: steps.pick.outputs.target != ''
@@ -129,12 +142,20 @@ jobs:
           git push -q --force origin "HEAD:refs/heads/$BRANCH"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
       - name: Open or update the PR, then start ci on it
-        if: steps.pick.outputs.target != '' && steps.push.outputs.pushed == 'true'
+        if: steps.pick.outputs.target != '' && env.DRY_RUN != 'true'
         env:
           TARGET: ${{ steps.pick.outputs.target }}
           CURRENT: ${{ steps.pick.outputs.current }}
           PR: ${{ steps.pr.outputs.number }}
+          PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
+          dispatch_ci() { # $1 = PR number or ''
+            if [ "$RUN_CI" != true ]; then echo "run_ci off: not starting ci"; return 0; fi
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/actions/workflows/ci.yml/dispatches" \
+              -d "$(jq -n --arg r "$BRANCH" --arg pr "$1" '{ref:$r, inputs:{pr:$pr, perf_mac:"false"}}')"
+            echo "dispatched ci on $BRANCH${1:+ (PR #$1)}"
+          }
+          compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/main...$BRANCH?expand=1"
           title="chore(deps): Electron $TARGET"
           body="$(cat <<MD
           Bumps the exact Electron pin **$CURRENT → $TARGET** (\`$ELECTRON_BUMP_POLICY\` policy) and \`bun.lock\`.
@@ -147,20 +168,38 @@ jobs:
           MD
           )"
           if [ -n "$PR" ]; then
-            curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/pulls/$PR" -d "$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')" >/dev/null
-            echo "updated PR #$PR"
-          else
-            resp="$(curl -sS -w '\n%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/pulls" -d "$(jq -n --arg t "$title" --arg b "$body" --arg h "$BRANCH" '{title:$t, body:$b, head:$h, base:"main"}')")"
-            code="$(echo "$resp" | tail -1)"
-            if [ "$code" != 201 ]; then
-              echo "$resp" | head -n -1
-              echo "::error::could not open the PR (HTTP $code). If it says Actions may not create pull requests, enable Settings → Actions → General → Allow GitHub Actions to create and approve pull requests. The branch $BRANCH is pushed."
-              exit 1
+            if [ "$PUSHED" = true ]; then
+              curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/pulls/$PR" -d "$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')" >/dev/null
+              echo "updated PR #$PR"
+              dispatch_ci "$PR"
+            else
+              echo "PR #$PR already has $TARGET"
             fi
+            echo "### Electron $CURRENT → $TARGET: PR #$PR" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          resp="$(curl -sS -w '\n%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/pulls" -d "$(jq -n --arg t "$title" --arg b "$body" --arg h "$BRANCH" '{title:$t, body:$b, head:$h, base:"main"}')")"
+          code="$(echo "$resp" | tail -1)"
+          if [ "$code" = 201 ]; then
             PR="$(echo "$resp" | head -n -1 | jq -r .number)"
             echo "opened PR #$PR"
+            dispatch_ci "$PR"
+            echo "### Electron $CURRENT → $TARGET: PR #$PR, ci dispatched" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/actions/workflows/ci.yml/dispatches" \
-            -d "$(jq -n --arg r "$BRANCH" --arg pr "$PR" '{ref:$r, inputs:{pr:$pr, perf_mac:"false"}}')"
-          echo "dispatched ci on $BRANCH (PR #$PR)"
-          echo "### Electron $CURRENT → $TARGET: PR #$PR, ci dispatched" >> "$GITHUB_STEP_SUMMARY"
+          echo "$resp" | head -n -1
+          # Usually "GitHub Actions is not permitted to create or approve pull requests" (a repo setting).
+          # Fall back to one tracking issue with a one-click compare link, and still run ci on the branch.
+          echo "::warning::could not open the PR (HTTP $code). Enable Settings → Actions → General → Allow GitHub Actions to create and approve pull requests; meanwhile a tracking issue links the branch."
+          [ "$PUSHED" = true ] && dispatch_ci ""
+          issue_title="Electron $TARGET is available (bump branch ready)"
+          issue_body="$(printf '%s\n\n**Open the PR:** %s\n\n(This issue exists because the workflow token may not open pull requests: Settings → Actions → General → Allow GitHub Actions to create and approve pull requests. ci has been dispatched on `%s`.)' "$body" "$compare" "$BRANCH")"
+          issue="$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$API/issues?state=open&creator=github-actions%5Bbot%5D&per_page=50" | jq -r '[.[] | select(.pull_request == null) | select(.title | test("^Electron .* is available \\(bump branch ready\\)$"))][0].number // ""')"
+          if [ -n "$issue" ]; then
+            curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/issues/$issue" -d "$(jq -n --arg t "$issue_title" --arg b "$issue_body" '{title:$t, body:$b}')" >/dev/null
+            echo "updated issue #$issue"
+          else
+            issue="$(curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/issues" -d "$(jq -n --arg t "$issue_title" --arg b "$issue_body" '{title:$t, body:$b}')" | jq -r .number)"
+            echo "opened issue #$issue"
+          fi
+          echo "### Electron $CURRENT → $TARGET: branch \`$BRANCH\` pushed, PR not allowed for the workflow token, issue #$issue ([open the PR]($compare))" >> "$GITHUB_STEP_SUMMARY"
