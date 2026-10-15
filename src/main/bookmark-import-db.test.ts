@@ -53,7 +53,8 @@ test('reads Chromium History (urls table), newest first, http(s) and visible onl
   db.close()
 })
 
-test('reads Firefox places.sqlite bookmarks and history, even from a WAL-mode file', () => {
+// WAL setup + copy hit the 5 s default timeout on a slow CI runner.
+test('reads Firefox places.sqlite bookmarks and history, even from a WAL-mode file', { timeout: 30_000 }, () => {
   const pr = (ms: number): number => ms * 1000
   const path = fixture(`
     PRAGMA journal_mode = WAL;
