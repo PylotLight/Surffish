@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
+import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, type MiniWindowGrouping, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './SettingsControls'
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC')
@@ -9,9 +9,15 @@ interface Status { shortcut: string; registered: boolean; error: string | null }
 
 /**
  * Settings → General → Mini window: the page the global shortcut opens (empty: pop out the current
- * tab), the shortcut itself (press keys to record, Clear to turn it off), tuck to screen edge (and
- * peek on hover) and opacity.
+ * tab), the shortcut itself (press keys to record, Clear to turn it off), how several mini windows
+ * group, tuck to screen edge (and peek on hover) and opacity.
  */
+
+const GROUPING_HINTS: Record<MiniWindowGrouping, string> = {
+  tabs: 'Popped-out tabs join the last used mini window as tabs (one edge tab each). Drag a tab out of the strip to give it its own window; drop a window\'s header on another, or tuck it to an edge that already has one, to merge them.',
+  stack: 'Each tab gets its own mini window. Windows tucked to the same screen edge share one edge tab and slide out together, stacked along the edge.',
+  separate: 'Each tab gets its own mini window with its own edge tab.'
+}
 export function MiniWindowSettings(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [status, setStatus] = useState<Status | null>(null)
@@ -100,6 +106,19 @@ export function MiniWindowSettings(): React.JSX.Element {
         {defaultShortcut && settings?.shortcut !== defaultShortcut && (
           <button className="settings-action secondary" type="button" aria-label="Use the default mini window shortcut" onClick={() => update({ shortcut: defaultShortcut })}>Default</button>
         )}
+      </SettingsRow>
+      <SettingsRow label="Mini window grouping" hint={GROUPING_HINTS[settings?.grouping ?? 'tabs']}>
+        <select
+          className="settings-select"
+          value={settings?.grouping ?? 'tabs'}
+          disabled={!settings}
+          aria-label="Mini window grouping"
+          onChange={(event) => update({ grouping: event.target.value as MiniWindowGrouping })}
+        >
+          <option value="tabs">Tabs</option>
+          <option value="stack">Stack</option>
+          <option value="separate">Separate</option>
+        </select>
       </SettingsRow>
       <SettingsRow
         label="Tuck to screen edge"

@@ -26,9 +26,27 @@ export interface MiniWindowSettings {
   tuckToEdge: boolean
   /** While tucked, resting the pointer on the handle peeks the window out until the pointer leaves it. */
   peekOnHover: boolean
+  /** How several mini windows group (MiniWindowGrouping). */
+  grouping: MiniWindowGrouping
 }
 
-export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false }
+/**
+ * How several mini windows group:
+ * - 'tabs': a collection is one mini window with a compact tab strip; popping a tab out adds it to the
+ *   last used collection, dragging a tab out of the strip splits it off, dropping a window's header on
+ *   another (or docking it to an edge that already holds one) merges them. One handle per collection.
+ * - 'stack': separate windows, but those docked to the same edge of a display share one handle and
+ *   slide out together, stacked along the edge.
+ * - 'separate': every mini window on its own, each with its own handle.
+ */
+export type MiniWindowGrouping = 'tabs' | 'stack' | 'separate'
+export const MINI_WINDOW_GROUPINGS: readonly MiniWindowGrouping[] = ['tabs', 'stack', 'separate']
+
+export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' }
+
+export function isMiniWindowGrouping(value: unknown): value is MiniWindowGrouping {
+  return typeof value === 'string' && (MINI_WINDOW_GROUPINGS as readonly string[]).includes(value)
+}
 
 /**
  * The default page as typed in Settings: '' stays off; a bare host ("claude.ai") becomes https://.
@@ -106,7 +124,9 @@ export function parseMiniWindowSettings(value: unknown): MiniWindowSettings {
     : 1
   const tuckToEdge = typeof record.tuckToEdge === 'boolean' ? record.tuckToEdge : DEFAULT_MINI_WINDOW_SETTINGS.tuckToEdge
   const peekOnHover = typeof record.peekOnHover === 'boolean' ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
-  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover }
+  // Settings saved before grouping existed (one window per tab) take the default.
+  const grouping = isMiniWindowGrouping(record.grouping) ? record.grouping : DEFAULT_MINI_WINDOW_SETTINGS.grouping
+  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, grouping }
 }
 
 /** Accelerators compared on what they press (CommandOrControl counts as Command on macOS, Control elsewhere). */
@@ -175,6 +195,13 @@ export const MINI_WINDOW_SNAP_DISTANCE = 32
 export const MINI_WINDOW_HEADER_HEIGHT = 36
 /** Pointer this close to the top of the page reveals the header. */
 export const MINI_WINDOW_REVEAL_ZONE = 44
+/** The tab strip under the header row (grouping 'tabs', two or more tabs in the window). */
+export const MINI_WINDOW_TAB_STRIP_HEIGHT = 28
+
+/** Height of the revealed header: the header row, plus the tab strip when the window holds several tabs. */
+export function miniHeaderHeight(tabCount: number, grouping: MiniWindowGrouping): number {
+  return MINI_WINDOW_HEADER_HEIGHT + (grouping === 'tabs' && tabCount > 1 ? MINI_WINDOW_TAB_STRIP_HEIGHT : 0)
+}
 
 /** Saved geometry is keyed by display (its work area), so each monitor remembers its own spot. */
 export function miniDisplayKey(workArea: MiniRect): string {
@@ -313,4 +340,64 @@ export function withMiniSlot<T>(slots: ReadonlyArray<Record<string, T>>, slot: n
   // Trailing empty slots carry nothing.
   while (next.length > 0 && Object.keys(next[next.length - 1] ?? {}).length === 0) next.pop()
   return { slots: next }
+}
+
+// ---------------------------------------------------------------------------
+// Grouping
+
+function inside(point: { x: number; y: number }, rect: MiniRect): boolean {
+  return point.x >= rect.x && point.x < rect.x + rect.width && point.y >= rect.y && point.y < rect.y + rect.height
+}
+
+/**
+ * Grouping 'tabs': the window a window dropped with its header at `point` merges into, i.e. the
+ * first of `others` whose header band (its top MINI_WINDOW_REVEAL_ZONE px) is under the point; null
+ * when none. Only the header band counts, so overlapping two windows never merges them by accident.
+ */
+export function miniMergeTarget<T extends { bounds: MiniRect }>(point: { x: number; y: number }, others: readonly T[]): T | null {
+  return others.find((other) => inside(point, { ...other.bounds, height: Math.min(other.bounds.height, MINI_WINDOW_REVEAL_ZONE) })) ?? null
+}
+
+export type MiniTabDrop<T> = { kind: 'merge'; into: T } | { kind: 'split' } | { kind: 'none' }
+
+/**
+ * A tab dragged out of a window's strip and let go at `point`: over another window it moves there,
+ * back inside its own window nothing happens, anywhere else it splits off into a window of its own
+ * (only when the window keeps another tab: a window's only tab just stays).
+ */
+export function miniTabDrop<T extends { bounds: MiniRect }>(point: { x: number; y: number }, own: MiniRect, tabCount: number, others: readonly T[]): MiniTabDrop<T> {
+  const into = others.find((other) => inside(point, other.bounds))
+  if (into) return { kind: 'merge', into }
+  if (inside(point, own) || tabCount < 2) return { kind: 'none' }
+  return { kind: 'split' }
+}
+
+/** Where a window split off at `point` goes: its own size, header centred under the pointer, fitted to the work area. */
+export function miniSplitBounds(point: { x: number; y: number }, size: { width: number; height: number }, workArea: MiniRect): MiniRect {
+  return clampMiniBounds({ x: Math.round(point.x - size.width / 2), y: Math.round(point.y - MINI_WINDOW_HEADER_HEIGHT / 2), width: size.width, height: size.height }, workArea)
+}
+
+export interface MiniRegroupWindow {
+  id: number
+  tabs: number
+  /** Docked: which display edge (`displayId:edge`), else null. */
+  dockKey: string | null
+}
+
+/**
+ * Switching grouping with mini windows open (no page reloads, only views move):
+ * - to 'tabs': windows docked to the same display edge merge into the oldest of them (one handle per
+ *   edge, the pile #203 left); undocked windows stay their own collections.
+ * - to 'stack' / 'separate': every window holding several tabs splits, one tab per window.
+ * `windows` oldest first; `merge.from` keeps that order.
+ */
+export function planMiniRegroup(grouping: MiniWindowGrouping, windows: readonly MiniRegroupWindow[]): { merge: Array<{ into: number; from: number[] }>; split: number[] } {
+  if (grouping !== 'tabs') return { merge: [], split: windows.filter((w) => w.tabs > 1).map((w) => w.id) }
+  const byKey = new Map<string, number[]>()
+  for (const w of windows) {
+    if (!w.dockKey) continue
+    byKey.set(w.dockKey, [...(byKey.get(w.dockKey) ?? []), w.id])
+  }
+  const merge = [...byKey.values()].filter((ids) => ids.length > 1).map(([into, ...from]) => ({ into: into as number, from }))
+  return { merge, split: [] }
 }

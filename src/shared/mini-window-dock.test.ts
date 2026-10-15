@@ -21,6 +21,8 @@ import {
   reconcileDock,
   slideFrame,
   spreadDockHandles,
+  stackDockOffsets,
+  dockGroupKey,
   type MiniDisplay
 } from './mini-window-dock'
 
@@ -220,5 +222,25 @@ describe('several handles on one edge', () => {
     expect(dockHandleAt(bottom, 'bottom', 700)).toEqual({ ...dockHandleBounds(bottom, 'bottom'), x: 700 })
     expect(dockEdgeSpan(laptop.workArea, 'right')).toEqual([25, 900])
     expect(dockEdgeSpan(laptop.workArea, 'top')).toEqual([0, 1440])
+  })
+})
+
+describe('stacked groups', () => {
+  test('windows stack one after another from the first one\'s offset', () => {
+    expect(stackDockOffsets([300, 200, 100], 50, 875)).toEqual([50, 350, 550])
+  })
+
+  test('moved back from the far end so the whole stack fits', () => {
+    expect(stackDockOffsets([300, 300], 500, 875)).toEqual([275, 575])
+    expect(stackDockOffsets([300], -20, 875)).toEqual([0])
+  })
+
+  test('too long for the edge: they overlap evenly, first at 0, last ending at the end', () => {
+    expect(stackDockOffsets([620, 620, 620], 100, 875)).toEqual([0, 128, 255])
+    expect(stackDockOffsets([], 0, 875)).toEqual([])
+  })
+
+  test('group key: display and edge', () => {
+    expect(dockGroupKey(7, 'right')).toBe('7:right')
   })
 })

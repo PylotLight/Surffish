@@ -16,7 +16,7 @@
 //   7. Closing the browser window keeps the mini window (and its page) alive; Return then opens a
 //      new browser window with the tab in it.
 //   8. A private tab pops out and back and stays in the private session.
-//   9. Several at once: three tabs pop out into three mini windows (each its own, none sent back,
+//   9. Several at once (grouping 'separate'): three tabs pop out into three mini windows (each its own, none sent back,
 //      cascaded so none sits on another, no reloads); the session file keeps all three; the Window
 //      menu and the palette list each; Show/Hide toggles all together; one returns (header button,
 //      then Cmd/Ctrl+Shift+M in its page) while the others stay; the 7th pop out past the cap of 6
@@ -283,7 +283,11 @@ async function run() {
   await waitFor(() => viewOf(mainWindow, privatePage) && privateMini.isDestroyed(), 'the private tab back in the browser window')
   assert.notEqual(privatePage.session, pinned.session, 'still the private session')
 
-  // --- 9. Several mini windows at once.
+  // --- 9. Several mini windows at once (grouping 'separate': one window per tab, as before grouping; tabs/stack: electron-mini-window-grouping-smoke.cjs).
+  const content2 = await waitFor(() => surface(mainWindow, 'content')?.webContents, 'the new window content surface')
+  await waitFor(() => smoke.evaluate(content2, 'document.readyState === "complete" && Boolean(window.api)'), 'the new content renderer')
+  assert.equal((await smoke.evaluate(content2, 'window.api.browser.miniWindow.getSettings()')).settings.grouping, 'tabs', 'tabs grouping out of the box')
+  assert.equal((await smoke.evaluate(content2, 'window.api.browser.miniWindow.update({ grouping: "separate" })')).settings.grouping, 'separate', 'switched to separate')
   smoke.step('three tabs pop out into three mini windows: none sent back, cascaded, no reloads')
   const multi = []
   for (const n of [1, 2, 3, 4, 5, 6, 7]) {

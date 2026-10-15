@@ -3,9 +3,11 @@ import {
   DEFAULT_MINI_WINDOW_SETTINGS,
   MINI_WINDOW_SETTINGS_FILE,
   clashingAppShortcut,
+  isMiniWindowGrouping,
   normalizeAccelerator,
   normalizeMiniWindowUrl,
   parseMiniWindowSettings,
+  type MiniWindowGrouping,
   type MiniWindowSettings
 } from '../shared/mini-window'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
@@ -26,14 +28,22 @@ export interface MiniWindowHost {
   /** The current browser window's active tab (what a pop-out without a tab id takes). */
   activeTabId(): string | null
   canPopOut(tabId: string): boolean
-  /** Move a tab's live view into the mini window (no reload). False when it can't go. */
+  /**
+   * Move a tab's live view into the mini window (no reload), from a browser window or another mini
+   * window, and make it the active tab there. False when it can't go (not a web page, or a private
+   * tab and a normal collection).
+   */
   adoptTab(tabId: string, win: BaseWindow): boolean
+  /** The mini window's tabs, in strip order. */
+  tabs(win: BaseWindow): MiniWindowTab[]
+  /** Show one of the mini window's tabs. */
+  activateTab(win: BaseWindow, tabId: string): boolean
   /** Open `url` as the mini window's tab, in the normal profile session. */
   openUrl(url: string, win: BaseWindow): string | null
-  /** Put the mini window's tab back into a browser window (the mini window closes). */
-  returnTab(win: BaseWindow): boolean
-  /** Close the mini window's tab (and with it the window). */
-  closeTab(win: BaseWindow): void
+  /** Put one of the mini window's tabs (default: the active one) back into a browser window (its last tab closes the mini window). */
+  returnTab(win: BaseWindow, tabId?: string): boolean
+  /** Close one of the mini window's tabs (default: the active one); its last tab closes the window. */
+  closeTab(win: BaseWindow, tabId?: string): void
   /** Where the page goes inside the mini window (window coordinates). */
   setPageBounds(win: BaseWindow, bounds: { x: number; y: number; width: number; height: number }): void
   pageContents(win: BaseWindow): WebContents | null
@@ -42,6 +52,14 @@ export interface MiniWindowHost {
   handleShortcut(win: BaseWindow, input: Electron.Input): boolean
   /** A short notice in the browser window (e.g. too many mini windows open). */
   notify(message: string): void
+}
+
+export interface MiniWindowTab {
+  tabId: string
+  title: string
+  url: string
+  faviconUrl: string | null
+  active: boolean
 }
 
 export interface MiniWindowListing {
@@ -114,6 +132,11 @@ export async function popOutTabToMiniWindow(tabId?: string | null): Promise<bool
 /** Put one mini window's tab back into the browser: the mini window `window`, or the one holding `tabId`. */
 export function returnMiniWindowToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
   return miniModule?.returnToBrowser(target) ?? false
+}
+
+/** Settings → Mini window grouping (also the Window menu and the palette). Regroups open mini windows without reloading. */
+export function setMiniWindowGrouping(grouping: MiniWindowGrouping): boolean {
+  return updateMiniWindowSettings({ grouping }).ok
 }
 
 /** Put every mini window's tab back into the browser. */
@@ -227,6 +250,10 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
   if ('peekOnHover' in patch) {
     if (typeof patch.peekOnHover !== 'boolean') return { ok: false, error: 'Invalid settings' }
     next.peekOnHover = patch.peekOnHover
+  }
+  if ('grouping' in patch) {
+    if (!isMiniWindowGrouping(patch.grouping)) return { ok: false, error: 'Invalid settings' }
+    next.grouping = patch.grouping
   }
   const shortcutChanged = next.shortcut !== current().shortcut
   settings = parseMiniWindowSettings(next)

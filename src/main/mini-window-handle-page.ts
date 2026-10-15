@@ -3,7 +3,8 @@
  * window's free side (out). Click slides the window out / tucks it; drag moves it along the edge.
  * Loaded from a data: URL in its own tiny always-on-top window with the narrow preload in
  * preload/mini-window.cjs; never remote content. main/mini-window-dock.ts sends it the edge, the
- * arrow and the page's favicon.
+ * arrow and the page's favicon; for a group (several tabs in one window, or a stack of windows on one
+ * edge) a count badge too, and for a stack up to three favicons fanned behind each other.
  */
 export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -27,6 +28,12 @@ export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
   body.dragging #tab { cursor: grabbing; }
   #icon { width: 12px; height: 12px; border-radius: 2px; flex: none; pointer-events: none; }
   #icon[hidden] { display: none; }
+  #icons { position: relative; flex: none; pointer-events: none; display: none; }
+  body.stacked #icons { display: block; }
+  body.stacked #icon { display: none; }
+  #icons img { position: absolute; width: 12px; height: 12px; border-radius: 2px; box-shadow: 0 0 0 1px var(--tab); }
+  #count { display: none; min-width: 12px; height: 12px; padding: 0 2px; box-sizing: border-box; border-radius: 6px; background: var(--accent); color: #fff; font: 700 11px/12px system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; pointer-events: none; flex: none; }
+  body.grouped #count { display: block; }
   #arrow { pointer-events: none; display: flex; }
   #arrow[data-dir=right] svg { transform: rotate(180deg); }
   #arrow[data-dir=up] svg { transform: rotate(90deg); }
@@ -34,13 +41,31 @@ export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
   @media (prefers-reduced-motion: reduce) { #tab { transition: none; } }
 </style></head>
 <body class="right">
-<div id="tab" role="button" tabindex="-1" aria-label="Show Mini Window" title="Show Mini Window (drag to move along the edge)"><img id="icon" alt="" hidden><span id="arrow" data-dir="left"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
+<div id="tab" role="button" tabindex="-1" aria-label="Show Mini Window" title="Show Mini Window (drag to move along the edge)"><img id="icon" alt="" hidden><span id="icons"></span><span id="count"></span><span id="arrow" data-dir="left"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span></div>
 <script>
   const tab = document.getElementById('tab')
   const icon = document.getElementById('icon')
   icon.addEventListener('error', () => { icon.hidden = true })
+  const icons = document.getElementById('icons')
   window.miniWindow.onHandleState((state) => {
-    document.body.className = state.edge
+    const count = Number(state.count) || 1
+    document.body.className = state.edge + (count > 1 ? ' grouped' : '') + (state.stacked ? ' stacked' : '')
+    document.getElementById('count').textContent = count > 1 ? String(count) : ''
+    // A stack: its windows' favicons fanned out behind each other.
+    const list = state.stacked && Array.isArray(state.favicons) ? state.favicons.filter((url) => typeof url === 'string' && url).slice(0, 3) : []
+    const side = state.edge === 'left' || state.edge === 'right'
+    icons.replaceChildren(...list.map((url, index) => {
+      const img = document.createElement('img')
+      img.alt = ''
+      img.src = url
+      img.style.zIndex = String(10 - index)
+      img.style[side ? 'top' : 'left'] = index * 3 + 'px'
+      img.style[side ? 'left' : 'top'] = '0px'
+      img.addEventListener('error', () => img.remove())
+      return img
+    }))
+    icons.style.width = side ? '12px' : 12 + Math.max(0, list.length - 1) * 3 + 'px'
+    icons.style.height = side ? 12 + Math.max(0, list.length - 1) * 3 + 'px' : '12px'
     document.getElementById('arrow').dataset.dir = state.arrow
     tab.setAttribute('aria-label', state.label)
     tab.title = state.label + ' (drag to move along the edge)'

@@ -11,7 +11,7 @@
 //   5. Docked state survives Return/Pop Out: the next pop out opens against the same edge with its
 //      handle; no handle window or webContents leaks after Return.
 //   6. Settings → Tuck to screen edge off: undocks, hides the header's tuck button, edges don't dock.
-//   7. Several docked at once: three mini windows tucked to the same edge each get their own handle
+//   7. Several docked at once (grouping 'separate'): three mini windows tucked to the same edge each get their own handle
 //      (showing its page's favicon), spread along the edge without overlapping; each dock is saved in
 //      its own slot; Show/Hide slides all out and tucks all back together; returning one re-spreads
 //      the rest; Return All leaves no handle window or webContents behind.
@@ -340,7 +340,8 @@ async function run() {
   await run('miniWindow.return')
   await waitFor(() => again.isDestroyed() && liveContents().filter((contents) => isMiniHeader(contents) || isHandlePage(contents)).length === 0, 'closed with nothing leaked')
 
-  // --- 7. Several docked to the same edge.
+  // --- 7. Several docked to the same edge (grouping 'separate'; tabs/stack: electron-mini-window-grouping-smoke.cjs).
+  assert.equal((await smoke.evaluate(content, 'window.api.browser.miniWindow.update({ grouping: "separate" })')).settings.grouping, 'separate')
   smoke.step('three mini windows tucked to the right edge: own handles, favicons, spread without overlapping')
   const docked = []
   for (const n of [1, 2, 3]) {
