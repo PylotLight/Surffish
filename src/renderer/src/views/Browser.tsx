@@ -23,6 +23,7 @@ import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, M
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { Debouncer, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
 import { addressDisplayValue } from '../../../shared/address-bar-sync'
+import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
 import { useAddressBarSync } from './useAddressBarSync'
 import { FAVOURITES_FOLDER_ID } from '../../../shared/bookmarks'
 import { formatZoomPercent, isDefaultZoom } from '../../../shared/zoom'
@@ -1319,7 +1320,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 selected={tabSelection.selectedKeys.has(entry.key)}
                 onSelectClick={(event) => tabSelection.handleClick(event, entry.key)}
                 onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
-                titleFor={(tab) => withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
+                titleFor={(tab) => withTabUsageHint(tab.sleeping ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload` : tab.title, tabUsage[tab.id])}
                 onActivate={(id) => {
                   void window.api.browser.tabs.activate(id)
                   if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
@@ -1335,7 +1336,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 aria-selected={tab.active}
                 aria-grabbed={tabDrag.draggingId === tab.id ? true : undefined}
                 tabIndex={0}
-                title={withTabUsageHint(tab.sleeping ? `${tab.title} — sleeping; select to reload` : tab.title, tabUsage[tab.id])}
+                title={withTabUsageHint(tab.sleeping ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload` : tab.title, tabUsage[tab.id])}
                 onClick={(event) => {
                   if (tabSelection.handleClick(event, tab.id)) return
                   void window.api.browser.tabs.activate(tab.id)
@@ -1364,7 +1365,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 {tab.private && <span className="tab-private-badge" title="Private tab" aria-label="Private tab"><PrivateGlyph /></span>}
                 {tab.crashed && <span className="tab-crashed-badge" title="This tab crashed · it reloads when you open it" aria-label="Crashed tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg></span>}
                 <TabAudioButton tab={tab} />
-                {tab.sleeping && <span className="tab-sleep-indicator" title="Sleeping tab" aria-label="Sleeping tab">☾</span>}
+                {tab.sleeping && <span className={`tab-sleep-indicator${isRestoredSleep(tab.sleep) ? ' is-restored' : ''}`} title={describeTabSleep(tab.sleep)} aria-label={`Sleeping tab: ${describeTabSleep(tab.sleep)}`}>☾</span>}
                 <button
                   className="tab-close"
                   type="button"

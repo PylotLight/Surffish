@@ -185,6 +185,11 @@
   font-size: 14px;
   line-height: 1;
 }
+/* Restored, never loaded this run: fainter than a tab Surffish put to sleep. */
+.tab-sleep-indicator.is-restored,
+.pinned-tab-sleep-indicator.is-restored {
+  opacity: 0.5;
+}
 .tab-close {
   display: inline-flex;
   align-items: center;
