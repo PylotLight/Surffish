@@ -1,5 +1,5 @@
 import { BaseWindow, WebContentsView, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent } from 'electron'
-import { clampMiniBounds, miniDisplayKey, parseMiniSlots, withMiniSlot, type MiniRect } from '../shared/mini-window'
+import { clampMiniBounds, miniDisplayKey, parseMiniSlots, withMiniSlot, type MiniRect, type MiniWindowGrouping } from '../shared/mini-window'
 import {
   MINI_DOCK_RELEASE_DISTANCE,
   MINI_DOCK_SLIDE_MS,
@@ -9,6 +9,7 @@ import {
   dockEdgeForDrop,
   dockEdgeSpan,
   dockFor,
+  dockGroupKey,
   dockHandleAlong,
   dockHandleAt,
   dockHandleBounds,
@@ -19,6 +20,7 @@ import {
   reconcileDock,
   slideFrame,
   spreadDockHandles,
+  stackDockOffsets,
   type MiniDisplay,
   type MiniDock,
   type MiniDockEdge
@@ -38,6 +40,13 @@ import { readUserJson, writeUserJson } from './user-json'
  * Several mini windows can dock at once, each with its own controller and handle. Handles tucked on
  * the same edge of the same display are spread along it so they never overlap (relayoutHandles), and
  * each window's dock is remembered in its own slot.
+ *
+ * Grouping 'stack' (setDockGrouping): windows docked to the same edge of the same display form a
+ * group in the order they docked there. Only the first one (the leader) shows a handle, with the
+ * group's favicons and count; its click / the shortcut / the header button tucks or slides out the
+ * whole group, stacked along the edge (stackDockOffsets); dragging the leader along the edge moves
+ * the others with it. Dragging one away undocks it (it leaves the group); docking one to that edge
+ * joins it. With 'tabs' or 'separate' each window is its own group of one (as before).
  */
 
 const IS_MAC = process.platform === 'darwin'
@@ -57,6 +66,8 @@ export interface DockHost {
   preload: string
   /** The tab's favicon, shown on the handle. */
   faviconUrl(): string | null
+  /** How many tabs the window holds (grouping 'tabs': the handle's count badge). */
+  tabCount(): number
   /** Give the page the keyboard (after sliding out from a click or the shortcut). */
   focusPage(): void
   /** Docked/tucked changed: refresh the header's tuck button. */
@@ -72,9 +83,18 @@ export interface DockController {
   tuckEdge(): MiniDockEdge | null
   /** Window moves right now are ours (sliding/placing) or the window is tucked away: not a user drop. */
   ignoringMoves(): boolean
-  /** Tuck (docking to the nearest edge first) or, when tucked, slide out. */
+  /** Tuck (docking to the nearest edge first) or, when tucked, slide out (its whole group, with 'stack'). */
   toggle(focus: boolean): boolean
+  /** Slide out (its whole group, stacked, with 'stack'). */
   slideOut(focus: boolean): void
+  /** Docked and out: tuck away (its whole group with 'stack'); otherwise nothing. */
+  tuckAway(): void
+  /** Docked: `displayId:edge` (the group it belongs to with 'stack'; the edge a collection holds with 'tabs'), else null. */
+  groupKey(): string | null
+  /** Where it is docked, for a window that should join it (a tab split off a docked collection). */
+  state(): { dock: MiniDock; display: Display; tucked: boolean } | null
+  /** Grouping changed: regroup handles; a group that is out re-stacks. */
+  regroup(): void
   /** The user dropped the window: dock/tuck at an edge, re-flush, or undock. True when handled (skip corner snap). */
   afterDrop(): boolean
   /** The window moved or resized (the handle follows when out). */
@@ -140,6 +160,25 @@ interface Peek {
 }
 
 interface HandleListener {
+  /** Joined its current edge (group order with 'stack': the first one leads). */
+  joinedAt: () => number
+  key: () => string | null
+  tucked: () => boolean
+  /** Docked and on screen (out). */
+  out: () => boolean
+  /** Window length along its docked edge, and the work area's. */
+  length: () => number
+  room: () => number
+  offset: () => number
+  favicon: () => string | null
+  tuckOne: () => boolean
+  /** Slide out (to `offset` along the edge when given), or move there when already out. */
+  slideOutOne: (focus: boolean, offset?: number) => void
+  /** Out: jump to `offset` along the edge (following its leader being dragged). */
+  placeOut: (offset: number) => void
+  bounds: () => MiniRect
+  /** The group's handle is this one's (leader / alone), or none (a follower). */
+  syncRole: () => void
   handleContents: () => Electron.WebContents | null
   onClick: () => void
   onDrag: (active: boolean) => void
@@ -152,6 +191,47 @@ interface HandleListener {
 
 const controllers = new Set<HandleListener>()
 let ipcRegistered = false
+let dockGrouping: () => MiniWindowGrouping = () => 'separate'
+let joinCounter = 0
+
+/** mini-window.ts: where the grouping setting comes from. */
+export function setDockGrouping(source: () => MiniWindowGrouping): void {
+  dockGrouping = source
+}
+
+/** Its 'stack' group (docked to the same display edge) in the order they joined; alone otherwise. */
+function groupOf(member: HandleListener): HandleListener[] {
+  const key = member.key()
+  if (!key || dockGrouping() !== 'stack') return [member]
+  return [...controllers].filter((other) => other.key() === key).sort((a, b) => a.joinedAt() - b.joinedAt())
+}
+
+function isFollower(member: HandleListener): boolean {
+  return groupOf(member)[0] !== member
+}
+
+function tuckGroup(member: HandleListener): boolean {
+  let any = false
+  for (const other of groupOf(member)) any = other.tuckOne() || any
+  return any
+}
+
+/** Slide the group out stacked along its edge from the leader's place; `focus` goes to `member`. */
+function slideOutGroup(member: HandleListener, focus: boolean): void {
+  const group = groupOf(member)
+  const leader = group[0]
+  if (group.length < 2 || !leader) return member.slideOutOne(focus)
+  const offsets = stackDockOffsets(group.map((other) => other.length()), leader.offset(), leader.room())
+  group.forEach((other, index) => other.slideOutOne(focus && other === member, offsets[index]))
+}
+
+/** The leader moved (dragged by its header or handle) while out: the rest of its group follows along the edge. */
+function followLeader(leader: HandleListener, start: number): void {
+  const group = groupOf(leader)
+  if (group.length < 2 || group[0] !== leader) return
+  const offsets = stackDockOffsets(group.map((other) => other.length()), start, leader.room())
+  group.forEach((other, index) => { if (other !== leader && other.out()) other.placeOut(offsets[index] ?? 0) })
+}
 
 /**
  * Spread the handles tucked on each display edge so they never overlap: each keeps its order by where
@@ -159,9 +239,11 @@ let ipcRegistered = false
  * undocks or closes, or the displays change.
  */
 function relayoutHandles(): void {
+  // Who shows a handle ('stack': one per group) first, then spread what's on each edge.
+  for (const controller of controllers) controller.syncRole()
   const groups = new Map<string, Array<{ controller: HandleListener; desired: number; edge: MiniDockEdge; workArea: MiniRect }>>()
   for (const controller of controllers) {
-    const spot = controller.onEdge()
+    const spot = isFollower(controller) ? null : controller.onEdge()
     if (!spot) {
       controller.setAlong(null)
       continue
@@ -203,6 +285,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   /** Tucked next to other handles on the same edge: its handle's place along the edge (relayoutHandles). */
   let along: number | null = null
   let disposed = false
+  /** When it docked to its current edge ('stack' group order). */
+  let joinedAt = initial ? ++joinCounter : 0
 
   const alive = (): boolean => !disposed && !win.isDestroyed()
 
@@ -226,9 +310,22 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
 
   // --- The handle window.
 
-  function handleState(): { edge: MiniDockEdge; arrow: string; label: string; faviconUrl: string | null } | null {
+  function handleState(): { edge: MiniDockEdge; arrow: string; label: string; faviconUrl: string | null; favicons: Array<string | null>; count: number; stacked: boolean } | null {
     if (!dock) return null
-    return { edge: dock.edge, arrow: dockArrow(dock.edge, tucked), label: tucked ? 'Show Mini Window' : 'Tuck Mini Window Away', faviconUrl: host.faviconUrl() }
+    const group = groupOf(registration)
+    const stacked = group.length > 1
+    // 'stack': the group's windows; 'tabs': the collection's tabs; otherwise just this one.
+    const count = stacked ? group.length : Math.max(1, host.tabCount())
+    const what = stacked ? `${count} Mini Windows` : count > 1 ? `Mini Window (${count} tabs)` : 'Mini Window'
+    return {
+      edge: dock.edge,
+      arrow: dockArrow(dock.edge, tucked),
+      label: tucked ? `Show ${what}` : `Tuck ${what} Away`,
+      faviconUrl: host.faviconUrl(),
+      favicons: stacked ? group.slice(0, 3).map((member) => member.favicon()) : [host.faviconUrl()],
+      count,
+      stacked
+    }
   }
 
   function sendHandleState(): void {
@@ -294,6 +391,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   /** Put the handle on the inner edge of a window at `rect`, and show it. */
   function placeHandle(rect: MiniRect): void {
     if (!dock) return
+    // 'stack': the group shares its leader's handle.
+    if (isFollower(registration)) return closeHandle()
     const h = ensureHandle()
     // Settled on the screen edge beside other tucked handles: at its spread-out place along it.
     const bounds = tucked && along !== null && !slideTimer && !drag ? dockHandleAt(rect, dock.edge, along) : dockHandleBounds(rect, dock.edge)
@@ -339,12 +438,37 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   }
 
   function dockTo(edge: MiniDockEdge, display: Display): void {
+    const before = groupKey()
     dock = dockFor(win.getBounds(), edge, display.workArea)
     displayId = display.id
+    if (groupKey() !== before) joinedAt = ++joinCounter
     remember()
   }
 
+  function groupKey(): string | null {
+    return dock ? dockGroupKey(displayId ?? dockDisplay().id, dock.edge) : null
+  }
+
+  function alongEdge(rect: MiniRect): number {
+    if (!dock) return 0
+    const wa = dockDisplay().workArea
+    return dock.edge === 'top' || dock.edge === 'bottom' ? rect.x - wa.x : rect.y - wa.y
+  }
+
+  /** Dock to the nearest edge if needed, then tuck (with its group). */
   function tuck(): boolean {
+    if (!alive() || !host.isTuckEnabled()) return false
+    if (!dock) {
+      const bounds = win.getBounds()
+      const display = screen.getDisplayMatching(bounds)
+      const edge = nearestDockEdge(bounds, displayInfo(display), allDisplays())
+      if (!edge) return false
+      dockTo(edge, display)
+    }
+    return tuckGroup(registration)
+  }
+
+  function tuckOne(): boolean {
     if (!alive() || !host.isTuckEnabled()) return false
     if (!dock) {
       const bounds = win.getBounds()
@@ -370,14 +494,22 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   }
 
   function slideOut(focus: boolean): void {
+    slideOutGroup(registration, focus)
+  }
+
+  function slideOutOne(focus: boolean, offset?: number): void {
     if (!alive() || !dock) return
-    if (!tucked && win.isVisible() && !slideTimer) {
+    const wa = dockDisplay().workArea
+    if (offset !== undefined && offset !== dock.offset) {
+      dock = { ...dock, offset }
+      remember()
+    }
+    const target = dockedBounds(size(), dock, wa, false)
+    if (!tucked && win.isVisible() && !slideTimer && sameRect(win.getBounds(), target)) {
       if (focus) host.focusPage()
       return
     }
     tucked = false
-    const wa = dockDisplay().workArea
-    const target = dockedBounds(size(), dock, wa, false)
     const from = win.isVisible() ? win.getBounds() : dockedBounds(size(), dock, wa, true)
     if (!win.isVisible()) {
       setOwnBounds(from)
@@ -453,6 +585,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
         placeHandle(rect)
         // The others on this edge make room (and swap places as it passes them).
         if (tucked) relayoutHandles()
+        // A stack that is out moves with its leader.
+        else followLeader(registration, offset)
       }, DRAG_POLL_MS)
     }
   }
@@ -466,7 +600,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       return
     }
     if (tucked) slideOut(true)
-    else tuck()
+    else tuckGroup(registration)
   }
 
   function stopPeek(): void {
@@ -494,13 +628,47 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
         const point = screen.getCursorScreenPoint()
         const inRect = (r: MiniRect): boolean => point.x >= r.x && point.x < r.x + r.width && point.y >= r.y && point.y < r.y + r.height
         const handleRect = handle && !handle.window.isDestroyed() ? handle.window.getBounds() : null
-        if (inRect(win.getBounds()) || (handleRect && inRect(handleRect))) state.lastInside = Date.now()
-        else if (Date.now() - state.lastInside > PEEK_LEAVE_MS) tuck()
+        // 'stack': any window of the group keeps it out.
+        if (groupOf(registration).some((member) => inRect(member.bounds())) || (handleRect && inRect(handleRect))) state.lastInside = Date.now()
+        else if (Date.now() - state.lastInside > PEEK_LEAVE_MS) tuckGroup(registration)
       }, PEEK_POLL_MS)
     }, PEEK_DELAY_MS)
   }
 
+  function syncRole(): void {
+    if (!alive() || !dock) return
+    if (isFollower(registration)) return closeHandle()
+    if (slideTimer || drag) return sendHandleState()
+    if (tucked) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true))
+    else if (win.isVisible()) placeHandle(win.getBounds())
+  }
+
   const registration: HandleListener = {
+    joinedAt: () => joinedAt,
+    key: groupKey,
+    tucked: () => dock !== null && tucked,
+    out: () => alive() && dock !== null && !tucked && win.isVisible(),
+    length: () => {
+      const { width, height } = size()
+      return dock?.edge === 'top' || dock?.edge === 'bottom' ? width : height
+    },
+    room: () => {
+      const wa = dockDisplay().workArea
+      return dock?.edge === 'top' || dock?.edge === 'bottom' ? wa.width : wa.height
+    },
+    offset: () => dock?.offset ?? 0,
+    favicon: () => host.faviconUrl(),
+    tuckOne: () => tuckOne(),
+    slideOutOne: (focus, offset) => slideOutOne(focus, offset),
+    placeOut: (offset) => {
+      if (!alive() || !dock || tucked || slideTimer || drag) return
+      dock = { ...dock, offset }
+      const rect = dockedBounds(size(), dock, dockDisplay().workArea, false)
+      setOwnBounds(rect)
+      placeHandle(rect)
+    },
+    bounds: () => (alive() ? win.getBounds() : { x: 0, y: 0, width: 0, height: 0 }),
+    syncRole,
     handleContents: () => (handle && !handle.view.webContents.isDestroyed() ? handle.view.webContents : null),
     onClick,
     onDrag,
@@ -538,8 +706,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     const display = dockDisplay()
     const next = reconcileDock(dock, size(), displayInfo(display), allDisplays())
     if (!next) return undock()
+    const before = groupKey()
     dock = next
     displayId = display.id
+    if (groupKey() !== before) joinedAt = ++joinCounter
     const rect = dockedBounds(size(), dock, display.workArea, tucked)
     setOwnBounds(rect)
     placeHandle(rect)
@@ -568,6 +738,16 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       return tuck()
     },
     slideOut,
+    tuckAway: () => {
+      if (alive() && dock && !tucked) tuckGroup(registration)
+    },
+    groupKey,
+    state: () => (alive() && dock ? { dock: { ...dock }, display: dockDisplay(), tucked } : null),
+    regroup: () => {
+      relayoutHandles()
+      // A 'stack' group that is out closes up along its edge.
+      if (alive() && dock && !tucked && dockGrouping() === 'stack' && !isFollower(registration) && groupOf(registration).length > 1) slideOut(false)
+    },
     afterDrop: () => {
       if (!alive() || tucked || slideTimer) return false
       if (!host.isTuckEnabled()) return false
@@ -576,7 +756,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       const edge = dockEdgeForDrop(bounds, screen.getCursorScreenPoint(), displayInfo(display), allDisplays())
       if (edge) {
         dockTo(edge, display)
-        tuck()
+        // 'stack': it joins the group on that edge (out with it when the group is out).
+        const others = groupOf(registration).filter((member) => member !== registration)
+        if (others.length > 0 && others.every((member) => member.out())) slideOut(false)
+        else tuck()
         return true
       }
       if (!dock) return false
@@ -587,6 +770,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
         const rect = dockedBounds(size(), dock, home.workArea, false)
         setOwnBounds(rect)
         placeHandle(rect)
+        // 'stack': the group closes up behind its leader (a follower nudged out of line goes back into it).
+        if (groupOf(registration).length > 1) slideOut(false)
         return true
       }
       undock()
@@ -594,7 +779,11 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     },
     follow: () => {
       if (!alive() || !dock || tucked || slideTimer || drag) return
-      if (win.isVisible()) placeHandle(win.getBounds())
+      if (!win.isVisible()) return
+      const bounds = win.getBounds()
+      placeHandle(bounds)
+      // 'stack': the leader dragged by its header; the rest of the group comes along the edge.
+      followLeader(registration, alongEdge(bounds))
     },
     applySettings: () => {
       if (!host.isTuckEnabled()) undock()

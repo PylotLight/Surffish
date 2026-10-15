@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BaseWindow, WebContentsView, ipcMain, screen, type IpcMainEvent, type WebContents } from 'electron'
+import { BaseWindow, WebContentsView, ipcMain, screen, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import {
+  MINI_WINDOW_CASCADE_STEP,
   MINI_WINDOW_GEOMETRY_FILE,
   MINI_WINDOW_HEADER_HEIGHT,
   MINI_WINDOW_MAX,
@@ -12,19 +13,25 @@ import {
   freeMiniSlot,
   initialMiniBounds,
   miniDisplayKey,
+  miniHeaderHeight,
   miniHeaderUrl,
+  miniMergeTarget,
+  miniSplitBounds,
+  miniTabDrop,
   parseMiniGeometry,
   parseMiniSlots,
+  planMiniRegroup,
   snapMiniToCorner,
   withMiniSlot,
   type MiniRect,
+  type MiniWindowGrouping,
   type MiniWindowHeaderState,
   type MiniWindowSettings
 } from '../shared/mini-window'
-import { dockArrow, dockedBounds } from '../shared/mini-window-dock'
+import { dockArrow, dockedBounds, type MiniDock } from '../shared/mini-window-dock'
 import { watchShellSurface } from './crash-guard'
-import { createDockController, savedDockFor, type DockController } from './mini-window-dock'
-import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost } from './mini-window-entry'
+import { createDockController, savedDockFor, setDockGrouping, type DockController } from './mini-window-dock'
+import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost, type MiniWindowTab } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
@@ -40,6 +47,12 @@ import { notifyBrowserWindowsChanged } from './window-scope'
  * macOS: an NSPanel (type 'panel') at the floating level, on every Space and over full-screen apps,
  * shown without taking focus when a tab pops out. Elsewhere: an always-on-top frameless window.
  * Tuck to screen edge (slide away behind a handle tab) lives in mini-window-dock.ts.
+ *
+ * Grouping (Settings → Mini window grouping, live): 'tabs' makes each window a collection with a tab
+ * strip (pop out adds to the last used one; drag a tab out to split, drop a header on another
+ * window's header or dock to an edge holding one to merge); 'stack' keeps windows apart but groups
+ * the ones docked to one edge behind one handle (mini-window-dock.ts); 'separate' is one window per
+ * tab. Switching regroups open windows by moving views only (no reloads). The cap counts tabs.
  */
 
 interface Mini {
@@ -64,6 +77,8 @@ interface Mini {
   headerReady: Promise<void>
   /** Docked to a screen edge / tucked away behind its handle. */
   dock: DockController
+  /** Moves before this are ours (corner snap), not a user drop. */
+  ownMoveUntil: number
   closed: boolean
 }
 
@@ -75,9 +90,25 @@ const GEOMETRY_SAVE_DELAY_MS = 400
 
 /** Open mini windows, oldest first. */
 const minis: Mini[] = []
-/** The one most recently opened or focused (what the palette's Tuck command acts on). */
+/** The one most recently opened or focused (what the palette's Tuck command acts on; where 'tabs' adds a popped-out tab). */
 let lastActive: Mini | null = null
 let ipcRegistered = false
+let appliedGrouping: MiniWindowGrouping = getMiniWindowSettings().grouping
+const OWN_MOVE_GRACE_MS = 500
+
+function grouping(): MiniWindowGrouping {
+  return getMiniWindowSettings().grouping
+}
+setDockGrouping(grouping)
+
+function tabsOf(m: Mini): MiniWindowTab[] {
+  return m.closed || m.window.isDestroyed() ? [] : host().tabs(m.window)
+}
+
+/** Tabs in every mini window (what the cap counts). */
+function totalTabs(): number {
+  return liveMinis().reduce((sum, m) => sum + tabsOf(m).length, 0)
+}
 
 function liveMinis(): Mini[] {
   return minis.filter((m) => !m.closed && !m.window.isDestroyed())
@@ -90,7 +121,7 @@ function miniOf(window: BaseWindow): Mini | null {
 
 /** The mini window holding tab `tabId`, if any. */
 function miniWithTab(tabId: string): Mini | null {
-  return liveMinis().find((m) => host().header(m.window)?.tabId === tabId) ?? null
+  return liveMinis().find((m) => tabsOf(m).some((tab) => tab.tabId === tabId)) ?? null
 }
 
 /** The palette's single-window commands act on the last one used. */
@@ -147,7 +178,10 @@ function snapToCorner(m: Mini): void {
   if (m.closed || m.window.isDestroyed()) return
   const bounds = m.window.getBounds()
   const snapped = snapMiniToCorner(bounds, screen.getDisplayMatching(bounds).workArea)
-  if (snapped) m.window.setBounds(snapped)
+  if (snapped) {
+    m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+    m.window.setBounds(snapped)
+  }
 }
 
 /**
@@ -171,8 +205,13 @@ function layout(m: Mini): void {
   const [width = 0, height = 0] = m.window.getContentSize()
   // The page fills the window; the header overlays its top while revealed.
   host().setPageBounds(m.window, { x: 0, y: 0, width, height })
-  m.header.setBounds({ x: 0, y: 0, width, height: m.revealed ? MINI_WINDOW_HEADER_HEIGHT : 0 })
+  m.header.setBounds({ x: 0, y: 0, width, height: m.revealed ? headerHeight(m) : 0 })
   rewirePage(m)
+}
+
+/** The revealed header: its row, plus the tab strip for a collection of two or more ('tabs'). */
+function headerHeight(m: Mini): number {
+  return miniHeaderHeight(tabsOf(m).length, grouping())
 }
 
 function stopPolling(m: Mini): void {
@@ -213,7 +252,7 @@ function pollPointer(m: Mini): void {
   const point = screen.getCursorScreenPoint()
   const bounds = m.window.getContentBounds()
   const inside = point.x >= bounds.x && point.x < bounds.x + bounds.width && point.y >= bounds.y && point.y < bounds.y + bounds.height
-  if (inside && point.y - bounds.y <= MINI_WINDOW_REVEAL_ZONE) cancelHide(m)
+  if (inside && point.y - bounds.y <= Math.max(MINI_WINDOW_REVEAL_ZONE, headerHeight(m))) cancelHide(m)
   else scheduleHide(m)
 }
 
@@ -256,11 +295,13 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; tuck: { arrow: string; label: string } | null } | null {
+function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean }> } | null {
   const info = host().header(m.window)
   if (!info) return null
   const tuckEdge = m.dock.tuckEdge()
+  const tabs = grouping() === 'tabs' ? tabsOf(m) : []
   return {
+    tabs: tabs.length > 1 ? tabs.map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Tab', faviconUrl: tab.faviconUrl, active: tab.active })) : [],
     tuck: tuckEdge ? { arrow: dockArrow(tuckEdge, false), label: `Tuck to the ${tuckEdge} edge` } : null,
     title: info.title,
     url: miniHeaderUrl(info.url),
@@ -278,13 +319,18 @@ function refreshHeaderOf(m: Mini): void {
   const state = headerState(m)
   if (!state) return
   m.window.setTitle(state.title ? `${state.title} — Mini Window` : 'Mini Window')
-  // The Window menu lists mini windows by title.
-  if (state.title !== m.menuTitle) {
-    m.menuTitle = state.title
+  // The Window menu lists mini window tabs by title.
+  const menuTitle = tabsOf(m).map((tab) => `${tab.tabId}\u0000${tab.title}`).join('\u0001')
+  if (menuTitle !== m.menuTitle) {
+    m.menuTitle = menuTitle
     notifyBrowserWindowsChanged()
   }
+  // A tab joined or left while the header is up: the strip comes or goes.
+  if (m.revealed && m.header.getBounds().height !== headerHeight(m)) layout(m)
   if (live(m.header.webContents)) m.header.webContents.send('mini-window:state', state)
-  m.dock.refreshHandle()
+  // 'stack': a group's handle shows every member's favicon.
+  if (grouping() === 'stack') for (const other of liveMinis()) other.dock.refreshHandle()
+  else m.dock.refreshHandle()
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +351,7 @@ function registerIpc(): void {
   })
   ipcMain.on('mini-window:return', (event) => {
     const m = fromHeader(event)
-    if (m) returnMini(m)
+    if (m) returnTabOf(m)
   })
   ipcMain.on('mini-window:close', (event) => {
     const m = fromHeader(event)
@@ -316,6 +362,25 @@ function registerIpc(): void {
     if (!m) return
     setRevealed(m, false)
     m.dock.toggle(true)
+  })
+  ipcMain.on('mini-window:activate-tab', (event, tabId: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || !tabsOf(m).some((tab) => tab.tabId === tabId)) return
+    host().activateTab(m.window, tabId)
+    refreshHeaderOf(m)
+  })
+  ipcMain.on('mini-window:close-tab', (event, tabId: unknown) => {
+    const m = fromHeader(event)
+    if (m && typeof tabId === 'string' && tabsOf(m).some((tab) => tab.tabId === tabId)) host().closeTab(m.window, tabId)
+  })
+  ipcMain.on('mini-window:return-all', (event) => {
+    const m = fromHeader(event)
+    if (m) returnAllOf(m)
+  })
+  ipcMain.on('mini-window:tab-out', (event, tabId: unknown, x: unknown, y: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
+    dropTabOutside(m, tabId, { x: Math.round(x), y: Math.round(y) })
   })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
@@ -357,24 +422,28 @@ function applyWindowSettings(m: Mini, settings: MiniWindowSettings): void {
   m.dock.applySettings()
 }
 
-/** Too many open: say so in the browser window instead of opening another. */
+/** Too many open (tabs across every mini window): say so in the browser window instead of opening another. */
 function atCap(): boolean {
-  if (liveMinis().length < MINI_WINDOW_MAX) return false
+  if (totalTabs() < MINI_WINDOW_MAX) return false
   host().notify(`Up to ${MINI_WINDOW_MAX} mini windows at a time. Return one to the browser first.`)
   return true
 }
 
-function createMini(): Mini | null {
+/**
+ * A new, empty mini window. `place`: open at these bounds (a tab split off under the pointer, or off
+ * its collection when regrouping), docked like `place.dock` when given, instead of the remembered spot.
+ */
+function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: Display } | null } | null = null): Mini | null {
   registerIpc()
   const slot = freeMiniSlot(liveMinis().map((m) => m.slot))
   if (slot === null) return null
   const header = createHeaderView()
   const preload = preloadPath()
   if (!header || !preload) return null
-  const opening = openingBounds(slot)
+  const opening = place?.bounds ?? openingBounds(slot)
   // Docked on this display last time: open against that edge again (out, with its handle).
-  const display = screen.getDisplayMatching(opening)
-  const savedDock = getMiniWindowSettings().tuckToEdge ? savedDockFor(slot, display, opening) : null
+  const display = place?.dock?.display ?? screen.getDisplayMatching(opening)
+  const savedDock = !getMiniWindowSettings().tuckToEdge ? null : place ? place.dock?.dock ?? null : savedDockFor(slot, display, opening)
   const bounds = savedDock ? dockedBounds(opening, savedDock, display.workArea, false) : opening
   const window = new BaseWindow({
     ...bounds,
@@ -407,6 +476,7 @@ function createMini(): Mini | null {
     slot,
     preload,
     faviconUrl: () => host().header(window)?.faviconUrl ?? null,
+    tabCount: () => (window.isDestroyed() ? 0 : host().tabs(window).length),
     focusPage: () => {
       if (m.closed || window.isDestroyed()) return
       window.focus()
@@ -430,6 +500,7 @@ function createMini(): Mini | null {
     pageListeners: [],
     headerReady: header.ready,
     dock,
+    ownMoveUntil: 0,
     closed: false
   }
   minis.push(m)
@@ -461,10 +532,21 @@ function createMini(): Mini | null {
     m.dock.follow()
     scheduleGeometrySave(m)
   })
-  // Dropped: against a screen edge it docks and tucks away, near a corner it snaps into it.
+  // Dropped: on another collection's header it merges ('tabs'); against a screen edge it docks and
+  // tucks away (into the collection already there, 'tabs'); near a corner it snaps into it.
   const dropped = (): void => {
-    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves()) return
-    if (!m.dock.afterDrop()) snapToCorner(m)
+    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
+    if (grouping() === 'tabs') {
+      const target = miniMergeTarget(dropPoint(m), othersOnScreen(m))
+      if (target && mergeInto(m, target.mini, true)) return
+    }
+    if (m.dock.afterDrop()) {
+      const key = grouping() === 'tabs' ? m.dock.groupKey() : null
+      const peer = key ? liveMinis().find((other) => other !== m && host().header(other.window) && other.dock.groupKey() === key) : undefined
+      if (peer && mergeInto(m, peer, false)) return
+    } else {
+      snapToCorner(m)
+    }
     scheduleGeometrySave(m)
   }
   // macOS/Windows say when a drag ends ('moved'); Linux only streams 'move', so act after it settles.
@@ -472,7 +554,7 @@ function createMini(): Mini | null {
   if (process.platform === 'linux') {
     let settle: ReturnType<typeof setTimeout> | null = null
     window.on('move', () => {
-      if (m.dock.ignoringMoves()) return
+      if (m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
       m.dock.follow()
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => { settle = null; dropped() }, 350)
@@ -527,26 +609,42 @@ function present(m: Mini, focus: boolean): void {
   m.dock.follow()
 }
 
-/** Pop a tab out into a new mini window of its own (already in one: bring that one up). */
+/** Header loaded: show what the window holds and bring it up (`focus`: take the keyboard). */
+async function finishOpen(m: Mini, focus: boolean): Promise<boolean> {
+  layout(m)
+  await m.headerReady
+  if (m.closed) return false
+  refreshHeaderOf(m)
+  present(m, focus)
+  return true
+}
+
+/**
+ * Pop a tab out (already in one: bring that one up, showing the tab). Grouping 'tabs': into the last
+ * used collection (a private tab never joins a normal one, so it gets its own); otherwise a new window.
+ */
 export async function popOutTab(tabId: string): Promise<boolean> {
   const existing = miniWithTab(tabId)
   if (existing) {
+    host().activateTab(existing.window, tabId)
     present(existing, false)
     return true
   }
   if (atCap()) return false
+  if (grouping() === 'tabs') {
+    const target = currentMini()
+    if (target && host().adoptTab(tabId, target.window)) {
+      lastActive = target
+      return finishOpen(target, false)
+    }
+  }
   const m = createMini()
   if (!m) return false
   if (!host().adoptTab(tabId, m.window)) {
     if (!host().header(m.window) && !m.window.isDestroyed()) m.window.close()
     return false
   }
-  layout(m)
-  await m.headerReady
-  if (m.closed) return false
-  refreshHeaderOf(m)
-  present(m, false)
-  return true
+  return finishOpen(m, false)
 }
 
 /** The toggle shortcut with no mini window open: open the pinned page in a new one. */
@@ -558,27 +656,137 @@ export async function openPinnedPage(url: string): Promise<boolean> {
     if (!m.window.isDestroyed()) m.window.close()
     return false
   }
-  layout(m)
-  await m.headerReady
-  if (m.closed) return false
-  refreshHeaderOf(m)
-  present(m, true)
+  return finishOpen(m, true)
+}
+
+// ---------------------------------------------------------------------------
+// Grouping 'tabs': merge and split collections (views move; pages never reload).
+
+/** Where a dragged window's header was let go: the pointer when it is on the window (a real drag), else the header's middle. */
+function dropPoint(m: Mini): { x: number; y: number } {
+  const bounds = m.window.getBounds()
+  const cursor = screen.getCursorScreenPoint()
+  const onWindow = cursor.x >= bounds.x && cursor.x < bounds.x + bounds.width && cursor.y >= bounds.y && cursor.y < bounds.y + MINI_WINDOW_REVEAL_ZONE
+  return onWindow ? cursor : { x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + MINI_WINDOW_HEADER_HEIGHT / 2) }
+}
+
+/** The other mini windows on screen, with their bounds (merge targets). */
+function othersOnScreen(m: Mini): Array<{ mini: Mini; bounds: MiniRect }> {
+  return liveMinis().filter((other) => other !== m && showing(other) && host().header(other.window)).map((other) => ({ mini: other, bounds: other.window.getBounds() }))
+}
+
+/**
+ * Move every tab of `from` into `into` (its active tab stays the active one); `from` closes with its
+ * last tab. `show`: bring `into` up (a header dropped on it); a merge by docking leaves it as it was.
+ */
+function mergeInto(from: Mini, into: Mini, show: boolean): boolean {
+  if (from === into || from.closed || into.closed) return false
+  const tabs = tabsOf(from)
+  const active = tabs.find((tab) => tab.active)
+  unwirePage(from)
+  let moved = false
+  for (const tab of [...tabs.filter((candidate) => candidate !== active), ...(active ? [active] : [])]) moved = host().adoptTab(tab.tabId, into.window) || moved
+  // Anything that couldn't come (a private tab and a normal collection) stays where it was.
+  if (!from.closed && !from.window.isDestroyed() && tabsOf(from).length > 0) refreshHeaderOf(from)
+  if (!moved) return false
+  lastActive = into
+  layout(into)
+  refreshHeaderOf(into)
+  if (show) present(into, true)
   return true
 }
+
+/**
+ * A tab of `m` in a window of its own at `bounds` (docked like `dock` when given). The new window is
+ * set up but not shown yet: the caller presents it (or tucks it).
+ */
+function splitOff(m: Mini, tabId: string, bounds: MiniRect, dock: { dock: MiniDock; display: Display } | null): Mini | null {
+  const n = createMini({ bounds, dock })
+  if (!n) return null
+  const wasActive = tabsOf(m).find((tab) => tab.tabId === tabId)?.active === true
+  if (wasActive) unwirePage(m)
+  if (!host().adoptTab(tabId, n.window)) {
+    if (!n.window.isDestroyed()) n.window.close()
+    if (wasActive) rewirePage(m)
+    return null
+  }
+  layout(n)
+  refreshHeaderOf(m)
+  return n
+}
+
+/** A tab dragged out of `m`'s strip and let go at `point`: onto another window it moves there, elsewhere it splits off. */
+function dropTabOutside(m: Mini, tabId: string, point: { x: number; y: number }): void {
+  if (!tabsOf(m).some((tab) => tab.tabId === tabId)) return
+  const drop = miniTabDrop(point, m.window.getBounds(), tabsOf(m).length, othersOnScreen(m))
+  if (drop.kind === 'merge') {
+    if (tabsOf(m).find((tab) => tab.tabId === tabId)?.active) unwirePage(m)
+    if (host().adoptTab(tabId, drop.into.mini.window)) {
+      lastActive = drop.into.mini
+      layout(drop.into.mini)
+      refreshHeaderOf(drop.into.mini)
+      present(drop.into.mini, true)
+    }
+    if (!m.closed && !m.window.isDestroyed()) refreshHeaderOf(m)
+    return
+  }
+  if (drop.kind !== 'split') return
+  const [width = 420, height = 620] = m.window.getSize()
+  const n = splitOff(m, tabId, miniSplitBounds(point, { width, height }, screen.getDisplayNearestPoint(point).workArea), null)
+  if (n) void finishOpen(n, true)
+}
+
+/** Settings → Mini window grouping changed: regroup what is open (planMiniRegroup). */
+function regroup(next: MiniWindowGrouping): void {
+  const open = liveMinis().filter((m) => host().header(m.window))
+  const plan = planMiniRegroup(next, open.map((m, id) => ({ id, tabs: tabsOf(m).length, dockKey: m.dock.groupKey() })))
+  for (const { into, from } of plan.merge) {
+    const target = open[into]
+    if (!target) continue
+    for (const id of from) {
+      const source = open[id]
+      if (source) mergeInto(source, target, false)
+    }
+  }
+  for (const id of plan.split) {
+    const m = open[id]
+    if (!m) continue
+    const state = m.dock.state()
+    let previous = m.window.getBounds()
+    for (const [index, tab] of tabsOf(m).filter((candidate) => !candidate.active).entries()) {
+      // Docked: the new windows dock to the same edge, a step further along it ('stack' closes them up); else cascaded off it.
+      const dock = state ? { dock: { ...state.dock, offset: state.dock.offset + (index + 1) * MINI_WINDOW_CASCADE_STEP }, display: state.display } : null
+      const bounds = cascadeMiniBounds(previous, liveMinis().map((other) => other.window.getBounds()), screen.getDisplayMatching(previous).workArea)
+      const n = splitOff(m, tab.tabId, bounds, dock)
+      if (!n) continue
+      previous = bounds
+      if (state?.tucked) {
+        void n.headerReady.then(() => refreshHeaderOf(n))
+        n.dock.toggle(false)
+      } else {
+        void finishOpen(n, false)
+      }
+    }
+  }
+  for (const m of liveMinis()) {
+    m.dock.regroup()
+    refreshHeaderOf(m)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Showing, hiding, returning.
 
 /** On screen right now: shown and not tucked away. */
 function showing(m: Mini): boolean {
   return !m.closed && !m.window.isDestroyed() && !m.dock.isTucked() && m.window.isVisible() && !m.window.isMinimized()
 }
 
-/** Hide one: docked ones tuck behind their handle, the rest hide. */
+/** Hide one: docked ones tuck behind their handle (with their group), the rest hide. */
 function hideMini(m: Mini): void {
   setRevealed(m, false)
-  if (m.dock.isDocked()) {
-    if (!m.dock.isTucked()) m.dock.toggle(false)
-  } else {
-    m.window.hide()
-  }
+  if (m.dock.isDocked()) m.dock.tuckAway()
+  else m.window.hide()
 }
 
 /**
@@ -612,40 +820,58 @@ export function isTucked(tabId?: string): boolean {
   return Boolean(m?.dock.isTucked())
 }
 
-function returnMini(m: Mini): boolean {
+/** Put one tab of `m` (default: its active one) back in the browser; its last tab closes the window. */
+function returnTabOf(m: Mini, tabId?: string): boolean {
   if (m.closed || m.window.isDestroyed()) return false
-  unwirePage(m)
-  const moved = host().returnTab(m.window)
-  if (!moved) rewirePage(m)
+  const active = !tabId || tabsOf(m).find((tab) => tab.tabId === tabId)?.active === true
+  if (active) unwirePage(m)
+  const moved = host().returnTab(m.window, tabId)
+  if (!m.closed && !m.window.isDestroyed()) {
+    rewirePage(m)
+    refreshHeaderOf(m)
+  }
   return moved
 }
 
-/** Put one mini window's tab back in the browser: the one `window` is, or the one holding `tabId`. */
-export function returnToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
-  const m = target.window ? miniOf(target.window) : target.tabId ? miniWithTab(target.tabId) : null
-  return m ? returnMini(m) : false
-}
-
-/** Put every mini window's tab back in the browser (oldest first, so they land in that order). */
-export function returnAll(): boolean {
+/** Every tab of `m` back in the browser (strip order). */
+function returnAllOf(m: Mini): boolean {
   let any = false
-  for (const m of liveMinis()) any = returnMini(m) || any
+  for (const tab of tabsOf(m)) any = returnTabOf(m, tab.tabId) || any
   return any
 }
 
-/** Bring one mini window up with the keyboard (Window menu, palette). */
+/** Put a mini window tab back in the browser: the active one of the window `window` is, or tab `tabId`. */
+export function returnToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
+  if (target.window) {
+    const m = miniOf(target.window)
+    return m ? returnTabOf(m) : false
+  }
+  const m = target.tabId ? miniWithTab(target.tabId) : null
+  return m ? returnTabOf(m, target.tabId) : false
+}
+
+/** Put every mini window tab back in the browser (oldest window first, so they land in that order). */
+export function returnAll(): boolean {
+  let any = false
+  for (const m of liveMinis()) any = returnAllOf(m) || any
+  return any
+}
+
+/** Bring the mini window holding `tabId` up with the keyboard, showing that tab (Window menu, palette). */
 export function focusMini(tabId: string): boolean {
   const m = miniWithTab(tabId)
   if (!m) return false
+  host().activateTab(m.window, tabId)
   present(m, true)
   return true
 }
 
-/** Open mini windows, oldest first, for the Window menu and the palette. */
+/** Open mini window tabs (a collection's in strip order), oldest window first, for the Window menu and the palette. */
 export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean }> {
   return liveMinis().flatMap((m) => {
-    const info = host().header(m.window)
-    return info ? [{ tabId: info.tabId, title: info.title || miniHeaderUrl(info.url) || 'Mini Window', tucked: m.dock.isTucked(), focused: m.window.isFocused() }] : []
+    const focused = m.window.isFocused()
+    const tucked = m.dock.isTucked()
+    return tabsOf(m).map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Mini Window', tucked, focused: focused && tab.active }))
   })
 }
 
@@ -659,5 +885,9 @@ export function refreshHeader(window: BaseWindow): void {
 }
 
 export function applySettings(settings: MiniWindowSettings): void {
+  if (settings.grouping !== appliedGrouping) {
+    appliedGrouping = settings.grouping
+    regroup(settings.grouping)
+  }
   for (const m of liveMinis()) applyWindowSettings(m, settings)
 }

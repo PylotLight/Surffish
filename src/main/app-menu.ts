@@ -13,7 +13,7 @@ import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
-import { focusMiniWindow, listMiniWindows, returnAllMiniWindows, toggleMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, getMiniWindowSettings, listMiniWindows, returnAllMiniWindows, setMiniWindowGrouping, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -206,6 +206,12 @@ export function installAppMenu(): void {
         tabItem('Pop Out to Mini Window', 'miniWindow'),
         { label: 'Return All Mini Windows', click: () => { returnAllMiniWindows() } },
         { label: 'Show/Hide Mini Windows', click: () => { void toggleMiniWindow() } },
+        {
+          label: 'Mini Window Grouping',
+          submenu: ([['tabs', 'Tabs'], ['stack', 'Stack'], ['separate', 'Separate']] as const).map(([grouping, label]): MenuItemConstructorOptions => ({
+            label, type: 'radio', checked: getMiniWindowSettings().grouping === grouping, click: () => { setMiniWindowGrouping(grouping) }
+          }))
+        },
         ...miniWindowMenuItems(),
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
         ...windowListMenuItems()

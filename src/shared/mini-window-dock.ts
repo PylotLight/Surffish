@@ -276,3 +276,32 @@ export function dockHandleAt(rect: MiniRect, edge: MiniDockEdge, along: number):
 export function dockEdgeSpan(workArea: MiniRect, edge: MiniDockEdge): [number, number] {
   return spanAlong(workArea, edge)
 }
+
+/**
+ * Grouping 'stack': windows docked to one edge slide out one after another along it. `lengths` are
+ * their sizes along the edge (in group order), `start` where the first wants to begin (its dock
+ * offset) and `room` the work area's length along the edge. They keep `start` where they all fit
+ * (moved back from the far end as needed); when they don't fit they overlap evenly, the first at 0
+ * and the last ending at `room`. Returns each window's dock offset.
+ */
+export function stackDockOffsets(lengths: readonly number[], start: number, room: number): number[] {
+  if (lengths.length === 0) return []
+  const total = lengths.reduce((sum, length) => sum + Math.max(0, length), 0)
+  if (total <= room) {
+    let at = Math.round(Math.min(Math.max(start, 0), room - total))
+    return lengths.map((length) => {
+      const offset = at
+      at += Math.max(0, length)
+      return offset
+    })
+  }
+  const last = Math.min(room, Math.max(0, lengths[lengths.length - 1] ?? 0))
+  if (lengths.length === 1) return [0]
+  const step = Math.max(0, room - last) / (lengths.length - 1)
+  return lengths.map((_, index) => Math.round(index * step))
+}
+
+/** A docked window's group key: same display and same edge. */
+export function dockGroupKey(displayId: number, edge: MiniDockEdge): string {
+  return `${displayId}:${edge}`
+}

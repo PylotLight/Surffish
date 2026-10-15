@@ -20,20 +20,27 @@ import {
   normalizeMiniWindowUrl,
   parseMiniGeometry,
   parseMiniWindowSettings,
-  snapMiniToCorner
+  snapMiniToCorner,
+  MINI_WINDOW_HEADER_HEIGHT,
+  MINI_WINDOW_TAB_STRIP_HEIGHT,
+  miniHeaderHeight,
+  miniMergeTarget,
+  miniSplitBounds,
+  miniTabDrop,
+  planMiniRegroup
 } from './mini-window'
 
 const workArea = { x: 0, y: 25, width: 1440, height: 875 }
 
 describe('mini window settings', () => {
   test('defaults: no pinned page, the default shortcut, opaque', () => {
-    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false })
-    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false })
+    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
+    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
   })
 
   test('tuck to edge is on and peek off by default; booleans are kept', () => {
     expect(parseMiniWindowSettings({ tuckToEdge: false, peekOnHover: true })).toMatchObject({ tuckToEdge: false, peekOnHover: true })
-    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false })
+    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false, grouping: 'tabs' })
   })
 
   test('an explicit empty shortcut turns it off', () => {
@@ -186,5 +193,68 @@ describe('several mini windows', () => {
     expect(withMiniSlot([a], 0, {})).toEqual({ slots: [] })
     // Migrated legacy data written back keeps slot 0.
     expect(withMiniSlot(parseMiniSlots(a, (v) => v as Record<string, typeof a.k>), 1, a)).toEqual({ slots: [a, a] })
+  })
+})
+
+describe('grouping', () => {
+  test('settings from before grouping (the #203 format) read as tabs; bad values fall back', () => {
+    const v203 = { defaultUrl: 'https://claude.ai/', shortcut: 'CommandOrControl+Shift+Space', opacity: 0.9, tuckToEdge: true, peekOnHover: true }
+    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, grouping: 'tabs' })
+    expect(parseMiniWindowSettings({ grouping: 'stack' }).grouping).toBe('stack')
+    expect(parseMiniWindowSettings({ grouping: 'separate' }).grouping).toBe('separate')
+    expect(parseMiniWindowSettings({ grouping: 'piles' }).grouping).toBe('tabs')
+  })
+
+  test('the #203 slot files still read slot by slot (and the single-window format as slot 0)', () => {
+    const rect = { x: 10, y: 40, width: 420, height: 620 }
+    expect(parseMiniSlots({ slots: [{ a: rect }, {}, { b: rect }] }, parseMiniGeometry)).toEqual([{ a: rect }, {}, { b: rect }])
+    expect(parseMiniSlots({ a: rect }, parseMiniGeometry)).toEqual([{ a: rect }])
+  })
+
+  test('the tab strip only shows in tabs mode with two or more tabs', () => {
+    expect(miniHeaderHeight(1, 'tabs')).toBe(MINI_WINDOW_HEADER_HEIGHT)
+    expect(miniHeaderHeight(2, 'tabs')).toBe(MINI_WINDOW_HEADER_HEIGHT + MINI_WINDOW_TAB_STRIP_HEIGHT)
+    expect(miniHeaderHeight(3, 'stack')).toBe(MINI_WINDOW_HEADER_HEIGHT)
+    expect(miniHeaderHeight(3, 'separate')).toBe(MINI_WINDOW_HEADER_HEIGHT)
+  })
+
+  test('a header dropped on another window\'s header band merges; on its page it does not', () => {
+    const a = { id: 1, bounds: { x: 100, y: 100, width: 400, height: 600 } }
+    const b = { id: 2, bounds: { x: 600, y: 100, width: 400, height: 600 } }
+    expect(miniMergeTarget({ x: 300, y: 120 }, [a, b])).toBe(a)
+    expect(miniMergeTarget({ x: 700, y: 143 }, [a, b])).toBe(b)
+    expect(miniMergeTarget({ x: 300, y: 400 }, [a, b])).toBeNull()
+    expect(miniMergeTarget({ x: 550, y: 120 }, [a, b])).toBeNull()
+  })
+
+  test('a tab dragged out: onto another window moves it, inside its own does nothing, elsewhere splits', () => {
+    const own = { x: 0, y: 0, width: 400, height: 600 }
+    const other = { id: 9, bounds: { x: 800, y: 0, width: 400, height: 600 } }
+    expect(miniTabDrop({ x: 900, y: 300 }, own, 2, [other])).toEqual({ kind: 'merge', into: other })
+    expect(miniTabDrop({ x: 200, y: 300 }, own, 2, [other])).toEqual({ kind: 'none' })
+    expect(miniTabDrop({ x: 600, y: 300 }, own, 2, [other])).toEqual({ kind: 'split' })
+    expect(miniTabDrop({ x: 600, y: 300 }, own, 1, [other])).toEqual({ kind: 'none' })
+  })
+
+  test('a split-off window opens under the pointer, inside the work area', () => {
+    expect(miniSplitBounds({ x: 700, y: 300 }, { width: 400, height: 600 }, workArea)).toEqual({ x: 500, y: 282, width: 400, height: 600 })
+    expect(miniSplitBounds({ x: 1430, y: 890 }, { width: 400, height: 600 }, workArea)).toEqual({ x: 1040, y: 300, width: 400, height: 600 })
+  })
+
+  test('switching to tabs merges windows docked to the same edge into the oldest; undocked ones stay', () => {
+    const windows = [
+      { id: 1, tabs: 1, dockKey: '7:right' },
+      { id: 2, tabs: 1, dockKey: null },
+      { id: 3, tabs: 1, dockKey: '7:right' },
+      { id: 4, tabs: 1, dockKey: '7:left' },
+      { id: 5, tabs: 1, dockKey: '7:right' }
+    ]
+    expect(planMiniRegroup('tabs', windows)).toEqual({ merge: [{ into: 1, from: [3, 5] }], split: [] })
+  })
+
+  test('switching away from tabs splits every window holding several tabs', () => {
+    const windows = [{ id: 1, tabs: 3, dockKey: '7:right' }, { id: 2, tabs: 1, dockKey: null }, { id: 3, tabs: 2, dockKey: null }]
+    expect(planMiniRegroup('stack', windows)).toEqual({ merge: [], split: [1, 3] })
+    expect(planMiniRegroup('separate', windows)).toEqual({ merge: [], split: [1, 3] })
   })
 })

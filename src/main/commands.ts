@@ -51,7 +51,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -207,6 +207,12 @@ const COMMANDS: BrowserCommand[] = [
     enabled: () => hasMiniWindows() && getMiniWindowSettings().tuckToEdge,
     run: () => tuckMiniWindow()
   },
+  ...(([['tabs', 'Tabs', ['tab strip', 'collection', 'merge']], ['stack', 'Stack', ['stack', 'edge group', 'slide out together']], ['separate', 'Separate', ['one window per tab', 'separate windows']]] as const).map(([grouping, label, extra]): BrowserCommand => ({
+    id: `miniWindow.grouping.${grouping}`, title: `Mini Window Grouping: ${label}`, section: 'Settings',
+    keywords: ['mini window', 'group', 'grouping', ...extra], refocusPage: true,
+    enabled: () => getMiniWindowSettings().grouping !== grouping,
+    run: () => setMiniWindowGrouping(grouping)
+  }))),
   // Split view
   {
     id: 'view.splitView', title: () => (getBrowserTabSplitStatus().split ? 'Unsplit Tabs' : 'Split with Last Used Tab'), accelerator: TAB_COMMAND_SHORTCUTS.splitView.accelerator, section: 'View',

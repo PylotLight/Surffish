@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('miniWindow', {
   close: () => ipcRenderer.send('mini-window:close'),
   hover: (inside) => ipcRenderer.send('mini-window:hover', Boolean(inside)),
   tuck: () => ipcRenderer.send('mini-window:tuck'),
+  // Tab strip (grouping 'tabs').
+  activateTab: (tabId) => ipcRenderer.send('mini-window:activate-tab', String(tabId)),
+  closeTab: (tabId) => ipcRenderer.send('mini-window:close-tab', String(tabId)),
+  returnAll: () => ipcRenderer.send('mini-window:return-all'),
+  tabOut: (tabId, x, y) => ipcRenderer.send('mini-window:tab-out', String(tabId), Number(x), Number(y)),
   // Dock handle.
   onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),
   handleClick: () => ipcRenderer.send('mini-window:handle-click'),

@@ -164,12 +164,13 @@ interface BrowserWindowState {
   /** Tab groups in this window (shared/tab-groups.ts has the rules). */
   groups: TabGroup[]
   /**
-   * The mini window (mini-window.ts): a small always-on-top window holding exactly one tab, with no
-   * shell surfaces. It is not a registered browser window, so "the current window" never resolves
-   * to it; tabs it would open go to a normal window (browserTargetForMini).
+   * A mini window (mini-window.ts): a small always-on-top window holding one tab (or, with grouping
+   * 'tabs', a collection of them), with no shell surfaces. It is not a registered browser window, so
+   * "the current window" never resolves to it; tabs it would open go to a normal window
+   * (browserTargetForMini). Every tab in it counts as on screen (never slept, discarded or archived).
    */
   mini: boolean
-  /** Mini window only: the window its tab came from (where Return to Browser puts it back). */
+  /** Mini window only: the window its first tab came from (Return to Browser's fallback; each tab's own is in miniTabHomes). */
   miniHome: BrowserWindowState | null
 }
 const windowStates: BrowserWindowState[] = []
@@ -289,9 +290,13 @@ function onScreenTabIds(w: BrowserWindowState | undefined): string[] {
   return splitOf(active)?.tabIds.slice() ?? [active.id]
 }
 
-/** On screen = the active tab or another pane of its split (never slept, throttled or archived). */
+/**
+ * On screen = the active tab or another pane of its split (never slept, throttled or archived). Every
+ * tab in a mini window counts: a collection's hidden tabs keep playing and are never slept or archived,
+ * like a tucked mini window's tab.
+ */
 function isTabOnScreen(tab: BrowserTab): boolean {
-  return isActiveTab(tab) || Boolean(splitOf(activeTabOf(tab.win))?.tabIds.includes(tab.id))
+  return tab.win.mini || isActiveTab(tab) || Boolean(splitOf(activeTabOf(tab.win))?.tabIds.includes(tab.id))
 }
 
 /** Where a tab's page is drawn (window coordinates): its pane in a split on screen, else the page area. */
@@ -597,7 +602,7 @@ function persistOpenTabs(): void {
   if (windows.length === 0) return
   // The mini window's tab is saved as the last tab of its home window (or the first window), so a
   // restart never loses it; it comes back as an ordinary tab.
-  const miniTabs = windowStates.filter((w) => w.mini && !w.window.isDestroyed()).flatMap((w) => w.tabs.map((tab) => ({ tab, home: w.miniHome })))
+  const miniTabs = windowStates.filter((w) => w.mini && !w.window.isDestroyed()).flatMap((w) => w.tabs.map((tab) => ({ tab, home: miniTabHomes.get(tab) ?? w.miniHome })))
   const extraTabsFor = (w: BrowserWindowState): BrowserTab[] => miniTabs
     .filter(({ home }) => (home && windows.includes(home) ? home : windows[0]) === w)
     .map(({ tab }) => tab)
@@ -1724,6 +1729,14 @@ setGlanceHost({
 
 /** Set while the mini window opens its own page (createTab otherwise sends mini tabs to a browser window). */
 let creatingMiniTab = false
+/** The browser window each mini window tab came from (where Return to Browser puts it back). */
+const miniTabHomes = new WeakMap<BrowserTab, BrowserWindowState>()
+
+/** A mini window's tab (`tabId`, else its active one). */
+function miniTabOf(mini: BrowserWindowState | undefined, tabId?: string): BrowserTab | undefined {
+  if (!mini) return undefined
+  return tabId ? mini.tabs.find((tab) => tab.id === tabId) : activeTabOf(mini)
+}
 
 /** Where tabs opened from the mini window go: its home window, the last focused one, any normal one, or a new one. */
 function browserTargetForMini(mini: BrowserWindowState | undefined): BrowserWindowState | undefined {
@@ -1749,8 +1762,8 @@ function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
   const live = contents && !contents.isDestroyed() ? contents : null
   switch (command) {
     case 'miniWindow':
-      // This mini window's tab goes back; any others stay out.
-      returnMiniWindowToBrowser({ window: tab.win.window })
+      // This tab goes back; any other mini windows (and the rest of its collection) stay out.
+      returnMiniWindowToBrowser({ tabId: tab.id })
       return true
     case 'close':
       closeBrowserTab(tab.id)
@@ -1848,13 +1861,21 @@ setMiniWindowHost({
   adoptTab: (tabId, win) => {
     const tab = findTab(tabId)
     const mini = miniStateFor(win)
-    if (!canPopOutTab(tab) || !isLiveWindow(mini) || mini.tabs.length > 0) return false
+    if (!tab || !isLiveWindow(mini) || tab.win === mini) return false
+    const fromMini = tab.win.mini
+    // From a browser window: web pages only. From another mini window (merge / drag between collections): any of its tabs.
+    if (!fromMini && !canPopOutTab(tab)) return false
+    // A collection is all private or all normal (a private page never shares a window with normal ones).
+    if (mini.tabs.length > 0 && mini.isPrivate !== tab.isPrivate) return false
     const from = tab.win
-    mini.isPrivate = tab.isPrivate
-    mini.miniHome = from
+    if (mini.tabs.length === 0) {
+      mini.isPrivate = tab.isPrivate
+      mini.miniHome = fromMini ? miniTabHomes.get(tab) ?? from.miniHome : from
+    }
+    if (!fromMini) miniTabHomes.set(tab, from)
     mini.activeSpaceId = tab.spaceId
     // The window keeps a tab: popping out its last one leaves a New Tab behind (in the same Space).
-    if (from.tabs.length === 1) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
+    if (!fromMini && from.tabs.length === 1) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
     detachTabFromWindow(tab)
     // Its group stays behind; the mini window has none.
     tab.groupId = null
@@ -1862,6 +1883,19 @@ setMiniWindowHost({
     activateTabInternal(tab.id)
     persistOpenTabs()
     publishState(from)
+    publishState(mini)
+    return true
+  },
+  tabs: (win) => {
+    const mini = miniStateFor(win)
+    if (!mini) return []
+    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId }))
+  },
+  activateTab: (win, tabId) => {
+    const tab = miniTabOf(miniStateFor(win), tabId)
+    if (!tab) return false
+    if (tab.win.activeTabId !== tab.id) activateTabInternal(tab.id)
+    publishState(tab.win)
     return true
   },
   openUrl: (url, win) => {
@@ -1880,11 +1914,11 @@ setMiniWindowHost({
       creatingMiniTab = false
     }
   },
-  returnTab: (win) => {
+  returnTab: (win, tabId) => {
     const mini = miniStateFor(win)
-    const tab = activeTabOf(mini)
+    const tab = miniTabOf(mini, tabId)
     if (!mini || !tab) return false
-    const home = mini.miniHome
+    const home = miniTabHomes.get(tab) ?? mini.miniHome
     const target = (home && isLiveWindow(home) && canMoveTabTo(tab, home) ? home : undefined)
       ?? (() => { const focused = windowStateFor(lastFocusedBrowserWindow()); return isLiveWindow(focused) && !focused.mini && canMoveTabTo(tab, focused) ? focused : undefined })()
       ?? windowStates.find((w) => !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
@@ -1896,8 +1930,8 @@ setMiniWindowHost({
     const created = browserWindowFactory?.({ private: home?.isPrivate === true && tab.isPrivate, adoptTabId: tab.id })
     return Boolean(created && findTab(tab.id)?.win.window === created)
   },
-  closeTab: (win) => {
-    const tab = activeTabOf(miniStateFor(win))
+  closeTab: (win, tabId) => {
+    const tab = miniTabOf(miniStateFor(win), tabId)
     if (tab) closeBrowserTab(tab.id, true)
     else if (!win.isDestroyed()) win.close()
   },
@@ -2309,8 +2343,9 @@ function detachTabFromWindow(tab: BrowserTab): void {
     return
   }
   if (wasActive) {
-    // Stay in the Space: its next tab, or a fresh New Tab when the move emptied it.
-    const replacement = findTab(partners[0]) ?? neighbourInSpace(from.tabs, index, tab.spaceId)
+    // Stay in the Space: its next tab, or a fresh New Tab when the move emptied it. A mini window's
+    // tabs can come from different Spaces: its neighbour in the strip takes over.
+    const replacement = findTab(partners[0]) ?? (from.mini ? from.tabs[Math.min(index, from.tabs.length - 1)] : neighbourInSpace(from.tabs, index, tab.spaceId))
     if (replacement) activateTabInternal(replacement.id)
     else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
   } else {
@@ -3322,7 +3357,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (tabs.length === 0) {
     w.activeTabId = null
     // The last tab of one of several windows closes that window; the final window keeps a fresh New Tab.
-    // The mini window only ever holds its one tab, so it closes with it.
+    // A mini window closes with its last tab.
     if (w.mini || hasOtherWindows(w)) {
       setImmediate(() => { if (!w.window.isDestroyed() && w.tabs.length === 0) w.window.close() })
       return
@@ -3332,7 +3367,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
     return
   }
   if (wasActive) {
-    const replacement = findTab(partners[0]) ?? neighbourInSpace(tabs, index, tab.spaceId)
+    const replacement = findTab(partners[0]) ?? (w.mini ? tabs[Math.min(index, tabs.length - 1)] : neighbourInSpace(tabs, index, tab.spaceId))
     if (replacement) activateTabInternal(replacement.id)
     // The Space's last tab closed while other Spaces still have tabs: the Space keeps a New Tab.
     else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
