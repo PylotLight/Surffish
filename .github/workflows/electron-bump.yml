@@ -36,6 +36,10 @@ on:
         description: Only report what would change
         type: boolean
         default: false
+      run_ci:
+        description: Start ci on the bump branch (off for testing this workflow without CI)
+        type: boolean
+        default: true
 
 concurrency:
   group: electron-bump
@@ -57,6 +61,7 @@ jobs:
       ELECTRON_BUMP_POLICY: ${{ inputs.policy || vars.ELECTRON_BUMP_POLICY || 'beta' }}
       ELECTRON_BUMP_VERSION: ${{ inputs.version }}
       DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      RUN_CI: ${{ (github.event_name != 'workflow_dispatch' || inputs.run_ci) && 'true' || 'false' }}
       GH_TOKEN: ${{ github.token }}
       API: ${{ github.api_url }}/repos/${{ github.repository }}
     steps:
@@ -145,6 +150,7 @@ jobs:
           PUSHED: ${{ steps.push.outputs.pushed }}
         run: |
           dispatch_ci() { # $1 = PR number or ''
+            if [ "$RUN_CI" != true ]; then echo "run_ci off: not starting ci"; return 0; fi
             curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/actions/workflows/ci.yml/dispatches" \
               -d "$(jq -n --arg r "$BRANCH" --arg pr "$1" '{ref:$r, inputs:{pr:$pr, perf_mac:"false"}}')"
             echo "dispatched ci on $BRANCH${1:+ (PR #$1)}"
