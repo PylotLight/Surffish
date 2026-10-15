@@ -18,6 +18,15 @@ on:
       - 'Casks/**'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number for the perf comments (the electron bump workflow sets it)
+        type: string
+        default: ''
+      perf_mac:
+        description: Also run perf (macos)
+        type: boolean
+        default: true
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -234,7 +243,7 @@ jobs:
         if: env.PERF_SKIP == '1' && github.event.pull_request.number
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         run: bun scripts/perf/post-comment.ts linux "$RUNNER_TEMP/perf.md"
       - name: bun install (fails if any Node.js process runs)
         if: env.PERF_SKIP != '1'
@@ -281,7 +290,7 @@ jobs:
         if: env.PERF_BASE && env.PERF_SKIP != '1'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           set +e
           bun run perf:compare "$RUNNER_TEMP/perf.json" --base main --head pr --title "Perf check (linux)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
@@ -422,7 +431,7 @@ jobs:
   perf-macos:
     name: perf (macos)
     # Opt-in only: a PR with the `perf-mac` label, or a manual workflow_dispatch run.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
+    if: (github.event_name == 'workflow_dispatch' && inputs.perf_mac) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     permissions:
@@ -502,7 +511,7 @@ jobs:
         if: env.PERF_BASE
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           set +e
           bun run perf:compare "$RUNNER_TEMP/perf.json" --base main --head pr --title "Perf check (macOS)" --markdown "$RUNNER_TEMP/perf.md" >/dev/null
