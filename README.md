@@ -177,7 +177,7 @@ In `~/Library/Application Support/Surffish`. The main file is `surffish.db` (SQL
 
 <br>
 
-Electron gives a current Chromium engine with a small, readable codebase on top, so features land quickly and the whole app stays hackable in TypeScript. The trade-off is that a few Chrome features (Chrome sync, some extension APIs) aren't available. A native WebKit build was prototyped and is kept as an experiment in `src/native/macos`.
+Electron gives a current Chromium engine with a small, readable codebase on top, so features land quickly and the whole app stays hackable in TypeScript. The trade-off is that a few Chrome features (Chrome sync, some extension APIs) aren't available.
 
 </details>
 
