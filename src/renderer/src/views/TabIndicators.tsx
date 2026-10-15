@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { BrowserTabSummary } from '../../../shared/types'
+import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
 
 /** Favicon / loading spinner, audio mute button and pinned-tab icon used by the tab sidebar. */
 /**
@@ -59,11 +60,11 @@ export function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.El
       type="button"
       data-browser-tab-id={tab.id}
       aria-label={`Open pinned tab ${tab.title}`}
-      title={`${tab.title}${tab.sleeping ? ' · sleeping' : ''}${tab.muted ? ' · muted' : tab.audible ? ' · playing audio' : ''}`}
+      title={`${tab.title}${tab.sleeping ? ` · ${describeTabSleep(tab.sleep).toLowerCase()}` : ''}${tab.muted ? ' · muted' : tab.audible ? ' · playing audio' : ''}`}
       onClick={() => { void window.api.browser.tabs.activate(tab.id) }}
     >
       <TabFavicon tab={tab} />
-      {tab.sleeping && <span className="pinned-tab-sleep-indicator" aria-hidden="true">☾</span>}
+      {tab.sleeping && <span className={`pinned-tab-sleep-indicator${isRestoredSleep(tab.sleep) ? ' is-restored' : ''}`} aria-hidden="true">☾</span>}
       {(tab.audible || tab.muted) && <span className={`pinned-tab-audio-indicator${tab.muted ? ' is-muted' : ''}`} aria-hidden="true"><svg viewBox="0 0 24 24"><path className="tab-audio-speaker" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />{tab.muted ? <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" /> : <path d="M15 9.2a4 4 0 0 1 0 5.6M17.6 6.8a7.4 7.4 0 0 1 0 10.4" />}</svg></span>}
     </button>
   )

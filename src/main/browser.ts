@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
-import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSleep, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
@@ -86,6 +86,8 @@ interface BrowserTab {
   pinned: boolean
   inactiveSince: number | null
   sleepTimer: ReturnType<typeof setTimeout> | null
+  /** Why the tab has no view (null: never loaded this run, i.e. restored). Cleared when it loads. */
+  sleep: BrowserTabSleep | null
   pageScrollEdges: BrowserPageScrollEdges
   /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
   pageScale: number
@@ -358,6 +360,7 @@ function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
     active: tab.id === w.activeTabId,
     pinned: tab.pinned,
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
+    ...(tab.view === null && tab.sleep ? { sleep: tab.sleep } : {}),
     private: tab.isPrivate,
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
@@ -692,20 +695,24 @@ function cancelSleepTimer(tab: BrowserTab): void {
   tab.sleepTimer = null
 }
 
-/** `keepPausedMedia`: timed sleep leaves a paused media session (Now Playing / media keys) alone; Hibernate Tab doesn't. */
-function hibernateTab(tab: BrowserTab, keepPausedMedia = true): void {
+/**
+ * `keepPausedMedia`: timed sleep leaves a paused media session (Now Playing / media keys) alone;
+ * Hibernate Tab doesn't. `reason` is shown on the sidebar moon (shared/tab-sleep.ts).
+ */
+function hibernateTab(tab: BrowserTab, reason: BrowserTabSleep, keepPausedMedia = true): void {
   if (isTabOnScreen(tab) || !tab.view) return
   // A blob: page can't be loaded again from main (it only resolves for the page that made it), so it stays awake.
   if (pageMadeUrlKind(currentUrl(tab)) === 'blob') return
   const contents = tab.view.webContents
   if (!contents.isDestroyed() && (contents.isCurrentlyAudible() || (keepPausedMedia && tabHoldsMediaSession(contents)))) {
     cancelSleepTimer(tab)
-    tab.sleepTimer = setTimeout(() => hibernateTab(tab), contents.isCurrentlyAudible() ? 60_000 : tabMediaHoldRecheckMs(contents))
+    tab.sleepTimer = setTimeout(() => hibernateTab(tab, reason), contents.isCurrentlyAudible() ? 60_000 : tabMediaHoldRecheckMs(contents))
     return
   }
   tab.lastUrl = currentUrl(tab)
   tab.pendingUrl = tab.lastUrl
   disposeTabView(tab)
+  tab.sleep = reason
   persistOpenTabs()
   publishState(tab.win)
 }
@@ -715,7 +722,8 @@ function scheduleTabSleep(tab: BrowserTab): void {
   // An editor tab holds unsaved edits in memory, so it never sleeps.
   if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || isTabOnScreen(tab) || tab.inactiveSince === null) return
   const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
-  tab.sleepTimer = setTimeout(() => hibernateTab(tab), delay)
+  const minutes = tabSleepMinutes
+  tab.sleepTimer = setTimeout(() => hibernateTab(tab, { reason: 'idle', minutes }), delay)
 }
 
 function markTabInactive(tab: BrowserTab): void {
@@ -750,6 +758,7 @@ function ensureTabLoaded(tab: BrowserTab): void {
   tab.pendingUrl = target
   const view = createTabView(tab)
   if (!view) return
+  tab.sleep = null
   tab.pendingUrl = ''
   if (isActiveTab(tab)) tab.inactiveSince = null
   applyTabBounds(tab.win)
@@ -1142,7 +1151,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   contents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit' || !isCurrentContents() || isTabOnScreen(tab)) return
     setImmediate(() => {
-      if (isCurrentContents() && !isTabOnScreen(tab)) hibernateTab(tab)
+      if (isCurrentContents() && !isTabOnScreen(tab)) hibernateTab(tab, { reason: 'crashed' })
     })
   })
   if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab))
@@ -1704,6 +1713,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pinned,
     inactiveSince: null,
     sleepTimer: null,
+    sleep: null,
     pageScrollEdges: { ...UNKNOWN_PAGE_SCROLL_EDGES },
     pageScale: 1,
     extensionPageOrigin: extensionPage?.extensionUrl ?? null,
@@ -3164,16 +3174,17 @@ export function reloadBrowserTab(id: string, ignoreCache = false): void {
   else activateTabInternal(id)
 }
 
-export function suspendBrowserTab(id: string): void {
+/** `reason`: 'memory' from the memory saver; everything else is the user asking. */
+export function suspendBrowserTab(id: string, reason: 'manual' | 'memory' = 'manual'): void {
   const tab = getTab(id)
-  if (tab && !isTabOnScreen(tab)) hibernateTab(tab, false)
+  if (tab && !isTabOnScreen(tab)) hibernateTab(tab, { reason }, false)
 }
 
 /** Suspend every other tab in the same window (the active one stays awake). */
 export function suspendOtherBrowserTabs(keepId: string): void {
   const w = findTab(keepId)?.win ?? currentWindowState()
   for (const tab of [...(w?.tabs ?? [])]) {
-    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab, false)
+    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab, { reason: 'manual' }, false)
   }
 }
 

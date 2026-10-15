@@ -5,6 +5,13 @@ import type { TabGroupInfo } from './tab-groups'
 /** Shared type-only contracts between the main, preload, and renderer processes. */
 export type SearchEngineId = 'brave' | 'duckduckgo' | 'google' | 'bing'
 export type TabSleepMinutes = 0 | 5 | 15 | 30 | 60
+/** Why a tab has no live page (shared/tab-sleep.ts). */
+export type TabSleepReason = 'restored' | 'idle' | 'memory' | 'manual' | 'crashed'
+export interface BrowserTabSleep {
+  reason: TabSleepReason
+  /** `idle`: the sleep timer it slept after. */
+  minutes?: number
+}
 export type NewTabPageId = 'quick-links' | 'bonjourr' | 'search'
 
 export interface NewTabBackground {
@@ -169,6 +176,8 @@ export interface BrowserTabSummary {
   active: boolean
   pinned: boolean
   sleeping: boolean
+  /** Why it sleeps (only while `sleeping`). */
+  sleep?: BrowserTabSleep
   /** Tab is currently producing sound (Chromium's audible state, ~ignores silent media). */
   audible: boolean
   /** Tab audio is muted by the user. */

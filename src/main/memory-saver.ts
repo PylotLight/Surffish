@@ -2,6 +2,7 @@ import { app, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { execFile } from 'node:child_process'
 import { freemem, totalmem } from 'node:os'
 import {
+  discardFloorMs,
   discardOrder,
   MAX_DISCARDS_PER_CHECK,
   MEMORY_CHECK_INTERVAL_MS,
@@ -12,6 +13,7 @@ import {
   type MemorySaverSettings
 } from '../shared/memory-saver'
 import { getBrowserTabArchiveCandidates, getBrowserTabWebContents, setBrowserMemorySaverActive, suspendBrowserTab } from './browser'
+import { getBrowserTabSleepMinutes } from './browser-persistence'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeUserJson } from './user-json'
 
@@ -31,11 +33,16 @@ function current(): MemorySaverSettings {
   return settings
 }
 
-function macPressureLevel(): Promise<number | null> {
+/** One sysctl for both: the kernel pressure level and its available-memory percentage. */
+function macMemoryStatus(): Promise<{ level: number | null; availablePercent: number | null }> {
   return new Promise((resolve) => {
-    execFile('/usr/sbin/sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], { timeout: 2_000 }, (error, stdout) => {
-      const level = Number(String(stdout).trim())
-      resolve(error || !Number.isFinite(level) ? null : level)
+    execFile('/usr/sbin/sysctl', ['-n', 'kern.memorystatus_vm_pressure_level', 'kern.memorystatus_level'], { timeout: 2_000 }, (_error, stdout) => {
+      // An unknown name makes sysctl exit non-zero but still print the others, in order.
+      const [level = Number.NaN, percent = Number.NaN] = String(stdout ?? '').trim().split(/\s+/).map((part) => part === '' ? Number.NaN : Number(part))
+      resolve({
+        level: Number.isFinite(level) ? level : null,
+        availablePercent: Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null
+      })
     })
   })
 }
@@ -45,8 +52,10 @@ async function sample(): Promise<MemorySample> {
   // Working set per process (KB), the number Activity Monitor / Task Manager are closest to.
   const surffishMB = app.getAppMetrics().reduce((sum, metric) => sum + (metric.memory?.workingSetSize ?? 0), 0) / 1024
   if (process.platform === 'darwin') {
-    // macOS keeps "free" memory near zero by design (file cache); the kernel's pressure level is the signal.
-    return { totalMB, availableMB: null, macPressureLevel: await macPressureLevel(), surffishMB }
+    // macOS keeps "free" memory near zero by design (file cache, compressor): the kernel's pressure
+    // level and its available percentage (free + reclaimable) are the signal, never free pages.
+    const status = await macMemoryStatus()
+    return { totalMB, availableMB: null, macPressureLevel: status.level, macAvailablePercent: status.availablePercent, surffishMB }
   }
   // Linux: libuv reads MemAvailable. Windows: available physical memory.
   const availableMB = process.platform === 'win32' ? process.getSystemMemoryInfo().free / 1024 : freemem() / 1048576
@@ -69,7 +78,7 @@ export async function checkMemoryPressure(): Promise<number> {
   checking = true
   try {
     const now = Date.now()
-    const order = discardOrder(getBrowserTabArchiveCandidates().map((tab) => ({
+    const candidates = getBrowserTabArchiveCandidates().map((tab) => ({
       id: tab.id,
       live: getBrowserTabWebContents(tab.id) !== null,
       onScreen: tab.active,
@@ -77,21 +86,23 @@ export async function checkMemoryPressure(): Promise<number> {
       pinned: tab.pinned,
       protected: tab.extensionPage || tab.unsavedPdfEdits,
       inactiveSince: tab.inactiveSince
-    })), now)
-    // Nothing that could be discarded: skip the sample (no sysctl / metrics work at all).
-    if (order.length === 0) return 0
+    }))
+    // Nothing that could be discarded even under critical pressure: skip the sample (no sysctl / metrics work at all).
+    if (discardOrder(candidates, now).length === 0) return 0
     const reason = memoryPressure(await sample())
     if (!reason) return 0
+    // Short of critical pressure, never sooner than the user's own sleep timer (and never under 15 min).
+    const order = discardOrder(candidates, now, discardFloorMs(reason, getBrowserTabSleepMinutes()))
     let discarded = 0
     for (const tab of order) {
       if (discarded >= MAX_DISCARDS_PER_CHECK) break
       if (await hasUnsavedFormInput(tab.id)) continue
-      suspendBrowserTab(tab.id)
+      suspendBrowserTab(tab.id, 'memory')
       discarded += 1
     }
     if (discarded > 0) {
       discardedForMemory += discarded
-      console.info(`[memory-saver] ${reason === 'system' ? 'Low system memory' : 'Surffish over its memory share'}: discarded ${discarded} background tab(s).`)
+      console.info(`[memory-saver] ${reason === 'critical' ? 'Critical memory pressure' : reason === 'system' ? 'Low system memory' : 'Surffish over its memory share'}: discarded ${discarded} background tab(s).`)
     }
     return discarded
   } finally {

@@ -149,6 +149,8 @@ async function run() {
     assert.equal(await evaluate(toolbar, `window.api.browser.diagnostics.discardTab(${JSON.stringify((await tabFor('wake')).id)})`), true)
     await waitFor(async () => (await tabFor('wake'))?.sleeping, 'the wake tab to sleep')
     assert.equal(pageFor('wake'), undefined, 'the sleeping tab has no page')
+    // The moon says why (shared/tab-sleep.ts): Task Manager / Hibernate Tab is the user's doing.
+    assert.deepEqual((await tabFor('wake')).sleep, { reason: 'manual' }, 'the sleeping tab carries its sleep reason')
   }
 
   // ---------------------------------------------------------------- 1. wake snapshot, shown then removed
