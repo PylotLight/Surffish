@@ -74,7 +74,7 @@ export function UpdateSettings(): React.JSX.Element {
   return (
     <div ref={sectionRef} className="update-settings">
       <SettingsGroup title="About & updates" status={status.text} statusOn={status.on}>
-        <SettingsRow label={`Surffish ${state.currentVersion}`} hint={state.message ? `${state.message} · ${formatChecked(state.lastChecked)}` : formatChecked(state.lastChecked)}>
+        <SettingsRow label={`Surffish ${state.currentVersion}`} hint={[state.engine ? `Electron ${state.engine.electron} · Chromium ${state.engine.chromium}` : null, state.message, formatChecked(state.lastChecked)].filter(Boolean).join(' · ')}>
           <button className="settings-action secondary" type="button" disabled={busy || state.status === 'checking'} onClick={() => void run(() => window.api.browser.updates.check())}>
             {state.status === 'checking' ? 'Checking…' : 'Check for updates'}
           </button>

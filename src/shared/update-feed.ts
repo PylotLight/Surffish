@@ -67,6 +67,8 @@ export interface UpdateReleaseInfo {
 /** Everything the Settings "About & updates" section and the badge render. */
 export interface UpdateState {
   currentVersion: string
+  /** Engine versions for About: Electron and Chromium (`process.versions` in main). */
+  engine?: { electron: string; chromium: string }
   status: UpdateCheckStatus
   /** Human-readable status line, e.g. "Update check unavailable (repo private)". */
   message: string | null
