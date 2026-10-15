@@ -2175,6 +2175,12 @@ export function getBrowserTabUrlByWebContentsId(webContentsId: number): string |
   return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null
 }
 
+/** The tab (id and window) a page WebContents belongs to, for the ad blocker's per-tab counts. */
+export function getBrowserTabRefByWebContentsId(webContentsId: number): { tabId: string; window: BaseWindow } | null {
+  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
+  return tab && isLiveWindow(tab.win) ? { tabId: tab.id, window: tab.win.window } : null
+}
+
 export function markBrowserDownloadStarted(webContentsId: number): void {
   const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
   if (!tab) return

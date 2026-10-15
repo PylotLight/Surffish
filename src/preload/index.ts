@@ -56,6 +56,7 @@ import { tabSelectionApi } from './tab-selection'
 import { watchersApi } from './watchers'
 import { feedsApi } from './feeds'
 import { readingListApi } from './reading-list'
+import { adblockApi } from './adblock'
 import { glanceApi } from './glance-settings'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
@@ -156,6 +157,7 @@ const api = {
     watchers: watchersApi,
     feeds: feedsApi,
     readingList: readingListApi,
+    adblock: adblockApi,
     glance: glanceApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),

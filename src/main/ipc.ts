@@ -37,6 +37,7 @@ import { certificateInfoFor, proceedPastCertificateError, showNativeCertificate 
 import { isSearchEngineId } from '../shared/navigation'
 import { isNavHistoryDisposition } from '../shared/nav-history-menu'
 import { registerCommandIpc } from './command-ipc'
+import { broadcastSiteSettings } from './adblock-stats'
 import { clearBrowsingHistory, getBrowsingHistory } from './history'
 import { getBrowserProxySettings, setBrowserProxySettings, testLocalProxy } from './proxy'
 import { getDefaultBrowserStatus, makeDefaultBrowser } from './external-links'
@@ -275,7 +276,10 @@ export function registerIpc(): void {
   })
   ipcMain.handle('browser:site-settings:set', (event, origin: unknown, settings: unknown) => {
     assertMainRenderer(event)
-    return saveBrowserSiteSettings(origin, settings)
+    const saved = saveBrowserSiteSettings(origin, settings)
+    // The toolbar's ad-blocker button shows the site's switch too.
+    broadcastSiteSettings(saved)
+    return saved
   })
   ipcMain.handle('browser:downloads:get', (event) => {
     assertMainRenderer(event)

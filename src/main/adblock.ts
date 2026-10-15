@@ -17,6 +17,7 @@ import {
 import { getBrowserSession, onPageSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
+import { noteAdblockRequest } from './adblock-stats'
 
 const CACHE_FILE = ADBLOCK_CACHE_FILE
 const LEGACY_CACHE_FILES = ['adblock-engine.bin']
@@ -113,6 +114,8 @@ function adblockHooks(): AdblockSessionHooks {
     getEngine: () => activeBlocker,
     pageUrlForRequest: requestingPageUrl,
     isBlockingDisabledForPage,
+    // The toolbar button's per-tab blocked count (adblock-stats.ts).
+    onRequest: noteAdblockRequest,
     getExemptHosts: getExtensionAdblockExemptHosts
   }
 }
