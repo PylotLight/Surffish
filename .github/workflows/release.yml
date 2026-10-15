@@ -6,9 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'patch | minor | major | current | X.Y.Z'
+        description: 'patch | minor | major | current | X.Y.Z | X.Y.Z-beta.N-eNN (pre-release, see ref)'
         required: true
         default: patch
+      ref:
+        description: 'branch to build: main for stable; a pre-release (X.Y.Z-beta.N-eNN / -nightly.N-eNN) may use another branch, e.g. exp/electron-45-beta'
+        required: true
+        default: main
       dry_run:
         description: 'build + verify only, publish nothing'
         type: boolean
@@ -34,18 +38,24 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
     steps:
-      - name: Checkout main (plain git)
+      - name: Checkout the branch (plain git; main unless this is a pre-release)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+          VERSION: ${{ inputs.version }}
         run: |
+          case "$REF" in ""|*[!A-Za-z0-9._/-]*) echo "::error::bad ref '$REF'"; exit 1;; esac
+          if [ "$REF" != main ] && ! printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z][0-9A-Za-z.-]*$'; then
+            echo "::error::only a pre-release version (X.Y.Z-beta.N-eNN) can be built from '$REF'; stable releases come from main"; exit 1
+          fi
           url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git init -q .
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"
-          git fetch -q --tags origin main
+          git fetch -q --tags origin main "$REF"
           # the work dir persists between runs; an old shallow checkout breaks --resume's ancestry check
-          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow --tags origin main; fi
-          git checkout -q --force -B main origin/main
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow --tags origin main "$REF"; fi
+          git checkout -q --force -B "$REF" "origin/$REF"
           git clean -qffdx -e node_modules
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
         run: |

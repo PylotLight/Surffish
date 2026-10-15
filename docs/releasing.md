@@ -78,3 +78,31 @@ xattr -cr /Applications/Surffish.app
 
 Then open the app again (or Control-click it and choose **Open** on first launch). This removes the quarantine attribute; it does not sign or notarize the app. Homebrew's former `--no-quarantine` option is not available, so the manual `xattr` step may be needed after installation.
 
+
+## Pre-release (beta / nightly) test builds
+
+For trying Surffish on an Electron prerelease (e.g. the `exp/electron-45-beta` / `exp/electron-nightly`
+branches) without touching the stable app.
+
+- Version: `X.Y.Z-<channel>.N-eNN`, e.g. `0.1.10-beta.1-e45`, `0.1.10-nightly.1-e46`. X.Y.Z must be newer
+  than the latest stable tag, so the next stable `0.1.10` still outranks every `0.1.10-*` build.
+- Run: Actions → release with `ref` = the branch and `version` = the pre-release version (dry run first),
+  or `bun run release 0.1.10-beta.1-e45 --dry-run` on that branch. Notes go in
+  `docs/releases/v0.1.10-beta.1-e45.md` on that branch.
+- What it does differently (`scripts/release.ts`):
+  - builds **Surffish Beta.app** / **Surffish Nightly.app** (`-c.productName`, bundle id
+    `com.pylotlight.surffish.beta|.nightly`), zip still `Surffish-<version>-mac-arm64.zip`;
+  - pushes the version bump to that branch only, tags that commit, and creates the GitHub release with
+    `prerelease: true` and `make_latest: false`;
+  - never renders or pushes the Homebrew Cask and never pushes to main.
+- In the app (`src/shared/release-channel.ts`): a pre-release version runs as "Surffish Beta"/"Surffish
+  Nightly" with its own profile (`~/Library/Application Support/Surffish Beta`), its own single-instance
+  lock, keychain item and compile cache (`~/Library/Caches/Surffish Beta`), so it never opens or migrates
+  the stable profile. Settings → About shows the channel and the Electron + Chromium versions. Its update
+  check includes pre-releases (and the next stable); the stable app keeps ignoring pre-releases unless
+  "Beta channel" is switched on.
+- Caveats: the beta starts with an empty profile (no tabs, bookmarks, extensions, Bramble vault or quick
+  unlock); import from the stable app is not automatic. A pre-release's dependencies differ from main's,
+  so its `bun install` must download packages: on the corporate Mac runner that currently fails
+  (`UnsupportedProxyProtocol`, bun can't use the runner's SOCKS proxy for npm) and it would fetch a new
+  Electron binary there, so build pre-releases on a Mac where that's OK.
