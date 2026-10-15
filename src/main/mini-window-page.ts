@@ -1,6 +1,6 @@
 /**
  * The mini window's header: a slim draggable strip over the top of the page (favicon + title + host,
- * Back, Reload, Return to Browser, Close). It is collapsed to nothing until the pointer comes near
+ * Back, Reload, Tuck to Edge, Return to Browser, Close). It is collapsed to nothing until the pointer comes near
  * the top of the window (mini-window.ts resizes the view), so the page gets the whole window.
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
@@ -25,6 +25,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   button:hover { background: var(--hover); }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   button[disabled] { opacity: .35; }
+  button[hidden] { display: none; }
+  #tuck[data-dir=right] svg { transform: rotate(180deg); }
+  #tuck[data-dir=up] svg { transform: rotate(90deg); }
+  #tuck[data-dir=down] svg { transform: rotate(-90deg); }
   #progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); opacity: 0; transition: width 400ms ease-out, opacity 200ms; }
   body.loading #progress { width: 70%; opacity: 1; }
   body.crashed #title { color: #d33; }
@@ -35,6 +39,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   <button id="reload" title="Reload" aria-label="Reload">&#8635;</button>
   <div id="where"><img id="icon" alt="" hidden><div id="text"><div id="title"></div><div id="url"></div></div></div>
   <span id="badge">Private</span>
+  <button id="tuck" title="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button id="return" title="Return to Browser" aria-label="Return to Browser">&#8689;</button>
   <button id="close" title="Close" aria-label="Close Mini Window">&#215;</button>
   <div id="progress"></div>
@@ -49,6 +54,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     document.body.classList.toggle('loading', Boolean(state.loading))
     document.body.classList.toggle('private', Boolean(state.private))
     document.body.classList.toggle('crashed', Boolean(state.crashed))
+    const tuck = document.getElementById('tuck')
+    tuck.hidden = !state.tuck
+    if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.title = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
     if (state.faviconUrl && icon.getAttribute('src') !== state.faviconUrl) { icon.hidden = false; icon.src = state.faviconUrl }
     else if (!state.faviconUrl) icon.hidden = true
   })
@@ -57,6 +65,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   bar.addEventListener('mouseleave', () => window.miniWindow.hover(false))
   document.getElementById('back').addEventListener('click', () => window.miniWindow.back())
   document.getElementById('reload').addEventListener('click', () => window.miniWindow.reload())
+  document.getElementById('tuck').addEventListener('click', () => window.miniWindow.tuck())
   document.getElementById('return').addEventListener('click', () => window.miniWindow.returnToBrowser())
   document.getElementById('close').addEventListener('click', () => window.miniWindow.close())
 </script>

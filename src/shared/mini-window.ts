@@ -22,9 +22,13 @@ export interface MiniWindowSettings {
   shortcut: string
   /** Window opacity, MINI_WINDOW_MIN_OPACITY..1 (macOS and Windows; Linux ignores it). */
   opacity: number
+  /** Dropped against a screen edge (or tucked with its button), the window slides away behind a handle tab (shared/mini-window-dock.ts). */
+  tuckToEdge: boolean
+  /** While tucked, resting the pointer on the handle peeks the window out until the pointer leaves it. */
+  peekOnHover: boolean
 }
 
-export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1 }
+export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false }
 
 /**
  * The default page as typed in Settings: '' stays off; a bare host ("claude.ai") becomes https://.
@@ -100,7 +104,9 @@ export function parseMiniWindowSettings(value: unknown): MiniWindowSettings {
   const opacity = typeof record.opacity === 'number' && Number.isFinite(record.opacity)
     ? Math.round(Math.min(1, Math.max(MINI_WINDOW_MIN_OPACITY, record.opacity)) * 100) / 100
     : 1
-  return { defaultUrl, shortcut, opacity }
+  const tuckToEdge = typeof record.tuckToEdge === 'boolean' ? record.tuckToEdge : DEFAULT_MINI_WINDOW_SETTINGS.tuckToEdge
+  const peekOnHover = typeof record.peekOnHover === 'boolean' ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
+  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover }
 }
 
 /** Accelerators compared on what they press (CommandOrControl counts as Command on macOS, Control elsewhere). */
