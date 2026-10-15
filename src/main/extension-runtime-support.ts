@@ -1,6 +1,7 @@
 /**
  * Entry point web-store-extensions.ts loads on demand for extensions that use declarativeNetRequest
- * or webNavigation: Surffish's DNR enforcement plus the hidden bridge page. Kept out of the startup
+ * or webNavigation: Surffish's DNR enforcement plus the channel into the extension's worker
+ * (service-worker preload, or the hidden bridge page as fallback). Kept out of the startup
  * bundle (most profiles have no such extension).
  */
 import type { Session, WebContents } from 'electron'
@@ -17,6 +18,11 @@ export interface ExtensionRuntimeOptions {
   isTab(contents: WebContents): boolean
 }
 
+function hasServiceWorker(manifest: Record<string, unknown>): boolean {
+  const background = manifest.background
+  return typeof background === 'object' && background !== null && typeof (background as Record<string, unknown>).service_worker === 'string'
+}
+
 export function startExtensionRuntimeSupport(options: ExtensionRuntimeOptions): void {
   const permissions = Array.isArray(options.manifest.permissions) ? options.manifest.permissions : []
   registerExtensionDnr(options.session, options.id, options.directory, options.manifest, options.statePath)
@@ -26,6 +32,7 @@ export function startExtensionRuntimeSupport(options: ExtensionRuntimeOptions): 
     session: options.session,
     webNavigation: permissions.includes('webNavigation'),
     dnr: manifestUsesDnr(options.manifest),
+    serviceWorker: hasServiceWorker(options.manifest),
     isTab: options.isTab
   })
 }

@@ -22,10 +22,19 @@ const { cpSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, webContents } = require('electron')
+const { app, BaseWindow, BrowserWindow, webContents } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 process.env.SURFFISH_SMOKE_DNR_STATS = '1'
+process.env.SURFFISH_SMOKE_EXTENSION_BRIDGE = '1'
+
+/** 'page' when forced or when the renderer sandbox is off (Chromium then skips service-worker preloads). */
+function expectedTransport() {
+  if ((process.env.SURFFISH_EXTENSION_BRIDGE || '').toLowerCase() === 'page') return 'page'
+  // Sandbox off: no preload, so 'page' (with SURFFISH_EXTENSION_BRIDGE=worker: after the fallback timeout).
+  if (process.env.ELECTRON_DISABLE_SANDBOX || app.commandLine.hasSwitch('no-sandbox')) return 'page'
+  return 'worker'
+}
 const realExtension = process.env.SURFFISH_DNR_SMOKE_EXTENSION ? resolve(process.env.SURFFISH_DNR_SMOKE_EXTENSION) : null
 const userData = join(tmpdir(), `surffish-extension-dnr-smoke-${process.pid}`)
 const requests = []
@@ -196,14 +205,25 @@ async function run() {
   }, 'the extension to load')
   const loadedEntry = extensionsState.extensions.find((entry) => entry.id === extension.id)
   assert.equal(loadedEntry.error, null, 'the extension loaded without errors')
-  const bridge = await waitFor(() => webContents.getAllWebContents().find((contents) => contents.getURL() === `chrome-extension://${extension.id}/surffish-bridge.html`), 'the extension bridge page')
-  await waitFor(() => evaluate(bridge, 'document.readyState === "complete"'), 'the bridge page to load')
+  // Which channel Surffish uses into the worker: the service-worker preload ('worker', needs the
+  // renderer sandbox) or the hidden bridge page ('page', fallback).
+  const expected = expectedTransport()
+  const snapshot = await waitFor(() => (globalThis.__surffishExtensionBridgeSnapshot?.() ?? []).find((entry) => entry.id === extension.id && entry.ready), 'the extension channel to be ready')
+  assert.equal(snapshot.transport, expected, `the extension channel uses the ${expected} transport`)
+  const bridgePage = webContents.getAllWebContents().find((contents) => contents.getURL() === `chrome-extension://${extension.id}/surffish-bridge.html`)
+  assert.equal(Boolean(bridgePage), expected === 'page', expected === 'page' ? 'the fallback bridge page runs' : 'no hidden bridge page with the service-worker preload')
+  console.log(`ok: extension channel = ${snapshot.transport}${expected === 'worker' ? ' (service-worker preload, no bridge page)' : ' (bridge page fallback)'}`)
 
   // --- 1. static ruleset block + banner hidden via webNavigation → scripting
   const statsBefore = globalThis.__surffishExtensionDnrStats()
   assert.ok(statsBefore.rules >= 1, `Surffish loaded the extension's static rules (${statsBefore.rules})`)
   await evaluate(toolbar.webContents, `window.api.browser.navigate(${JSON.stringify(`${origin}/cookies`)})`)
   const page = await waitFor(() => views(win).find((view) => view.webContents.getURL() === `${origin}/cookies`), 'the cookie page')
+  // An extension page the smoke drives the worker from (runtime.sendMessage). It is the bridge page's
+  // file, opened without Surffish's bridge preload, so it relays nothing and tabs.query hides it.
+  const driverWindow = new BrowserWindow({ show: false, webPreferences: { session: page.webContents.session, sandbox: true, contextIsolation: true } })
+  await driverWindow.loadURL(`chrome-extension://${extension.id}/surffish-bridge.html`)
+  const bridge = driverWindow.webContents
   await waitFor(async () => !page.webContents.isLoading() && await evaluate(page.webContents, 'window.allowedLoaded === true'), 'the cookie page to load')
   const bannerHidden = (frame) => `(() => { const doc = ${frame ? 'document.getElementById("frame").contentDocument' : 'document'}; const el = doc && doc.getElementById('cookie-law-info-bar'); return Boolean(el) && getComputedStyle(el).display === 'none' })()`
   await waitFor(() => evaluate(page.webContents, bannerHidden(false)), 'the cookie banner to be hidden by the extension')
@@ -258,6 +278,7 @@ async function run() {
   const warmPerRequest = stats.evaluated > cold.evaluated ? (stats.gateMicroseconds - cold.gateMicroseconds) / (stats.evaluated - cold.evaluated) : 0
   console.log(`DNR gate: ${stats.rules} rules, ${stats.evaluated} requests evaluated, ${stats.blocked} blocked, ${stats.redirected} redirected, ${stats.allowed} allowed; ${warmPerRequest.toFixed(1)} µs per request warm (${coldPerRequest.toFixed(1)} µs over the first ${cold.evaluated}, incl. JIT warm-up) in the main-process webRequest handler`)
   if (stats.headerMicroseconds !== undefined) console.log(`DNR header hooks: ${stats.headerMicroseconds.toFixed(0)} µs total, ${stats.headerRequests} requests changed, ${stats.headerMatchesReused} matches reused from the gate`)
+  driverWindow.destroy()
   console.log('Electron extension DNR smoke passed.')
 }
 

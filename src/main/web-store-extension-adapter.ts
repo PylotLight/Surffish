@@ -151,18 +151,40 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
   const toBridge = (message) => {
     try { return Promise.resolve(api.runtime.sendMessage({ [BRIDGE_KEY]: message })).catch(() => undefined); } catch { return Promise.resolve(undefined); }
   };
+  // Surffish's service-worker preload (preload/extension-worker.cjs) gives the worker a direct
+  // channel to Surffish. Without it (sandbox off, older Surffish) the hidden bridge page relays.
+  const workerHost = isWorker && globalThis.surffishExtensionWorker && typeof globalThis.surffishExtensionWorker.send === 'function' ? globalThis.surffishExtensionWorker : null;
+  const toHost = (message) => { try { workerHost.send(message); } catch {} };
+  const fromOwnPage = (sender) => !!sender && sender.id === api.runtime.id && typeof sender.url === 'string' && sender.url.startsWith(api.runtime.getURL('/'));
 
   // declarativeNetRequest: Electron stores the rules but never enforces them in Surffish (its own
   // webRequest pipeline takes precedence), so Surffish enforces them itself. Tell the bridge after
   // every change so it can read the new state back.
   const dnr = api.declarativeNetRequest;
+  const safe = async (task, fallback) => { try { return await task(); } catch { return fallback; } };
+  let dnrSyncing = Promise.resolve();
+  const syncDnrToHost = () => {
+    if (!dnr || !workerHost) return dnrSyncing;
+    dnrSyncing = dnrSyncing.then(async () => {
+      const enabledRulesets = await safe(() => dnr.getEnabledRulesets(), []);
+      const disabledStaticRuleIds = {};
+      if (typeof dnr.getDisabledRuleIds === 'function') {
+        for (const rulesetId of enabledRulesets) {
+          const ids = await safe(() => dnr.getDisabledRuleIds({ rulesetId }), []);
+          if (ids.length > 0) disabledStaticRuleIds[rulesetId] = ids;
+        }
+      }
+      toHost({ type: 'dnr-state', dynamicRules: await safe(() => dnr.getDynamicRules(), []), sessionRules: await safe(() => dnr.getSessionRules(), []), enabledRulesets, disabledStaticRuleIds });
+    });
+    return dnrSyncing;
+  };
   if (dnr && (isWorker || isExtensionPage)) {
     for (const name of ['updateDynamicRules', 'updateSessionRules', 'updateEnabledRulesets', 'updateStaticRules']) {
       const original = typeof dnr[name] === 'function' ? dnr[name].bind(dnr) : null;
       if (!original) continue;
       define(dnr, name, (options, callback) => {
         const result = Promise.resolve().then(() => original(options));
-        result.then(() => toBridge({ type: 'dnr-changed' }), () => {});
+        result.then(() => workerHost ? syncDnrToHost() : toBridge({ type: 'dnr-changed' }), () => {});
         if (typeof callback !== 'function') return result;
         result.then(() => callback(), (error) => {
           try { console.warn('[surffish] declarativeNetRequest.' + name + ' failed:', error && error.message ? error.message : error); } catch {}
@@ -184,6 +206,121 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
       onClicked: noopEvent(), onClosed: noopEvent(), onButtonClicked: noopEvent(), onShowSettings: noopEvent(), onPermissionLevelChanged: noopEvent(),
       TemplateType: { BASIC: 'basic', IMAGE: 'image', LIST: 'list', PROGRESS: 'progress' }
     });
+  }
+
+  // storage.onChanged: Electron 44 never fires it in an extension service worker (pages get it).
+  // Extension pages relay what they see to the worker over runtime messaging; the worker also
+  // reports its own writes to its listeners (pages may be closed). Duplicates (the same change
+  // seen by several pages, or a page relaying the worker's own write) are dropped by fingerprint.
+  // A value larger than STORAGE_RELAY_MAX_CHARS is relayed as the key only. Changes made only by
+  // content scripts while no extension page is open still never reach the worker. Replaying stops
+  // once a native event is seen (a future Electron fix).
+  const STORAGE_RELAY_MAX_CHARS = 256 * 1024;
+  const storageEvent = api.storage && api.storage.onChanged;
+  const jsonOf = (value) => { try { return value === undefined ? 'undefined' : JSON.stringify(value); } catch { return '?'; } };
+  if (isExtensionPage && storageEvent && typeof storageEvent.addListener === 'function' && !String(globalThis.location.pathname).endsWith('/surffish-bridge.html')) {
+    storageEvent.addListener((changes, area) => {
+      if (!changes || typeof changes !== 'object' || typeof area !== 'string') return;
+      const relayed = {};
+      for (const key of Object.keys(changes)) {
+        const change = changes[key] || {};
+        const small = jsonOf(change.oldValue).length <= STORAGE_RELAY_MAX_CHARS && jsonOf(change.newValue).length <= STORAGE_RELAY_MAX_CHARS;
+        relayed[key] = small ? change : {};
+      }
+      if (Object.keys(relayed).length > 0) toBridge({ type: 'storage-changed', area, changes: relayed });
+    });
+  }
+  let storageRelay = null;
+  if (isWorker && storageEvent && typeof storageEvent.addListener === 'function' && !storageEvent.__surffishRelay) {
+    const listeners = new Set();
+    const areaListeners = {};
+    let nativeSeen = false;
+    const recent = new Map();
+    const DEDUPE_MS = 2000;
+    const remember = (fingerprint) => recent.set(fingerprint, Date.now() + DEDUPE_MS);
+    const seen = (fingerprint) => {
+      const now = Date.now();
+      for (const [key, expires] of recent) if (expires < now) recent.delete(key);
+      return recent.has(fingerprint);
+    };
+    const hasAny = (area) => listeners.size > 0 || (areaListeners[area] && areaListeners[area].size > 0);
+    const deliver = (area, changes) => {
+      if (nativeSeen || Object.keys(changes).length === 0) return;
+      for (const listener of [...listeners]) { try { listener(changes, area); } catch (error) { try { console.error(error); } catch {} } }
+      for (const listener of [...(areaListeners[area] || [])]) { try { listener(changes); } catch (error) { try { console.error(error); } catch {} } }
+    };
+    const patchEvent = (event, set) => {
+      const nativeAdd = event.addListener.bind(event);
+      const nativeRemove = event.removeListener.bind(event);
+      define(event, 'addListener', (listener) => { if (typeof listener === 'function') set.add(listener); return nativeAdd(listener); });
+      define(event, 'removeListener', (listener) => { set.delete(listener); return nativeRemove(listener); });
+      define(event, 'hasListener', (listener) => set.has(listener));
+      define(event, 'hasListeners', () => set.size > 0);
+    };
+    try {
+      storageEvent.addListener(() => { nativeSeen = true; });
+      Object.defineProperty(storageEvent, '__surffishRelay', { value: true });
+    } catch {}
+    patchEvent(storageEvent, listeners);
+    for (const areaName of ['local', 'session']) {
+      const area = api.storage[areaName];
+      if (!area) continue;
+      areaListeners[areaName] = new Set();
+      if (area.onChanged && typeof area.onChanged.addListener === 'function') patchEvent(area.onChanged, areaListeners[areaName]);
+      const get = typeof area.get === 'function' ? area.get.bind(area) : null;
+      if (!get) continue;
+      for (const op of ['set', 'remove', 'clear']) {
+        const original = typeof area[op] === 'function' ? area[op].bind(area) : null;
+        if (!original) continue;
+        define(area, op, (...args) => {
+          const callback = lastFunction(args);
+          const rest = callback ? args.slice(0, -1) : args;
+          const work = (async () => {
+            if (!hasAny(areaName) || nativeSeen) return original(...rest);
+            const keys = op === 'set' ? Object.keys(rest[0] || {}) : op === 'remove' ? [].concat(rest[0] === undefined ? [] : rest[0]) : null;
+            const before = await Promise.resolve(get(keys)).catch(() => ({}));
+            const result = await original(...rest);
+            const changes = {};
+            if (op === 'set') {
+              for (const key of keys) {
+                const newJson = jsonOf(rest[0][key]);
+                const oldJson = jsonOf(before ? before[key] : undefined);
+                if (newJson === oldJson) continue;
+                const change = { newValue: newJson === 'undefined' ? undefined : JSON.parse(newJson) };
+                if (before && Object.prototype.hasOwnProperty.call(before, key)) change.oldValue = before[key];
+                changes[key] = change;
+              }
+            } else {
+              for (const key of Object.keys(before || {})) changes[key] = { oldValue: before[key] };
+            }
+            for (const key of Object.keys(changes)) {
+              remember(areaName + '|' + key + '|' + jsonOf(changes[key].oldValue) + '|' + jsonOf(changes[key].newValue));
+              remember(areaName + '|' + key + '|*');
+            }
+            deliver(areaName, changes);
+            return result;
+          })();
+          return settle(work, callback);
+        });
+      }
+    }
+    storageRelay = {
+      fromPage(area, changes) {
+        if (typeof area !== 'string' || !changes || typeof changes !== 'object' || !hasAny(area)) return;
+        const fresh = {};
+        for (const key of Object.keys(changes)) {
+          const change = changes[key] && typeof changes[key] === 'object' ? changes[key] : {};
+          const truncated = !('oldValue' in change) && !('newValue' in change);
+          const full = area + '|' + key + '|' + jsonOf(change.oldValue) + '|' + jsonOf(change.newValue);
+          const star = area + '|' + key + '|*';
+          if (truncated ? seen(star) : seen(full)) continue;
+          remember(full);
+          remember(star);
+          fresh[key] = change;
+        }
+        deliver(area, fresh);
+      }
+    };
   }
 
   if (isWorker) {
@@ -218,10 +355,15 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
         ];
         return checks.every(([key, test]) => filter[key] === undefined || test(typeof filter[key] === 'string' ? text(filter[key]) : filter[key]));
       };
-      const makeEvent = () => {
+      const makeEvent = (name) => {
         const listeners = [];
         return {
-          addListener(listener, filters) { if (typeof listener === 'function' && !listeners.some((entry) => entry.listener === listener)) listeners.push({ listener, filters: filters && Array.isArray(filters.url) ? filters.url : null }); },
+          addListener(listener, filters) {
+            if (typeof listener !== 'function' || listeners.some((entry) => entry.listener === listener)) return;
+            listeners.push({ listener, filters: filters && Array.isArray(filters.url) ? filters.url : null });
+            // Surffish only wakes a stopped worker for events it listens to (as Chrome does).
+            if (workerHost && listeners.length === 1) toHost({ type: 'listen', name });
+          },
           removeListener(listener) { const index = listeners.findIndex((entry) => entry.listener === listener); if (index >= 0) listeners.splice(index, 1); },
           hasListener(listener) { return listeners.some((entry) => entry.listener === listener); },
           hasListeners() { return listeners.length > 0; },
@@ -234,9 +376,15 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
         };
       };
       for (const name of ['onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted', 'onErrorOccurred', 'onHistoryStateUpdated', 'onReferenceFragmentUpdated', 'onCreatedNavigationTarget', 'onTabReplaced']) {
-        navigationEvents[name] = makeEvent();
+        navigationEvents[name] = makeEvent(name);
       }
-      const call = (method, details, callback) => settle(toBridge({ type: 'call', method, args: details && typeof details === 'object' ? JSON.parse(JSON.stringify(details)) : {} }).then((response) => response && response.ok ? response.result : null), callback);
+      const call = (method, details, callback) => {
+        const args = details && typeof details === 'object' ? JSON.parse(JSON.stringify(details)) : {};
+        const result = workerHost
+          ? Promise.resolve().then(() => workerHost.call(method, args)).catch(() => null)
+          : toBridge({ type: 'call', method, args }).then((response) => response && response.ok ? response.result : null);
+        return settle(result, callback);
+      };
       const webNavigation = {
         getFrame: (details, callback) => call('webNavigation.getFrame', details, callback),
         getAllFrames: (details, callback) => call('webNavigation.getAllFrames', details, callback)
@@ -252,7 +400,31 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
         if (!isBridgeMessage(message) || !sender || sender.id !== api.runtime.id) return undefined;
         const payload = message[BRIDGE_KEY];
         if (payload && payload.type === 'event' && navigationEvents[payload.name]) navigationEvents[payload.name].dispatch(payload.details || {});
+        // An extension page changed DNR rules: with the worker channel, the worker reports them.
+        else if (payload && payload.type === 'dnr-changed' && workerHost && fromOwnPage(sender)) syncDnrToHost();
+        else if (payload && payload.type === 'storage-changed' && fromOwnPage(sender) && storageRelay) storageRelay.fromPage(payload.area, payload.changes);
         return undefined;
+      });
+    }
+
+    if (workerHost && typeof workerHost.onMessage === 'function') {
+      workerHost.onMessage(async (message) => {
+        if (!message || typeof message !== 'object') return;
+        if (message.type === 'event') {
+          if (navigationEvents[message.name]) navigationEvents[message.name].dispatch(message.details || {});
+        } else if (message.type === 'init') {
+          // Ready first: queued events (e.g. the one that woke this worker) are delivered at once.
+          toHost({ type: 'ready', listening: Object.keys(navigationEvents).filter((name) => navigationEvents[name].hasListeners()) });
+          // Electron never enables manifest rulesets itself: mirror Surffish's set into the native
+          // API so the extension's own getEnabledRulesets() is right, then report the state.
+          if (dnr && Array.isArray(message.enabledRulesets)) {
+            const current = await safe(() => dnr.getEnabledRulesets(), []);
+            const enableRulesetIds = message.enabledRulesets.filter((id) => !current.includes(id));
+            const disableRulesetIds = current.filter((id) => !message.enabledRulesets.includes(id));
+            if (enableRulesetIds.length > 0 || disableRulesetIds.length > 0) await safe(() => dnr.updateEnabledRulesets({ enableRulesetIds, disableRulesetIds }));
+          }
+          if (dnr && Array.isArray(message.enabledRulesets)) await syncDnrToHost();
+        }
       });
     }
   }
