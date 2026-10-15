@@ -68,6 +68,7 @@ import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
 import { ReadingListButton } from './reading-list/ReadingListButton'
+import { AdblockButton } from './adblock/AdblockButton'
 import { BookmarksBar } from './bookmarks/BookmarksBar'
 import { SpacesSwitcher, useSpaces } from './spaces/SpacesSwitcher'
 import { SPACE_COLOR_VALUES } from '../../../shared/spaces'
@@ -378,6 +379,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Bookmarks dropdown (next to the address bar) and the optional bookmarks bar (⌘⇧B, off by default).
   const [bookmarksMenuOpen, setBookmarksMenuOpen] = useState(false)
   const [readingListOpen, setReadingListOpen] = useState(false)
+  const [adblockOpen, setAdblockOpen] = useState(false)
   const [bookmarksBarMenuOpen, setBookmarksBarMenuOpen] = useState(false)
   const [bookmarksMenuLayout, setBookmarksMenuLayout] = useState(0)
   const bumpBookmarksMenuLayout = useCallback(() => setBookmarksMenuLayout((value) => value + 1), [])
@@ -959,7 +961,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }).finally(() => {
       if (!cancelled) setSiteSettingsLoading(false)
     })
-    return () => { cancelled = true }
+    // The toolbar's ad-blocker switch changes the same settings.
+    const stop = window.api.browser.adblock.onSiteSettingsChanged((settings) => {
+      if (!cancelled && settings?.origin === activeOrigin) setSiteSettings(settings)
+    })
+    return () => { cancelled = true; stop() }
   }, [sidebarMode, activeOrigin])
 
   useEffect(() => {
@@ -1026,7 +1032,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
     debouncer.push({ input: address, top: topSuggestionUrl })
   }, [suggestionsActive, address, topSuggestionUrl, browser.url, isLocalNewTab])
-  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  // The centered address bar shrinks to keep clear of the right-aligned icons, whose width varies
+  // (extension icons, badges, the ad-blocker count): Browser.css reads --toolbar-trailing-width.
+  useEffect(() => {
+    const chrome = browserChromeRef.current
+    const trailing = chrome?.querySelector<HTMLElement>('.browser-toolbar-trailing')
+    if (!chrome || !trailing) return
+    const update = (): void => chrome.style.setProperty('--toolbar-trailing-width', `${Math.ceil(trailing.getBoundingClientRect().width)}px`)
+    const observer = new ResizeObserver(update)
+    observer.observe(trailing)
+    update()
+    return () => observer.disconnect()
+  }, [surface])
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
   const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
@@ -1608,6 +1626,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   title={browser.title}
                   isPrivate={browser.private}
                   onOpenChange={setReadingListOpen}
+                />}
+                {surface !== 'sidebar' && <AdblockButton
+                  tabId={activeTabId}
+                  url={isLocalNewTab ? '' : browser.url}
+                  onOpenChange={setAdblockOpen}
+                  onOpenSettings={() => selectSettingsSection('site')}
                 />}
                 <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>

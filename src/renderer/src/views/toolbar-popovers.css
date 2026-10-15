@@ -151,6 +151,37 @@
 .browser-chrome .reading-list-meta,
 .browser-chrome .reading-list-excerpt { font-size: var(--pop-meta); }
 
+.adblock-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.adblock-button { position: relative; }
+.adblock-button.is-off svg { opacity: 0.55; }
+.adblock-badge {
+  position: absolute;
+  top: 1px;
+  right: -2px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #d9534f;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+.browser-chrome .adblock-popover {
+  width: min(320px, calc(100vw - 24px));
+  max-height: min(520px, var(--popover-room, 520px));
+  font-size: var(--pop-body);
+}
+.browser-chrome .adblock-header strong { font-size: var(--pop-title); }
+
 /* ---- Back/Forward history menu (press-and-hold or right-click Back/Forward) ---- */
 .browser-chrome .browser-nav-buttons { position: relative; }
 .browser-chrome .nav-history-menu {

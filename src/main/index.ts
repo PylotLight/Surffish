@@ -38,6 +38,7 @@ import { initializeCertificateHandling } from './certificates'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
 import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feeds-ipc'
 import { registerReadingListIpc } from './reading-list-ipc'
+import { registerAdblockStatsIpc } from './adblock-stats'
 import { registerGlanceIpc } from './glance-entry'
 import { chromeUserAgent } from './adblock-policy'
 
@@ -118,6 +119,7 @@ app.whenReady().then(async () => {
   registerPageWatcherIpc()
   registerFeedIpc()
   registerReadingListIpc()
+  registerAdblockStatsIpc()
   // Glance settings only; the glance module itself loads on the first Shift+click.
   registerGlanceIpc()
   installAppMenu()
