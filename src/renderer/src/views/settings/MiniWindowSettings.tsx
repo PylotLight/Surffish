@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, type MiniWindowGrouping, type MiniWindowHeaderPlacement, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
+import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, MINI_WINDOW_PEEK_DELAYS, type MiniWindowGrouping, type MiniWindowHeaderPlacement, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './SettingsControls'
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC')
@@ -10,7 +10,7 @@ interface Status { shortcut: string; registered: boolean; error: string | null }
 /**
  * Settings → General → Mini window: the page the global shortcut opens (empty: pop out the current
  * tab), the shortcut itself (press keys to record, Clear to turn it off), how several mini windows
- * group, where the header shows, tuck to screen edge (and peek on hover) and opacity.
+ * group, where the header shows, tuck to screen edge (and peek on hover, with its delay) and opacity.
  */
 
 const GROUPING_HINTS: Record<MiniWindowGrouping, string> = {
@@ -153,7 +153,7 @@ export function MiniWindowSettings(): React.JSX.Element {
         />
       </SettingsRow>
       {settings?.tuckToEdge && (
-        <SettingsRow label="Peek on hover" hint="While tucked, resting the pointer on the tab slides the window out until the pointer leaves it.">
+        <SettingsRow label="Peek tucked mini on hover" hint="Rest the pointer on a tucked mini window's edge tab and it slides out for a look; move away and it tucks back in. Click or type in it to keep it out.">
           <input
             type="checkbox"
             className="settings-switch"
@@ -161,6 +161,18 @@ export function MiniWindowSettings(): React.JSX.Element {
             aria-label="Peek the tucked mini window on hover"
             onChange={(event) => update({ peekOnHover: event.target.checked })}
           />
+        </SettingsRow>
+      )}
+      {settings?.tuckToEdge && settings.peekOnHover && (
+        <SettingsRow label="Hover delay" hint="How long the pointer rests on the edge tab before the mini window peeks out.">
+          <select
+            className="settings-select"
+            value={settings.peekDelayMs}
+            aria-label="Mini window peek hover delay"
+            onChange={(event) => update({ peekDelayMs: Number(event.target.value) })}
+          >
+            {MINI_WINDOW_PEEK_DELAYS.map((ms) => <option key={ms} value={ms}>{ms === 1000 ? '1 s' : `${ms} ms`}</option>)}
+          </select>
         </SettingsRow>
       )}
       {!IS_LINUX && settings && (

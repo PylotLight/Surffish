@@ -51,7 +51,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -206,6 +206,12 @@ const COMMANDS: BrowserCommand[] = [
     refocusPage: false,
     enabled: () => hasMiniWindows() && getMiniWindowSettings().tuckToEdge,
     run: () => tuckMiniWindow()
+  },
+  {
+    id: 'miniWindow.togglePeek', title: () => (getMiniWindowSettings().peekOnHover ? 'Turn Off Mini Window Peek on Hover' : 'Turn On Mini Window Peek on Hover'), section: 'Settings',
+    keywords: ['mini window', 'peek', 'hover', 'tuck', 'edge', 'handle', 'slide out'], refocusPage: true,
+    enabled: () => getMiniWindowSettings().tuckToEdge,
+    run: () => setMiniWindowPeekOnHover(!getMiniWindowSettings().peekOnHover)
   },
   ...(([['tabs', 'Tabs', ['tab strip', 'collection', 'merge']], ['stack', 'Stack', ['stack', 'edge group', 'slide out together']], ['separate', 'Separate', ['one window per tab', 'separate windows']]] as const).map(([grouping, label, extra]): BrowserCommand => ({
     id: `miniWindow.grouping.${grouping}`, title: `Mini Window Grouping: ${label}`, section: 'Settings',

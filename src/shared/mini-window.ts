@@ -24,8 +24,10 @@ export interface MiniWindowSettings {
   opacity: number
   /** Dropped against a screen edge (or tucked with its button), the window slides away behind a handle tab (shared/mini-window-dock.ts). */
   tuckToEdge: boolean
-  /** While tucked, resting the pointer on the handle peeks the window out until the pointer leaves it. */
+  /** While tucked, resting the pointer on the handle peeks the window out until the pointer leaves it (shared/mini-window-peek.ts). */
   peekOnHover: boolean
+  /** How long the pointer rests (still) on the handle before it peeks, one of MINI_WINDOW_PEEK_DELAYS. */
+  peekDelayMs: number
   /** How several mini windows group (MiniWindowGrouping). */
   grouping: MiniWindowGrouping
   /** Where the auto-hiding header (and tab strip) shows (MiniWindowHeaderPlacement). */
@@ -58,7 +60,14 @@ export function isMiniWindowHeaderPlacement(value: unknown): value is MiniWindow
 export type MiniWindowGrouping = 'tabs' | 'stack' | 'separate'
 export const MINI_WINDOW_GROUPINGS: readonly MiniWindowGrouping[] = ['tabs', 'stack', 'separate']
 
-export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' }
+export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float' }
+
+/** Settings → Mini window → hover delay choices (ms). */
+export const MINI_WINDOW_PEEK_DELAYS: readonly number[] = [200, 350, 600, 1000]
+
+export function isMiniWindowPeekDelay(value: unknown): value is number {
+  return typeof value === 'number' && MINI_WINDOW_PEEK_DELAYS.includes(value)
+}
 
 export function isMiniWindowGrouping(value: unknown): value is MiniWindowGrouping {
   return typeof value === 'string' && (MINI_WINDOW_GROUPINGS as readonly string[]).includes(value)
@@ -139,12 +148,15 @@ export function parseMiniWindowSettings(value: unknown): MiniWindowSettings {
     ? Math.round(Math.min(1, Math.max(MINI_WINDOW_MIN_OPACITY, record.opacity)) * 100) / 100
     : 1
   const tuckToEdge = typeof record.tuckToEdge === 'boolean' ? record.tuckToEdge : DEFAULT_MINI_WINDOW_SETTINGS.tuckToEdge
-  const peekOnHover = typeof record.peekOnHover === 'boolean' ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
+  // Peek used to be off by default and every save wrote it, so a stored value only counts once the
+  // hover delay exists next to it (saved by a build with hover peek on by default); older files take the new default.
+  const peekOnHover = typeof record.peekOnHover === 'boolean' && 'peekDelayMs' in record ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
+  const peekDelayMs = isMiniWindowPeekDelay(record.peekDelayMs) ? record.peekDelayMs : DEFAULT_MINI_WINDOW_SETTINGS.peekDelayMs
   // Settings saved before grouping existed (one window per tab) take the default.
   const grouping = isMiniWindowGrouping(record.grouping) ? record.grouping : DEFAULT_MINI_WINDOW_SETTINGS.grouping
   // Settings saved before the header placement existed take the default (float above the window).
   const headerPlacement = isMiniWindowHeaderPlacement(record.headerPlacement) ? record.headerPlacement : DEFAULT_MINI_WINDOW_SETTINGS.headerPlacement
-  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, grouping, headerPlacement }
+  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, peekDelayMs, grouping, headerPlacement }
 }
 
 /** Accelerators compared on what they press (CommandOrControl counts as Command on macOS, Control elsewhere). */

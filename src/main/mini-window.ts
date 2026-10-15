@@ -727,7 +727,14 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     },
     changed: () => refreshHeaderOf(m),
     isTuckEnabled: () => getMiniWindowSettings().tuckToEdge,
-    isPeekEnabled: () => getMiniWindowSettings().peekOnHover
+    isPeekEnabled: () => getMiniWindowSettings().peekOnHover,
+    peekDelayMs: () => getMiniWindowSettings().peekDelayMs,
+    peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
+    peekContents: () => {
+      const page = window.isDestroyed() ? null : host().pageContents(window)
+      return [page, m.header.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
+    },
+    busy: () => liveMinis().some((other) => other.headerDrag !== null)
   }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
     window,

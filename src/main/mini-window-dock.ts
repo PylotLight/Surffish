@@ -1,4 +1,4 @@
-import { BaseWindow, WebContentsView, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent } from 'electron'
+import { BaseWindow, WebContentsView, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import { clampMiniBounds, miniDisplayKey, parseMiniSlots, withMiniSlot, type MiniRect, type MiniWindowGrouping } from '../shared/mini-window'
 import {
   MINI_DOCK_RELEASE_DISTANCE,
@@ -25,6 +25,7 @@ import {
   type MiniDock,
   type MiniDockEdge
 } from '../shared/mini-window-dock'
+import { createPeekDriver, type PeekDriver, type PeekPoint } from '../shared/mini-window-peek'
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
 import { readUserJson, writeUserJson } from './user-json'
 
@@ -55,9 +56,6 @@ const FRAME_MS = 16
 const OWN_MOVE_GRACE_MS = 500
 const DRAG_POLL_MS = 16
 const DRAG_MAX_MS = 15_000
-const PEEK_DELAY_MS = 250
-const PEEK_POLL_MS = 200
-const PEEK_LEAVE_MS = 600
 
 export interface DockHost {
   window: BaseWindow
@@ -74,6 +72,14 @@ export interface DockHost {
   changed(): void
   isTuckEnabled(): boolean
   isPeekEnabled(): boolean
+  /** Hover delay before a tucked handle peeks (Settings). */
+  peekDelayMs(): number
+  /** Extra on-screen parts that keep a peek out (the floating header panel while it shows). */
+  peekRects(): MiniRect[]
+  /** The window's web contents (page, header): a click or key in any of them pins a peek out. */
+  peekContents(): WebContents[]
+  /** Something is being dragged (a mini window by its floating header): no peek starts. */
+  busy(): boolean
 }
 
 export interface DockController {
@@ -151,14 +157,6 @@ interface Handle {
   ready: boolean
 }
 
-/** Peeking: the pointer rested on the handle (delay), then the window slid out until the pointer leaves it (poll). */
-interface Peek {
-  delay: ReturnType<typeof setTimeout> | null
-  poll: ReturnType<typeof setInterval> | null
-  lastInside: number
-  out: boolean
-}
-
 interface HandleListener {
   /** Joined its current edge (group order with 'stack': the first one leads). */
   joinedAt: () => number
@@ -183,6 +181,13 @@ interface HandleListener {
   onClick: () => void
   onDrag: (active: boolean) => void
   onHover: (inside: boolean) => void
+  /** Sliding right now (a 'stack' group peeks only once all of it has settled). */
+  sliding: () => boolean
+  /** What keeps a peek out: its window and floating header while out. */
+  peekRects: () => MiniRect[]
+  peekContents: () => WebContents[]
+  /** A click/key inside one of the group's windows: the group's peek (run by its leader) stays out. */
+  pinPeek: () => void
   /** Tucked and settled: its handle sits on the screen edge. Which display/edge, where it wants to be along it, and the work area. */
   onEdge: () => { key: string; edge: MiniDockEdge; desired: number; workArea: MiniRect } | null
   /** Move the handle along the edge (null: centred on its window again). */
@@ -281,7 +286,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   let slideTimer: ReturnType<typeof setInterval> | null = null
   let ownMoveUntil = 0
   let drag: { timer: ReturnType<typeof setInterval>; startCursor: { x: number; y: number }; startOffset: number; startedAt: number } | null = null
-  let peek: Peek | null = null
+  /** Hover peek (shared/mini-window-peek.ts): dwell on the tucked handle, slide out, tuck after the pointer leaves. */
+  let peek: PeekDriver | null = null
+  /** While peeked: input listeners on the group's contents that pin it out. */
+  let pinWatch: Array<{ contents: WebContents; listener: (event: Electron.Event, input: Electron.InputEvent) => void }> = []
   /** Tucked next to other handles on the same edge: its handle's place along the edge (relayoutHandles). */
   let along: number | null = null
   let disposed = false
@@ -593,46 +601,84 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
 
   function onClick(): void {
     if (!alive() || !dock) return
-    if (peek?.out) {
+    if (peek?.phase() === 'out') {
       // Peeking out and clicked: keep it out.
-      stopPeek()
+      peek.pin()
       host.focusPage()
       return
     }
+    stopPeek()
     if (tucked) slideOut(true)
     else tuckGroup(registration)
   }
 
   function stopPeek(): void {
-    if (peek?.delay) clearTimeout(peek.delay)
-    if (peek?.poll) clearInterval(peek.poll)
-    peek = null
+    peek?.cancel()
+  }
+
+  function within(point: PeekPoint, r: MiniRect): boolean {
+    return point.x >= r.x && point.x < r.x + r.width && point.y >= r.y && point.y < r.y + r.height
+  }
+
+  function handleRect(): MiniRect | null {
+    return handle && !handle.window.isDestroyed() && handle.window.isVisible() ? handle.window.getBounds() : null
+  }
+
+  function unwatchPins(): void {
+    for (const { contents, listener } of pinWatch) if (!contents.isDestroyed()) contents.removeListener('input-event', listener)
+    pinWatch = []
+  }
+
+  /** Peeked out: a click or key press in any window of the group pins it (focus does too, see onFocus). */
+  function watchPins(): void {
+    unwatchPins()
+    const listener = (_event: Electron.Event, input: Electron.InputEvent): void => {
+      if (input.type === 'mouseDown' || input.type === 'keyDown' || input.type === 'rawKeyDown') peek?.pin()
+    }
+    for (const member of groupOf(registration)) {
+      for (const contents of member.peekContents()) {
+        if (contents.isDestroyed()) continue
+        contents.on('input-event', listener)
+        pinWatch.push({ contents, listener })
+      }
+    }
+  }
+
+  function ensurePeek(): PeekDriver {
+    if (peek) return peek
+    peek = createPeekDriver({
+      now: () => Date.now(),
+      cursor: () => screen.getCursorScreenPoint(),
+      overHandle: (point) => {
+        const rect = handleRect()
+        return Boolean(rect && within(point, rect))
+      },
+      // 'stack': any window of the group (or its floating header) keeps it out.
+      overWindow: (point) => groupOf(registration).some((member) => member.peekRects().some((rect) => within(point, rect))),
+      blocked: () => !alive() || !dock || !tucked || drag !== null || host.busy() || groupOf(registration).some((member) => member.sliding()),
+      enabled: () => alive() && dock !== null && host.isTuckEnabled() && host.isPeekEnabled(),
+      delayMs: () => host.peekDelayMs(),
+      slideOut: () => {
+        if (!alive() || !tucked) return
+        slideOut(false)
+        watchPins()
+      },
+      tuck: () => {
+        if (alive() && dock && !tucked) tuckGroup(registration)
+      },
+      ended: unwatchPins,
+      setInterval: (fn, ms) => setInterval(fn, ms),
+      clearInterval: (timer) => clearInterval(timer as ReturnType<typeof setInterval>)
+    })
+    return peek
   }
 
   function onHover(inside: boolean): void {
-    if (!alive() || !dock || !host.isPeekEnabled()) return
-    if (!inside) {
-      if (peek && !peek.out) stopPeek()
-      return
-    }
-    if (!tucked || peek || drag) return
-    const state: Peek = { delay: null, poll: null, lastInside: Date.now(), out: false }
-    peek = state
-    state.delay = setTimeout(() => {
-      state.delay = null
-      if (peek !== state || !tucked) return
-      state.out = true
-      slideOut(false)
-      state.poll = setInterval(() => {
-        if (peek !== state || !alive()) return
-        const point = screen.getCursorScreenPoint()
-        const inRect = (r: MiniRect): boolean => point.x >= r.x && point.x < r.x + r.width && point.y >= r.y && point.y < r.y + r.height
-        const handleRect = handle && !handle.window.isDestroyed() ? handle.window.getBounds() : null
-        // 'stack': any window of the group keeps it out.
-        if (groupOf(registration).some((member) => inRect(member.bounds())) || (handleRect && inRect(handleRect))) state.lastInside = Date.now()
-        else if (Date.now() - state.lastInside > PEEK_LEAVE_MS) tuckGroup(registration)
-      }, PEEK_POLL_MS)
-    }, PEEK_DELAY_MS)
+    if (!alive() || !dock) return
+    if (!inside) return peek?.leave()
+    // Only a settled, tucked handle peeks (not mid-drag; a held button never reports inside).
+    if (!tucked || drag || !host.isPeekEnabled()) return
+    ensurePeek().enter()
   }
 
   function syncRole(): void {
@@ -673,6 +719,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     onClick,
     onDrag,
     onHover,
+    sliding: () => slideTimer !== null,
+    peekRects: () => (alive() && win.isVisible() ? [win.getBounds(), ...host.peekRects()] : []),
+    peekContents: () => (alive() ? host.peekContents() : []),
+    pinPeek: () => { if (peek?.phase() === 'out') peek.pin() },
     onEdge: () => {
       if (!alive() || !dock || !tucked || slideTimer) return null
       const display = dockDisplay()
@@ -689,8 +739,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   }
   controllers.add(registration)
 
-  // Focusing the window (a click inside it) ends a peek: it stays out.
-  const onFocus = (): void => { if (peek?.out) stopPeek() }
+  // Focusing the window (a click inside it) pins a peek out ('stack': the group's peek, run by its leader).
+  const onFocus = (): void => { for (const member of groupOf(registration)) member.pinPeek() }
   win.on('focus', onFocus)
   // Shown while docked and out (pop out, shortcut): the handle comes with it.
   const onShow = (): void => {
@@ -796,6 +846,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       stopSlide()
       stopDrag()
       stopPeek()
+      unwatchPins()
       disposed = true
       controllers.delete(registration)
       relayoutHandles()

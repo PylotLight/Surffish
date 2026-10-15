@@ -5,6 +5,7 @@ import {
   clashingAppShortcut,
   isMiniWindowGrouping,
   isMiniWindowHeaderPlacement,
+  isMiniWindowPeekDelay,
   normalizeAccelerator,
   normalizeMiniWindowUrl,
   parseMiniWindowSettings,
@@ -136,6 +137,11 @@ export function returnMiniWindowToBrowser(target: { window?: BaseWindow; tabId?:
   return miniModule?.returnToBrowser(target) ?? false
 }
 
+/** ⌘K: turn hover peek for tucked mini windows on/off (applies live). */
+export function setMiniWindowPeekOnHover(peekOnHover: boolean): boolean {
+  return updateMiniWindowSettings({ peekOnHover }).ok
+}
+
 /** Settings → Mini window grouping (also the Window menu and the palette). Regroups open mini windows without reloading. */
 export function setMiniWindowGrouping(grouping: MiniWindowGrouping): boolean {
   return updateMiniWindowSettings({ grouping }).ok
@@ -257,6 +263,10 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
   if ('peekOnHover' in patch) {
     if (typeof patch.peekOnHover !== 'boolean') return { ok: false, error: 'Invalid settings' }
     next.peekOnHover = patch.peekOnHover
+  }
+  if ('peekDelayMs' in patch) {
+    if (!isMiniWindowPeekDelay(patch.peekDelayMs)) return { ok: false, error: 'Invalid settings' }
+    next.peekDelayMs = patch.peekDelayMs
   }
   if ('grouping' in patch) {
     if (!isMiniWindowGrouping(patch.grouping)) return { ok: false, error: 'Invalid settings' }

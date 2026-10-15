@@ -20,6 +20,8 @@ import {
   normalizeMiniWindowUrl,
   parseMiniGeometry,
   parseMiniWindowSettings,
+  MINI_WINDOW_PEEK_DELAYS,
+  isMiniWindowPeekDelay,
   snapMiniToCorner,
   MINI_WINDOW_HEADER_HEIGHT,
   MINI_WINDOW_TAB_STRIP_HEIGHT,
@@ -39,13 +41,13 @@ const workArea = { x: 0, y: 25, width: 1440, height: 875 }
 
 describe('mini window settings', () => {
   test('defaults: no pinned page, the default shortcut, opaque', () => {
-    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
-    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
+    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float' })
+    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float' })
   })
 
   test('tuck to edge is on and peek off by default; booleans are kept', () => {
-    expect(parseMiniWindowSettings({ tuckToEdge: false, peekOnHover: true })).toMatchObject({ tuckToEdge: false, peekOnHover: true })
-    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false, grouping: 'tabs', headerPlacement: 'float' })
+    expect(parseMiniWindowSettings({ tuckToEdge: false, peekOnHover: false, peekDelayMs: 600 })).toMatchObject({ tuckToEdge: false, peekOnHover: false, peekDelayMs: 600 })
+    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float' })
   })
 
   test('an explicit empty shortcut turns it off', () => {
@@ -204,7 +206,7 @@ describe('several mini windows', () => {
 describe('grouping', () => {
   test('settings from before grouping (the #203 format) read as tabs; bad values fall back', () => {
     const v203 = { defaultUrl: 'https://claude.ai/', shortcut: 'CommandOrControl+Shift+Space', opacity: 0.9, tuckToEdge: true, peekOnHover: true }
-    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, grouping: 'tabs', headerPlacement: 'float' })
+    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float' })
     expect(parseMiniWindowSettings({ grouping: 'stack' }).grouping).toBe('stack')
     expect(parseMiniWindowSettings({ grouping: 'separate' }).grouping).toBe('separate')
     expect(parseMiniWindowSettings({ grouping: 'piles' }).grouping).toBe('tabs')
@@ -270,7 +272,8 @@ describe('header placement', () => {
 
   test('settings without a header placement (the #206 format) read as float; bad values fall back', () => {
     const v206 = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' as const }
-    expect(parseMiniWindowSettings(v206)).toEqual({ ...v206, headerPlacement: 'float' })
+    // Saved before hover peek defaulted on (no peekDelayMs next to it): the stored false was just the old default.
+    expect(parseMiniWindowSettings(v206)).toEqual({ ...v206, peekOnHover: true, peekDelayMs: 350, headerPlacement: 'float' })
     expect(parseMiniWindowSettings({ headerPlacement: 'push' }).headerPlacement).toBe('push')
     expect(parseMiniWindowSettings({ headerPlacement: 'overlay' }).headerPlacement).toBe('overlay')
     expect(parseMiniWindowSettings({ headerPlacement: 'sideways' }).headerPlacement).toBe('float')
@@ -338,5 +341,22 @@ describe('header placement', () => {
     expect(miniMergeTarget({ x: 700, y: 280 }, others, MINI_WINDOW_HEADER_HEIGHT)?.id).toBe('a')
     expect(miniMergeTarget({ x: 700, y: 250 }, others, MINI_WINDOW_HEADER_HEIGHT)).toBeNull()
     expect(miniMergeTarget({ x: 700, y: 320 }, others, MINI_WINDOW_HEADER_HEIGHT)?.id).toBe('a')
+  })
+})
+
+describe('hover peek settings', () => {
+  test('missing values migrate to the default (on, 350 ms)', () => {
+    expect(parseMiniWindowSettings({ tuckToEdge: true, peekOnHover: false })).toMatchObject({ peekOnHover: true, peekDelayMs: 350 })
+    expect(parseMiniWindowSettings({})).toMatchObject({ peekOnHover: true, peekDelayMs: 350 })
+  })
+  test('a stored choice saved with the delay is kept', () => {
+    expect(parseMiniWindowSettings({ peekOnHover: false, peekDelayMs: 350 })).toMatchObject({ peekOnHover: false, peekDelayMs: 350 })
+    expect(parseMiniWindowSettings({ peekOnHover: true, peekDelayMs: 1000 })).toMatchObject({ peekOnHover: true, peekDelayMs: 1000 })
+  })
+  test('only the offered delays are accepted', () => {
+    expect(MINI_WINDOW_PEEK_DELAYS).toEqual([200, 350, 600, 1000])
+    for (const bad of [0, 10, 351, -200, '600', null, Number.NaN]) expect(parseMiniWindowSettings({ peekDelayMs: bad }).peekDelayMs).toBe(350)
+    expect(isMiniWindowPeekDelay(200)).toBe(true)
+    expect(isMiniWindowPeekDelay(250)).toBe(false)
   })
 })
