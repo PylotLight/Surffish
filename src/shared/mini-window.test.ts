@@ -21,8 +21,13 @@ const workArea = { x: 0, y: 25, width: 1440, height: 875 }
 
 describe('mini window settings', () => {
   test('defaults: no pinned page, the default shortcut, opaque', () => {
-    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1 })
-    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1 })
+    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false })
+    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false })
+  })
+
+  test('tuck to edge is on and peek off by default; booleans are kept', () => {
+    expect(parseMiniWindowSettings({ tuckToEdge: false, peekOnHover: true })).toMatchObject({ tuckToEdge: false, peekOnHover: true })
+    expect(parseMiniWindowSettings({ tuckToEdge: 'no', peekOnHover: 1 })).toMatchObject({ tuckToEdge: true, peekOnHover: false })
   })
 
   test('an explicit empty shortcut turns it off', () => {

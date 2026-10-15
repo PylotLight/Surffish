@@ -51,7 +51,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, getMiniWindowTabId } from './browser'
-import { getMiniWindowSettings, popOutTabToMiniWindow, returnMiniWindowToBrowser, toggleMiniWindow } from './mini-window-entry'
+import { getMiniWindowSettings, isMiniWindowTucked, popOutTabToMiniWindow, returnMiniWindowToBrowser, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -199,6 +199,13 @@ const COMMANDS: BrowserCommand[] = [
     keywords: ['mini window', 'float', 'always on top', 'ai chat', 'pinned page'],
     refocusPage: false,
     run: () => toggleMiniWindow()
+  },
+  {
+    id: 'miniWindow.tuck', title: () => (isMiniWindowTucked() ? 'Slide Out Mini Window' : 'Tuck Mini Window to Screen Edge'), section: 'View',
+    keywords: ['mini window', 'tuck', 'dock', 'edge', 'hide', 'side', 'drawer', 'slide'],
+    refocusPage: false,
+    enabled: () => getMiniWindowTabId() !== null && getMiniWindowSettings().tuckToEdge,
+    run: () => tuckMiniWindow()
   },
   // Split view
   {

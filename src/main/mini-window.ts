@@ -16,7 +16,9 @@ import {
   type MiniWindowHeaderState,
   type MiniWindowSettings
 } from '../shared/mini-window'
+import { dockArrow, dockedBounds } from '../shared/mini-window-dock'
 import { watchShellSurface } from './crash-guard'
+import { createDockController, savedDockFor, type DockController } from './mini-window-dock'
 import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -31,6 +33,7 @@ import { readUserJson, writeUserJson } from './user-json'
  *
  * macOS: an NSPanel (type 'panel') at the floating level, on every Space and over full-screen apps,
  * shown without taking focus when a tab pops out. Elsewhere: an always-on-top frameless window.
+ * Tuck to screen edge (slide away behind a handle tab) lives in mini-window-dock.ts.
  */
 
 interface Mini {
@@ -49,6 +52,8 @@ interface Mini {
   pageListeners: Array<[string, (...args: never[]) => void]>
   /** Header loaded (it is attached only then, so it never takes keyboard focus from the page). */
   headerReady: Promise<void>
+  /** Docked to a screen edge / tucked away behind its handle. */
+  dock: DockController
   closed: boolean
 }
 
@@ -88,7 +93,8 @@ function readGeometry(): Record<string, MiniRect> {
 }
 
 function saveGeometry(m: Mini): void {
-  if (m.closed || m.window.isDestroyed() || m.window.isMinimized()) return
+  // Tucked (off screen) or mid-slide: not a place to come back to.
+  if (m.closed || m.window.isDestroyed() || m.window.isMinimized() || m.dock.isTucked()) return
   const bounds = m.window.getBounds()
   const key = miniDisplayKey(screen.getDisplayMatching(bounds).workArea)
   const all = readGeometry()
@@ -211,10 +217,12 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean } | null {
+function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; tuck: { arrow: string; label: string } | null } | null {
   const info = host().header(m.window)
   if (!info) return null
+  const tuckEdge = m.dock.tuckEdge()
   return {
+    tuck: tuckEdge ? { arrow: dockArrow(tuckEdge, false), label: `Tuck to the ${tuckEdge} edge` } : null,
     title: info.title,
     url: miniHeaderUrl(info.url),
     faviconUrl: info.faviconUrl,
@@ -232,6 +240,7 @@ function refreshHeaderOf(m: Mini): void {
   if (!state) return
   m.window.setTitle(state.title ? `${state.title} — Mini Window` : 'Mini Window')
   if (live(m.header.webContents)) m.header.webContents.send('mini-window:state', state)
+  m.dock.refreshHandle()
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +265,12 @@ function registerIpc(): void {
   ipcMain.on('mini-window:close', (event) => {
     const m = fromHeader(event)
     if (m) host().closeTab(m.window)
+  })
+  ipcMain.on('mini-window:tuck', (event) => {
+    const m = fromHeader(event)
+    if (!m) return
+    setRevealed(m, false)
+    m.dock.toggle(true)
   })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
@@ -294,13 +309,19 @@ function applyWindowSettings(m: Mini, settings: MiniWindowSettings): void {
   if (m.closed || m.window.isDestroyed()) return
   // Linux has no window opacity; macOS and Windows do.
   if (process.platform !== 'linux') m.window.setOpacity(settings.opacity)
+  m.dock.applySettings()
 }
 
 function createMini(): Mini | null {
   registerIpc()
   const header = createHeaderView()
-  if (!header) return null
-  const bounds = openingBounds()
+  const preload = preloadPath()
+  if (!header || !preload) return null
+  const opening = openingBounds()
+  // Docked on this display last time: open against that edge again (out, with its handle).
+  const display = screen.getDisplayMatching(opening)
+  const savedDock = getMiniWindowSettings().tuckToEdge ? savedDockFor(display, opening) : null
+  const bounds = savedDock ? dockedBounds(opening, savedDock, display.workArea, false) : opening
   const window = new BaseWindow({
     ...bounds,
     title: 'Mini Window',
@@ -326,6 +347,20 @@ function createMini(): Mini | null {
   } else {
     window.setAlwaysOnTop(true)
   }
+  // Callbacks run later (m exists by then).
+  const dock = createDockController({
+    window,
+    preload,
+    faviconUrl: () => host().header(window)?.faviconUrl ?? null,
+    focusPage: () => {
+      if (m.closed || window.isDestroyed()) return
+      window.focus()
+      host().pageContents(window)?.focus()
+    },
+    changed: () => refreshHeaderOf(m),
+    isTuckEnabled: () => getMiniWindowSettings().tuckToEdge,
+    isPeekEnabled: () => getMiniWindowSettings().peekOnHover
+  }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
     window,
     header: header.view,
@@ -337,6 +372,7 @@ function createMini(): Mini | null {
     page: null,
     pageListeners: [],
     headerReady: header.ready,
+    dock,
     closed: false
   }
   mini = m
@@ -358,19 +394,34 @@ function createMini(): Mini | null {
   })
   window.on('resize', () => {
     layout(m)
+    if (m.dock.ignoringMoves()) return
+    m.dock.follow()
     scheduleGeometrySave(m)
   })
-  // macOS/Windows say when a drag ends ('moved'); Linux only streams 'move', so snap after it settles.
+  // Dropped: against a screen edge it docks and tucks away, near a corner it snaps into it.
+  const dropped = (): void => {
+    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves()) return
+    if (!m.dock.afterDrop()) snapToCorner(m)
+    scheduleGeometrySave(m)
+  }
+  // macOS/Windows say when a drag ends ('moved'); Linux only streams 'move', so act after it settles.
+  // Moves the dock makes itself (sliding, placing) are not drops.
   if (process.platform === 'linux') {
     let settle: ReturnType<typeof setTimeout> | null = null
     window.on('move', () => {
+      if (m.dock.ignoringMoves()) return
+      m.dock.follow()
       if (settle) clearTimeout(settle)
-      settle = setTimeout(() => { settle = null; snapToCorner(m) }, 350)
+      settle = setTimeout(() => { settle = null; dropped() }, 350)
       scheduleGeometrySave(m)
     })
   } else {
-    window.on('move', () => scheduleGeometrySave(m))
-    window.on('moved', () => snapToCorner(m))
+    window.on('move', () => {
+      if (m.dock.ignoringMoves()) return
+      m.dock.follow()
+      scheduleGeometrySave(m)
+    })
+    window.on('moved', dropped)
   }
   window.on('closed', () => {
     m.closed = true
@@ -381,6 +432,7 @@ function createMini(): Mini | null {
       m.geometryTimer = null
     }
     unwirePage(m)
+    m.dock.dispose()
     // A closed BaseWindow doesn't destroy its views' webContents.
     if (live(header.view.webContents)) header.view.webContents.close()
     if (mini === m) mini = null
@@ -391,6 +443,8 @@ function createMini(): Mini | null {
 /** Bring the window up. `focus`: take the keyboard (shortcut/toggle); otherwise stay out of the way (pop out). */
 function present(m: Mini, focus: boolean): void {
   if (m.closed || m.window.isDestroyed()) return
+  // Tucked behind its handle: slide out instead.
+  if (m.dock.isTucked()) return m.dock.slideOut(focus)
   if (focus) {
     m.window.show()
     m.window.focus()
@@ -402,6 +456,8 @@ function present(m: Mini, focus: boolean): void {
   // Re-assert the level: some window managers drop it while a window is hidden.
   if (IS_MAC) m.window.setAlwaysOnTop(true, 'floating')
   else m.window.setAlwaysOnTop(true)
+  // Docked: its handle shows with it.
+  m.dock.follow()
 }
 
 /** Pop a tab out. One mini window at a time: a tab already in it goes back to the browser first. */
@@ -443,10 +499,14 @@ export async function openPinnedPage(url: string): Promise<boolean> {
   return true
 }
 
-/** Show the mini window (focused) when hidden or behind; hide it when it is showing. */
+/** Show the mini window (focused) when hidden or behind; hide it when it is showing. Docked to an edge: slide it out / tuck it away. */
 export function toggleVisible(): boolean {
   const m = mini
   if (!m || m.closed || m.window.isDestroyed()) return false
+  if (m.dock.isDocked()) {
+    setRevealed(m, false)
+    return m.dock.toggle(true)
+  }
   if (m.window.isVisible() && !m.window.isMinimized()) {
     setRevealed(m, false)
     m.window.hide()
@@ -454,6 +514,19 @@ export function toggleVisible(): boolean {
     present(m, true)
   }
   return true
+}
+
+/** Tuck the mini window to its nearest screen edge, or slide it back out when tucked. */
+export function toggleTuck(): boolean {
+  const m = mini
+  if (!m || m.closed || m.window.isDestroyed() || !host().header(m.window)) return false
+  setRevealed(m, false)
+  return m.dock.toggle(true)
+}
+
+/** Is the mini window tucked away behind its handle? */
+export function isTucked(): boolean {
+  return Boolean(mini && !mini.closed && mini.dock.isTucked())
 }
 
 export function returnToBrowser(): boolean {

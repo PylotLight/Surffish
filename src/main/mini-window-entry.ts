@@ -109,7 +109,8 @@ export function returnMiniWindowToBrowser(): boolean {
 
 /**
  * The global shortcut (and the palette's "Toggle Mini Window"): with nothing in the mini window,
- * open the pinned default page (or, without one, pop out the current tab); otherwise show or hide it.
+ * open the pinned default page (or, without one, pop out the current tab); otherwise show or hide it
+ * (docked to a screen edge: slide it out or tuck it away).
  */
 export async function toggleMiniWindow(): Promise<boolean> {
   if (miniModule?.isOpen()) return miniModule.toggleVisible()
@@ -123,6 +124,16 @@ export async function toggleMiniWindow(): Promise<boolean> {
     }
   }
   return popOutTabToMiniWindow()
+}
+
+/** Tuck the mini window to the nearest screen edge, or slide it back out (palette). */
+export function tuckMiniWindow(): boolean {
+  return miniModule?.toggleTuck() ?? false
+}
+
+/** Is the mini window tucked away behind its edge handle? */
+export function isMiniWindowTucked(): boolean {
+  return miniModule?.isTucked() ?? false
 }
 
 /** browser.ts: the mini window's tab changed (title, URL, loading); refresh its header. */
@@ -185,6 +196,14 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
     }
   }
   if ('opacity' in patch) next.opacity = parseMiniWindowSettings({ ...next, opacity: patch.opacity }).opacity
+  if ('tuckToEdge' in patch) {
+    if (typeof patch.tuckToEdge !== 'boolean') return { ok: false, error: 'Invalid settings' }
+    next.tuckToEdge = patch.tuckToEdge
+  }
+  if ('peekOnHover' in patch) {
+    if (typeof patch.peekOnHover !== 'boolean') return { ok: false, error: 'Invalid settings' }
+    next.peekOnHover = patch.peekOnHover
+  }
   const shortcutChanged = next.shortcut !== current().shortcut
   settings = parseMiniWindowSettings(next)
   writeSettingsFile(MINI_WINDOW_SETTINGS_FILE, settings)

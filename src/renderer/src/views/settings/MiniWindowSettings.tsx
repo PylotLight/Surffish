@@ -9,7 +9,8 @@ interface Status { shortcut: string; registered: boolean; error: string | null }
 
 /**
  * Settings → General → Mini window: the page the global shortcut opens (empty: pop out the current
- * tab), the shortcut itself (press keys to record, Clear to turn it off) and opacity.
+ * tab), the shortcut itself (press keys to record, Clear to turn it off), tuck to screen edge (and
+ * peek on hover) and opacity.
  */
 export function MiniWindowSettings(): React.JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -100,6 +101,30 @@ export function MiniWindowSettings(): React.JSX.Element {
           <button className="settings-action secondary" type="button" aria-label="Use the default mini window shortcut" onClick={() => update({ shortcut: defaultShortcut })}>Default</button>
         )}
       </SettingsRow>
+      <SettingsRow
+        label="Tuck to screen edge"
+        hint="Drag the mini window against a screen edge (or use its header's arrow) and it slides away, leaving a small tab on the edge. Click the tab or press the toggle shortcut to slide it back out."
+      >
+        <input
+          type="checkbox"
+          className="settings-switch"
+          disabled={!settings}
+          checked={settings?.tuckToEdge ?? true}
+          aria-label="Tuck the mini window to a screen edge"
+          onChange={(event) => update({ tuckToEdge: event.target.checked })}
+        />
+      </SettingsRow>
+      {settings?.tuckToEdge && (
+        <SettingsRow label="Peek on hover" hint="While tucked, resting the pointer on the tab slides the window out until the pointer leaves it.">
+          <input
+            type="checkbox"
+            className="settings-switch"
+            checked={settings.peekOnHover}
+            aria-label="Peek the tucked mini window on hover"
+            onChange={(event) => update({ peekOnHover: event.target.checked })}
+          />
+        </SettingsRow>
+      )}
       {!IS_LINUX && settings && (
         <SettingsSlider label="Opacity" value={Math.round(settings.opacity * 100)} unit="%" min={Math.round(MINI_WINDOW_MIN_OPACITY * 100)} max={100} step={5} onChange={(value) => update({ opacity: value / 100 })} />
       )}

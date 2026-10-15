@@ -1,7 +1,8 @@
 'use strict'
 
-// Sandboxed preload for the mini window's header strip (main/mini-window-page.ts). Only the handful
-// of messages it needs; the page in the mini window never gets this bridge.
+// Sandboxed preload for the mini window's header strip (main/mini-window-page.ts) and its dock
+// handle (main/mini-window-handle-page.ts). Only the handful of messages they need; the page in the
+// mini window never gets this bridge.
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('miniWindow', {
@@ -10,5 +11,11 @@ contextBridge.exposeInMainWorld('miniWindow', {
   reload: () => ipcRenderer.send('mini-window:reload'),
   returnToBrowser: () => ipcRenderer.send('mini-window:return'),
   close: () => ipcRenderer.send('mini-window:close'),
-  hover: (inside) => ipcRenderer.send('mini-window:hover', Boolean(inside))
+  hover: (inside) => ipcRenderer.send('mini-window:hover', Boolean(inside)),
+  tuck: () => ipcRenderer.send('mini-window:tuck'),
+  // Dock handle.
+  onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),
+  handleClick: () => ipcRenderer.send('mini-window:handle-click'),
+  handleDrag: (active) => ipcRenderer.send('mini-window:handle-drag', Boolean(active)),
+  handleHover: (inside) => ipcRenderer.send('mini-window:handle-hover', Boolean(inside))
 })
