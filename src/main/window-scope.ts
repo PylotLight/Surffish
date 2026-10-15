@@ -97,10 +97,12 @@ export function bindContentsToWindow(contents: WebContents, win: BaseWindow): vo
   if (contents.isDestroyed()) return
   const id = contents.id
   contentsWindows.set(id, win)
-  contents.once('destroyed', () => {
-    if (contentsWindows.get(id) === win) contentsWindows.delete(id)
-  })
+  // One cleanup listener per webContents, however often it moves between windows (tab moves, mini window).
+  if (watchedContents.has(contents)) return
+  watchedContents.add(contents)
+  contents.once('destroyed', () => contentsWindows.delete(id))
 }
+const watchedContents = new WeakSet<WebContents>()
 
 export function windowForContents(contents: WebContents | null | undefined): BaseWindow | null {
   if (!contents) return null
