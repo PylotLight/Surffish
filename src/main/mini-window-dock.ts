@@ -1,6 +1,7 @@
 import { BaseWindow, WebContentsView, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import { clampMiniBounds, miniDisplayKey, parseMiniSlots, withMiniSlot, type MiniRect, type MiniWindowGrouping } from '../shared/mini-window'
 import {
+  MINI_DOCK_HANDLE_LENGTH,
   MINI_DOCK_RELEASE_DISTANCE,
   MINI_DOCK_SLIDE_MS,
   MINI_WINDOW_DOCK_FILE,
@@ -18,7 +19,6 @@ import {
   nearestDockEdge,
   parseMiniDocks,
   reconcileDock,
-  slideFrame,
   spreadDockHandles,
   stackDockOffsets,
   type MiniDisplay,
@@ -26,7 +26,9 @@ import {
   type MiniDockEdge
 } from '../shared/mini-window-dock'
 import { createPeekDriver, type PeekDriver, type PeekPoint } from '../shared/mini-window-peek'
+import { lerpRect, motionDuration } from '../shared/mini-window-motion'
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
+import { motion, placeWindow } from './mini-window-motion'
 import { readUserJson, writeUserJson } from './user-json'
 
 /**
@@ -51,10 +53,10 @@ import { readUserJson, writeUserJson } from './user-json'
  */
 
 const IS_MAC = process.platform === 'darwin'
-const FRAME_MS = 16
+/** A handle making room for another on its edge glides there (shorter moves take proportionally less). */
+const HANDLE_GLIDE_MS = 160
 /** Window moves for this long after we placed it ourselves are ours (Linux reports them late), not a user drop. */
 const OWN_MOVE_GRACE_MS = 500
-const DRAG_POLL_MS = 16
 const DRAG_MAX_MS = 15_000
 
 export interface DockHost {
@@ -70,6 +72,8 @@ export interface DockHost {
   focusPage(): void
   /** Docked/tucked changed: refresh the header's tuck button. */
   changed(): void
+  /** The dock is moving the window to `rect` this frame (slide, handle drag, following its leader): the floating header follows in the same tick. */
+  moved(rect: MiniRect): void
   isTuckEnabled(): boolean
   isPeekEnabled(): boolean
   /** Hover delay before a tucked handle peeks (Settings). */
@@ -103,8 +107,8 @@ export interface DockController {
   regroup(): void
   /** The user dropped the window: dock/tuck at an edge, re-flush, or undock. True when handled (skip corner snap). */
   afterDrop(): boolean
-  /** The window moved or resized (the handle follows when out). */
-  follow(): void
+  /** The window moved or resized (the handle follows when out; 'stack' followers come along). With `rect` (moving it this frame) at once, else coalesced to the next frame. */
+  follow(rect?: MiniRect): void
   /** Settings changed (tuck turned off undocks). */
   applySettings(): void
   refreshHandle(): void
@@ -155,6 +159,8 @@ interface Handle {
   window: BaseWindow
   view: WebContentsView
   ready: boolean
+  /** The view's size (set only when it changes, not per frame). */
+  size: { width: number; height: number } | null
 }
 
 interface HandleListener {
@@ -283,9 +289,14 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   let displayId: number | null = initial?.display.id ?? null
   let tucked = false
   let handle: Handle | null = null
-  let slideTimer: ReturnType<typeof setInterval> | null = null
+  /** Frame-loop keys (mini-window-motion.ts): this window's slide, handle drag, handle glide and coalesced follow. */
+  const slideKey = {}
+  const dragKey = {}
+  const glideKey = {}
+  const followKey = {}
+  let sliding = false
   let ownMoveUntil = 0
-  let drag: { timer: ReturnType<typeof setInterval>; startCursor: { x: number; y: number }; startOffset: number; startedAt: number } | null = null
+  let drag: { startCursor: { x: number; y: number }; startOffset: number; startedAt: number } | null = null
   /** Hover peek (shared/mini-window-peek.ts): dwell on the tucked handle, slide out, tuck after the pointer leaves. */
   let peek: PeekDriver | null = null
   /** While peeked: input listeners on the group's contents that pin it out. */
@@ -311,9 +322,16 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     return { width, height }
   }
 
+  /** Place the window ourselves (not a user drop): in a frame it commits with everything else that moves. */
   function setOwnBounds(rect: MiniRect): void {
     ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
-    if (!sameRect(win.getBounds(), rect)) win.setBounds(rect)
+    placeWindow(win, rect)
+    host.moved(rect)
+  }
+
+  /** Where the window is now, or where this frame is putting it (mid-slide). */
+  function currentRect(): MiniRect {
+    return win.getBounds()
   }
 
   // --- The handle window.
@@ -336,9 +354,15 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     }
   }
 
+  /** What the handle page last got (it is only sent again when something changed, never per frame). */
+  let sentState = ''
   function sendHandleState(): void {
     const state = handleState()
-    if (state && handle?.ready && !handle.view.webContents.isDestroyed()) handle.view.webContents.send('mini-window:handle-state', state)
+    if (!state || !handle?.ready || handle.view.webContents.isDestroyed()) return
+    const json = JSON.stringify(state)
+    if (json === sentState) return
+    sentState = json
+    handle.view.webContents.send('mini-window:handle-state', state)
   }
 
   function ensureHandle(): Handle {
@@ -376,9 +400,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     view.webContents.on('will-navigate', (event) => event.preventDefault())
     window.contentView.addChildView(view)
-    const created: Handle = { window, view, ready: false }
+    const created: Handle = { window, view, ready: false, size: null }
     view.webContents.once('did-finish-load', () => {
       created.ready = true
+      sentState = ''
       sendHandleState()
     })
     void view.webContents.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(MINI_WINDOW_HANDLE_HTML)}`).catch(() => undefined)
@@ -396,29 +421,66 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (current && !current.window.isDestroyed()) current.window.close()
   }
 
-  /** Put the handle on the inner edge of a window at `rect`, and show it. */
-  function placeHandle(rect: MiniRect): void {
+  /**
+   * Put the handle on the inner edge of a window at `rect`, and show it. `moving` (a slide or drag
+   * frame): only its bounds change, in the same tick as the window. `glide`: settling beside other
+   * handles on its edge, it eases there instead of jumping.
+   */
+  function placeHandle(rect: MiniRect, mode: 'moving' | 'glide' | 'exact' = 'exact'): void {
     if (!dock) return
     // 'stack': the group shares its leader's handle.
     if (isFollower(registration)) return closeHandle()
     const h = ensureHandle()
     // Settled on the screen edge beside other tucked handles: at its spread-out place along it.
-    const bounds = tucked && along !== null && !slideTimer && !drag ? dockHandleAt(rect, dock.edge, along) : dockHandleBounds(rect, dock.edge)
-    h.view.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
-    if (!sameRect(h.window.getBounds(), bounds)) h.window.setBounds(bounds)
-    if (!h.window.isVisible()) h.window.showInactive()
-    // Some window managers drop the level while a window is hidden.
-    if (IS_MAC) h.window.setAlwaysOnTop(true, 'floating')
-    sendHandleState()
+    const bounds = tucked && along !== null && !sliding && !drag ? dockHandleAt(rect, dock.edge, along) : dockHandleBounds(rect, dock.edge)
+    if (!h.size || h.size.width !== bounds.width || h.size.height !== bounds.height) {
+      h.size = { width: bounds.width, height: bounds.height }
+      h.view.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
+    }
+    const shown = h.window.isVisible()
+    if (mode === 'glide' && shown) glideHandle(h, bounds)
+    else {
+      motion.cancel(glideKey)
+      placeWindow(h.window, bounds)
+    }
+    if (!shown) {
+      h.window.showInactive()
+      // Some window managers drop the level while a window is hidden.
+      if (IS_MAC) h.window.setAlwaysOnTop(true, 'floating')
+    }
+    if (mode !== 'moving') sendHandleState()
+  }
+
+  /** Ease the handle from where it is to `to` (making room on its edge, or settling after a slide). */
+  function glideHandle(h: Handle, to: MiniRect): void {
+    const from = h.window.getBounds()
+    const duration = reducedMotion() ? 0 : motionDuration(from, to, 2 * MINI_DOCK_HANDLE_LENGTH, HANDLE_GLIDE_MS)
+    if (duration === 0) {
+      motion.cancel(glideKey)
+      return placeWindow(h.window, to)
+    }
+    const start = performance.now()
+    motion.run(glideKey, (now) => {
+      if (h.window.isDestroyed() || handle !== h) return false
+      const t = (now - start) / duration
+      placeWindow(h.window, t >= 1 ? to : lerpRect(from, to, t))
+      return t < 1
+    })
   }
 
   // --- Sliding.
 
   function stopSlide(): void {
-    if (slideTimer) clearInterval(slideTimer)
-    slideTimer = null
+    motion.cancel(slideKey)
+    sliding = false
   }
 
+  /**
+   * Slide from `from` to `to` on the shared frame loop (display refresh rate, ease-out, time based so a
+   * slow frame never slows it down). The handle, the floating header and the rest of a 'stack' group
+   * (each sliding on the same loop) move in the same tick. Interrupted, the next slide starts from where
+   * this one got to (no snap) and takes time in proportion to the distance left.
+   */
   function slide(from: MiniRect, to: MiniRect, done: () => void): void {
     stopSlide()
     ownMoveUntil = Number.POSITIVE_INFINITY
@@ -426,19 +488,30 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       stopSlide()
       if (!alive()) return
       setOwnBounds(to)
-      placeHandle(to)
+      placeHandle(to, 'glide')
       done()
     }
-    if (reducedMotion() || sameRect(from, to)) return finish()
-    const start = Date.now()
-    slideTimer = setInterval(() => {
-      if (!alive()) return stopSlide()
-      const t = (Date.now() - start) / MINI_DOCK_SLIDE_MS
-      if (t >= 1) return finish()
-      const frame = slideFrame(from, to, t)
-      win.setBounds(frame)
-      placeHandle(frame)
-    }, FRAME_MS)
+    const full = dock?.edge === 'left' || dock?.edge === 'right' ? to.width : to.height
+    const duration = reducedMotion() ? 0 : motionDuration(from, to, full, MINI_DOCK_SLIDE_MS)
+    if (duration === 0) return finish()
+    const start = performance.now()
+    sliding = true
+    motion.run(slideKey, (now) => {
+      if (!alive()) {
+        sliding = false
+        return false
+      }
+      const t = (now - start) / duration
+      if (t >= 1) {
+        finish()
+        return false
+      }
+      const frame = lerpRect(from, to, t)
+      placeWindow(win, frame)
+      placeHandle(frame, 'moving')
+      host.moved(frame)
+      return true
+    })
   }
 
   function remember(): void {
@@ -490,7 +563,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (!current) return false
     tucked = true
     const wa = dockDisplay().workArea
-    const from = win.isVisible() ? win.getBounds() : dockedBounds(size(), current, wa, true)
+    const from = win.isVisible() ? currentRect() : dockedBounds(size(), current, wa, true)
     slide(from, dockedBounds(size(), current, wa, true), () => {
       // Off-screen and hidden: no painting, no stray pixels on a neighbouring display. The tab stays put.
       if (tucked && win.isVisible()) win.hide()
@@ -513,18 +586,20 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       remember()
     }
     const target = dockedBounds(size(), dock, wa, false)
-    if (!tucked && win.isVisible() && !slideTimer && sameRect(win.getBounds(), target)) {
+    if (!tucked && win.isVisible() && !sliding && sameRect(win.getBounds(), target)) {
       if (focus) host.focusPage()
       return
     }
     tucked = false
-    const from = win.isVisible() ? win.getBounds() : dockedBounds(size(), dock, wa, true)
-    if (!win.isVisible()) {
+    const shown = win.isVisible()
+    const from = shown ? currentRect() : dockedBounds(size(), dock, wa, true)
+    if (!shown) {
       setOwnBounds(from)
       win.showInactive()
+      // The level can drop while hidden; set once when it shows, not per frame.
+      if (IS_MAC) win.setAlwaysOnTop(true, 'floating')
+      else win.setAlwaysOnTop(true)
     }
-    if (IS_MAC) win.setAlwaysOnTop(true, 'floating')
-    else win.setAlwaysOnTop(true)
     along = null
     relayoutHandles()
     slide(from, target, () => {
@@ -558,7 +633,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   // --- Handle input.
 
   function stopDrag(): void {
-    if (drag) clearInterval(drag.timer)
+    motion.cancel(dragKey)
     drag = null
   }
 
@@ -573,30 +648,32 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     }
     stopDrag()
     stopPeek()
-    const startedAt = Date.now()
-    drag = {
-      startCursor: screen.getCursorScreenPoint(),
-      startOffset: dock.offset,
-      startedAt,
-      timer: setInterval(() => {
-        if (!alive() || !dock || !drag || Date.now() - drag.startedAt > DRAG_MAX_MS) return onDrag(false)
-        const cursor = screen.getCursorScreenPoint()
-        const horizontal = dock.edge === 'top' || dock.edge === 'bottom'
-        const delta = horizontal ? cursor.x - drag.startCursor.x : cursor.y - drag.startCursor.y
-        const { width, height } = size()
-        const wa = dockDisplay().workArea
-        const offset = dragDockOffset(drag.startOffset, delta, horizontal ? width : height, dock.edge, wa)
-        if (offset === dock.offset) return
-        dock = { ...dock, offset }
-        const rect = dockedBounds(size(), dock, wa, tucked)
-        setOwnBounds(rect)
-        placeHandle(rect)
-        // The others on this edge make room (and swap places as it passes them).
-        if (tucked) relayoutHandles()
-        // A stack that is out moves with its leader.
-        else followLeader(registration, offset)
-      }, DRAG_POLL_MS)
-    }
+    const state = { startCursor: screen.getCursorScreenPoint(), startOffset: dock.offset, startedAt: Date.now() }
+    drag = state
+    // Once per frame (however fast the pointer reports): read the cursor, move window + handle together.
+    motion.run(dragKey, () => {
+      if (drag !== state) return false
+      if (!alive() || !dock || Date.now() - state.startedAt > DRAG_MAX_MS) {
+        onDrag(false)
+        return false
+      }
+      const cursor = screen.getCursorScreenPoint()
+      const horizontal = dock.edge === 'top' || dock.edge === 'bottom'
+      const delta = horizontal ? cursor.x - state.startCursor.x : cursor.y - state.startCursor.y
+      const { width, height } = size()
+      const wa = dockDisplay().workArea
+      const offset = dragDockOffset(state.startOffset, delta, horizontal ? width : height, dock.edge, wa)
+      if (offset === dock.offset) return true
+      dock = { ...dock, offset }
+      const rect = dockedBounds(size(), dock, wa, tucked)
+      setOwnBounds(rect)
+      placeHandle(rect, 'moving')
+      // The others on this edge make room (and swap places as it passes them).
+      if (tucked) relayoutHandles()
+      // A stack that is out moves with its leader.
+      else followLeader(registration, offset)
+      return true
+    })
   }
 
   function onClick(): void {
@@ -684,7 +761,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   function syncRole(): void {
     if (!alive() || !dock) return
     if (isFollower(registration)) return closeHandle()
-    if (slideTimer || drag) return sendHandleState()
+    if (sliding || drag) return sendHandleState()
     if (tucked) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true))
     else if (win.isVisible()) placeHandle(win.getBounds())
   }
@@ -707,11 +784,12 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     tuckOne: () => tuckOne(),
     slideOutOne: (focus, offset) => slideOutOne(focus, offset),
     placeOut: (offset) => {
-      if (!alive() || !dock || tucked || slideTimer || drag) return
+      if (!alive() || !dock || tucked || sliding || drag) return
       dock = { ...dock, offset }
       const rect = dockedBounds(size(), dock, dockDisplay().workArea, false)
+      // In the leader's frame: same tick as the leader (and its header).
       setOwnBounds(rect)
-      placeHandle(rect)
+      placeHandle(rect, 'moving')
     },
     bounds: () => (alive() ? win.getBounds() : { x: 0, y: 0, width: 0, height: 0 }),
     syncRole,
@@ -719,12 +797,12 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     onClick,
     onDrag,
     onHover,
-    sliding: () => slideTimer !== null,
+    sliding: () => sliding,
     peekRects: () => (alive() && win.isVisible() ? [win.getBounds(), ...host.peekRects()] : []),
     peekContents: () => (alive() ? host.peekContents() : []),
     pinPeek: () => { if (peek?.phase() === 'out') peek.pin() },
     onEdge: () => {
-      if (!alive() || !dock || !tucked || slideTimer) return null
+      if (!alive() || !dock || !tucked || sliding) return null
       const display = dockDisplay()
       const rect = dockedBounds(size(), dock, display.workArea, true)
       // The one being dragged stays under the pointer; the rest arrange around it.
@@ -734,7 +812,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       const settled = next === null || drag ? null : next
       if (settled === along) return
       along = settled
-      if (alive() && dock && tucked && !slideTimer && handle && !handle.window.isDestroyed()) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true))
+      if (alive() && dock && tucked && !sliding && handle && !handle.window.isDestroyed()) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true), 'glide')
     }
   }
   controllers.add(registration)
@@ -744,7 +822,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   win.on('focus', onFocus)
   // Shown while docked and out (pop out, shortcut): the handle comes with it.
   const onShow = (): void => {
-    if (dock && !tucked && !slideTimer) placeHandle(win.getBounds())
+    if (dock && !tucked && !sliding) placeHandle(win.getBounds())
   }
   win.on('show', onShow)
 
@@ -779,7 +857,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       const bounds = win.getBounds()
       return nearestDockEdge(bounds, displayInfo(screen.getDisplayMatching(bounds)), allDisplays())
     },
-    ignoringMoves: () => tucked || slideTimer !== null || drag !== null || Date.now() < ownMoveUntil,
+    ignoringMoves: () => tucked || sliding || drag !== null || Date.now() < ownMoveUntil,
     toggle: (focus) => {
       if (dock && tucked) {
         slideOut(focus)
@@ -799,7 +877,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       if (alive() && dock && !tucked && dockGrouping() === 'stack' && !isFollower(registration) && groupOf(registration).length > 1) slideOut(false)
     },
     afterDrop: () => {
-      if (!alive() || tucked || slideTimer) return false
+      if (!alive() || tucked || sliding) return false
       if (!host.isTuckEnabled()) return false
       const bounds = win.getBounds()
       const display = screen.getDisplayMatching(bounds)
@@ -827,13 +905,16 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       undock()
       return false
     },
-    follow: () => {
-      if (!alive() || !dock || tucked || slideTimer || drag) return
-      if (!win.isVisible()) return
-      const bounds = win.getBounds()
-      placeHandle(bounds)
-      // 'stack': the leader dragged by its header; the rest of the group comes along the edge.
-      followLeader(registration, alongEdge(bounds))
+    follow: (rect) => {
+      const now = (bounds: MiniRect): void => {
+        if (!alive() || !dock || tucked || sliding || drag || !win.isVisible()) return
+        placeHandle(bounds, 'moving')
+        // 'stack': the leader dragged by its header; the rest of the group comes along the edge.
+        followLeader(registration, alongEdge(bounds))
+      }
+      if (rect) return now(rect)
+      // A native move/resize event: coalesced to one follow per frame, in that frame's tick.
+      motion.once(followKey, () => now(win.getBounds()))
     },
     applySettings: () => {
       if (!host.isTuckEnabled()) undock()
@@ -847,6 +928,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       stopDrag()
       stopPeek()
       unwatchPins()
+      motion.cancel(glideKey)
+      motion.cancel(followKey)
       disposed = true
       controllers.delete(registration)
       relayoutHandles()
