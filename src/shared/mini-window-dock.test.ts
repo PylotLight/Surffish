@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  MINI_DOCK_HANDLE_GAP,
   MINI_DOCK_HANDLE_LENGTH,
   MINI_DOCK_HANDLE_THICKNESS,
   MINI_DOCK_OVERSHOOT,
@@ -8,6 +9,9 @@ import {
   dockArrow,
   dockEdgeForDrop,
   dockFor,
+  dockEdgeSpan,
+  dockHandleAlong,
+  dockHandleAt,
   dockHandleBounds,
   dockedBounds,
   dragDockOffset,
@@ -16,6 +20,7 @@ import {
   parseMiniDocks,
   reconcileDock,
   slideFrame,
+  spreadDockHandles,
   type MiniDisplay
 } from './mini-window-dock'
 
@@ -163,5 +168,57 @@ describe('saved docks and display changes', () => {
     expect(dockArrow('right', false)).toBe('right')
     expect(dockArrow('top', true)).toBe('down')
     expect(dockArrow('bottom', false)).toBe('down')
+  })
+})
+
+describe('several handles on one edge', () => {
+  const step = MINI_DOCK_HANDLE_LENGTH + MINI_DOCK_HANDLE_GAP
+  const noOverlap = (positions: number[]): boolean => {
+    const sorted = [...positions].sort((a, b) => a - b)
+    return sorted.every((value, index) => index === 0 || value - (sorted[index - 1] ?? 0) >= step)
+  }
+
+  test('apart already: left where they are', () => {
+    expect(spreadDockHandles([100, 300, 600], 25, 900)).toEqual([100, 300, 600])
+  })
+
+  test('same spot: spread apart, order kept by input', () => {
+    const out = spreadDockHandles([400, 400, 400], 25, 900)
+    expect(noOverlap(out)).toBe(true)
+    expect(out[0]).toBeLessThan(out[1] ?? 0)
+    expect(out[1]).toBeLessThan(out[2] ?? 0)
+  })
+
+  test('order follows the desired place (dragging one past another swaps them)', () => {
+    const before = spreadDockHandles([300, 320], 25, 900)
+    expect(before[0]).toBeLessThan(before[1] ?? 0)
+    const after = spreadDockHandles([340, 320], 25, 900)
+    expect(after[0]).toBeGreaterThan(after[1] ?? 0)
+    expect(noOverlap(after)).toBe(true)
+  })
+
+  test('crowded at an end: pushed back inside the edge', () => {
+    const out = spreadDockHandles([880, 880, 880], 25, 900)
+    expect(noOverlap(out)).toBe(true)
+    expect(Math.max(...out) + MINI_DOCK_HANDLE_LENGTH).toBeLessThanOrEqual(900)
+    const start = spreadDockHandles([0, 0], 25, 900)
+    expect(Math.min(...start)).toBe(25)
+    expect(noOverlap(start)).toBe(true)
+  })
+
+  test('six handles fit on a short edge without overlapping', () => {
+    const out = spreadDockHandles([500, 500, 500, 500, 500, 500], 25, 900)
+    expect(noOverlap(out)).toBe(true)
+    for (const value of out) expect(value >= 25 && value + MINI_DOCK_HANDLE_LENGTH <= 900).toBe(true)
+  })
+
+  test('handle placement helpers', () => {
+    const rect = dockedBounds(size, { edge: 'right', offset: 100 }, laptop.workArea, true)
+    expect(dockHandleAlong(rect, 'right')).toBe(dockHandleBounds(rect, 'right').y)
+    expect(dockHandleAt(rect, 'right', 500)).toEqual({ ...dockHandleBounds(rect, 'right'), y: 500 })
+    const bottom = dockedBounds(size, { edge: 'bottom', offset: 100 }, laptop.workArea, true)
+    expect(dockHandleAt(bottom, 'bottom', 700)).toEqual({ ...dockHandleBounds(bottom, 'bottom'), x: 700 })
+    expect(dockEdgeSpan(laptop.workArea, 'right')).toEqual([25, 900])
+    expect(dockEdgeSpan(laptop.workArea, 'top')).toEqual([0, 1440])
   })
 })

@@ -50,8 +50,8 @@ import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
-import { canPopOutBrowserTab, getMiniWindowTabId } from './browser'
-import { getMiniWindowSettings, isMiniWindowTucked, popOutTabToMiniWindow, returnMiniWindowToBrowser, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { canPopOutBrowserTab, hasMiniWindows } from './browser'
+import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -190,12 +190,12 @@ const COMMANDS: BrowserCommand[] = [
     enabled: () => canPopOutBrowserTab(), run: () => popOutTabToMiniWindow()
   },
   {
-    id: 'miniWindow.return', title: 'Return Mini Window to Browser', section: 'View',
-    keywords: ['mini window', 'pop in', 'dock', 'back to browser'],
-    enabled: () => getMiniWindowTabId() !== null, run: () => returnMiniWindowToBrowser()
+    id: 'miniWindow.return', title: 'Return All Mini Windows', section: 'View',
+    keywords: ['mini window', 'pop in', 'dock', 'back to browser', 'return mini window to browser', 'close mini windows'],
+    enabled: () => hasMiniWindows(), run: () => returnAllMiniWindows()
   },
   {
-    id: 'miniWindow.toggle', title: () => (getMiniWindowTabId() ? 'Show/Hide Mini Window' : getMiniWindowSettings().defaultUrl ? 'Open Mini Window' : 'Toggle Mini Window'), section: 'View',
+    id: 'miniWindow.toggle', title: () => (hasMiniWindows() ? 'Show/Hide Mini Windows' : getMiniWindowSettings().defaultUrl ? 'Open Mini Window' : 'Toggle Mini Window'), section: 'View',
     keywords: ['mini window', 'float', 'always on top', 'ai chat', 'pinned page'],
     refocusPage: false,
     run: () => toggleMiniWindow()
@@ -204,7 +204,7 @@ const COMMANDS: BrowserCommand[] = [
     id: 'miniWindow.tuck', title: () => (isMiniWindowTucked() ? 'Slide Out Mini Window' : 'Tuck Mini Window to Screen Edge'), section: 'View',
     keywords: ['mini window', 'tuck', 'dock', 'edge', 'hide', 'side', 'drawer', 'slide'],
     refocusPage: false,
-    enabled: () => getMiniWindowTabId() !== null && getMiniWindowSettings().tuckToEdge,
+    enabled: () => hasMiniWindows() && getMiniWindowSettings().tuckToEdge,
     run: () => tuckMiniWindow()
   },
   // Split view
@@ -313,9 +313,24 @@ function tabGroupCommands(): BrowserCommand[] {
   ]
 }
 
+/** Per mini window (only with two or more open; one is covered by the commands above): show, tuck/slide out, return. */
+function miniWindowCommands(): BrowserCommand[] {
+  const open = listMiniWindows()
+  if (open.length < 2) return []
+  const keywords = ['mini window', 'float', 'always on top']
+  return open.flatMap((mini): BrowserCommand[] => [
+    { id: `miniWindow.show:${mini.tabId}`, title: `Show Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'focus', 'switch to'], refocusPage: false, run: () => focusMiniWindow(mini.tabId) },
+    {
+      id: `miniWindow.tuck:${mini.tabId}`, title: `${isMiniWindowTucked(mini.tabId) ? 'Slide Out' : 'Tuck Away'} Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'tuck', 'edge', 'slide'], refocusPage: false,
+      enabled: () => getMiniWindowSettings().tuckToEdge, run: () => tuckMiniWindow(mini.tabId)
+    },
+    { id: `miniWindow.return:${mini.tabId}`, title: `Return Mini Window to Browser: ${mini.title}`, section: 'View', keywords: [...keywords, 'pop in', 'back to browser'], run: () => returnMiniWindowToBrowser({ tabId: mini.tabId }) }
+  ])
+}
+
 function allCommands(): BrowserCommand[] {
   const watchersEnabled = pageWatchersEnabled()
-  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands()]
+  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands(), ...miniWindowCommands()]
 }
 
 function isEnabled(command: BrowserCommand): boolean {
@@ -349,7 +364,7 @@ export function focusActivePage(): void {
 
 export async function runCommand(id: unknown): Promise<boolean> {
   if (typeof id !== 'string') return false
-  const command = COMMANDS_BY_ID.get(id) ?? (id.startsWith('space.') || id.startsWith('group.') ? allCommands().find((candidate) => candidate.id === id) : undefined)
+  const command = COMMANDS_BY_ID.get(id) ?? (id.startsWith('space.') || id.startsWith('group.') || id.startsWith('miniWindow.') ? allCommands().find((candidate) => candidate.id === id) : undefined)
   if (!command || !isEnabled(command)) return false
   noteCommandUsed(id)
   if (command.refocusPage) focusActivePage()

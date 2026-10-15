@@ -16,6 +16,11 @@
 //   7. Closing the browser window keeps the mini window (and its page) alive; Return then opens a
 //      new browser window with the tab in it.
 //   8. A private tab pops out and back and stays in the private session.
+//   9. Several at once: three tabs pop out into three mini windows (each its own, none sent back,
+//      cascaded so none sits on another, no reloads); the session file keeps all three; the Window
+//      menu and the palette list each; Show/Hide toggles all together; one returns (header button,
+//      then Cmd/Ctrl+Shift+M in its page) while the others stay; the 7th pop out past the cap of 6
+//      is refused with a notice; Return All brings every tab back with nothing leaked.
 // `bun run build && bun run test:electron-mini-window`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-mini-window-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -25,7 +30,7 @@ const { mkdirSync, readdirSync, readFileSync, writeFileSync } = require('node:fs
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, globalShortcut, webContents: allWebContents } = require('electron')
+const { app, BaseWindow, Menu, globalShortcut, webContents: allWebContents } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const userData = join(tmpdir(), `surffish-mini-window-smoke-${process.pid}`)
@@ -39,7 +44,8 @@ const server = createServer((request, response) => {
     '/chat': PAGE('Chat', '<textarea id="prompt"></textarea>'),
     '/idle': PAGE('Idle', '<p>idle</p>'),
     '/pinned': PAGE('Pinned', '<p>pinned page</p>'),
-    '/private': PAGE('Private', '<p>private</p>')
+    '/private': PAGE('Private', '<p>private</p>'),
+    ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7].map((n) => [`/m${n}`, PAGE(`Multi ${n}`, `<p>mini ${n}</p>`)]))
   }
   response.writeHead(pages[path] ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   response.end(pages[path] ?? 'not found')
@@ -276,6 +282,121 @@ async function run() {
   await run('miniWindow.return', toolbar2)
   await waitFor(() => viewOf(mainWindow, privatePage) && privateMini.isDestroyed(), 'the private tab back in the browser window')
   assert.notEqual(privatePage.session, pinned.session, 'still the private session')
+
+  // --- 9. Several mini windows at once.
+  smoke.step('three tabs pop out into three mini windows: none sent back, cascaded, no reloads')
+  const multi = []
+  for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+    await smoke.evaluate(toolbar2, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/m${n}`)})`)
+    const contents = await waitFor(() => pageContents((url, c) => url === `${origin}/m${n}` && !c.isLoading()), `page m${n}`)
+    await waitFor(() => smoke.evaluate(contents, 'document.readyState === "complete" && typeof window.loadId === "number"'), `page m${n} ready`)
+    await smoke.evaluate(contents, `window.marker = "m${n}"; true`)
+    multi.push({ n, contents, loadId: await smoke.evaluate(contents, 'window.loadId'), id: (await tabs(toolbar2)).find((tab) => tab.url === `${origin}/m${n}`).id })
+  }
+  const intact = async (entries, where) => {
+    for (const entry of entries) {
+      assert.equal(entry.contents.isDestroyed(), false, `${where}: m${entry.n} not destroyed`)
+      assert.equal(await smoke.evaluate(entry.contents, 'window.marker'), `m${entry.n}`, `${where}: m${entry.n} kept its state`)
+      assert.equal(await smoke.evaluate(entry.contents, 'window.loadId'), entry.loadId, `${where}: m${entry.n} not reloaded`)
+    }
+  }
+  const miniOf = (contents) => miniWindows().find((win) => viewOf(win, contents))
+  const popOut = async (entry) => {
+    await smoke.evaluate(toolbar2, `window.api.browser.tabs.activate(${JSON.stringify(entry.id)})`)
+    await waitFor(async () => (await tabs(toolbar2)).find((tab) => tab.active)?.id === entry.id, `m${entry.n} active`)
+    await run('miniWindow.popOut', toolbar2)
+  }
+  const [a, b, c] = multi
+  for (const [index, entry] of [a, b, c].entries()) {
+    await popOut(entry)
+    await waitFor(() => miniWindows().length === index + 1 && miniOf(entry.contents)?.isVisible(), `mini window ${index + 1} with m${entry.n}`)
+  }
+  const [winA, winB, winC] = [a, b, c].map((entry) => miniOf(entry.contents))
+  assert.equal(new Set([winA, winB, winC]).size, 3, 'each tab has its own mini window')
+  for (const win of [winA, winB, winC]) assert.equal(win.isAlwaysOnTop(), true, 'each is always on top')
+  const spots = [winA, winB, winC].map((win) => win.getBounds())
+  assert.equal(new Set(spots.map((r) => `${r.x},${r.y}`)).size, 3, `cascaded, not stacked (${JSON.stringify(spots)})`)
+  assert.equal(miniHeaders().length, 3, 'one header each')
+  await intact([a, b, c], 'three popped out')
+  assert.ok(!(await tabs(toolbar2)).some((tab) => [a.id, b.id, c.id].includes(tab.id)), 'none of them is listed in the browser window')
+  await waitFor(() => {
+    const saved = JSON.parse(readFileSync(join(userData, 'browser-session.json'), 'utf8'))
+    const urls = JSON.stringify(saved)
+    return [1, 2, 3].every((n) => urls.includes(`${origin}/m${n}`))
+  }, 'the session file to keep all three mini tabs')
+
+  smoke.step('Window menu and palette list each mini window')
+  await waitFor(() => {
+    const windowMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === 'Window')
+    const labels = windowMenu?.submenu?.items.map((item) => item.label) ?? []
+    return ['Multi 1', 'Multi 2', 'Multi 3'].every((title) => labels.includes(`Mini Window: ${title}`)) && labels.includes('Return All Mini Windows')
+  }, 'the Window menu to list the mini windows')
+  const listed = (await smoke.evaluate(toolbar2, 'window.api.browser.commands.list()')).commands
+  for (const entry of [a, b, c]) {
+    assert.ok(listed.some((command) => command.id === `miniWindow.return:${entry.id}` && command.title === `Return Mini Window to Browser: Multi ${entry.n}`), `palette: return m${entry.n}`)
+    assert.ok(listed.some((command) => command.id === `miniWindow.show:${entry.id}`), `palette: show m${entry.n}`)
+  }
+  assert.equal(listed.find((command) => command.id === 'miniWindow.return')?.title, 'Return All Mini Windows')
+  assert.equal(listed.find((command) => command.id === 'miniWindow.toggle')?.title, 'Show/Hide Mini Windows')
+
+  smoke.step('Show/Hide toggles all of them together')
+  await run('miniWindow.toggle', toolbar2)
+  await waitFor(() => [winA, winB, winC].every((win) => !win.isVisible()), 'all three hidden')
+  await intact([a, b, c], 'hidden')
+  await run('miniWindow.toggle', toolbar2)
+  await waitFor(() => [winA, winB, winC].every((win) => win.isVisible()), 'all three shown again')
+  // The Window menu's entry for one brings it up.
+  await run(`miniWindow.show:${b.id}`, toolbar2)
+  await waitFor(() => winB.isVisible(), 'palette shows one')
+
+  smoke.step('one returns (header button) while the others stay out')
+  const headerB = miniHeaders().find((contents) => viewOf(winB, contents))
+  await smoke.evaluate(headerB, 'document.getElementById("return").click(); true')
+  await waitFor(() => viewOf(mainWindow, b.contents) && winB.isDestroyed(), 'm2 back in the browser window')
+  assert.equal(winA.isDestroyed() || winC.isDestroyed(), false, 'the other two stay open')
+  assert.ok(viewOf(winA, a.contents) && viewOf(winC, c.contents), 'still holding their pages')
+  assert.equal(miniHeaders().length, 2, 'the returned one\'s header is gone')
+  await intact([a, b, c], 'after one returned')
+  smoke.step('Cmd/Ctrl+Shift+M inside one mini window returns just that one; in the browser it pops out another')
+  key(c.contents, 'M', [PRIMARY, 'shift'])
+  await waitFor(() => viewOf(mainWindow, c.contents) && winC.isDestroyed(), 'm3 back via the shortcut')
+  assert.ok(viewOf(winA, a.contents) && winA.isVisible(), 'm1 stays out')
+  await smoke.evaluate(toolbar2, `window.api.browser.tabs.activate(${JSON.stringify(b.id)})`)
+  await waitFor(async () => (await tabs(toolbar2)).find((tab) => tab.active)?.id === b.id, 'm2 active')
+  key(b.contents, 'M', [PRIMARY, 'shift'])
+  await waitFor(() => miniOf(b.contents) && miniWindows().length === 2, 'the shortcut pops m2 out beside m1')
+  assert.ok(viewOf(winA, a.contents), 'm1 was not sent back')
+  await intact([a, b, c], 'after the shortcut')
+
+  smoke.step(`cap: six at once, the seventh is refused with a notice`)
+  for (const entry of multi.slice(2, 6)) {
+    await popOut(entry)
+    await waitFor(() => miniOf(entry.contents), `m${entry.n} popped out`)
+  }
+  assert.equal(miniWindows().length, 6, 'six mini windows')
+  const sixSpots = miniWindows().map((win) => win.getBounds())
+  assert.equal(new Set(sixSpots.map((r) => `${r.x},${r.y}`)).size, 6, 'six distinct spots')
+  const seventh = multi[6]
+  await popOut(seventh)
+  const noticeShown = async () => {
+    for (const contents of liveContents().filter((candidate) => candidate.getURL().startsWith('data:text/html') && !isMiniHeader(candidate))) {
+      const text = await smoke.evaluate(contents, 'document.body ? document.body.innerText : ""').catch(() => '')
+      if (/mini windows at a time/.test(String(text))) return true
+    }
+    return false
+  }
+  await waitFor(noticeShown, 'the cap notice in the browser window', 3000)
+  await delay(300)
+  assert.equal(miniWindows().length, 6, 'no seventh mini window')
+  assert.equal(miniOf(seventh.contents), undefined, 'the seventh tab stays in the browser')
+  assert.ok(viewOf(mainWindow, seventh.contents), 'still in the browser window')
+
+  smoke.step('Return All brings every tab back, nothing leaked')
+  await run('miniWindow.return', toolbar2)
+  await waitFor(() => miniWindows().length === 0 && miniHeaders().length === 0, 'all mini windows closed, headers gone')
+  for (const entry of multi) assert.ok(viewOf(mainWindow, entry.contents) || (await tabs(toolbar2)).some((tab) => tab.id === entry.id), `m${entry.n} back in the browser`)
+  await intact(multi, 'after Return All')
+  assert.equal(BaseWindow.getAllWindows().filter((win) => !win.isDestroyed() && win.getTitle().includes('Mini Window')).length, 0, 'no mini (or handle) windows left')
 
   console.log('Electron mini window smoke passed.')
 }

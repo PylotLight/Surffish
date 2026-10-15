@@ -228,3 +228,51 @@ export function dockArrow(edge: MiniDockEdge, tucked: boolean): MiniDockArrow {
   const awayFromEdge = { left: 'right', right: 'left', top: 'down', bottom: 'up' } as const
   return tucked ? awayFromEdge[edge] : towardEdge[edge]
 }
+
+/** Space kept between two handles on the same edge. */
+export const MINI_DOCK_HANDLE_GAP = 6
+
+/**
+ * Handles of several windows tucked to the same edge: each wants to start at `desired[i]` (along the
+ * edge, centred on its window); the result keeps their order by desired place (ties: input order),
+ * at least `length + gap` apart, inside [min, max - length] where they fit. Same order as `desired`.
+ */
+export function spreadDockHandles(desired: readonly number[], min: number, max: number, length = MINI_DOCK_HANDLE_LENGTH, gap = MINI_DOCK_HANDLE_GAP): number[] {
+  const order = desired.map((_, index) => index).sort((a, b) => (desired[a] ?? 0) - (desired[b] ?? 0) || a - b)
+  const step = length + gap
+  const pos = desired.map((value) => Math.round(Math.min(Math.max(value, min), max - length)))
+  let previous = Number.NEGATIVE_INFINITY
+  for (const i of order) {
+    pos[i] = Math.max(pos[i] ?? 0, previous + step)
+    previous = pos[i] ?? 0
+  }
+  let next = Number.POSITIVE_INFINITY
+  for (const i of [...order].reverse()) {
+    pos[i] = Math.min(pos[i] ?? 0, next - step, max - length)
+    next = pos[i] ?? 0
+  }
+  // Too many to fit: the last pass keeps them from running past the start (they may run past the end).
+  previous = Number.NEGATIVE_INFINITY
+  for (const i of order) {
+    pos[i] = Math.max(pos[i] ?? 0, min, previous + step)
+    previous = pos[i] ?? 0
+  }
+  return pos.map((value) => Math.round(value))
+}
+
+/** The handle's place along its edge for a window at `rect`: centred on the window (x for top/bottom, y for left/right). */
+export function dockHandleAlong(rect: MiniRect, edge: MiniDockEdge): number {
+  const bounds = dockHandleBounds(rect, edge)
+  return isHorizontalEdge(edge) ? bounds.x : bounds.y
+}
+
+/** The handle bounds with its place along the edge moved to `along`. */
+export function dockHandleAt(rect: MiniRect, edge: MiniDockEdge, along: number): MiniRect {
+  const bounds = dockHandleBounds(rect, edge)
+  return isHorizontalEdge(edge) ? { ...bounds, x: along } : { ...bounds, y: along }
+}
+
+/** The span [start, end) a work area offers handles on `edge`. */
+export function dockEdgeSpan(workArea: MiniRect, edge: MiniDockEdge): [number, number] {
+  return spanAlong(workArea, edge)
+}

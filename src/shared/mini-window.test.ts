@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import {
   DEFAULT_MINI_WINDOW_SHORTCUT,
+  MINI_WINDOW_CASCADE_STEP,
   MINI_WINDOW_MARGIN,
+  MINI_WINDOW_MAX,
+  cascadeMiniBounds,
+  freeMiniSlot,
+  parseMiniSlots,
+  withMiniSlot,
   acceleratorFromKeyEvent,
   canPopOutUrl,
   clampMiniBounds,
@@ -125,5 +131,60 @@ describe('pages', () => {
     expect(canPopOutUrl('https://example.com')).toBe(true)
     expect(canPopOutUrl('surffish://newtab')).toBe(false)
     expect(canPopOutUrl('chrome-extension://abc/popup.html')).toBe(false)
+  })
+})
+
+describe('several mini windows', () => {
+  test('slots: the lowest free one, none past the cap', () => {
+    expect(freeMiniSlot([])).toBe(0)
+    expect(freeMiniSlot([0, 1, 3])).toBe(2)
+    expect(freeMiniSlot([1])).toBe(0)
+    expect(freeMiniSlot([0, 1, 2, 3, 4, 5])).toBeNull()
+    expect(MINI_WINDOW_MAX).toBe(6)
+  })
+
+  test('cascade: a free spot stays put; a taken one steps toward the middle', () => {
+    const corner = initialMiniBounds(workArea, undefined)
+    expect(cascadeMiniBounds(corner, [], workArea)).toEqual(corner)
+    const second = cascadeMiniBounds(corner, [corner], workArea)
+    expect(second).toEqual({ ...corner, x: corner.x - MINI_WINDOW_CASCADE_STEP, y: corner.y - MINI_WINDOW_CASCADE_STEP })
+    const third = cascadeMiniBounds(corner, [corner, second], workArea)
+    expect(third.x).toBe(corner.x - 2 * MINI_WINDOW_CASCADE_STEP)
+    // Top-left windows step down and right.
+    const topLeft = { x: workArea.x + 16, y: workArea.y + 16, width: 420, height: 620 }
+    expect(cascadeMiniBounds(topLeft, [topLeft], workArea)).toMatchObject({ x: topLeft.x + MINI_WINDOW_CASCADE_STEP, y: topLeft.y + MINI_WINDOW_CASCADE_STEP })
+  })
+
+  test('cascade: six windows never share a spot and stay on screen', () => {
+    const placed: Array<{ x: number; y: number; width: number; height: number }> = []
+    for (let i = 0; i < MINI_WINDOW_MAX; i++) placed.push(cascadeMiniBounds(initialMiniBounds(workArea, placed.at(-1)), placed, workArea))
+    const spots = new Set(placed.map((rect) => `${rect.x},${rect.y}`))
+    expect(spots.size).toBe(MINI_WINDOW_MAX)
+    for (const rect of placed) expect(clampMiniBounds(rect, workArea)).toEqual(rect)
+  })
+
+  test('cascade: stops when it cannot move (window fills the work area)', () => {
+    const full = { ...workArea }
+    expect(cascadeMiniBounds(full, [full], workArea)).toEqual(full)
+  })
+
+  test('slots: the single-window format reads as slot 0 (migration)', () => {
+    const legacy = { '0,25,1440x875': { x: 10, y: 40, width: 400, height: 500 } }
+    expect(parseMiniSlots(legacy, parseMiniGeometry)).toEqual([legacy])
+    expect(parseMiniSlots({}, parseMiniGeometry)).toEqual([])
+    expect(parseMiniSlots(null, parseMiniGeometry)).toEqual([])
+    const two = { slots: [legacy, { '0,25,1440x875': { x: 50, y: 80, width: 400, height: 500 } }] }
+    expect(parseMiniSlots(two, parseMiniGeometry)).toEqual(two.slots)
+    expect(parseMiniSlots({ slots: [{ bad: 1 }, 'nope'] }, parseMiniGeometry)).toEqual([{}, {}])
+    expect(parseMiniSlots({ slots: Array.from({ length: 20 }, () => legacy) }, parseMiniGeometry)).toHaveLength(MINI_WINDOW_MAX)
+  })
+
+  test('slots: write one, keep the rest, drop trailing empties', () => {
+    const a = { k: { x: 1, y: 2, width: 300, height: 300 } }
+    expect(withMiniSlot([], 2, a)).toEqual({ slots: [{}, {}, a] })
+    expect(withMiniSlot([a, a], 1, {})).toEqual({ slots: [a] })
+    expect(withMiniSlot([a], 0, {})).toEqual({ slots: [] })
+    // Migrated legacy data written back keeps slot 0.
+    expect(withMiniSlot(parseMiniSlots(a, (v) => v as Record<string, typeof a.k>), 1, a)).toEqual({ slots: [a, a] })
   })
 })

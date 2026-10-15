@@ -1,5 +1,5 @@
 import { BaseWindow, WebContentsView, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent } from 'electron'
-import { clampMiniBounds, miniDisplayKey, type MiniRect } from '../shared/mini-window'
+import { clampMiniBounds, miniDisplayKey, parseMiniSlots, withMiniSlot, type MiniRect } from '../shared/mini-window'
 import {
   MINI_DOCK_RELEASE_DISTANCE,
   MINI_DOCK_SLIDE_MS,
@@ -7,7 +7,10 @@ import {
   distanceFromDockEdge,
   dockArrow,
   dockEdgeForDrop,
+  dockEdgeSpan,
   dockFor,
+  dockHandleAlong,
+  dockHandleAt,
   dockHandleBounds,
   dockedBounds,
   dragDockOffset,
@@ -15,6 +18,7 @@ import {
   parseMiniDocks,
   reconcileDock,
   slideFrame,
+  spreadDockHandles,
   type MiniDisplay,
   type MiniDock,
   type MiniDockEdge
@@ -30,6 +34,10 @@ import { readUserJson, writeUserJson } from './user-json'
  * dragging it moves both along the edge. Hiding a tucked window keeps its tab exactly as before
  * (still its window's active tab, so never slept/discarded/archived); only painting stops, and media
  * keeps playing.
+ *
+ * Several mini windows can dock at once, each with its own controller and handle. Handles tucked on
+ * the same edge of the same display are spread along it so they never overlap (relayoutHandles), and
+ * each window's dock is remembered in its own slot.
  */
 
 const IS_MAC = process.platform === 'darwin'
@@ -44,6 +52,8 @@ const PEEK_LEAVE_MS = 600
 
 export interface DockHost {
   window: BaseWindow
+  /** Which remembered dock (per display) this window uses (mini-window.ts gives each open window its own). */
+  slot: number
   preload: string
   /** The tab's favicon, shown on the handle. */
   faviconUrl(): string | null
@@ -83,22 +93,23 @@ function allDisplays(): MiniDisplay[] {
   return screen.getAllDisplays().map(displayInfo)
 }
 
-function readDocks(): Record<string, MiniDock> {
-  return parseMiniDocks(readUserJson(MINI_WINDOW_DOCK_FILE))
+function readDocks(): Array<Record<string, MiniDock>> {
+  return parseMiniSlots(readUserJson(MINI_WINDOW_DOCK_FILE), parseMiniDocks)
 }
 
-function writeDock(display: Display, dock: MiniDock | null): void {
+function writeDock(slot: number, display: Display, dock: MiniDock | null): void {
   const all = readDocks()
+  const record = { ...all[slot] }
   const key = miniDisplayKey(display.workArea)
-  if (dock) all[key] = dock
-  else if (key in all) delete all[key]
+  if (dock) record[key] = dock
+  else if (key in record) delete record[key]
   else return
-  writeUserJson(MINI_WINDOW_DOCK_FILE, all)
+  writeUserJson(MINI_WINDOW_DOCK_FILE, withMiniSlot(all, slot, record))
 }
 
-/** The dock remembered for `display`, still valid for a window of `size` there; null when none. */
-export function savedDockFor(display: Display, size: { width: number; height: number }): MiniDock | null {
-  const saved = readDocks()[miniDisplayKey(display.workArea)]
+/** The dock remembered for `slot` on `display`, still valid for a window of `size` there; null when none. */
+export function savedDockFor(slot: number, display: Display, size: { width: number; height: number }): MiniDock | null {
+  const saved = readDocks()[slot]?.[miniDisplayKey(display.workArea)]
   return saved ? reconcileDock(saved, size, displayInfo(display), allDisplays()) : null
 }
 
@@ -133,10 +144,40 @@ interface HandleListener {
   onClick: () => void
   onDrag: (active: boolean) => void
   onHover: (inside: boolean) => void
+  /** Tucked and settled: its handle sits on the screen edge. Which display/edge, where it wants to be along it, and the work area. */
+  onEdge: () => { key: string; edge: MiniDockEdge; desired: number; workArea: MiniRect } | null
+  /** Move the handle along the edge (null: centred on its window again). */
+  setAlong: (along: number | null) => void
 }
 
 const controllers = new Set<HandleListener>()
 let ipcRegistered = false
+
+/**
+ * Spread the handles tucked on each display edge so they never overlap: each keeps its order by where
+ * its window sits along the edge. Runs whenever a window tucks, slides out, moves along the edge,
+ * undocks or closes, or the displays change.
+ */
+function relayoutHandles(): void {
+  const groups = new Map<string, Array<{ controller: HandleListener; desired: number; edge: MiniDockEdge; workArea: MiniRect }>>()
+  for (const controller of controllers) {
+    const spot = controller.onEdge()
+    if (!spot) {
+      controller.setAlong(null)
+      continue
+    }
+    const group = groups.get(spot.key) ?? []
+    group.push({ controller, desired: spot.desired, edge: spot.edge, workArea: spot.workArea })
+    groups.set(spot.key, group)
+  }
+  for (const group of groups.values()) {
+    const first = group[0]
+    if (!first) continue
+    const [min, max] = dockEdgeSpan(first.workArea, first.edge)
+    const positions = spreadDockHandles(group.map((entry) => entry.desired), min, max)
+    group.forEach((entry, index) => entry.controller.setAlong(group.length > 1 ? positions[index] ?? null : null))
+  }
+}
 
 function registerIpc(): void {
   if (ipcRegistered) return
@@ -159,6 +200,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   let ownMoveUntil = 0
   let drag: { timer: ReturnType<typeof setInterval>; startCursor: { x: number; y: number }; startOffset: number; startedAt: number } | null = null
   let peek: Peek | null = null
+  /** Tucked next to other handles on the same edge: its handle's place along the edge (relayoutHandles). */
+  let along: number | null = null
   let disposed = false
 
   const alive = (): boolean => !disposed && !win.isDestroyed()
@@ -252,7 +295,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   function placeHandle(rect: MiniRect): void {
     if (!dock) return
     const h = ensureHandle()
-    const bounds = dockHandleBounds(rect, dock.edge)
+    // Settled on the screen edge beside other tucked handles: at its spread-out place along it.
+    const bounds = tucked && along !== null && !slideTimer && !drag ? dockHandleAt(rect, dock.edge, along) : dockHandleBounds(rect, dock.edge)
     h.view.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
     if (!sameRect(h.window.getBounds(), bounds)) h.window.setBounds(bounds)
     if (!h.window.isVisible()) h.window.showInactive()
@@ -291,7 +335,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   }
 
   function remember(): void {
-    if (dock) writeDock(dockDisplay(), dock)
+    if (dock) writeDock(host.slot, dockDisplay(), dock)
   }
 
   function dockTo(edge: MiniDockEdge, display: Display): void {
@@ -318,6 +362,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     slide(from, dockedBounds(size(), current, wa, true), () => {
       // Off-screen and hidden: no painting, no stray pixels on a neighbouring display. The tab stays put.
       if (tucked && win.isVisible()) win.hide()
+      relayoutHandles()
       host.changed()
     })
     host.changed()
@@ -340,6 +385,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     }
     if (IS_MAC) win.setAlwaysOnTop(true, 'floating')
     else win.setAlwaysOnTop(true)
+    along = null
+    relayoutHandles()
     slide(from, target, () => {
       if (focus && !tucked) host.focusPage()
       host.changed()
@@ -355,10 +402,11 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     stopSlide()
     const wasTucked = tucked
     tucked = false
-    writeDock(display, null)
+    writeDock(host.slot, display, null)
     dock = null
     displayId = null
     closeHandle()
+    relayoutHandles()
     if (wasTucked && alive()) {
       // Bring it back on screen where it was along the edge.
       setOwnBounds(clampMiniBounds(win.getBounds(), display.workArea))
@@ -379,6 +427,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (!active) {
       stopDrag()
       remember()
+      // Dropped: settle beside the other handles on this edge (in its new order).
+      relayoutHandles()
       return
     }
     stopDrag()
@@ -401,6 +451,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
         const rect = dockedBounds(size(), dock, wa, tucked)
         setOwnBounds(rect)
         placeHandle(rect)
+        // The others on this edge make room (and swap places as it passes them).
+        if (tucked) relayoutHandles()
       }, DRAG_POLL_MS)
     }
   }
@@ -452,7 +504,20 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     handleContents: () => (handle && !handle.view.webContents.isDestroyed() ? handle.view.webContents : null),
     onClick,
     onDrag,
-    onHover
+    onHover,
+    onEdge: () => {
+      if (!alive() || !dock || !tucked || slideTimer) return null
+      const display = dockDisplay()
+      const rect = dockedBounds(size(), dock, display.workArea, true)
+      // The one being dragged stays under the pointer; the rest arrange around it.
+      return { key: `${display.id}:${dock.edge}`, edge: dock.edge, desired: dockHandleAlong(rect, dock.edge), workArea: display.workArea }
+    },
+    setAlong: (next) => {
+      const settled = next === null || drag ? null : next
+      if (settled === along) return
+      along = settled
+      if (alive() && dock && tucked && !slideTimer && handle && !handle.window.isDestroyed()) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true))
+    }
   }
   controllers.add(registration)
 
@@ -479,6 +544,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     setOwnBounds(rect)
     placeHandle(rect)
     remember()
+    relayoutHandles()
   }
   screen.on('display-added', onDisplays)
   screen.on('display-removed', onDisplays)
@@ -543,6 +609,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       stopPeek()
       disposed = true
       controllers.delete(registration)
+      relayoutHandles()
       screen.removeListener('display-added', onDisplays)
       screen.removeListener('display-removed', onDisplays)
       screen.removeListener('display-metrics-changed', onDisplays)

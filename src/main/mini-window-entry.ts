@@ -40,6 +40,15 @@ export interface MiniWindowHost {
   header(win: BaseWindow): { tabId: string; title: string; url: string; faviconUrl: string | null; loading: boolean; canGoBack: boolean; private: boolean } | null
   /** Run a browser shortcut pressed in the mini window; true when it was one. */
   handleShortcut(win: BaseWindow, input: Electron.Input): boolean
+  /** A short notice in the browser window (e.g. too many mini windows open). */
+  notify(message: string): void
+}
+
+export interface MiniWindowListing {
+  tabId: string
+  title: string
+  tucked: boolean
+  focused: boolean
 }
 
 export interface MiniWindowShortcutStatus {
@@ -89,7 +98,7 @@ function loadModule(): Promise<MiniWindowModule> {
   return loadingModule
 }
 
-/** Pop a tab (default: the current window's active tab) out to the mini window. */
+/** Pop a tab (default: the current window's active tab) out into a new mini window of its own. */
 export async function popOutTabToMiniWindow(tabId?: string | null): Promise<boolean> {
   if (!host) return false
   const id = tabId ?? host.activeTabId()
@@ -102,15 +111,30 @@ export async function popOutTabToMiniWindow(tabId?: string | null): Promise<bool
   }
 }
 
-/** Put the mini window's tab back into the browser. */
-export function returnMiniWindowToBrowser(): boolean {
-  return miniModule?.returnToBrowser() ?? false
+/** Put one mini window's tab back into the browser: the mini window `window`, or the one holding `tabId`. */
+export function returnMiniWindowToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
+  return miniModule?.returnToBrowser(target) ?? false
+}
+
+/** Put every mini window's tab back into the browser. */
+export function returnAllMiniWindows(): boolean {
+  return miniModule?.returnAll() ?? false
+}
+
+/** Open mini windows, oldest first (Window menu, palette). */
+export function listMiniWindows(): MiniWindowListing[] {
+  return miniModule?.list() ?? []
+}
+
+/** Bring the mini window holding `tabId` forward with the keyboard. */
+export function focusMiniWindow(tabId: string): boolean {
+  return miniModule?.focusMini(tabId) ?? false
 }
 
 /**
- * The global shortcut (and the palette's "Toggle Mini Window"): with nothing in the mini window,
- * open the pinned default page (or, without one, pop out the current tab); otherwise show or hide it
- * (docked to a screen edge: slide it out or tuck it away).
+ * The global shortcut (and the palette's "Show/Hide Mini Windows"): with no mini window open, open
+ * the pinned default page (or, without one, pop out the current tab); otherwise show or hide all of
+ * them together (docked ones slide out or tuck away).
  */
 export async function toggleMiniWindow(): Promise<boolean> {
   if (miniModule?.isOpen()) return miniModule.toggleVisible()
@@ -126,14 +150,14 @@ export async function toggleMiniWindow(): Promise<boolean> {
   return popOutTabToMiniWindow()
 }
 
-/** Tuck the mini window to the nearest screen edge, or slide it back out (palette). */
-export function tuckMiniWindow(): boolean {
-  return miniModule?.toggleTuck() ?? false
+/** Tuck a mini window (the last used, or the one holding `tabId`) to the nearest screen edge, or slide it back out (palette). */
+export function tuckMiniWindow(tabId?: string): boolean {
+  return miniModule?.toggleTuck(tabId) ?? false
 }
 
-/** Is the mini window tucked away behind its edge handle? */
-export function isMiniWindowTucked(): boolean {
-  return miniModule?.isTucked() ?? false
+/** Is that mini window tucked away behind its edge handle? */
+export function isMiniWindowTucked(tabId?: string): boolean {
+  return miniModule?.isTucked(tabId) ?? false
 }
 
 /** browser.ts: the mini window's tab changed (title, URL, loading); refresh its header. */

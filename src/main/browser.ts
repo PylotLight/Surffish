@@ -1717,8 +1717,8 @@ setGlanceHost({
 })
 
 // ---------------------------------------------------------------------------
-// Mini window (mini-window-entry.ts / mini-window.ts): one tab's live page in a small always-on-top
-// window. The window is a BrowserWindowState with `mini` set and no shell surfaces, holding exactly
+// Mini windows (mini-window-entry.ts / mini-window.ts): each holds one tab's live page in a small
+// always-on-top window (several can be open). Each window is a BrowserWindowState with `mini` set and no shell surfaces, holding exactly
 // one tab, so the tab keeps every tab behaviour (events, history, crash handling, session saving)
 // and, being its window's active tab, counts as on screen: never slept, discarded or archived.
 
@@ -1749,7 +1749,8 @@ function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
   const live = contents && !contents.isDestroyed() ? contents : null
   switch (command) {
     case 'miniWindow':
-      returnMiniWindowToBrowser()
+      // This mini window's tab goes back; any others stay out.
+      returnMiniWindowToBrowser({ window: tab.win.window })
       return true
     case 'close':
       closeBrowserTab(tab.id)
@@ -1835,10 +1836,9 @@ export function canPopOutBrowserTab(id?: string | null): boolean {
   return canPopOutTab(getTab(id ?? undefined))
 }
 
-/** The tab in the mini window, if one is open. */
-export function getMiniWindowTabId(): string | null {
-  const w = windowStates.find((candidate) => candidate.mini && isLiveWindow(candidate))
-  return w?.activeTabId ?? null
+/** Any mini window open (with its tab)? */
+export function hasMiniWindows(): boolean {
+  return windowStates.some((candidate) => candidate.mini && isLiveWindow(candidate) && candidate.activeTabId !== null)
 }
 
 setMiniWindowHost({
@@ -1929,7 +1929,8 @@ setMiniWindowHost({
   handleShortcut: (win, input) => {
     const tab = activeTabOf(miniStateFor(win))
     return tab ? handleBrowserShortcutInput(input, tab.id) : false
-  }
+  },
+  notify: (message) => flashBrowserStatus(message, 3500)
 })
 
 export interface ExtensionPageTabOptions {

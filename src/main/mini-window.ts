@@ -5,13 +5,18 @@ import { BaseWindow, WebContentsView, ipcMain, screen, type IpcMainEvent, type W
 import {
   MINI_WINDOW_GEOMETRY_FILE,
   MINI_WINDOW_HEADER_HEIGHT,
+  MINI_WINDOW_MAX,
   MINI_WINDOW_MIN_SIZE,
   MINI_WINDOW_REVEAL_ZONE,
+  cascadeMiniBounds,
+  freeMiniSlot,
   initialMiniBounds,
   miniDisplayKey,
   miniHeaderUrl,
   parseMiniGeometry,
+  parseMiniSlots,
   snapMiniToCorner,
+  withMiniSlot,
   type MiniRect,
   type MiniWindowHeaderState,
   type MiniWindowSettings
@@ -23,10 +28,11 @@ import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost } from '.
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
+import { notifyBrowserWindowsChanged } from './window-scope'
 
 /**
- * The mini window: a small frameless window that floats above other apps and holds one tab's live
- * page. Lazy chunk (mini-window-entry.ts imports it on first use). The tab itself stays in
+ * Mini windows: small frameless windows that float above other apps, each holding one tab's live
+ * page (up to MINI_WINDOW_MAX at once; each new one cascades off the last). Lazy chunk (mini-window-entry.ts imports it on first use). The tab itself stays in
  * browser.ts's registry (a BrowserWindowState flagged `mini`), so its page never reloads on the way
  * in or out and keeps every tab behaviour. This module owns the window: placement (per display,
  * corner snap), the auto-hiding header strip, always-on-top / all-Spaces, opacity, show/hide.
@@ -38,6 +44,10 @@ import { readUserJson, writeUserJson } from './user-json'
 
 interface Mini {
   window: BaseWindow
+  /** Which remembered spot/dock it uses (the lowest free when it opened). */
+  slot: number
+  /** Last title the Window menu was told about. */
+  menuTitle: string
   header: WebContentsView
   /** Header strip shown (the pointer is near the top of the window, or on the header). */
   revealed: boolean
@@ -63,8 +73,31 @@ const HIDE_DELAY_MS = 700
 const POLL_MS = 300
 const GEOMETRY_SAVE_DELAY_MS = 400
 
-let mini: Mini | null = null
+/** Open mini windows, oldest first. */
+const minis: Mini[] = []
+/** The one most recently opened or focused (what the palette's Tuck command acts on). */
+let lastActive: Mini | null = null
 let ipcRegistered = false
+
+function liveMinis(): Mini[] {
+  return minis.filter((m) => !m.closed && !m.window.isDestroyed())
+}
+
+/** The mini window `window` is, if any. */
+function miniOf(window: BaseWindow): Mini | null {
+  return liveMinis().find((m) => m.window === window) ?? null
+}
+
+/** The mini window holding tab `tabId`, if any. */
+function miniWithTab(tabId: string): Mini | null {
+  return liveMinis().find((m) => host().header(m.window)?.tabId === tabId) ?? null
+}
+
+/** The palette's single-window commands act on the last one used. */
+function currentMini(): Mini | null {
+  const open = liveMinis().filter((m) => host().header(m.window))
+  return lastActive && open.includes(lastActive) ? lastActive : open.at(-1) ?? null
+}
 
 function host(): MiniWindowHost {
   const current = getMiniWindowHost()
@@ -82,14 +115,14 @@ function preloadPath(): string | null {
 }
 
 function fromHeader(event: IpcMainEvent): Mini | null {
-  return mini && !mini.closed && mini.header.webContents === event.sender ? mini : null
+  return liveMinis().find((m) => m.header.webContents === event.sender) ?? null
 }
 
 // ---------------------------------------------------------------------------
-// Geometry: one remembered rect per display (keyed by its work area).
+// Geometry: one remembered rect per slot per display (keyed by its work area).
 
-function readGeometry(): Record<string, MiniRect> {
-  return parseMiniGeometry(readUserJson(MINI_WINDOW_GEOMETRY_FILE))
+function readGeometry(): Array<Record<string, MiniRect>> {
+  return parseMiniSlots(readUserJson(MINI_WINDOW_GEOMETRY_FILE), parseMiniGeometry)
 }
 
 function saveGeometry(m: Mini): void {
@@ -98,8 +131,7 @@ function saveGeometry(m: Mini): void {
   const bounds = m.window.getBounds()
   const key = miniDisplayKey(screen.getDisplayMatching(bounds).workArea)
   const all = readGeometry()
-  all[key] = bounds
-  writeUserJson(MINI_WINDOW_GEOMETRY_FILE, all)
+  writeUserJson(MINI_WINDOW_GEOMETRY_FILE, withMiniSlot(all, m.slot, { ...all[m.slot], [key]: bounds }))
 }
 
 function scheduleGeometrySave(m: Mini): void {
@@ -118,10 +150,17 @@ function snapToCorner(m: Mini): void {
   if (snapped) m.window.setBounds(snapped)
 }
 
-/** Opens on the display under the pointer, where it was last on that display (else its bottom-right corner). */
-function openingBounds(): MiniRect {
+/**
+ * Opens on the display under the pointer, where this slot's window was last on that display (else
+ * off the newest open mini window there, else the bottom-right corner), stepped clear of any open one.
+ */
+function openingBounds(slot: number): MiniRect {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  return initialMiniBounds(display.workArea, readGeometry()[miniDisplayKey(display.workArea)])
+  const wa = display.workArea
+  const others = liveMinis().map((m) => m.window.getBounds())
+  const newestHere = liveMinis().filter((m) => !m.dock.isTucked() && screen.getDisplayMatching(m.window.getBounds()).id === display.id).at(-1)
+  const saved = readGeometry()[slot]?.[miniDisplayKey(wa)] ?? newestHere?.window.getBounds()
+  return cascadeMiniBounds(initialMiniBounds(wa, saved), others, wa)
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +278,11 @@ function refreshHeaderOf(m: Mini): void {
   const state = headerState(m)
   if (!state) return
   m.window.setTitle(state.title ? `${state.title} — Mini Window` : 'Mini Window')
+  // The Window menu lists mini windows by title.
+  if (state.title !== m.menuTitle) {
+    m.menuTitle = state.title
+    notifyBrowserWindowsChanged()
+  }
   if (live(m.header.webContents)) m.header.webContents.send('mini-window:state', state)
   m.dock.refreshHandle()
 }
@@ -260,7 +304,8 @@ function registerIpc(): void {
     if (page) page.reload()
   })
   ipcMain.on('mini-window:return', (event) => {
-    if (fromHeader(event)) returnToBrowser()
+    const m = fromHeader(event)
+    if (m) returnMini(m)
   })
   ipcMain.on('mini-window:close', (event) => {
     const m = fromHeader(event)
@@ -312,15 +357,24 @@ function applyWindowSettings(m: Mini, settings: MiniWindowSettings): void {
   m.dock.applySettings()
 }
 
+/** Too many open: say so in the browser window instead of opening another. */
+function atCap(): boolean {
+  if (liveMinis().length < MINI_WINDOW_MAX) return false
+  host().notify(`Up to ${MINI_WINDOW_MAX} mini windows at a time. Return one to the browser first.`)
+  return true
+}
+
 function createMini(): Mini | null {
   registerIpc()
+  const slot = freeMiniSlot(liveMinis().map((m) => m.slot))
+  if (slot === null) return null
   const header = createHeaderView()
   const preload = preloadPath()
   if (!header || !preload) return null
-  const opening = openingBounds()
+  const opening = openingBounds(slot)
   // Docked on this display last time: open against that edge again (out, with its handle).
   const display = screen.getDisplayMatching(opening)
-  const savedDock = getMiniWindowSettings().tuckToEdge ? savedDockFor(display, opening) : null
+  const savedDock = getMiniWindowSettings().tuckToEdge ? savedDockFor(slot, display, opening) : null
   const bounds = savedDock ? dockedBounds(opening, savedDock, display.workArea, false) : opening
   const window = new BaseWindow({
     ...bounds,
@@ -350,6 +404,7 @@ function createMini(): Mini | null {
   // Callbacks run later (m exists by then).
   const dock = createDockController({
     window,
+    slot,
     preload,
     faviconUrl: () => host().header(window)?.faviconUrl ?? null,
     focusPage: () => {
@@ -363,6 +418,8 @@ function createMini(): Mini | null {
   }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
     window,
+    slot,
+    menuTitle: '',
     header: header.view,
     revealed: false,
     hovered: false,
@@ -375,7 +432,13 @@ function createMini(): Mini | null {
     dock,
     closed: false
   }
-  mini = m
+  minis.push(m)
+  lastActive = m
+  window.on('focus', () => {
+    lastActive = m
+    // The Window menu checks the focused one.
+    notifyBrowserWindowsChanged()
+  })
   host().attachWindow(window)
   applyWindowSettings(m, getMiniWindowSettings())
   const documentUrl = headerDocumentUrl()
@@ -435,8 +498,12 @@ function createMini(): Mini | null {
     m.dock.dispose()
     // A closed BaseWindow doesn't destroy its views' webContents.
     if (live(header.view.webContents)) header.view.webContents.close()
-    if (mini === m) mini = null
+    const index = minis.indexOf(m)
+    if (index >= 0) minis.splice(index, 1)
+    if (lastActive === m) lastActive = null
+    notifyBrowserWindowsChanged()
   })
+  notifyBrowserWindowsChanged()
   return m
 }
 
@@ -460,14 +527,14 @@ function present(m: Mini, focus: boolean): void {
   m.dock.follow()
 }
 
-/** Pop a tab out. One mini window at a time: a tab already in it goes back to the browser first. */
+/** Pop a tab out into a new mini window of its own (already in one: bring that one up). */
 export async function popOutTab(tabId: string): Promise<boolean> {
-  if (mini && !mini.closed && host().header(mini.window)?.tabId === tabId) {
-    present(mini, false)
+  const existing = miniWithTab(tabId)
+  if (existing) {
+    present(existing, false)
     return true
   }
-  // The old window closes on its own once its tab has moved out (detachTabFromWindow); a new one opens.
-  if (mini && !mini.closed) returnToBrowser()
+  if (atCap()) return false
   const m = createMini()
   if (!m) return false
   if (!host().adoptTab(tabId, m.window)) {
@@ -482,9 +549,9 @@ export async function popOutTab(tabId: string): Promise<boolean> {
   return true
 }
 
-/** The toggle shortcut with nothing in the mini window: open the pinned page in it. */
+/** The toggle shortcut with no mini window open: open the pinned page in a new one. */
 export async function openPinnedPage(url: string): Promise<boolean> {
-  if (mini && !mini.closed && host().header(mini.window)) return toggleVisible()
+  if (atCap()) return false
   const m = createMini()
   if (!m) return false
   if (!host().openUrl(url, m.window)) {
@@ -499,53 +566,98 @@ export async function openPinnedPage(url: string): Promise<boolean> {
   return true
 }
 
-/** Show the mini window (focused) when hidden or behind; hide it when it is showing. Docked to an edge: slide it out / tuck it away. */
-export function toggleVisible(): boolean {
-  const m = mini
-  if (!m || m.closed || m.window.isDestroyed()) return false
+/** On screen right now: shown and not tucked away. */
+function showing(m: Mini): boolean {
+  return !m.closed && !m.window.isDestroyed() && !m.dock.isTucked() && m.window.isVisible() && !m.window.isMinimized()
+}
+
+/** Hide one: docked ones tuck behind their handle, the rest hide. */
+function hideMini(m: Mini): void {
+  setRevealed(m, false)
   if (m.dock.isDocked()) {
-    setRevealed(m, false)
-    return m.dock.toggle(true)
-  }
-  if (m.window.isVisible() && !m.window.isMinimized()) {
-    setRevealed(m, false)
-    m.window.hide()
+    if (!m.dock.isTucked()) m.dock.toggle(false)
   } else {
-    present(m, true)
+    m.window.hide()
   }
+}
+
+/**
+ * Show or hide every mini window together: any on screen → all hide (docked ones tuck away);
+ * none on screen → all come back (docked ones slide out), the last used one focused.
+ */
+export function toggleVisible(): boolean {
+  const open = liveMinis().filter((m) => host().header(m.window))
+  if (open.length === 0) return false
+  if (open.some(showing)) {
+    for (const m of open) hideMini(m)
+    return true
+  }
+  const focused = currentMini()
+  for (const m of open) if (m !== focused) present(m, false)
+  if (focused) present(focused, true)
   return true
 }
 
-/** Tuck the mini window to its nearest screen edge, or slide it back out when tucked. */
-export function toggleTuck(): boolean {
-  const m = mini
-  if (!m || m.closed || m.window.isDestroyed() || !host().header(m.window)) return false
+/** Tuck the last used mini window to its nearest screen edge, or slide it back out when tucked. */
+export function toggleTuck(tabId?: string): boolean {
+  const m = tabId ? miniWithTab(tabId) : currentMini()
+  if (!m || !host().header(m.window)) return false
   setRevealed(m, false)
   return m.dock.toggle(true)
 }
 
-/** Is the mini window tucked away behind its handle? */
-export function isTucked(): boolean {
-  return Boolean(mini && !mini.closed && mini.dock.isTucked())
+/** Is the last used mini window (or the one holding `tabId`) tucked away behind its handle? */
+export function isTucked(tabId?: string): boolean {
+  const m = tabId ? miniWithTab(tabId) : currentMini()
+  return Boolean(m?.dock.isTucked())
 }
 
-export function returnToBrowser(): boolean {
-  const m = mini
-  if (!m || m.closed || m.window.isDestroyed()) return false
+function returnMini(m: Mini): boolean {
+  if (m.closed || m.window.isDestroyed()) return false
   unwirePage(m)
   const moved = host().returnTab(m.window)
   if (!moved) rewirePage(m)
   return moved
 }
 
+/** Put one mini window's tab back in the browser: the one `window` is, or the one holding `tabId`. */
+export function returnToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
+  const m = target.window ? miniOf(target.window) : target.tabId ? miniWithTab(target.tabId) : null
+  return m ? returnMini(m) : false
+}
+
+/** Put every mini window's tab back in the browser (oldest first, so they land in that order). */
+export function returnAll(): boolean {
+  let any = false
+  for (const m of liveMinis()) any = returnMini(m) || any
+  return any
+}
+
+/** Bring one mini window up with the keyboard (Window menu, palette). */
+export function focusMini(tabId: string): boolean {
+  const m = miniWithTab(tabId)
+  if (!m) return false
+  present(m, true)
+  return true
+}
+
+/** Open mini windows, oldest first, for the Window menu and the palette. */
+export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean }> {
+  return liveMinis().flatMap((m) => {
+    const info = host().header(m.window)
+    return info ? [{ tabId: info.tabId, title: info.title || miniHeaderUrl(info.url) || 'Mini Window', tucked: m.dock.isTucked(), focused: m.window.isFocused() }] : []
+  })
+}
+
 export function isOpen(): boolean {
-  return Boolean(mini && !mini.closed && !mini.window.isDestroyed() && host().header(mini.window))
+  return liveMinis().some((m) => host().header(m.window))
 }
 
 export function refreshHeader(window: BaseWindow): void {
-  if (mini && mini.window === window) refreshHeaderOf(mini)
+  const m = miniOf(window)
+  if (m) refreshHeaderOf(m)
 }
 
 export function applySettings(settings: MiniWindowSettings): void {
-  if (mini) applyWindowSettings(mini, settings)
+  for (const m of liveMinis()) applyWindowSettings(m, settings)
 }
