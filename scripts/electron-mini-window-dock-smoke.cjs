@@ -214,7 +214,8 @@ async function run() {
     await waitFor(() => Object.keys(readDocks()).length === 0, 'the saved dock cleared')
     assert.equal(mini.isVisible(), true, 'still showing after undock')
   }
-  assert.equal(liveContents().filter(isHandlePage).length, 0, 'no leaked handle webContents after undocking')
+  // The handle window's 'closed' handler closes its page, which is destroyed a tick or two later: wait for it.
+  await waitFor(() => liveContents().filter(isHandlePage).length === 0, 'no leaked handle webContents after undocking', 5000)
 
   // --- 2. Header button, toggle command, palette command.
   smoke.step('header tuck button tucks to the nearest edge; toggle and palette slide it out and back')
