@@ -82,7 +82,7 @@ import {
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, TimeZonePicker, UpdateSettings
 } from './lazy-views'
-import { PageWatchersToggle, CertificateViewer, GlanceSettings } from './lazy-views'
+import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
@@ -1931,6 +1931,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </SettingsGroup>
                 <GlanceSettings />
+                <LocalAISettings />
                 <TabArchiveSettings />
                 <SpacesSettings />
                 <PageWatchersToggle />
