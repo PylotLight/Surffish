@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { dependencyDifferences, draftReleaseNotes, latestVersionTag, plistString, resolveFromTagVersion, resolveReleaseVersion, setPackageVersion } from './release-version.ts'
+import { dependencyDifferences, draftReleaseNotes, isPrereleaseSpec, latestVersionTag, plistString, resolveFromTagVersion, resolvePrereleaseVersion, resolveReleaseVersion, setPackageVersion } from './release-version.ts'
 
 test('bumps patch, minor and major from the latest tag', () => {
   assert.equal(resolveReleaseVersion('patch', '0.1.1', 'v0.1.1'), '0.1.2')
@@ -63,4 +63,15 @@ test('plistString reads a string key from an XML plist', () => {
   assert.equal(plistString(xml, 'CFBundleShortVersionString'), '0.1.2')
   assert.equal(plistString(xml, 'CFBundleName'), 'Surffish')
   assert.equal(plistString(xml, 'CFBundleVersion'), null)
+})
+
+test('pre-release versions: explicit, newer X.Y.Z than the latest stable tag, not tagged yet', () => {
+  assert.equal(resolvePrereleaseVersion('0.1.10-beta.1-e45', 'v0.1.9'), '0.1.10-beta.1-e45')
+  assert.equal(resolvePrereleaseVersion('v0.1.10-nightly.1-e46', 'v0.1.9'), '0.1.10-nightly.1-e46')
+  assert.throws(() => resolvePrereleaseVersion('0.1.9-beta.1', 'v0.1.9'), /newer than the latest stable tag/)
+  assert.throws(() => resolvePrereleaseVersion('0.1.10', 'v0.1.9'), /not a pre-release/)
+  assert.throws(() => resolvePrereleaseVersion('0.1.10-beta.1-e45', 'v0.1.9', ['v0.1.10-beta.1-e45']), /already tagged/)
+  assert.ok(isPrereleaseSpec('0.1.10-beta.1-e45') && !isPrereleaseSpec('patch') && !isPrereleaseSpec('0.1.10'))
+  // the stable flow never sees pre-release tags
+  assert.equal(latestVersionTag(['v0.1.9', 'v0.1.10-beta.1-e45']), 'v0.1.9')
 })

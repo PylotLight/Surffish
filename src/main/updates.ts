@@ -25,6 +25,7 @@ import {
   type UpdateState
 } from '../shared/update-feed'
 import { APP_NAME } from '../shared/config'
+import { channelProductName, releaseChannelOf, versionLine } from '../shared/release-channel'
 import { getBrowserSession } from './browser-session'
 import { isMainWindowRenderer, sendToMainWindowRenderers, setBrowserChromeState } from './browser-shell'
 import { getBrowserTabWebContents, openExternalBrowserTab } from './browser'
@@ -91,6 +92,8 @@ export function getUpdateState(): UpdateState {
   const decision = decideUpdate(latest?.version ?? null, currentVersion(), preferences, Date.now())
   return {
     currentVersion: currentVersion(),
+    channel: releaseChannelOf(currentVersion()),
+    versionLine: versionLine(currentVersion(), { electron: process.versions.electron, chrome: process.versions.chrome }),
     status,
     message,
     latest,
@@ -134,7 +137,7 @@ function showUpdateNotification(release: UpdateReleaseInfo): void {
   if (!Notification.isSupported()) return
   activeNotification?.close()
   const notification = new Notification({
-    title: `${APP_NAME} ${release.version} is available`,
+    title: `${channelProductName(releaseChannelOf(currentVersion()))} ${release.version} is available`,
     body: `You have ${currentVersion()}. Open Settings to see what's new and download it.`,
     silent: false
   })
@@ -182,7 +185,7 @@ async function runCheck(manual: boolean): Promise<UpdateState> {
       return publish()
     }
     const entries = parseReleaseFeed(await readCappedText(response))
-    const best = pickLatestRelease(entries, { includePrereleases: preferences.betaChannel })
+    const best = pickLatestRelease(entries, { includePrereleases: preferences.betaChannel || releaseChannelOf(currentVersion()) !== 'stable' })
     latest = best ? toReleaseInfo(best) : null
     const decision = decideUpdate(latest?.version ?? null, currentVersion(), preferences, Date.now())
     status = decision.updateAvailable ? 'available' : 'up-to-date'

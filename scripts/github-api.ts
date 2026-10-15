@@ -132,6 +132,8 @@ export interface CreateReleaseInput {
   title: string
   notes: string
   assetPath: string
+  /** A beta / nightly build: GitHub marks it pre-release and never makes it the "latest" release. */
+  prerelease?: boolean
   log?: (message: string) => void
 }
 
@@ -154,7 +156,7 @@ export function createGitHubRelease(config: GitHubApiConfig, input: CreateReleas
     const created = githubRequest(config, {
       method: 'POST',
       url: api(config, '/releases'),
-      body: { tag_name: input.tag, name: input.title, body: input.notes, draft: true, prerelease: false }
+      body: { tag_name: input.tag, name: input.title, body: input.notes, draft: true, prerelease: input.prerelease === true }
     })
     if (created.status !== 201) throw new Error(describeFailure(`creating the ${input.tag} release`, created))
     release = created.json
@@ -182,7 +184,7 @@ export function createGitHubRelease(config: GitHubApiConfig, input: CreateReleas
 
   let published = release
   if (release.draft) {
-    const patch = githubRequest(config, { method: 'PATCH', url: api(config, `/releases/${release.id}`), body: { draft: false, make_latest: 'true' } })
+    const patch = githubRequest(config, { method: 'PATCH', url: api(config, `/releases/${release.id}`), body: { draft: false, make_latest: input.prerelease ? 'false' : 'true' } })
     if (patch.status !== 200) throw new Error(describeFailure(`publishing the ${input.tag} release`, patch))
     published = patch.json
   }

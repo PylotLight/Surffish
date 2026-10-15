@@ -5,6 +5,7 @@ import { installIpcWindowScope } from './ipc-window-scope'
 import { app } from 'electron'
 import { dirname, join } from 'node:path'
 import { APP_ID, APP_NAME } from '../shared/config'
+import { channelProductName, releaseChannelOf } from '../shared/release-channel'
 import { CHROMIUM_HTTPS_UPGRADE_FEATURES, mergeFeatureList } from '../shared/https-only'
 import { registerIpc } from './ipc'
 import { registerDiagnosticsIpc } from './diagnostics'
@@ -43,7 +44,11 @@ import { registerGlanceIpc } from './glance-entry'
 import { chromeUserAgent } from './adblock-policy'
 
 installIpcWindowScope()
-app.setName(APP_NAME)
+// Beta / nightly builds (version X.Y.Z-beta.N-e45, ...) are "Surffish Beta" / "Surffish Nightly":
+// their own name, profile and single-instance lock, so testing one never touches the stable profile.
+const releaseChannel = releaseChannelOf(app.getVersion())
+const channelName = channelProductName(releaseChannel)
+app.setName(channelName)
 // Dev builds get their own profile, so they can run beside the installed release app.
 // The single-instance lock is per profile (userData), so each profile still has one window owner.
 // SURFFISH_PROFILE=<name> picks another isolated profile (e.g. a second dev instance).
@@ -54,6 +59,11 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
   const profileName = profileOverride ? `${APP_NAME} ${profileOverride}` : `${APP_NAME} Dev`
   app.setName(profileName)
   app.setPath('userData', join(app.getPath('appData'), profileName))
+} else if (usesDefaultProfileDir && releaseChannel !== 'stable') {
+  // Packaged pre-release: electron-builder already names it "Surffish Beta" (scripts/release.ts), so
+  // this is normally a no-op; it also covers a pre-release built without that override, which would
+  // otherwise open the stable app's profile.
+  app.setPath('userData', join(app.getPath('appData'), channelName))
 }
 // One user agent everywhere, before any session or page exists. Sessions get theirs from
 // browser-session.ts, but service workers and the workers inside cross-site iframes (Cloudflare

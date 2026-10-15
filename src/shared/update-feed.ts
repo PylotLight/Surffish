@@ -67,6 +67,10 @@ export interface UpdateReleaseInfo {
 /** Everything the Settings "About & updates" section and the badge render. */
 export interface UpdateState {
   currentVersion: string
+  /** stable, or beta / nightly / alpha for a pre-release build (src/shared/release-channel.ts). */
+  channel?: 'stable' | 'beta' | 'nightly' | 'alpha'
+  /** "Surffish Beta 0.1.10-beta.1-e45 · Electron 45.0.0-beta.3 · Chromium 156.0.8078.12" for About. */
+  versionLine?: string
   status: UpdateCheckStatus
   /** Human-readable status line, e.g. "Update check unavailable (repo private)". */
   message: string | null

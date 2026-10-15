@@ -74,7 +74,7 @@ export function UpdateSettings(): React.JSX.Element {
   return (
     <div ref={sectionRef} className="update-settings">
       <SettingsGroup title="About & updates" status={status.text} statusOn={status.on}>
-        <SettingsRow label={`Surffish ${state.currentVersion}`} hint={state.message ? `${state.message} · ${formatChecked(state.lastChecked)}` : formatChecked(state.lastChecked)}>
+        <SettingsRow label={state.versionLine ?? `Surffish ${state.currentVersion}`} hint={state.message ? `${state.message} · ${formatChecked(state.lastChecked)}` : formatChecked(state.lastChecked)}>
           <button className="settings-action secondary" type="button" disabled={busy || state.status === 'checking'} onClick={() => void run(() => window.api.browser.updates.check())}>
             {state.status === 'checking' ? 'Checking…' : 'Check for updates'}
           </button>
@@ -107,8 +107,8 @@ export function UpdateSettings(): React.JSX.Element {
           </div>
         )}
 
-        <SettingsRow label="Beta channel" hint="Also offer pre-releases (tags like v0.3.0-beta.1).">
-          <input type="checkbox" className="settings-switch" checked={state.betaChannel} disabled={busy} onChange={(event) => void run(() => saveSettings({ betaChannel: event.target.checked }))} aria-label="Offer pre-release updates" />
+        <SettingsRow label="Beta channel" hint={state.channel && state.channel !== 'stable' ? 'Always on in a pre-release build: it offers newer pre-releases and the next stable release.' : 'Also offer pre-releases (tags like v0.3.0-beta.1).'}>
+          <input type="checkbox" className="settings-switch" checked={state.betaChannel || (state.channel !== undefined && state.channel !== 'stable')} disabled={busy} onChange={(event) => void run(() => saveSettings({ betaChannel: event.target.checked }))} aria-label="Offer pre-release updates" />
         </SettingsRow>
         <form
           className="update-feed-form"

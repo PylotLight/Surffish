@@ -42,6 +42,30 @@ export function resolveReleaseVersion(spec: string, packageVersion: string, late
   return next
 }
 
+const PRERELEASE = /^(\d+\.\d+\.\d+)-([0-9A-Za-z][0-9A-Za-z.-]*)$/
+
+/**
+ * A beta / nightly test build's version, e.g. `0.1.10-beta.1-e45` or `0.1.10-nightly.1-e46`. Must be
+ * explicit (no bumping), its X.Y.Z must be newer than the latest stable tag (so the stable app's
+ * update check, which only takes plain versions, never sees it as a downgrade and the next stable
+ * X.Y.Z still outranks it), and the tag must not exist yet.
+ */
+export function resolvePrereleaseVersion(spec: string, latestStableTag: string | null, tags: string[] = []): string {
+  const version = spec.trim().replace(/^v/, '')
+  const match = PRERELEASE.exec(version)
+  if (!match) throw new Error(`not a pre-release version (X.Y.Z-beta.N[-eNN]): '${spec}'`)
+  const tagged = latestStableTag ? latestStableTag.replace(/^v/, '') : null
+  if (tagged && compareVersions(match[1]!, tagged) <= 0) {
+    throw new Error(`pre-release ${version}: ${match[1]} must be newer than the latest stable tag v${tagged}`)
+  }
+  if (tags.map((tag) => tag.trim()).includes(`v${version}`)) throw new Error(`v${version} is already tagged`)
+  return version
+}
+
+export function isPrereleaseSpec(spec: string): boolean {
+  return PRERELEASE.test(spec.trim().replace(/^v/, ''))
+}
+
 /** Newest vX.Y.Z tag from a `git tag` listing, ignoring anything that isn't plain semver. */
 export function latestVersionTag(tags: string[]): string | null {
   const versions = tags.map((tag) => tag.trim()).filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag))

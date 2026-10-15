@@ -57,13 +57,13 @@ function withFakeCurl(fn: (log: () => string[]) => void, opts: { existingRelease
   const logFile = join(dir, 'log')
   writeFileSync(logFile, '')
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash
-method=GET; url=""; proxy=""
+method=GET; url=""; proxy=""; body=""
 while [ $# -gt 0 ]; do
-  case "$1" in -X) method="$2"; shift;; --proxy) proxy="$2"; shift;; -o|-w|-H|--max-time|--config|--data-binary) shift;; -*) ;; *) url="$1";; esac
+  case "$1" in -X) method="$2"; shift;; --proxy) proxy="$2"; shift;; --data-binary) body="\${2#@}"; shift;; -o|-w|-H|--max-time|--config) shift;; -*) ;; *) url="$1";; esac
   shift
 done
 stdin="$(cat)"
-echo "$method $url proxy=$proxy auth=$([[ "$stdin" == *"Bearer t0k"* ]] && echo yes || echo no)" >> "${logFile}"
+echo "$method $url proxy=$proxy auth=$([[ "$stdin" == *"Bearer t0k"* ]] && echo yes || echo no)$([ -n "$body" ] && [ -f "$body" ] && echo " body=$(tr -d '\\n' < "$body")")" >> "${logFile}"
 case "$method $url" in
   "GET https://api.github.com/repos/o/r") printf '{"full_name":"o/r"}\\n200';;
   "GET https://api.github.com/repos/o/r/releases?per_page=5") printf '[{"tag_name":"v0.1.1"}]\\n200';;
@@ -115,6 +115,16 @@ test('release: verify tag -> draft -> upload -> publish', () => {
     createGitHubRelease(config, { tag: 'v9', title: 'S v9', notes: 'n', assetPath: join(dir, 'S.zip') })
     assert.ok(!log().some((l) => l.startsWith('POST https://api.github.com/repos/o/r/releases ')), 'reuses the existing draft')
   }, { existingRelease: true })
+  withFakeCurl((log) => {
+    createGitHubRelease(config, { tag: 'v9', title: 'S v9', notes: 'n', assetPath: join(dir, 'S.zip') })
+    assert.match(log().find((l) => l.startsWith('POST https://api.github.com/repos/o/r/releases ')) ?? '', /"prerelease":false/)
+    assert.match(log().find((l) => l.startsWith('PATCH ')) ?? '', /"make_latest":"true"/)
+  })
+  withFakeCurl((log) => {
+    createGitHubRelease(config, { tag: 'v9', title: 'S v9', notes: 'n', assetPath: join(dir, 'S.zip'), prerelease: true })
+    assert.match(log().find((l) => l.startsWith('POST https://api.github.com/repos/o/r/releases ')) ?? '', /"prerelease":true/)
+    assert.match(log().find((l) => l.startsWith('PATCH ')) ?? '', /"make_latest":"false"/)
+  })
   withFakeCurl(() => {
     assert.throws(() => createGitHubRelease(config, { tag: 'v8', title: '', notes: '', assetPath: join(dir, 'S.zip') }), /tag v8 not found.*HTTP 404 Not Found/)
   })

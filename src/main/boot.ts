@@ -8,7 +8,18 @@ import { join } from 'node:path'
 import { compileCacheDirectoryFor, pruneOtherCompileCaches } from './compile-cache-dir'
 
 // Same as APP_NAME in shared/config; not imported, so this entry shares no chunk with the app.
-const APP_NAME = 'Surffish'
+// Pre-release builds (X.Y.Z-beta.N, -nightly.N, ...) keep their own cache folder: the stable app and
+// a beta prune every other version's cache, so sharing one folder would make them wipe each other's.
+const PRERELEASE_WORD = /^\d+\.\d+\.\d+-([A-Za-z]+)/.exec(safeVersion())?.[1]?.toLowerCase()
+const APP_NAME = !PRERELEASE_WORD ? 'Surffish' : `Surffish ${PRERELEASE_WORD === 'nightly' || PRERELEASE_WORD === 'alpha' ? PRERELEASE_WORD[0]!.toUpperCase() + PRERELEASE_WORD.slice(1) : 'Beta'}`
+
+function safeVersion(): string {
+  try {
+    return app.getVersion()
+  } catch {
+    return ''
+  }
+}
 
 /** The OS cache directory (purgeable, outside the profile, so dev and release builds share it safely). */
 function compileCacheRoot(): string {
