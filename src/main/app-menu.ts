@@ -13,6 +13,7 @@ import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
+import { returnMiniWindowToBrowser, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -185,6 +186,11 @@ export function installAppMenu(): void {
         ...(pageWatchersEnabled() ? [{ label: 'Page Watchers', click: () => { revealPageWatchers() } }] : []),
         { label: 'Feeds', click: () => { revealFeeds() } },
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
+        { type: 'separator' },
+        // Pop out / put back the current tab (Cmd/Ctrl+Shift+M); the global toggle lives in Settings.
+        tabItem('Pop Out to Mini Window', 'miniWindow'),
+        { label: 'Return Mini Window to Browser', click: () => { returnMiniWindowToBrowser() } },
+        { label: 'Show/Hide Mini Window', click: () => { void toggleMiniWindow() } },
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
         ...windowListMenuItems()
       ]

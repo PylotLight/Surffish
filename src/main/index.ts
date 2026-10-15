@@ -19,7 +19,7 @@ import { initializeScreenSharing } from './screen-share'
 import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
 import { quietRetiredShellSenders } from './ipc-retired'
-import { freezeBrowserSession, setBrowserSearchEngine } from './browser'
+import { freezeBrowserSession, setBrowserSearchEngine, TAB_COMMAND_SHORTCUTS } from './browser'
 import { browserWindows } from './window-scope'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
@@ -40,6 +40,8 @@ import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feed
 import { registerReadingListIpc } from './reading-list-ipc'
 import { registerAdblockStatsIpc } from './adblock-stats'
 import { registerGlanceIpc } from './glance-entry'
+import { registerMiniWindowIpc, setMiniWindowAppShortcuts } from './mini-window-entry'
+import { APP_SHORTCUTS } from './app-shortcuts'
 import { initializeLocalAI, registerLocalAIIpc } from './local-ai'
 import { chromeUserAgent } from './adblock-policy'
 
@@ -123,6 +125,9 @@ app.whenReady().then(async () => {
   registerAdblockStatsIpc()
   // Glance settings only; the glance module itself loads on the first Shift+click.
   registerGlanceIpc()
+  // Mini window settings and its global toggle shortcut; the window module loads on first use.
+  setMiniWindowAppShortcuts(() => [...Object.values(APP_SHORTCUTS), ...Object.values(TAB_COMMAND_SHORTCUTS).map((shortcut) => shortcut.accelerator)])
+  registerMiniWindowIpc()
   // Built-in AI (Prompt API, experimental): off by default; nothing is forked until it's on.
   registerLocalAIIpc()
   initializeLocalAI()

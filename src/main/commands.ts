@@ -50,6 +50,8 @@ import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
+import { canPopOutBrowserTab, getMiniWindowTabId } from './browser'
+import { getMiniWindowSettings, popOutTabToMiniWindow, returnMiniWindowToBrowser, toggleMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -180,6 +182,23 @@ const COMMANDS: BrowserCommand[] = [
     id: 'glance.toggleShiftClick', title: () => (glanceShiftClickEnabled() ? 'Turn Off Shift-Click Glance' : 'Turn On Shift-Click Glance'), section: 'Settings',
     keywords: ['glance', 'peek', 'shift click', 'link preview'], refocusPage: true,
     run: () => setGlanceShiftClick(!glanceShiftClickEnabled())
+  },
+  // Mini window
+  {
+    id: 'miniWindow.popOut', title: 'Pop Out to Mini Window', accelerator: TAB_COMMAND_SHORTCUTS.miniWindow.accelerator, section: 'View',
+    keywords: ['mini window', 'float', 'always on top', 'picture in picture', 'pin', 'detach', 'pop out', 'overlay'],
+    enabled: () => canPopOutBrowserTab(), run: () => popOutTabToMiniWindow()
+  },
+  {
+    id: 'miniWindow.return', title: 'Return Mini Window to Browser', section: 'View',
+    keywords: ['mini window', 'pop in', 'dock', 'back to browser'],
+    enabled: () => getMiniWindowTabId() !== null, run: () => returnMiniWindowToBrowser()
+  },
+  {
+    id: 'miniWindow.toggle', title: () => (getMiniWindowTabId() ? 'Show/Hide Mini Window' : getMiniWindowSettings().defaultUrl ? 'Open Mini Window' : 'Toggle Mini Window'), section: 'View',
+    keywords: ['mini window', 'float', 'always on top', 'ai chat', 'pinned page'],
+    refocusPage: false,
+    run: () => toggleMiniWindow()
   },
   // Split view
   {

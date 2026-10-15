@@ -35,7 +35,7 @@ import { createBroadcastQueue } from '../shared/tab-broadcast'
 import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
 import { activeTabSinceFor, captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { attachPagePopups, type PagePopupHost, userPopupResponse } from './page-popups'
-import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
+import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, lastFocusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
@@ -66,6 +66,8 @@ import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplit
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
+import { noteMiniWindowChanged, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost } from './mini-window-entry'
+import { canPopOutUrl } from '../shared/mini-window'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
@@ -161,6 +163,14 @@ interface BrowserWindowState {
   spaceActiveTabs: Map<string, string>
   /** Tab groups in this window (shared/tab-groups.ts has the rules). */
   groups: TabGroup[]
+  /**
+   * The mini window (mini-window.ts): a small always-on-top window holding exactly one tab, with no
+   * shell surfaces. It is not a registered browser window, so "the current window" never resolves
+   * to it; tabs it would open go to a normal window (browserTargetForMini).
+   */
+  mini: boolean
+  /** Mini window only: the window its tab came from (where Return to Browser puts it back). */
+  miniHome: BrowserWindowState | null
 }
 const windowStates: BrowserWindowState[] = []
 let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
@@ -212,7 +222,8 @@ function windowStateFor(window: BaseWindow | null | undefined): BrowserWindowSta
 
 /** The window an implicit call is for: the IPC sender's, else the focused / last focused one. */
 function currentWindowState(): BrowserWindowState | undefined {
-  return windowStateFor(currentBrowserWindow()) ?? (windowStates.length === 1 ? windowStates[0] : undefined)
+  const normal = windowStates.filter((w) => !w.mini)
+  return windowStateFor(currentBrowserWindow()) ?? (normal.length === 1 ? normal[0] : undefined)
 }
 
 /** Every tab in every window. */
@@ -555,6 +566,8 @@ function publishState(w = currentWindowState()): void {
 /** A load, title or tab change burst becomes one `browser:state` + one `browser:tabs` diff per frame. */
 const broadcastQueue = createBroadcastQueue<BrowserWindowState>((w, stateChanged) => {
   if (!isLiveWindow(w)) return
+  // The mini window has no shell surfaces; its header page draws the tab's title/URL/loading.
+  if (w.mini) return void noteMiniWindowChanged(w.window)
   if (stateChanged) sendStateToWindowRenderers(w.window, getState(w))
   sendTabsToWindowRenderers(w.window, getTabSummaries(w))
   // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
@@ -580,12 +593,18 @@ export function freezeBrowserSession(): void {
 function persistOpenTabs(): void {
   if (sessionFrozen) return
   // Private windows are never saved; private tabs in normal windows are skipped.
-  const windows = windowStates.filter((w) => !w.isPrivate && !w.window.isDestroyed())
+  const windows = windowStates.filter((w) => !w.isPrivate && !w.mini && !w.window.isDestroyed())
   if (windows.length === 0) return
+  // The mini window's tab is saved as the last tab of its home window (or the first window), so a
+  // restart never loses it; it comes back as an ordinary tab.
+  const miniTabs = windowStates.filter((w) => w.mini && !w.window.isDestroyed()).flatMap((w) => w.tabs.map((tab) => ({ tab, home: w.miniHome })))
+  const extraTabsFor = (w: BrowserWindowState): BrowserTab[] => miniTabs
+    .filter(({ home }) => (home && windows.includes(home) ? home : windows[0]) === w)
+    .map(({ tab }) => tab)
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
   const saved = windows.map((w) => {
     // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
-    const kept = w.tabs.filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
+    const kept = [...w.tabs, ...extraTabsFor(w)].filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
     const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
@@ -960,6 +979,7 @@ function showBrowserTabContextMenu(id: string): void {
     { label: 'Add to Reading List', ...tabMenuAccelerator('readingList'), enabled: Boolean(origin) && !tab.isPrivate, click: () => addTabToReadingList(id) },
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
+    { label: 'Pop Out to Mini Window', ...tabMenuAccelerator('miniWindow'), enabled: canPopOutTab(tab), click: () => { void popOutTabToMiniWindow(id) } },
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
     { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
     { type: 'separator' },
@@ -984,7 +1004,7 @@ function showBrowserTabContextMenu(id: string): void {
 
 /** "Move to New Window" plus one "Move to <window>" per other window the tab may go to. */
 function moveTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  const targets = windowStates.filter((w) => w !== tab.win && isLiveWindow(w) && canMoveTabTo(tab, w))
+  const targets = windowStates.filter((w) => w !== tab.win && !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
   return [
     { label: 'Move to New Window', enabled: tab.win.tabs.length > 1, click: () => { moveBrowserTabToNewWindow(tab.id) } },
     ...targets.map((w): MenuItemConstructorOptions => ({
@@ -1146,7 +1166,8 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     // Link hovers for Glance's hook (glance-entry.ts); a no-op with no listeners.
     emitGlanceLinkHover(contents, url)
     if (!isTabOnScreen(tab)) return
-    showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
+    // The mini window has no link status bubble (no shell surfaces to stack it under).
+    if (!tab.win.mini) showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
     // Resting on a link for ~200 ms preconnects its origin in this tab's own session.
     noteLinkHover(contents, url, () => networkContextForTab(tab))
   })
@@ -1191,7 +1212,9 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     // Shift+click on a link: peek at it in a Glance over this page instead of a new window
     // (Settings → General; off keeps the old Shift+click behaviour below).
     if (!tab.extensionPageOrigin && !tab.pdfEditor && isShiftClickLinkOpen(details) && isGlanceableUrl(details.url) && glanceShiftClickEnabled()) {
-      void openGlance(contents, details.url)
+      // No glance sheet in the small mini window: the link opens as a background tab in the browser.
+      if (tab.win.mini) openBackgroundTab(details.url, tab.isPrivate, tab.win)
+      else void openGlance(contents, details.url)
       return { action: 'deny' }
     }
     // blob:/data: links and window.open(blobUrl): let Chromium make the new contents (same process,
@@ -1635,7 +1658,7 @@ function glanceSourceTab(source: GlanceSource): BrowserTab | undefined {
 setGlanceHost({
   sourceFor: (contents) => {
     const tab = tabForContents(contents)
-    if (!tab || tab.extensionPageOrigin || tab.pdfEditor || !isLiveWindow(tab.win) || contents.isDestroyed()) return null
+    if (!tab || tab.extensionPageOrigin || tab.pdfEditor || tab.win.mini || !isLiveWindow(tab.win) || contents.isDestroyed()) return null
     return { tabId: tab.id, window: tab.win.window, contents, isPrivate: tab.isPrivate }
   },
   pageWebPreferences: (source) => {
@@ -1693,6 +1716,222 @@ setGlanceHost({
   bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
 })
 
+// ---------------------------------------------------------------------------
+// Mini window (mini-window-entry.ts / mini-window.ts): one tab's live page in a small always-on-top
+// window. The window is a BrowserWindowState with `mini` set and no shell surfaces, holding exactly
+// one tab, so the tab keeps every tab behaviour (events, history, crash handling, session saving)
+// and, being its window's active tab, counts as on screen: never slept, discarded or archived.
+
+/** Set while the mini window opens its own page (createTab otherwise sends mini tabs to a browser window). */
+let creatingMiniTab = false
+
+/** Where tabs opened from the mini window go: its home window, the last focused one, any normal one, or a new one. */
+function browserTargetForMini(mini: BrowserWindowState | undefined): BrowserWindowState | undefined {
+  const home = mini?.miniHome
+  const focused = windowStateFor(lastFocusedBrowserWindow())
+  const candidate = (isLiveWindow(focused) && !focused.mini ? focused : undefined)
+    ?? (home && isLiveWindow(home) ? home : undefined)
+    ?? windowStates.find((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
+    ?? windowStates.find((w) => !w.mini && isLiveWindow(w))
+  if (candidate) return candidate
+  const created = browserWindowFactory?.({})
+  return created ? windowStateFor(created) : undefined
+}
+
+function miniStateFor(window: BaseWindow): BrowserWindowState | undefined {
+  const w = windowStateFor(window)
+  return w?.mini ? w : undefined
+}
+
+/** Page commands pressed in (or sent to) the mini window's tab. False: not a page command, run it as usual. */
+function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
+  const contents = tab.view?.webContents
+  const live = contents && !contents.isDestroyed() ? contents : null
+  switch (command) {
+    case 'miniWindow':
+      returnMiniWindowToBrowser()
+      return true
+    case 'close':
+      closeBrowserTab(tab.id)
+      return true
+    case 'reload':
+    case 'hardReload':
+      reloadBrowserTab(tab.id, command === 'hardReload')
+      return true
+    case 'back':
+      if (live?.navigationHistory.canGoBack()) live.navigationHistory.goBack()
+      return true
+    case 'forward':
+      if (live?.navigationHistory.canGoForward()) live.navigationHistory.goForward()
+      return true
+    case 'zoomIn':
+    case 'zoomOut':
+    case 'zoomReset':
+      zoomTab(tab, command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset')
+      return true
+    case 'copyLink':
+    case 'copyCleanLink':
+    case 'bookmark':
+    case 'readingList':
+      return false
+    default:
+      // Window-level commands (find, split, history, tab cycling…) belong to the browser window.
+      return true
+  }
+}
+
+/** Make `win` the mini window's BrowserWindowState (no tabs yet). */
+function attachMiniWindowState(win: BaseWindow): BrowserWindowState {
+  const existing = windowStateFor(win)
+  if (existing) return existing
+  const w: BrowserWindowState = {
+    window: win,
+    tabs: [],
+    activeTabId: null,
+    browserBounds: { x: 0, y: 0, width: 0, height: 0 },
+    findState: { tabId: null, open: false, text: '', result: null },
+    confirmingWindowClose: false,
+    isPrivate: false,
+    splits: [],
+    recentTabIds: [],
+    activeSpaceId: DEFAULT_SPACE_ID,
+    spaceActiveTabs: new Map(),
+    groups: [],
+    mini: true,
+    miniHome: null
+  }
+  windowStates.push(w)
+  win.on('closed', () => {
+    const index = windowStates.indexOf(w)
+    if (index < 0) return
+    windowStates.splice(index, 1)
+    const closingTabs = [...w.tabs]
+    w.tabs.length = 0
+    w.activeTabId = null
+    w.miniHome = null
+    for (const tab of closingTabs) {
+      cancelSleepTimer(tab)
+      forgetTabPicture(tab.id)
+      const view = tab.view
+      tab.view = null
+      if (view) {
+        detachNetworkInspector(view.webContents)
+        if (!view.webContents.isDestroyed()) view.webContents.close()
+      }
+    }
+    if (closingTabs.some((tab) => tab.isPrivate) && !allTabs().some((tab) => tab.isPrivate)) endPrivateSession()
+    persistOpenTabs()
+  })
+  return w
+}
+
+/** Can this tab go into the mini window? Loaded or sleeping web pages; not New Tab, the PDF editor or extension pages. */
+function canPopOutTab(tab: BrowserTab | undefined): tab is BrowserTab {
+  return Boolean(tab && !tab.win.mini && !tab.pdfEditor && !tab.extensionPageOrigin && canPopOutUrl(currentUrl(tab)))
+}
+
+/** Is `id` (default: the current window's active tab) a tab that can pop out to the mini window? */
+export function canPopOutBrowserTab(id?: string | null): boolean {
+  return canPopOutTab(getTab(id ?? undefined))
+}
+
+/** The tab in the mini window, if one is open. */
+export function getMiniWindowTabId(): string | null {
+  const w = windowStates.find((candidate) => candidate.mini && isLiveWindow(candidate))
+  return w?.activeTabId ?? null
+}
+
+setMiniWindowHost({
+  attachWindow: (win) => { attachMiniWindowState(win) },
+  activeTabId: () => getTab()?.id ?? null,
+  canPopOut: (tabId) => canPopOutTab(findTab(tabId)),
+  adoptTab: (tabId, win) => {
+    const tab = findTab(tabId)
+    const mini = miniStateFor(win)
+    if (!canPopOutTab(tab) || !isLiveWindow(mini) || mini.tabs.length > 0) return false
+    const from = tab.win
+    mini.isPrivate = tab.isPrivate
+    mini.miniHome = from
+    mini.activeSpaceId = tab.spaceId
+    // The window keeps a tab: popping out its last one leaves a New Tab behind (in the same Space).
+    if (from.tabs.length === 1) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
+    detachTabFromWindow(tab)
+    // Its group stays behind; the mini window has none.
+    tab.groupId = null
+    adoptTabIntoWindow(tab, mini, null)
+    activateTabInternal(tab.id)
+    persistOpenTabs()
+    publishState(from)
+    return true
+  },
+  openUrl: (url, win) => {
+    const mini = miniStateFor(win)
+    if (!isLiveWindow(mini) || mini.tabs.length > 0) return null
+    mini.isPrivate = false
+    mini.miniHome = windowStateFor(lastFocusedBrowserWindow()) ?? null
+    mini.activeSpaceId = DEFAULT_SPACE_ID
+    creatingMiniTab = true
+    try {
+      // The normal profile session (Default Space): signed-in sites stay signed in.
+      const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, mini, DEFAULT_SPACE_ID)
+      if (id) persistOpenTabs()
+      return id
+    } finally {
+      creatingMiniTab = false
+    }
+  },
+  returnTab: (win) => {
+    const mini = miniStateFor(win)
+    const tab = activeTabOf(mini)
+    if (!mini || !tab) return false
+    const home = mini.miniHome
+    const target = (home && isLiveWindow(home) && canMoveTabTo(tab, home) ? home : undefined)
+      ?? (() => { const focused = windowStateFor(lastFocusedBrowserWindow()); return isLiveWindow(focused) && !focused.mini && canMoveTabTo(tab, focused) ? focused : undefined })()
+      ?? windowStates.find((w) => !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
+    if (target) {
+      // Moving its only tab out closes the mini window (detachTabFromWindow).
+      return moveBrowserTabToWindow(tab.id, target.window)
+    }
+    // No browser window left (macOS keeps running without one): a new window takes the tab over.
+    const created = browserWindowFactory?.({ private: home?.isPrivate === true && tab.isPrivate, adoptTabId: tab.id })
+    return Boolean(created && findTab(tab.id)?.win.window === created)
+  },
+  closeTab: (win) => {
+    const tab = activeTabOf(miniStateFor(win))
+    if (tab) closeBrowserTab(tab.id, true)
+    else if (!win.isDestroyed()) win.close()
+  },
+  setPageBounds: (win, bounds) => {
+    const mini = miniStateFor(win)
+    if (!mini) return
+    mini.browserBounds = { ...bounds }
+    applyTabBounds(mini)
+  },
+  pageContents: (win) => {
+    const contents = activeTabOf(miniStateFor(win))?.view?.webContents
+    return contents && !contents.isDestroyed() ? contents : null
+  },
+  header: (win) => {
+    const tab = activeTabOf(miniStateFor(win))
+    if (!tab) return null
+    const contents = tab.view?.webContents
+    const live = contents && !contents.isDestroyed() ? contents : null
+    return {
+      tabId: tab.id,
+      title: pageTitle(tab),
+      url: currentUrl(tab),
+      faviconUrl: tab.faviconUrl,
+      loading: live ? live.isLoading() : false,
+      canGoBack: live ? live.navigationHistory.canGoBack() : false,
+      private: tab.isPrivate
+    }
+  },
+  handleShortcut: (win, input) => {
+    const tab = activeTabOf(miniStateFor(win))
+    return tab ? handleBrowserShortcutInput(input, tab.id) : false
+  }
+})
+
 export interface ExtensionPageTabOptions {
   extensionUrl: string
   preloadPath: string
@@ -1700,8 +1939,15 @@ export interface ExtensionPageTabOptions {
 }
 
 function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false, targetWindow: BrowserWindowState | undefined = currentWindowState(), spaceId?: string): string | null {
-  const w = targetWindow
+  // The mini window holds one tab: anything opened from it (links, context menu, popups as tabs)
+  // goes to a normal window, which comes forward for a foreground tab.
+  const redirected = targetWindow?.mini === true && !creatingMiniTab
+  const w = redirected ? browserTargetForMini(targetWindow) : targetWindow
   if (!isLiveWindow(w)) return null
+  if (redirected && activate && !w.window.isDestroyed()) {
+    w.window.show()
+    w.window.focus()
+  }
   const { tabs } = w
   // Every page tab in a private window is private; with no address it opens the private New Tab.
   const makePrivate = (isPrivate || w.isPrivate) && !extensionPage
@@ -1805,7 +2051,9 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     // A new window opens on the Space you're in (private windows have no Spaces).
     activeSpaceId: init.private === true ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), (windowStateFor(focusedBrowserWindow()) ?? currentWindowState())?.activeSpaceId),
     spaceActiveTabs: new Map(),
-    groups: []
+    groups: [],
+    mini: false,
+    miniHome: null
   }
   windowStates.push(w)
   tabSleepMinutes = getBrowserTabSleepMinutes()
@@ -2159,7 +2407,7 @@ export function dropBrowserTabOutside(id: string): boolean {
   }
   // Back over its own window: the left/right edge of the page area splits the page with the tab.
   if (contains(tab.win.window)) return dropTabOnPageEdge(tab, point)
-  const target = windowStates.find((w) => w !== tab.win && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
+  const target = windowStates.find((w) => w !== tab.win && !w.mini && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
   if (target) return moveBrowserTabToWindow(id, target.window)
   if (windowStates.some((w) => w !== tab.win && isLiveWindow(w) && contains(w.window))) return false
   return moveBrowserTabToNewWindow(id, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
@@ -2168,7 +2416,7 @@ export function dropBrowserTabOutside(id: string): boolean {
 /** Window menu / palette: every window with its label, in creation order. */
 export function listBrowserWindows(): { window: BaseWindow; label: string; private: boolean; focused: boolean }[] {
   const focused = focusedBrowserWindow()
-  return windowStates.filter(isLiveWindow).map((w) => ({ window: w.window, label: browserWindowLabel(w.window), private: w.isPrivate, focused: w.window === focused }))
+  return windowStates.filter((w) => isLiveWindow(w) && !w.mini).map((w) => ({ window: w.window, label: browserWindowLabel(w.window), private: w.isPrivate, focused: w.window === focused }))
 }
 
 export function getBrowserState(): BrowserState {
@@ -2181,16 +2429,17 @@ export function getBrowserTabs(): BrowserTabSummary[] {
 
 /** Diagnostics: every tab with its live web contents (null while it sleeps). */
 export function getBrowserTabProcessEntries(): TabProcessEntry[] {
-  const several = windowStates.length > 1
+  const several = windowStates.filter((w) => !w.mini).length > 1
   return allTabs().map((tab) => ({
     id: tab.id,
-    title: pageTitle(tab),
+    // Task Manager names the mini window's tab as such.
+    title: tab.win.mini ? `Mini Window: ${pageTitle(tab)}` : pageTitle(tab),
     url: currentUrl(tab),
     active: isActiveTab(tab),
     pdfEditor: tab.pdfEditor !== null,
     extensionPage: tab.extensionPageOrigin !== null,
     contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
-    ...(several ? { windowNumber: browserWindowNumber(tab.win.window) } : {}),
+    ...(several && !tab.win.mini ? { windowNumber: browserWindowNumber(tab.win.window) } : {}),
     ...(spacesEnabled() && !tab.win.isPrivate ? { spaceName: getSpace(tab.spaceId)?.name ?? 'Default' } : {})
   }))
 }
@@ -2280,7 +2529,7 @@ export function newPrivateBrowserTab(input?: string): string | null {
 function normalWindowState(): BrowserWindowState | undefined {
   const current = currentWindowState()
   if (!current?.isPrivate) return current
-  return [...windowStates].reverse().find((w) => !w.isPrivate && isLiveWindow(w)) ?? current
+  return [...windowStates].reverse().find((w) => !w.isPrivate && !w.mini && isLiveWindow(w)) ?? current
 }
 
 /**
@@ -2543,6 +2792,7 @@ export type TabCommand =
   | 'screenshot'
   | 'splitView' | 'focusPaneLeft' | 'focusPaneRight'
   | 'readingList'
+  | 'miniWindow'
 
 interface CommandShortcut {
   key: string
@@ -2594,7 +2844,9 @@ export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
   focusPaneLeft: { key: 'arrowleft', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Left' },
   focusPaneRight: { key: 'arrowright', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Right' },
   // Safari/Orion use Cmd+Shift+D, which is Bookmark All Tabs here (Chrome's binding); Cmd/Ctrl+Shift+L is free.
-  readingList: { key: 'l', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+L' }
+  readingList: { key: 'l', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+L' },
+  // Pop the tab out to the mini window, or (in the mini window) put it back. Free in Chrome on macOS.
+  miniWindow: { key: 'm', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+M' }
 }
 
 function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
@@ -2604,12 +2856,18 @@ function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOption
 }
 
 export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
-  const owner = findTab(tabId)?.win.window
+  const ownerTab = findTab(tabId)
+  // The mini window's tab: page commands act on it; the rest go to the browser window as usual.
+  if (ownerTab?.win.mini && runMiniTabCommand(ownerTab, command)) return
+  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window
   if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
     runInWindow(owner, () => runTabCommand(command, tabId))
     return
   }
   switch (command) {
+    case 'miniWindow':
+      if (tabId) void popOutTabToMiniWindow(tabId)
+      return
     case 'close':
       closeBrowserTabFromShortcut(tabId)
       return
@@ -2719,7 +2977,9 @@ export function handleBrowserShortcutInput(input: Electron.Input, tabId: string 
 }
 
 export function handleBrowserShortcut(key: string, shift: boolean, tabId: string | null | undefined = getTab()?.id ?? null, alt = false, primary = true): boolean {
-  const owner = findTab(tabId)?.win.window
+  const ownerTab = findTab(tabId)
+  // The mini window isn't a registered browser window, so it can't scope a call (runInWindow would no-op and recurse).
+  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window
   if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
     return runInWindow(owner, () => handleBrowserShortcut(key, shift, tabId, alt, primary))
   }
@@ -3061,7 +3321,8 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (tabs.length === 0) {
     w.activeTabId = null
     // The last tab of one of several windows closes that window; the final window keeps a fresh New Tab.
-    if (hasOtherWindows(w)) {
+    // The mini window only ever holds its one tab, so it closes with it.
+    if (w.mini || hasOtherWindows(w)) {
       setImmediate(() => { if (!w.window.isDestroyed() && w.tabs.length === 0) w.window.close() })
       return
     }
@@ -3081,8 +3342,9 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   publishState(w)
 }
 
+/** Other normal windows (the mini window doesn't count: closing the last browser tab never hands the app to it). */
 function hasOtherWindows(w: BrowserWindowState): boolean {
-  return windowStates.some((other) => other !== w && isLiveWindow(other))
+  return windowStates.some((other) => other !== w && !other.mini && isLiveWindow(other))
 }
 
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
@@ -3103,7 +3365,7 @@ function endPrivateSession(): void {
 export function closeBrowserTabFromShortcut(tabId = getTab()?.id): void {
   const w = findTab(tabId)?.win ?? currentWindowState()
   if (!w) return
-  if (w.tabs.length > 1 || hasOtherWindows(w)) {
+  if (w.tabs.length > 1 || w.mini || hasOtherWindows(w)) {
     if (tabId) closeBrowserTab(tabId)
     return
   }
@@ -4777,7 +5039,7 @@ export function dropBrowserTabGroupOutside(groupId: string): boolean {
     return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
   }
   if (contains(from.window)) return false
-  const target = windowStates.find((w) => w !== from && isLiveWindow(w) && contains(w.window))
+  const target = windowStates.find((w) => w !== from && !w.mini && isLiveWindow(w) && contains(w.window))
   if (target) return moveBrowserTabGroupToWindow(groupId, target.window)
   return moveBrowserTabGroupToWindow(groupId, null, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
 }
@@ -4839,7 +5101,7 @@ export function showBrowserTabGroupMenu(groupId: string): boolean {
   const w = windowOfGroup(groupId)
   const group = groupById(w, groupId)
   if (!w || !group) return false
-  const others = windowStates.filter((candidate) => candidate !== w && isLiveWindow(candidate) && !candidate.isPrivate === !w.isPrivate)
+  const others = windowStates.filter((candidate) => candidate !== w && !candidate.mini && isLiveWindow(candidate) && !candidate.isPrivate === !w.isPrivate)
   const items: MenuItemConstructorOptions[] = [
     ...(groupHeaderMenuHook?.(groupId) ?? []),
     {

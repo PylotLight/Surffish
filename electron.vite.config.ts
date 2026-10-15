@@ -34,6 +34,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/glance.cjs'),
       join(outputDirectory, 'glance.cjs')
     )
+    // Mini window header bridge.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/mini-window.cjs'),
+      join(outputDirectory, 'mini-window.cjs')
+    )
     copyFileSync(
       resolve(projectDirectory, 'src/preload/screenshot.cjs'),
       join(outputDirectory, 'screenshot.cjs')

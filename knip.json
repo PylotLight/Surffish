@@ -40,6 +40,9 @@
     "src/main/glance.ts": [
       "exports"
     ],
+    "src/main/mini-window.ts": [
+      "exports"
+    ],
     "src/main/page-watchers.ts": [
       "exports"
     ],

@@ -74,6 +74,7 @@ Surffish isn't signed or notarized yet, so the first launch needs one extra step
 | **Command palette** | Commands, open tabs and search keywords (`yt lofi`, or a bang anywhere: `lofi !yt`) in one place. | ⌘K |
 | **Split view** | Two tabs side by side. Swap panes, pop one out, or move focus between them. | ⇧⌘= · ⌥⌘← / ⌥⌘→ |
 | **Glance** | Shift-click a link to open it in a floating sheet over the current tab. Keep it as a real tab without reloading. | Shift-click · ⌘↩ to keep |
+| **Mini window** | Pop a tab out into a small window that floats above other apps (an AI chat, a video, docs), then put it back, without reloading. A global shortcut opens a pinned page in it. | ⇧⌘M · ⇧⌘Space |
 | **Ad and tracker blocking** | uBlock Origin's default lists plus EasyList, EasyPrivacy, Peter Lowe's list and URLhaus, with cosmetic and scriptlet rules. Turn it off per site. | On by default · per site in Settings → This site |
 | **SOCKS5 proxy** | Route all traffic through a local SOCKS5 port (an `ssh -D` tunnel, for example). LAN addresses go direct by default. | Settings → General |
 | **Per-site routing & kill switch** | Send specific sites through other proxies or Direct. The kill switch blocks proxied traffic if the proxy stops answering. | Settings → General → Network rules · This site |

@@ -26,6 +26,7 @@ export const PrivacySettings = deferred(() => settings().then((m) => m.PrivacySe
 export const PageWatchersSettings = deferred(() => settings().then((m) => m.PageWatchersSettings))
 export const PageWatchersToggle = deferred(() => settings().then((m) => m.PageWatchersToggle))
 export const GlanceSettings = deferred(() => settings().then((m) => m.GlanceSettings))
+export const MiniWindowSettings = deferred(() => settings().then((m) => m.MiniWindowSettings))
 export const LocalAISettings = deferred(() => settings().then((m) => m.LocalAISettings))
 export const FeedsSettings = deferred(() => settings().then((m) => m.FeedsSettings))
 export const BrambleQuickUnlockSettings = deferred(() => settings().then((m) => m.BrambleQuickUnlockSettings))

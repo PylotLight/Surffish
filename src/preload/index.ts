@@ -58,6 +58,7 @@ import { feedsApi } from './feeds'
 import { readingListApi } from './reading-list'
 import { adblockApi } from './adblock'
 import { glanceApi } from './glance-settings'
+import { miniWindowApi } from './mini-window-settings'
 import { localAIApi } from './local-ai-settings'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
@@ -160,6 +161,7 @@ const api = {
     readingList: readingListApi,
     adblock: adblockApi,
     glance: glanceApi,
+    miniWindow: miniWindowApi,
     localAI: localAIApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
