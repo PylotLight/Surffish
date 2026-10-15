@@ -260,3 +260,57 @@ export function miniHeaderUrl(url: string): string {
 export function canPopOutUrl(url: string): boolean {
   return /^https?:\/\//i.test(url)
 }
+
+// ---------------------------------------------------------------------------
+// Several mini windows
+
+/** How many mini windows can be open at once. */
+export const MINI_WINDOW_MAX = 6
+/** A new mini window opens this far (x and y) from one already there, so they never stack exactly. */
+export const MINI_WINDOW_CASCADE_STEP = 28
+
+/** The lowest slot no open mini window uses (slots key each window's remembered spot), or null when all MINI_WINDOW_MAX are taken. */
+export function freeMiniSlot(used: readonly number[], max = MINI_WINDOW_MAX): number | null {
+  for (let slot = 0; slot < max; slot++) if (!used.includes(slot)) return slot
+  return null
+}
+
+/**
+ * `rect` (fitted to the work area), stepped diagonally by MINI_WINDOW_CASCADE_STEP until no window in
+ * `others` sits at (about) the same spot. It steps toward the middle of the work area, so a window
+ * in the bottom-right corner cascades up and left. Stops where it can't move further.
+ */
+export function cascadeMiniBounds(rect: MiniRect, others: readonly MiniRect[], workArea: MiniRect, step = MINI_WINDOW_CASCADE_STEP): MiniRect {
+  let current = clampMiniBounds(rect, workArea)
+  const dx = current.x + current.width / 2 > workArea.x + workArea.width / 2 ? -step : step
+  const dy = current.y + current.height / 2 > workArea.y + workArea.height / 2 ? -step : step
+  const taken = (r: MiniRect): boolean => others.some((other) => Math.abs(other.x - r.x) < step / 2 && Math.abs(other.y - r.y) < step / 2)
+  for (let i = 0; i < 64 && taken(current); i++) {
+    const next = clampMiniBounds({ ...current, x: current.x + dx, y: current.y + dy }, workArea)
+    if (next.x === current.x && next.y === current.y) break
+    current = next
+  }
+  return current
+}
+
+/**
+ * Per-window remembered state, one record per slot (`{ slots: [...] }`). The single-window format
+ * (just the per-display record) reads as slot 0, so an existing spot or dock carries over.
+ */
+export function parseMiniSlots<T>(value: unknown, parseOne: (value: unknown) => Record<string, T>): Array<Record<string, T>> {
+  if (typeof value !== 'object' || value === null) return []
+  const slots = (value as Record<string, unknown>).slots
+  if (Array.isArray(slots)) return slots.slice(0, MINI_WINDOW_MAX).map((slot) => parseOne(slot))
+  const legacy = parseOne(value)
+  return Object.keys(legacy).length > 0 ? [legacy] : []
+}
+
+/** One slot's record set to `record` (others kept), ready to write back as `{ slots }`. */
+export function withMiniSlot<T>(slots: ReadonlyArray<Record<string, T>>, slot: number, record: Record<string, T>): { slots: Array<Record<string, T>> } {
+  const next = slots.map((entry) => ({ ...entry }))
+  while (next.length <= slot) next.push({})
+  next[slot] = record
+  // Trailing empty slots carry nothing.
+  while (next.length > 0 && Object.keys(next[next.length - 1] ?? {}).length === 0) next.pop()
+  return { slots: next }
+}

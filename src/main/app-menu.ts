@@ -13,7 +13,7 @@ import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
-import { returnMiniWindowToBrowser, toggleMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, listMiniWindows, returnAllMiniWindows, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -39,6 +39,21 @@ function splitViewMenu(): MenuItemConstructorOptions {
       { ...tabItem('Focus Right Pane', 'focusPaneRight'), registerAccelerator: false }
     ]
   }
+}
+
+/** Window menu: each open mini window by its page title; picking one brings it up (sliding it out when tucked). */
+function miniWindowMenuItems(): MenuItemConstructorOptions[] {
+  const open = listMiniWindows()
+  if (open.length === 0) return []
+  return [
+    { type: 'separator' },
+    ...open.map(({ tabId, title, focused }): MenuItemConstructorOptions => ({
+      label: `Mini Window: ${title.length > 60 ? `${title.slice(0, 59)}…` : title}`,
+      type: 'checkbox',
+      checked: focused,
+      click: () => { focusMiniWindow(tabId) }
+    }))
+  ]
 }
 
 export function installAppMenu(): void {
@@ -187,10 +202,11 @@ export function installAppMenu(): void {
         { label: 'Feeds', click: () => { revealFeeds() } },
         { label: 'Task Manager', accelerator: 'Shift+Escape', click: () => toggleTaskManager() },
         { type: 'separator' },
-        // Pop out / put back the current tab (Cmd/Ctrl+Shift+M); the global toggle lives in Settings.
+        // Pop out the current tab (Cmd/Ctrl+Shift+M; in a mini window it goes back); the global toggle lives in Settings.
         tabItem('Pop Out to Mini Window', 'miniWindow'),
-        { label: 'Return Mini Window to Browser', click: () => { returnMiniWindowToBrowser() } },
-        { label: 'Show/Hide Mini Window', click: () => { void toggleMiniWindow() } },
+        { label: 'Return All Mini Windows', click: () => { returnAllMiniWindows() } },
+        { label: 'Show/Hide Mini Windows', click: () => { void toggleMiniWindow() } },
+        ...miniWindowMenuItems(),
         ...(isMac ? [{ type: 'separator' } as const, { role: 'front' } as const] : []),
         ...windowListMenuItems()
       ]

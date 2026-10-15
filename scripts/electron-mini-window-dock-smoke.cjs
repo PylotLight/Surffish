@@ -11,6 +11,11 @@
 //   5. Docked state survives Return/Pop Out: the next pop out opens against the same edge with its
 //      handle; no handle window or webContents leaks after Return.
 //   6. Settings → Tuck to screen edge off: undocks, hides the header's tuck button, edges don't dock.
+//   7. Several docked at once: three mini windows tucked to the same edge each get their own handle
+//      (showing its page's favicon), spread along the edge without overlapping; each dock is saved in
+//      its own slot; Show/Hide slides all out and tucks all back together; returning one re-spreads
+//      the rest; Return All leaves no handle window or webContents behind.
+//   8. Migration: a single-window dock file (pre multi-window) opens the first mini window docked.
 // `bun run build && bun run test:electron-mini-window-dock`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-mini-window-dock-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -47,7 +52,13 @@ const server = createServer((request, response) => {
   const pages = {
     '/start': PAGE('Start', '<p>start</p>'),
     '/chat': PAGE('Chat', `<textarea id="prompt"></textarea>${AUDIO}`),
-    '/idle': PAGE('Idle', '<p>idle</p>')
+    '/idle': PAGE('Idle', '<p>idle</p>'),
+    ...Object.fromEntries([1, 2, 3].map((n) => [`/d${n}`, PAGE(`Dock ${n}`, `<p>dock ${n}</p>`).replace('<title>', `<link rel="icon" href="/icon${n}.svg"><title>`)]))
+  }
+  if (/^\/icon\d\.svg$/.test(path)) {
+    response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' })
+    response.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="#2f6fed"/></svg>')
+    return
   }
   response.writeHead(pages[path] ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   response.end(pages[path] ?? 'not found')
@@ -82,7 +93,9 @@ const miniWindows = () => windowsWith(isMiniHeader)
 const handleWindows = () => windowsWith(isHandlePage)
 const viewOf = (win, contents) => win.contentView.children.find((view) => view.webContents === contents)
 const handlePage = (win) => win.contentView.children.find((view) => view.webContents && isHandlePage(view.webContents))?.webContents
-const readDocks = () => existsSync(join(userData, 'mini-window-dock.json')) ? JSON.parse(readFileSync(join(userData, 'mini-window-dock.json'), 'utf8')) : {}
+const readDockFile = () => existsSync(join(userData, 'mini-window-dock.json')) ? JSON.parse(readFileSync(join(userData, 'mini-window-dock.json'), 'utf8')) : {}
+/** One window's saved docks (per display): `slot` of `{ slots: [...] }` (slot 0 is the first mini window). */
+const readDocks = (slot = 0) => readDockFile().slots?.[slot] ?? {}
 
 /** Where a window of `size` sits flush against `edge` of `wa` (the dock's "out" position), along-edge start not checked. */
 function flushWith(bounds, edge, wa) {
@@ -325,6 +338,90 @@ async function run() {
   await smoke.evaluate(content, 'window.api.browser.miniWindow.update({ tuckToEdge: true })')
   await run('miniWindow.return')
   await waitFor(() => again.isDestroyed() && liveContents().filter((contents) => isMiniHeader(contents) || isHandlePage(contents)).length === 0, 'closed with nothing leaked')
+
+  // --- 7. Several docked to the same edge.
+  smoke.step('three mini windows tucked to the right edge: own handles, favicons, spread without overlapping')
+  const docked = []
+  for (const n of [1, 2, 3]) {
+    await smoke.evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(`${origin}/d${n}`)})`)
+    const contents = await waitFor(() => pageContents((url, c) => url === `${origin}/d${n}` && !c.isLoading()), `page d${n}`)
+    await waitFor(() => smoke.evaluate(contents, 'typeof window.loadId === "number"'), `page d${n} ready`)
+    const id = (await tabs()).find((tab) => tab.url === `${origin}/d${n}`).id
+    await waitFor(async () => (await tabs()).find((tab) => tab.id === id)?.favicon || (await tabs()).find((tab) => tab.id === id)?.faviconUrl, `d${n} favicon`, 5000).catch(() => null)
+    await smoke.evaluate(contents, `window.marker = "d${n}"; true`)
+    docked.push({ n, id, contents, loadId: await smoke.evaluate(contents, 'window.loadId') })
+  }
+  const intactAll = async (where) => {
+    for (const entry of docked) {
+      assert.equal(entry.contents.isDestroyed(), false, `${where}: d${entry.n} alive`)
+      assert.equal(await smoke.evaluate(entry.contents, 'window.marker'), `d${entry.n}`, `${where}: d${entry.n} kept its state`)
+      assert.equal(await smoke.evaluate(entry.contents, 'window.loadId'), entry.loadId, `${where}: d${entry.n} not reloaded`)
+    }
+  }
+  const miniOf = (contents) => miniWindows().find((win) => viewOf(win, contents))
+  for (const entry of docked) {
+    await smoke.evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify(entry.id)})`)
+    await waitFor(async () => (await tabs()).find((tab) => tab.active)?.id === entry.id, `d${entry.n} active`)
+    await run('miniWindow.popOut')
+    entry.win = await waitFor(() => miniOf(entry.contents), `d${entry.n} in its own mini window`)
+    await waitFor(() => entry.win.isVisible(), `d${entry.n} shown`)
+  }
+  assert.equal(miniWindows().length, 3, 'three mini windows')
+  const wa3 = screen.getDisplayMatching(docked[0].win.getBounds()).workArea
+  // Same size, same spot along the edge: their handles would sit on top of each other without spreading.
+  for (const entry of docked) {
+    await delay(600)
+    entry.win.setBounds(pastEdge(size, 'right', wa3))
+    await waitFor(() => !entry.win.isVisible(), `d${entry.n} tucked`)
+  }
+  const handleRects = () => handleWindows().filter((win) => win.isVisible()).map((win) => win.getBounds())
+  const overlap = (r, q) => r.x < q.x + q.width && q.x < r.x + r.width && r.y < q.y + q.height && q.y < r.y + r.height
+  const spread = () => {
+    const rects = handleRects()
+    return rects.every((r, i) => rects.every((q, j) => i === j || !overlap(r, q))) ? rects : null
+  }
+  await waitFor(() => handleRects().length === 3 && spread(), `three handles, none overlapping (got ${JSON.stringify(handleRects())})`)
+  for (const rect of handleRects()) assert.ok(handleOnEdge(rect, 'right', wa3), `each handle on the right edge (${JSON.stringify(rect)})`)
+  const slots = readDockFile().slots ?? []
+  assert.equal(slots.filter((slot) => Object.values(slot).some((dock) => dock.edge === 'right')).length, 3, `each window's dock saved in its own slot (${JSON.stringify(slots)})`)
+  for (const win of handleWindows()) {
+    const page = handlePage(win)
+    await waitFor(() => smoke.evaluate(page, 'document.getElementById("icon").hidden === false && document.getElementById("icon").src.length > 0 && document.getElementById("icon").complete'), 'each handle shows its page favicon', 5000)
+  }
+  await intactAll('three tucked')
+
+  smoke.step('Show/Hide slides every docked window out together, and tucks them back together')
+  await run('miniWindow.toggle')
+  await waitFor(() => docked.every((entry) => entry.win.isVisible() && flushWith(entry.win.getBounds(), 'right', wa3)), 'all three slid out')
+  await delay(300)
+  await run('miniWindow.toggle')
+  await waitFor(() => docked.every((entry) => !entry.win.isVisible()), 'all three tucked again')
+  await waitFor(() => handleRects().length === 3 && spread(), 'handles spread again')
+  await intactAll('toggled')
+
+  smoke.step('returning one re-spreads the others; Return All leaves nothing behind')
+  await run(`miniWindow.return:${docked[1].id}`)
+  await waitFor(() => docked[1].win.isDestroyed(), 'd2 returned')
+  await waitFor(() => handleWindows().length === 2 && handleRects().length === 2 && spread(), 'two handles left, still apart')
+  // With the middle one gone the other two settle back toward their windows' centres (no gap left behind).
+  await run('miniWindow.return')
+  await waitFor(() => miniWindows().length === 0 && handleWindows().length === 0, 'all mini windows and handles closed')
+  await waitFor(() => liveContents().filter((contents) => isMiniHeader(contents) || isHandlePage(contents)).length === 0, 'no header or handle webContents left')
+  await intactAll('returned')
+
+  // --- 8. Migration from the single-window dock file.
+  smoke.step('a single-window dock file still docks the first mini window')
+  const legacyKey = Object.keys(readDocks(0))[0]
+  assert.ok(legacyKey, 'slot 0 remembered a dock')
+  writeFileSync(join(userData, 'mini-window-dock.json'), JSON.stringify({ [legacyKey]: { edge: 'left', offset: 40 } }))
+  await smoke.evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify(docked[0].id)})`)
+  await waitFor(async () => (await tabs()).find((tab) => tab.active)?.id === docked[0].id, 'd1 active')
+  await run('miniWindow.popOut')
+  const migrated = await waitFor(() => miniOf(docked[0].contents), 'd1 in a mini window')
+  await waitFor(() => migrated.isVisible() && flushWith(migrated.getBounds(), 'left', wa3), 'opens docked to the legacy left edge')
+  await waitFor(() => handleWindows().length === 1, 'with its handle')
+  await run('miniWindow.return')
+  await waitFor(() => migrated.isDestroyed() && handleWindows().length === 0, 'closed again')
 
   console.log('Electron mini window dock smoke passed.')
 }
