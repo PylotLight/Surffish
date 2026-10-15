@@ -200,6 +200,9 @@ async function run() {
   assert.equal(trustedState.error, null)
   assert.equal(trustedState.security.level, 'os-trusted', 'Chromium rejected the unknown root; the OS trust store accepted it')
   assert.equal(trustedState.security.host, 'trusted.surffish.test')
+  // The toolbar renders the new security state a beat after main has it; opening the menu before
+  // that shows the previous (local http) page's connection row.
+  await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector(".site-actions-button svg.site-actions-lock:not(.is-broken)"))'), 'the toolbar lock for the OS-trusted page')
   const secureMenu = await openSiteMenu()
   assert.match(secureMenu.connection, /is-secure/)
   assert.match(secureMenu.text, /Connection is secure/)
