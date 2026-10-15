@@ -144,7 +144,13 @@ function evaluate(contents, code, timeout = waitMs) {
     if (contents.isDestroyed()) onDestroyed()
     else contents.once('destroyed', onDestroyed)
   })
-  return Promise.race([contents.isDestroyed() ? destroyed : contents.executeJavaScript(code), timedOut, destroyed]).finally(() => {
+  // The frame can also be disposed (navigation away, or the view closing) before 'destroyed' fires;
+  // Electron then rejects with "Render frame was disposed ...". Tag that as destroyed too.
+  const run = contents.isDestroyed() ? destroyed : contents.executeJavaScript(code).catch((error) => {
+    if (/Render frame was disposed/.test(String(error?.message))) error.destroyed = true
+    throw error
+  })
+  return Promise.race([run, timedOut, destroyed]).finally(() => {
     clearTimeout(timer)
     if (!contents.isDestroyed()) contents.removeListener('destroyed', onDestroyed)
   })
