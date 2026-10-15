@@ -162,7 +162,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "dompurify": "^3.4.17",
-    "electron": "^44.5.1",
+    "electron": "npm:electron-nightly@46.0.0-nightly.20261014",
     "electron-builder": "^26.0.0",
     "electron-vite": "^5.0.0",
     "node-api-headers": "^1.9.0",
