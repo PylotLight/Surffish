@@ -102,7 +102,7 @@ export default defineConfig({
       rollupOptions: {
         // Custom inputs drop electron-vite's implicit externals; keep runtime
         // deps as real imports exactly like the single-entry build.
-        external: ['electron', /^@ghostery\//, 'tldts-experimental'],
+        external: ['electron', /^electron\//, /^@ghostery\//, 'tldts-experimental'],
         // Shared chunks sit next to app.js, not under chunks/: main resolves ../renderer, ../preload
         // and ../native from import.meta.url, and the boot entry makes Rolldown split app code into one.
         output: { format: 'es', chunkFileNames: '[name]-[hash].js' },
@@ -112,7 +112,9 @@ export default defineConfig({
           index: resolve(projectDirectory, 'src/main/boot.ts'),
           app: resolve(projectDirectory, 'src/main/index.ts'),
           // Standalone entry so Electron harnesses reuse the production engine wiring.
-          'adblock-engine': resolve(projectDirectory, 'src/main/adblock-engine.ts')
+          'adblock-engine': resolve(projectDirectory, 'src/main/adblock-engine.ts'),
+          // Built-in AI utility process (utilityProcess.fork from src/main/local-ai.ts).
+          'local-ai-handler': resolve(projectDirectory, 'src/main/local-ai-handler.ts')
         }
       }
     }

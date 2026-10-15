@@ -58,6 +58,7 @@ import { feedsApi } from './feeds'
 import { readingListApi } from './reading-list'
 import { adblockApi } from './adblock'
 import { glanceApi } from './glance-settings'
+import { localAIApi } from './local-ai-settings'
 import { onTabsChange } from './tab-sync'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
 import type { SiteCertificateInfo } from '../shared/certificates'
@@ -159,6 +160,7 @@ const api = {
     readingList: readingListApi,
     adblock: adblockApi,
     glance: glanceApi,
+    localAI: localAIApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
       set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)

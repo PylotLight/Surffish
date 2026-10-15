@@ -40,6 +40,7 @@ import { disposeFeeds, registerFeedIpc, startFeedsAfterFirstPaint } from './feed
 import { registerReadingListIpc } from './reading-list-ipc'
 import { registerAdblockStatsIpc } from './adblock-stats'
 import { registerGlanceIpc } from './glance-entry'
+import { initializeLocalAI, registerLocalAIIpc } from './local-ai'
 import { chromeUserAgent } from './adblock-policy'
 
 installIpcWindowScope()
@@ -122,6 +123,9 @@ app.whenReady().then(async () => {
   registerAdblockStatsIpc()
   // Glance settings only; the glance module itself loads on the first Shift+click.
   registerGlanceIpc()
+  // Built-in AI (Prompt API, experimental): off by default; nothing is forked until it's on.
+  registerLocalAIIpc()
+  initializeLocalAI()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {
