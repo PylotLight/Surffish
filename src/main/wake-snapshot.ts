@@ -1,4 +1,5 @@
 import { ipcMain, type BaseWindow, type NativeImage, type WebContents } from 'electron'
+import { capturedPixelWidth } from './capture-page'
 import {
   nextWakeSnapshotPhase,
   parseWakeSnapshotInput,
@@ -75,9 +76,9 @@ const FIRST_PAINT_SCRIPT = `new Promise((resolve) => {
 const PAINT_WORLD_ID = 1907
 /** A capture at the width snapshots are stored at: device pixels, only scaled down past WAKE_SNAPSHOT_MAX_WIDTH. */
 function scaleForWakeSnapshot(image: NativeImage): NativeImage {
-  const size = image.getSize()
-  const width = wakeSnapshotWidth(size.width)
-  return width > 0 && width < size.width ? image.resize({ width, quality: 'good' }) : image
+  const pixels = capturedPixelWidth(image)
+  const width = wakeSnapshotWidth(pixels)
+  return width > 0 && width < pixels ? image.resize({ width, quality: 'good' }) : image
 }
 
 /**

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { capturePageWithin } from './capture-page'
+import { capturePageWithin, capturedPixelWidth } from './capture-page'
 import { shouldHandOffSignIn, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
 import { hasGoogleSessionCookie, isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
 import { Buffer } from 'node:buffer'
@@ -3578,8 +3578,7 @@ function isLocalNewTab(tab: BrowserTab): boolean {
 }
 
 function thumbnailDataUrl(image: Electron.NativeImage): string {
-  const size = image.getSize()
-  const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
+  const scaled = capturedPixelWidth(image) > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
   return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
 }
 

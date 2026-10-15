@@ -41,3 +41,13 @@ export function capturePageWithin(
     capture.then(finish, () => finish(null))
   })
 }
+
+/**
+ * A captured image's width in bitmap pixels. Electron 46 marks capturePage() images with the page's
+ * scale factor, so getSize() is in DIPs on a Retina screen (Electron 44/45 always marked them 1x, so
+ * getSize() was pixels); resize({ width }) still yields that many pixels. Size maths that wants
+ * pixels (wake snapshots, thumbnails, the sidebar backdrop) uses this instead of getSize().width.
+ */
+export function capturedPixelWidth(image: NativeImage): number {
+  return Math.round(image.getSize().width * Math.max(1, ...image.getScaleFactors()))
+}

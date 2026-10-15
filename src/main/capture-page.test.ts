@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
 import type { NativeImage, WebContents } from 'electron'
-import { capturePageWithin } from './capture-page'
+import { capturePageWithin, capturedPixelWidth } from './capture-page'
 
 function fakeImage(empty = false): NativeImage {
   return { isEmpty: () => empty } as unknown as NativeImage
@@ -47,5 +47,14 @@ describe('capturePageWithin', () => {
     gone.destroy()
     expect(await capturePageWithin(gone)).toBeNull()
     expect(called).toBe(false)
+  })
+})
+
+describe('capturedPixelWidth', () => {
+  const image = (width: number, scales: number[]) => ({ getSize: () => ({ width, height: width / 2 }), getScaleFactors: () => scales }) as unknown as NativeImage
+  test('pixels on Electron 44/45 (always marked 1x) and on 46 (DIPs × scale factor)', () => {
+    expect(capturedPixelWidth(image(2880, [1]))).toBe(2880)
+    expect(capturedPixelWidth(image(1440, [2]))).toBe(2880)
+    expect(capturedPixelWidth(image(800, []))).toBe(800)
   })
 })
