@@ -91,6 +91,7 @@ export function getUpdateState(): UpdateState {
   const decision = decideUpdate(latest?.version ?? null, currentVersion(), preferences, Date.now())
   return {
     currentVersion: currentVersion(),
+    engine: { electron: process.versions.electron ?? '', chromium: process.versions.chrome ?? '' },
     status,
     message,
     latest,
