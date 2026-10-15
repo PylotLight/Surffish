@@ -336,6 +336,8 @@ jobs:
           "$HOME/.bun/bin/bun" --version
       - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
         run: bash scripts/ci/bun-as-node.sh
+      - name: Network route probe (schemes and HTTP codes only)
+        run: bash scripts/ci/mac-net-probe.sh
       - name: bun install (fails if any Node.js process runs)
         run: bash scripts/ci/watch-node.sh bun install
       - run: swift --version
