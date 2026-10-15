@@ -1,0 +1,166 @@
+name: electron bump
+
+# Daily: is there a newer Electron than the exact pin in package.json? If so, open (or update) one PR
+# on chore/electron-bump with the new pin + bun.lock, then start ci on it. Never merges anything.
+#
+# Policy (scripts/ci/electron-bump.ts has the details and tests):
+#   beta (default)  newest beta or stable of the current major or newer: rides the current major's
+#                   betas to its stable release and its patches, then jumps to the next major's beta.1.
+#   stable-after-ga betas only until the current major ships stable, then that major's stable patches.
+#   stable          stable releases only.
+# Set the repo variable ELECTRON_BUMP_POLICY to change the scheduled policy; a manual run can pick one
+# (and an exact version) for that run only.
+#
+# Token: the job's GITHUB_TOKEN. A push or PR made with it doesn't start other workflows (GitHub's
+# loop guard), but workflow_dispatch is exempt, so this workflow dispatches ci.yml on the bump branch
+# itself; those check runs land on the PR's head commit. Re-run that dispatch (Actions -> ci -> Run
+# workflow, branch chore/electron-bump) after pushing to the branch by hand, or close and reopen the PR
+# from your own account to get normal pull_request runs. Creating the PR needs "Allow GitHub Actions
+# to create and approve pull requests" (Settings -> Actions -> General).
+on:
+  schedule:
+    - cron: '17 20 * * *' # 07:17 Melbourne (AEDT), daily
+  workflow_dispatch:
+    inputs:
+      policy:
+        description: Bump policy for this run
+        type: choice
+        options: [beta, stable-after-ga, stable]
+        default: beta
+      version:
+        description: Exact Electron version to pin instead (optional, e.g. 45.0.0-beta.4)
+        type: string
+        default: ''
+      dry_run:
+        description: Only report what would change
+        type: boolean
+        default: false
+
+concurrency:
+  group: electron-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  bump:
+    # GitHub-hosted on purpose: never the self-hosted Mac (corporate laptop) or the k3s runners.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BRANCH: chore/electron-bump
+      ELECTRON_BUMP_POLICY: ${{ inputs.policy || vars.ELECTRON_BUMP_POLICY || 'beta' }}
+      ELECTRON_BUMP_VERSION: ${{ inputs.version }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      GH_TOKEN: ${{ github.token }}
+      API: ${{ github.api_url }}/repos/${{ github.repository }}
+    steps:
+      - name: Checkout main (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          git init -q .
+          git remote add origin "$REPO_URL"
+          git config http.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git fetch -q --depth 1 origin main
+          git checkout -q -B main FETCH_HEAD
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Bun (pinned to .bun-version)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          curl -fsSL https://bun.sh/install | bash -s "bun-v$want"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - name: Pick the target version
+        id: pick
+        run: |
+          out="$(bun scripts/ci/electron-bump.ts)"
+          echo "$out"
+          echo "current=$(echo "$out" | jq -r .current)" >> "$GITHUB_OUTPUT"
+          echo "target=$(echo "$out" | jq -r '.target // ""')" >> "$GITHUB_OUTPUT"
+      - name: Open PR (if any)
+        id: pr
+        run: |
+          pr="$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$API/pulls?state=open&head=${GITHUB_REPOSITORY_OWNER}:${BRANCH}" | jq -r '.[0].number // ""')"
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "open bump PR: ${pr:-none}"
+      - name: Nothing newer (close a stale bump PR)
+        if: steps.pick.outputs.target == ''
+        env:
+          CURRENT: ${{ steps.pick.outputs.current }}
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          echo "### Electron $CURRENT is current ($ELECTRON_BUMP_POLICY policy)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR" ] && [ "$DRY_RUN" != true ]; then
+            body="main is already on Electron $CURRENT, nothing newer under the \`$ELECTRON_BUMP_POLICY\` policy. Closing."
+            curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/issues/$PR/comments" -d "$(jq -n --arg b "$body" '{body:$b}')" >/dev/null
+            curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/pulls/$PR" -d '{"state":"closed"}' >/dev/null
+            echo "closed stale bump PR #$PR"
+          fi
+      - name: Pin, update bun.lock, push the branch
+        id: push
+        if: steps.pick.outputs.target != ''
+        env:
+          TARGET: ${{ steps.pick.outputs.target }}
+          CURRENT: ${{ steps.pick.outputs.current }}
+        run: |
+          # Already pushed for this exact version on top of this main? Then leave the PR and its CI alone.
+          if git fetch -q --depth 2 origin "$BRANCH" 2>/dev/null; then
+            onbranch="$(git show FETCH_HEAD:package.json | jq -r .devDependencies.electron)"
+            parent="$(git rev-parse FETCH_HEAD~1 2>/dev/null || true)"
+            if [ "$onbranch" = "$TARGET" ] && [ "$parent" = "$(git rev-parse main)" ]; then
+              echo "$BRANCH already pins $TARGET on current main; nothing to push"
+              echo "pushed=false" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          bun -e '
+            const f = "package.json"; const pkg = await Bun.file(f).json()
+            pkg.devDependencies.electron = process.env.TARGET
+            await Bun.write(f, JSON.stringify(pkg, null, 2) + "\n")'
+          # Scripts off: the lockfile is all this needs (no Electron binary download).
+          bun install --ignore-scripts
+          git diff --stat
+          git diff --quiet bun.lock && { echo "::error::bun.lock didn't change"; exit 1; }
+          git commit -qam "chore(deps): Electron $CURRENT -> $TARGET" -m "Automated by .github/workflows/electron-bump.yml ($ELECTRON_BUMP_POLICY policy)."
+          if [ "$DRY_RUN" = true ]; then echo "dry run: not pushing"; git show --stat HEAD; echo "pushed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git push -q --force origin "HEAD:refs/heads/$BRANCH"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: Open or update the PR, then start ci on it
+        if: steps.pick.outputs.target != '' && steps.push.outputs.pushed == 'true'
+        env:
+          TARGET: ${{ steps.pick.outputs.target }}
+          CURRENT: ${{ steps.pick.outputs.current }}
+          PR: ${{ steps.pr.outputs.number }}
+        run: |
+          title="chore(deps): Electron $TARGET"
+          body="$(cat <<MD
+          Bumps the exact Electron pin **$CURRENT → $TARGET** (\`$ELECTRON_BUMP_POLICY\` policy) and \`bun.lock\`.
+
+          - Release notes: https://github.com/electron/electron/releases/tag/v$TARGET
+          - Breaking changes: https://github.com/electron/electron/blob/main/docs/breaking-changes.md
+          - Opened by [electron bump]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). **Not auto-merged**: merge after ci (incl. perf (linux)) is green.
+          - ci was started with workflow_dispatch (pushes made with the workflow token don't trigger it). After a manual push, re-run: Actions → ci → Run workflow → \`$BRANCH\`.
+          - The Mac jobs fetch the new Electron once through \`bun install\` on the self-hosted runner.
+          MD
+          )"
+          if [ -n "$PR" ]; then
+            curl -fsS -X PATCH -H "Authorization: Bearer $GH_TOKEN" "$API/pulls/$PR" -d "$(jq -n --arg t "$title" --arg b "$body" '{title:$t, body:$b}')" >/dev/null
+            echo "updated PR #$PR"
+          else
+            resp="$(curl -sS -w '\n%{http_code}' -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/pulls" -d "$(jq -n --arg t "$title" --arg b "$body" --arg h "$BRANCH" '{title:$t, body:$b, head:$h, base:"main"}')")"
+            code="$(echo "$resp" | tail -1)"
+            if [ "$code" != 201 ]; then
+              echo "$resp" | head -n -1
+              echo "::error::could not open the PR (HTTP $code). If it says Actions may not create pull requests, enable Settings → Actions → General → Allow GitHub Actions to create and approve pull requests. The branch $BRANCH is pushed."
+              exit 1
+            fi
+            PR="$(echo "$resp" | head -n -1 | jq -r .number)"
+            echo "opened PR #$PR"
+          fi
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" "$API/actions/workflows/ci.yml/dispatches" \
+            -d "$(jq -n --arg r "$BRANCH" --arg pr "$PR" '{ref:$r, inputs:{pr:$pr, perf_mac:"false"}}')"
+          echo "dispatched ci on $BRANCH (PR #$PR)"
+          echo "### Electron $CURRENT → $TARGET: PR #$PR, ci dispatched" >> "$GITHUB_STEP_SUMMARY"
