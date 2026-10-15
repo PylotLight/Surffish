@@ -64,7 +64,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
+          git clean -qffdx -e node_modules
       # Set SURFFISH_CI_CACHE on the runner (or mount a writable /cache) to keep bun, its package
       # cache and the Electron zip across ephemeral pods. Without it nothing changes.
       - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
@@ -190,7 +190,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build
+          git clean -qffdx -e node_modules
           base="$RUNNER_TEMP/perf-base"
           git worktree prune; rm -rf "$base"
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != 0000000000000000000000000000000000000000 ] && git fetch -q --no-tags --depth 1 origin "$BASE_SHA"; then
@@ -326,7 +326,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
+          git clean -qffdx -e node_modules -e out/native
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
@@ -341,16 +341,16 @@ jobs:
       - run: swift --version
       - name: Typecheck and unit tests on macOS
         run: bun run typecheck && bun run test
-      - name: Build Electron and the native AppKit trackpad bridge
+      - name: Build Electron, the native AppKit trackpad bridge and the Google sign-in helper
         run: bun run build
       - name: Load the compiled native addon
         run: bun -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function') throw new Error('Native trackpad addon exports are missing')"
-      - name: Native WebKit API tests
-        working-directory: src/native/macos
-        run: swift test
-      - name: Build native prototype
-        working-directory: src/native/macos
-        run: swift build
+      - name: Check the compiled Google sign-in helper
+        run: |
+          helper=out/native/google-sign-in
+          test -x "$helper" || { echo "::error::$helper is missing or not executable"; exit 1; }
+          file "$helper" | grep -q 'Mach-O 64-bit executable arm64' || { file "$helper"; echo "::error::$helper is not an arm64 Mach-O executable"; exit 1; }
+          codesign --verify "$helper" 2>/dev/null || echo "note: helper is unsigned here; electron-builder signs it when packaging"
 
   # Core Electron smokes on real macOS (no xvfb). The sidebar-overlay smoke drives the cursor with
   # xdotool, so it stays Linux-only. Same install path as native-macos. Set the repo variable
@@ -376,7 +376,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
+          git clean -qffdx -e node_modules -e out/native
       - name: Bun (pinned to .bun-version, installed into ~/.bun if missing)
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
@@ -446,7 +446,7 @@ jobs:
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
-          git clean -qffdx -e node_modules -e src/native/macos/.build -e out/native
+          git clean -qffdx -e node_modules -e out/native
           base="$RUNNER_TEMP/perf-base"
           git worktree prune; rm -rf "$base"
           if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != 0000000000000000000000000000000000000000 ] && git fetch -q --no-tags --depth 1 origin "$BASE_SHA"; then
