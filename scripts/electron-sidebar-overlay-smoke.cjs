@@ -208,7 +208,7 @@ async function run() {
   const footerControls = await evaluate(rendererViews.content, `(() => [...document.querySelectorAll('.sidebar-footer-icon-button')].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })))()`)
   assert.deepEqual(footerControls.map(({ label }) => label), ['Keep sidebar open', 'Settings', 'Quit Surffish'], 'pin, Settings and Quit are compact footer actions')
   assert.ok(footerControls.every(({ width, height }) => width <= 36 && height <= 36), 'the footer controls do not consume full-width rows')
-  assert.ok(await evaluate(rendererViews.toolbar, 'document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing")'), 'toolbar controls use distinct left and right groups')
+  assert.ok(await evaluate(rendererViews.toolbar, 'Boolean(document.querySelector(".browser-toolbar-leading") && document.querySelector(".browser-toolbar-trailing"))'), 'toolbar controls use distinct left and right groups')
   // Startup briefly holds a transient fourth view under load; settle instead of single-sampling.
   console.log('[overlay-smoke] initial children:', JSON.stringify(mainWindow.contentView.children.map((view) => { try { return view.webContents && !view.webContents.isDestroyed() ? view.webContents.getURL() || '(blank)' : '(no contents)' } catch { return '(gone)' } })))
   // The hidden tab-overview view is preloaded ~1.5s after the window opens (a data: URL), so it is not
