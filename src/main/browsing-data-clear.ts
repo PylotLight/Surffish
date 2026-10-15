@@ -26,6 +26,7 @@ function persistentPageSessions(): Session[] {
 import { getBrowsingHistory, removeBrowsingHistory } from './history'
 import { clearDownloadHistory, clearDownloadHistorySince } from './downloads'
 import { clearBrowserSiteZoom, resetBrowserSiteSettings } from './browser-persistence'
+import { resetSiteVolumes } from './tab-volume'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getActiveTabWebContents } from './browser'
 import { forgetArchivedTabsSince } from './tab-archive-store'
@@ -128,6 +129,7 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
   if (options.zoom && (allTime || scoped)) {
     clearBrowserSiteZoom(origins)
     resetZoomOnOpenPages(origins)
+    resetSiteVolumes(origins)
   }
   if (options.history) {
     result.historyRemoved = removeBrowsingHistory((entry) => entry.visitedAt >= since)
@@ -185,7 +187,7 @@ export async function getSiteData(originInput: unknown): Promise<SiteDataSummary
   return { origin, cookies: cookies.length, storageBytes: await storageUsage(origin) }
 }
 
-/** Forget this site: cookies, storage, cache, permissions/settings and zoom; history entries if asked. */
+/** Forget this site: cookies, storage, cache, permissions/settings, zoom and tab volume; history entries if asked. */
 export async function forgetSite(originInput: unknown, includeHistory: unknown): Promise<SiteDataSummary | null> {
   const origin = normalizeHttpOrigin(originInput)
   if (!origin) return null
@@ -198,6 +200,7 @@ export async function forgetSite(originInput: unknown, includeHistory: unknown):
   resetBrowserSiteSettings(origins)
   clearBrowserSiteZoom(origins)
   resetZoomOnOpenPages(origins)
+  resetSiteVolumes(origins)
   if (includeHistory === true) {
     removeBrowsingHistory((entry) => {
       try {

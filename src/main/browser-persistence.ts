@@ -16,6 +16,7 @@ import {
 import { normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, type SavedWindowsSession, type SessionWindowInput } from '../shared/window-session'
 import type { SavedWindowState } from '../shared/window-geometry'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
+import { normalizeTabVolume, withSiteVolume } from '../shared/tab-volume'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
 import { createFileTextCache, isOwnerOnlyMode } from '../shared/write-skip'
 import { getProfileDatabase, reportStoreWriteError } from './store'
@@ -345,6 +346,45 @@ export function saveBrowserSiteZoom(value: unknown, factorInput: unknown): numbe
   preferences = { ...preferences, siteZoom: Object.fromEntries(entries.slice(-MAX_SAVED_SITE_ZOOMS)) }
   deferWrite('preferences:site-zoom', () => savePreferences(), 800)
   return factor
+}
+
+/** Saved tab volume for a site (undefined when none, i.e. 100%), applied when a tab moves to that origin. */
+export function getBrowserSiteVolume(value: unknown): number | undefined {
+  const origin = normalizeHttpOrigin(value)
+  if (!origin) return undefined
+  loadPreferencesIfNeeded()
+  return preferences.siteVolume[origin]
+}
+
+export function saveBrowserSiteVolume(value: unknown, volumeInput: unknown): number | null {
+  const origin = normalizeHttpOrigin(value)
+  const volume = normalizeTabVolume(volumeInput)
+  if (!origin || volume === null) return null
+  loadPreferencesIfNeeded()
+  if ((preferences.siteVolume[origin] ?? 1) === volume) return volume
+  preferences = { ...preferences, siteVolume: withSiteVolume(preferences.siteVolume, origin, volume) }
+  deferWrite('preferences:site-volume', () => savePreferences(), 800)
+  return volume
+}
+
+/** Saved per-site volumes, most recently changed last. */
+export function listBrowserSiteVolumes(): Array<{ origin: string; volume: number }> {
+  loadPreferencesIfNeeded()
+  return Object.entries(preferences.siteVolume).map(([origin, volume]) => ({ origin, volume }))
+}
+
+/** Forget saved tab volume for these origins (null = every site). */
+export function clearBrowserSiteVolume(origins: readonly string[] | null): number {
+  loadPreferencesIfNeeded()
+  const current = preferences.siteVolume
+  const drop = origins === null ? Object.keys(current) : origins.map(normalizeHttpOrigin).filter((origin): origin is string => origin !== null && origin in current)
+  if (drop.length === 0) return 0
+  const next = { ...current }
+  for (const origin of drop) delete next[origin]
+  cancelDeferredWrite('preferences:site-volume')
+  preferences = { ...preferences, siteVolume: next }
+  savePreferences(true)
+  return drop.length
 }
 
 function loadPreferencesIfNeeded(): void {

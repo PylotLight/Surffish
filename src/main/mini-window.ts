@@ -37,7 +37,7 @@ import {
 import { dockArrow, dockedBounds, type MiniDock } from '../shared/mini-window-dock'
 import { watchShellSurface } from './crash-guard'
 import { createDockController, savedDockFor, setDockGrouping, type DockController } from './mini-window-dock'
-import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost, type MiniWindowTab } from './mini-window-entry'
+import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
@@ -523,13 +523,13 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; floating: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean }> } | null {
+function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { tabId: string; crashed: boolean; floating: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean } & MiniWindowTabAudio> } | null {
   const info = host().header(m.window)
   if (!info) return null
   const tuckEdge = m.dock.tuckEdge()
   const tabs = grouping() === 'tabs' ? tabsOf(m) : []
   return {
-    tabs: tabs.length > 1 ? tabs.map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Tab', faviconUrl: tab.faviconUrl, active: tab.active })) : [],
+    tabs: tabs.length > 1 ? tabs.map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Tab', faviconUrl: tab.faviconUrl, active: tab.active, audio: tab.audio, muted: tab.muted, volume: tab.volume })) : [],
     tuck: tuckEdge ? { arrow: dockArrow(tuckEdge, false), label: `Tuck to the ${tuckEdge} edge` } : null,
     title: info.title,
     url: miniHeaderUrl(info.url),
@@ -538,7 +538,12 @@ function headerState(m: Mini): MiniWindowHeaderState & { crashed: boolean; float
     canGoBack: info.canGoBack,
     private: info.private,
     crashed: isTabCrashed(m.page),
-    floating: m.mount === 'panel'
+    floating: m.mount === 'panel',
+    // The header's own speaker (single tab; with a strip each chip has one).
+    tabId: info.tabId,
+    audio: info.audio,
+    muted: info.muted,
+    volume: info.volume
   }
 }
 
@@ -606,6 +611,17 @@ function registerIpc(): void {
   ipcMain.on('mini-window:close-tab', (event, tabId: unknown) => {
     const m = fromHeader(event)
     if (m && typeof tabId === 'string' && tabsOf(m).some((tab) => tab.tabId === tabId)) host().closeTab(m.window, tabId)
+  })
+  // The speaker on the header / a strip chip: volume 0..1, click to mute.
+  ipcMain.on('mini-window:set-volume', (event, tabId: unknown, volume: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || typeof volume !== 'number' || !Number.isFinite(volume) || !tabsOf(m).some((tab) => tab.tabId === tabId)) return
+    host().setTabVolume(m.window, tabId, volume)
+  })
+  ipcMain.on('mini-window:set-muted', (event, tabId: unknown, muted: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || typeof muted !== 'boolean' || !tabsOf(m).some((tab) => tab.tabId === tabId)) return
+    host().setTabMuted(m.window, tabId, muted)
   })
   ipcMain.on('mini-window:return-all', (event) => {
     const m = fromHeader(event)

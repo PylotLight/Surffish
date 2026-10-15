@@ -16,7 +16,8 @@ function samplePreferences(): BrowserPreferences {
       'https://maps.test': { ...parseBrowserSiteSettings('https://maps.test', {})!, allowGeolocation: true },
       'https://news.test': { ...parseBrowserSiteSettings('https://news.test', {})!, blockAds: false }
     },
-    siteZoom: { 'https://small.test': 1.25, 'https://big.test': 0.8 }
+    siteZoom: { 'https://small.test': 1.25, 'https://big.test': 0.8 },
+    siteVolume: { 'https://quiet.test': 0.3 }
   }
 }
 
@@ -33,6 +34,7 @@ test('round-trips preferences through parseBrowserPreferences', () => {
   const loaded = parseBrowserPreferences(new PreferencesTable(db).load())
   assert.deepEqual(loaded, parseBrowserPreferences({ version: 1, ...preferences }))
   assert.deepEqual(Object.keys(loaded.siteZoom), ['https://small.test', 'https://big.test'], 'zoom keeps its order (oldest change first)')
+  assert.deepEqual(loaded.siteVolume, { 'https://quiet.test': 0.3 }, 'tab volume per site round-trips')
 })
 
 test('one change writes one row; device-only values are scoped', () => {

@@ -21,6 +21,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/adblock-frame.cjs'),
       join(outputDirectory, 'adblock-frame.cjs')
     )
+    // Tab volume frame preload (plain CommonJS, registered on every page session).
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/tab-volume-frame.cjs'),
+      join(outputDirectory, 'tab-volume-frame.cjs')
+    )
     copyFileSync(
       resolve(projectDirectory, 'src/preload/mac-trackpad-swipe.cjs'),
       join(outputDirectory, 'mac-trackpad-swipe.cjs')

@@ -182,6 +182,10 @@ export interface BrowserTabSummary {
   audible: boolean
   /** Tab audio is muted by the user. */
   muted: boolean
+  /** Tab volume 0..1 (shared/tab-volume.ts), absent at 100%; separate from `muted`. */
+  volume?: number
+  /** The page plays media or paused it recently (the speaker shows even while it's silent). */
+  media?: boolean
   /** Private tab: in-memory session, nothing saved. */
   private: boolean
   /** The tab's page process crashed; it reloads when the tab is next opened. */
