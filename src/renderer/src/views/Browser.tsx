@@ -722,9 +722,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setNewTabWeather(null)
     setNewTabWeatherError('')
     const provider = newTabPreferences.weatherProvider
+    const model = newTabPreferences.openMeteoModel
     const refresh = (): void => {
       setNewTabWeatherLoading(true)
-      void window.api.browser.newTabWeather.get({ provider, place, location: legacyLocation }).then((reply) => {
+      void window.api.browser.newTabWeather.get({ provider, model, place, location: legacyLocation }).then((reply) => {
         if (!mounted) return
         if (!reply.ok) { setNewTabWeatherError(reply.error); return }
         const weather = reply.value
@@ -748,7 +749,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.clearInterval(refreshTimer)
     }
     // The place is compared by its coordinates: a re-sent identical place doesn't refetch.
-  }, [surface, isLocalNewTab, newTabWeatherKeyVersion, newTabPreferences.weatherEnabled, newTabPreferences.weatherProvider, newTabPreferences.weatherPlace?.latitude, newTabPreferences.weatherPlace?.longitude, newTabPreferences.weatherPlace ? '' : newTabPreferences.weatherLocation])
+  }, [surface, isLocalNewTab, newTabWeatherKeyVersion, newTabPreferences.weatherEnabled, newTabPreferences.weatherProvider, newTabPreferences.openMeteoModel, newTabPreferences.weatherPlace?.latitude, newTabPreferences.weatherPlace?.longitude, newTabPreferences.weatherPlace ? '' : newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
   const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null
@@ -1914,7 +1915,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <div className="new-tab-weather-widget" role="status" aria-live="polite">
                         {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
                           : newTabWeatherError ? <span>{newTabWeatherError}</span>
-                            : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small></>
+                            : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
                               : <span>Weather unavailable</span>}
                       </div>
                     )}

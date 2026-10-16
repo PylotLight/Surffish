@@ -2179,6 +2179,11 @@
   color: rgba(250, 252, 253, 0.77);
   font-size: 11px;
 }
+.new-tab-weather-widget .new-tab-weather-notice {
+  max-width: 260px;
+  color: rgba(250, 252, 253, 0.62);
+  font-size: 10.5px;
+}
 /* Vertical position: the free space runs from under the clocks/weather to above the photo credit;
    flex spacers split what the icons don't use by --new-tab-icon-position (0 top, 1 bottom), so the
    icons can't leave the page, and the track scrolls when a tiny window can't fit them at all. */

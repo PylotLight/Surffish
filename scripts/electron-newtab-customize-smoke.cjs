@@ -1,5 +1,6 @@
 // New Tab "Customize" panel + weather city search / providers + wider vertical position, against
-// the production build. All weather traffic goes to a fake `fetch` installed in this (main) process
+// the production build. All weather traffic goes to a fake fetch installed in this (main) process
+// as globalThis.__surffishWeatherFetch (main otherwise uses the browser session's Chromium fetch)
 // before the app loads, so CI never touches the network:
 //   1. The New Tab draws the gear, but the panel's code isn't loaded until the gear is used (lazy chunk).
 //   2. A weather setting saved before city search (free text "Melbourne") still loads and saves its place once.
@@ -7,9 +8,11 @@
 //   4. Vertical position: 0 % puts the icons right under the clocks, 100 % right above the photo credit,
 //      never off-screen in a short window; a fast drag ends where it stopped (no echo snap-back).
 //   5. City search: debounced suggestions with region + country; picking one saves its coordinates.
-//   6. Providers: MET Norway (with an identifying User-Agent), a failing wttr.in shows a friendly error,
+//   6. Open-Meteo forecast model: BOM ACCESS-G with no data falls back to best match with a hint; a
+//      429 falls back to MET Norway; a DNS failure says so instead of "Can't reach".
+//   7. Providers: MET Norway (with an identifying User-Agent), a failing wttr.in shows a friendly error,
 //      OpenWeather asks for a key then works once one is saved; °F.
-//   7. Escape / a press outside close it (focus back on the gear); Settings → New Tab shares the same
+//   8. Escape / a press outside close it (focus back on the gear); Settings → New Tab shares the same
 //      state and its "Customize on New Tab" button opens the panel.
 // `bun run build && bun run test:electron-newtab-customize` (headless Linux: xvfb-run -a ...).
 // SMOKE_SHOTS=<dir> also saves screenshots of the New Tab with the panel open.
@@ -47,9 +50,8 @@ const PLACES = [
   { name: 'Melton', admin1: 'Victoria', country: 'Australia', country_code: 'AU', latitude: -37.68339, longitude: 144.58566 }
 ]
 const calls = []
-const realFetch = globalThis.fetch
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-globalThis.fetch = async (input, init) => {
+globalThis.__surffishWeatherFetch = async (input, init) => {
   const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
   const headers = new Headers(init?.headers)
   const lat = Number(url.searchParams.get('latitude') ?? url.searchParams.get('lat') ?? url.pathname.slice(1).split(',')[0])
@@ -59,9 +61,16 @@ globalThis.fetch = async (input, init) => {
       calls.push({ host: url.hostname, name })
       return json({ results: PLACES.filter((place) => place.name.toLowerCase().startsWith(name)) })
     }
-    case 'api.open-meteo.com':
-      calls.push({ host: url.hostname, lat })
+    case 'api.open-meteo.com': {
+      const model = url.searchParams.get('models') ?? 'best_match'
+      calls.push({ host: url.hostname, lat, model })
+      // BOM open-data delivery paused: Open-Meteo answers 200 with nulls for the model.
+      if (model === 'bom_access_global') return json({ current: { time: '2026-10-17T00:00', temperature_2m: null, weather_code: null } })
+      if (model === 'ukmo_seamless') return json({ error: true, reason: 'Daily API request limit exceeded. Please try again tomorrow.' }, 429)
+      if (model === 'dwd_icon_seamless') throw new Error('net::ERR_NAME_NOT_RESOLVED')
+      if (model === 'ecmwf_ifs') return json({ current: { temperature_2m: 25.6, weather_code: 61 } })
       return json({ current: { temperature_2m: lat > 0 ? 27.2 : 15.3, weather_code: 2 } })
+    }
     case 'api.met.no':
       calls.push({ host: url.hostname, lat, ua: headers.get('user-agent') })
       if (!/Surffish\/\S+ \(\+https:\/\/github\.com\/PylotLight\/Surffish\)/.test(headers.get('user-agent') ?? '')) return json({ error: 'identify yourself' }, 403)
@@ -77,7 +86,7 @@ globalThis.fetch = async (input, init) => {
       calls.push({ host: url.hostname })
       return json({ city: 'Boardman', region: 'Oregon', country: 'United States', country_code: 'US', latitude: '45.8401', longitude: '-119.705' })
     default:
-      return realFetch(input, init)
+      throw new Error(`net::ERR_BLOCKED_BY_CLIENT (unexpected weather host ${url.hostname} in the smoke)`)
   }
 }
 const callsTo = (host) => calls.filter((call) => call.host === host)
@@ -217,6 +226,24 @@ async function run() {
   assert.equal((await prefs()).weatherPlace.latitude, 28.0836)
   await waitFor(async () => /27°C · Partly cloudy/.test(await widgetText()), 'weather for Melbourne, Florida')
   assert.equal(await ev('document.querySelector(\'.new-tab-customize [aria-label="Weather city or town"]\').value'), 'Melbourne, Florida, United States')
+
+  smoke.step('Open-Meteo forecast model: BOM fallback hint, 429 → MET Norway, DNS error named')
+  await setSelect('Open-Meteo forecast model', 'ecmwf_ifs')
+  await waitFor(async () => /26°C · Rain/.test(await widgetText()), 'ECMWF reading')
+  await waitFor(async () => (await prefs()).openMeteoModel === 'ecmwf_ifs', 'the model saved')
+  assert.equal(callsTo('api.open-meteo.com').at(-1).model, 'ecmwf_ifs', 'the model goes in models=')
+  await setSelect('Open-Meteo forecast model', 'bom_access_global')
+  await waitFor(async () => /27°C · Partly cloudy/.test(await widgetText()) && /BOM ACCESS-G data unavailable, showing best match/.test(await widgetText()), 'BOM with no data falls back to best match with a hint')
+  assert.deepEqual(callsTo('api.open-meteo.com').slice(-2).map((call) => call.model), ['bom_access_global', 'best_match'])
+  assert.match(await ev('document.querySelector(".new-tab-customize .weather-preview").textContent'), /BOM ACCESS-G data unavailable/, 'the panel preview shows the hint too')
+  await setSelect('Open-Meteo forecast model', 'ukmo_seamless')
+  await waitFor(async () => /9°C · Light rain/.test(await widgetText()) && /MET Norway · Melbourne/.test(await widgetText()) && /Open-Meteo is rate-limiting requests\. Showing MET Norway\./.test(await widgetText()), 'a 429 falls back to MET Norway and says so')
+  await setSelect('Open-Meteo forecast model', 'dwd_icon_seamless')
+  await waitFor(async () => /Couldn’t look up Open-Meteo’s server \(ERR_NAME_NOT_RESOLVED\)/.test(await widgetText()), 'a DNS failure is named, not "Can’t reach"')
+  await setSelect('Open-Meteo forecast model', 'best_match')
+  await waitFor(async () => /27°C · Partly cloudy/.test(await widgetText()) && !/unavailable|Showing/.test(await widgetText()), 'best match again, no hint')
+  await setSelect('Weather provider', 'wttr')
+  assert.equal(await ev('Boolean(document.querySelector(\'.new-tab-customize [aria-label="Open-Meteo forecast model"]\'))'), false, 'the model picker is Open-Meteo only')
 
   smoke.step('Providers: MET Norway, a failing wttr.in, OpenWeather with a key; °F')
   await setSelect('Weather provider', 'met-norway')

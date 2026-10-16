@@ -2,7 +2,7 @@
  * New Tab weather: providers, the place a search picked, and the pure parsing of each provider's
  * response. Network calls live in main (main/new-tab-weather.ts); everything here is unit-tested.
  */
-import type { NewTabWeatherSnapshot, WeatherPlace, WeatherProviderId } from './types'
+import type { NewTabWeatherSnapshot, OpenMeteoModelId, WeatherPlace, WeatherProviderId } from './types'
 
 export interface WeatherProviderInfo {
   id: WeatherProviderId
@@ -20,6 +20,32 @@ export const WEATHER_PROVIDERS: readonly WeatherProviderInfo[] = [
 ]
 
 export const DEFAULT_WEATHER_PROVIDER: WeatherProviderId = 'open-meteo'
+
+export interface OpenMeteoModelInfo {
+  id: OpenMeteoModelId
+  label: string
+  hint: string
+}
+
+/** Open-Meteo `models=` choices (ids from open-meteo.com/en/docs). All global, so every place gets data. */
+export const OPEN_METEO_MODELS: readonly OpenMeteoModelInfo[] = [
+  { id: 'best_match', label: 'Best match', hint: 'Open-Meteo picks the best local models for the place.' },
+  { id: 'bom_access_global', label: 'BOM ACCESS-G', hint: 'Australian Bureau of Meteorology global model (~15 km). BOM open data is sometimes paused; Surffish falls back to best match then.' },
+  { id: 'ecmwf_ifs', label: 'ECMWF IFS', hint: 'European Centre global model (~9 km).' },
+  { id: 'ncep_gfs_seamless', label: 'NOAA GFS', hint: 'US National Weather Service global model.' },
+  { id: 'dwd_icon_seamless', label: 'DWD ICON', hint: 'German Weather Service model.' },
+  { id: 'ukmo_seamless', label: 'UK Met Office', hint: 'UK Met Office global + UK models.' }
+]
+
+export const DEFAULT_OPEN_METEO_MODEL: OpenMeteoModelId = 'best_match'
+
+export function isOpenMeteoModelId(value: unknown): value is OpenMeteoModelId {
+  return typeof value === 'string' && OPEN_METEO_MODELS.some((model) => model.id === value)
+}
+
+export function openMeteoModelLabel(id: OpenMeteoModelId): string {
+  return OPEN_METEO_MODELS.find((model) => model.id === id)?.label ?? 'Best match'
+}
 export const WEATHER_CACHE_MS = 10 * 60 * 1000
 export const MAX_WEATHER_API_KEY_LENGTH = 128
 
@@ -143,6 +169,7 @@ export function describeMetSymbol(symbol: string): string {
 
 type Reading = Pick<NewTabWeatherSnapshot, 'temperatureCelsius' | 'description'>
 
+/** Open-Meteo `current` block. A model with no data (e.g. BOM delivery paused) answers 200 with nulls: that's null here. */
 export function parseOpenMeteoCurrent(json: unknown): Reading | null {
   const current = isRecord(json) && isRecord(json.current) ? json.current : null
   const temperature = finite(current?.temperature_2m)
@@ -181,15 +208,82 @@ export function parseOpenWeatherMap(json: unknown): Reading | null {
   return { temperatureCelsius: temperature, description: desc ? desc.charAt(0).toUpperCase() + desc.slice(1) : 'Current conditions' }
 }
 
-/** Cache key: one entry per provider and place (coordinates, so two "Springfield"s never share). */
-export function weatherCacheKey(provider: WeatherProviderId, place: WeatherPlace): string {
-  return `${provider}|${place.latitude.toFixed(3)},${place.longitude.toFixed(3)}`
+/** Cache key: one entry per provider (+ Open-Meteo model) and place (coordinates, so two "Springfield"s never share). */
+export function weatherCacheKey(provider: WeatherProviderId, place: WeatherPlace, model: OpenMeteoModelId = DEFAULT_OPEN_METEO_MODEL): string {
+  const source = provider === 'open-meteo' && model !== DEFAULT_OPEN_METEO_MODEL ? `${provider}:${model}` : provider
+  return `${source}|${place.latitude.toFixed(3)},${place.longitude.toFixed(3)}`
+}
+
+/** What kind of network failure a thrown fetch error was (Chromium `net::ERR_*` or Node/undici codes). */
+export type WeatherNetworkFailureKind = 'offline' | 'dns' | 'timeout' | 'tls' | 'proxy' | 'blocked' | 'connection' | 'network'
+
+export interface WeatherNetworkFailure {
+  kind: WeatherNetworkFailureKind
+  /** Short code for the message and logs: "ERR_NAME_NOT_RESOLVED", "ENOTFOUND", "TimeoutError". */
+  code: string
+  /** The whole error chain, for the main-process log. */
+  detail: string
+}
+
+function errorChain(error: unknown): { messages: string[]; codes: string[]; names: string[] } {
+  const messages: string[] = []
+  const codes: string[] = []
+  const names: string[] = []
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth += 1) {
+    if (typeof current === 'object') {
+      const record = current as { message?: unknown; code?: unknown; name?: unknown; cause?: unknown }
+      if (typeof record.message === 'string' && record.message) messages.push(record.message)
+      if (typeof record.code === 'string' && record.code) codes.push(record.code)
+      if (typeof record.name === 'string' && record.name) names.push(record.name)
+      current = record.cause
+    } else {
+      messages.push(String(current))
+      break
+    }
+  }
+  return { messages, codes, names }
+}
+
+/** Classifies a thrown fetch error so the message says what actually went wrong (and never "offline" for a TLS or proxy problem). */
+export function classifyWeatherFetchError(error: unknown): WeatherNetworkFailure {
+  const { messages, codes, names } = errorChain(error)
+  const chromium = messages.map((message) => /\b(?:net::)?(ERR_[A-Z0-9_]+)/.exec(message)?.[1]).find((code): code is string => Boolean(code))
+  const timeoutName = names.find((name) => name === 'TimeoutError' || name === 'AbortError')
+  const code = chromium ?? codes.find((entry) => entry !== 'ERR_INVALID_STATE') ?? timeoutName ?? names.find((name) => name !== 'Error' && name !== 'TypeError') ?? 'unknown error'
+  const detail = [...new Set([...messages, ...codes])].join(' ← ') || String(error)
+  const kind = ((): WeatherNetworkFailureKind => {
+    if (timeoutName || /^(ERR_(CONNECTION_)?TIMED_OUT|ETIMEDOUT|UND_ERR_(CONNECT|HEADERS|BODY)_TIMEOUT)$/.test(code)) return 'timeout'
+    if (/^(ERR_INTERNET_DISCONNECTED|ENETDOWN)$/.test(code)) return 'offline'
+    if (/^(ERR_NAME_NOT_RESOLVED|ERR_NAME_RESOLUTION_FAILED|ERR_DNS_.*|ENOTFOUND|EAI_AGAIN|EAI_NONAME)$/.test(code)) return 'dns'
+    if (/^(ERR_PROXY_.*|ERR_SOCKS_.*|ERR_TUNNEL_CONNECTION_FAILED|ERR_MANDATORY_PROXY_CONFIGURATION_FAILED|ERR_PAC_.*|UND_ERR_PRX_TLS)$/.test(code)) return 'proxy'
+    if (/^(ERR_CERT_.*|ERR_SSL_.*|ERR_BAD_SSL_.*|ERR_TLS_.*|CERT_.*|.*_CERT_.*|UNABLE_TO_.*|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|EPROTO)$/.test(code)) return 'tls'
+    if (/^ERR_BLOCKED_BY_/.test(code)) return 'blocked'
+    if (/^(ERR_CONNECTION_(REFUSED|RESET|CLOSED|ABORTED|FAILED)|ERR_EMPTY_RESPONSE|ECONNREFUSED|ECONNRESET|EPIPE|UND_ERR_SOCKET|UND_ERR_CLOSED)$/.test(code)) return 'connection'
+    return 'network'
+  })()
+  return { kind, code, detail }
+}
+
+/** Failures on the provider's side (busy, broken, slow): worth trying the other keyless provider. */
+export function isProviderSideFailure(error: { status?: number; network?: WeatherNetworkFailure; unreadable?: boolean }): boolean {
+  if (error.unreadable) return true
+  if (error.status !== undefined) return error.status === 429 || error.status >= 500
+  return error.network?.kind === 'timeout' || error.network?.kind === 'connection'
 }
 
 /** A friendly sentence for a failed provider request (shown on the New Tab and in Settings). */
-export function weatherErrorMessage(provider: WeatherProviderId, error: { status?: number; timeout?: boolean; offline?: boolean }): string {
+export function weatherErrorMessage(provider: WeatherProviderId, error: { status?: number; timeout?: boolean; offline?: boolean; network?: WeatherNetworkFailure }): string {
   const label = weatherProviderLabel(provider)
-  if (error.timeout) return `${label} didn’t answer in time. Trying again later.`
+  const network = error.network
+  if (error.timeout || network?.kind === 'timeout') return `${label} didn’t answer in time. Trying again later.`
+  if (network?.kind === 'offline') return `You’re offline. ${label} weather loads when you’re back online.`
+  if (network?.kind === 'dns') return `Couldn’t look up ${label}’s server (${network.code}). Check your DNS or VPN.`
+  if (network?.kind === 'tls') return `Couldn’t make a secure connection to ${label} (${network.code}). A VPN or network filter may be intercepting it.`
+  if (network?.kind === 'proxy') return `Couldn’t reach ${label} through your proxy (${network.code}).`
+  if (network?.kind === 'blocked') return `The request to ${label} was blocked (${network.code}). Check ad blocking or network rules.`
+  if (network?.kind === 'connection') return `${label} dropped the connection (${network.code}). Trying again later.`
+  if (network) return `Can’t reach ${label} (${network.code}). Check your connection.`
   if (error.offline) return `Can’t reach ${label}. Check your connection.`
   if (error.status === 401 || error.status === 403) return provider === 'openweathermap' ? 'OpenWeather rejected the API key. Check it in New Tab settings.' : `${label} refused the request (HTTP ${error.status}).`
   if (error.status === 429) return `${label} is rate-limiting requests. Trying again later.`
