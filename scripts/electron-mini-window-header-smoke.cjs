@@ -17,6 +17,7 @@
 //   6. Overlay: the header lies over the page's top (the original behaviour).
 //   7. Float again: tucking hides the panel with the window; sliding out and revealing puts it back above.
 //   8. Stack: dragging the leader by its floating header moves the rest of its group along the edge.
+//   Also: a floating header dragged up into the menu bar band stops at the work area's top (never under the bar).
 //   9. Return All leaves no mini window, panel, handle, or header/handle webContents behind.
 // `bun run build && bun run test:electron-mini-window-header`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-mini-window-header-smoke.cjs`; needs xdotool).
@@ -275,6 +276,19 @@ async function run() {
   assert.ok(Math.abs(wb.x - (before.x + moved.dx)) <= 2 && Math.abs(wb.y - (before.y + moved.dy)) <= 2, 'dropped where it was let go (no snap)')
   await waitFor(() => panel.isVisible() && panel.getBounds().y === w1.getBounds().y - 64 && panel.getBounds().x === w1.getBounds().x, 'the panel still attached above')
   await intact('dragged by the header', [h1, h2])
+
+  smoke.step('float: dragged up into the menu bar band, the header stops at the top of the work area (never under the bar)')
+  {
+    const display = screen.getDisplayMatching(w1.getBounds())
+    // Into the band above the work area (a macOS menu bar), short of pressing the screen's top edge (which tucks).
+    const up = await dragHeader(header, { x: panel.getBounds().x + 12 + 40, y: display.bounds.y + 6 })
+    await delay(600)
+    wb = w1.getBounds()
+    assert.equal(wb.y, display.workArea.y + 64, `the window stopped with its header just under the work area's top (moved ${JSON.stringify(up)}, now ${JSON.stringify(wb)}, work area ${JSON.stringify(display.workArea)})`)
+    await waitFor(() => panel.isVisible() && panel.getBounds().y === display.workArea.y && panel.getBounds().y === w1.getBounds().y - 64, `the panel still above, at the work area's top (got ${JSON.stringify(panel.getBounds())})`)
+    assert.equal(w1.isVisible(), true, 'not tucked (the pointer never pressed the screen edge)')
+    await intact('dragged up to the menu bar', [h1, h2])
+  }
 
   smoke.step('float: no room above (top of the work area) flips the panel below the window')
   park()

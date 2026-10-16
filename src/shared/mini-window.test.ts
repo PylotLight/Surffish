@@ -25,6 +25,7 @@ import {
   snapMiniToCorner,
   MINI_WINDOW_HEADER_HEIGHT,
   MINI_WINDOW_TAB_STRIP_HEIGHT,
+  MINI_WINDOW_POPOUT_STRIP_HEIGHT,
   miniHeaderHeight,
   miniMergeTarget,
   miniSplitBounds,
@@ -332,6 +333,16 @@ describe('header placement', () => {
     expect(miniPageBounds('above', true, size, 64)).toEqual({ x: 0, y: 0, width: 420, height: 400 })
     // Never a zero-height page.
     expect(miniPageBounds('push', true, { width: 300, height: 30 }, 64).height).toBe(1)
+  })
+
+  test('menu bar popout strip: always there, the page always under it, nothing to reveal', () => {
+    const size = { width: 400, height: 588 }
+    const page = { x: 0, y: MINI_WINDOW_POPOUT_STRIP_HEIGHT, width: 400, height: 560 }
+    // Revealed or not (hover), the page's bounds never change: no reflow.
+    expect(miniPageBounds('strip', false, size, MINI_WINDOW_POPOUT_STRIP_HEIGHT)).toEqual(page)
+    expect(miniPageBounds('strip', true, size, MINI_WINDOW_POPOUT_STRIP_HEIGHT)).toEqual(page)
+    for (const y of [0, 10, 27, 44, 300]) expect(inMiniRevealZone('strip', y, 588)).toBe(false)
+    expect(MINI_WINDOW_POPOUT_STRIP_HEIGHT).toBeLessThan(MINI_WINDOW_HEADER_HEIGHT)
   })
 
   test('union and the merge band over a floating header', () => {

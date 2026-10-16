@@ -8,12 +8,25 @@
  * what is remembered); main/mini-window-menubar.ts owns the Tray and main/mini-window.ts the windows.
  */
 import { easeOut, frameClock, type FrameLoop } from './mini-window-motion'
-import { MINI_WINDOW_MAX, MINI_WINDOW_MIN_SIZE, canPopOutUrl, type MiniRect, type MiniWindowMenuBarIcon } from './mini-window'
+import { MINI_WINDOW_MAX, MINI_WINDOW_MIN_SIZE, MINI_WINDOW_POPOUT_STRIP_HEIGHT, canPopOutUrl, type MiniRect, type MiniWindowMenuBarIcon } from './mini-window'
 
 /** Which mini windows live in the menu bar and the popout's size, kept across restarts (private tabs never). */
 export const MINI_WINDOW_MENU_BAR_FILE = 'mini-window-menubar.json'
-/** The popout's size until it is resized. */
+/** The popout's page size (under its strip) until it is resized. */
 export const MINI_MENU_BAR_DEFAULT_SIZE = { width: 400, height: 560 }
+
+/**
+ * The popout window for a page area of `page` (the size that is remembered): the always-on strip adds
+ * to the window, so the page keeps the height it had before the strip existed.
+ */
+export function menuBarWindowSize(page: { width: number; height: number }): { width: number; height: number } {
+  return { width: page.width, height: page.height + MINI_WINDOW_POPOUT_STRIP_HEIGHT }
+}
+
+/** The page area of a popout window `window` big (what is remembered when the user resizes it). */
+export function menuBarPageSize(window: { width: number; height: number }): { width: number; height: number } {
+  return { width: window.width, height: Math.max(1, window.height - MINI_WINDOW_POPOUT_STRIP_HEIGHT) }
+}
 /** Gap between the icon (the menu bar) and the popout. */
 export const MINI_MENU_BAR_GAP = 4
 /** Kept from the work area's sides when the icon sits near a screen edge. */

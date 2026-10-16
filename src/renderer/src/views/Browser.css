@@ -1375,7 +1375,7 @@
   align-items: center;
   gap: 11px;
   min-width: 0;
-  min-height: 45px;
+  min-height: 50px;
   padding: 6px 10px;
   border: 1px solid transparent;
   border-radius: 10px;
@@ -1418,16 +1418,42 @@
   white-space: nowrap;
 }
 .suggestion-main strong {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
+  line-height: 1.25;
 }
+/* URL line: AA contrast on the dropdown glass (path >=4.5:1 even on the selected row's lighter
+   fill), host stronger than path, scheme and "www." dimmed, the typed text highlighted. */
 .suggestion-main small,
 .suggestion-source {
-  color: rgba(245, 247, 250, 0.45);
-  font-size: 9px;
+  color: rgba(226, 232, 240, 0.76);
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.suggestion-url {
+  font-variant-numeric: tabular-nums;
+}
+.suggestion-url-scheme,
+.suggestion-url-www {
+  color: rgba(226, 232, 240, 0.56);
+}
+.suggestion-url-host {
+  color: rgba(241, 245, 249, 0.92);
+  font-weight: 600;
+}
+.suggestion-url .is-match {
+  color: rgb(165, 200, 255);
+  font-weight: 600;
+}
+.suggestion-match {
+  background: transparent;
+  color: #fff;
+  font-weight: 750;
 }
 .suggestion-source {
   flex: 0 0 auto;
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 11px;
 }
 
 .settings-subnav {

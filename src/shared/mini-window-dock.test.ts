@@ -16,6 +16,7 @@ import {
   dockedBounds,
   dragDockOffset,
   isOuterEdge,
+  keepBelowTopEdge,
   nearestDockEdge,
   parseMiniDocks,
   reconcileDock,
@@ -118,6 +119,39 @@ describe('docked bounds and handle', () => {
     expect(topTucked).toMatchObject({ y: 25, width: MINI_DOCK_HANDLE_LENGTH, height: MINI_DOCK_HANDLE_THICKNESS })
     const bottomTucked = dockHandleBounds(dockedBounds(size, { edge: 'bottom', offset: 0 }, wa, true), 'bottom')
     expect(bottomTucked.y + bottomTucked.height).toBe(900)
+  })
+
+  test('tucked to the top under a menu bar: fully past the display\'s top, nothing left in the menu bar band', () => {
+    const b = laptop.bounds
+    const top = dockedBounds(size, { edge: 'top', offset: 10 }, wa, true, b)
+    expect(top).toEqual({ x: 10, y: -620, ...size })
+    // A taller notch menu bar (37 px) and an auto-hidden one (work area = bounds) alike.
+    const notch = { x: 0, y: 37, width: 1512, height: 945 }
+    expect(dockedBounds(size, { edge: 'top', offset: 0 }, notch, true, { x: 0, y: 0, width: 1512, height: 982 }).y + size.height).toBe(0)
+    expect(dockedBounds(size, { edge: 'top', offset: 0 }, b, true, b).y).toBe(-620)
+    // Out: still flush with the work area, just under the menu bar.
+    expect(dockedBounds(size, { edge: 'top', offset: 10 }, wa, false, b).y).toBe(25)
+    // A Dock / taskbar band on the other edges: tucked past it too.
+    const docked = { x: 60, y: 25, width: 1380, height: 805 }
+    expect(dockedBounds(size, { edge: 'left', offset: 0 }, docked, true, b).x).toBe(-420)
+    expect(dockedBounds(size, { edge: 'bottom', offset: 0 }, docked, true, b).y).toBe(900)
+    expect(dockedBounds(size, { edge: 'right', offset: 0 }, { x: 0, y: 25, width: 1380, height: 875 }, true, b).x).toBe(1440)
+  })
+
+  test('the handle of a window tucked past the menu bar stays just under it (inside the work area)', () => {
+    const b = laptop.bounds
+    const top = dockHandleBounds(dockedBounds(size, { edge: 'top', offset: 0 }, wa, true, b), 'top', wa)
+    expect(top).toMatchObject({ y: 25, width: MINI_DOCK_HANDLE_LENGTH, height: MINI_DOCK_HANDLE_THICKNESS })
+    // Out (flush under the menu bar): on the window's free side as before.
+    expect(dockHandleBounds(dockedBounds(size, { edge: 'top', offset: 0 }, wa, false, b), 'top', wa).y).toBe(25 + 620)
+    // Mid-slide it rides the window's edge once that is inside the work area, never above it.
+    expect(dockHandleBounds({ x: 0, y: -300, ...size }, 'top', wa).y).toBe(320)
+    expect(dockHandleBounds({ x: 0, y: -610, ...size }, 'top', wa).y).toBe(25)
+    const docked = { x: 60, y: 25, width: 1380, height: 805 }
+    expect(dockHandleBounds(dockedBounds(size, { edge: 'left', offset: 0 }, docked, true, b), 'left', docked).x).toBe(60)
+    const bottom = dockHandleBounds(dockedBounds(size, { edge: 'bottom', offset: 0 }, docked, true, b), 'bottom', docked)
+    expect(bottom.y + bottom.height).toBe(830)
+    expect(dockHandleAt(dockedBounds(size, { edge: 'top', offset: 0 }, wa, true, b), 'top', 300, wa)).toMatchObject({ x: 300, y: 25 })
   })
 
   test('dockFor keeps the place along the edge; distance tells flush from dragged away', () => {
@@ -242,5 +276,20 @@ describe('stacked groups', () => {
 
   test('group key: display and edge', () => {
     expect(dockGroupKey(7, 'right')).toBe('7:right')
+  })
+})
+
+describe('keeping a header-dragged window out from under the menu bar', () => {
+  test('its top (and a header floating above it) stays at or below the work area\'s top', () => {
+    expect(keepBelowTopEdge({ x: 100, y: 10, ...size }, 0, laptop, alone)).toEqual({ x: 100, y: 25, ...size })
+    expect(keepBelowTopEdge({ x: 100, y: 40, ...size }, 36, laptop, alone)).toEqual({ x: 100, y: 61, ...size })
+    expect(keepBelowTopEdge({ x: 100, y: 200, ...size }, 36, laptop, alone)).toEqual({ x: 100, y: 200, ...size })
+    // Sideways and down are untouched (pushing past those edges is how it docks there).
+    expect(keepBelowTopEdge({ x: -200, y: 500, ...size }, 36, laptop, alone)).toEqual({ x: -200, y: 500, ...size })
+  })
+
+  test('a display above it there: dragging up onto that one is fine', () => {
+    const above: MiniDisplay = { bounds: { x: 0, y: -1080, width: 1920, height: 1080 }, workArea: { x: 0, y: -1080, width: 1920, height: 1080 } }
+    expect(keepBelowTopEdge({ x: 100, y: -300, ...size }, 36, laptop, [laptop, above])).toEqual({ x: 100, y: -300, ...size })
   })
 })

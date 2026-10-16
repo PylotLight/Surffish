@@ -6,12 +6,15 @@
 //      menu bar last run is picked back out of the restored tabs into a (hidden) menu bar mini, and
 //      the icon exists for it.
 //   2. ⌘K "Send Mini Window to Menu Bar" on a floating mini: it drops in under the icon (anchored and
-//      clamped to the work area), not movable, 'float' header pushes inside it (no panel); the page
-//      never reloads; a click on the icon hides it, again shows it; hidden keeps the page and audio
-//      running (♪ in the title).
+//      clamped to the work area), not movable; its header is the popout strip: always shown (28 px,
+//      no panel), the page always under it and never moved by hovering it or the page's top; one tab
+//      shows its favicon and title, ⋯ / Pin / Close (Tab order) and the ⋯ menu (Esc while it is up
+//      never hides the popout); the page never reloads; a click on the icon hides it, again shows it;
+//      hidden keeps the page and audio running (♪ in the title).
 //   3. Esc hides it; a click elsewhere (blur) hides it unless pinned (header pin button); the icon click
 //      that blurred it shut doesn't reopen it, the next one does.
-//   4. Tabs grouping: another tab sent there joins the menu bar collection (one entry, +1); switching
+//   4. Tabs grouping: another tab sent there joins the menu bar collection (one entry, +1) and its tab
+//      chips sit in the same strip (still 28 px, the page doesn't move); switching
 //      to Separate splits it into two menu bar minis (title "2"), the menu picks which one shows (one
 //      popout at a time).
 //   5. Right-click menu: Pin, Return to Window, Move to Edge (docks and tucks it), Settings, Hide icon.
@@ -86,6 +89,16 @@ const bar = () => globalThis.__surffishMiniMenuBar
 const trayExists = () => Boolean(bar()?.exists())
 // setMovable is macOS/Windows only: on Linux "in the menu bar" is read from the header instead.
 const inMenuBar = (win) => smoke.evaluate(headerOf(win), 'document.body.classList.contains("inmenubar")')
+const popoutMenu = () => globalThis.__surffishMiniPopoutMenu
+// The popout's always-on strip (shared/mini-window.ts MINI_WINDOW_POPOUT_STRIP_HEIGHT): it adds to the window.
+const STRIP = 28
+const headerViewOf = (win) => win.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && isMiniHeader(view.webContents))
+const sameBounds = (a, b) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+// What a header shows: the ids of visible elements, and the keyboard's Tab order through it.
+const SHOWN = `(() => { const shown = (el) => el && el.offsetParent !== null && getComputedStyle(el).visibility !== 'hidden';
+  const ids = ['back', 'reload', 'where', 'title', 'url', 'tuck', 'menubar', 'more', 'pin', 'return', 'returnAll', 'close', 'strip'].filter((id) => shown(document.getElementById(id)));
+  const order = [...document.querySelectorAll('button, [tabindex="0"], input')].filter((el) => shown(el) && el.tabIndex >= 0).map((el) => el.id || (el.classList.contains('tab') ? 'tab' : el.closest('.tab') ? 'tab-close' : el.tagName.toLowerCase()));
+  return { ids, order, title: document.getElementById('title').textContent, popout: document.body.classList.contains('popout'), tabs: document.querySelectorAll('#bar .tab').length, stripInRow: document.getElementById('strip').parentElement.id === 'bar', height: document.getElementById('bar').getBoundingClientRect().height } })()`
 const menuBarFile = () => (existsSync(join(userData, 'mini-window-menubar.json')) ? JSON.parse(readFileSync(join(userData, 'mini-window-menubar.json'), 'utf8')) : null)
 
 async function run() {
@@ -136,7 +149,9 @@ async function run() {
   const anchor = { x: wa.x + wa.width - 120, y: display.bounds.y, width: 24, height: Math.max(22, wa.y - display.bounds.y) }
   bar().click(anchor)
   await waitFor(() => w4.isVisible(), 'a click on the icon drops it in')
-  await waitFor(() => { const b = w4.getBounds(); return b.width === 380 && b.height === 420 && b.y === Math.max(anchor.y + anchor.height, wa.y) + 4 }, 'at the saved size, just below the menu bar', 3000)
+  // The saved size is the page's: the always-on strip adds to the window.
+  await waitFor(() => { const b = w4.getBounds(); return b.width === 380 && b.height === 420 + STRIP && b.y === Math.max(anchor.y + anchor.height, wa.y) + 4 }, 'at the saved size (plus the strip), just below the menu bar', 3000)
+  await waitFor(() => { const page = viewOf(w4, p4)?.getBounds(); return page && page.y === STRIP && page.height === 420 }, 'the page under the strip at the saved size', 3000)
   const b4 = w4.getBounds()
   assert.ok(b4.x + b4.width <= wa.x + wa.width - 8, `clamped inside the work area (${JSON.stringify(b4)})`)
   assert.ok(Math.abs(b4.x + b4.width / 2 - (anchor.x + 12)) <= 1 || b4.x + b4.width === wa.x + wa.width - 8, 'centred on the icon unless clamped')
@@ -181,8 +196,41 @@ async function run() {
   await waitFor(() => { const b = w1.getBounds(); return b.y === Math.max(wa.y, display.bounds.y) + 4 || b.y >= wa.y }, 'inside the work area under the menu bar')
   assert.equal(panelWindows().filter((win) => win.isVisible()).length, 0, 'no floating header panel')
   const header1 = headerOf(w1)
-  assert.ok(header1, 'the header lives in the popout (Float pushes here)')
-  await waitFor(() => smoke.evaluate(header1, 'document.body.classList.contains("inmenubar") && !document.getElementById("pin").hidden'), 'the header shows Pin and Float as Mini Window')
+  assert.ok(header1, 'the header lives in the popout')
+  await waitFor(() => smoke.evaluate(header1, 'document.body.classList.contains("popout") && !document.getElementById("pin").hidden'), 'the header is the popout strip, with Pin')
+  // Always there, before any hover: the strip at the top, the page under it.
+  const [cw1, ch1] = w1.getContentSize()
+  await waitFor(() => sameBounds(headerViewOf(w1).getBounds(), { x: 0, y: 0, width: cw1, height: STRIP }), 'the strip shown without a hover')
+  const page1 = viewOf(w1, p1.contents).getBounds()
+  assert.deepEqual(page1, { x: 0, y: STRIP, width: cw1, height: ch1 - STRIP }, 'the page under the strip')
+  let shown = await smoke.evaluate(header1, SHOWN)
+  assert.equal(shown.height, STRIP, 'the strip is 28 px')
+  assert.deepEqual(shown.ids.filter((id) => ['more', 'pin', 'close'].includes(id)), ['more', 'pin', 'close'], `⋯, Pin and Close shown (${shown.ids})`)
+  for (const id of ['back', 'reload', 'tuck', 'menubar', 'return', 'returnAll', 'url', 'strip']) assert.ok(!shown.ids.includes(id), `${id} folded away (${shown.ids})`)
+  assert.ok(shown.ids.includes('where') && shown.title === 'Bar 1', `one tab: its title (${JSON.stringify(shown)})`)
+  assert.deepEqual(shown.order, ['more', 'pin', 'close'], `Tab order (${shown.order})`)
+  // Hovering the page's top and the strip itself never moves the page (or the strip).
+  const headerBounds1 = headerViewOf(w1).getBounds()
+  for (const y of [2, 10, 30, 44, 60]) p1.contents.sendInputEvent({ type: 'mouseMove', x: 120, y })
+  headerViewOf(w1).webContents.sendInputEvent({ type: 'mouseMove', x: 60, y: 12 })
+  await holds(() => sameBounds(viewOf(w1, p1.contents).getBounds(), page1) && sameBounds(headerViewOf(w1).getBounds(), headerBounds1), 'no bounds change on hover', 700)
+  for (const y of [300, 5, 400]) p1.contents.sendInputEvent({ type: 'mouseMove', x: 200, y })
+  await holds(() => sameBounds(viewOf(w1, p1.contents).getBounds(), page1) && sameBounds(headerViewOf(w1).getBounds(), headerBounds1), 'none after leaving it either', 700)
+  // ⋯: the native menu with what the strip has no room for; Esc while it is up never hides the popout.
+  await smoke.evaluate(header1, 'document.getElementById("more").click()')
+  await waitFor(() => popoutMenu()?.open(), 'the ⋯ menu opens')
+  const moreItems = popoutMenu().items()
+  for (const label of ['Back', 'Reload', 'Pin', 'Float as Mini Window', 'Move to Edge', 'Return to Window', 'Grouping', 'Mini Window Settings…']) assert.ok(moreItems.some((item) => item.label === label), `⋯ has ${label} (${moreItems.map((item) => item.label)})`)
+  assert.deepEqual(moreItems.find((item) => item.label === 'Grouping').submenu, ['Tabs', 'Stack', 'Separate'], 'Grouping: Tabs / Stack / Separate')
+  assert.equal(moreItems.find((item) => item.label === 'Back').enabled, false, 'Back follows the page')
+  assert.equal(await smoke.evaluate(header1, 'document.getElementById("more").getAttribute("aria-expanded")'), 'true', 'aria-expanded while open')
+  header1.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
+  header1.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+  await holds(() => w1.isVisible(), 'Esc with the menu up: the popout stays', 400)
+  popoutMenu().close()
+  await waitFor(() => !popoutMenu().open(), 'the menu closed')
+  await waitFor(() => smoke.evaluate(header1, 'document.getElementById("more").getAttribute("aria-expanded") === "false"'), 'aria-expanded back to false')
+  assert.ok(w1.isVisible(), 'still shown after the menu closed')
   await intact('sent to the menu bar', [p1])
   const played = await p1.contents.executeJavaScript('window.startAudio()', true)
   const audioChecked = played === true
@@ -236,6 +284,20 @@ async function run() {
   await waitFor(() => w1.isVisible(), 'the collection drops in showing p2')
   let entries = bar().menu().filter((item) => item.label.startsWith('Bar '))
   assert.equal(entries.length, 1, `one entry for the collection (${menuLabels().join(' | ')})`)
+  // Its tabs sit in the same strip: still 28 px, the page still right under it.
+  await waitFor(async () => (await smoke.evaluate(header1, SHOWN)).tabs === 2, 'two tab chips in the strip')
+  shown = await smoke.evaluate(header1, SHOWN)
+  assert.ok(shown.stripInRow && shown.ids.includes('strip') && !shown.ids.includes('where'), `tabs replace the title, in the row (${JSON.stringify(shown)})`)
+  assert.equal(shown.height, STRIP, 'still one 28 px strip')
+  assert.equal(headerViewOf(w1).getBounds().height, STRIP, 'the header view stays 28 px')
+  assert.equal(viewOf(w1, p2.contents).getBounds().y, STRIP, 'the page stays under it')
+  assert.deepEqual(shown.order.filter((id) => !['tab', 'tab-close'].includes(id)), ['more', 'pin', 'close'], `tabs first, then ⋯ / Pin / Close (${shown.order})`)
+  assert.equal(shown.order[0], 'tab', `Tab starts on the tabs (${shown.order})`)
+  await smoke.evaluate(header1, 'document.getElementById("more").click()')
+  await waitFor(() => popoutMenu()?.open(), 'the ⋯ menu opens for the collection')
+  assert.ok(popoutMenu().items().some((item) => item.label === 'Return All to Window'), 'Return All for a collection')
+  popoutMenu().close()
+  await waitFor(() => !popoutMenu().open(), 'closed')
   assert.match(entries[0].label, /\(\+1\)$/, 'it says it holds another tab')
   assert.equal((await update({ grouping: 'separate' })).ok, true)
   await waitFor(() => miniWindows().length === 2, 'split into two menu bar minis')
@@ -284,6 +346,17 @@ async function run() {
   assert.equal((await update({ menuBarIcon: 'never' })).ok, true)
   await waitFor(() => !trayExists(), '"never": no icon')
   await waitFor(() => miniWindows().length === 2 && miniWindows().every((win) => win.isVisible()), 'menu bar minis floated out (on screen)')
+  // Floating again: the usual auto-hiding header (here 'float': back in its panel, hidden), the page fills the window.
+  await waitFor(async () => {
+    for (const contents of liveContents().filter(isMiniHeader)) if (await smoke.evaluate(contents, 'document.body.classList.contains("popout")')) return false
+    return true
+  }, 'no header is a popout strip any more')
+  for (const win of miniWindows()) {
+    const header = headerViewOf(win)
+    assert.ok(!header || header.getBounds().height === 0, `no header shown in the window until hovered (${JSON.stringify(header?.getBounds())})`)
+    const page = win.contentView.children.find((view) => view.webContents && !view.webContents.isDestroyed() && /\/p\d$/.test(view.webContents.getURL()))
+    if (page) assert.equal(page.getBounds().y, 0, 'the page fills the window again')
+  }
   if (process.platform !== 'linux') assert.ok(miniWindows().every((win) => win.isMovable()), 'movable again')
   assert.equal((await command('miniWindow.menuBar'))?.enabled, false, 'the command is off')
   assert.equal((await update({ menuBarIcon: 'always' })).ok, true)

@@ -1,6 +1,7 @@
 // Integration smoke for tuck-to-screen-edge on the mini window, against the production build:
 //   1. Dropped past each edge of the display (right, left, top, bottom) the mini window docks there and
-//      tucks away (hidden), leaving a small always-on-top handle window on that edge; the dock is
+//      tucks away (hidden, wholly past the display's edge, so none of it sits in a menu bar / Dock band),
+//      leaving a small always-on-top handle window on the work area's edge; the dock is
 //      saved; clicking the handle slides the window back out flush with the edge at its own size;
 //      dragging it away from the edge undocks it (handle gone, saved dock cleared).
 //   2. The header's tuck button tucks it to the nearest edge; the toggle command (what the global
@@ -114,6 +115,14 @@ function handleOnEdge(bounds, edge, wa) {
   return bounds.y + bounds.height === wa.y + wa.height
 }
 
+/** Tucked: wholly past `edge` of the display's bounds (none of it in the band between work area and screen edge). */
+function offDisplay(bounds, edge, screenBounds) {
+  if (edge === 'left') return bounds.x + bounds.width <= screenBounds.x
+  if (edge === 'right') return bounds.x >= screenBounds.x + screenBounds.width
+  if (edge === 'top') return bounds.y + bounds.height <= screenBounds.y
+  return bounds.y >= screenBounds.y + screenBounds.height
+}
+
 /** A drop with the window pushed 60 px past `edge`. */
 function pastEdge(size, edge, wa) {
   const midX = Math.round(wa.x + (wa.width - size.width) / 2)
@@ -193,6 +202,9 @@ async function run() {
     assert.equal(handle.isAlwaysOnTop(), true, 'the handle is always on top')
     assert.equal(handle.isFocusable?.() ?? false, false, 'the handle never takes focus')
     await waitFor(() => handleOnEdge(handle.getBounds(), edge, wa), `the handle on the ${edge} edge (got ${JSON.stringify(handle.getBounds())})`, 3000)
+    // Past the display's own edge, not just the work area's: nothing left in a menu bar / Dock / taskbar band.
+    const screenBounds = screen.getDisplayMatching(handle.getBounds()).bounds
+    await waitFor(() => offDisplay(mini.getBounds(), edge, screenBounds), `the tucked window fully past the display's ${edge} edge (got ${JSON.stringify(mini.getBounds())}, display ${JSON.stringify(screenBounds)})`, 3000)
     const saved = Object.values(readDocks())
     assert.equal(saved.length, 1, 'one saved dock')
     assert.equal(saved[0].edge, edge, 'the saved dock edge')

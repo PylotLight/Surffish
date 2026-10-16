@@ -11,9 +11,13 @@
  * Tab volume: a speaker shows on a chip (or, with one tab, next to the title) while the tab plays,
  * holds media or is muted; hovering it slides out a volume slider (the title gives way), click mutes,
  * the scroll wheel steps 5%.
- * Menu bar (shared/mini-window-menubar.ts): a Send to Menu Bar button (in the menu bar it floats the
- * mini out again) and, in the menu bar's popout, a Pin button (pinned: clicking elsewhere keeps it
- * open). Right-click on the header opens the mini window's menu.
+ * Menu bar (shared/mini-window-menubar.ts): a Send to Menu Bar button. In the menu bar's popout
+ * (body.popout) the header is a different thing: one slim strip, always shown (main never hides it or
+ * moves the page under it), holding the tabs (or, with one tab, the favicon and title) and a compact
+ * action area: ⋯ (a native menu with Back, Reload, Pin, Float as Mini Window, Move to Edge, Return,
+ * Grouping, Settings; arrow keys move through it and Esc closes it, not the popout), Pin (pinned:
+ * clicking elsewhere keeps it open) and Close. Right-click on the header opens the mini window's menu
+ * (the ⋯ menu in the popout).
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
 export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
@@ -80,6 +84,22 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   .vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 50%; background: var(--text); border: 0; }
   .vol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
   @media (prefers-reduced-motion: reduce) { .vol input { transition: none; } }
+  /* Menu bar popout: one slim strip, always there (no reveal, no motion), tabs and actions in one row. */
+  #more { display: none; }
+  body.popout header { height: 28px; gap: 1px; padding: 0 3px 0 4px; -webkit-app-region: no-drag; }
+  body.popout #back, body.popout #reload, body.popout #tuck, body.popout #menubar, body.popout #return, body.popout #returnAll, body.popout #url, body.popout #progress { display: none; }
+  body.popout #more { display: inline-flex; }
+  body.popout header > button, body.popout header > .vol > .spk { width: 22px; height: 22px; border-radius: 5px; font-size: 14px; }
+  body.popout #where { gap: 6px; padding: 0 3px; }
+  body.popout #icon { width: 14px; height: 14px; }
+  body.popout #title { font-size: 11.5px; }
+  body.popout.tabbed #where { display: none; }
+  body.popout #strip { position: static; display: none; flex: 1 1 auto; min-width: 0; height: 100%; padding: 3px 2px 3px 0; border: 0; background: transparent; -webkit-app-region: no-drag; }
+  body.popout.tabbed #strip { display: flex; }
+  body.popout.loading header { box-shadow: inset 0 -2px 0 -0.5px var(--accent); }
+  body.popout #more[aria-expanded=true] { background: var(--hover); }
+  @media (prefers-reduced-transparency: reduce) { :root { --bar: rgb(246,246,247); } }
+  @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); } }
 </style></head>
 <body>
 <header id="bar">
@@ -90,6 +110,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   <span id="badge">Private</span>
   <button id="tuck" data-hint="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button id="menubar" data-hint="Send to Menu Bar" aria-label="Send to Menu Bar" hidden><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 2.5h12"/><path class="arrow" d="M8 13.5v-7M5.2 9.2 8 6.4l2.8 2.8"/></svg></button>
+  <button id="more" data-hint="More" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="3" cy="8" r="1.45" fill="currentColor"/><circle cx="8" cy="8" r="1.45" fill="currentColor"/><circle cx="13" cy="8" r="1.45" fill="currentColor"/></svg></button>
   <button id="pin" data-hint="Pin (stay open when clicking elsewhere)" aria-label="Pin" aria-pressed="false" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2h4l-.6 4 2.3 2.3H4.3L6.6 6z"/><path d="M8 8.3v5.2"/></svg></button>
   <button id="return" data-hint="Return to Browser" aria-label="Return to Browser">&#8689;</button>
   <button id="returnAll" data-hint="Return All Tabs to Browser" aria-label="Return All Tabs to Browser">&#8648;</button>
@@ -116,6 +137,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     // Menu bar: Send to Menu Bar (in it: Float as Mini Window) and, in it, Pin.
     const menuBar = state.menuBar || { available: false, inMenuBar: false, pinned: false }
     document.body.classList.toggle('inmenubar', Boolean(menuBar.inMenuBar))
+    setPopout(Boolean(menuBar.inMenuBar))
     const menuButton = document.getElementById('menubar')
     menuButton.hidden = !menuBar.available && !menuBar.inMenuBar
     const menuLabel = menuBar.inMenuBar ? 'Float as Mini Window' : 'Send to Menu Bar'
@@ -217,6 +239,25 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     }
   }
   const headerVolume = makeVolume(document.getElementById('vol'), false)
+  // The popout's strip: the tab strip moves into the header row (before the speaker and the actions,
+  // so Tab goes tabs → ⋯ → Pin → Close); out of the popout it goes back under the header.
+  function setPopout(on) {
+    if (document.body.classList.contains('popout') === on) return
+    document.body.classList.toggle('popout', on)
+    const strip = document.getElementById('strip')
+    if (on) document.getElementById('bar').insertBefore(strip, document.getElementById('vol'))
+    else document.getElementById('bar').after(strip)
+    syncPopoutTitles()
+  }
+  // With tabs in the popout the title's place (where hints show) is gone: the actions get tooltips.
+  function syncPopoutTitles() {
+    const titled = document.body.classList.contains('popout') && document.body.classList.contains('tabbed')
+    for (const id of ['more', 'pin', 'close']) {
+      const button = document.getElementById(id)
+      if (titled) button.title = button.dataset.hint || button.getAttribute('aria-label') || ''
+      else button.removeAttribute('title')
+    }
+  }
   // The tab strip (grouping 'tabs', two or more tabs).
   const strip = document.getElementById('strip')
   let dragTab = null
@@ -225,6 +266,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   const chipVolumes = new Map()
   function renderTabs(tabs) {
     document.body.classList.toggle('tabbed', tabs.length > 1)
+    syncPopoutTitles()
     // With a strip, the header's close button closes the tab on screen (the rest stay).
     const closeButton = document.getElementById('close')
     closeButton.dataset.hint = tabs.length > 1 ? 'Close Tab' : 'Close'
@@ -353,7 +395,18 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   document.getElementById('close').addEventListener('click', () => window.miniWindow.close())
   document.getElementById('menubar').addEventListener('click', () => window.miniWindow.menuBar())
   document.getElementById('pin').addEventListener('click', () => window.miniWindow.pin())
+  // ⋯ (popout): a native menu under the button. Enter/Space/click or ArrowDown open it.
+  const more = document.getElementById('more')
+  function openMore() {
+    const rect = more.getBoundingClientRect()
+    more.setAttribute('aria-expanded', 'true')
+    window.miniWindow.more(rect.left, rect.bottom + 2)
+  }
+  more.addEventListener('click', openMore)
+  more.addEventListener('keydown', (event) => { if (event.key === 'ArrowDown') { event.preventDefault(); openMore() } })
+  window.miniWindow.onMenuClosed(() => { more.setAttribute('aria-expanded', 'false') })
   // Right-click on the header (not a tab chip or the volume): the mini window's menu.
-  for (const surface of [bar, strip]) surface.addEventListener('contextmenu', (event) => { if (event.target.closest('.tab, .vol')) return; event.preventDefault(); window.miniWindow.menu() })
+  // (In the popout the strip sits inside the header row: one menu per right-click.)
+  for (const surface of [bar, strip]) surface.addEventListener('contextmenu', (event) => { if (event.target.closest('.tab, .vol')) return; event.preventDefault(); event.stopPropagation(); window.miniWindow.menu() })
 </script>
 </body></html>`

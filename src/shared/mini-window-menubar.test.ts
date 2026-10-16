@@ -1,16 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { parseMiniWindowSettings } from './mini-window'
+import { MINI_WINDOW_POPOUT_STRIP_HEIGHT, parseMiniWindowSettings } from './mini-window'
 import {
   MINI_MENU_BAR_BLUR_CLICK_MS,
+  MINI_MENU_BAR_DEFAULT_SIZE,
   MINI_MENU_BAR_DROP_MS,
   MINI_MENU_BAR_DROP_PX,
   MINI_MENU_BAR_GAP,
   MINI_MENU_BAR_MARGIN,
   createMenuBarPopout,
   menuBarDropFrame,
+  menuBarPageSize,
   menuBarPopoutBounds,
   menuBarTrayTitle,
   menuBarTrayTooltip,
+  menuBarWindowSize,
   parseMenuBarSaved,
   pickMenuBarMini,
   pickRestoredMenuBarTabs,
@@ -133,6 +136,19 @@ describe('popout placement', () => {
     expect(bounds.height).toBe(475 - 2 * MINI_MENU_BAR_GAP)
     expect(bounds.y + bounds.height).toBeLessThanOrEqual(500)
     expect(menuBarPopoutBounds({ x: 400, y: 0, width: 20, height: 25 }, { x: 0, y: 0 }, { width: 10, height: 10 }, MAC).bounds).toMatchObject({ width: 280, height: 200 })
+  })
+})
+
+describe('popout strip sizing', () => {
+  test('the strip adds to the window: the page keeps the remembered size', () => {
+    expect(menuBarWindowSize(MINI_MENU_BAR_DEFAULT_SIZE)).toEqual({ width: 400, height: 560 + MINI_WINDOW_POPOUT_STRIP_HEIGHT })
+    expect(menuBarWindowSize({ width: 380, height: 420 })).toEqual({ width: 380, height: 448 })
+  })
+
+  test('a resized popout is remembered as its page size (round trip)', () => {
+    expect(menuBarPageSize({ width: 380, height: 448 })).toEqual({ width: 380, height: 420 })
+    expect(menuBarPageSize(menuBarWindowSize({ width: 512, height: 700 }))).toEqual({ width: 512, height: 700 })
+    expect(menuBarPageSize({ width: 300, height: 10 }).height).toBe(1)
   })
 })
 
