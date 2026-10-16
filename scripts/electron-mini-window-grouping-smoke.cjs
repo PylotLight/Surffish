@@ -257,7 +257,9 @@ async function run() {
 
   // --- 3. Split and merge.
   smoke.step('tabs: dragging a tab out of the strip splits it into its own window under the pointer')
-  const splitAt = { x: wa.x + 300, y: wa.y + 300 }
+  // Open desktop: right of the browser window (0..1100), left of the collection docked to the right edge
+  // (a drop over the browser window puts the tab back in its sidebar).
+  const splitAt = { x: wa.x + 1140, y: wa.y + 300 }
   await smoke.evaluate(header1, `window.miniWindow.tabOut(${JSON.stringify(g2.id)}, ${splitAt.x}, ${splitAt.y}); true`)
   const w2 = await waitFor(() => miniWindows().find((win) => win !== w1 && viewOf(win, g2.contents)), 'g2 in a window of its own')
   await waitFor(() => w2.isVisible(), 'the split-off window shows')
