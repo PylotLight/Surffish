@@ -504,7 +504,7 @@ function setRevealed(m: Mini, revealed: boolean): void {
 
 /** Nothing needs the header right now: hidden, not hovered or dragged, loaded, not the menu bar popout's strip. */
 function headerIdle(m: Mini): boolean {
-  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || !m.headerLoaded || !m.header) return false
+  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || m.tabDrag || m.dropTarget || !m.headerLoaded || !m.header) return false
   // Still has the keyboard (clicked, then the pointer left): keep it so the keys don't go nowhere.
   return !(live(m.header.webContents) && m.header.webContents.isFocused())
 }
@@ -1541,6 +1541,7 @@ function headerOrigin(m: Mini): { x: number; y: number } | null {
   if (m.closed || m.window.isDestroyed() || !m.window.isVisible()) return null
   const owner = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
   if (!owner || owner.isDestroyed() || !owner.isVisible()) return null
+  if (!m.header) return null
   const view = m.header.getBounds()
   if (view.height <= 0 || view.width <= 0) return null
   const content = owner.getContentBounds()
@@ -1552,7 +1553,7 @@ function stripOnScreen(m: Mini): MiniRect | null {
   const origin = headerOrigin(m)
   const layout = m.stripLayout
   if (!origin || !layout || layout.chips.length === 0 || layout.strip.width <= 0) return null
-  if (layout.strip.y + layout.strip.height > m.header.getBounds().height) return null
+  if (!m.header || layout.strip.y + layout.strip.height > m.header.getBounds().height) return null
   return { x: origin.x + layout.strip.x, y: origin.y + layout.strip.y, width: layout.strip.width, height: layout.strip.height }
 }
 
@@ -1589,7 +1590,8 @@ function releaseEscape(owner: Mini | 'foreign'): void {
 function onDragEscape(): void {
   const owner = escapeOwner
   if (owner && owner !== 'foreign') {
-    if (live(owner.header.webContents)) owner.header.webContents.send('mini-window:tab-drag-cancel')
+    const contents = owner.header?.webContents
+    if (live(contents)) contents.send('mini-window:tab-drag-cancel')
     endTabDrag(owner)
   } else {
     releaseEscape('foreign')
@@ -1627,12 +1629,14 @@ function hintMini(target: Mini | null, point: { x: number; y: number }): void {
     if (!target.menuBar) setRevealed(target, true)
   }
   const slot = slotAt(target, point)
-  if (live(target.header.webContents)) target.header.webContents.send('mini-window:drop-hint', { slot })
+  const contents = target.header?.webContents
+  if (live(contents)) contents.send('mini-window:drop-hint', { slot })
 }
 
 function clearDropTarget(m: Mini): void {
   m.dropTarget = false
-  if (live(m.header.webContents)) m.header.webContents.send('mini-window:drop-hint', null)
+  const contents = m.header?.webContents
+  if (live(contents)) contents.send('mini-window:drop-hint', null)
   if (m.revealed && !m.closed) scheduleHide(m)
 }
 
