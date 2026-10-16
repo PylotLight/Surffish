@@ -40,6 +40,12 @@ export const MINI_MENU_BAR_DROP_MS = 140
  * focus away (pressing the icon blurs the popout first): it closes, never reopens.
  */
 export const MINI_MENU_BAR_BLUR_CLICK_MS = 400
+/**
+ * A blur this soon after the popout opened is not taken at once: macOS can take the key window away
+ * for a moment while it comes up (a Space change, Surffish activating, the page taking first
+ * responder). It hides when that time is up unless the popout got the focus back meanwhile.
+ */
+export const MINI_MENU_BAR_OPEN_BLUR_GRACE_MS = 200
 
 /** Does the Tray exist? 'in-use' only while a mini window lives in the menu bar; never one for 'never'. */
 export function wantsMenuBarTray(mode: MiniWindowMenuBarIcon, inMenuBar: number): boolean {
@@ -125,8 +131,17 @@ export interface MenuBarPopout {
   open(target: MiniRect, side: 'below' | 'above', focus: boolean): void
   /** Hide (instant). */
   close(): void
-  /** It lost focus: hide unless `pinned`. True when it hid. */
+  /**
+   * It lost focus: hide unless `pinned`. True when it hid. Within MINI_MENU_BAR_OPEN_BLUR_GRACE_MS of
+   * opening it is held instead (false; `blurPendingMs()` says how long until `settle()`).
+   */
   blur(pinned: boolean): boolean
+  /** It has the focus (again): a held blur is dropped. */
+  focused(): void
+  /** Ms until a held blur should be settled (0: none held). */
+  blurPendingMs(): number
+  /** The grace is up: a held blur hides it now (unless `pinned`). True when it hid. */
+  settle(pinned: boolean): boolean
   /** The icon was clicked: what to do ('none' for the click that just blurred it shut). */
   click(): 'show' | 'hide' | 'none'
   /** Mid drop-in. */
@@ -140,6 +155,14 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
   let shown = false
   let animating = false
   let blurHiddenAt = Number.NEGATIVE_INFINITY
+  let openedAt = Number.NEGATIVE_INFINITY
+  let heldBlur = false
+
+  function hideForBlur(): void {
+    heldBlur = false
+    blurHiddenAt = deps.now()
+    close()
+  }
 
   function stop(): void {
     deps.loop.cancel(key)
@@ -148,6 +171,7 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
 
   function close(): void {
     stop()
+    heldBlur = false
     if (!shown) return
     shown = false
     deps.hide()
@@ -157,6 +181,8 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
     shown: () => shown,
     open: (target, side, focus) => {
       stop()
+      heldBlur = false
+      if (!shown || focus) openedAt = deps.now()
       const opacity = deps.opacity()
       if (deps.reducedMotion() || shown) {
         // Already up (another click while shown re-anchors it): just move there.
@@ -193,8 +219,24 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
     close,
     blur: (pinned) => {
       if (!shown || pinned) return false
-      blurHiddenAt = deps.now()
-      close()
+      if (deps.now() - openedAt < MINI_MENU_BAR_OPEN_BLUR_GRACE_MS) {
+        heldBlur = true
+        return false
+      }
+      hideForBlur()
+      return true
+    },
+    focused: () => {
+      heldBlur = false
+    },
+    blurPendingMs: () => (heldBlur && shown ? Math.max(1, Math.ceil(openedAt + MINI_MENU_BAR_OPEN_BLUR_GRACE_MS - deps.now())) : 0),
+    settle: (pinned) => {
+      if (!heldBlur) return false
+      if (!shown || pinned) {
+        heldBlur = false
+        return false
+      }
+      hideForBlur()
       return true
     },
     click: () => {
@@ -208,6 +250,7 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
     animating: () => animating,
     dispose: () => {
       stop()
+      heldBlur = false
       shown = false
     }
   }

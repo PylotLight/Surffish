@@ -15,7 +15,8 @@
 //      the window, never re-sends unchanged state to the strip (no DOM writes: it repainted and flashed),
 //      and title flips land throttled, the last one shown.
 //   3. Esc hides it; a click elsewhere (blur) hides it unless pinned (header pin button); the icon click
-//      that blurred it shut doesn't reopen it, the next one does.
+//      that blurred it shut doesn't reopen it, the next one does. A blur right as it opens is held for a
+//      moment (open only while it has the focus when that is up); macOS: it is on every Space.
 //   4. Tabs grouping: another tab sent there joins the menu bar collection (one entry, +1) and its tab
 //      chips sit in the same strip (still 28 px, the page doesn't move); switching
 //      to Separate splits it into two menu bar minis (title "2"), the menu picks which one shows (one
@@ -315,6 +316,19 @@ async function run() {
   await waitFor(() => !w1.isVisible(), 'Esc hides it')
   bar().click(anchor)
   await waitFor(() => w1.isVisible(), 'shown again')
+  // A blur right as it opens (macOS moving the key window about, a Space change) is held, not taken at
+  // once: with the focus still (or back) on the popout it stays; without it, it hides when the grace is up.
+  w1.emit('blur')
+  assert.equal(w1.isVisible(), true, 'a blur right as it opens is held')
+  await delay(450)
+  assert.equal(w1.isVisible(), w1.isFocused(), `after the grace: open only while it has the focus (visible ${w1.isVisible()}, focused ${w1.isFocused()})`)
+  if (!w1.isVisible()) {
+    // Settled shut: that counts as a blur for the icon (the next click after the guard window opens it).
+    await delay(450)
+    bar().click(anchor)
+    await waitFor(() => w1.isVisible(), 'shown again after a held blur settled')
+  }
+  if (process.platform === 'darwin') assert.equal(w1.isVisibleOnAllWorkspaces(), true, 'the popout is on every Space (it comes up on the one the user is on)')
   await delay(250)
   w1.emit('blur')
   await waitFor(() => !w1.isVisible(), 'losing focus hides it')
