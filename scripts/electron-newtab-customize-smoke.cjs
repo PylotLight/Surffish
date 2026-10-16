@@ -166,7 +166,7 @@ async function run() {
   assert.equal(await ev('document.querySelector(".new-tab-customize-gear").getAttribute("aria-expanded")'), 'true')
   assert.equal(await ev('document.activeElement?.getAttribute("aria-label")'), 'Close Customize New Tab', 'focus on the close button')
   assert.equal(await ev('getComputedStyle(document.querySelector(".new-tab-customize")).backdropFilter'), 'none', 'no CSS backdrop-filter on the panel')
-  const missing = await ev(`${JSON.stringify(['Default new tab page', 'Show site names under icons', 'Icon size', 'Links per row', 'Vertical position', 'Dim', 'Blur', 'Show local clock', 'Show date', 'Use 24-hour time', 'Show seconds', 'Primary New Tab time zone', 'Show weather', 'Weather city or town', 'Weather provider', 'Weather temperature unit'])}.filter((label) => !document.querySelector('.new-tab-customize [aria-label="' + label + '"]'))`)
+  const missing = await ev(`${JSON.stringify(['Default new tab page', 'Show site names under icons', 'Icon size', 'Links per row', 'Vertical position', 'Dim', 'Blur', 'Show local clock', 'Show date', 'Time format', 'Show seconds', 'Primary New Tab time zone', 'Show weather', 'Weather city or town', 'Weather provider', 'Weather temperature unit'])}.filter((label) => !document.querySelector('.new-tab-customize [aria-label="' + label + '"]'))`)
   assert.deepEqual(missing, [], 'every New Tab setting is in the panel')
   await shot('after-panel-open')
 

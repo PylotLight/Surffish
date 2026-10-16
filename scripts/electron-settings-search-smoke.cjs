@@ -114,7 +114,7 @@ async function run() {
   await waitFor(async () => (await status()) === 'Nothing on this page matches “clock”', 'the empty state')
   assert.deepEqual(await visibleRows(), [])
   const chips = await ev('[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)')
-  assert.deepEqual(chips, ['New Tab 3'], 'New Tab offered with its match count')
+  assert.deepEqual(chips, ['New Tab 5'], 'New Tab offered with its match count (clock display options added Oct 2026)')
   await ev('document.querySelector(".settings-search-chip").click()')
   await waitFor(async () => (await mode()) === 'newtab', 'the chip to open New Tab')
   await waitFor(async () => {

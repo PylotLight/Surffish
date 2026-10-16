@@ -2153,6 +2153,30 @@
   letter-spacing: -0.035em;
   line-height: 1.1;
 }
+/* Clock display options (Settings → New Tab → Clock): size, weight, digit style. M + Light +
+   tabular digits is the original look, so the default selectors add nothing. */
+.new-tab-clock-size-s .new-tab-clock-time { font-size: clamp(20px, 2.2vw, 30px); }
+.new-tab-clock-size-l .new-tab-clock-time { font-size: clamp(32px, 4.4vw, 62px); }
+.new-tab-clock-size-xl .new-tab-clock-time { font-size: clamp(42px, 6.6vw, 96px); letter-spacing: -0.045em; }
+.new-tab-clock-weight-regular .new-tab-clock-time { font-weight: 420; }
+.new-tab-clock-weight-bold .new-tab-clock-time { font-weight: 680; letter-spacing: -0.025em; }
+.new-tab-clock-proportional .new-tab-clock-time { font-variant-numeric: normal; }
+.new-tab-greeting {
+  flex-basis: 100%;
+  margin: 0 0 -6px;
+  color: rgba(250, 252, 253, 0.94);
+  font-size: clamp(15px, 1.6vw, 20px);
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.72);
+}
+.new-tab-clock-diff {
+  color: rgba(250, 252, 253, 0.76);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75);
+}
 .new-tab-clock-label,
 .new-tab-clock-date {
   max-width: 210px;
