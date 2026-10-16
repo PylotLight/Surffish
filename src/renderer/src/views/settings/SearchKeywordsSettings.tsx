@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { DEFAULT_CUSTOM_SEARCH_ENGINES, MAX_CUSTOM_SEARCH_ENGINES, makeSearchEngineId, normalizeSearchKeyword, validateCustomSearchEngine, type CustomSearchEngine } from '../../../../shared/search-keywords'
 import { useSearchKeywords } from '../useSearchKeywords'
-import { SettingsGroup, SettingsRow } from './SettingsControls'
+import { SettingsDisclosure, SettingsGroup, SettingsRow } from './SettingsControls'
 
 interface Draft {
   id: string | null
@@ -62,23 +62,28 @@ export function SearchKeywordsSettings(): React.JSX.Element {
 
   return (
     <SettingsGroup title="Search keywords" aside={!draft && engines.length < MAX_CUSTOM_SEARCH_ENGINES ? <button className="settings-action secondary" type="button" onClick={() => startDraft({ ...EMPTY_DRAFT })}>Add</button> : undefined}>
-      <SettingsRow label="Keyword search" hint="Type a keyword and a space (“yt lofi”), or a !bang anywhere (“lofi !yt”), to search that site from the address bar or the command palette.">
-        <button className="settings-action secondary" type="button" onClick={() => void save(DEFAULT_CUSTOM_SEARCH_ENGINES.map((engine) => ({ ...engine })), 'Restored the default keywords.')}>Restore defaults</button>
+      <SettingsRow label="Keyword search" hint="Type “yt lofi” or “lofi !yt” in the address bar or the command palette." info="A keyword and a space, or a !bang anywhere in the query, searches that site instead of the default engine.">
+        <span className="settings-row-value">{engines.length} {engines.length === 1 ? 'keyword' : 'keywords'}</span>
       </SettingsRow>
-      <div className="search-keyword-list" role="list" aria-label="Search keywords">
-        {engines.length === 0 && <p className="settings-message">No search keywords.</p>}
-        {engines.map((engine) => (
-          <div className="search-keyword-row" role="listitem" key={engine.id}>
-            <span>{engine.name}</span>
-            <span className="keyword-suggestion-chip">{engine.keyword}</span>
-            <code title={engine.urlTemplate}>{engine.urlTemplate}</code>
-            <span className="search-keyword-actions">
-              <button className="settings-action secondary" type="button" aria-label={`Edit ${engine.name}`} onClick={() => startDraft({ id: engine.id, name: engine.name, keyword: engine.keyword, urlTemplate: engine.urlTemplate })}>Edit</button>
-              <button className="settings-action secondary" type="button" aria-label={`Remove ${engine.name}`} onClick={() => remove(engine.id)}>Remove</button>
-            </span>
-          </div>
-        ))}
-      </div>
+      <SettingsDisclosure id="search-keywords-list" title="Keywords" summary={engines.length === 0 ? 'None' : `${engines.slice(0, 5).map((engine) => engine.keyword).join(', ')}${engines.length > 5 ? '…' : ''}`} defaultOpen={false}>
+        <div className="search-keyword-list" role="list" aria-label="Search keywords">
+          {engines.length === 0 && <p className="settings-message">No search keywords.</p>}
+          {engines.map((engine) => (
+            <div className="search-keyword-row" role="listitem" key={engine.id}>
+              <span>{engine.name}</span>
+              <span className="keyword-suggestion-chip">{engine.keyword}</span>
+              <code title={engine.urlTemplate}>{engine.urlTemplate}</code>
+              <span className="search-keyword-actions">
+                <button className="settings-action secondary" type="button" aria-label={`Edit ${engine.name}`} onClick={() => startDraft({ id: engine.id, name: engine.name, keyword: engine.keyword, urlTemplate: engine.urlTemplate })}>Edit</button>
+                <button className="settings-action secondary" type="button" aria-label={`Remove ${engine.name}`} onClick={() => remove(engine.id)}>Remove</button>
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="settings-actions">
+          <button className="settings-action secondary" type="button" onClick={() => void save(DEFAULT_CUSTOM_SEARCH_ENGINES.map((engine) => ({ ...engine })), 'Restored the default keywords.')}>Restore defaults</button>
+        </div>
+      </SettingsDisclosure>
       {draft && (
         <form className="search-keyword-form" onSubmit={(event) => void submit(event)} aria-label={draft.id ? 'Edit search engine' : 'Add search engine'}>
           <input className="settings-input" type="text" value={draft.name} maxLength={60} placeholder="Name" aria-label="Name" autoFocus onChange={(event) => setDraft({ ...draft, name: event.target.value })} />

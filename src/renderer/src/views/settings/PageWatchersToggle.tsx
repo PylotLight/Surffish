@@ -8,7 +8,8 @@ export function PageWatchersToggle(): React.JSX.Element {
     <SettingsGroup title="Page Watchers" status={enabled === null ? undefined : enabled ? 'On' : 'Off'} statusOn={enabled === true}>
       <SettingsRow
         label="Enable page watchers"
-        hint="Watch pages for changes (right-click → Watch This Page for Changes…) and get a notification when they change. Turning this off stops all checks and hides Watchers; saved watchers are kept and resume when you turn it back on."
+        hint="Get a notification when a watched page changes."
+        info="Right-click a page → Watch This Page for Changes…. Turning this off stops all checks and hides Watchers; saved watchers are kept and resume when you turn it back on."
       >
         <input
           type="checkbox"

@@ -19,7 +19,8 @@ export function GlanceSettings(): React.JSX.Element {
     <SettingsGroup title="Glance" status={enabled === null ? undefined : enabled ? 'On' : 'Off'} statusOn={enabled === true}>
       <SettingsRow
         label="Shift-click opens links in Glance"
-        hint={`Peek at a link in a sheet over the page instead of a new tab. Esc or a click outside closes it; ${IS_MAC ? '⌘' : 'Ctrl+'}Enter opens it as a tab without reloading. Right-click a link → Open Link in Glance works either way.`}
+        hint="Peek at a link in a sheet over the page instead of a new tab."
+        info={`Esc or a click outside closes it; ${IS_MAC ? '⌘' : 'Ctrl+'}Enter opens it as a tab without reloading. Right-click a link → Open Link in Glance works either way.`}
       >
         <input
           type="checkbox"

@@ -12,7 +12,8 @@ export function SpacesSettings(): React.JSX.Element {
     <SettingsGroup title="Spaces" status={snapshot ? (enabled ? `${snapshot.spaces.length} Space${snapshot.spaces.length === 1 ? '' : 's'}` : 'Off') : undefined} statusOn={enabled}>
       <SettingsRow
         label="Enable Spaces"
-        hint={`Separate sets of tabs (Work, Personal…) with their own pinned tabs, switched from the bottom of the sidebar, with ${shortcut}…9 or a two-finger swipe on the sidebar. A Space can have its own logins and its own proxy (right-click it). Turning Spaces off moves every tab into one list.`}
+        hint="Separate sets of tabs (Work, Personal…) with their own pinned tabs."
+        info={`Switch from the bottom of the sidebar, with ${shortcut}…9 or a two-finger swipe on the sidebar. A Space can have its own logins and its own proxy (right-click it). Turning Spaces off moves every tab into one list.`}
       >
         <input
           type="checkbox"
