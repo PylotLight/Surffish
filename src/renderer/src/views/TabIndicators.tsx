@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserTabSummary } from '../../../shared/types'
 import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
+import { tabAudioIndicator } from '../../../shared/tab-audio'
 import { formatTabVolume, stepTabVolume, TAB_VOLUME_WHEEL_STEP, tabVolumeLevel, type TabVolumeLevel } from '../../../shared/tab-volume'
 
 /** Favicon / loading spinner, audio mute + volume control and pinned-tab icon used by the tab sidebar. */
@@ -41,8 +42,10 @@ const SPEAKER_WAVES: Record<TabVolumeLevel, React.JSX.Element | null> = {
 const WHEEL_PIXELS_PER_STEP = 100
 
 /**
- * The tab's speaker (shown while it plays, holds media or is muted): click mutes, the scroll wheel
- * steps the tab volume 5%, and hovering it slides out a volume slider (the title gives way).
+ * The tab's speaker (shared/tab-audio.ts): shown while the tab is audible or muted; a quiet tab that
+ * was heard (or has a non-default volume) keeps it only while the row is hovered (`is-idle`), so a
+ * muted autoplay video never lights it. Click mutes, the scroll wheel steps the tab volume 5%, and
+ * hovering it slides out a volume slider (the title gives way).
  */
 export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary; className?: string }): React.JSX.Element | null {
   const saved = tab.volume ?? 1
@@ -53,7 +56,8 @@ export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary
   const volumeRef = useRef(volume)
   volumeRef.current = volume
   const rootRef = useRef<HTMLSpanElement | null>(null)
-  const shown = tab.audible || tab.muted || tab.media === true
+  const indicator = tabAudioIndicator({ audible: tab.audible, muted: tab.muted, heard: tab.audioHeard === true, volume: saved })
+  const shown = indicator !== 'none'
   const tabId = tab.id
 
   const send = useCallback((value: number) => {
@@ -96,7 +100,8 @@ export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary
   return (
     <span
       ref={rootRef}
-      className={`tab-volume${dragging ? ' is-open' : ''}${level === 'muted' ? ' is-muted' : ''}`}
+      className={`tab-volume${dragging ? ' is-open' : ''}${level === 'muted' ? ' is-muted' : ''}${indicator === 'idle' ? ' is-idle' : ''}`}
+      data-audio={indicator}
       onPointerDown={stop}
       onMouseDown={stop}
       onClick={stop}
@@ -105,7 +110,7 @@ export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary
       onKeyDown={stop}
     >
       <button
-        className={`tab-audio-button${tab.muted ? ' is-muted' : tab.audible ? ' is-playing' : ''} ${className}`.trim()}
+        className={`tab-audio-button${tab.muted ? ' is-muted' : indicator === 'playing' ? ' is-playing' : ' is-idle'} ${className}`.trim()}
         type="button"
         aria-label={`${tab.muted ? 'Unmute' : 'Mute'} ${tab.title} (volume ${percent})`}
         aria-pressed={tab.muted}

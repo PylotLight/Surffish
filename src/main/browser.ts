@@ -26,6 +26,8 @@ import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmark
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
+import { tabAudioState, trackTabAudio } from './tab-audio'
+import { tabAudioIndicator } from '../shared/tab-audio'
 import { forgetPrivateTabVolumes, pushTabVolume, setTabVolumeHost, setTabVolumeLevel, tabVolumeForUrl } from './tab-volume'
 import { formatTabVolume, stepTabVolume, TAB_VOLUME_COMMAND_STEP } from '../shared/tab-volume'
 import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
@@ -384,10 +386,9 @@ function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
     sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
     ...(tab.view === null && tab.sleep ? { sleep: tab.sleep } : {}),
     private: tab.isPrivate,
-    audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
+    ...tabAudioSummary(tab),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
     ...(tab.volume !== 1 ? { volume: tab.volume } : {}),
-    ...(tabHoldsMediaSession(tab.view?.webContents) ? { media: true } : {}),
     crashed: isTabCrashed(tab.view?.webContents),
     ...(split ? { split } : {}),
     ...(group ? { group } : {})
@@ -1148,9 +1149,9 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   contents.on('page-title-updated', pictureChanged)
   contents.on('zoom-changed', pictureChanged)
   contents.on('found-in-page', pictureChanged)
-  // Media starting/stopping can show or hide the tab's speaker (BrowserTabSummary.media).
-  contents.on('media-started-playing', () => { if (isCurrentContents()) { tabsPlayingMedia.add(tab); publishTabs(tab.win) } })
-  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab); publishTabs(tab.win) } })
+  // Playing media always counts as a changed picture. (The speaker follows audibility instead: trackTabAudio.)
+  contents.on('media-started-playing', () => { if (isCurrentContents()) tabsPlayingMedia.add(tab) })
+  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab) } })
   contents.once('destroyed', () => tabsPlayingMedia.delete(tab))
   contents.on('before-mouse-event', (_event, mouseEvent) => {
     if (!isCurrentContents()) return
@@ -1211,6 +1212,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab))
   guardPageDragRegions(contents)
   trackTabMediaSession(contents)
+  trackTabAudio(contents, () => { if (isCurrentContents()) publishTabs(tab.win) })
   contents.on('media-started-playing', () => {
     if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isTabOnScreen(tab) || contents.isDestroyed()) return
     void contents.executeJavaScript(`
@@ -1286,10 +1288,6 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
     if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url)) return event.preventDefault()
     if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
-  })
-  contents.on('audio-state-changed', () => {
-    if (!isCurrentContents()) return
-    publishTabs(tab.win)
   })
   contents.on('did-start-loading', () => {
     if (!isCurrentContents()) return
@@ -1806,12 +1804,19 @@ function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
   }
 }
 
-/** The mini header's speaker: shown while the tab plays, holds media or is muted. */
+/** The sidebar row's speaker state (shared/tab-audio.ts): audible with a short hold, and heard since load. */
+function tabAudioSummary(tab: BrowserTab): { audible: boolean; audioHeard?: true } {
+  const { audible, heard } = tabAudioState(tab.view?.webContents)
+  return { audible, ...(heard ? { audioHeard: true as const } : {}) }
+}
+
+/** The mini header's / strip chip's speaker: the same states as the sidebar row (shared/tab-audio.ts). */
 function miniTabAudio(tab: BrowserTab): MiniWindowTabAudio {
   const contents = tab.view?.webContents
   const live = contents && !contents.isDestroyed() ? contents : null
   const muted = live ? live.isAudioMuted() : false
-  return { audio: muted || tabHoldsMediaSession(live), muted, volume: tab.volume }
+  const { audible, heard } = tabAudioState(live)
+  return { audio: tabAudioIndicator({ audible, muted, heard, volume: tab.volume }), muted, volume: tab.volume }
 }
 
 /** Make `win` the mini window's BrowserWindowState (no tabs yet). */
@@ -1909,7 +1914,7 @@ setMiniWindowHost({
   tabs: (win) => {
     const mini = miniStateFor(win)
     if (!mini) return []
-    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, playing: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()), ...miniTabAudio(tab) }))
+    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, playing: tabAudioState(tab.view?.webContents).audible, ...miniTabAudio(tab) }))
   },
   activateTab: (win, tabId) => {
     const tab = miniTabOf(miniStateFor(win), tabId)

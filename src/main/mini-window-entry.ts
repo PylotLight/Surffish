@@ -1,4 +1,5 @@
 import { app, globalShortcut, ipcMain, type BaseWindow, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import type { TabAudioIndicator } from '../shared/tab-audio'
 import {
   DEFAULT_MINI_WINDOW_SETTINGS,
   MINI_WINDOW_SETTINGS_FILE,
@@ -66,9 +67,9 @@ export interface MiniWindowHost {
   browserTabs(): Array<{ tabId: string; url: string }>
 }
 
-/** What the header's speaker needs (shown while the tab is audible, holds media or is muted). */
+/** What the header's speaker needs: playing / muted show it, idle only on hover (shared/tab-audio.ts). */
 export interface MiniWindowTabAudio {
-  audio: boolean
+  audio: TabAudioIndicator
   muted: boolean
   volume: number
 }
