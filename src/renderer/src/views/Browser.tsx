@@ -1114,7 +1114,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!omniboxCaretToEndRef.current) return
     omniboxCaretToEndRef.current = false
     const input = addressRef.current
-    if (input && document.activeElement === input) input.setSelectionRange(input.value.length, input.value.length)
+    if (!input || document.activeElement !== input) return
+    input.setSelectionRange(input.value.length, input.value.length)
+    // A new value doesn't scroll the field; show the end, where the caret is.
+    input.scrollLeft = input.scrollWidth
   }, [address, omniboxPreview])
 
   async function navigateTo(valueInput: string): Promise<void> {

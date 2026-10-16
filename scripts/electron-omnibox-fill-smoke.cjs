@@ -80,7 +80,7 @@ async function run() {
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
   mainWindow = await waitFor(() => BaseWindow.getAllWindows()[0], 'the main window')
-  mainWindow.setBounds({ x: 0, y: 0, width: 1200, height: 760 })
+  mainWindow.setBounds({ x: 0, y: 0, width: 1500, height: 800 })
   await waitFor(() => surface('content') && surface('toolbar') && surface('sidebar'), 'the renderer surfaces')
   const toolbar = surface('toolbar').webContents
   await waitFor(() => evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
@@ -139,6 +139,7 @@ async function run() {
   const [start, end, length] = await caret()
   assert.equal(start, length, 'caret at the end')
   assert.equal(end, length, 'nothing selected')
+  assert.equal(await evaluate(toolbar, `${INPUT}.scrollWidth <= ${INPUT}.clientWidth || ${INPUT}.scrollLeft > 0`), true, 'the field scrolls to show the caret')
   assert.deepEqual((await rows()).map((row) => row.url), urls, 'the dropdown keeps matching the typed text')
   assert.equal((await rows())[0].selected, true, 'the filled row is highlighted')
   key('Down')
