@@ -394,17 +394,24 @@ async function run() {
   const shownAt = Date.now()
   await waitFor(() => !overlay.getVisible(), 'the idle preview to dismiss itself', 10000)
   assert.ok(Date.now() - shownAt >= 600, 'the preview stays up for the idle timeout first')
-  // Hover hold: a longer idle timeout, so the hover (two IPC round trips after the preview shows) can't
-  // lose the race against the countdown on a busy runner; holding still has to outlast it.
-  process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '2500'
+  // Hover hold, without racing the countdown: open the preview with a long timeout so the hover can't
+  // lose to it on a busy runner, then shorten it and poke the preview (a keydown re-arms the countdown
+  // unless the pointer is over it). Hovered, nothing may start; after the pointer leaves, it dismisses.
+  process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '600000'
   inner.webContents.focus()
   key(inner, 'S', [primary, 'shift'])
   await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for hover hold')
   await evaluate(overlay, 'document.getElementById("btn-visible").click()')
   await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for hover hold')
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerenter"))')
-  await delay(4000)
-  assert.ok(overlay.getVisible(), 'hovering the preview holds it open')
+  process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '800'
+  // Same renderer, same IPC pipe: the activity ping lands after the hover, so it can't arm a countdown.
+  await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }))')
+  const holdUntil = Date.now() + 2500
+  while (Date.now() < holdUntil) {
+    assert.ok(overlay.getVisible(), 'hovering the preview holds it open')
+    await delay(100)
+  }
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerleave"))')
   await waitFor(() => !overlay.getVisible(), 'the preview to dismiss after the pointer leaves', 10000)
 
