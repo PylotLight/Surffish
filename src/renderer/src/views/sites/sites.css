@@ -1,0 +1,90 @@
+/* Site menu (address bar): this tab's site switches, compact. */
+.site-quick-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+.site-setting-switches.is-compact .site-setting-row {
+  min-height: 30px;
+  gap: 10px;
+  padding: 4px 6px 4px 9px;
+  border-top: 0;
+  border-radius: 8px;
+}
+.site-setting-switches.is-compact .site-setting-row:hover { background: rgba(255, 255, 255, 0.06); }
+.site-setting-switches.is-compact .site-setting-row strong {
+  font-size: var(--pop-body, 12px);
+  font-weight: 500;
+}
+.site-quick-settings-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.site-actions-menu .site-quick-settings-reload { color: #a4edbd; }
+
+/* Settings → Sites: one collapsible card per site. */
+.sites-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.sites-settings-site { padding: 0; overflow: hidden; }
+.sites-settings-site.is-focused { box-shadow: 0 0 0 1px rgba(126, 226, 168, 0.45); }
+.sites-settings-site-head {
+  display: flex;
+  width: 100%;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: rgba(248, 250, 252, 0.92);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sites-settings-site-head:hover { background: rgba(255, 255, 255, 0.04); }
+.sites-settings-site-head:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.6); outline-offset: -2px; }
+.sites-settings-site-head strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sites-settings-site-head .settings-status { margin-left: auto; white-space: nowrap; }
+.sites-settings-chevron {
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 16px;
+  transition: transform 140ms ease;
+}
+.sites-settings-site.is-open .sites-settings-chevron { transform: rotate(90deg); }
+.sites-settings-site-body { padding: 0 14px 12px; }
+.sites-settings-site-body > .settings-section { margin-top: 10px; }
+.sites-settings-filter { display: block; margin-bottom: 10px; }
+.sites-settings-filter input {
+  width: 100%;
+  max-width: 320px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  font: inherit;
+}
+
+/* Settings tab icon in the sidebar / tab strip. */
+.tab-favicon .tab-favicon-settings { width: 14px; height: 14px; color: rgba(235, 240, 245, 0.82); }
+@media (prefers-reduced-motion: reduce) {
+  .sites-settings-chevron { transition: none; }
+}

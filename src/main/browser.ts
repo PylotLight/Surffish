@@ -3175,6 +3175,11 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
     sendFocusAddressToVisibleRenderer()
     return true
   }
+  // Cmd/Ctrl+, : the Settings tab (pressed in a mini window, it opens in a browser window).
+  if (key === ',' && !shift && primary) {
+    openSettingsTab(undefined, ownerTab?.win.window)
+    return true
+  }
   if (key === 't' && !shift) {
     newBrowserTab()
     return true
@@ -4166,6 +4171,9 @@ export function openSettingsTab(input?: unknown, window?: BaseWindow | null): st
       w.window.focus()
     }
   }
+  // Keyboard to the content renderer (the one drawing Settings) once the layout has switched to it.
+  const shown = w.window
+  setImmediate(() => { if (!shown.isDestroyed()) focusVisibleShellPage(shown) })
   return tab.id
 }
 

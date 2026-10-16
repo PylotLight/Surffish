@@ -12,7 +12,7 @@ import { onPageWatchersEnabledChange, pageWatchersEnabled, revealPageWatchers } 
 import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
-import { popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
+import { openSettingsTab, popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 import { focusMiniWindow, getMiniWindowSettings, listMiniWindows, returnAllMiniWindows, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
@@ -66,6 +66,8 @@ export function installAppMenu(): void {
             { role: 'about' },
             { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
             { type: 'separator' },
+            { label: 'Settings…', accelerator: APP_SHORTCUTS.settings, click: () => { openSettingsTab() } },
+            { type: 'separator' },
             { role: 'services' },
             { type: 'separator' },
             { role: 'hide' },
@@ -96,6 +98,8 @@ export function installAppMenu(): void {
         { type: 'separator' },
         tabItem('Close Tab', 'close'),
         tabItem('Close Other Tabs', 'closeOthers'),
+        // macOS has it in the app menu.
+        ...(isMac ? [] : [{ type: 'separator' } as const, { label: 'Settings', accelerator: APP_SHORTCUTS.settings, click: () => { openSettingsTab() } } satisfies MenuItemConstructorOptions]),
         {
           label: 'Close Window',
           accelerator: APP_SHORTCUTS.closeWindow,
