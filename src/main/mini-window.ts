@@ -37,6 +37,7 @@ import {
 import { dockArrow, dockedBounds, type MiniDock } from '../shared/mini-window-dock'
 import { watchShellSurface } from './crash-guard'
 import { createDockController, savedDockFor, setDockGrouping, type DockController } from './mini-window-dock'
+import { motion, placeWindow } from './mini-window-motion'
 import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -107,7 +108,7 @@ interface Mini {
   /** 'push': no reveal before this (just hidden), so the page never bounces under a resting pointer. */
   revealBlockedUntil: number
   /** Dragging the window by its floating header: main follows the pointer from where it was pressed. */
-  headerDrag: { timer: ReturnType<typeof setInterval>; startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number } | null
+  headerDrag: { startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number } | null
 }
 
 const IS_MAC = process.platform === 'darwin'
@@ -117,7 +118,6 @@ const POLL_MS = 300
 const GEOMETRY_SAVE_DELAY_MS = 400
 /** 'push': after hiding, reveals wait this long (no bounce while the page settles under the pointer). */
 const PUSH_REVEAL_COOLDOWN_MS = 250
-const HEADER_DRAG_POLL_MS = 16
 const HEADER_DRAG_MAX_MS = 15_000
 const HEADER_DRAG_THRESHOLD = 3
 
@@ -250,9 +250,9 @@ function floats(plan: MiniHeaderLayout): plan is Extract<MiniHeaderLayout, { pan
   return plan.kind === 'above' || plan.kind === 'below'
 }
 
-/** Where the revealed header goes for the window where it is now (the side kept while dragging by it). */
-function updatePlan(m: Mini): void {
-  const bounds = m.window.getBounds()
+/** Where the revealed header goes for the window where it is now, or `at` where this frame puts it (the side kept while dragging by it). */
+function updatePlan(m: Mini, at?: MiniRect): void {
+  const bounds = at ?? m.window.getBounds()
   const workArea = screen.getDisplayMatching(bounds).workArea
   m.plan = planMiniHeader(headerPlacement(), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
 }
@@ -328,18 +328,19 @@ function mountHeader(m: Mini, where: 'window' | 'panel'): void {
 function positionPanel(m: Mini): void {
   if (!floats(m.plan) || !m.revealed || m.mount !== 'panel' || !m.window.isVisible() || m.dock.isTucked()) return hidePanel(m)
   const panel = ensurePanel(m)
-  if (!sameRect(panel.getBounds(), m.plan.panel)) panel.setBounds(m.plan.panel)
+  // In a frame (a slide, a drag): commits in the same tick as the window.
+  placeWindow(panel, m.plan.panel)
   if (!panel.isVisible()) {
     panel.showInactive()
     if (IS_MAC) panel.setAlwaysOnTop(true, 'floating')
   }
 }
 
-/** The window moved (dragged, slid along an edge, snapped): a revealed floating header follows it. */
-function followPanel(m: Mini): void {
+/** The window moved (dragged, slid along an edge, snapped), or is moving to `at` this frame: a revealed floating header follows it. */
+function followPanel(m: Mini, at?: MiniRect): void {
   if (m.closed || m.window.isDestroyed()) return
   const before = m.plan.kind
-  updatePlan(m)
+  updatePlan(m, at)
   // Flipped across the window's edge (or between floating and push): lay it out again.
   if (m.revealed && floats(m.plan) !== (before === 'above' || before === 'below')) return layout(m)
   positionPanel(m)
@@ -429,7 +430,7 @@ function pollPointer(m: Mini): void {
 // Dragging the window by its floating header (the panel can't drag the window natively).
 
 function stopHeaderDrag(m: Mini): void {
-  if (m.headerDrag) clearInterval(m.headerDrag.timer)
+  if (m.headerDrag) motion.cancel(m.headerDrag)
   m.headerDrag = null
 }
 
@@ -443,25 +444,31 @@ function startHeaderDrag(m: Mini): void {
     startBounds: m.window.getBounds(),
     side: floats(m.plan) ? m.plan.kind : null,
     moved: false,
-    startedAt: Date.now(),
-    timer: setInterval(() => {
-      if (m.headerDrag !== drag) return
-      if (m.closed || m.window.isDestroyed() || Date.now() - drag.startedAt > HEADER_DRAG_MAX_MS) return endHeaderDrag(m)
-      const cursor = screen.getCursorScreenPoint()
-      const dx = cursor.x - drag.startCursor.x
-      const dy = cursor.y - drag.startCursor.y
-      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < HEADER_DRAG_THRESHOLD) return
-      drag.moved = true
-      const next = { ...drag.startBounds, x: drag.startBounds.x + dx, y: drag.startBounds.y + dy }
-      if (sameRect(m.window.getBounds(), next)) return
-      m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
-      m.window.setBounds(next)
-      followPanel(m)
-      // Docked: its handle follows ('stack': the rest of the group comes along the edge).
-      m.dock.follow()
-      scheduleGeometrySave(m)
-    }, HEADER_DRAG_POLL_MS)
+    startedAt: Date.now()
   }
+  // Once per frame (however fast the pointer reports): the window, its floating header, its handle and
+  // ('stack') the rest of its group all move in this tick, one setBounds each.
+  motion.run(drag, () => {
+    if (m.headerDrag !== drag) return false
+    if (m.closed || m.window.isDestroyed() || Date.now() - drag.startedAt > HEADER_DRAG_MAX_MS) {
+      endHeaderDrag(m)
+      return false
+    }
+    const cursor = screen.getCursorScreenPoint()
+    const dx = cursor.x - drag.startCursor.x
+    const dy = cursor.y - drag.startCursor.y
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) < HEADER_DRAG_THRESHOLD) return true
+    drag.moved = true
+    const next = { ...drag.startBounds, x: drag.startBounds.x + dx, y: drag.startBounds.y + dy }
+    if (sameRect(m.window.getBounds(), next)) return true
+    m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+    placeWindow(m.window, next)
+    followPanel(m, next)
+    // Docked: its handle follows ('stack': the rest of the group comes along the edge).
+    m.dock.follow(next)
+    scheduleGeometrySave(m)
+    return true
+  })
   m.headerDrag = drag
 }
 
@@ -742,8 +749,16 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       host().pageContents(window)?.focus()
     },
     changed: () => refreshHeaderOf(m),
+    moved: (rect) => followPanel(m, rect),
     isTuckEnabled: () => getMiniWindowSettings().tuckToEdge,
-    isPeekEnabled: () => getMiniWindowSettings().peekOnHover
+    isPeekEnabled: () => getMiniWindowSettings().peekOnHover,
+    peekDelayMs: () => getMiniWindowSettings().peekDelayMs,
+    peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
+    peekContents: () => {
+      const page = window.isDestroyed() ? null : host().pageContents(window)
+      return [page, m.header.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
+    },
+    busy: () => liveMinis().some((other) => other.headerDrag !== null)
   }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
     window,
