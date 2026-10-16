@@ -85,21 +85,29 @@ async function run() {
   const toolbar = surface('toolbar').webContents
   await waitFor(() => evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api)'), 'the toolbar renderer')
   const state = () => evaluate(toolbar, 'window.api.browser.state()')
+  const INPUT = 'document.querySelector(".browser-toolbar input[type=text]")'
+  const bar = () => evaluate(toolbar, `${INPUT}.value`)
+  const caret = () => evaluate(toolbar, `[${INPUT}.selectionStart, ${INPUT}.selectionEnd, ${INPUT}.value.length]`)
+  const rows = () => evaluate(toolbar, 'Array.from(document.querySelectorAll("#address-suggestions .address-suggestion:not(.keyword-suggestion)")).map((row) => ({ url: row.querySelector(".suggestion-url")?.getAttribute("title") ?? "", source: row.querySelector(".suggestion-source")?.textContent ?? "", selected: row.classList.contains("is-selected") }))')
+  // main's state() answers at once, but the toolbar renderer hears about a navigation from the tab
+  // broadcast (coalesced per frame), so it can still show the previous page for a moment. Every
+  // step below types into that renderer, so wait until it, not just main, is on the page.
   const visit = async (path) => {
     await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}${path}`)})`)
     await waitFor(async () => { const current = await state(); return current.url === `${origin}${path}` && !current.loading }, `the ${path} page`)
+    await waitFor(async () => (await bar()) === `${origin}${path}`, `the toolbar showing ${path}`)
   }
   // History, oldest first; ends on /home so the three channels are History rows.
   await waitFor(async () => { const current = await state(); return current.url === `${origin}/@veritasium` && !current.loading }, 'the first page')
   await visit('/@3blue1brown')
   await visit('/@vsauce')
   await visit('/home')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.history.get()')).filter((entry) => entry.url.includes('/@')).length >= 3, 'history entries')
-
-  const INPUT = 'document.querySelector(".browser-toolbar input[type=text]")'
-  const bar = () => evaluate(toolbar, `${INPUT}.value`)
-  const caret = () => evaluate(toolbar, `[${INPUT}.selectionStart, ${INPUT}.selectionEnd, ${INPUT}.value.length]`)
-  const rows = () => evaluate(toolbar, 'Array.from(document.querySelectorAll("#address-suggestions .address-suggestion:not(.keyword-suggestion)")).map((row) => ({ url: row.querySelector(".suggestion-url")?.getAttribute("title") ?? "", selected: row.classList.contains("is-selected") }))')
+  // Every visit recorded with its title, so a history refresh while the dropdown is open (it
+  // refreshes on focus) can't reorder the rows under the arrow keys.
+  await waitFor(async () => {
+    const entries = await evaluate(toolbar, 'window.api.browser.history.get()')
+    return Object.entries(TITLES).every(([path, title]) => entries.some((entry) => entry.url === `${origin}${path}` && entry.title === title))
+  }, 'history entries for every visit, with titles')
   const dropdownOpen = () => evaluate(toolbar, 'Boolean(document.querySelector("#address-suggestions"))')
   const key = (keyCode, modifiers = []) => {
     toolbar.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
@@ -114,8 +122,13 @@ async function run() {
   const typeQuery = async (text) => {
     await focusBar()
     await toolbar.insertText(text)
-    await waitFor(async () => (await bar()) === text, `the typed text ${JSON.stringify(text)}`)
-    return waitFor(async () => { const list = await rows(); return list.length >= 3 && list }, 'History suggestions for the query')
+    await waitFor(async () => (await bar()) === text, `the typed text ${JSON.stringify(text)}`).catch(async (error) => {
+      throw new Error(`${error.message} — bar shows ${JSON.stringify(await bar())}`)
+    })
+    // Settled: the open tab row is the page the tab is on now (the toolbar's tab list is current),
+    // so the rows can't reshuffle while the test arrows through them.
+    const page = (await state()).url
+    return waitFor(async () => { const list = await rows(); return list.length >= 3 && list.some((row) => row.source === 'Open tab' && row.url === page) && list }, 'History suggestions for the query')
   }
   const expectBar = (value, description) => waitFor(async () => (await bar()) === value, description).catch(async (error) => {
     throw new Error(`${error.message} — bar shows ${JSON.stringify(await bar())}`)
