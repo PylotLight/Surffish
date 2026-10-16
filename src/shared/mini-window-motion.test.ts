@@ -56,6 +56,21 @@ describe('frame loop', () => {
     expect(loop.running()).toBe(false)
   })
 
+  test('restarting soon after going idle waits a full frame (no tick in the same ms as the start)', () => {
+    const { timers, loop } = rig(60)
+    const ticks: number[] = []
+    loop.run('a', (now) => { ticks.push(now); return false })
+    timers.advance(17) // one tick, then idle
+    expect(ticks.length).toBe(1)
+    expect(loop.running()).toBe(false)
+    timers.advance(16.6) // the old next-due time has just passed
+    const started = timers.now()
+    loop.run('b', (now) => { ticks.push(now); return false })
+    timers.advance(100)
+    expect(ticks.length).toBe(2)
+    expect((ticks[1] ?? 0) - started).toBeCloseTo(1000 / 60, 1)
+  })
+
   test('all jobs run in the same tick, and each window gets one setBounds per tick (last wins)', () => {
     const { timers, loop } = rig()
     const applied: Array<[string, number, number]> = []
