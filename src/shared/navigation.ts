@@ -1,5 +1,6 @@
 import { httpFallbackUrl, isLocalOrPrivateHost } from './https-only'
 import type { SearchEngineId } from './types'
+import { SURFFISH_SETTINGS_URL } from './settings-tab'
 
 export const DEFAULT_SEARCH_ENGINE: SearchEngineId = 'brave'
 export const SURFFISH_QUICK_LINKS_URL = 'surffish://quick-links'
@@ -18,9 +19,9 @@ export function getSearchHomepage(engineId: SearchEngineId): string {
   return SEARCH_ENGINES.find((engine) => engine.id === engineId)?.homeUrl ?? SEARCH_ENGINES[0].homeUrl
 }
 
-/** Local New Tab content is rendered by the app, so the absence of a BrowserView does not mean it is sleeping. */
+/** Local New Tab and Settings content is rendered by the app, so the absence of a BrowserView does not mean it is sleeping. */
 export function isBrowserTabSleeping(hasBrowserView: boolean, url: string): boolean {
-  return !hasBrowserView && url !== SURFFISH_QUICK_LINKS_URL
+  return !hasBrowserView && url !== SURFFISH_QUICK_LINKS_URL && url !== SURFFISH_SETTINGS_URL
 }
 
 /** Match direct YouTube destinations without accepting lookalike hostnames. */

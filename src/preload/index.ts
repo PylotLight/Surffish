@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   BrowserSiteSettings,
+  BrowserSettingsTarget,
   BramblePopupAnchor,
   BrambleExtensionState,
   BrowserBounds,
@@ -174,7 +175,13 @@ const api = {
     localAI: localAIApi,
     siteSettings: {
       get: (origin: string): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:get', origin),
-      set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings)
+      set: (origin: string, settings: BrowserSiteSettings): Promise<BrowserSiteSettings | null> => ipcRenderer.invoke('browser:site-settings:set', origin, settings),
+      /** Sites with saved overrides (Settings → Sites), most recently changed last. */
+      list: (): Promise<BrowserSiteSettings[]> => ipcRenderer.invoke('browser:site-settings:list')
+    },
+    /** Settings tab: focus or open it at a section (and, for Sites, a site). Resolves to its tab id. */
+    settings: {
+      open: (target: BrowserSettingsTarget = { section: 'settings' }): Promise<string | null> => ipcRenderer.invoke('browser:settings:open', target)
     },
     pictureInPicture: (): Promise<boolean> => ipcRenderer.invoke('browser:picture-in-picture'),
     /** Main saw a press on the page/sidebar view or the window blur: close toolbar popovers (shared/popover-dismiss.ts). */

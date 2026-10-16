@@ -391,13 +391,30 @@ export function getBrowserChromeState(window?: BaseWindow | null): BrowserChrome
   return { ...(shell?.chromeState ?? DEFAULT_CHROME_STATE) }
 }
 
+/**
+ * Settings pages live in the window's Settings tab (shared/settings-tab.ts), not in the sidebar
+ * mode: a request for one (old callers, the palette, a renderer) is handed to browser.ts, which
+ * focuses or opens that tab. The sidebar mode then stays whatever it was (tabs).
+ */
+const SETTINGS_TAB_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['settings', 'newtab', 'integrations', 'network', 'site', 'privacy', 'diagnostics', 'watchers', 'feeds'])
+let settingsSectionOpener: ((section: BrowserSidebarMode, window: BaseWindow) => void) | null = null
+
+export function setSettingsSectionOpener(open: (section: BrowserSidebarMode, window: BaseWindow) => void): void {
+  settingsSectionOpener = open
+}
+
+export function isSettingsTabMode(mode: unknown): boolean {
+  return typeof mode === 'string' && SETTINGS_TAB_MODES.has(mode as BrowserSidebarMode)
+}
+
 export function setBrowserChromeState(input: unknown, window?: BaseWindow | null, cause?: string): BrowserChromeState {
   const shell = shellFor(window)
   if (!shell) return getBrowserChromeState(window)
   if (typeof input !== 'object' || input === null) return getBrowserChromeState(shell.window)
   const patch = input as Record<string, unknown>
   const next = { ...shell.chromeState }
-  if (typeof patch.sidebarMode === 'string' && SIDEBAR_MODES.has(patch.sidebarMode as BrowserSidebarMode)) {
+  const settingsSection = isSettingsTabMode(patch.sidebarMode) && settingsSectionOpener ? patch.sidebarMode as BrowserSidebarMode : null
+  if (!settingsSection && typeof patch.sidebarMode === 'string' && SIDEBAR_MODES.has(patch.sidebarMode as BrowserSidebarMode)) {
     next.sidebarMode = patch.sidebarMode as BrowserSidebarMode
   }
   if (typeof patch.sidebarPinned === 'boolean') next.sidebarPinned = patch.sidebarPinned
@@ -409,7 +426,10 @@ export function setBrowserChromeState(input: unknown, window?: BaseWindow | null
   shell.layoutCause = cause ?? `set ${Object.keys(patch).filter((key) => key.startsWith('sidebar')).map((key) => `${key}=${String(patch[key])}`).join(' ')}`
   if (next.sidebarPinned || next.sidebarHovered || next.sidebarFocused || next.sidebarResizing || next.sidebarMode !== 'tabs') clearPointerTimers(shell)
   applyShellLayout(shell)
+  // Always sent, also when only a settings page was asked for: a renderer that set the mode itself
+  // (optimistically) gets the real one back.
   sendToWindowRenderers(shell.window, 'browser:chrome-state', getBrowserChromeState(shell.window))
+  if (settingsSection) settingsSectionOpener?.(settingsSection, shell.window)
   return getBrowserChromeState(shell.window)
 }
 

@@ -39,6 +39,7 @@ import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canAr
 import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
 import { takeScreenshot } from './screenshot'
 import { readerStateFor, toggleReaderMode } from './reader-mode'
+import { openSettingsTab } from './browser'
 import { cycleBrowserSpace, getBrowserSpacesSnapshot, moveBrowserTabToSpace, switchBrowserSpace } from './browser'
 import { createBrowserSpace, deleteBrowserSpaceWithConfirm } from './spaces-ipc'
 import { activeBrowserTabGroupId, addBrowserTabsToGroup, createBrowserTabGroup, listBrowserTabGroups, newBrowserTabInGroup, removeBrowserTabsFromGroup, toggleBrowserTabGroupCollapsed, ungroupBrowserTabGroup } from './browser'
@@ -104,7 +105,8 @@ setMiniWindowSettingsOpener(() => {
     win.show()
     win.focus()
   }
-  openPanel('settings')
+  openSettingsTab({ section: 'settings', focus: 'mini-window' })
+  focusVisibleShellPage()
 })
 
 const COMMANDS: BrowserCommand[] = [

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isSettingsUrl, normalizeSettingsTarget, parseSettingsUrl, settingsSiteOrigin, settingsSitesList, settingsTabInsertIndex, settingsUrl, SURFFISH_SETTINGS_URL } from './settings-tab.ts'
+import { siteSettingsHaveOverrides, isSettingsUrl, normalizeSettingsTarget, parseSettingsUrl, settingsSiteOrigin, settingsSitesList, settingsTabInsertIndex, settingsUrl, SURFFISH_SETTINGS_URL } from './settings-tab.ts'
 
 test('recognises the settings address only', () => {
   assert.equal(isSettingsUrl(SURFFISH_SETTINGS_URL), true)
@@ -74,4 +74,11 @@ test('sites list: deep-linked site first, then newest overrides first, no duplic
   assert.deepEqual(settingsSitesList(['https://old.test', 'https://new.test'], 'https://old.test'), ['https://old.test', 'https://new.test'])
   assert.deepEqual(settingsSitesList([], 'https://fresh.test/page'), ['https://fresh.test'])
   assert.deepEqual(settingsSitesList(['not a url', 'https://a.test'], 'javascript:alert(1)'), ['https://a.test'])
+})
+
+test('a site counts as overridden only when a switch differs from its default', () => {
+  assert.equal(siteSettingsHaveOverrides({ blockAds: true, allowMedia: false }), false)
+  assert.equal(siteSettingsHaveOverrides({ blockAds: false }), true)
+  assert.equal(siteSettingsHaveOverrides({ allowClipboardRead: true }), true)
+  assert.equal(siteSettingsHaveOverrides({}), false)
 })

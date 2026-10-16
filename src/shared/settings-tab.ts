@@ -168,3 +168,18 @@ export function settingsSitesList(savedOrigins: readonly string[], focusHost?: s
   for (const origin of [...savedOrigins].reverse()) add(settingsSiteOrigin(origin))
   return list
 }
+
+/** Per-site switches with their defaults (persistence.ts parseBrowserSiteSettings uses the same). */
+const SITE_SETTING_DEFAULTS = {
+  blockAds: true,
+  openPopupsInTabs: false,
+  allowMedia: false,
+  allowGeolocation: false,
+  allowNotifications: false,
+  allowClipboardRead: false
+} as const
+
+/** Does a site's saved entry change anything (a switch turned back to its default doesn't count)? */
+export function siteSettingsHaveOverrides(settings: Partial<Record<keyof typeof SITE_SETTING_DEFAULTS, unknown>>): boolean {
+  return (Object.keys(SITE_SETTING_DEFAULTS) as Array<keyof typeof SITE_SETTING_DEFAULTS>).some((key) => typeof settings[key] === 'boolean' && settings[key] !== SITE_SETTING_DEFAULTS[key])
+}
