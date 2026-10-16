@@ -15,11 +15,10 @@ import type {
   NewTabWeatherSnapshot,
   PinnedSite,
   SearchEngineId,
-  TabSleepMinutes,
-  WorldClockPreference
+  TabSleepMinutes
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
-import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
+import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
 import { arrowSuggestion, escapeOmnibox, highlightMatches, omniboxQuery, suggestionUrlParts, type OmniboxPreview } from '../../../shared/omnibox-fill'
 import { Debouncer, HOVER_DWELL_MS, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
@@ -45,7 +44,7 @@ import { useSearchKeywords } from './useSearchKeywords'
 import { parseKeywordSearch } from '../../../shared/search-keywords'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { NavHistoryButtons } from './NavHistoryButtons'
-import { SettingsCategory, SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from './settings/SettingsControls'
+import { SettingsCategory, SettingsGroup, SettingsRow } from './settings/SettingsControls'
 import { SettingsSearchField, SettingsSearchStatus, SettingsToc } from './settings/SettingsSearch'
 import { useSettingsSearch } from './settings/useSettingsSearch'
 import { TabInterstitial } from './TabInterstitial'
@@ -67,7 +66,7 @@ import { useGroupReveal } from './tab-groups/useGroupReveal'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
-import { WORLD_CITIES } from '../../../shared/world-cities'
+import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
@@ -83,7 +82,7 @@ import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
   DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, BrambleQuickUnlockSettings, PrivacySettings,
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
-  TabArchiveSettings, TimeZonePicker, UpdateSettings
+  TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel
 } from './lazy-views'
 import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
@@ -102,22 +101,10 @@ import './motion.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
-const COMMON_TIME_ZONES = [
-  'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'Asia/Kolkata', 'Asia/Tokyo', 'Asia/Singapore',
-  'Europe/London', 'Europe/Paris', 'Europe/Bratislava', 'America/New_York', 'America/Chicago', 'America/Denver',
-  'America/Los_Angeles', 'UTC'
-]
-const SYSTEM_TIME_ZONES = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []
-const TIME_ZONE_OPTIONS = Array.from(new Set([...COMMON_TIME_ZONES, ...SYSTEM_TIME_ZONES, 'UTC']))
-
-function timeZoneCityName(timeZone: string): string {
-  return timeZone.split('/').at(-1)?.replaceAll('_', ' ') || timeZone
-}
-
-function timeZoneOptionLabel(timeZone: string): string {
-  return timeZone.replaceAll('_', ' ')
-}
-
+/** New Tab settings edits are saved to main at most this often (a slider drag is many patches). */
+const NEW_TAB_SAVE_COALESCE_MS = 150
+/** Preference broadcasts arriving this soon after a local edit are our own older values: ignored. */
+const NEW_TAB_ECHO_GUARD_MS = 700
 const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = [
   {
     id: 'fallback-forest-lake',
@@ -459,6 +446,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [newTabWeather, setNewTabWeather] = useState<NewTabWeatherSnapshot | null>(null)
   const [newTabWeatherError, setNewTabWeatherError] = useState('')
   const [newTabWeatherLoading, setNewTabWeatherLoading] = useState(false)
+  const newTabPreferencesRef = useRef(newTabPreferences)
+  const newTabLocalEditAtRef = useRef(-Infinity)
+  const newTabSaveTimerRef = useRef(0)
+  const [newTabCustomizeOpen, setNewTabCustomizeOpen] = useState(false)
+  /** Bumped when a weather API key changes, so the reading reloads at once. */
+  const [newTabWeatherKeyVersion, setNewTabWeatherKeyVersion] = useState(0)
+  /** The panel's chunk has been asked for (first hover / focus / open of the gear); then it stays mounted. */
+  const [newTabCustomizeLoaded, setNewTabCustomizeLoaded] = useState(false)
+  const newTabGearRef = useRef<HTMLButtonElement>(null)
   const [tabSleepMinutes, setTabSleepMinutes] = useState<TabSleepMinutes>(30)
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
@@ -534,13 +530,22 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     persistSidebarWidth(nextWidth)
   }
 
+  // A slider drag patches many times a second: the page follows every step at once, the save to
+  // main is coalesced, and main's broadcasts of our own (older) values are ignored while we edit, so
+  // the icons never jump back mid-drag (NEW_TAB_ECHO_GUARD_MS).
+  newTabPreferencesRef.current = newTabPreferences
   function saveNewTabPreferences(next: NewTabPreferences): void {
+    newTabPreferencesRef.current = next
+    newTabLocalEditAtRef.current = performance.now()
     setNewTabPreferences(next)
-    void window.api.browser.newTabPreferences.set(next).catch(() => undefined)
+    window.clearTimeout(newTabSaveTimerRef.current)
+    newTabSaveTimerRef.current = window.setTimeout(() => {
+      void window.api.browser.newTabPreferences.set(newTabPreferencesRef.current).catch(() => undefined)
+    }, NEW_TAB_SAVE_COALESCE_MS)
   }
 
   function patchNewTabPreferences(patch: Partial<NewTabPreferences>): void {
-    saveNewTabPreferences({ ...newTabPreferences, ...patch })
+    saveNewTabPreferences({ ...newTabPreferencesRef.current, ...patch })
   }
 
   function setSidebarMode(next: SidebarMode | ((current: SidebarMode) => SidebarMode)): void {
@@ -623,6 +628,32 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // The New Tab page (clock, photos) is only on screen in the content surface, on a New Tab,
   // with no settings/downloads panel over it. Nothing behind it needs to tick otherwise.
   const newTabOnScreen = surface === 'content' && isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads'
+  // Leaving the New Tab (a site opened from it, a tab switch) closes the Customize panel. Opening it
+  // from Settings while on a site sets it open before the New Tab arrives, so only a true → false
+  // change of isLocalNewTab closes it.
+  const wasLocalNewTabRef = useRef(isLocalNewTab)
+  useEffect(() => {
+    if (wasLocalNewTabRef.current && !isLocalNewTab) setNewTabCustomizeOpen(false)
+    wasLocalNewTabRef.current = isLocalNewTab
+  }, [isLocalNewTab])
+  // The icons' free space starts under the clocks / weather: their bottom edge as a CSS variable,
+  // written straight to the style (ResizeObserver runs before paint, so no re-render or jump).
+  const newTabWidgetsRef = useRef<HTMLDivElement>(null)
+  const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled)
+  useLayoutEffect(() => {
+    const widgets = newTabWidgetsRef.current
+    const page = widgets?.closest<HTMLElement>('.new-tab-page')
+    if (!widgets || !page) return
+    const write = (): void => { page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(widgets.offsetTop + widgets.offsetHeight)}px`) }
+    write()
+    const observer = new ResizeObserver(write)
+    observer.observe(widgets)
+    observer.observe(page)
+    return () => {
+      observer.disconnect()
+      page.style.removeProperty('--new-tab-widgets-bottom')
+    }
+  }, [hasNewTabWidgets])
   // Whether this surface's own sidebar is actually painted: the sidebar overlay while it is
   // revealed, the content surface only when it is the visible layer (New Tab or a full panel).
   // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
@@ -678,7 +709,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [newTabOnScreen, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length])
 
   useEffect(() => {
-    if (surface !== 'content' || !isLocalNewTab || !newTabPreferences.weatherEnabled || !newTabPreferences.weatherLocation.trim()) {
+    const place = newTabPreferences.weatherPlace
+    // Settings saved before city search hold free text only: main looks it up once, we save the place.
+    const legacyLocation = place ? '' : newTabPreferences.weatherLocation.trim()
+    if (surface !== 'content' || !isLocalNewTab || !newTabPreferences.weatherEnabled || (!place && !legacyLocation)) {
       setNewTabWeather(null)
       setNewTabWeatherError('')
       setNewTabWeatherLoading(false)
@@ -687,15 +721,21 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     let mounted = true
     setNewTabWeather(null)
     setNewTabWeatherError('')
+    const provider = newTabPreferences.weatherProvider
     const refresh = (): void => {
       setNewTabWeatherLoading(true)
-      void window.api.browser.newTabWeather.get(newTabPreferences.weatherLocation).then((weather) => {
-        if (mounted) {
-          setNewTabWeather(weather)
-          setNewTabWeatherError('')
+      void window.api.browser.newTabWeather.get({ provider, place, location: legacyLocation }).then((reply) => {
+        if (!mounted) return
+        if (!reply.ok) { setNewTabWeatherError(reply.error); return }
+        const weather = reply.value
+        setNewTabWeather(weather)
+        setNewTabWeatherError('')
+        const current = newTabPreferencesRef.current
+        if (!current.weatherPlace && current.weatherLocation.trim() === legacyLocation) {
+          patchNewTabPreferences({ weatherPlace: weather.place, weatherLocation: weather.location.slice(0, 100) })
         }
       }).catch((error: unknown) => {
-        if (mounted) setNewTabWeatherError(error instanceof Error ? error.message : String(error))
+        if (mounted) setNewTabWeatherError((error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ''))
       }).finally(() => {
         if (mounted) setNewTabWeatherLoading(false)
       })
@@ -707,7 +747,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.clearTimeout(initialTimer)
       window.clearInterval(refreshTimer)
     }
-  }, [surface, isLocalNewTab, newTabPreferences.weatherEnabled, newTabPreferences.weatherLocation])
+    // The place is compared by its coordinates: a re-sent identical place doesn't refetch.
+  }, [surface, isLocalNewTab, newTabWeatherKeyVersion, newTabPreferences.weatherEnabled, newTabPreferences.weatherProvider, newTabPreferences.weatherPlace?.latitude, newTabPreferences.weatherPlace?.longitude, newTabPreferences.weatherPlace ? '' : newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
   const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null
@@ -837,6 +878,28 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     setSidebarMode(mode)
   }
 
+  const closeNewTabCustomize = useCallback(() => setNewTabCustomizeOpen(false), [])
+  function warmNewTabCustomize(): void {
+    void preloadNewTabCustomizePanel()
+  }
+  /** Settings → New Tab "Customize on New Tab": show the New Tab (this tab's, or a new one) with the panel open. */
+  function customizeOnNewTab(): void {
+    setNewTabCustomizeLoaded(true)
+    setNewTabCustomizeOpen(true)
+    exitSettings()
+    if (!isLocalNewTab) void window.api.browser.tabs.create(SURFFISH_QUICK_LINKS_URL)
+  }
+  const newTabFieldsProps = {
+    preferences: newTabPreferences,
+    onPatch: patchNewTabPreferences,
+    newTabPage,
+    onNewTabPageChange: (page: NewTabPageId) => {
+      void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
+    },
+    weather: { snapshot: newTabWeather, error: newTabWeatherError, loading: newTabWeatherLoading },
+    onWeatherKeyChange: () => setNewTabWeatherKeyVersion((version) => version + 1)
+  }
+
   function exitSettings(): void {
     setSidebarMode('tabs')
     setSettingsQuery('')
@@ -952,7 +1015,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       setSearchEngine(preferences.searchEngine)
       setSearchEngineLoaded(true)
       setNewTabPage(preferences.newTabPage)
-      setNewTabPreferences(preferences.newTabPreferences)
+      // Skip echoes of our own edits (a broadcast per save) while a drag or typing is in flight.
+      if (performance.now() - newTabLocalEditAtRef.current > NEW_TAB_ECHO_GUARD_MS) setNewTabPreferences(preferences.newTabPreferences)
       setTabSleepMinutes(preferences.tabSleepMinutes)
       setChromeState((current) => ({ ...current, sidebarWidth: preferences.sidebarWidth }))
       void window.api.browser.chrome.set({ sidebarWidth: preferences.sidebarWidth }).catch(() => undefined)
@@ -1831,7 +1895,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </div>
                 )}
                 {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled) && (
-                  <div className="new-tab-widgets" aria-label="Time and weather">
+                  <div className="new-tab-widgets" aria-label="Time and weather" ref={newTabWidgetsRef}>
                     {newTabPreferences.showClock && (
                       <div className="new-tab-clock">
                         <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatNewTabTime(clockNow, newTabPreferences.timeZone, newTabPreferences)}</time>
@@ -1846,36 +1910,38 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                         {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatNewTabDate(clockNow, clock.timeZone)}</time>}
                       </div>
                     ))}
-                    {newTabPreferences.weatherEnabled && newTabPreferences.weatherLocation.trim() && (
+                    {newTabPreferences.weatherEnabled && (newTabPreferences.weatherPlace || newTabPreferences.weatherLocation.trim()) && (
                       <div className="new-tab-weather-widget" role="status" aria-live="polite">
                         {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
                           : newTabWeatherError ? <span>{newTabWeatherError}</span>
-                            : newTabWeather ? <><strong>{Math.round(newTabPreferences.temperatureUnit === 'fahrenheit' ? newTabWeather.temperatureCelsius * 9 / 5 + 32 : newTabWeather.temperatureCelsius)}°{newTabPreferences.temperatureUnit === 'fahrenheit' ? 'F' : 'C'} · {newTabWeather.description}</strong><small>Open-Meteo · {newTabWeather.location}</small></>
+                            : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small></>
                               : <span>Weather unavailable</span>}
                       </div>
                     )}
                   </div>
                 )}
-                {(browser.private ? favoriteSites.length > 0 : newTabSites.length > 0) ? (
-                  <div className="new-tab-link-groups" style={{
-                    '--new-tab-icon-size': `${newTabPreferences.iconSize}px`,
-                    '--new-tab-links-per-row': newTabPreferences.linksPerRow,
-                    '--new-tab-icon-offset': `${newTabPreferences.iconVerticalOffset}px`
-                  } as React.CSSProperties}>
-                    {!browser.private && frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
-                      <div className="new-tab-icon-grid" role="group" aria-label="Most visited sites">
-                        {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
-                      </div>
-                      <span className="new-tab-group-label">Most visited</span>
-                    </section>}
-                    {favoriteSites.length > 0 && <section className="new-tab-link-group" aria-label="Favourite sites">
-                      <div className="new-tab-icon-grid" role="group" aria-label="Favourite sites">
-                        {favoriteSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
-                      </div>
-                      <span className="new-tab-group-label">Favourites</span>
-                    </section>}
-                  </div>
-                ) : !browser.private && <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
+                {/* Vertical position: the icons sit at a fraction of the free space between the clocks and the photo credit (never off-screen; scrolls if a tiny window can't fit them). Private tabs keep the hero layout. */}
+                <div className={browser.private ? 'new-tab-icon-flow' : 'new-tab-icon-track'} style={{ '--new-tab-icon-position': (newTabPreferences.iconVerticalPosition / 100).toFixed(3) } as React.CSSProperties}>
+                  {(browser.private ? favoriteSites.length > 0 : newTabSites.length > 0) ? (
+                    <div className="new-tab-link-groups" style={{
+                      '--new-tab-icon-size': `${newTabPreferences.iconSize}px`,
+                      '--new-tab-links-per-row': newTabPreferences.linksPerRow
+                    } as React.CSSProperties}>
+                      {!browser.private && frequentlyVisitedSites.length > 0 && <section className="new-tab-link-group" aria-label="Most visited sites">
+                        <div className="new-tab-icon-grid" role="group" aria-label="Most visited sites">
+                          {frequentlyVisitedSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                        </div>
+                        <span className="new-tab-group-label">Most visited</span>
+                      </section>}
+                      {favoriteSites.length > 0 && <section className="new-tab-link-group" aria-label="Favourite sites">
+                        <div className="new-tab-icon-grid" role="group" aria-label="Favourite sites">
+                          {favoriteSites.map((site) => <NewTabSiteIcon key={site.origin} site={site} faviconUrl={cachedSiteIcons[site.origin] ?? tabs.find((tab) => httpOrigin(tab.url) === site.origin)?.faviconUrl} showLabel={newTabPreferences.showLinkLabels} iconSize={newTabPreferences.iconSize} onOpen={() => void navigateTo(site.url)} />)}
+                        </div>
+                        <span className="new-tab-group-label">Favourites</span>
+                      </section>}
+                    </div>
+                  ) : !browser.private && <p className="new-tab-empty">Pin a site from the address bar to add its icon here.</p>}
+                </div>
                 <span className="new-tab-sr-only" role="status" aria-live="polite">{photoRefreshStatus}</span>
                 <footer className="new-tab-photo-footer">
                   <p className="new-tab-photo-credit">
@@ -1910,9 +1976,38 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                         <path d="M5 12a7 7 0 0 0 13 4" />
                       </svg>
                     </button>
+                    {surface === 'content' && (
+                      <button
+                        ref={newTabGearRef}
+                        className={`new-tab-background-action new-tab-customize-gear${newTabCustomizeOpen ? ' is-active' : ''}`}
+                        type="button"
+                        title="Customize New Tab"
+                        aria-label="Customize New Tab"
+                        aria-expanded={newTabCustomizeOpen}
+                        aria-controls="new-tab-customize-panel"
+                        onPointerEnter={warmNewTabCustomize}
+                        onFocus={warmNewTabCustomize}
+                        onClick={() => { setNewTabCustomizeLoaded(true); setNewTabCustomizeOpen((open) => !open) }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
+                          <circle cx="16" cy="7" r="2" />
+                          <circle cx="10" cy="17" r="2" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </footer>
               </div>
+              {surface === 'content' && newTabCustomizeLoaded && (
+                <NewTabCustomizePanel
+                  {...newTabFieldsProps}
+                  open={newTabCustomizeOpen}
+                  onClose={closeNewTabCustomize}
+                  onOpenSettings={() => { setNewTabCustomizeOpen(false); selectSettingsSection('newtab') }}
+                  gearRef={newTabGearRef}
+                />
+              )}
             </section>
           )}
           {SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(sidebarMode)) && (
@@ -2069,88 +2164,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsCategory>
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
                 </div>}
-                {sidebarMode === 'newtab' && <>
-                <SettingsGroup title="Page">
-                  <SettingsRow label="New tab opens" hint="Applies to tabs opened from now on.">
-                    <select className="settings-select" value={newTabPage} onChange={(event) => {
-                      const page = event.target.value as NewTabPageId
-                      void window.api.browser.newTabPage.set(page).then((saved) => { if (saved) setNewTabPage(saved) })
-                    }} aria-label="Default new tab page">
-                      <option value="quick-links">Surffish New Tab</option>
-                      <option value="bonjourr">Bonjourr (online)</option>
-                      <option value="search">Search engine</option>
-                    </select>
-                  </SettingsRow>
-                  {newTabPage === 'quick-links' && <p className="settings-help">Favorites reuse pinned sites, frequent sites come from local history, and site icons and Wikimedia Commons photos are cached locally. No browsing data is sent.</p>}
-                </SettingsGroup>
-                <SettingsGroup title="Layout">
-                  <SettingsRow label="Show site names"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showLinkLabels} onChange={(event) => patchNewTabPreferences({ showLinkLabels: event.target.checked })} aria-label="Show site names under icons" /></SettingsRow>
-                  <SettingsSlider label="Icon size" value={newTabPreferences.iconSize} unit="px" min={20} max={52} onChange={(iconSize) => patchNewTabPreferences({ iconSize })} />
-                  <SettingsSlider label="Links per row" value={newTabPreferences.linksPerRow} min={3} max={12} onChange={(linksPerRow) => patchNewTabPreferences({ linksPerRow })} />
-                  <SettingsSlider label="Vertical position" value={newTabPreferences.iconVerticalOffset} unit="px" min={0} max={480} step={10} onChange={(iconVerticalOffset) => patchNewTabPreferences({ iconVerticalOffset })} />
-                </SettingsGroup>
-                <SettingsGroup title="Background">
-                  <SettingsSlider label="Dim" value={newTabPreferences.backgroundDim} unit="%" min={0} max={70} onChange={(backgroundDim) => patchNewTabPreferences({ backgroundDim })} />
-                  <SettingsSlider label="Blur" value={newTabPreferences.backgroundBlur} unit="px" min={0} max={12} onChange={(backgroundBlur) => patchNewTabPreferences({ backgroundBlur })} />
-                </SettingsGroup>
-                <SettingsGroup title="Clock">
-                  <SettingsRow label="Show clock"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showClock} onChange={(event) => patchNewTabPreferences({ showClock: event.target.checked })} aria-label="Show local clock" /></SettingsRow>
-                  <SettingsRow label="Show date"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showDate} onChange={(event) => patchNewTabPreferences({ showDate: event.target.checked })} aria-label="Show date" /></SettingsRow>
-                  <SettingsRow label="24-hour time"><input type="checkbox" className="settings-switch" checked={newTabPreferences.use24HourTime} onChange={(event) => patchNewTabPreferences({ use24HourTime: event.target.checked })} aria-label="Use 24-hour time" /></SettingsRow>
-                  <SettingsRow label="Show seconds"><input type="checkbox" className="settings-switch" checked={newTabPreferences.showSeconds} onChange={(event) => patchNewTabPreferences({ showSeconds: event.target.checked })} aria-label="Show seconds" /></SettingsRow>
-                  <SettingsRow label="Time zone">
-                    <select className="settings-select" value={newTabPreferences.timeZone} onChange={(event) => patchNewTabPreferences({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
-                      <option value="local">Automatic · device time</option>
-                      {Array.from(new Set([...TIME_ZONE_OPTIONS, ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone])])).map((zone) => <option key={zone} value={zone}>{timeZoneOptionLabel(zone)}</option>)}
-                    </select>
-                  </SettingsRow>
-                </SettingsGroup>
-                <SettingsGroup
-                  title="World clocks"
-                  status={`${newTabPreferences.worldClocks.length} of ${MAX_WORLD_CLOCKS}`}
-                  aside={<button className="settings-action secondary" type="button" disabled={newTabPreferences.worldClocks.length >= MAX_WORLD_CLOCKS} onClick={() => {
-                    const usedTimeZones = new Set([
-                      Intl.DateTimeFormat().resolvedOptions().timeZone,
-                      ...(newTabPreferences.timeZone === 'local' ? [] : [newTabPreferences.timeZone]),
-                      ...newTabPreferences.worldClocks.map((item) => item.timeZone)
-                    ])
-                    const timeZone = TIME_ZONE_OPTIONS.find((zone) => !usedTimeZones.has(zone)) ?? 'UTC'
-                    const clock: WorldClockPreference = { id: `${Date.now()}-${Math.floor(Math.random() * 10_000)}`, label: timeZoneCityName(timeZone), timeZone }
-                    patchNewTabPreferences({ worldClocks: [...newTabPreferences.worldClocks, clock] })
-                  }}>+ Add clock</button>}
-                >
-                  {newTabPreferences.worldClocks.length === 0 && <p className="settings-help">No world clocks yet.</p>}
-                  {newTabPreferences.worldClocks.map((clock, index) => (
-                    <div className="new-tab-world-clock-editor" key={clock.id}>
-                      <input type="text" maxLength={40} value={clock.label} aria-label={`World clock ${index + 1} city name`} onChange={(event) => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.map((item) => item.id === clock.id ? { ...item, label: event.target.value } : item) })} />
-                      <TimeZonePicker
-                        value={clock.timeZone}
-                        label={clock.label}
-                        ariaLabel={`World clock ${index + 1} city or time zone`}
-                        onSelect={(result) => patchNewTabPreferences({
-                          worldClocks: newTabPreferences.worldClocks.map((item) => {
-                            if (item.id !== clock.id) return item
-                            const autoLabels = new Set([timeZoneCityName(item.timeZone), ...WORLD_CITIES.filter((city) => city.timeZone === item.timeZone).map((city) => city.city)])
-                            const keepLabel = item.label.trim() !== '' && !autoLabels.has(item.label.trim())
-                            return { ...item, timeZone: result.timeZone, label: keepLabel ? item.label : result.city.slice(0, 40) }
-                          })
-                        })}
-                      />
-                      <button className="settings-icon-action" type="button" aria-label={`Remove ${clock.label} world clock`} title="Remove" onClick={() => patchNewTabPreferences({ worldClocks: newTabPreferences.worldClocks.filter((item) => item.id !== clock.id) })}>×</button>
-                    </div>
-                  ))}
-                </SettingsGroup>
-                <SettingsGroup
-                  title="Weather"
-                  status="Only the city name is sent to Open-Meteo"
-                  aside={<input type="checkbox" className="settings-switch" checked={newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherEnabled: event.target.checked })} aria-label="Show weather" />}
-                >
-                  <SettingsRow label="City or town"><input type="text" className="settings-input" maxLength={100} value={newTabPreferences.weatherLocation} placeholder="e.g. Melbourne" disabled={!newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherLocation: event.target.value })} aria-label="Weather city or town" /></SettingsRow>
-                  <SettingsRow label="Units">
-                    <SettingsSegmented value={newTabPreferences.temperatureUnit} options={[{ value: 'celsius', label: '°C' }, { value: 'fahrenheit', label: '°F' }] as const} ariaLabel="Weather temperature unit" disabled={!newTabPreferences.weatherEnabled} onChange={(temperatureUnit) => patchNewTabPreferences({ temperatureUnit })} />
-                  </SettingsRow>
-                </SettingsGroup>
-                </>}
+                {sidebarMode === 'newtab' && <NewTabSettingsFields {...newTabFieldsProps} variant="page" onCustomizeOnNewTab={customizeOnNewTab} />}
                 {sidebarMode === 'integrations' && <>
                 <SettingsGroup
                   title="Bramble password manager"

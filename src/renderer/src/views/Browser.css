@@ -2179,6 +2179,36 @@
   color: rgba(250, 252, 253, 0.77);
   font-size: 11px;
 }
+/* Vertical position: the free space runs from under the clocks/weather to above the photo credit;
+   flex spacers split what the icons don't use by --new-tab-icon-position (0 top, 1 bottom), so the
+   icons can't leave the page, and the track scrolls when a tiny window can't fit them at all. */
+.new-tab-icon-track {
+  position: absolute;
+  top: calc(var(--new-tab-widgets-bottom, 4px) + 14px);
+  right: 0;
+  bottom: 58px;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 16px;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+.new-tab-icon-track::before,
+.new-tab-icon-track::after {
+  flex: var(--new-tab-icon-position, 0.69) 1 0px;
+  content: '';
+}
+.new-tab-icon-track::after {
+  flex-grow: calc(1 - var(--new-tab-icon-position, 0.69));
+}
+.new-tab-icon-track > * {
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
 .new-tab-link-groups {
   display: flex;
   width: max-content;
@@ -2186,7 +2216,9 @@
   flex-direction: column;
   align-items: center;
   gap: 23px;
-  margin-top: var(--new-tab-icon-offset, 115px);
+}
+.new-tab-icon-flow > .new-tab-link-groups {
+  margin-top: 115px;
 }
 /* The sidebar overlays the New Tab page; the icon grid stays put when it opens. */
 .new-tab-link-group {
@@ -2329,7 +2361,6 @@
     font-size: 10px;
   }
   .new-tab-link-groups {
-    margin-top: max(125px, var(--new-tab-icon-offset, 115px));
     gap: 16px;
   }
   .new-tab-icon-grid {
@@ -3921,4 +3952,39 @@
   .settings-disclosure-chevron,
   .settings-switch,
   .settings-switch::after { transition: none; }
+}
+
+/* New Tab weather city search + Customize gear (the panel itself is a lazy chunk: new-tab/new-tab-customize.css). */
+.weather-city-search {
+  display: flex;
+  width: 260px;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.weather-city-search .tz-picker { width: 100%; }
+.settings-view .weather-city-search .tz-picker input { height: 30px; font-size: 13px; border-radius: 8px; }
+.settings-link-action {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: #7ee2a8;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-link-action:hover:not(:disabled) { text-decoration: underline; }
+.settings-link-action:disabled { color: rgba(235, 240, 245, 0.4); cursor: default; }
+.settings-link-action:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.6); outline-offset: 2px; border-radius: 4px; }
+.weather-key-form { display: flex; align-items: center; gap: 6px; }
+.weather-key-form .settings-input { flex: 1 1 auto; min-width: 0; }
+.settings-group-body > .weather-preview { color: rgba(235, 240, 245, 0.72); font-size: 12.5px; }
+.settings-group-body > .weather-preview.is-error { color: #ffb4a8; }
+.new-tab-customize-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.new-tab-customize-link .settings-help { margin: 0; }
+.new-tab-customize-gear.is-active {
+  border-color: rgba(180, 243, 202, 0.68);
+  background: rgba(9, 13, 17, 0.78);
+  color: #fff;
 }

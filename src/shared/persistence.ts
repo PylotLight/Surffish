@@ -1,6 +1,7 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
 import { parseSiteVolumes } from './tab-volume.ts'
+import { isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -22,13 +23,26 @@ export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   worldClocks: [],
   weatherEnabled: false,
   weatherLocation: '',
+  weatherPlace: null,
+  weatherProvider: 'open-meteo',
   temperatureUnit: 'celsius',
   iconSize: 30,
   linksPerRow: 8,
   showLinkLabels: false,
   backgroundDim: 34,
   backgroundBlur: 0,
-  iconVerticalOffset: 340
+  iconVerticalPosition: 69
+}
+/** New Tab icon position range (percent of the free space; see NewTabPreferences.iconVerticalPosition). */
+export const MIN_ICON_VERTICAL_POSITION = 0
+export const MAX_ICON_VERTICAL_POSITION = 100
+
+/**
+ * The old setting was px below the centre (0–480, default 340). Mapped so the icons land where they
+ * were on a 1280×860 window with the clock shown: 0 px → 35 %, 340 px → 69 %, 480 px → 83 %.
+ */
+export function iconVerticalPositionFromOffset(offset: number): number {
+  return Math.round(Math.min(MAX_ICON_VERTICAL_POSITION, Math.max(MIN_ICON_VERTICAL_POSITION, 35 + Math.min(480, Math.max(0, offset)) / 10)))
 }
 export const MAX_WORLD_CLOCKS = 8
 const LOCAL_PROXY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
@@ -115,13 +129,19 @@ export function parseNewTabPreferences(value: unknown): NewTabPreferences {
     worldClocks: normalizeWorldClocks(record.worldClocks),
     weatherEnabled: typeof record.weatherEnabled === 'boolean' ? record.weatherEnabled : DEFAULT_NEW_TAB_PREFERENCES.weatherEnabled,
     weatherLocation: typeof record.weatherLocation === 'string' ? record.weatherLocation.trim().slice(0, 100) : DEFAULT_NEW_TAB_PREFERENCES.weatherLocation,
+    weatherPlace: normalizeWeatherPlace(record.weatherPlace),
+    weatherProvider: isWeatherProviderId(record.weatherProvider) ? record.weatherProvider : DEFAULT_NEW_TAB_PREFERENCES.weatherProvider,
     temperatureUnit: record.temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
     iconSize: boundedNumber(record.iconSize, DEFAULT_NEW_TAB_PREFERENCES.iconSize, 20, 52),
     linksPerRow: boundedNumber(record.linksPerRow, DEFAULT_NEW_TAB_PREFERENCES.linksPerRow, 3, 12),
     showLinkLabels: typeof record.showLinkLabels === 'boolean' ? record.showLinkLabels : DEFAULT_NEW_TAB_PREFERENCES.showLinkLabels,
     backgroundDim: boundedNumber(record.backgroundDim, DEFAULT_NEW_TAB_PREFERENCES.backgroundDim, 0, 70),
     backgroundBlur: boundedNumber(record.backgroundBlur, DEFAULT_NEW_TAB_PREFERENCES.backgroundBlur, 0, 12),
-    iconVerticalOffset: boundedNumber(record.iconVerticalOffset, DEFAULT_NEW_TAB_PREFERENCES.iconVerticalOffset, 0, 480)
+    iconVerticalPosition: typeof record.iconVerticalPosition === 'number'
+      ? boundedNumber(record.iconVerticalPosition, DEFAULT_NEW_TAB_PREFERENCES.iconVerticalPosition, MIN_ICON_VERTICAL_POSITION, MAX_ICON_VERTICAL_POSITION)
+      : typeof record.iconVerticalOffset === 'number' && Number.isFinite(record.iconVerticalOffset)
+        ? iconVerticalPositionFromOffset(record.iconVerticalOffset)
+        : DEFAULT_NEW_TAB_PREFERENCES.iconVerticalPosition
   }
 }
 
