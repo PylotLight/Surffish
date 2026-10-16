@@ -11,6 +11,7 @@
     "dev:bare": "bun scripts/build-mac-trackpad-swipe.ts --dev && bun scripts/build-google-sign-in.ts && electron-vite dev",
     "build": "electron-vite build && bun scripts/build-mac-trackpad-swipe.ts && bun scripts/build-google-sign-in.ts",
     "dist:mac": "bun run build && electron-builder --mac --publish never",
+    "dist:win": "bun run build && electron-builder --win --publish never",
     "release": "bun scripts/release.ts",
     "start": "electron ./out/main/index.js",
     "preview": "electron-vite preview",
@@ -171,6 +172,14 @@
           }
         ]
       }
+    },
+    "win": {
+      "icon": "src/resources/icons/Surffish.ico",
+      "target": [
+        {
+          "target": "zip"
+        }
+      ]
     }
   },
   "devDependencies": {

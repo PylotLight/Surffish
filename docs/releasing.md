@@ -47,6 +47,14 @@ bun run dist:mac
 
 Before publishing, inspect and test the app on an Apple-silicon Mac: verify it starts, the sidebar/native trackpad integration works, and `Surffish.app` contains the expected app identifier `com.pylotlight.surffish`. Check the zip with `unzip -tq` and get its checksum with `shasum -a 256`.
 
+## Ad hoc Windows build
+
+Not a release. Actions -> **windows build** -> Run workflow, pick a ref (default `main`) and `x64`, `arm64` or `both`. It builds on GitHub's hosted Windows runners (`windows-latest`, `windows-11-arm`) and uploads `Surffish-<version>-win-<arch>.zip` as a run artifact for 14 days. Nothing is published and no Cask changes.
+
+Locally on Windows: `bun install && bun run dist:win`. Build on Windows itself: `build.electronDist` points at `node_modules/electron/dist`, which is the host's Electron, so a Linux or Mac `--win` build would package the wrong binary. The macOS native addons skip themselves off darwin.
+
+The exe is unsigned: SmartScreen shows "Windows protected your PC", click **More info -> Run anyway**. The UI is tuned on macOS (vibrancy, NSPanel mini windows, menu bar popout), so expect rough edges.
+
 ## Future manual release and Cask update
 
 `bun run release` does all of this. To do it by hand: for a future version, publish only `Surffish-<version>-mac-arm64.zip` as the macOS release asset. Render the Cask from the published zip's SHA-256, then review and push the source/Cask changes through the normal repository workflow:
