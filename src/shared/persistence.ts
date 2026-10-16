@@ -1,7 +1,7 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
 import { parseSiteVolumes } from './tab-volume.ts'
-import { isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
+import { isOpenMeteoModelId, isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -25,6 +25,7 @@ export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   weatherLocation: '',
   weatherPlace: null,
   weatherProvider: 'open-meteo',
+  openMeteoModel: 'best_match',
   temperatureUnit: 'celsius',
   iconSize: 30,
   linksPerRow: 8,
@@ -131,6 +132,7 @@ export function parseNewTabPreferences(value: unknown): NewTabPreferences {
     weatherLocation: typeof record.weatherLocation === 'string' ? record.weatherLocation.trim().slice(0, 100) : DEFAULT_NEW_TAB_PREFERENCES.weatherLocation,
     weatherPlace: normalizeWeatherPlace(record.weatherPlace),
     weatherProvider: isWeatherProviderId(record.weatherProvider) ? record.weatherProvider : DEFAULT_NEW_TAB_PREFERENCES.weatherProvider,
+    openMeteoModel: isOpenMeteoModelId(record.openMeteoModel) ? record.openMeteoModel : DEFAULT_NEW_TAB_PREFERENCES.openMeteoModel,
     temperatureUnit: record.temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
     iconSize: boundedNumber(record.iconSize, DEFAULT_NEW_TAB_PREFERENCES.iconSize, 20, 52),
     linksPerRow: boundedNumber(record.linksPerRow, DEFAULT_NEW_TAB_PREFERENCES.linksPerRow, 3, 12),

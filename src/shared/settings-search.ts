@@ -158,7 +158,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
   ]),
   ...entries('newtab', [
     ['New tab opens', 'page'], ['Show site names'], ['Icon size'], ['Links per row'], ['Vertical position'], ['Dim', 'background'], ['Blur', 'background'],
-    ['Show clock'], ['Show date'], ['24-hour time'], ['Show seconds'], ['Time zone'], ['World clocks', 'city'], ['Weather', 'open-meteo forecast temperature'], ['City', 'town location search approximate'], ['Provider', 'open-meteo met norway yr wttr openweather'], ['API key', 'openweather'], ['Units', 'celsius fahrenheit']
+    ['Show clock'], ['Show date'], ['24-hour time'], ['Show seconds'], ['Time zone'], ['World clocks', 'city'], ['Weather', 'open-meteo forecast temperature'], ['City', 'town location search approximate'], ['Provider', 'open-meteo met norway yr wttr openweather bom forecast model ecmwf gfs icon'], ['API key', 'openweather'], ['Units', 'celsius fahrenheit']
   ]),
   ...entries('integrations', [['Bramble password manager', 'passwords'], ['Chrome Web Store extensions', 'extension install']]),
   ...entries('feeds', [['Add a feed', 'rss atom json'], ['Following']]),

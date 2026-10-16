@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, WeatherKeyStatus, WeatherProviderId, WorldClockPreference } from '../../../../shared/types'
+import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, OpenMeteoModelId, WeatherKeyStatus, WeatherProviderId, WorldClockPreference } from '../../../../shared/types'
 import { MAX_ICON_VERTICAL_POSITION, MAX_WORLD_CLOCKS, MIN_ICON_VERTICAL_POSITION } from '../../../../shared/persistence'
-import { formatTemperature, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
+import { formatTemperature, OPEN_METEO_MODELS, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
 import { WORLD_CITIES } from '../../../../shared/world-cities'
 import { SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from '../settings/SettingsControls'
 import TimeZonePicker from '../TimeZonePicker'
@@ -84,6 +84,7 @@ function OpenWeatherKeyRow({ onKeyChange }: { onKeyChange: () => void }): React.
  */
 export default function NewTabSettingsFields({ preferences, onPatch, newTabPage, onNewTabPageChange, weather, variant, onCustomizeOnNewTab, onWeatherKeyChange }: NewTabSettingsFieldsProps): React.JSX.Element {
   const provider = WEATHER_PROVIDERS.find((entry) => entry.id === preferences.weatherProvider) ?? WEATHER_PROVIDERS[0]!
+  const openMeteoModel = OPEN_METEO_MODELS.find((entry) => entry.id === preferences.openMeteoModel) ?? OPEN_METEO_MODELS[0]!
   const placeLabel = preferences.weatherPlace ? weatherPlaceLabel(preferences.weatherPlace) : preferences.weatherLocation
   const timeZones = allTimeZones()
   return (
@@ -179,6 +180,13 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
             {WEATHER_PROVIDERS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}{entry.needsKey ? ' (API key)' : ''}</option>)}
           </select>
         </SettingsRow>
+        {provider.id === 'open-meteo' && (
+          <SettingsRow label="Forecast model" hint={openMeteoModel.hint}>
+            <select className="settings-select" value={openMeteoModel.id} disabled={!preferences.weatherEnabled} onChange={(event) => onPatch({ openMeteoModel: event.target.value as OpenMeteoModelId })} aria-label="Open-Meteo forecast model">
+              {OPEN_METEO_MODELS.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+            </select>
+          </SettingsRow>
+        )}
         {provider.needsKey && preferences.weatherEnabled && <OpenWeatherKeyRow onKeyChange={onWeatherKeyChange} />}
         <SettingsRow label="Units">
           <SettingsSegmented value={preferences.temperatureUnit} options={[{ value: 'celsius', label: '°C' }, { value: 'fahrenheit', label: '°F' }] as const} ariaLabel="Weather temperature unit" disabled={!preferences.weatherEnabled} onChange={(temperatureUnit) => onPatch({ temperatureUnit })} />
@@ -186,7 +194,7 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
         {preferences.weatherEnabled && placeLabel && (
           <p className={`settings-message weather-preview${weather.error ? ' is-error' : ''}`} role="status" aria-label="Weather preview">
             {weather.error ? weather.error
-              : weather.snapshot ? `${formatTemperature(weather.snapshot.temperatureCelsius, preferences.temperatureUnit)} · ${weather.snapshot.description} · ${weatherProviderLabel(weather.snapshot.provider)}`
+              : weather.snapshot ? `${formatTemperature(weather.snapshot.temperatureCelsius, preferences.temperatureUnit)} · ${weather.snapshot.description} · ${weatherProviderLabel(weather.snapshot.provider)}${weather.snapshot.notice ? ` · ${weather.snapshot.notice}` : ''}`
                 : weather.loading ? 'Loading weather…' : 'Weather shows on the New Tab.'}
           </p>
         )}

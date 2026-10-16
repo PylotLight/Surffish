@@ -38,6 +38,8 @@ export interface WorldClockPreference {
 
 export type TemperatureUnit = 'celsius' | 'fahrenheit'
 export type WeatherProviderId = 'open-meteo' | 'met-norway' | 'wttr' | 'openweathermap'
+/** Open-Meteo's `models=` choice (Best match lets Open-Meteo pick per place). */
+export type OpenMeteoModelId = 'best_match' | 'bom_access_global' | 'ecmwf_ifs' | 'ncep_gfs_seamless' | 'dwd_icon_seamless' | 'ukmo_seamless'
 
 /** A place picked in the New Tab weather search: weather lookups use its coordinates, never re-geocode. */
 export interface WeatherPlace {
@@ -71,6 +73,8 @@ export interface NewTabPreferences {
   /** The searched place; null for settings saved before city search (looked up once, then saved). */
   weatherPlace: WeatherPlace | null
   weatherProvider: WeatherProviderId
+  /** Only used when weatherProvider is Open-Meteo. */
+  openMeteoModel: OpenMeteoModelId
   temperatureUnit: TemperatureUnit
   iconSize: number
   linksPerRow: number
@@ -92,6 +96,10 @@ export interface NewTabWeatherSnapshot {
   temperatureCelsius: number
   description: string
   fetchedAt: number
+  /** Open-Meteo model the reading came from (best_match when the chosen model had no data). */
+  model?: OpenMeteoModelId
+  /** One short line when the reading isn't exactly what was asked for ("BOM ACCESS-G data unavailable, showing best match."). */
+  notice?: string
 }
 
 export interface PinnedSite {
