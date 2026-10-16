@@ -2134,6 +2134,8 @@
   align-items: flex-start;
   justify-content: center;
   gap: 18px 28px;
+  /* Clock position slider: set from Browser.tsx (0 keeps the original top spot). */
+  margin-top: var(--new-tab-clock-shift, 0px);
   transform: translateX(-50%);
   text-align: center;
 }
@@ -2147,11 +2149,34 @@
   text-shadow: 0 2px 16px rgba(0, 0, 0, 0.72);
 }
 .new-tab-clock-time {
-  font-size: clamp(24px, 3vw, 42px);
+  /* Clock size slider: --new-tab-clock-scale 1 is the original clamp(24px, 3vw, 42px). */
+  font-size: calc(clamp(24px, 3vw, 42px) * var(--new-tab-clock-scale, 1));
   font-weight: 300;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.035em;
   line-height: 1.1;
+}
+/* Clock display options (Settings → New Tab → Clock): weight, digit style. Light + tabular digits
+   is the original look, so the default selectors add nothing. */
+.new-tab-clock-weight-regular .new-tab-clock-time { font-weight: 420; }
+.new-tab-clock-weight-bold .new-tab-clock-time { font-weight: 680; letter-spacing: -0.025em; }
+.new-tab-clock-proportional .new-tab-clock-time { font-variant-numeric: normal; }
+.new-tab-greeting {
+  flex-basis: 100%;
+  margin: 0 0 -6px;
+  color: rgba(250, 252, 253, 0.94);
+  font-size: clamp(15px, 1.6vw, 20px);
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.72);
+}
+.new-tab-clock-diff {
+  color: rgba(250, 252, 253, 0.86);
+  font-size: 11.5px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.75);
 }
 .new-tab-clock-label,
 .new-tab-clock-date {

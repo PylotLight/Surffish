@@ -2,6 +2,7 @@ import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } fro
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
 import { parseSiteVolumes } from './tab-volume.ts'
 import { isOpenMeteoModelId, isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
+import { CLOCK_SCALE_STEP, clockScaleFromLegacySize, isClockDateFormat, isClockTimeFormat, isClockWeight, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE } from './new-tab-clock.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -17,10 +18,19 @@ export const TAB_SLEEP_OPTIONS: readonly TabSleepMinutes[] = [0, 5, 15, 30, 60]
 export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   showClock: true,
   showDate: true,
-  use24HourTime: true,
+  timeFormat: '24h',
+  showAmPm: true,
   showSeconds: false,
+  dateFormat: 'long',
+  clockScale: 100,
+  clockVerticalPosition: 0,
+  clockWeight: 'light',
+  clockTabularDigits: true,
+  showGreeting: false,
   timeZone: 'local',
   worldClocks: [],
+  worldClockShowDifference: false,
+  worldClockShowDay: false,
   weatherEnabled: false,
   weatherLocation: '',
   weatherPlace: null,
@@ -124,10 +134,26 @@ export function parseNewTabPreferences(value: unknown): NewTabPreferences {
   return {
     showClock: typeof record.showClock === 'boolean' ? record.showClock : DEFAULT_NEW_TAB_PREFERENCES.showClock,
     showDate: typeof record.showDate === 'boolean' ? record.showDate : DEFAULT_NEW_TAB_PREFERENCES.showDate,
-    use24HourTime: typeof record.use24HourTime === 'boolean' ? record.use24HourTime : DEFAULT_NEW_TAB_PREFERENCES.use24HourTime,
+    // Before Oct 2026 a boolean `use24HourTime`; keep what it showed.
+    timeFormat: isClockTimeFormat(record.timeFormat) ? record.timeFormat
+      : typeof record.use24HourTime === 'boolean' ? (record.use24HourTime ? '24h' : '12h') : DEFAULT_NEW_TAB_PREFERENCES.timeFormat,
+    showAmPm: typeof record.showAmPm === 'boolean' ? record.showAmPm : DEFAULT_NEW_TAB_PREFERENCES.showAmPm,
     showSeconds: typeof record.showSeconds === 'boolean' ? record.showSeconds : DEFAULT_NEW_TAB_PREFERENCES.showSeconds,
+    dateFormat: isClockDateFormat(record.dateFormat) ? record.dateFormat : DEFAULT_NEW_TAB_PREFERENCES.dateFormat,
+    // The first clock-options build saved S/M/L/XL as `clockSize`; keep that size on the slider.
+    clockScale: typeof record.clockScale === 'number'
+      ? Math.round(boundedNumber(record.clockScale, DEFAULT_NEW_TAB_PREFERENCES.clockScale, MIN_CLOCK_SCALE, MAX_CLOCK_SCALE) / CLOCK_SCALE_STEP) * CLOCK_SCALE_STEP
+      : clockScaleFromLegacySize(record.clockSize) ?? DEFAULT_NEW_TAB_PREFERENCES.clockScale,
+    clockVerticalPosition: typeof record.clockVerticalPosition === 'number'
+      ? boundedNumber(record.clockVerticalPosition, DEFAULT_NEW_TAB_PREFERENCES.clockVerticalPosition, MIN_CLOCK_POSITION, MAX_CLOCK_POSITION)
+      : DEFAULT_NEW_TAB_PREFERENCES.clockVerticalPosition,
+    clockWeight: isClockWeight(record.clockWeight) ? record.clockWeight : DEFAULT_NEW_TAB_PREFERENCES.clockWeight,
+    clockTabularDigits: typeof record.clockTabularDigits === 'boolean' ? record.clockTabularDigits : DEFAULT_NEW_TAB_PREFERENCES.clockTabularDigits,
+    showGreeting: typeof record.showGreeting === 'boolean' ? record.showGreeting : DEFAULT_NEW_TAB_PREFERENCES.showGreeting,
     timeZone: record.timeZone === 'local' || isTimeZone(record.timeZone) ? record.timeZone : DEFAULT_NEW_TAB_PREFERENCES.timeZone,
     worldClocks: normalizeWorldClocks(record.worldClocks),
+    worldClockShowDifference: typeof record.worldClockShowDifference === 'boolean' ? record.worldClockShowDifference : DEFAULT_NEW_TAB_PREFERENCES.worldClockShowDifference,
+    worldClockShowDay: typeof record.worldClockShowDay === 'boolean' ? record.worldClockShowDay : DEFAULT_NEW_TAB_PREFERENCES.worldClockShowDay,
     weatherEnabled: typeof record.weatherEnabled === 'boolean' ? record.weatherEnabled : DEFAULT_NEW_TAB_PREFERENCES.weatherEnabled,
     weatherLocation: typeof record.weatherLocation === 'string' ? record.weatherLocation.trim().slice(0, 100) : DEFAULT_NEW_TAB_PREFERENCES.weatherLocation,
     weatherPlace: normalizeWeatherPlace(record.weatherPlace),

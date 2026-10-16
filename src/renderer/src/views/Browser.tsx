@@ -67,6 +67,7 @@ import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from '.
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
+import { clockGreeting, clockShift, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
@@ -101,6 +102,9 @@ import './motion.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
+/** New Tab layout (Browser.css): the icon track's gap under the clocks and its inset above the photo credit. */
+const NEW_TAB_ICON_GAP = 14
+const NEW_TAB_CREDIT_SPACE = 58
 /** New Tab settings edits are saved to main at most this often (a slider drag is many patches). */
 const NEW_TAB_SAVE_COALESCE_MS = 150
 /** Preference broadcasts arriving this soon after a local edit are our own older values: ignored. */
@@ -228,25 +232,6 @@ function historyHost(url: string): string {
   } catch {
     return url
   }
-}
-
-function formatNewTabTime(date: Date, timeZone: string, preferences: NewTabPreferences): string {
-  return new Intl.DateTimeFormat(undefined, {
-    ...(timeZone === 'local' ? {} : { timeZone }),
-    hour: '2-digit',
-    minute: '2-digit',
-    ...(preferences.showSeconds ? { second: '2-digit' as const } : {}),
-    hour12: !preferences.use24HourTime
-  }).format(date)
-}
-
-function formatNewTabDate(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    ...(timeZone === 'local' ? {} : { timeZone }),
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric'
-  }).format(date)
 }
 
 function NewTabSiteIcon({ site, faviconUrl, showLabel, iconSize, onOpen }: { site: QuickLinkSite; faviconUrl?: string | null; showLabel: boolean; iconSize: number; onOpen: () => void }): React.JSX.Element {
@@ -638,22 +623,47 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [isLocalNewTab])
   // The icons' free space starts under the clocks / weather: their bottom edge as a CSS variable,
   // written straight to the style (ResizeObserver runs before paint, so no re-render or jump).
+  // Clock position: the clocks move down by a share of the space left above the icons' own height
+  // (page height − top spot − clocks − icons − photo credit), so at 100 % they sit just above the
+  // icons and never push them off the page. Private tabs keep the hero layout (no shift).
   const newTabWidgetsRef = useRef<HTMLDivElement>(null)
-  const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled)
+  const newTabWidgetsLayoutRef = useRef<(() => void) | null>(null)
+  const clockVerticalPositionRef = useRef(newTabPreferences.clockVerticalPosition)
+  clockVerticalPositionRef.current = newTabPreferences.clockVerticalPosition
+  const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting)
   useLayoutEffect(() => {
     const widgets = newTabWidgetsRef.current
     const page = widgets?.closest<HTMLElement>('.new-tab-page')
     if (!widgets || !page) return
-    const write = (): void => { page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(widgets.offsetTop + widgets.offsetHeight)}px`) }
-    write()
+    let observedIcons: HTMLElement | null = null
+    const write = (): void => {
+      const track = page.querySelector<HTMLElement>('.new-tab-icon-track')
+      const icons = track?.firstElementChild instanceof HTMLElement ? track.firstElementChild : null
+      if (icons !== observedIcons) {
+        if (observedIcons) observer.unobserve(observedIcons)
+        if (icons) observer.observe(icons)
+        observedIcons = icons
+      }
+      const baseTop = parseFloat(getComputedStyle(widgets).top) || 0
+      const free = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight - baseTop - widgets.offsetHeight : 0
+      const shift = clockShift(clockVerticalPositionRef.current, free)
+      page.style.setProperty('--new-tab-clock-shift', `${shift}px`)
+      page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(baseTop + shift + widgets.offsetHeight)}px`)
+    }
     const observer = new ResizeObserver(write)
     observer.observe(widgets)
     observer.observe(page)
+    write()
+    newTabWidgetsLayoutRef.current = write
     return () => {
       observer.disconnect()
+      newTabWidgetsLayoutRef.current = null
       page.style.removeProperty('--new-tab-widgets-bottom')
+      page.style.removeProperty('--new-tab-clock-shift')
     }
   }, [hasNewTabWidgets])
+  // A position drag moves the clocks before paint, step by step (the page follows every patch).
+  useLayoutEffect(() => { newTabWidgetsLayoutRef.current?.() }, [newTabPreferences.clockVerticalPosition])
   // Whether this surface's own sidebar is actually painted: the sidebar overlay while it is
   // revealed, the content surface only when it is the visible layer (New Tab or a full panel).
   // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
@@ -695,9 +705,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }, [surface, isLocalNewTab])
   useEffect(() => {
-    if (!newTabOnScreen || (!newTabPreferences.showClock && newTabPreferences.worldClocks.length === 0)) return
-    // Tick on the next second/minute boundary: one wakeup per displayed change, never more.
-    const step = newTabPreferences.showSeconds ? 1_000 : 60_000
+    const showsTime = newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0
+    if (!newTabOnScreen || (!showsTime && !newTabPreferences.showGreeting)) return
+    // Tick on the next second/minute boundary: one wakeup per displayed change, never more (per
+    // second only while a clock shows seconds; the greeting alone needs minutes).
+    const step = newTabPreferences.showSeconds && showsTime ? 1_000 : 60_000
     let timer = 0
     const tick = (): void => {
       const now = new Date()
@@ -706,7 +718,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
     tick()
     return () => window.clearTimeout(timer)
-  }, [newTabOnScreen, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length])
+  }, [newTabOnScreen, newTabPreferences.showClock, newTabPreferences.showSeconds, newTabPreferences.worldClocks.length, newTabPreferences.showGreeting])
 
   useEffect(() => {
     const place = newTabPreferences.weatherPlace
@@ -1895,22 +1907,28 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <p>Nothing here is saved to history, tabs or downloads, and cookies and site data are wiped when you close the last private tab. You're signed out of everything, so searches aren't personalised. Extensions are off; your proxy and ad blocking still apply.</p>
                   </div>
                 )}
-                {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled) && (
-                  <div className="new-tab-widgets" aria-label="Time and weather" ref={newTabWidgetsRef}>
+                {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting) && (
+                  <div className={`new-tab-widgets new-tab-clock-weight-${newTabPreferences.clockWeight}${newTabPreferences.clockTabularDigits ? '' : ' new-tab-clock-proportional'}`} style={{ '--new-tab-clock-scale': (newTabPreferences.clockScale / 100).toFixed(2) } as React.CSSProperties} aria-label="Time and weather" ref={newTabWidgetsRef}>
+                    {newTabPreferences.showGreeting && <p className="new-tab-greeting">{clockGreeting(clockNow, newTabPreferences.timeZone)}</p>}
                     {newTabPreferences.showClock && (
                       <div className="new-tab-clock">
-                        <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatNewTabTime(clockNow, newTabPreferences.timeZone, newTabPreferences)}</time>
+                        <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatClockTime(clockNow, newTabPreferences)}</time>
                         <span className="new-tab-clock-label">{newTabPreferences.timeZone === 'local' ? 'Local time' : newTabPreferences.timeZone.replaceAll('_', ' ')}</span>
-                        {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatNewTabDate(clockNow, newTabPreferences.timeZone)}</time>}
+                        {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatClockDate(clockNow, newTabPreferences.timeZone, newTabPreferences.dateFormat)}</time>}
                       </div>
                     )}
-                    {newTabPreferences.worldClocks.map((clock) => (
-                      <div className="new-tab-clock" key={clock.id}>
-                        <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatNewTabTime(clockNow, clock.timeZone, newTabPreferences)}</time>
-                        <span className="new-tab-clock-label">{clock.label}</span>
-                        {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatNewTabDate(clockNow, clock.timeZone)}</time>}
-                      </div>
-                    ))}
+                    {newTabPreferences.worldClocks.map((clock) => {
+                      const difference = newTabPreferences.worldClockShowDifference ? formatZoneDifference(zoneDifferenceMinutes(clockNow, clock.timeZone, newTabPreferences.timeZone)) : null
+                      const relativeDay = newTabPreferences.worldClockShowDay ? relativeClockDay(clockNow, clock.timeZone, newTabPreferences.timeZone) : null
+                      return (
+                        <div className="new-tab-clock" key={clock.id}>
+                          <time className="new-tab-clock-time" dateTime={clockNow.toISOString()}>{formatClockTime(clockNow, { ...newTabPreferences, timeZone: clock.timeZone })}</time>
+                          <span className="new-tab-clock-label">{clock.label}</span>
+                          {(difference || relativeDay) && <span className="new-tab-clock-diff">{[relativeDay, difference].filter(Boolean).join(' · ')}</span>}
+                          {newTabPreferences.showDate && <time className="new-tab-clock-date" dateTime={clockNow.toISOString()}>{formatClockDate(clockNow, clock.timeZone, newTabPreferences.dateFormat)}</time>}
+                        </div>
+                      )
+                    })}
                     {newTabPreferences.weatherEnabled && (newTabPreferences.weatherPlace || newTabPreferences.weatherLocation.trim()) && (
                       <div className="new-tab-weather-widget" role="status" aria-live="polite">
                         {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>

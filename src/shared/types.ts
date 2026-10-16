@@ -1,3 +1,4 @@
+import type { ClockDateFormat, ClockTimeFormat, ClockWeight } from './new-tab-clock'
 import type { BrowserPageSecurity } from './certificates'
 import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
@@ -63,10 +64,27 @@ export interface WeatherKeyStatus {
 export interface NewTabPreferences {
   showClock: boolean
   showDate: boolean
-  use24HourTime: boolean
+  /** Replaced `use24HourTime` (Oct 2026): true → '24h', false → '12h'. */
+  timeFormat: ClockTimeFormat
+  /** 12-hour clocks only. */
+  showAmPm: boolean
   showSeconds: boolean
+  dateFormat: ClockDateFormat
+  /** Clock size, percent of the original (MIN_CLOCK_SCALE–MAX_CLOCK_SCALE); replaced S/M/L/XL `clockSize`. */
+  clockScale: number
+  /** Vertical position of the clocks/weather, percent of the free space above the icons (0 = top). */
+  clockVerticalPosition: number
+  clockWeight: ClockWeight
+  /** Tabular (fixed-width) digits so the time doesn't jiggle as it ticks. */
+  clockTabularDigits: boolean
+  /** "Good evening" above the clocks. */
+  showGreeting: boolean
   timeZone: string
   worldClocks: WorldClockPreference[]
+  /** World clocks: "+2h" from the main clock. */
+  worldClockShowDifference: boolean
+  /** World clocks: "Tomorrow" / "Yesterday" when the day differs from the main clock's. */
+  worldClockShowDay: boolean
   weatherEnabled: boolean
   /** Display label of the place ("Melbourne, Victoria, Australia"); before places existed, free text. */
   weatherLocation: string

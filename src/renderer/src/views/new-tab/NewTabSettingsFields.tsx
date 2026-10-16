@@ -3,6 +3,7 @@ import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, OpenMeteoM
 import { MAX_ICON_VERTICAL_POSITION, MAX_WORLD_CLOCKS, MIN_ICON_VERTICAL_POSITION } from '../../../../shared/persistence'
 import { formatTemperature, OPEN_METEO_MODELS, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
 import { WORLD_CITIES } from '../../../../shared/world-cities'
+import { CLOCK_DATE_FORMATS, CLOCK_SCALE_STEP, formatClockDate, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE, usesTwelveHour, type ClockDateFormat, type ClockTimeFormat, type ClockWeight } from '../../../../shared/new-tab-clock'
 import { SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from '../settings/SettingsControls'
 import TimeZonePicker from '../TimeZonePicker'
 import WeatherCitySearch from './WeatherCitySearch'
@@ -12,6 +13,8 @@ const COMMON_TIME_ZONES = [
   'Europe/London', 'Europe/Paris', 'Europe/Bratislava', 'America/New_York', 'America/Chicago', 'America/Denver',
   'America/Los_Angeles', 'UTC'
 ]
+const TIME_FORMAT_OPTIONS: ReadonlyArray<{ value: ClockTimeFormat; label: string }> = [{ value: 'auto', label: 'Auto' }, { value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]
+const CLOCK_WEIGHT_OPTIONS: ReadonlyArray<{ value: ClockWeight; label: string }> = [{ value: 'light', label: 'Light' }, { value: 'regular', label: 'Regular' }, { value: 'bold', label: 'Bold' }]
 let timeZoneOptions: string[] | null = null
 function allTimeZones(): string[] {
   timeZoneOptions ??= Array.from(new Set([...COMMON_TIME_ZONES, ...(typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : []), 'UTC']))
@@ -87,6 +90,9 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
   const openMeteoModel = OPEN_METEO_MODELS.find((entry) => entry.id === preferences.openMeteoModel) ?? OPEN_METEO_MODELS[0]!
   const placeLabel = preferences.weatherPlace ? weatherPlaceLabel(preferences.weatherPlace) : preferences.weatherLocation
   const timeZones = allTimeZones()
+  const twelveAuto = usesTwelveHour('auto')
+  const twelveHour = usesTwelveHour(preferences.timeFormat)
+  const sampleDate = new Date()
   return (
     <>
       <SettingsGroup title="Page">
@@ -117,9 +123,26 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
       </SettingsGroup>
       <SettingsGroup title="Clock">
         <SettingsRow label="Show clock"><input type="checkbox" className="settings-switch" checked={preferences.showClock} onChange={(event) => onPatch({ showClock: event.target.checked })} aria-label="Show local clock" /></SettingsRow>
+        <SettingsRow label="Time format" hint={`Auto follows your system: ${twelveAuto ? '12-hour' : '24-hour'} here. World clocks use it too.`}>
+          <SettingsSegmented value={preferences.timeFormat} ariaLabel="Time format" options={TIME_FORMAT_OPTIONS} onChange={(timeFormat) => onPatch({ timeFormat })} />
+        </SettingsRow>
+        <SettingsRow label="Show AM/PM" hint="12-hour clocks only.">
+          <input type="checkbox" className="settings-switch" checked={preferences.showAmPm} disabled={!twelveHour} onChange={(event) => onPatch({ showAmPm: event.target.checked })} aria-label="Show AM/PM" />
+        </SettingsRow>
+        <SettingsRow label="Show seconds" hint="The page updates every second while on; otherwise once a minute."><input type="checkbox" className="settings-switch" checked={preferences.showSeconds} onChange={(event) => onPatch({ showSeconds: event.target.checked })} aria-label="Show seconds" /></SettingsRow>
         <SettingsRow label="Show date"><input type="checkbox" className="settings-switch" checked={preferences.showDate} onChange={(event) => onPatch({ showDate: event.target.checked })} aria-label="Show date" /></SettingsRow>
-        <SettingsRow label="24-hour time"><input type="checkbox" className="settings-switch" checked={preferences.use24HourTime} onChange={(event) => onPatch({ use24HourTime: event.target.checked })} aria-label="Use 24-hour time" /></SettingsRow>
-        <SettingsRow label="Show seconds"><input type="checkbox" className="settings-switch" checked={preferences.showSeconds} onChange={(event) => onPatch({ showSeconds: event.target.checked })} aria-label="Show seconds" /></SettingsRow>
+        <SettingsRow label="Date format">
+          <select className="settings-select" value={preferences.dateFormat} disabled={!preferences.showDate} onChange={(event) => onPatch({ dateFormat: event.target.value as ClockDateFormat })} aria-label="Date format">
+            {CLOCK_DATE_FORMATS.map((format) => <option key={format} value={format}>{formatClockDate(sampleDate, 'local', format)}{format === 'iso' ? ' (ISO)' : ''}</option>)}
+          </select>
+        </SettingsRow>
+        <SettingsSlider label="Clock size" value={preferences.clockScale} unit="%" min={MIN_CLOCK_SCALE} max={MAX_CLOCK_SCALE} step={CLOCK_SCALE_STEP} onChange={(clockScale) => onPatch({ clockScale })} />
+        <SettingsSlider label="Clock position" value={preferences.clockVerticalPosition} unit="%" min={MIN_CLOCK_POSITION} max={MAX_CLOCK_POSITION} onChange={(clockVerticalPosition) => onPatch({ clockVerticalPosition })} />
+        <SettingsRow label="Clock weight">
+          <SettingsSegmented value={preferences.clockWeight} ariaLabel="Clock weight" options={CLOCK_WEIGHT_OPTIONS} onChange={(clockWeight) => onPatch({ clockWeight })} />
+        </SettingsRow>
+        <SettingsRow label="Monospaced digits" hint="Every digit is the same width, so the time doesn't shift as it changes."><input type="checkbox" className="settings-switch" checked={preferences.clockTabularDigits} onChange={(event) => onPatch({ clockTabularDigits: event.target.checked })} aria-label="Monospaced digits" /></SettingsRow>
+        <SettingsRow label="Greeting" hint="“Good morning”, “Good afternoon” or “Good evening” above the clocks."><input type="checkbox" className="settings-switch" checked={preferences.showGreeting} onChange={(event) => onPatch({ showGreeting: event.target.checked })} aria-label="Show greeting" /></SettingsRow>
         <SettingsRow label="Time zone">
           <select className="settings-select" value={preferences.timeZone} onChange={(event) => onPatch({ timeZone: event.target.value })} aria-label="Primary New Tab time zone">
             <option value="local">Automatic · device time</option>
@@ -141,6 +164,8 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
           onPatch({ worldClocks: [...preferences.worldClocks, clock] })
         }}>+ Add clock</button>}
       >
+        <SettingsRow label="Time difference" hint="“+2h” from the main clock."><input type="checkbox" className="settings-switch" checked={preferences.worldClockShowDifference} onChange={(event) => onPatch({ worldClockShowDifference: event.target.checked })} aria-label="Show world clock time difference" /></SettingsRow>
+        <SettingsRow label="Day when different" hint="“Tomorrow” or “Yesterday” when it's another day there."><input type="checkbox" className="settings-switch" checked={preferences.worldClockShowDay} onChange={(event) => onPatch({ worldClockShowDay: event.target.checked })} aria-label="Show world clock day" /></SettingsRow>
         {preferences.worldClocks.length === 0 && <p className="settings-help">No world clocks yet.</p>}
         {preferences.worldClocks.map((clock, index) => (
           <div className="new-tab-world-clock-editor" key={clock.id}>
