@@ -1,7 +1,8 @@
 // Integration smoke for paused media sessions (Now Playing / media keys): a background tab whose
 // media the user paused keeps its page (and so Chromium's MediaSession) through timed tab sleep
 // and auto-archive, while an idle tab without media still sleeps / archives. Hibernate Tab
-// (manual) still sleeps it. Runs the production build:
+// (manual) still sleeps it. Only a session that was heard is kept: a muted autoplay video (X's
+// timeline) fires media-started-playing too, and that tab sleeps like any idle one. Runs the production build:
 // `bun run build && bun run test:electron-media-session`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-media-session-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -39,10 +40,17 @@ const MEDIA_PAGE = `<!doctype html><meta charset="utf-8"><title>Fixture media</t
   player.addEventListener('pause', () => { navigator.mediaSession.playbackState = 'paused' })
 </script>`
 
+// The same tone in a muted, looping autoplay <video> (muted autoplay needs no gesture), like a
+// timeline clip on X: Chromium fires media-started-playing but the page is never audible.
+const MUTED_PAGE = MEDIA_PAGE
+  .replace('<title>Fixture media</title>', '<title>Fixture muted</title>')
+  .replace('<audio id="player" loop></audio>', '<video id="player" muted autoplay loop playsinline width="160" height="90"></video>')
+  .replace('</script>', 'document.getElementById("player").play().catch(() => {})\n</script>')
+
 const server = createServer((request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   const name = (request.url || '/').slice(1).replace(/[^\w-]/g, '') || 'root'
-  response.end(name === 'media' ? MEDIA_PAGE : `<!doctype html><meta charset="utf-8"><title>Fixture ${name}</title><p>${name}</p>`)
+  response.end(name === 'media' ? MEDIA_PAGE : name === 'muted' ? MUTED_PAGE : `<!doctype html><meta charset="utf-8"><title>Fixture ${name}</title><p>${name}</p>`)
 })
 
 let mainWindow
@@ -116,21 +124,42 @@ async function run() {
   page.on('media-paused', () => { paused = true })
   await evaluate(page, 'document.getElementById("player").play().then(() => true)', true)
   await waitFor(() => started, 'media-started-playing (no audio output under xvfb?)')
+  // The hold needs a session that was heard (the speaker's audibility, not just "media played").
+  await waitFor(() => page.isCurrentlyAudible(), 'the playing tone to count as audible')
+
+  // --- a muted autoplay video tab (X's timeline): plays, never audible
+  await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(url('muted'))})`)
+  await waitFor(async () => (await tabFor('muted'))?.title === 'Fixture muted', 'the muted autoplay tab')
+  const mutedPage = await waitFor(() => webContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL() === url('muted')), 'the muted autoplay page')
+  await waitFor(() => evaluate(mutedPage, 'document.getElementById("player").currentTime > 0.2 && !document.getElementById("player").paused'), 'the muted video playing')
+  assert.equal(mutedPage.isCurrentlyAudible(), false, 'Chromium: a muted video is not audible')
+  assert.equal((await tabFor('muted')).audible, false, 'muted autoplay: no speaker')
   await evaluate(toolbar, `window.api.browser.tabs.create(${JSON.stringify(url('front'))})`)
   await waitFor(async () => (await tabFor('front'))?.active, 'the front tab')
 
   // --- 13 hours later (past any tab-sleep delay and the 12h auto-archive) the user pauses it from
   // the background, the way a media key does
   const realNow = Date.now
-  const offset = 13 * 3_600_000
+  let offset = 13 * 3_600_000
   Date.now = () => realNow() + offset
   try {
     await evaluate(page, 'document.getElementById("player").pause()')
     await waitFor(() => paused, 'media-paused')
     await waitFor(() => !page.isCurrentlyAudible(), 'the paused tab to stop counting as audible')
+    // The muted clip (re)starts in the background now, so a media-started-playing hold would still be
+    // live (Chromium may pause hidden muted video again; that pause used to hold 6h too). A minute
+    // later its start grace is over.
+    let mutedStarted = false
+    mutedPage.on('media-started-playing', () => { mutedStarted = true })
+    await evaluate(mutedPage, 'document.getElementById("player").pause(); document.getElementById("player").play().then(() => true)')
+    await waitFor(() => mutedStarted, 'the muted clip to start again in the background')
+    assert.equal(mutedPage.isCurrentlyAudible(), false, 'the muted clip is still not audible')
+    offset += 60_000
     // Re-arms every background tab's sleep timer; both are long overdue so they fire at once.
     await evaluate(toolbar, 'window.api.browser.setTabSleepMinutes(5)')
     await waitFor(async () => (await tabFor('idle'))?.sleeping, 'the idle tab to sleep')
+    // Muted-only autoplay holds nothing (it used to keep the tab awake for six hours).
+    await waitFor(async () => (await tabFor('muted'))?.sleeping, 'the muted autoplay tab to sleep')
     await delay(500)
     const media = await tabFor('media')
     assert.equal(media.sleeping, false, 'the paused media tab stays awake through timed tab sleep')
