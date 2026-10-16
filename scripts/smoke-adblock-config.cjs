@@ -16,7 +16,7 @@ module.exports = {
     loadExtendedSelectors: false,
     loadGenericCosmeticsFilters: true,
     loadPreprocessors: true,
-    enableCompression: false,
+    enableCompression: true,
     enableOptimizations: true
   })
 }
