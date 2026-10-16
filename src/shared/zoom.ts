@@ -24,3 +24,13 @@ export function stepZoomFactor(current: number, direction: 1 | -1): number {
 export function formatZoomPercent(factor: number): string {
   return `${Math.round(factor * 100)}%`
 }
+
+/** Largest trackpad pinch (visual zoom) scale on a page: tabs and Glance alike. */
+export const PINCH_ZOOM_MAX_SCALE = 3
+
+export type PageZoomAction = 'in' | 'out' | 'reset'
+
+/** Electron's zoom-changed direction (Ctrl+wheel, precision-touchpad zoom) as a zoom step. */
+export function zoomActionForWheel(direction: unknown): PageZoomAction | null {
+  return direction === 'in' ? 'in' : direction === 'out' ? 'out' : null
+}

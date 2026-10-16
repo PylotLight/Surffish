@@ -12,14 +12,14 @@ import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/exten
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from '../shared/navigation'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
-import { stepZoomFactor } from '../shared/zoom'
+import { zoomActionForWheel, type PageZoomAction } from '../shared/zoom'
 import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION, PRIVATE_SESSION_PARTITION as PRIVATE_PARTITION, clearPageSessionData, clearPrivateSession, getBrowserSession, getPageSession, getPrivateSession, whenPageSessionReady } from './browser-session'
 import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, spacesEnabled } from './spaces-store'
 import { forgetSessionCookieSnapshot } from './session-cookies'
 import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
 import { forgetPrivateDownloads } from './downloads'
-import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserSiteZoom, getBrowserTabSleepMinutes, saveBrowserSiteZoom, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
@@ -67,7 +67,8 @@ import { canWatchPage, watchPageFromTab } from './page-watchers-feature'
 import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitMoveFocusId, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
-import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
+import { emitGlanceLinkHover, glanceShiftClickEnabled, isGlanceOpenIn, noteGlanceWindowState, openGlance, setGlanceHost, zoomOpenGlance, type GlanceSource } from './glance-entry'
+import { applySavedPageZoom, enablePagePinchZoom, forgetPrivatePageZoom, stepPageZoom } from './page-zoom'
 import { getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
 import { canPopOutUrl } from '../shared/mini-window'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
@@ -1194,7 +1195,8 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   })
   // Ctrl/Cmd + mouse wheel (and Windows precision-touchpad zoom) step the page zoom like Chrome.
   contents.on('zoom-changed', (_event, direction) => {
-    if (isCurrentContents()) zoomTab(tab, direction === 'in' ? 'in' : 'out')
+    const action = zoomActionForWheel(direction)
+    if (action && isCurrentContents()) zoomTab(tab, action)
   })
   contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
   // A background tab whose renderer died (crash, OOM, or "Kill process" in Task Manager) goes to
@@ -1217,8 +1219,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
       }
     `).catch(() => undefined)
   })
-  // Electron disables visual pinch-zoom by default; enable it for trackpads (macOS and Windows precision touchpads).
-  void contents.setVisualZoomLevelLimits(1, 3).catch(() => {})
+  enablePagePinchZoom(contents)
   contents.setWindowOpenHandler((details) => {
     if (tab.extensionPageOrigin && tab.extensionPreloadPath && isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)) {
       openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
@@ -3223,38 +3224,21 @@ export function closeFindBar(focusPage = true, w = currentWindowState()): void {
 // Page zoom, remembered per origin. Private tabs use saved levels but keep their own changes in
 // memory only (forgotten with the private session).
 
-const privateSiteZoom = new Map<string, number>()
-
-function savedZoomFor(tab: BrowserTab, url: string): number {
-  const origin = normalizeHttpOrigin(url)
-  if (!origin) return 1
-  return (tab.isPrivate ? privateSiteZoom.get(origin) : undefined) ?? getBrowserSiteZoom(origin)
-}
-
 function applySavedZoom(tab: BrowserTab, url: string): void {
-  const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed() || !/^https?:\/\//i.test(url)) return
-  const factor = savedZoomFor(tab, url)
-  if (Math.abs(contents.getZoomFactor() - factor) > 0.001) contents.setZoomFactor(factor)
+  applySavedPageZoom(tab.view?.webContents, url, tab.isPrivate)
 }
 
-function zoomTab(tab: BrowserTab, action: 'in' | 'out' | 'reset'): void {
-  const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed()) return
-  const current = contents.getZoomFactor()
-  const next = action === 'reset' ? 1 : stepZoomFactor(current, action === 'in' ? 1 : -1)
-  if (Math.abs(current - next) > 0.001) contents.setZoomFactor(next)
-  const origin = normalizeHttpOrigin(contents.getURL())
-  if (origin) {
-    if (tab.isPrivate) privateSiteZoom.set(origin, next)
-    else saveBrowserSiteZoom(origin, next)
-  }
+function zoomTab(tab: BrowserTab, action: PageZoomAction): void {
+  if (stepPageZoom(tab.view?.webContents, action, tab.isPrivate) === null) return
   if (isActiveTab(tab)) publishState(tab.win)
 }
 
 /** Cmd + / Cmd - / Cmd 0 and the omnibox zoom pill. */
 export function zoomActiveBrowserTab(action: unknown): void {
   if (action !== 'in' && action !== 'out' && action !== 'reset') return
+  // A Glance open over the tab owns zoom (View menu, palette): it is what the user is reading.
+  const w = currentWindowState()
+  if (w && zoomOpenGlance(w.window, action)) return
   const tab = getTab()
   if (tab) zoomTab(tab, action)
 }
@@ -3464,7 +3448,7 @@ function hasOtherWindows(w: BrowserWindowState): boolean {
 
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
-  privateSiteZoom.clear()
+  forgetPrivatePageZoom()
   forgetPrivateTabVolumes()
   for (const [id, job] of [...pendingPictures]) if (job.wake?.isPrivate) cancelTabPictureEncode(id)
   dropPrivateWakeSnapshots()
@@ -4135,6 +4119,8 @@ function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: num
       }
       return true
     }
+    // A Glance on screen: the pinch is its page's (visual zoom), never the tab overview's.
+    if (isGlanceOpenIn(pinchWindow)) return false
     if (magnification > 0) return false
     if (!isLiveWindow(w) || !w.window.isFocused()) return false
     const tab = activeTabOf(w)

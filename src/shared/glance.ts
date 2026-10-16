@@ -139,6 +139,11 @@ export function glanceKeyAction(input: GlanceKeyInput, mac: boolean, fullscreen 
   return 'close-and-forward'
 }
 
+/** The page-zoom step a glance key action is, or null when it isn't a zoom key. */
+export function glanceZoomAction(action: GlanceKeyAction | null): 'in' | 'out' | 'reset' | null {
+  return action === 'zoom-in' ? 'in' : action === 'zoom-out' ? 'out' : action === 'zoom-reset' ? 'reset' : null
+}
+
 /** A link inside the glance asked for a new window/tab. */
 export type GlanceOpenAction = 'navigate' | 'background-tab' | 'deny'
 
