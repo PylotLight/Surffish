@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, utilityProcess } from 'electron'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,7 +9,6 @@ import {
   applyFilterEnvironment,
   attachAdblockToSession,
   type AdblockSessionHooks,
-  buildFilterEngine,
   type BeforeRequestDetails,
   type HeadersReceivedDetails,
   type ListFetch
@@ -18,11 +17,14 @@ import { getBrowserSession, onPageSessionCreated } from './browser-session'
 import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
 import { noteAdblockRequest } from './adblock-stats'
+import { compileFilterEngine, downloadFilterLists, type DownloadedFilterLists } from './adblock-filters.ts'
 
 const CACHE_FILE = ADBLOCK_CACHE_FILE
 const LEGACY_CACHE_FILES = ['adblock-engine.bin']
 const FILTER_FETCH_TIMEOUT_MS = 20_000
 const FIRST_RUN_WAIT_MS = 8_000
+// Compiling uBO's default lists takes ~0.5 s on a laptop; a compiler that hasn't answered by then is stuck.
+const COMPILE_TIMEOUT_MS = 60_000
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 
 let initialization: Promise<void> | null = null
@@ -73,12 +75,58 @@ function readCache(): { blocker: ElectronBlocker; fresh: boolean } | null {
   }
 }
 
-function writeCache(blocker: ElectronBlocker): void {
+function writeCache(bytes: Uint8Array): void {
   const file = cachePath()
   const temporaryFile = `${file}.tmp`
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  writeFileSync(temporaryFile, blocker.serialize(), { mode: 0o600 })
+  writeFileSync(temporaryFile, bytes, { mode: 0o600 })
   renameSync(temporaryFile, file)
+}
+
+function compilerPath(): string | null {
+  const path = join(mainDirectory, 'adblock-compiler.js')
+  return existsSync(path) ? path : null
+}
+
+/**
+ * Compile the lists in a short-lived utility process (adblock-compiler.ts) and return the serialized
+ * engine: the parse's CPU time and garbage stay out of main. Rejects when the process can't run,
+ * fails or hangs; the caller then compiles in main as before.
+ */
+function compileInUtilityProcess(lists: DownloadedFilterLists): Promise<Uint8Array> {
+  const path = compilerPath()
+  if (!path) return Promise.reject(new Error('adblock compiler script missing'))
+  return new Promise((resolve, reject) => {
+    const child = utilityProcess.fork(path, [], { serviceName: 'Surffish Ad Filter Compiler', stdio: 'ignore' })
+    let settled = false
+    const finish = (error: Error | null, bytes?: Uint8Array): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.kill()
+      if (error) reject(error)
+      else resolve(bytes!)
+    }
+    const timer = setTimeout(() => finish(new Error('adblock compiler timed out')), COMPILE_TIMEOUT_MS)
+    child.once('message', (message: { ok?: boolean; bytes?: unknown; error?: string }) => {
+      if (message?.ok && message.bytes instanceof Uint8Array) finish(null, message.bytes)
+      else finish(new Error(message?.error || 'adblock compiler failed'))
+    })
+    child.once('exit', (code) => finish(new Error(`adblock compiler exited (${code})`)))
+    child.once('spawn', () => child.postMessage({ texts: lists.texts, resources: lists.resources }))
+  })
+}
+
+/** Serialized engine for the lists, compiled off the main thread when possible. */
+async function compileEngine(lists: DownloadedFilterLists): Promise<{ engine: ElectronBlocker; bytes: Uint8Array }> {
+  try {
+    const bytes = await compileInUtilityProcess(lists)
+    return { engine: applyFilterEnvironment(ElectronBlocker.deserialize(bytes)), bytes }
+  } catch (error) {
+    console.warn('Ad-filter compiler process unavailable; compiling in the main process:', error)
+    const engine = compileFilterEngine(lists)
+    return { engine, bytes: engine.serialize() }
+  }
 }
 
 const fetchThroughBrowserSession: ListFetch = async (url) => {
@@ -140,10 +188,10 @@ function activateBlocker(next: ElectronBlocker): void {
 async function refreshFilters(): Promise<void> {
   const previous = activeBlocker
   try {
-    const { engine } = await buildFilterEngine(fetchThroughBrowserSession)
+    const { engine, bytes } = await compileEngine(await downloadFilterLists(fetchThroughBrowserSession))
     activateBlocker(engine)
     try {
-      writeCache(engine)
+      writeCache(bytes)
       removeLegacyCaches()
     } catch {
       // Filters updated; the local cache just could not be saved this time.

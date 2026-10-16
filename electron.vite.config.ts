@@ -121,6 +121,8 @@ export default defineConfig({
           app: resolve(projectDirectory, 'src/main/index.ts'),
           // Standalone entry so Electron harnesses reuse the production engine wiring.
           'adblock-engine': resolve(projectDirectory, 'src/main/adblock-engine.ts'),
+          // Filter-list compiler utility process (utilityProcess.fork from src/main/adblock.ts).
+          'adblock-compiler': resolve(projectDirectory, 'src/main/adblock-compiler.ts'),
           // Built-in AI utility process (utilityProcess.fork from src/main/local-ai.ts).
           'local-ai-handler': resolve(projectDirectory, 'src/main/local-ai-handler.ts')
         }
