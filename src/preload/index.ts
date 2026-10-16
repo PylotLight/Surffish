@@ -19,6 +19,10 @@ import type {
   NewTabPageId,
   NewTabPreferences,
   NewTabWeatherSnapshot,
+  WeatherKeyStatus,
+  WeatherPlace,
+  WeatherProviderId,
+  WeatherResult,
   PinnedSite,
   NetworkRequestDetails,
   NetworkRequestSummary,
@@ -136,7 +140,11 @@ const api = {
       set: (preferences: NewTabPreferences): Promise<NewTabPreferences | null> => ipcRenderer.invoke('browser:new-tab-preferences:set', preferences)
     },
     newTabWeather: {
-      get: (location: string): Promise<NewTabWeatherSnapshot> => ipcRenderer.invoke('browser:new-tab-weather:get', location)
+      get: (request: { provider: WeatherProviderId; place: WeatherPlace | null; location: string }): Promise<WeatherResult<NewTabWeatherSnapshot>> => ipcRenderer.invoke('browser:new-tab-weather:get', request),
+      search: (query: string): Promise<WeatherResult<WeatherPlace[]>> => ipcRenderer.invoke('browser:new-tab-weather:search', query),
+      locate: (): Promise<WeatherResult<WeatherPlace>> => ipcRenderer.invoke('browser:new-tab-weather:locate'),
+      keys: (): Promise<WeatherKeyStatus> => ipcRenderer.invoke('browser:new-tab-weather:keys:get'),
+      setKey: (provider: WeatherProviderId, key: string): Promise<WeatherResult<WeatherKeyStatus>> => ipcRenderer.invoke('browser:new-tab-weather:keys:set', provider, key)
     },
     newTabBackgrounds: {
       get: (): Promise<NewTabBackground[]> => ipcRenderer.invoke('browser:new-tab-backgrounds:get'),

@@ -37,6 +37,26 @@ export interface WorldClockPreference {
 }
 
 export type TemperatureUnit = 'celsius' | 'fahrenheit'
+export type WeatherProviderId = 'open-meteo' | 'met-norway' | 'wttr' | 'openweathermap'
+
+/** A place picked in the New Tab weather search: weather lookups use its coordinates, never re-geocode. */
+export interface WeatherPlace {
+  name: string
+  region?: string
+  country?: string
+  countryCode?: string
+  latitude: number
+  longitude: number
+  timeZone?: string
+}
+
+/** Weather IPC replies: expected failures (offline, bad key, unknown city) are values, not thrown errors. */
+export type WeatherResult<T> = { ok: true; value: T } | { ok: false; error: string }
+
+/** Which weather API keys are saved (the keys themselves never leave main). */
+export interface WeatherKeyStatus {
+  openweathermap: boolean
+}
 
 export interface NewTabPreferences {
   showClock: boolean
@@ -46,20 +66,30 @@ export interface NewTabPreferences {
   timeZone: string
   worldClocks: WorldClockPreference[]
   weatherEnabled: boolean
+  /** Display label of the place ("Melbourne, Victoria, Australia"); before places existed, free text. */
   weatherLocation: string
+  /** The searched place; null for settings saved before city search (looked up once, then saved). */
+  weatherPlace: WeatherPlace | null
+  weatherProvider: WeatherProviderId
   temperatureUnit: TemperatureUnit
   iconSize: number
   linksPerRow: number
   showLinkLabels: boolean
   backgroundDim: number
   backgroundBlur: number
-  iconVerticalOffset: number
+  /**
+   * Where the site icons sit in the free space between the clocks and the photo credit: 0 = top,
+   * 100 = bottom (percent). Replaced `iconVerticalOffset` (px below centre, 0–480) in Oct 2026.
+   */
+  iconVerticalPosition: number
 }
 
 export interface NewTabWeatherSnapshot {
   location: string
+  provider: WeatherProviderId
+  /** The place the reading is for (lets a legacy free-text setting save its place once). */
+  place: WeatherPlace
   temperatureCelsius: number
-  weatherCode: number
   description: string
   fetchedAt: number
 }

@@ -189,7 +189,26 @@ test('defaults New Tab clocks, weather, and icon display preferences safely', ()
   assert.equal(preferences.showClock, true)
   assert.equal(preferences.weatherEnabled, false)
   assert.equal(preferences.timeZone, 'local')
-  assert.equal(preferences.iconVerticalOffset, 340)
+  assert.equal(preferences.iconVerticalPosition, 69)
+  assert.equal(preferences.weatherProvider, 'open-meteo')
+  assert.equal(preferences.weatherPlace, null)
+})
+
+test('migrates the old px icon offset and free-text weather city', () => {
+  assert.equal(parseNewTabPreferences({ iconVerticalOffset: 340 }).iconVerticalPosition, 69)
+  assert.equal(parseNewTabPreferences({ iconVerticalOffset: 0 }).iconVerticalPosition, 35)
+  assert.equal(parseNewTabPreferences({ iconVerticalOffset: 480 }).iconVerticalPosition, 83)
+  assert.equal(parseNewTabPreferences({ iconVerticalOffset: 340, iconVerticalPosition: 12 }).iconVerticalPosition, 12, 'the new key wins')
+  assert.equal(parseNewTabPreferences({ iconVerticalPosition: 140 }).iconVerticalPosition, 100)
+  assert.equal(parseNewTabPreferences({ iconVerticalPosition: -3 }).iconVerticalPosition, 0)
+  const legacy = parseNewTabPreferences({ weatherEnabled: true, weatherLocation: 'Melbourne' })
+  assert.equal(legacy.weatherLocation, 'Melbourne')
+  assert.equal(legacy.weatherPlace, null, 'looked up once by main, then saved')
+  const picked = parseNewTabPreferences({ weatherPlace: { name: 'Melbourne', region: 'Victoria', country: 'Australia', latitude: -37.81396, longitude: 144.96332 }, weatherProvider: 'met-norway' })
+  assert.deepEqual(picked.weatherPlace, { name: 'Melbourne', region: 'Victoria', country: 'Australia', latitude: -37.814, longitude: 144.9633 })
+  assert.equal(picked.weatherProvider, 'met-norway')
+  assert.equal(parseNewTabPreferences({ weatherProvider: 'darksky', weatherPlace: { name: 'X', latitude: 200, longitude: 0 } }).weatherProvider, 'open-meteo')
+  assert.equal(parseNewTabPreferences({ weatherPlace: { name: 'X', latitude: 200, longitude: 0 } }).weatherPlace, null)
 })
 
 test('normalizes clock time zones, removes invalid world clocks, and bounds display settings', () => {
@@ -203,7 +222,7 @@ test('normalizes clock time zones, removes invalid world clocks, and bounds disp
     linksPerRow: 1,
     backgroundDim: -12,
     backgroundBlur: 6.4,
-    iconVerticalOffset: 999,
+    iconVerticalPosition: 999,
     worldClocks: [
       { id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' },
       { id: 'two', label: 'Bad zone', timeZone: 'Mars/Phobos' },
@@ -219,7 +238,7 @@ test('normalizes clock time zones, removes invalid world clocks, and bounds disp
   assert.equal(preferences.linksPerRow, 3)
   assert.equal(preferences.backgroundDim, 0)
   assert.equal(preferences.backgroundBlur, 6)
-  assert.equal(preferences.iconVerticalOffset, 480)
+  assert.equal(preferences.iconVerticalPosition, 100)
   assert.deepEqual(preferences.worldClocks, [{ id: 'one', label: 'Sydney', timeZone: 'Australia/Sydney' }])
 })
 

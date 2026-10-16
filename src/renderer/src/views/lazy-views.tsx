@@ -40,7 +40,6 @@ export const PreloadPagesSettings = deferred(() => settings().then((m) => m.Prel
 export const SpacesSettings = deferred(() => settings().then((m) => m.SpacesSettings))
 export const ExtensionsSettings = deferred(() => settings().then((m) => m.ExtensionsSettings))
 export const BookmarkImportPanel = deferred(() => settings().then((m) => m.BookmarkImportPanel))
-export const TimeZonePicker = deferred(() => settings().then((m) => m.TimeZonePicker))
 
 export const DownloadsPanel = deferred(() => import('./DownloadsPanel').then((m) => m.default))
 export const NetworkView = deferred(() => import('./NetworkView').then((m) => m.default))
@@ -48,3 +47,10 @@ export const DiagnosticsView = deferred(() => import('./DiagnosticsView').then((
 export const BookmarksManager = deferred(() => import('./bookmarks/BookmarksManager').then((m) => m.BookmarksManager))
 export const ArchivedTabsSidebar = deferred(() => import('./tab-archive/ArchivedTabsSidebar').then((m) => m.ArchivedTabsSidebar))
 export const CertificateViewer = deferred(() => import('./certificates/CertificateViewer').then((m) => m.CertificateViewer))
+
+// New Tab settings: Settings → New Tab and the Customize panel on the New Tab share one component
+// (one chunk). The panel's chunk is warmed on the gear's hover/focus so the first open is instant.
+const newTabPanel = (): Promise<typeof import('./new-tab/NewTabCustomizePanel')> => import('./new-tab/NewTabCustomizePanel')
+export const preloadNewTabCustomizePanel = newTabPanel
+export const NewTabCustomizePanel = deferred(() => newTabPanel().then((m) => m.default))
+export const NewTabSettingsFields = deferred(() => import('./new-tab/NewTabSettingsFields').then((m) => m.default))

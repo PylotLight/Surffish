@@ -53,7 +53,7 @@ import {
 } from './browser-shell'
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload, clearDownloadHistory, openDownloadsFolder } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
-import { getNewTabWeather } from './new-tab-weather'
+import { getNewTabWeather, getWeatherKeyStatus, locateWeatherPlace, searchWeatherPlaces, setWeatherApiKey, weatherResult } from './new-tab-weather'
 import { brambleTabsCallerForSender, checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
 import {
   checkWebStoreExtensionUpdate,
@@ -252,10 +252,25 @@ export function registerIpc(): void {
     if (saved) sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
     return saved
   })
-  ipcMain.handle('browser:new-tab-weather:get', async (event, location: unknown) => {
+  ipcMain.handle('browser:new-tab-weather:get', async (event, request: unknown) => {
     assertMainRenderer(event)
-    if (typeof location !== 'string') throw new Error('Enter a city or town to load weather.')
-    return getNewTabWeather(location)
+    return weatherResult(() => getNewTabWeather(typeof request === 'string' || (typeof request === 'object' && request !== null) ? request : {}))
+  })
+  ipcMain.handle('browser:new-tab-weather:search', async (event, query: unknown) => {
+    assertMainRenderer(event)
+    return weatherResult(() => searchWeatherPlaces(typeof query === 'string' ? query : ''))
+  })
+  ipcMain.handle('browser:new-tab-weather:locate', async (event) => {
+    assertMainRenderer(event)
+    return weatherResult(locateWeatherPlace)
+  })
+  ipcMain.handle('browser:new-tab-weather:keys:get', (event) => {
+    assertMainRenderer(event)
+    return getWeatherKeyStatus()
+  })
+  ipcMain.handle('browser:new-tab-weather:keys:set', async (event, provider: unknown, key: unknown) => {
+    assertMainRenderer(event)
+    return weatherResult(() => setWeatherApiKey(provider, key))
   })
   ipcMain.handle('browser:new-tab-backgrounds:get', (event) => {
     assertMainRenderer(event)
