@@ -196,6 +196,16 @@ export function MiniWindowSettings(): React.JSX.Element {
           </select>
         </SettingsRow>
       )}
+      <SettingsRow label="Throw with momentum" hint="Let go of a mini window while it's still moving and it glides on, slowing to a stop inside the screen. Fling it hard at an edge to tuck it there. Off when Reduce Motion is on.">
+        <input
+          type="checkbox"
+          className="settings-switch"
+          disabled={!settings}
+          checked={settings?.throwMomentum ?? true}
+          aria-label="Throw mini windows with momentum"
+          onChange={(event) => update({ throwMomentum: event.target.checked })}
+        />
+      </SettingsRow>
       {!IS_LINUX && settings && (
         <SettingsSlider label="Opacity" value={Math.round(settings.opacity * 100)} unit="%" min={Math.round(MINI_WINDOW_MIN_OPACITY * 100)} max={100} step={5} onChange={(value) => update({ opacity: value / 100 })} />
       )}

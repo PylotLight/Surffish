@@ -213,6 +213,11 @@ export function setMiniWindowPeekOnHover(peekOnHover: boolean): boolean {
   return updateMiniWindowSettings({ peekOnHover }).ok
 }
 
+/** ⌘K: turn throwing mini windows with momentum on/off (applies live). */
+export function setMiniWindowThrowMomentum(throwMomentum: boolean): boolean {
+  return updateMiniWindowSettings({ throwMomentum }).ok
+}
+
 /** Settings → Mini window grouping (also the Window menu and the palette). Regroups open mini windows without reloading. */
 export function setMiniWindowGrouping(grouping: MiniWindowGrouping): boolean {
   return updateMiniWindowSettings({ grouping }).ok
@@ -338,6 +343,10 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
   if ('peekDelayMs' in patch) {
     if (!isMiniWindowPeekDelay(patch.peekDelayMs)) return { ok: false, error: 'Invalid settings' }
     next.peekDelayMs = patch.peekDelayMs
+  }
+  if ('throwMomentum' in patch) {
+    if (typeof patch.throwMomentum !== 'boolean') return { ok: false, error: 'Invalid settings' }
+    next.throwMomentum = patch.throwMomentum
   }
   if ('grouping' in patch) {
     if (!isMiniWindowGrouping(patch.grouping)) return { ok: false, error: 'Invalid settings' }

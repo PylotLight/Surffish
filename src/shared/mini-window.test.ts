@@ -41,8 +41,8 @@ const workArea = { x: 0, y: 25, width: 1440, height: 875 }
 
 describe('mini window settings', () => {
   test('defaults: no pinned page, the default shortcut, opaque', () => {
-    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
-    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
+    expect(parseMiniWindowSettings(null)).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, throwMomentum: true, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
+    expect(parseMiniWindowSettings({ shortcut: 'nonsense', opacity: 'x' })).toEqual({ defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, throwMomentum: true, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
   })
 
   test('tuck to edge is on and peek off by default; booleans are kept', () => {
@@ -206,7 +206,7 @@ describe('several mini windows', () => {
 describe('grouping', () => {
   test('settings from before grouping (the #203 format) read as tabs; bad values fall back', () => {
     const v203 = { defaultUrl: 'https://claude.ai/', shortcut: 'CommandOrControl+Shift+Space', opacity: 0.9, tuckToEdge: true, peekOnHover: true }
-    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
+    expect(parseMiniWindowSettings(v203)).toEqual({ ...v203, peekDelayMs: 350, throwMomentum: true, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' })
     expect(parseMiniWindowSettings({ grouping: 'stack' }).grouping).toBe('stack')
     expect(parseMiniWindowSettings({ grouping: 'separate' }).grouping).toBe('separate')
     expect(parseMiniWindowSettings({ grouping: 'piles' }).grouping).toBe('tabs')
@@ -273,7 +273,7 @@ describe('header placement', () => {
   test('settings without a header placement (the #206 format) read as float; bad values fall back', () => {
     const v206 = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: false, grouping: 'tabs' as const }
     // Saved before hover peek defaulted on (no peekDelayMs next to it): the stored false was just the old default.
-    expect(parseMiniWindowSettings(v206)).toEqual({ ...v206, peekOnHover: true, peekDelayMs: 350, headerPlacement: 'float', menuBarIcon: 'in-use' })
+    expect(parseMiniWindowSettings(v206)).toEqual({ ...v206, peekOnHover: true, peekDelayMs: 350, throwMomentum: true, headerPlacement: 'float', menuBarIcon: 'in-use' })
     expect(parseMiniWindowSettings({ headerPlacement: 'push' }).headerPlacement).toBe('push')
     expect(parseMiniWindowSettings({ headerPlacement: 'overlay' }).headerPlacement).toBe('overlay')
     expect(parseMiniWindowSettings({ headerPlacement: 'sideways' }).headerPlacement).toBe('float')
@@ -358,5 +358,17 @@ describe('hover peek settings', () => {
     for (const bad of [0, 10, 351, -200, '600', null, Number.NaN]) expect(parseMiniWindowSettings({ peekDelayMs: bad }).peekDelayMs).toBe(350)
     expect(isMiniWindowPeekDelay(200)).toBe(true)
     expect(isMiniWindowPeekDelay(250)).toBe(false)
+  })
+})
+
+describe('throw with momentum setting', () => {
+  test('missing or unreadable values migrate to the default (on)', () => {
+    expect(parseMiniWindowSettings({}).throwMomentum).toBe(true)
+    expect(parseMiniWindowSettings({ tuckToEdge: true, peekOnHover: false, peekDelayMs: 350, grouping: 'stack' }).throwMomentum).toBe(true)
+    expect(parseMiniWindowSettings({ throwMomentum: 'no' }).throwMomentum).toBe(true)
+  })
+  test('a stored choice is kept', () => {
+    expect(parseMiniWindowSettings({ throwMomentum: false }).throwMomentum).toBe(false)
+    expect(parseMiniWindowSettings({ throwMomentum: true }).throwMomentum).toBe(true)
   })
 })
