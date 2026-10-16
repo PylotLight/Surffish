@@ -32,5 +32,8 @@ contextBridge.exposeInMainWorld('miniWindow', {
   menu: () => ipcRenderer.send('mini-window:menu'),
   handleMenu: () => ipcRenderer.send('mini-window:handle-menu'),
   menuBar: () => ipcRenderer.send('mini-window:menubar'),
-  pin: () => ipcRenderer.send('mini-window:pin')
+  pin: () => ipcRenderer.send('mini-window:pin'),
+  // The menu bar popout's strip: its ⋯ menu at (x, y) in the window, and word that it closed.
+  more: (x, y) => ipcRenderer.send('mini-window:more', Number(x), Number(y)),
+  onMenuClosed: (callback) => ipcRenderer.on('mini-window:menu-closed', () => callback())
 })
