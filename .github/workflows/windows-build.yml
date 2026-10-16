@@ -1,0 +1,75 @@
+name: windows build
+
+# Ad hoc, unsigned Windows build. Manual only: Actions -> windows build -> Run workflow.
+# Builds on GitHub's hosted Windows runners (free for this public repo), so electronDist
+# (node_modules/electron/dist) is the native Windows Electron and no wine is needed.
+# Output: a zip artifact (Surffish-<version>-win-<arch>.zip) kept for 14 days. Not a release,
+# nothing is published. Unsigned, so SmartScreen asks "More info -> Run anyway" on first launch.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'branch, tag or SHA to build'
+        required: true
+        default: main
+      arch:
+        description: 'x64, arm64 or both'
+        type: choice
+        options: [x64, arm64, both]
+        default: x64
+  # Proves the workflow itself still builds when it (or the Windows config) is edited in a PR.
+  pull_request:
+    paths:
+      - .github/workflows/windows-build.yml
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  win:
+    name: windows ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # PRs build x64 only; a manual run builds what was picked.
+        arch: ${{ fromJSON(github.event_name == 'pull_request' && '["x64"]' || (inputs.arch == 'both' && '["x64","arm64"]' || format('["{0}"]', inputs.arch))) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.sha }}
+      - name: Bun (pinned to .bun-version)
+        shell: pwsh
+        run: |
+          $want = (Get-Content .bun-version -Raw).Trim().TrimStart('v')
+          & ([scriptblock]::Create((Invoke-RestMethod https://bun.sh/install.ps1))) -Version $want
+          "$env:USERPROFILE\.bun\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: bun install
+        run: bun install
+      - name: Electron binary in node_modules/electron/dist (electronDist)
+        run: |
+          if [ ! -f node_modules/electron/dist/electron.exe ]; then bun node_modules/electron/install.js; fi
+          test -f node_modules/electron/dist/electron.exe
+          echo "Electron $(cat node_modules/electron/dist/version) ($(cat node_modules/electron/path.txt))"
+      - name: Build + package (zip, unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          bun run build
+          bun x electron-builder --win zip --${{ matrix.arch }} --publish never
+          ls -la release
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Surffish-win-${{ matrix.arch }}
+          path: release/*.zip
+          if-no-files-found: error
+          retention-days: 14
