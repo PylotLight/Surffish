@@ -300,7 +300,9 @@ async function run() {
   assert.ok(settingsTabId, 'one Settings tab')
   await evaluate(views.toolbar, `window.api.browser.tabs.close(${JSON.stringify(settingsTabId)})`)
   await waitFor(async () => (await settingsSection()) === null, 'closing the Settings tab returning to the page')
-  await waitFor(() => evaluate(views.sidebar, `Boolean(${gear})`), 'the sidebar Settings gear')
+  // The sidebar renderer gets the closed-tab state a beat after main (slow on macOS CI): until then its
+  // gear still points at the closed tab's section (Sites), so wait for it to stop showing Settings as current.
+  await waitFor(() => evaluate(views.sidebar, `Boolean(${gear}) && ${gear}.getAttribute('aria-current') !== 'page'`), 'the sidebar Settings gear (Settings tab closed)')
   await evaluate(views.sidebar, `${gear}.click()`)
   await waitFor(async () => (await settingsSection()) === 'settings', 'the Settings gear action')
   const gearTitle = await evaluate(views.sidebar, `${gear}?.title || null`)
