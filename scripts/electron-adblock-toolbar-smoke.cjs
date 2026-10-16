@@ -109,8 +109,11 @@ async function seedEngine(pagePort, framePort) {
     { id: 'ublock-quick-fixes', url: 'https://fixture.invalid/quick.txt' },
     { id: 'easylist', url: 'https://fixture.invalid/easylist.txt' }
   ])
-  // A fresh cache under the real name: the app loads it and never downloads lists.
-  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), engine.serialize(), { mode: 0o600 })
+  // A fresh cache under the real name: the app loads it and never downloads lists. Written
+  // zstd-compressed, the format the app saves (adblock-cache-codec.ts), so this smoke covers the
+  // compressed load path; the other smokes seed the older raw format, which still loads too.
+  const { zstdCompressSync } = require('node:zlib')
+  writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), zstdCompressSync(engine.serialize()), { mode: 0o600 })
 }
 
 async function run() {

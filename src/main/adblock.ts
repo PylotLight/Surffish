@@ -1,5 +1,6 @@
 import { app, utilityProcess } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ElectronBlocker } from '@ghostery/adblocker-electron'
@@ -18,6 +19,7 @@ import { getBrowserSiteSettings } from './browser-persistence'
 import { getBrowserTabUrlByWebContentsId } from './browser'
 import { noteAdblockRequest } from './adblock-stats'
 import { compileFilterEngine, downloadFilterLists, type DownloadedFilterLists } from './adblock-filters.ts'
+import { decodeEngineCache } from './adblock-cache-codec.ts'
 
 const CACHE_FILE = ADBLOCK_CACHE_FILE
 const LEGACY_CACHE_FILES = ['adblock-engine.bin']
@@ -59,11 +61,13 @@ function resolveFramePreload(): string {
   return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!
 }
 
-function readCache(): { blocker: ElectronBlocker; fresh: boolean } | null {
+async function readCache(): Promise<{ blocker: ElectronBlocker; fresh: boolean } | null> {
   try {
     const file = cachePath()
-    const modifiedAt = statSync(file).mtimeMs
-    const blocker = ElectronBlocker.deserialize(readFileSync(file))
+    const modifiedAt = (await stat(file)).mtimeMs
+    // zstd-compressed (~3.8 MB, adblock-cache-codec.ts): the read runs off the main thread, the
+    // decode adds ~15 ms to the deserialize. Older uncompressed caches load as before.
+    const blocker = ElectronBlocker.deserialize(decodeEngineCache(await readFile(file)))
     if (!isFullFilterConfig(blocker.config)) return null
     applyFilterEnvironment(blocker)
     return {
@@ -93,23 +97,32 @@ function compilerPath(): string | null {
  * engine: the parse's CPU time and garbage stay out of main. Rejects when the process can't run,
  * fails or hangs; the caller then compiles in main as before.
  */
-function compileInUtilityProcess(lists: DownloadedFilterLists): Promise<Uint8Array> {
+interface CompiledEngineBytes {
+  /** Serialized engine, for ElectronBlocker.deserialize. */
+  bytes: Uint8Array
+  /** The same engine encoded for the cache file (compressed in the compiler when it could). */
+  cache?: Uint8Array
+}
+
+function compileInUtilityProcess(lists: DownloadedFilterLists): Promise<CompiledEngineBytes> {
   const path = compilerPath()
   if (!path) return Promise.reject(new Error('adblock compiler script missing'))
   return new Promise((resolve, reject) => {
     const child = utilityProcess.fork(path, [], { serviceName: 'Surffish Ad Filter Compiler', stdio: 'ignore' })
     let settled = false
-    const finish = (error: Error | null, bytes?: Uint8Array): void => {
+    const finish = (error: Error | null, result?: CompiledEngineBytes): void => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       child.kill()
       if (error) reject(error)
-      else resolve(bytes!)
+      else resolve(result!)
     }
     const timer = setTimeout(() => finish(new Error('adblock compiler timed out')), COMPILE_TIMEOUT_MS)
-    child.once('message', (message: { ok?: boolean; bytes?: unknown; error?: string }) => {
-      if (message?.ok && message.bytes instanceof Uint8Array) finish(null, message.bytes)
+    child.once('message', (message: { ok?: boolean; bytes?: unknown; cache?: unknown; error?: string }) => {
+      if (message?.ok && message.bytes instanceof Uint8Array) {
+        finish(null, { bytes: message.bytes, cache: message.cache instanceof Uint8Array ? message.cache : undefined })
+      }
       else finish(new Error(message?.error || 'adblock compiler failed'))
     })
     child.once('exit', (code) => finish(new Error(`adblock compiler exited (${code})`)))
@@ -117,15 +130,18 @@ function compileInUtilityProcess(lists: DownloadedFilterLists): Promise<Uint8Arr
   })
 }
 
-/** Serialized engine for the lists, compiled off the main thread when possible. */
-async function compileEngine(lists: DownloadedFilterLists): Promise<{ engine: ElectronBlocker; bytes: Uint8Array }> {
+/**
+ * Engine for the lists plus its cache-file bytes, compiled (and compressed) off the main thread when
+ * possible. Without the compiler process the cache is written uncompressed, a format that still loads.
+ */
+async function compileEngine(lists: DownloadedFilterLists): Promise<{ engine: ElectronBlocker; cache: Uint8Array }> {
   try {
-    const bytes = await compileInUtilityProcess(lists)
-    return { engine: applyFilterEnvironment(ElectronBlocker.deserialize(bytes)), bytes }
+    const { bytes, cache } = await compileInUtilityProcess(lists)
+    return { engine: applyFilterEnvironment(ElectronBlocker.deserialize(bytes)), cache: cache ?? bytes }
   } catch (error) {
     console.warn('Ad-filter compiler process unavailable; compiling in the main process:', error)
     const engine = compileFilterEngine(lists)
-    return { engine, bytes: engine.serialize() }
+    return { engine, cache: engine.serialize() }
   }
 }
 
@@ -188,10 +204,10 @@ function activateBlocker(next: ElectronBlocker): void {
 async function refreshFilters(): Promise<void> {
   const previous = activeBlocker
   try {
-    const { engine, bytes } = await compileEngine(await downloadFilterLists(fetchThroughBrowserSession))
+    const { engine, cache } = await compileEngine(await downloadFilterLists(fetchThroughBrowserSession))
     activateBlocker(engine)
     try {
-      writeCache(bytes)
+      writeCache(cache)
       removeLegacyCaches()
     } catch {
       // Filters updated; the local cache just could not be saved this time.
@@ -218,7 +234,7 @@ function startRefreshTimer(): void {
 }
 
 async function initialize(): Promise<void> {
-  const cached = readCache()
+  const cached = await readCache()
   if (cached) {
     try {
       activateBlocker(cached.blocker)
