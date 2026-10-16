@@ -21,6 +21,7 @@ import type {
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MAX_WORLD_CLOCKS, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { buildAddressSuggestions } from '../../../shared/autocomplete'
+import { arrowSuggestion, escapeOmnibox, highlightMatches, omniboxQuery, suggestionUrlParts, type OmniboxPreview } from '../../../shared/omnibox-fill'
 import { Debouncer, HOVER_DWELL_MS, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
 import { addressDisplayValue } from '../../../shared/address-bar-sync'
 import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
@@ -301,6 +302,11 @@ function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin }: { site: Pin
   )
 }
 
+/** Text with each occurrence of the typed query marked (suggestion titles). */
+function HighlightedText({ text, query }: { text: string; query: string }): React.JSX.Element {
+  return <>{highlightMatches(text, query).map((part, index) => part.match ? <mark key={index} className="suggestion-match">{part.text}</mark> : <span key={index}>{part.text}</span>)}</>
+}
+
 function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: string; faviconUrl?: string | null }): React.JSX.Element {
   const origin = httpOrigin(url)
   const candidates = useMemo(
@@ -407,7 +413,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
-  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1)
+  // Arrowing onto a suggestion fills the bar with its URL; this remembers what was typed (the
+  // dropdown keeps matching it, Esc puts it back). null while the bar shows the user's own text.
+  const [omniboxPreview, setOmniboxPreview] = useState<OmniboxPreview | null>(null)
+  const activeSuggestionIndex = omniboxPreview ? omniboxPreview.index : -1
+  const omniboxCaretToEndRef = useRef(false)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
   const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
   const [newTabPreferences, setNewTabPreferences] = useState<NewTabPreferences>(() => ({ ...DEFAULT_NEW_TAB_PREFERENCES, worldClocks: [] }))
@@ -532,16 +542,18 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Only build suggestions while the dropdown is open, and never in the sidebar surface (it has no
   // address bar). Otherwise every tab/history update re-ran the matcher in all three renderers.
   const suggestionsActive = suggestionsOpen && surface !== 'sidebar'
+  // While a suggestion is filled in, the dropdown keeps matching what the user typed.
+  const addressQuery = omniboxQuery(address, omniboxPreview)
   const addressSuggestions = useMemo(
     // Favourites come first in tree order, so the old pinned-site ranking holds without a separate list.
-    () => suggestionsActive ? buildAddressSuggestions(address, [], tabs, history, 7, bookmarkSuggestions) : [],
-    [suggestionsActive, address, tabs, history, bookmarkSuggestions]
+    () => suggestionsActive ? buildAddressSuggestions(addressQuery, [], tabs, history, 7, bookmarkSuggestions) : [],
+    [suggestionsActive, addressQuery, tabs, history, bookmarkSuggestions]
   )
   // "yt cats" / "cats !yt": show which engine the address bar will use.
   const searchKeywordEngines = useSearchKeywords(surface !== 'sidebar')
   const keywordMatch = useMemo(
-    () => suggestionsActive ? parseKeywordSearch(address, searchKeywordEngines) : null,
-    [suggestionsActive, address, searchKeywordEngines]
+    () => suggestionsActive ? parseKeywordSearch(addressQuery, searchKeywordEngines) : null,
+    [suggestionsActive, addressQuery, searchKeywordEngines]
   )
   const favoriteSites = useMemo(() => pinnedSites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), [pinnedSites])
   const frequentlyVisitedSites = useMemo(() => buildFrequentSites(history, pinnedSites), [history, pinnedSites])
@@ -1096,12 +1108,23 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   // The tab URL wins unless the user is really typing (activeElement alone sticks when focus moves to another view).
   const addressSync = useAddressBarSync({ inputRef: addressRef, address, setAddress, displayUrl: addressDisplayValue(browser.url, isLocalNewTab), tabKey: activeTabId })
+  // After arrowing (or Esc back to the typed text), caret at the end with nothing selected, so the
+  // next keystroke edits the text instead of replacing it.
+  useLayoutEffect(() => {
+    if (!omniboxCaretToEndRef.current) return
+    omniboxCaretToEndRef.current = false
+    const input = addressRef.current
+    if (!input || document.activeElement !== input) return
+    input.setSelectionRange(input.value.length, input.value.length)
+    // A new value doesn't scroll the field; show the end, where the caret is.
+    input.scrollLeft = input.scrollWidth
+  }, [address, omniboxPreview])
 
   async function navigateTo(valueInput: string): Promise<void> {
     const value = valueInput.trim()
     if (!value) return
     setSuggestionsOpen(false)
-    setActiveSuggestionIndex(-1)
+    setOmniboxPreview(null)
     setSidebarMode('tabs')
     // "Switch to open tabs" (Settings → Tab archive): main switches instead of loading a duplicate.
     if (await window.api.browser.tabArchive.switchToOpenTab(value, searchEngine).catch(() => false)) {
@@ -1141,29 +1164,36 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (event.key === 'Escape') {
+      const escape = escapeOmnibox(omniboxPreview)
+      if (escape.kind === 'restore') {
+        // First Esc after arrowing: put back what the user typed, dropdown stays open.
+        event.preventDefault()
+        setOmniboxPreview(null)
+        omniboxCaretToEndRef.current = true
+        setAddress(escape.text)
+        return
+      }
       // Like Chrome: Esc drops the dropdown and any half-typed text, leaving the real URL selected.
       setSuggestionsOpen(false)
-      setActiveSuggestionIndex(-1)
+      setOmniboxPreview(null)
       setAddress(addressDisplayValue(browser.url, isLocalNewTab))
       addressSync.markSynced(addressDisplayValue(browser.url, isLocalNewTab))
       const input = event.currentTarget
       window.requestAnimationFrame(() => input.select())
       return
     }
-    if (addressSuggestions.length === 0) return
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      setActiveSuggestionIndex((index) => (index + 1) % addressSuggestions.length)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      setActiveSuggestionIndex((index) => (index <= 0 ? addressSuggestions.length - 1 : index - 1))
-    } else if (event.key === 'Enter' && activeSuggestionIndex >= 0) {
-      const suggestion = addressSuggestions[activeSuggestionIndex]
-      if (suggestion) {
-        event.preventDefault()
-        void navigateTo(suggestion.url)
-      }
-    }
+    if (!suggestionsOpen || addressSuggestions.length === 0 || event.altKey || event.ctrlKey || event.metaKey) return
+    // Up/Down (and Tab/Shift+Tab, as in Chrome and Firefox) fill the bar with the row's URL, caret at
+    // the end, so it can be edited into a similar address. Enter then submits whatever the bar shows.
+    const direction = event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)
+      ? 'down'
+      : event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? 'up' : null
+    if (!direction || (event.key !== 'Tab' && event.shiftKey)) return
+    event.preventDefault()
+    const next = arrowSuggestion(address, omniboxPreview, addressSuggestions, direction)
+    setOmniboxPreview(next.preview)
+    omniboxCaretToEndRef.current = true
+    setAddress(next.text)
   }
 
   async function saveProxy(): Promise<void> {
@@ -1515,10 +1545,11 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   type="text"
                   value={address}
                   onChange={(event) => {
+                    // Typing (including editing a filled-in suggestion) makes this the new query.
                     setAddress(event.target.value)
                     setNavigationError('')
                     setSuggestionsOpen(true)
-                    setActiveSuggestionIndex(-1)
+                    setOmniboxPreview(null)
                   }}
                   onMouseDown={(event) => {
                     // First click selects the whole URL (select() in onFocus alone gets undone by
@@ -1528,6 +1559,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     event.currentTarget.focus()
                   }}
                   onFocus={(event) => {
+                    setOmniboxPreview(null)
                     event.currentTarget.select()
                     setSuggestionsOpen(true)
                     if (historyStaleRef.current) void refreshHistory()
@@ -1615,7 +1647,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       onClick={() => void navigateTo(suggestion.url)}
                     >
                       <span className="suggestion-mark" aria-hidden="true"><SuggestionFavicon url={suggestion.url} title={suggestion.title} faviconUrl={(suggestion.source === 'Open tab' ? tabs.find((tab) => tab.url === suggestion.url)?.faviconUrl : null) ?? cachedSiteIcons[httpOrigin(suggestion.url) ?? '']} /></span>
-                      <span className="suggestion-main"><strong>{suggestion.title || suggestion.url}</strong><small>{suggestion.url}</small></span>
+                      <span className="suggestion-main">
+                        <strong><HighlightedText text={suggestion.title || suggestion.url} query={addressQuery} /></strong>
+                        <small className="suggestion-url" title={suggestion.url}>
+                          {suggestionUrlParts(suggestion.url, addressQuery).map((part, partIndex) => (
+                            <span key={partIndex} className={`suggestion-url-${part.role}${part.match ? ' is-match' : ''}`}>{part.text}</span>
+                          ))}
+                        </small>
+                      </span>
                       <span className="suggestion-source">{suggestion.source}</span>
                     </button>
                   ))}
