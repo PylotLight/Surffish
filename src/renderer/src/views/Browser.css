@@ -2841,6 +2841,13 @@
 @media (prefers-reduced-motion: reduce) { .tab-volume-slider { transition: none; } }
 .tab-audio-button:hover { background: rgba(255, 255, 255, 0.1); }
 .tab-audio-button.is-muted { color: rgba(245, 247, 250, 0.55); }
+/* A quiet tab that was heard (or has its own volume): no speaker until the row is hovered, so the
+   slider stays reachable without an active speaker (shared/tab-audio.ts). */
+.tab-audio-button.is-idle { color: rgba(245, 247, 250, 0.55); }
+.tab-volume.is-idle { display: none; }
+.tab-item:hover .tab-volume.is-idle,
+.tab-item:focus-within .tab-volume.is-idle,
+.tab-volume.is-idle.is-open { display: inline-flex; }
 .tab-audio-button svg,
 .pinned-tab-audio-indicator svg {
   width: 15px;

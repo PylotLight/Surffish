@@ -8,9 +8,10 @@
  * click to switch, drag a tab out of the window to split it off or onto another mini window to move it)
  * and a Return All button joins the row.
  * Button hints show in place of the title (never as native tooltips, which would cover the tab strip).
- * Tab volume: a speaker shows on a chip (or, with one tab, next to the title) while the tab plays,
- * holds media or is muted; hovering it slides out a volume slider (the title gives way), click mutes,
- * the scroll wheel steps 5%.
+ * Tab volume: a speaker shows on a chip (or, with one tab, next to the title) while the tab is
+ * audible or muted (shared/tab-audio.ts; muted autoplay video never counts); a quiet tab that was
+ * heard shows it only while the chip / header is hovered. Hovering it slides out a volume slider
+ * (the title gives way), click mutes, the scroll wheel steps 5%.
  * Menu bar (shared/mini-window-menubar.ts): a Send to Menu Bar button. In the menu bar's popout
  * (body.popout) the header is a different thing: one slim strip, always shown (main never hides it or
  * moves the page under it), holding the tabs (or, with one tab, the favicon and title) and a compact
@@ -71,6 +72,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   .vol { -webkit-app-region: no-drag; display: none; align-items: center; flex: none; border-radius: 6px; }
   .vol * { -webkit-app-region: no-drag; }
   .vol.shown { display: inline-flex; }
+  .vol.idle .spk { color: var(--muted); }
+  .tab:hover .vol.idle, .tab:focus-within .vol.idle, header:hover > .vol.idle, header:focus-within > .vol.idle, .vol.idle.open { display: inline-flex; }
   .vol:hover, .vol.open, .vol:focus-within { background: var(--hover); }
   .vol .spk:hover { background: transparent; }
   .vol .spk svg { flex: none; width: 17px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -150,7 +153,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     pin.dataset.hint = menuBar.pinned ? 'Pinned (stays open when clicking elsewhere)' : 'Pin (stay open when clicking elsewhere)'
     if (hinted === pin || hinted === menuButton) showHint(hinted)
     const tabs = Array.isArray(state.tabs) ? state.tabs : []
-    headerVolume.update({ tabId: state.tabId, audio: Boolean(state.audio) && tabs.length < 2, muted: Boolean(state.muted), volume: state.volume })
+    headerVolume.update({ tabId: state.tabId, audio: tabs.length < 2 ? state.audio : 'none', muted: Boolean(state.muted), volume: state.volume })
     renderTabs(tabs)
   })
   // Tab volume: the speaker (click: mute; wheel: ±5%) and its slider, shown on hover.
@@ -229,7 +232,11 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
       root,
       update(state) {
         control.tabId = state.tabId || null
-        root.classList.toggle('shown', Boolean(state.audio) && Boolean(control.tabId))
+        // 'playing' / 'muted': shown; 'idle': only on hover (CSS); 'none': hidden.
+        const audio = control.tabId ? state.audio : 'none'
+        root.classList.toggle('shown', audio === 'playing' || audio === 'muted')
+        root.classList.toggle('idle', audio === 'idle')
+        root.dataset.audio = typeof audio === 'string' ? audio : 'none'
         control.muted = Boolean(state.muted)
         const incoming = clampVolume(state.volume)
         if (control.pending !== null && Math.abs(incoming - control.pending) < 0.005) control.pending = null

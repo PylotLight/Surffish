@@ -178,14 +178,14 @@ export interface BrowserTabSummary {
   sleeping: boolean
   /** Why it sleeps (only while `sleeping`). */
   sleep?: BrowserTabSleep
-  /** Tab is currently producing sound (Chromium's audible state, ~ignores silent media). */
+  /** Tab is producing sound (Chromium's audible state, held ~1 s after it goes quiet; muted media never counts). */
   audible: boolean
   /** Tab audio is muted by the user. */
   muted: boolean
   /** Tab volume 0..1 (shared/tab-volume.ts), absent at 100%; separate from `muted`. */
   volume?: number
-  /** The page plays media or paused it recently (the speaker shows even while it's silent). */
-  media?: boolean
+  /** The page has been audible since it loaded: a quiet tab keeps its volume control on hover (shared/tab-audio.ts). */
+  audioHeard?: boolean
   /** Private tab: in-memory session, nothing saved. */
   private: boolean
   /** The tab's page process crashed; it reloads when the tab is next opened. */

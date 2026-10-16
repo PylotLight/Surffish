@@ -1,4 +1,8 @@
 // Integration smoke for per-tab volume, against the production build:
+//   0. The speaker follows audibility (shared/tab-audio.ts): a muted autoplay video (X's timeline)
+//      shows no speaker in the sidebar row or the mini window header; unmuting it shows the playing
+//      speaker; pausing clears it within ~2 s (the row keeps a hover-only idle control); muting the
+//      tab shows the muted speaker; navigating away forgets it.
 //   1. A page with an <audio> and a <video> (page volume 0.8 / 1), one in an open shadow root, a
 //      detached `new Audio()`, a cross-site iframe (its own process) with an <audio> and Web Audio,
 //      and a main-frame AudioContext (an oscillator to the destination, and a media element the page
@@ -76,6 +80,15 @@ const MEDIA_PAGE = (frameOrigin) => `<!doctype html><meta charset="utf-8"><title
   a.play().catch(() => {})
 </script>`
 
+const MUTED_PAGE = `<!doctype html><meta charset="utf-8"><title>Muted autoplay</title>
+<video id="mv" muted autoplay loop playsinline width="160" height="90"></video>
+<script>
+  ${TONE}
+  const mv = document.getElementById('mv')
+  mv.src = toneUrl
+  mv.play().catch(() => {})
+</script>`
+
 const FRAME_PAGE = `<!doctype html><meta charset="utf-8"><title>Frame</title><audio id="fa"></audio>
 <script>
   document.getElementById('fa').volume = 0.7
@@ -86,7 +99,7 @@ const FRAME_PAGE = `<!doctype html><meta charset="utf-8"><title>Frame</title><au
 let frameOrigin = ''
 const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname
-  const body = path === '/media' ? MEDIA_PAGE(frameOrigin) : path === '/frame' ? FRAME_PAGE : `<!doctype html><meta charset="utf-8"><title>Fixture ${path.slice(1)}</title><p>${path}</p>`
+  const body = path === '/media' ? MEDIA_PAGE(frameOrigin) : path === '/muted' ? MUTED_PAGE : path === '/frame' ? FRAME_PAGE : `<!doctype html><meta charset="utf-8"><title>Fixture ${path.slice(1)}</title><p>${path}</p>`
   response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
   response.end(body)
 })
@@ -196,6 +209,68 @@ async function run() {
     await waitFor(() => page.mainFrame.framesInSubtree.some((frame) => frame.url === `${frameOrigin}/frame`), 'the cross-site iframe')
   }
 
+  // --- 0. The speaker follows audibility, not "media started playing".
+  smoke.step('muted autoplay video: no speaker; unmute shows it; pause clears it; mute shows muted; navigation forgets')
+  {
+    await api(`tabs.create(${JSON.stringify(url('muted'))})`)
+    const mutedTab = await waitFor(() => tabAt(url('muted')), 'the muted autoplay tab')
+    const mutedPage = await pageFor(url('muted'))
+    await waitFor(() => smoke.evaluate(mutedPage, 'document.getElementById("mv").currentTime > 0.2 && !document.getElementById("mv").paused'), 'the muted video playing')
+    const summary = async () => (await tabs()).find((entry) => entry.id === mutedTab.id)
+    const sidebarView = surface('sidebar')?.webContents
+    const rowSel = `document.querySelector('.tab-list [data-browser-tab-id=${JSON.stringify(JSON.stringify(mutedTab.id)).slice(1, -1)}]')`
+    const rowAudio = () => sidebarView ? smoke.evaluate(sidebarView, `(() => { const v = ${rowSel}?.querySelector('.tab-volume'); return v ? { audio: v.dataset.audio, display: getComputedStyle(v).display, playing: Boolean(v.querySelector('.tab-audio-button.is-playing')) } : null })()`) : Promise.resolve(undefined)
+    if (sidebarView) await waitFor(() => smoke.evaluate(sidebarView, `Boolean(${rowSel})`), 'the muted tab row')
+    await delay(1500)
+    let entry = await summary()
+    assert.equal(mutedPage.isCurrentlyAudible(), false, 'Chromium: a muted video is not audible')
+    assert.equal(entry.audible, false, 'muted autoplay: not audible')
+    assert.equal(entry.audioHeard, undefined, 'muted autoplay: never heard')
+    if (sidebarView) assert.equal(await rowAudio(), null, 'muted autoplay: no speaker on the row')
+
+    // Mini window (single tab): no speaker in the header either.
+    await api(`tabs.activate(${JSON.stringify(mutedTab.id)})`)
+    await waitFor(async () => (await tabs()).find((candidate) => candidate.active)?.id === mutedTab.id, 'the muted tab active')
+    await runCommand('miniWindow.popOut')
+    const mutedHeader = await waitFor(() => liveContents().find((contents) => isMiniHeader(contents) && !contents.isLoading()), 'the mini window header')
+    const headerAudio = () => smoke.evaluate(mutedHeader, '(() => { const v = document.getElementById("vol"); return { audio: v.dataset.audio ?? null, shown: v.classList.contains("shown"), display: getComputedStyle(v).display } })()')
+    await waitFor(async () => (await headerAudio()).audio === 'none', 'the mini header has no speaker for muted autoplay')
+    assert.equal((await headerAudio()).shown, false)
+    await smoke.evaluate(mutedPage, 'document.getElementById("mv").muted = false; true')
+    await waitFor(async () => { const h = await headerAudio(); return h.audio === 'playing' && h.shown && h.display !== 'none' }, 'the mini header speaker once unmuted')
+    await smoke.evaluate(mutedPage, 'document.getElementById("mv").muted = true; true')
+    await waitFor(async () => (await headerAudio()).audio === 'idle', 'the mini header speaker goes idle (hover only) when silent again')
+    assert.equal((await headerAudio()).shown, false, 'idle is not the active speaker')
+    await smoke.evaluate(mutedHeader, 'window.miniWindow.returnAll(); true')
+    await waitFor(() => !liveContents().some(isMiniHeader), 'Return All closes the mini window')
+    await waitFor(async () => Boolean(await summary()), 'the muted tab back in the browser')
+
+    smoke.step('unmuted: the playing speaker; paused: gone within ~2 s; tab mute: muted speaker')
+    await smoke.evaluate(mutedPage, 'document.getElementById("mv").muted = false; document.getElementById("mv").play().then(() => true)')
+    await waitFor(async () => (await summary())?.audible === true, 'audible once unmuted')
+    if (sidebarView) await waitFor(async () => { const r = await rowAudio(); return r?.audio === 'playing' && r.playing && r.display !== 'none' }, 'the playing speaker on the row')
+    const pausedAt = Date.now()
+    await smoke.evaluate(mutedPage, 'document.getElementById("mv").pause(); true')
+    await waitFor(async () => (await summary())?.audible === false, 'not audible after pausing', 4000)
+    const quietMs = Date.now() - pausedAt
+    console.log(`  speaker cleared ${quietMs} ms after pause`)
+    assert.ok(quietMs < 2500, `the speaker clears within ~2 s of pausing (${quietMs} ms)`)
+    entry = await summary()
+    assert.equal(entry.audioHeard, true, 'heard since load')
+    if (sidebarView) await waitFor(async () => { const r = await rowAudio(); return r?.audio === 'idle' && !r.playing && r.display === 'none' }, 'the row keeps a hidden, hover-only control')
+    assert.equal(await api(`tabs.setMuted(${JSON.stringify(mutedTab.id)}, true)`), true)
+    await waitFor(async () => (await summary())?.muted === true, 'tab muted')
+    if (sidebarView) await waitFor(async () => { const r = await rowAudio(); return r?.audio === 'muted' && r.display !== 'none' }, 'the muted speaker on the row')
+    await api(`tabs.setMuted(${JSON.stringify(mutedTab.id)}, false)`)
+    if (sidebarView) await waitFor(async () => (await rowAudio())?.audio === 'idle', 'unmuting the quiet tab: back to idle')
+
+    smoke.step('navigating away forgets the heard state')
+    await mutedPage.loadURL(url('start'))
+    await waitFor(async () => { const e = await summary(); return e?.url === url('start') && e.audioHeard === undefined && e.audible === false }, 'a new document starts unheard')
+    if (sidebarView) await waitFor(async () => (await rowAudio()) === null, 'no speaker on the row after navigating')
+    await api(`tabs.close(${JSON.stringify(mutedTab.id)})`)
+  }
+
   // --- 1. One tab, every kind of audio.
   smoke.step('tab at 50%: every element and frame plays at page × 50%; the page still sees its own volume')
   await api(`tabs.create(${JSON.stringify(url('media'))})`)
@@ -268,7 +343,7 @@ async function run() {
 
   // --- 3. Sidebar speaker.
   smoke.step('the sidebar row shows the speaker with a hover slider; the wheel steps 5%')
-  await waitFor(() => page.isCurrentlyAudible() || (tabs().then((list) => list.find((entry) => entry.id === tab.id)?.media)), 'the tab to count as playing media')
+  await waitFor(async () => (await tabs()).find((entry) => entry.id === tab.id)?.audible === true, 'the tab to count as audible')
   const sidebar = surface('sidebar')?.webContents
   if (sidebar) {
     const row = `document.querySelector('.tab-list [data-browser-tab-id=${JSON.stringify(JSON.stringify(tab.id)).slice(1, -1)}]')`
