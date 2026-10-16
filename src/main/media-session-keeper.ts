@@ -18,19 +18,35 @@ function record(contents: WebContents, event: MediaEvent): void {
 export function trackTabMediaSession(contents: WebContents): void {
   contents.on('media-started-playing', () => record(contents, 'started'))
   contents.on('media-paused', () => record(contents, 'paused'))
+  // Only a session that was heard is kept: muted autoplay fires media-started-playing too.
+  contents.on('audio-state-changed', (event) => { if (event.audible) record(contents, 'audible') })
   contents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) record(contents, 'reset')
   })
   contents.on('render-process-gone', () => record(contents, 'reset'))
 }
 
-/** True while the page plays media, is audible, or paused it within the hold window. */
+function current(contents: WebContents): MediaActivity {
+  const state = activity.get(contents) ?? NO_MEDIA_ACTIVITY
+  // Audible before tracking saw it (e.g. adopted contents): count it as heard.
+  if (!state.heard && contents.isCurrentlyAudible()) {
+    const heard = nextMediaActivity(state, 'audible', Date.now())
+    activity.set(contents, heard)
+    return heard
+  }
+  return state
+}
+
+/**
+ * True while the page is audible, or plays (or paused within the hold window) media that was heard.
+ * Muted-only autoplay holds nothing past a short start grace.
+ */
 export function tabHoldsMediaSession(contents: WebContents | null | undefined, now = Date.now()): boolean {
   if (!contents || contents.isDestroyed()) return false
-  return contents.isCurrentlyAudible() || holdsMediaSession(activity.get(contents) ?? NO_MEDIA_ACTIVITY, now)
+  return contents.isCurrentlyAudible() || holdsMediaSession(current(contents), now)
 }
 
 /** When a deferred sleep should look at this tab again. */
 export function tabMediaHoldRecheckMs(contents: WebContents, now = Date.now()): number {
-  return mediaHoldRecheckMs(activity.get(contents) ?? NO_MEDIA_ACTIVITY, now)
+  return mediaHoldRecheckMs(current(contents), now)
 }
