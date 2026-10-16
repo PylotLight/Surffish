@@ -5,6 +5,7 @@ import { WebContentsView, ipcMain, type BaseWindow, type IpcMainEvent } from 'el
 import type { BrowserBounds } from '../shared/types'
 import { TAB_OVERVIEW_HTML } from './tab-overview-page'
 import { bindContentsToWindow, currentBrowserWindow } from './window-scope'
+import { readUserJson, writeUserJson } from './user-json'
 
 export interface TabOverviewItem {
   id: string
@@ -59,6 +60,26 @@ interface TabOverview {
 
 const overviews = new Map<BaseWindow, TabOverview>()
 let ipcRegistered = false
+
+// The overview's page is its own renderer process (~20 MB PSS, ~75 MB RSS on Linux), so it is only
+// loaded ahead of time (1.5 s after a window opens, for an instant first pinch) once the user has
+// opened the overview at least once on this profile. Until then it loads on the first open, which
+// waits for it (a few hundred ms) before the grid shows. SURFFISH_TAB_OVERVIEW_PRELOAD=1|0 forces it.
+const USAGE_FILE = 'tab-overview.json'
+let usedBefore: boolean | null = null
+
+function shouldPreload(): boolean {
+  const forced = process.env['SURFFISH_TAB_OVERVIEW_PRELOAD']
+  if (forced === '1' || forced === '0') return forced === '1'
+  usedBefore ??= (readUserJson(USAGE_FILE) as { used?: unknown } | null)?.used === true
+  return usedBefore
+}
+
+function noteUsed(): void {
+  if (usedBefore) return
+  usedBefore = true
+  writeUserJson(USAGE_FILE, { used: true })
+}
 
 function overviewFor(window?: BaseWindow | null): TabOverview | null {
   const target = window ?? currentBrowserWindow()
@@ -257,7 +278,8 @@ export function attachTabOverview(win: BaseWindow, overviewHost: TabOverviewHost
   overviews.set(win, overview)
   registerIpc()
   win.on('resize', overview.onResize)
-  // Load it ahead of time so the first pinch responds instantly.
+  // Load it ahead of time so the first pinch responds instantly, once the overview is known to be used.
+  if (!shouldPreload()) return
   overview.preloadTimer = setTimeout(() => {
     overview.preloadTimer = null
     if (overviews.get(win) === overview) ensureView(overview)
@@ -298,6 +320,7 @@ export async function openTabOverview(options: { interactive?: boolean } = {}, w
   if (!overview || overview.state !== 'closed') return
   const view = ensureView(overview)
   if (!view) return
+  noteUsed()
   overview.state = 'opening'
   overview.shown = false
   overview.pendingSettle = null
