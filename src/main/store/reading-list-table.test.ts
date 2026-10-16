@@ -47,6 +47,18 @@ test('saving the same page again moves it to the top as unread, keeping details 
   assert.equal(table.list()[0]!.id, item.id)
 })
 
+test('a save in the same millisecond as the newest item still lands on top', () => {
+  const now = 1_000
+  const db = SurffishDatabase.open({ path: ':memory:', now: () => now })
+  const table = new ReadingListTable(db)
+  const { item } = table.add(input('https://example.com/a'))
+  const link = table.add(input('https://example.com/b'))
+  assert.deepEqual(table.list().map((entry) => entry.id), [link.item.id, item.id], 'a new save is on top even in the same ms')
+  const again = table.add(input('https://example.com/a#comments'))
+  assert.equal(again.created, false)
+  assert.deepEqual(table.list().map((entry) => entry.id), [item.id, link.item.id], 're-saving moves it above an item saved the same ms')
+})
+
 test('mark read / unread writes only on a change', () => {
   let now = 1_000
   const db = SurffishDatabase.open({ path: ':memory:', now: () => now })
