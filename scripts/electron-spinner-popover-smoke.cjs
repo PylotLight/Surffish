@@ -236,7 +236,7 @@ async function run() {
   const BOOKMARKS = ['.bookmarks-menu-button', '#bookmarks-menu']
   await closesOn('a press on the page', ...SITE, pressPage)
   await closesOn('Escape', ...SITE, () => toolbar.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' }))
-  await closesOn('a press elsewhere in the toolbar', ...SITE, () => inToolbar(`document.querySelector('.omnibox input').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`))
+  await closesOn('a press elsewhere in the toolbar', ...SITE, () => inToolbar(`document.querySelector('.omnibox > input[type=text]').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`))
   await closesOn('the toolbar losing focus', ...SITE, async () => {
     toolbar.webContents.focus()
     await delay(100)
