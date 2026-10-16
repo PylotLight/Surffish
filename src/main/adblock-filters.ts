@@ -76,12 +76,22 @@ async function fetchListWithIncludes(fetch: ListFetch, url: string, depth: numbe
   return [text, ...included].join('\n')
 }
 
+/** Downloaded filter lists, ready to compile (plain data: crosses into the compiler process as is). */
+export interface DownloadedFilterLists {
+  /** One prepared text per loaded list, in source order. */
+  texts: string[]
+  /** Scriptlet + redirect resources JSON. */
+  resources: string
+  loadedLists: string[]
+  failedLists: string[]
+}
+
 /**
- * Download every list (tolerating optional-list failures), the scriptlet
- * resources, and compile one engine. Throws when a required list or the
- * scriptlet resources are unavailable so the caller keeps its current engine.
+ * Download every list (tolerating optional-list failures) and the scriptlet
+ * resources. Throws when a required list or the scriptlet resources are
+ * unavailable so the caller keeps its current engine.
  */
-export async function buildFilterEngine(fetch: ListFetch, sources: readonly FilterListSource[] = FILTER_LIST_SOURCES): Promise<BuiltFilterEngine> {
+export async function downloadFilterLists(fetch: ListFetch, sources: readonly FilterListSource[] = FILTER_LIST_SOURCES): Promise<DownloadedFilterLists> {
   const seen = new Set<string>()
   const [listResults, resources] = await Promise.all([
     Promise.allSettled(sources.map((source) => fetchListWithIncludes(fetch, source.url, 0, seen))),
@@ -105,11 +115,24 @@ export async function buildFilterEngine(fetch: ListFetch, sources: readonly Filt
   const missingRequired = REQUIRED_FILTER_LIST_IDS.filter((id) => sources.some((source) => source.id === id) && !loadedLists.includes(id))
   if (missingRequired.length > 0) throw new Error(`Required filter lists unavailable: ${missingRequired.join(', ')}`)
   if (texts.length === 0) throw new Error('No filter lists could be downloaded')
+  return { texts, resources, loadedLists, failedLists }
+}
 
-  const engine = ElectronBlocker.parse(texts.join('\n'), FULL_FILTER_CONFIG)
-  engine.updateResources(resources, `surffish-${resources.length}`)
-  applyFilterEnvironment(engine)
-  return { engine, loadedLists, failedLists }
+/**
+ * Compile downloaded lists into one engine. CPU and allocation heavy (~0.5 s and a few hundred MB of
+ * short-lived garbage for uBO's default lists), so the app runs it in a utility process
+ * (adblock-compiler.ts) and only falls back to running it in main.
+ */
+export function compileFilterEngine(lists: Pick<DownloadedFilterLists, 'texts' | 'resources'>): ElectronBlocker {
+  const engine = ElectronBlocker.parse(lists.texts.join('\n'), FULL_FILTER_CONFIG)
+  engine.updateResources(lists.resources, `surffish-${lists.resources.length}`)
+  return applyFilterEnvironment(engine)
+}
+
+/** Download and compile in one go (tests and Electron harnesses). */
+export async function buildFilterEngine(fetch: ListFetch, sources: readonly FilterListSource[] = FILTER_LIST_SOURCES): Promise<BuiltFilterEngine> {
+  const lists = await downloadFilterLists(fetch, sources)
+  return { engine: compileFilterEngine(lists), loadedLists: lists.loadedLists, failedLists: lists.failedLists }
 }
 
 function domainParts(url: string): { hostname: string; domain: string } {

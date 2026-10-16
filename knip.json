@@ -7,6 +7,7 @@
     "src/main/index.ts",
     "src/main/adblock-engine.ts",
     "src/main/local-ai-handler.ts",
+    "src/main/adblock-compiler.ts",
     "src/preload/index.ts",
     "src/preload/*.cjs",
     "src/renderer/src/main.tsx",

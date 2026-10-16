@@ -25,7 +25,9 @@ export const FULL_FILTER_CONFIG = {
   // Evaluate uBO `!#if env_*` blocks against FILTER_ENVIRONMENT instead of
   // loading Firefox/Safari/uBO Lite-only rules.
   loadPreprocessors: true,
-  enableCompression: false,
+  // Ghostery's string codebooks: the engine (kept in main for every request, and on disk) is ~20%
+  // smaller (10.7 -> 8.6 MB for uBO's default lists) at the same match speed and results.
+  enableCompression: true,
   enableOptimizations: true
 } as const
 
