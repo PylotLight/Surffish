@@ -213,12 +213,12 @@ async function run() {
   await waitFor(async () => !(await popoverOpen()), 'the popover to close for Settings')
   const siteView = await waitFor(async () => {
     for (const view of views()) {
-      const found = await smoke.evaluate(view.webContents, 'Boolean(document.querySelector(".site-settings-view")) && document.querySelector(\'input[aria-label="Block ads and trackers on this site"]\')?.checked')
+      const found = await smoke.evaluate(view.webContents, 'Boolean(document.querySelector(".site-settings-view")) && document.querySelector(\'.sites-settings-site.is-focused input[aria-label^="Block ads and trackers on this site"]\')?.checked')
       if (found !== null && found !== false && found !== undefined) return { checked: found }
     }
     return null
-  }, 'Settings → This site with the ad-block switch')
-  assert.equal(siteView.checked, true, 'Settings → This site shows the same switch, on')
+  }, 'Settings → Sites (deep-linked to this site) with the ad-block switch')
+  assert.equal(siteView.checked, true, 'Settings → Sites shows the same switch, on')
 
   console.log('Adblock toolbar smoke passed.')
 }
