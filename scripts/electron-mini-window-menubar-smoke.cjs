@@ -10,7 +10,10 @@
 //      no panel), the page always under it and never moved by hovering it or the page's top; one tab
 //      shows its favicon and title, ⋯ / Pin / Close (Tab order) and the ⋯ menu (Esc while it is up
 //      never hides the popout); the page never reloads; a click on the icon hides it, again shows it;
-//      hidden keeps the page and audio running (♪ in the title).
+//      hidden keeps the page and audio running (♪ in the title). Typing into the page (a chat app that
+//      rewrites its URL or flips a "typing…" title per key) never moves focus to or from the strip or
+//      the window, never re-sends unchanged state to the strip (no DOM writes: it repainted and flashed),
+//      and title flips land throttled, the last one shown.
 //   3. Esc hides it; a click elsewhere (blur) hides it unless pinned (header pin button); the icon click
 //      that blurred it shut doesn't reopen it, the next one does.
 //   4. Tabs grouping: another tab sent there joins the menu bar collection (one entry, +1) and its tab
@@ -35,8 +38,16 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const userData = join(tmpdir(), `surffish-mini-window-menubar-smoke-${process.pid}`)
 const PAGE = (n) => `<!doctype html><meta charset="utf-8"><title>Bar ${n}</title>
-<style>body{font:16px system-ui;margin:0;height:2000px}</style><body><p>Bar ${n}</p>
+<style>body{font:16px system-ui;margin:0;height:2000px}</style><body><p>Bar ${n}</p><textarea id="chat"></textarea>
 <script>window.loadId = Math.random()
+// A chat app while the user types: rewrites its URL every key (draft), or flips a "typing…" title.
+window.chatMode = 'none'
+let keys = 0
+document.getElementById('chat').addEventListener('input', () => {
+  keys += 1
+  if (window.chatMode === 'replace') history.replaceState(null, '', '?draft=' + keys)
+  if (window.chatMode === 'title') document.title = keys % 2 ? 'typing… Bar ${n}' : 'Bar ${n}'
+})
 window.startAudio = async () => { try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); gain.gain.value = 0.05; osc.connect(gain).connect(ctx.destination); osc.start(); await ctx.resume(); window.tone = ctx; return ctx.state === 'running' } catch (error) { return String(error) } }
 </script></body>`
 const server = createServer((request, response) => {
@@ -231,6 +242,56 @@ async function run() {
   await waitFor(() => !popoutMenu().open(), 'the menu closed')
   await waitFor(() => smoke.evaluate(header1, 'document.getElementById("more").getAttribute("aria-expanded") === "false"'), 'aria-expanded back to false')
   assert.ok(w1.isVisible(), 'still shown after the menu closed')
+  // Typing into the page: nothing on the strip moves, focuses, blurs or repaints for it.
+  const focusLog = []
+  const focusListeners = []
+  for (const [emitter, name] of [[w1, 'window'], [header1, 'strip'], [p1.contents, 'page']]) {
+    for (const event of ['focus', 'blur']) {
+      const listener = () => focusLog.push(`${name}.${event}`)
+      emitter.on(event, listener)
+      focusListeners.push([emitter, event, listener])
+    }
+  }
+  await smoke.evaluate(header1, `(() => { window.__stripLog = []; const log = (entry) => window.__stripLog.push(entry)
+    for (const type of ['focus', 'blur']) { window.addEventListener(type, () => log('window.' + type)); document.addEventListener(type + 'in', (event) => log(type + 'in ' + (event.target.id || event.target.tagName))) }
+    window.__stripObserver = new MutationObserver((records) => { for (const record of records) log('mutation ' + record.type + ' ' + (record.target.id || record.target.nodeName) + ' ' + (record.attributeName || '') + (record.attributeName === 'class' ? ' ' + record.oldValue + ' -> ' + record.target.className : '')) })
+    window.__stripObserver.observe(document.body, { subtree: true, attributes: true, attributeOldValue: true, childList: true, characterData: true }); return true })()`)
+  const stripLog = () => smoke.evaluate(header1, 'window.__stripLog.splice(0)')
+  const typeInto = async (contents, text, gap) => {
+    await smoke.evaluate(contents, 'document.getElementById("chat").focus(); true')
+    for (const ch of text) {
+      contents.sendInputEvent({ type: 'keyDown', keyCode: ch })
+      contents.sendInputEvent({ type: 'char', keyCode: ch })
+      contents.sendInputEvent({ type: 'keyUp', keyCode: ch })
+      await delay(gap)
+    }
+  }
+  p1.contents.focus()
+  await delay(200)
+  await stripLog()
+  focusLog.length = 0
+  await smoke.evaluate(p1.contents, 'window.chatMode = "replace"; true')
+  await typeInto(p1.contents, 'hellothere', 40)
+  await waitFor(() => smoke.evaluate(p1.contents, 'location.search === "?draft=10"'), 'the page rewrote its URL per key')
+  await delay(400)
+  assert.deepEqual(focusLog, [], `typing never focuses/blurs the window, strip or page (${focusLog})`)
+  assert.deepEqual(await stripLog(), [], 'a URL rewrite per key changes nothing on the strip: no focus events, no DOM writes')
+  assert.ok(p1.contents.isFocused(), 'the page keeps the keyboard')
+  assert.ok(w1.isVisible(), 'the popout stays')
+  await smoke.evaluate(p1.contents, 'window.chatMode = "title"; true')
+  await typeInto(p1.contents, 'abcdefghij', 30)
+  // 10 keys in ~300 ms flip the title 10 times: the strip gets a few throttled pushes, ending on the last title.
+  await waitFor(() => smoke.evaluate(header1, 'document.getElementById("title").textContent === "Bar 1"'), 'the last title lands on the strip')
+  await delay(400)
+  const titleWrites = (await stripLog()).filter((entry) => entry.startsWith('mutation childList title'))
+  assert.ok(titleWrites.length >= 1 && titleWrites.length <= 4, `title flips throttled (${titleWrites.length} strip title writes for 10 flips)`)
+  assert.deepEqual(focusLog, [], `still no focus changes (${focusLog})`)
+  assert.equal(w1.getTitle(), 'Bar 1 — Mini Window', 'the window title follows the last title')
+  await smoke.evaluate(p1.contents, 'window.chatMode = "none"; history.replaceState(null, "", location.pathname); true')
+  // The URL it saves for the menu bar follows the page (the draft URLs were real changes).
+  await waitFor(() => (menuBarFile()?.urls ?? []).includes(`${origin}/p1`), 'the saved menu bar page back on p1')
+  await smoke.evaluate(header1, 'window.__stripObserver.disconnect(); true')
+  for (const [emitter, event, listener] of focusListeners) emitter.removeListener(event, listener)
   await intact('sent to the menu bar', [p1])
   const played = await p1.contents.executeJavaScript('window.startAudio()', true)
   const audioChecked = played === true

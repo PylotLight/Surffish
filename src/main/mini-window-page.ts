@@ -124,33 +124,40 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
 <script>
   const icon = document.getElementById('icon')
   icon.addEventListener('error', () => { icon.hidden = true })
+  // Writes only what changed: a rewrite of the same text or attribute still restyles and repaints the
+  // header (in the menu bar popout, its glass strip flashed under every keystroke of a busy page).
+  function setText(element, value) { const text = String(value ?? ''); if (element.textContent !== text) element.textContent = text }
+  function setAttr(element, name, value) { const text = String(value); if (element.getAttribute(name) !== text) element.setAttribute(name, text) }
+  function setHint(element, value) { if (element.dataset.hint !== value) element.dataset.hint = value }
+  function setHidden(element, hidden) { if (element.hidden !== hidden) element.hidden = hidden }
   window.miniWindow.onState((state) => {
-    document.getElementById('title').textContent = state.crashed ? 'Page crashed — Reload' : state.title
-    document.getElementById('url').textContent = state.url
-    document.getElementById('back').disabled = !state.canGoBack
+    setText(document.getElementById('title'), state.crashed ? 'Page crashed — Reload' : state.title)
+    setText(document.getElementById('url'), state.url)
+    const back = document.getElementById('back')
+    if (back.disabled !== !state.canGoBack) back.disabled = !state.canGoBack
     document.body.classList.toggle('loading', Boolean(state.loading))
     document.body.classList.toggle('private', Boolean(state.private))
     document.body.classList.toggle('crashed', Boolean(state.crashed))
     document.body.classList.toggle('floating', Boolean(state.floating))
     const tuck = document.getElementById('tuck')
-    tuck.hidden = !state.tuck
-    if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.dataset.hint = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
+    setHidden(tuck, !state.tuck)
+    if (state.tuck) { setAttr(tuck, 'data-dir', state.tuck.arrow); setHint(tuck, state.tuck.label); setAttr(tuck, 'aria-label', state.tuck.label) }
     if (state.faviconUrl && icon.getAttribute('src') !== state.faviconUrl) { icon.hidden = false; icon.src = state.faviconUrl }
-    else if (!state.faviconUrl) icon.hidden = true
+    else if (!state.faviconUrl) setHidden(icon, true)
     // Menu bar: Send to Menu Bar (in it: Float as Mini Window) and, in it, Pin.
     const menuBar = state.menuBar || { available: false, inMenuBar: false, pinned: false }
     document.body.classList.toggle('inmenubar', Boolean(menuBar.inMenuBar))
     setPopout(Boolean(menuBar.inMenuBar))
     const menuButton = document.getElementById('menubar')
-    menuButton.hidden = !menuBar.available && !menuBar.inMenuBar
+    setHidden(menuButton, !menuBar.available && !menuBar.inMenuBar)
     const menuLabel = menuBar.inMenuBar ? 'Float as Mini Window' : 'Send to Menu Bar'
-    menuButton.dataset.hint = menuLabel
-    menuButton.setAttribute('aria-label', menuLabel)
+    setHint(menuButton, menuLabel)
+    setAttr(menuButton, 'aria-label', menuLabel)
     const pin = document.getElementById('pin')
-    pin.hidden = !menuBar.inMenuBar
+    setHidden(pin, !menuBar.inMenuBar)
     pin.classList.toggle('on', Boolean(menuBar.pinned))
-    pin.setAttribute('aria-pressed', menuBar.pinned ? 'true' : 'false')
-    pin.dataset.hint = menuBar.pinned ? 'Pinned (stays open when clicking elsewhere)' : 'Pin (stay open when clicking elsewhere)'
+    setAttr(pin, 'aria-pressed', menuBar.pinned ? 'true' : 'false')
+    setHint(pin, menuBar.pinned ? 'Pinned (stays open when clicking elsewhere)' : 'Pin (stay open when clicking elsewhere)')
     if (hinted === pin || hinted === menuButton) showHint(hinted)
     const tabs = Array.isArray(state.tabs) ? state.tabs : []
     headerVolume.update({ tabId: state.tabId, audio: tabs.length < 2 ? state.audio : 'none', muted: Boolean(state.muted), volume: state.volume })
@@ -181,14 +188,14 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
         speaker.innerHTML = '<svg viewBox="3 4 19 16" aria-hidden="true"><path class="cone" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z"/>' + SPEAKER_WAVES[level] + '</svg>'
       }
       const percent = Math.round(control.volume * 100)
-      if (!control.dragging) slider.value = String(percent)
-      slider.style.setProperty('--fill', percent + '%')
+      if (!control.dragging && slider.value !== String(percent)) slider.value = String(percent)
+      if (slider.style.getPropertyValue('--fill') !== percent + '%') slider.style.setProperty('--fill', percent + '%')
       root.classList.toggle('muted', control.muted)
       const label = control.muted ? 'Unmute tab (volume ' + percent + '%)' : 'Mute tab (volume ' + percent + '%)'
-      speaker.setAttribute('aria-label', label)
-      speaker.dataset.hint = control.muted ? 'Muted · click to unmute' : 'Volume ' + percent + '% · click to mute'
-      slider.setAttribute('aria-label', 'Tab volume')
-      slider.setAttribute('aria-valuetext', percent + '%')
+      setAttr(speaker, 'aria-label', label)
+      setHint(speaker, control.muted ? 'Muted · click to unmute' : 'Volume ' + percent + '% · click to mute')
+      setAttr(slider, 'aria-label', 'Tab volume')
+      setAttr(slider, 'aria-valuetext', percent + '%')
       if (hinted === speaker) showHint(speaker)
     }
     function send(volume) {
@@ -236,7 +243,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
         const audio = control.tabId ? state.audio : 'none'
         root.classList.toggle('shown', audio === 'playing' || audio === 'muted')
         root.classList.toggle('idle', audio === 'idle')
-        root.dataset.audio = typeof audio === 'string' ? audio : 'none'
+        setAttr(root, 'data-audio', typeof audio === 'string' ? audio : 'none')
         control.muted = Boolean(state.muted)
         const incoming = clampVolume(state.volume)
         if (control.pending !== null && Math.abs(incoming - control.pending) < 0.005) control.pending = null
@@ -261,8 +268,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     const titled = document.body.classList.contains('popout') && document.body.classList.contains('tabbed')
     for (const id of ['more', 'pin', 'close']) {
       const button = document.getElementById(id)
-      if (titled) button.title = button.dataset.hint || button.getAttribute('aria-label') || ''
-      else button.removeAttribute('title')
+      if (titled) setAttr(button, 'title', button.dataset.hint || button.getAttribute('aria-label') || '')
+      else if (button.hasAttribute('title')) button.removeAttribute('title')
     }
   }
   // The tab strip (grouping 'tabs', two or more tabs).
@@ -276,8 +283,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     syncPopoutTitles()
     // With a strip, the header's close button closes the tab on screen (the rest stay).
     const closeButton = document.getElementById('close')
-    closeButton.dataset.hint = tabs.length > 1 ? 'Close Tab' : 'Close'
-    closeButton.setAttribute('aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
+    setHint(closeButton, tabs.length > 1 ? 'Close Tab' : 'Close')
+    setAttr(closeButton, 'aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
     if (dragTab) return
     // Only a speaker changed: update the chips in place (keeps a hovered slider open).
     const key = JSON.stringify(tabs.map((tab) => [tab.tabId, tab.title, tab.faviconUrl, tab.active]))
@@ -351,7 +358,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   let hinted = null
   function showHint(button) {
     hinted = button
-    hint.textContent = button.dataset.hint || button.getAttribute('aria-label') || ''
+    setText(hint, button.dataset.hint || button.getAttribute('aria-label') || '')
     document.body.classList.toggle('hinting', Boolean(hint.textContent))
   }
   function hideHint(button) {
