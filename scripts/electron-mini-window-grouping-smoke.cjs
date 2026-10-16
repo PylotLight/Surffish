@@ -257,9 +257,11 @@ async function run() {
 
   // --- 3. Split and merge.
   smoke.step('tabs: dragging a tab out of the strip splits it into its own window under the pointer')
-  // Open desktop: right of the browser window (0..1100), left of the collection docked to the right edge
-  // (a drop over the browser window puts the tab back in its sidebar).
-  const splitAt = { x: wa.x + 1140, y: wa.y + 300 }
+  // Open desktop under the pointer: the browser window narrowed out of the way while splitting (a drop
+  // over a browser window puts the tab back in its sidebar instead).
+  const mainBounds = mainWindow.getBounds()
+  mainWindow.setBounds({ ...mainBounds, width: 200 })
+  const splitAt = { x: wa.x + 300, y: wa.y + 300 }
   await smoke.evaluate(header1, `window.miniWindow.tabOut(${JSON.stringify(g2.id)}, ${splitAt.x}, ${splitAt.y}); true`)
   const w2 = await waitFor(() => miniWindows().find((win) => win !== w1 && viewOf(win, g2.contents)), 'g2 in a window of its own')
   await waitFor(() => w2.isVisible(), 'the split-off window shows')
@@ -287,6 +289,7 @@ async function run() {
   await waitFor(() => handleWindows().length === 1 && visibleHandles().length === 1, 'one handle for the edge')
   await waitFor(async () => (await handleCount(visibleHandles()[0])) === '2', 'count 2 on the handle')
   await intact('merged by docking', [g1, g2])
+  mainWindow.setBounds(mainBounds)
 
   // --- 4. Return, Return All, cap.
   smoke.step('tabs: Return sends the active tab back; Return All empties and closes the collection')
