@@ -88,13 +88,17 @@ export class ReadingListTable implements ReadingListBackend {
       const live = this.db.all<{ id: string; url: string }>('SELECT id, url FROM reading_list WHERE deleted_at IS NULL')
       const existing = live.find((row) => readingListKey(row.url) === key)
       const { now, hlc, deviceId } = this.db.stamp()
+      // The list sorts by added_at: a save in the same millisecond as the current top item (or a
+      // clock step back) must still land on top, so never stamp it at or below the newest one.
+      const newest = this.db.get<{ at: number | null }>('SELECT max(added_at) AS at FROM reading_list WHERE deleted_at IS NULL')?.at
+      const addedAt = newest == null ? now : Math.max(now, Number(newest) + 1)
       if (existing) {
         this.db.run(
           `UPDATE reading_list SET url = ?, title = CASE WHEN ? <> '' THEN ? ELSE title END,
              favicon_url = coalesce(?, favicon_url), site_name = coalesce(?, site_name), excerpt = coalesce(?, excerpt),
              added_at = ?, read_at = NULL, updated_at = ?, hlc = ?, device_id = ?
            WHERE id = ?`,
-          input.url, input.title, input.title, input.faviconUrl, input.siteName, input.excerpt, now, now, hlc, deviceId, existing.id
+          input.url, input.title, input.title, input.faviconUrl, input.siteName, input.excerpt, addedAt, now, hlc, deviceId, existing.id
         )
         return { item: this.get(existing.id)!, created: false }
       }
@@ -103,7 +107,7 @@ export class ReadingListTable implements ReadingListBackend {
       this.db.run(
         `INSERT INTO reading_list (id, url, title, favicon_url, site_name, excerpt, added_at, read_at, device_id, created_at, updated_at, hlc)
          VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
-        id, input.url, input.title, input.faviconUrl, input.siteName, input.excerpt, now, deviceId, now, now, hlc
+        id, input.url, input.title, input.faviconUrl, input.siteName, input.excerpt, addedAt, deviceId, now, now, hlc
       )
       return { item: this.get(id)!, created: true }
     })
