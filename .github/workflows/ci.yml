@@ -56,7 +56,7 @@ jobs:
         # per lane, so each lane's smokes finish in ~30 s at two at a time.
         - lane: A
           unit: false
-          tests: "test:electron-watchers-toggle test:electron-glance test:electron-mini-window test:electron-mini-window-dock test:electron-mini-window-grouping test:electron-mini-window-menubar test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-certificates test:electron-perceived-perf"
+          tests: "test:electron-watchers-toggle test:electron-glance test:electron-mini-window test:electron-mini-window-dock test:electron-mini-window-grouping test:electron-mini-window-menubar test:electron-mini-window-throw test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-certificates test:electron-perceived-perf"
         - lane: B
           unit: false
           tests: "test:electron-spaces test:electron-mini-window-header test:electron-mini-window-peek test:electron-mini-window-motion test:electron-toolbar-popovers test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-network-tools test:electron-tab-archive test:electron-media-session test:electron-sqlite-store test:electron-sqlite-session test:electron-feeds test:electron-adblock-toolbar test:electron-user-agent test:electron-stability"

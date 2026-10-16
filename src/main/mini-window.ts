@@ -49,6 +49,7 @@ import { watchShellSurface } from './crash-guard'
 import { createDockController, savedDockFor, setDockGrouping, type DockController } from './mini-window-dock'
 import { menuBarTrayBounds, syncMenuBarTray, type MenuBarTrayEntry, type MenuBarTrayHost } from './mini-window-menubar'
 import { motion, placeWindow } from './mini-window-motion'
+import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -127,7 +128,11 @@ interface Mini {
   /** 'push': no reveal before this (just hidden), so the page never bounces under a resting pointer. */
   revealBlockedUntil: number
   /** Dragging the window by its floating header: main follows the pointer from where it was pressed. */
-  headerDrag: { startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number } | null
+  headerDrag: { startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number; samples: VelocityTracker } | null
+  /** Thrown (let go while moving): gliding to a stop on the frame loop (shared/mini-window-throw.ts). Its motion key, and the last few places it put the window. */
+  glide: { key: object; placed: MiniRect[] } | null
+  /** Native window drags (Windows: 'moved' says when it is let go): recent window positions for the throw. */
+  moveSamples: VelocityTracker
   /** Lives in the menu bar: shown as a popout under the icon (null: floating or docked). */
   menuBar: { popout: MenuBarPopout; pinned: boolean; joinedAt: number } | null
 }
@@ -140,6 +145,8 @@ const GEOMETRY_SAVE_DELAY_MS = 400
 /** 'push': after hiding, reveals wait this long (no bounce while the page settles under the pointer). */
 const PUSH_REVEAL_COOLDOWN_MS = 250
 const HEADER_DRAG_MAX_MS = 15_000
+/** Native window drags report when they are let go only on Windows ('moved' after WM_EXITSIZEMOVE; macOS sends it with every move, Linux never). */
+const NATIVE_THROW = process.platform === 'win32'
 const HEADER_DRAG_THRESHOLD = 3
 
 /** Open mini windows, oldest first. */
@@ -465,6 +472,8 @@ function stopHeaderDrag(m: Mini): void {
 function startHeaderDrag(m: Mini): void {
   if (m.closed || m.window.isDestroyed() || m.mount !== 'panel') return
   stopHeaderDrag(m)
+  // Grabbing it again stops a throw where it is.
+  stopThrow(m)
   lastActive = m
   cancelHide(m)
   const drag: NonNullable<Mini['headerDrag']> = {
@@ -472,17 +481,20 @@ function startHeaderDrag(m: Mini): void {
     startBounds: m.window.getBounds(),
     side: floats(m.plan) ? m.plan.kind : null,
     moved: false,
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    samples: createVelocityTracker()
   }
   // Once per frame (however fast the pointer reports): the window, its floating header, its handle and
   // ('stack') the rest of its group all move in this tick, one setBounds each.
-  motion.run(drag, () => {
+  motion.run(drag, (now) => {
     if (m.headerDrag !== drag) return false
     if (m.closed || m.window.isDestroyed() || Date.now() - drag.startedAt > HEADER_DRAG_MAX_MS) {
       endHeaderDrag(m)
       return false
     }
     const cursor = screen.getCursorScreenPoint()
+    // The pointer's path, for the throw when it is let go (read here: no extra IPC per move).
+    drag.samples.add(now, cursor.x, cursor.y)
     const dx = cursor.x - drag.startCursor.x
     const dy = cursor.y - drag.startCursor.y
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < HEADER_DRAG_THRESHOLD) return true
@@ -507,11 +519,95 @@ function endHeaderDrag(m: Mini): void {
   stopHeaderDrag(m)
   if (!drag.moved || m.closed || m.window.isDestroyed()) return
   m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
-  droppedMini(m, screen.getCursorScreenPoint())
+  const cursor = screen.getCursorScreenPoint()
+  const now = performance.now()
+  drag.samples.add(now, cursor.x, cursor.y)
+  releasedMini(m, cursor, drag.samples.velocity(now))
   if (!m.closed && !m.window.isDestroyed()) {
     layout(m)
     pollPointer(m)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Throwing (shared/mini-window-throw.ts): let go while moving and it glides on, slowing to a stop.
+
+function stopThrow(m: Mini): void {
+  if (m.glide) motion.cancel(m.glide.key)
+  m.glide = null
+}
+
+/**
+ * Let go of a drag (header or native) at `velocity`, the pointer at `point`. A drop that means something
+ * right there wins (onto another collection's header, pushed past a screen edge); otherwise a throw
+ * glides on (or flings it into a tuck) and the drop (dock, stay docked, corner snap) happens where it
+ * stops. Too slow, stale, Reduce Motion or the setting off: an ordinary drop.
+ */
+function releasedMini(m: Mini, point: { x: number; y: number } | null, velocity: ThrowVelocity | null): void {
+  if (m.closed || m.window.isDestroyed()) return
+  const v = releaseVelocity({ enabled: getMiniWindowSettings().throwMomentum, reducedMotion: reducedMotion(), velocity })
+  if (!v || m.menuBar || droppedOnSomething(m, point)) return droppedMini(m, point)
+  if (throwMini(m, v)) return
+  droppedMini(m, point)
+}
+
+/** Let go onto a merge target ('tabs') or pushed past a dockable edge: the drop happens right there, no throw. */
+function droppedOnSomething(m: Mini, point: { x: number; y: number } | null): boolean {
+  if (grouping() === 'tabs') {
+    const above = headerPlacement() === 'float' ? MINI_WINDOW_HEADER_HEIGHT : 0
+    if (miniMergeTarget(point ?? dropPoint(m), othersOnScreen(m), above)) return true
+  }
+  return m.dock.dropEdge() !== null
+}
+
+function throwMini(m: Mini, v: ThrowVelocity): boolean {
+  stopThrow(m)
+  const from = m.window.getBounds()
+  // Flung hard at an edge it can tuck to: it tucks there, the slide carrying on at the throw's speed.
+  if (m.dock.flingTuck(from, v)) {
+    joinDockedCollection(m)
+    scheduleGeometrySave(m)
+    return true
+  }
+  const plan = planGlide(from, v, screen.getAllDisplays().map((display) => ({ workArea: display.workArea })))
+  if (!plan) return false
+  const glide: NonNullable<Mini['glide']> = { key: {}, placed: [from] }
+  m.glide = glide
+  // Each frame the window, its floating header, its handle and ('stack') the rest of its group move in
+  // the same tick, like the drag it carries on from.
+  runGlide(motion, glide.key, plan, (rect) => {
+    if (m.glide !== glide) return false
+    if (m.closed || m.window.isDestroyed() || m.headerDrag || m.menuBar || m.dock.moving() || !m.window.isVisible()) {
+      m.glide = null
+      return false
+    }
+    // A 'move' can report the frame before this one (Linux reports late): keep the last few.
+    glide.placed.push(rect)
+    if (glide.placed.length > 4) glide.placed.shift()
+    m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+    placeWindow(m.window, rect)
+    followPanel(m, rect)
+    m.dock.follow(rect)
+    return true
+  }, () => {
+    if (m.glide !== glide) return
+    m.glide = null
+    if (m.closed || m.window.isDestroyed()) return
+    // Settled: the drop happens where it stopped (re-flush or undock from an edge, snap into a corner).
+    // The pointer is somewhere else by now, so it never merges onto a header it happened to stop over.
+    m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+    droppedMini(m, null, false)
+    if (!m.closed && !m.window.isDestroyed()) layout(m)
+  })
+  return true
+}
+
+/** The window moved and it wasn't the glide: grabbed (a native drag), so the glide stops. */
+function glideOverridden(m: Mini): boolean {
+  const placed = m.glide?.placed
+  if (!placed || m.window.isDestroyed()) return false
+  const now = m.window.getBounds()
+  return !placed.some((at) => Math.abs(now.x - at.x) <= 2 && Math.abs(now.y - at.y) <= 2)
 }
 
 function onPage<T extends unknown[]>(m: Mini, contents: WebContents, event: string, listener: (...args: T) => void): void {
@@ -534,6 +630,8 @@ function rewirePage(m: Mini): void {
   if (!contents) return
   m.page = contents
   onPage(m, contents, 'before-mouse-event', (_event: Electron.Event, input: Electron.MouseInputEvent) => {
+    // A press on the page while it glides: caught, it stops there.
+    if (input.type === 'mouseDown' && m.glide) stopThrow(m)
     if (input.type === 'mouseMove' || input.type === 'mouseEnter') {
       // In window coordinates ('push' moves the page under the header).
       if (inRevealZone(m, input.y + m.pageTop)) {
@@ -806,13 +904,14 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     // Never docked while in the menu bar.
     isTuckEnabled: () => getMiniWindowSettings().tuckToEdge && !self.mini?.menuBar,
     isPeekEnabled: () => getMiniWindowSettings().peekOnHover,
+    isThrowEnabled: () => getMiniWindowSettings().throwMomentum,
     peekDelayMs: () => getMiniWindowSettings().peekDelayMs,
     peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
     peekContents: () => {
       const page = window.isDestroyed() ? null : host().pageContents(window)
       return [page, m.header.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
     },
-    busy: () => liveMinis().some((other) => other.headerDrag !== null),
+    busy: () => liveMinis().some((other) => other.headerDrag !== null || other.glide !== null),
     menu: () => showMiniMenu(m, null)
   }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
@@ -839,6 +938,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     size: { width: bounds.width, height: bounds.height },
     revealBlockedUntil: 0,
     headerDrag: null,
+    glide: null,
+    moveSamples: createVelocityTracker(),
     menuBar: null
   }
   self.mini = m
@@ -898,6 +999,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   if (process.platform === 'linux') {
     let settle: ReturnType<typeof setTimeout> | null = null
     window.on('move', () => {
+      if (glideOverridden(m)) stopThrow(m)
       followPanel(m)
       if (m.menuBar || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
       m.dock.follow()
@@ -907,18 +1009,33 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     })
   } else {
     window.on('move', () => {
+      // Grabbed mid-glide (a native drag): it stops there and the drag takes over.
+      if (glideOverridden(m)) stopThrow(m)
       followPanel(m)
       if (m.menuBar || m.dock.ignoringMoves()) return
+      if (NATIVE_THROW && !m.glide && Date.now() >= m.ownMoveUntil) {
+        const bounds = window.getBounds()
+        m.moveSamples.add(performance.now(), bounds.x, bounds.y)
+      }
       m.dock.follow()
       scheduleGeometrySave(m)
     })
-    window.on('moved', dropped)
+    window.on('moved', () => {
+      if (!NATIVE_THROW) return dropped()
+      // Windows: let go of a native drag. Thrown while moving, it glides on (the drop happens where it stops).
+      const now = performance.now()
+      const velocity = m.moveSamples.velocity(now)
+      m.moveSamples.reset()
+      if (m.closed || window.isDestroyed() || m.menuBar || m.glide || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return dropped()
+      releasedMini(m, screen.getCursorScreenPoint(), velocity)
+    })
   }
   window.on('closed', () => {
     m.closed = true
     cancelHide(m)
     stopPolling(m)
     stopHeaderDrag(m)
+    stopThrow(m)
     if (m.geometryTimer) {
       clearTimeout(m.geometryTimer)
       m.geometryTimer = null
@@ -1042,22 +1159,28 @@ function dropPoint(m: Mini): { x: number; y: number } {
  * screen edge it docks and tucks away (into the collection already there, 'tabs'); near a corner it
  * snaps into it. `point`: where the floating header was let go (else where the pointer / header is).
  */
-function droppedMini(m: Mini, point: { x: number; y: number } | null): void {
+function droppedMini(m: Mini, point: { x: number; y: number } | null, merge = true): void {
   if (m.closed || m.window.isDestroyed()) return
-  if (grouping() === 'tabs') {
+  stopThrow(m)
+  if (merge && grouping() === 'tabs') {
     // A floating header sits over the other windows' top edges: that band counts as their header too.
     const above = headerPlacement() === 'float' ? MINI_WINDOW_HEADER_HEIGHT : 0
     const target = miniMergeTarget(point ?? dropPoint(m), othersOnScreen(m), above)
     if (target && mergeInto(m, target.mini, true)) return
   }
   if (m.dock.afterDrop()) {
-    const key = grouping() === 'tabs' ? m.dock.groupKey() : null
-    const peer = key ? liveMinis().find((other) => other !== m && host().header(other.window) && other.dock.groupKey() === key) : undefined
-    if (peer && mergeInto(m, peer, false)) return
+    if (joinDockedCollection(m)) return
   } else {
     snapToCorner(m)
   }
   scheduleGeometrySave(m)
+}
+
+/** Just docked to an edge another collection holds ('tabs'): its tabs join that one. True when merged. */
+function joinDockedCollection(m: Mini): boolean {
+  const key = grouping() === 'tabs' ? m.dock.groupKey() : null
+  const peer = key ? liveMinis().find((other) => other !== m && host().header(other.window) && other.dock.groupKey() === key) : undefined
+  return Boolean(peer && mergeInto(m, peer, false))
 }
 
 /** What a dragged tab let go "inside its own window" means: the window plus its floating header. */
@@ -1319,6 +1442,8 @@ export function applySettings(settings: MiniWindowSettings): void {
     }
   }
   for (const m of liveMinis()) applyWindowSettings(m, settings)
+  // Throwing turned off: a glide in flight stops where it is.
+  if (!settings.throwMomentum) for (const m of liveMinis()) stopThrow(m)
   syncTray()
   for (const m of liveMinis()) refreshHeaderOf(m)
 }

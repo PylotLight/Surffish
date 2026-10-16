@@ -16,6 +16,7 @@ import {
   dockHandleBounds,
   dockedBounds,
   dragDockOffset,
+  isOuterEdge,
   nearestDockEdge,
   parseMiniDocks,
   reconcileDock,
@@ -27,6 +28,7 @@ import {
 } from '../shared/mini-window-dock'
 import { createPeekDriver, type PeekDriver, type PeekPoint } from '../shared/mini-window-peek'
 import { frameClock, lerpRect, motionDuration } from '../shared/mini-window-motion'
+import { createVelocityTracker, flingAlong, flingSlideMs, flingTuckEdge, glideAxisAt, planEdgeGlide, releaseVelocity, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
 import { motion, placeWindow } from './mini-window-motion'
 import { readUserJson, writeUserJson } from './user-json'
@@ -76,6 +78,8 @@ export interface DockHost {
   moved(rect: MiniRect): void
   isTuckEnabled(): boolean
   isPeekEnabled(): boolean
+  /** Throw with momentum (Settings): a handle let go while moving glides on along the edge. */
+  isThrowEnabled(): boolean
   /** Hover delay before a tucked handle peeks (Settings). */
   peekDelayMs(): number
   /** Extra on-screen parts that keep a peek out (the floating header panel while it shows). */
@@ -109,6 +113,15 @@ export interface DockController {
   regroup(): void
   /** The user dropped the window: dock/tuck at an edge, re-flush, or undock. True when handled (skip corner snap). */
   afterDrop(): boolean
+  /** The edge a drop right now would dock to (pushed past it / pointer pressed against it), else null. */
+  dropEdge(): MiniDockEdge | null
+  /**
+   * Thrown at `velocity` from `from` (shared/mini-window-throw.ts): fast and aimed at an outer edge it
+   * would fly past, it docks there and tucks (its tuck slide starting at the throw's speed). True when it did.
+   */
+  flingTuck(from: MiniRect, velocity: ThrowVelocity): boolean
+  /** The dock is moving this window itself (sliding, handle drag or its glide) or it is tucked: a glide over it stops. */
+  moving(): boolean
   /** The window moved or resized (the handle follows when out; 'stack' followers come along). With `rect` (moving it this frame) at once, else coalesced to the next frame. */
   follow(rect?: MiniRect): void
   /** Settings changed (tuck turned off undocks). */
@@ -147,7 +160,8 @@ export function savedDockFor(slot: number, display: Display, size: { width: numb
   return saved ? reconcileDock(saved, size, displayInfo(display), allDisplays()) : null
 }
 
-function reducedMotion(): boolean {
+/** macOS Reduce Motion (prefers-reduced-motion): slides jump to their end, throws don't glide. */
+export function reducedMotion(): boolean {
   try {
     return systemPreferences.getAnimationSettings().prefersReducedMotion
   } catch {
@@ -302,7 +316,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   const followKey = {}
   let sliding = false
   let ownMoveUntil = 0
-  let drag: { startCursor: { x: number; y: number }; startOffset: number; startedAt: number } | null = null
+  /** A handle drag, and (`gliding`) the throw that carries on after it is let go (still a drag to everything else). */
+  let drag: { startCursor: { x: number; y: number }; startOffset: number; startedAt: number; samples: VelocityTracker; gliding: boolean } | null = null
+  /** The next slide continues a fling: it starts at this speed toward the edge (px/ms). */
+  let flingSpeed: number | null = null
   /** Hover peek (shared/mini-window-peek.ts): dwell on the tucked handle, slide out, tuck after the pointer leaves. */
   let peek: PeekDriver | null = null
   /** While peeked: input listeners on the group's contents that pin it out. */
@@ -498,7 +515,12 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       done()
     }
     const full = dock?.edge === 'left' || dock?.edge === 'right' ? to.width : to.height
-    const duration = reducedMotion() ? 0 : motionDuration(from, to, full, MINI_DOCK_SLIDE_MS)
+    const normal = motionDuration(from, to, full, MINI_DOCK_SLIDE_MS)
+    // Continuing a fling: as long as it takes to leave at the throw's speed (the throw carries on, no restart).
+    const speed = flingSpeed
+    flingSpeed = null
+    const distance = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y))
+    const duration = reducedMotion() ? 0 : speed !== null && normal > 0 ? flingSlideMs(distance, speed, normal) : normal
     if (duration === 0) return finish()
     // Timed from its first frame: a 'stack' group's windows all start in the same tick, however long
     // showing the others took after this one was queued.
@@ -645,41 +667,88 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     drag = null
   }
 
+  /** Done dragging (and gliding): keep the place, settle beside the other handles on this edge (in its new order). */
+  function finishDrag(): void {
+    stopDrag()
+    remember()
+    relayoutHandles()
+  }
+
+  /** The handle drag (or its glide) puts the window `offset` along the edge: window + handle move together. */
+  function moveAlong(offset: number): void {
+    if (!dock || offset === dock.offset) return
+    dock = { ...dock, offset }
+    const rect = dockedBounds(size(), dock, dockDisplay().workArea, tucked)
+    setOwnBounds(rect)
+    placeHandle(rect, 'moving')
+    // The others on this edge make room (and swap places as it passes them).
+    if (tucked) relayoutHandles()
+    // A stack that is out moves with its leader.
+    else followLeader(registration, offset)
+  }
+
+  /** Let go while moving along the edge: glide on (exponential friction), easing into the end of the edge. */
+  function throwAlong(state: NonNullable<typeof drag>): boolean {
+    if (!dock) return false
+    const now = performance.now()
+    const cursor = screen.getCursorScreenPoint()
+    state.samples.add(now, cursor.x, cursor.y)
+    const velocity = releaseVelocity({ enabled: host.isThrowEnabled(), reducedMotion: reducedMotion(), velocity: state.samples.velocity(now) })
+    if (!velocity) return false
+    const horizontal = dock.edge === 'top' || dock.edge === 'bottom'
+    const { width, height } = size()
+    const wa = dockDisplay().workArea
+    const room = Math.max(0, (horizontal ? wa.width : wa.height) - (horizontal ? width : height))
+    const glide = planEdgeGlide(dock.offset, horizontal ? velocity.vx : velocity.vy, 0, room)
+    if (!glide) return false
+    const from = dock.offset
+    state.gliding = true
+    const elapsed = frameClock(motion)
+    motion.run(dragKey, (tick) => {
+      if (drag !== state) return false
+      if (!alive() || !dock) {
+        finishDrag()
+        return false
+      }
+      const t = elapsed(tick)
+      const last = t >= glide.duration
+      moveAlong(last ? glide.to : Math.round(from + glideAxisAt(glide.axis, t)))
+      if (!last) return true
+      finishDrag()
+      return false
+    })
+    return true
+  }
+
   function onDrag(active: boolean): void {
     if (!alive() || !dock) return
     if (!active) {
-      stopDrag()
-      remember()
-      // Dropped: settle beside the other handles on this edge (in its new order).
-      relayoutHandles()
+      const state = drag
+      // Let go again (a blur after pointerup) while it glides: the glide carries on.
+      if (state?.gliding) return
+      if (state && throwAlong(state)) return
+      finishDrag()
       return
     }
+    // Grabbing it again stops a glide where it is.
     stopDrag()
     stopPeek()
-    const state = { startCursor: screen.getCursorScreenPoint(), startOffset: dock.offset, startedAt: Date.now() }
+    const state: NonNullable<typeof drag> = { startCursor: screen.getCursorScreenPoint(), startOffset: dock.offset, startedAt: Date.now(), samples: createVelocityTracker(), gliding: false }
     drag = state
     // Once per frame (however fast the pointer reports): read the cursor, move window + handle together.
-    motion.run(dragKey, () => {
+    motion.run(dragKey, (now) => {
       if (drag !== state) return false
       if (!alive() || !dock || Date.now() - state.startedAt > DRAG_MAX_MS) {
         onDrag(false)
         return false
       }
       const cursor = screen.getCursorScreenPoint()
+      state.samples.add(now, cursor.x, cursor.y)
       const horizontal = dock.edge === 'top' || dock.edge === 'bottom'
       const delta = horizontal ? cursor.x - state.startCursor.x : cursor.y - state.startCursor.y
       const { width, height } = size()
       const wa = dockDisplay().workArea
-      const offset = dragDockOffset(state.startOffset, delta, horizontal ? width : height, dock.edge, wa)
-      if (offset === dock.offset) return true
-      dock = { ...dock, offset }
-      const rect = dockedBounds(size(), dock, wa, tucked)
-      setOwnBounds(rect)
-      placeHandle(rect, 'moving')
-      // The others on this edge make room (and swap places as it passes them).
-      if (tucked) relayoutHandles()
-      // A stack that is out moves with its leader.
-      else followLeader(registration, offset)
+      moveAlong(dragDockOffset(state.startOffset, delta, horizontal ? width : height, dock.edge, wa))
       return true
     })
   }
@@ -885,6 +954,37 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       // A 'stack' group that is out closes up along its edge.
       if (alive() && dock && !tucked && dockGrouping() === 'stack' && !isFollower(registration) && groupOf(registration).length > 1) slideOut(false)
     },
+    dropEdge: () => {
+      if (!alive() || tucked || sliding || !host.isTuckEnabled()) return null
+      const bounds = win.getBounds()
+      return dockEdgeForDrop(bounds, screen.getCursorScreenPoint(), displayInfo(screen.getDisplayMatching(bounds)), allDisplays())
+    },
+    flingTuck: (from, velocity) => {
+      if (!alive() || tucked || sliding || drag || !host.isTuckEnabled()) return false
+      const display = screen.getDisplayMatching(from)
+      const wa = display.workArea
+      const displays = allDisplays()
+      const edge = flingTuckEdge(from, velocity, wa, (candidate) => isOuterEdge(displayInfo(display), candidate, displays, candidate === 'top' || candidate === 'bottom' ? [from.x, from.x + from.width] : [from.y, from.y + from.height]))
+      if (!edge) return false
+      // Docks where the glide along that edge would have taken it.
+      const target = flingAlong(from, velocity, edge, wa)
+      const before = groupKey()
+      dock = dockFor(target, edge, wa)
+      displayId = display.id
+      if (groupKey() !== before) joinedAt = ++joinCounter
+      remember()
+      // 'stack': joining a group that is out comes out with it (like a drop at that edge).
+      const others = groupOf(registration).filter((member) => member !== registration)
+      if (others.length > 0 && others.every((member) => member.out())) {
+        slideOut(false)
+        return true
+      }
+      flingSpeed = edge === 'left' ? -velocity.vx : edge === 'right' ? velocity.vx : edge === 'top' ? -velocity.vy : velocity.vy
+      const tuckedNow = tuckGroup(registration)
+      flingSpeed = null
+      return tuckedNow
+    },
+    moving: () => tucked || sliding || drag !== null,
     afterDrop: () => {
       if (!alive() || tucked || sliding) return false
       if (!host.isTuckEnabled()) return false

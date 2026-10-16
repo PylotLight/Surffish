@@ -28,6 +28,8 @@ export interface MiniWindowSettings {
   peekOnHover: boolean
   /** How long the pointer rests (still) on the handle before it peeks, one of MINI_WINDOW_PEEK_DELAYS. */
   peekDelayMs: number
+  /** Let go of a drag while still moving and the window glides on, slowing to a stop (shared/mini-window-throw.ts). */
+  throwMomentum: boolean
   /** How several mini windows group (MiniWindowGrouping). */
   grouping: MiniWindowGrouping
   /** Where the auto-hiding header (and tab strip) shows (MiniWindowHeaderPlacement). */
@@ -75,7 +77,7 @@ export function isMiniWindowHeaderPlacement(value: unknown): value is MiniWindow
 export type MiniWindowGrouping = 'tabs' | 'stack' | 'separate'
 export const MINI_WINDOW_GROUPINGS: readonly MiniWindowGrouping[] = ['tabs', 'stack', 'separate']
 
-export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' }
+export const DEFAULT_MINI_WINDOW_SETTINGS: MiniWindowSettings = { defaultUrl: '', shortcut: DEFAULT_MINI_WINDOW_SHORTCUT, opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 350, throwMomentum: true, grouping: 'tabs', headerPlacement: 'float', menuBarIcon: 'in-use' }
 
 /** Settings → Mini window → hover delay choices (ms). */
 export const MINI_WINDOW_PEEK_DELAYS: readonly number[] = [200, 350, 600, 1000]
@@ -167,13 +169,15 @@ export function parseMiniWindowSettings(value: unknown): MiniWindowSettings {
   // hover delay exists next to it (saved by a build with hover peek on by default); older files take the new default.
   const peekOnHover = typeof record.peekOnHover === 'boolean' && 'peekDelayMs' in record ? record.peekOnHover : DEFAULT_MINI_WINDOW_SETTINGS.peekOnHover
   const peekDelayMs = isMiniWindowPeekDelay(record.peekDelayMs) ? record.peekDelayMs : DEFAULT_MINI_WINDOW_SETTINGS.peekDelayMs
+  // Settings saved before throwing existed take the default (on).
+  const throwMomentum = typeof record.throwMomentum === 'boolean' ? record.throwMomentum : DEFAULT_MINI_WINDOW_SETTINGS.throwMomentum
   // Settings saved before grouping existed (one window per tab) take the default.
   const grouping = isMiniWindowGrouping(record.grouping) ? record.grouping : DEFAULT_MINI_WINDOW_SETTINGS.grouping
   // Settings saved before the header placement existed take the default (float above the window).
   const headerPlacement = isMiniWindowHeaderPlacement(record.headerPlacement) ? record.headerPlacement : DEFAULT_MINI_WINDOW_SETTINGS.headerPlacement
   // Settings saved before the menu bar icon existed take the default (shown only while in use).
   const menuBarIcon = isMiniWindowMenuBarIcon(record.menuBarIcon) ? record.menuBarIcon : DEFAULT_MINI_WINDOW_SETTINGS.menuBarIcon
-  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, peekDelayMs, grouping, headerPlacement, menuBarIcon }
+  return { defaultUrl, shortcut, opacity, tuckToEdge, peekOnHover, peekDelayMs, throwMomentum, grouping, headerPlacement, menuBarIcon }
 }
 
 /** Accelerators compared on what they press (CommandOrControl counts as Command on macOS, Control elsewhere). */

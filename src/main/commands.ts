@@ -52,7 +52,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -234,6 +234,11 @@ const COMMANDS: BrowserCommand[] = [
     keywords: ['mini window', 'peek', 'hover', 'tuck', 'edge', 'handle', 'slide out'], refocusPage: true,
     enabled: () => getMiniWindowSettings().tuckToEdge,
     run: () => setMiniWindowPeekOnHover(!getMiniWindowSettings().peekOnHover)
+  },
+  {
+    id: 'miniWindow.toggleThrow', title: () => (getMiniWindowSettings().throwMomentum ? 'Turn Off Mini Window Throw with Momentum' : 'Turn On Mini Window Throw with Momentum'), section: 'Settings',
+    keywords: ['mini window', 'throw', 'momentum', 'inertia', 'fling', 'glide', 'drag'], refocusPage: true,
+    run: () => setMiniWindowThrowMomentum(!getMiniWindowSettings().throwMomentum)
   },
   ...(([['tabs', 'Tabs', ['tab strip', 'collection', 'merge']], ['stack', 'Stack', ['stack', 'edge group', 'slide out together']], ['separate', 'Separate', ['one window per tab', 'separate windows']]] as const).map(([grouping, label, extra]): BrowserCommand => ({
     id: `miniWindow.grouping.${grouping}`, title: `Mini Window Grouping: ${label}`, section: 'Settings',
