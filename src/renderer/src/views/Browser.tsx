@@ -639,7 +639,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     <div className={`new-tab-weather-widget is-${newTabWeatherPlacement}${newTabWeatherPlacement === 'corner' && newTabCustomizeOpen ? ' is-beside-panel' : ''}`} role="status" aria-live="polite">
       {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
         : newTabWeatherError ? <span>{newTabWeatherError}</span>
-          : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
+          : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small title={newTabWeather.location}>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location.split(',')[0]}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
             : <span>Weather unavailable</span>}
     </div>
   )

@@ -3,7 +3,8 @@
 // as globalThis.__surffishWeatherFetch (main otherwise uses the browser session's Chromium fetch)
 // before the app loads, so CI never touches the network:
 //   1. The New Tab draws the gear, but the panel's code isn't loaded until the gear is used (lazy chunk).
-//   2. A weather setting saved before city search (free text "Melbourne") still loads and saves its place once.
+//   2. A weather setting saved before city search (free text "Melbourne") still loads and saves its place once;
+//      the reading sits on its own centred line under the clock, smaller than the time.
 //   3. Gear opens the right-side panel (focus inside, aria-expanded); changes apply live to the page behind.
 //   4. Vertical position: 0 % puts the icons right under the clocks, 100 % right above the photo credit,
 //      never off-screen in a short window; a fast drag ends where it stopped (no echo snap-back).
@@ -11,7 +12,8 @@
 //   6. Open-Meteo forecast model: BOM ACCESS-G with no data falls back to best match with a hint; a
 //      429 falls back to MET Norway; a DNS failure says so instead of "Can't reach".
 //   7. Providers: MET Norway (with an identifying User-Agent), a failing wttr.in shows a friendly error,
-//      OpenWeather asks for a key then works once one is saved; °F.
+//      OpenWeather asks for a key then works once one is saved; °F. Weather position: top-right corner
+//      (beside the open panel) and back under the clock.
 //   8. Escape / a press outside close it (focus back on the gear); Settings → New Tab shares the same
 //      state and its "Customize on New Tab" button opens the panel.
 // `bun run build && bun run test:electron-newtab-customize` (headless Linux: xvfb-run -a ...).
@@ -155,6 +157,29 @@ async function run() {
   assert.equal(geocodesAfterMigration, 1, 'geocoded exactly once')
   await shot('after-newtab-gear')
 
+  smoke.step('Weather: its own centred line under the clock, smaller than the time')
+  const weatherGeometry = () => ev(`(() => {
+    const weather = document.querySelector('.new-tab-weather-widget')
+    const clock = document.querySelector('.new-tab-widgets .new-tab-clock')
+    const panel = document.querySelector('.new-tab-customize.is-open')
+    if (!weather) return null
+    const w = weather.getBoundingClientRect()
+    const c = clock?.getBoundingClientRect()
+    return {
+      inWidgets: Boolean(weather.closest('.new-tab-widgets')), corner: weather.classList.contains('is-corner'),
+      top: w.top, bottom: w.bottom, left: w.left, right: w.right, centre: (w.left + w.right) / 2,
+      clockTop: c?.top ?? null, clockBottom: c?.bottom ?? null, clockCentre: c ? (c.left + c.right) / 2 : null,
+      panelLeft: panel ? panel.getBoundingClientRect().left : null, width: innerWidth,
+      weatherFont: parseFloat(getComputedStyle(weather.querySelector('strong') ?? weather).fontSize),
+      clockFont: clock ? parseFloat(getComputedStyle(clock.querySelector('.new-tab-clock-time')).fontSize) : null
+    }
+  })()`)
+  const below = await weatherGeometry()
+  assert.ok(below?.inWidgets && !below.corner, 'weather is part of the clock block by default')
+  assert.ok(below.top >= below.clockBottom - 1, `weather sits under the clock/date, not beside it (${below.top} vs ${below.clockBottom})`)
+  assert.ok(Math.abs(below.centre - below.clockCentre) <= 4, `weather is centred under the clock (${below.centre} vs ${below.clockCentre})`)
+  assert.ok(below.weatherFont < below.clockFont / 1.5, `weather reads as secondary (${below.weatherFont}px vs the ${below.clockFont}px time)`)
+
   smoke.step('Gear opens the panel; focus moves in')
   await ev('document.querySelector(".new-tab-customize-gear").click()')
   await waitFor(() => ev(`(() => {
@@ -166,7 +191,7 @@ async function run() {
   assert.equal(await ev('document.querySelector(".new-tab-customize-gear").getAttribute("aria-expanded")'), 'true')
   assert.equal(await ev('document.activeElement?.getAttribute("aria-label")'), 'Close Customize New Tab', 'focus on the close button')
   assert.equal(await ev('getComputedStyle(document.querySelector(".new-tab-customize")).backdropFilter'), 'none', 'no CSS backdrop-filter on the panel')
-  const missing = await ev(`${JSON.stringify(['Default new tab page', 'Show site names under icons', 'Icon size', 'Links per row', 'Vertical position', 'Dim', 'Blur', 'Show local clock', 'Show date', 'Time format', 'Show seconds', 'Primary New Tab time zone', 'Show weather', 'Weather city or town', 'Weather provider', 'Weather temperature unit'])}.filter((label) => !document.querySelector('.new-tab-customize [aria-label="' + label + '"]'))`)
+  const missing = await ev(`${JSON.stringify(['Default new tab page', 'Show site names under icons', 'Icon size', 'Links per row', 'Vertical position', 'Dim', 'Blur', 'Show local clock', 'Show date', 'Time format', 'Show seconds', 'Primary New Tab time zone', 'Show weather', 'Weather city or town', 'Weather provider', 'Weather position', 'Weather temperature unit'])}.filter((label) => !document.querySelector('.new-tab-customize [aria-label="' + label + '"]'))`)
   assert.deepEqual(missing, [], 'every New Tab setting is in the panel')
   await shot('after-panel-open')
 
@@ -265,6 +290,20 @@ async function run() {
   await waitFor(async () => /22°C · Scattered clouds/.test(await widgetText()) && /OpenWeather · Melbourne/.test(await widgetText()), 'OpenWeather weather with the saved key')
   await ev('[...document.querySelectorAll(\'.new-tab-customize [aria-label="Weather temperature unit"] [role=radio]\')].find((b) => b.textContent === "°F").click()')
   await waitFor(async () => /71°F/.test(await widgetText()), '°F on the page')
+
+  smoke.step('Weather position: top-right corner (beside the open panel), then back under the clock')
+  await ev('[...document.querySelectorAll(\'.new-tab-customize [aria-label="Weather position"] [role=radio]\')].find((b) => b.textContent === "Top right").click()')
+  await waitFor(async () => (await weatherGeometry())?.corner === true, 'the weather in the corner')
+  await waitFor(async () => (await prefs()).weatherPosition === 'corner', 'the corner position saved')
+  const corner = await weatherGeometry()
+  assert.equal(corner.inWidgets, false, 'the corner reading leaves the clock block')
+  assert.ok(corner.top < corner.clockTop, `corner reading above the clock line (${corner.top} vs ${corner.clockTop})`)
+  assert.ok(corner.right <= corner.panelLeft && corner.right > corner.width / 2, `corner reading sits right, beside the open panel (${corner.right} vs panel ${corner.panelLeft})`)
+  assert.match(await widgetText(), /71°F/, 'same reading in the corner')
+  await shot('after-weather-corner')
+  await ev('[...document.querySelectorAll(\'.new-tab-customize [aria-label="Weather position"] [role=radio]\')].find((b) => b.textContent === "Below clock").click()')
+  await waitFor(async () => (await weatherGeometry())?.inWidgets === true, 'the weather back under the clock')
+  await waitFor(async () => (await prefs()).weatherPosition === 'below', 'below saved')
 
   smoke.step('Approximate location (IP lookup)')
   await ev('[...document.querySelectorAll(".new-tab-customize .settings-link-action")].find((b) => /approximate/.test(b.textContent)).click()')
