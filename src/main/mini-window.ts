@@ -110,7 +110,12 @@ interface Mini {
    */
   headerGate: HeaderStateGate<NonNullable<ReturnType<typeof headerState>>>
   headerTimer: ReturnType<typeof setTimeout> | null
-  header: WebContentsView
+  /**
+   * The header page's view, or null while released: its renderer (~20 MB PSS, ~80 MB RSS on Linux) is
+   * made when the window opens, released once it has sat hidden with the pointer away for a while
+   * (headerIdleReleaseMs, 30 s), and made again as soon as the pointer comes over the window (ensureHeader).
+   */
+  header: WebContentsView | null
   /** Header strip shown (the pointer is near the top of the window, or on the header). */
   revealed: boolean
   /** Pointer is on the header view itself. */
@@ -122,8 +127,12 @@ interface Mini {
   /** The page contents this module listens to (re-wired when the tab's view changes). */
   page: WebContents | null
   pageListeners: Array<[string, (...args: never[]) => void]>
-  /** Header loaded (it is attached only then, so it never takes keyboard focus from the page). */
-  headerReady: Promise<void>
+  /** Header loaded (it is attached only then, so it never takes keyboard focus from the page). Reading it makes the header again when it was released. */
+  readonly headerReady: Promise<void>
+  /** The current header view's load (headerReady without making one). */
+  headerLoading: Promise<void>
+  /** Hidden and idle: releases the header's renderer when it fires (scheduleHeaderRelease). */
+  headerIdleTimer: ReturnType<typeof setTimeout> | null
   /** Docked to a screen edge / tucked away behind its handle. */
   dock: DockController
   /** Moves before this are ours (corner snap), not a user drop. */
@@ -157,6 +166,17 @@ interface Mini {
 
 const IS_MAC = process.platform === 'darwin'
 const HEADER_READY_TIMEOUT_MS = 3000
+/**
+ * A header that has been hidden this long, with the pointer off the window, gives its renderer back; the
+ * pointer coming over the window makes it again (a page load, well before it reaches the reveal zone
+ * most of the time). The menu bar popout's strip is always up, so it keeps its header.
+ * SURFFISH_MINI_HEADER_IDLE_MS overrides it (0: never release; read each time, so smokes can shorten it).
+ */
+function headerIdleReleaseMs(): number {
+  const forced = process.env['SURFFISH_MINI_HEADER_IDLE_MS']
+  const ms = forced ? Number(forced) : NaN
+  return Number.isFinite(ms) && ms >= 0 ? ms : 30_000
+}
 const HIDE_DELAY_MS = 700
 const POLL_MS = 300
 const GEOMETRY_SAVE_DELAY_MS = 400
@@ -236,7 +256,7 @@ function preloadPath(): string | null {
 }
 
 function fromHeader(event: IpcMainEvent): Mini | null {
-  return liveMinis().find((m) => m.header.webContents === event.sender) ?? null
+  return liveMinis().find((m) => m.header?.webContents === event.sender) ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -374,7 +394,7 @@ function closePanel(m: Mini): void {
   const panel = m.panel
   if (!panel) return
   if (m.mount === 'panel') {
-    if (!panel.isDestroyed()) panel.contentView.removeChildView(m.header)
+    if (!panel.isDestroyed() && m.header) panel.contentView.removeChildView(m.header)
     m.mount = null
   }
   m.panel = null
@@ -383,7 +403,7 @@ function closePanel(m: Mini): void {
 
 /** Attach the header view to the window or the panel (moving the view; the header page never reloads). */
 function mountHeader(m: Mini, where: 'window' | 'panel'): void {
-  if (!m.headerLoaded || m.mount === where || m.closed || m.window.isDestroyed()) return
+  if (!m.header || !m.headerLoaded || m.mount === where || m.closed || m.window.isDestroyed()) return
   const from = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
   const to = where === 'panel' ? ensurePanel(m) : m.window
   if (from && !from.isDestroyed()) from.contentView.removeChildView(m.header)
@@ -419,19 +439,22 @@ function layout(m: Mini): void {
   const [width = 0, height = 0] = m.window.getContentSize()
   m.size = { width, height }
   updatePlan(m)
+  // Showing (or the popout's strip, always up) while released: make it again; it lays out when loaded.
+  if (!m.header && (m.revealed || m.plan.kind === 'strip')) void ensureHeader(m)
   const tall = headerHeight(m)
   // The page fills the window; 'push' moves it under the revealed header, 'overlay' runs it under it,
   // 'strip' (menu bar popout) keeps it under the strip at all times (no reflow on hover).
-  const page = miniPageBounds(m.plan.kind, m.revealed, m.size, tall)
+  // Revealed while a released header is still loading again: the page stays put until it is there.
+  const page = miniPageBounds(m.plan.kind, m.revealed && m.headerLoaded, m.size, tall)
   m.pageTop = page.y
   host().setPageBounds(m.window, page)
   if (floats(m.plan)) {
     mountHeader(m, 'panel')
-    m.header.setBounds({ x: 0, y: 0, width, height: tall })
+    m.header?.setBounds({ x: 0, y: 0, width, height: tall })
     positionPanel(m)
   } else {
     mountHeader(m, 'window')
-    m.header.setBounds({ x: 0, y: 0, width, height: m.revealed || m.plan.kind === 'strip' ? tall : 0 })
+    m.header?.setBounds({ x: 0, y: 0, width, height: m.revealed || m.plan.kind === 'strip' ? tall : 0 })
     hidePanel(m)
   }
   rewirePage(m)
@@ -459,6 +482,7 @@ function setRevealed(m: Mini, revealed: boolean): void {
   m.revealed = revealed
   cancelHide(m)
   if (revealed) {
+    void ensureHeader(m)
     refreshHeaderOf(m)
     m.pollTimer ??= setInterval(() => pollPointer(m), POLL_MS)
   } else {
@@ -466,8 +490,82 @@ function setRevealed(m: Mini, revealed: boolean): void {
     stopHeaderDrag(m)
     m.hovered = false
     if (m.plan.kind === 'push') m.revealBlockedUntil = Date.now() + PUSH_REVEAL_COOLDOWN_MS
+    scheduleHeaderRelease(m)
   }
   layout(m)
+}
+
+/** Nothing needs the header right now: hidden, not hovered or dragged, loaded, not the menu bar popout's strip. */
+function headerIdle(m: Mini): boolean {
+  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || !m.headerLoaded || !m.header) return false
+  // Still has the keyboard (clicked, then the pointer left): keep it so the keys don't go nowhere.
+  return !(live(m.header.webContents) && m.header.webContents.isFocused())
+}
+
+function cancelHeaderRelease(m: Mini): void {
+  if (m.headerIdleTimer) clearTimeout(m.headerIdleTimer)
+  m.headerIdleTimer = null
+}
+
+/** Release the header's renderer once it has been idle for headerIdleReleaseMs() (re-armed while the pointer is over the window). */
+function scheduleHeaderRelease(m: Mini): void {
+  cancelHeaderRelease(m)
+  if (!headerIdle(m)) return
+  m.headerIdleTimer = setTimeout(() => {
+    m.headerIdleTimer = null
+    if (!headerIdle(m) || m.window.isDestroyed()) return
+    // Over the window (about to reveal it, most likely): keep it and look again later.
+    if (m.window.isVisible() && within(screen.getCursorScreenPoint(), m.window.getBounds())) return scheduleHeaderRelease(m)
+    releaseHeader(m)
+  }, headerIdleReleaseMs())
+  m.headerIdleTimer.unref?.()
+}
+
+/** Give the header's renderer back (it comes back through ensureHeader). */
+function releaseHeader(m: Mini): void {
+  cancelHeaderRelease(m)
+  const view = m.header
+  if (!view) return
+  const from = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
+  if (from && !from.isDestroyed()) from.contentView.removeChildView(view)
+  m.header = null
+  m.headerLoaded = false
+  m.mount = null
+  hidePanel(m)
+  if (live(view.webContents)) view.webContents.close()
+}
+
+/** The header, made again if it was released; resolves once it has loaded (attached by then). */
+function ensureHeader(m: Mini): Promise<void> {
+  if (m.closed || m.window.isDestroyed()) return Promise.resolve()
+  if (m.header && live(m.header.webContents)) return m.headerLoading
+  if (m.header) releaseHeader(m)
+  const header = createHeaderView()
+  if (!header) return Promise.resolve()
+  const { view } = header
+  m.header = view
+  m.headerLoaded = false
+  m.mount = null
+  const window = m.window
+  const documentUrl = headerDocumentUrl()
+  void view.webContents.loadURL(documentUrl).catch(() => undefined)
+  // A crashed or hung header reloads like the browser's own surfaces (crash-guard.ts).
+  watchShellSurface(view.webContents, () => view.webContents.loadURL(documentUrl).then(() => { m.headerGate.reset(); refreshHeaderOf(m) }), () => !m.closed && !window.isDestroyed() && m.header === view)
+  // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
+    else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
+  })
+  m.headerLoading = header.ready.then(() => {
+    if (m.closed || window.isDestroyed() || m.header !== view) return
+    m.headerLoaded = true
+    // A new page (made again after a release) has seen nothing yet.
+    m.headerGate.reset()
+    layout(m)
+    refreshHeaderOf(m)
+    scheduleHeaderRelease(m)
+  })
+  return m.headerLoading
 }
 
 function scheduleHide(m: Mini): void {
@@ -673,6 +771,8 @@ function rewirePage(m: Mini): void {
     // A press on the page while it glides: caught, it stops there.
     if (input.type === 'mouseDown' && m.glide) stopThrow(m)
     if (input.type === 'mouseMove' || input.type === 'mouseEnter') {
+      // The pointer is over the window: a released header loads again before it is asked for.
+      if (!m.header) void ensureHeader(m)
       // In window coordinates ('push' moves the page under the header).
       if (inRevealZone(m, input.y + m.pageTop)) {
         if (m.revealed) cancelHide(m)
@@ -682,6 +782,7 @@ function rewirePage(m: Mini): void {
       }
     } else if (input.type === 'mouseLeave') {
       scheduleHide(m)
+      if (!m.revealed) scheduleHeaderRelease(m)
     }
   })
   // In the menu bar's popout, Esc hides it (the page still gets the key).
@@ -747,10 +848,11 @@ function cancelHeaderPush(m: Mini): void {
 
 /** The header page gets the state now, changed or not (just attached, or reloaded). */
 function sendHeaderState(m: Mini): void {
-  const state = live(m.header.webContents) ? headerState(m) : null
-  if (!state) return
+  const contents = m.header?.webContents
+  const state = live(contents) ? headerState(m) : null
+  if (!contents || !state) return
   cancelHeaderPush(m)
-  m.header.webContents.send('mini-window:state', state)
+  contents.send('mini-window:state', state)
   m.headerGate.sent(state, headerExtraKey(m))
 }
 
@@ -758,7 +860,7 @@ function refreshHeaderOf(m: Mini): void {
   if (m.closed || m.window.isDestroyed()) return
   rewirePage(m)
   // A tab joined or left while the header is up: the strip comes or goes.
-  if (m.revealed && m.header.getBounds().height !== headerHeight(m)) layout(m)
+  if (m.revealed && m.header && m.header.getBounds().height !== headerHeight(m)) layout(m)
   let state = headerState(m)
   if (!state) return
   // Nothing the header shows changed (a page's replaceState per keystroke): no push, no repaint.
@@ -788,7 +890,8 @@ function refreshHeaderOf(m: Mini): void {
     m.menuTitle = menuTitle
     notifyBrowserWindowsChanged()
   }
-  if (live(m.header.webContents)) m.header.webContents.send('mini-window:state', state)
+  const header = m.header?.webContents
+  if (live(header)) header.send('mini-window:state', state)
   refreshHandlesOf(m)
   // In the menu bar: the icon's title/menu (count, playing) and the saved pages follow.
   if (m.menuBar) {
@@ -882,7 +985,7 @@ function registerIpc(): void {
   })
   ipcMain.on('mini-window:menu', (event) => {
     const m = fromHeader(event)
-    if (m) showMiniMenu(m, m.header.webContents)
+    if (m) showMiniMenu(m, event.sender)
   })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
@@ -942,9 +1045,11 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   registerIpc()
   const slot = freeMiniSlot(liveMinis().map((m) => m.slot))
   if (slot === null) return null
-  const header = createHeaderView()
   const preload = preloadPath()
-  if (!header || !preload) return null
+  if (!preload) {
+    console.warn('[mini window] preload missing; mini window unavailable')
+    return null
+  }
   const opening = place?.bounds ?? openingBounds(slot)
   // Docked on this display last time: open against that edge again (out, with its handle).
   const display = place?.dock?.display ?? screen.getDisplayMatching(opening)
@@ -998,7 +1103,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
     peekContents: () => {
       const page = window.isDestroyed() ? null : host().pageContents(window)
-      return [page, m.header.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
+      return [page, m.header?.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
     },
     busy: () => liveMinis().some((other) => other.headerDrag !== null || other.glide !== null),
     menu: () => showMiniMenu(m, null)
@@ -1010,7 +1115,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     windowTitle: '',
     headerGate: createHeaderStateGate({ now: () => performance.now() }),
     headerTimer: null,
-    header: header.view,
+    header: null,
     revealed: false,
     hovered: false,
     hideTimer: null,
@@ -1018,7 +1123,9 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     geometryTimer: null,
     page: null,
     pageListeners: [],
-    headerReady: header.ready,
+    get headerReady() { return ensureHeader(m) },
+    headerLoading: Promise.resolve(),
+    headerIdleTimer: null,
     dock,
     ownMoveUntil: 0,
     closed: false,
@@ -1044,22 +1151,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   })
   host().attachWindow(window)
   applyWindowSettings(m, getMiniWindowSettings())
-  const documentUrl = headerDocumentUrl()
-  void header.view.webContents.loadURL(documentUrl).catch(() => undefined)
-  // A crashed or hung header reloads like the browser's own surfaces (crash-guard.ts).
-  watchShellSurface(header.view.webContents, () => header.view.webContents.loadURL(documentUrl).then(() => { m.headerGate.reset(); refreshHeaderOf(m) }), () => !m.closed && !window.isDestroyed())
-  // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
-  header.view.webContents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
-    else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
-  })
-  void header.ready.then(() => {
-    if (m.closed || window.isDestroyed()) return
-    m.headerLoaded = true
-    m.headerGate.reset()
-    layout(m)
-    refreshHeaderOf(m)
-  })
+  void ensureHeader(m)
   // Hidden (Show/Hide, tucked away): the header goes with it (and a menu bar popout counts as hidden).
   window.on('hide', () => {
     setRevealed(m, false)
@@ -1140,7 +1232,9 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     m.menuBar?.popout.dispose()
     m.menuBar = null
     // A closed BaseWindow doesn't destroy its views' webContents.
-    if (live(header.view.webContents)) header.view.webContents.close()
+    cancelHeaderRelease(m)
+    const header = m.header?.webContents
+    if (live(header)) header.close()
     // The floating header's panel goes with its window.
     closePanel(m)
     const index = minis.indexOf(m)
@@ -1921,7 +2015,7 @@ function showPopoutMenu(m: Mini, at: { x: number; y: number } | null): void {
     bar.menuOpen = false
     bar.menuClosedAt = Date.now()
     if (lastPopoutMenu?.menu === menu) lastPopoutMenu = null
-    if (live(m.header.webContents)) m.header.webContents.send('mini-window:menu-closed')
+    if (live(m.header?.webContents)) m.header?.webContents.send('mini-window:menu-closed')
   }
   menu.popup({ window: m.window, ...(at ? { x: at.x, y: at.y } : {}), callback: closed })
 }

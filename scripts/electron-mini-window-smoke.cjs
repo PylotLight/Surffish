@@ -4,7 +4,8 @@
 //   2. Palette "Pop Out to Mini Window": the active tab's own webContents moves into a second,
 //      frameless, always-on-top window (no reload: a page-side marker and typed text survive), the
 //      browser window no longer lists it and shows its neighbour, the header strip is collapsed
-//      until the pointer nears the top of the page, then revealed.
+//      until the pointer nears the top of the page, then revealed. Left idle it releases its renderer,
+//      and the pointer coming back makes it again.
 //   3. Never treated as a background tab: with the clock 13 h ahead, timed tab sleep and auto-archive
 //      take an idle tab in the browser window but leave the mini window's tab loaded and visible.
 //   4. "Return Mini Window to Browser": the same webContents back in the browser window (no reload),
@@ -162,6 +163,19 @@ async function run() {
   await waitFor(() => headerView.getBounds().height > 0, 'the header to reveal near the top')
   chat.sendInputEvent({ type: 'mouseMove', x: 120, y: 300 })
   await waitFor(() => headerView.getBounds().height === 0, 'the header to hide again', 5000)
+  // Idle (hidden, pointer gone): the header gives its renderer back; the pointer coming back makes it again.
+  process.env.SURFFISH_MINI_HEADER_IDLE_MS = '300'
+  chat.sendInputEvent({ type: 'mouseLeave', x: 120, y: 300 })
+  await waitFor(() => miniHeaders().length === 0, 'the idle header to be released', 5000)
+  assert.ok(!mini.contentView.children.some((view) => view.webContents && !view.webContents.isDestroyed() && isMiniHeader(view.webContents)), 'no header view left in the mini window')
+  assert.deepEqual(viewOf(mini, chat).getBounds(), { x: 0, y: 0, width: miniWidth, height: miniHeight }, 'the page still fills the mini window')
+  delete process.env.SURFFISH_MINI_HEADER_IDLE_MS
+  chat.sendInputEvent({ type: 'mouseMove', x: 120, y: 10 })
+  const remade = await waitFor(() => miniHeaders()[0], 'the header to be made again')
+  await waitFor(() => viewOf(mini, remade)?.getBounds().height > 0, 'the remade header to reveal')
+  await waitFor(() => smoke.evaluate(remade, 'document.getElementById("title").textContent === "Chat"'), 'the remade header to show the page title')
+  chat.sendInputEvent({ type: 'mouseMove', x: 120, y: 300 })
+  await waitFor(() => viewOf(mini, remade).getBounds().height === 0, 'the remade header to hide', 5000)
   // Diagnostics names it.
   const diagnostics = await smoke.evaluate(content, 'window.api.browser.diagnostics ? window.api.browser.diagnostics.get?.() ?? null : null').catch(() => null)
   if (diagnostics?.tabs) assert.ok(diagnostics.tabs.some((entry) => String(entry.title).startsWith('Mini Window:')), 'Task Manager lists the mini window tab')
