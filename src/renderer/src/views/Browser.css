@@ -2373,6 +2373,24 @@
 .tab-item.is-dragging .tab-close {
   opacity: 0;
 }
+/* A mini window tab dragged over the sidebar: where it lands. */
+.tab-item[data-external-drop]::before,
+.tab-list[data-external-drop-end]::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: #4b9fff;
+  pointer-events: none;
+}
+.tab-item[data-external-drop]::before {
+  top: -2px;
+}
+.tab-list[data-external-drop-end]::after {
+  bottom: -2px;
+}
 
 /* ── New tab row, sits right under the last tab ───────────────── */
 .sidebar-new-tab-row {

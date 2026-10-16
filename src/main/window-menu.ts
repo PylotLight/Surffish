@@ -1,4 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
+import { noteBrowserTabDragOutside } from './mini-window-entry'
 import { dropBrowserTabOutside, listBrowserWindows, moveBrowserTabToNewWindow } from './browser'
 import { isMainWindowRenderer } from './browser-shell'
 import { onBrowserWindowsChanged } from './window-scope'
@@ -57,6 +58,11 @@ export function registerWindowIpc(): void {
   ipcMain.handle('browser:tabs:drop-outside', (event, id: unknown) => {
     assertMainRenderer(event)
     return typeof id === 'string' && dropBrowserTabOutside(id)
+  })
+  // A sidebar drag left (id) or came back into / ended (null) the window: mini windows show where it would join.
+  ipcMain.on('browser:tabs:drag-outside', (event, id: unknown) => {
+    if (!isMainWindowRenderer(event.sender, event.senderFrame)) return
+    noteBrowserTabDragOutside(typeof id === 'string' ? id : null)
   })
   ipcMain.handle('browser:tabs:move-to-new-window', (event, id: unknown) => {
     assertMainRenderer(event)

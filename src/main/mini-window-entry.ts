@@ -41,7 +41,16 @@ export interface MiniWindowHost {
    * window, and make it the active tab there. False when it can't go (not a web page, or a private
    * tab and a normal collection).
    */
-  adoptTab(tabId: string, win: BaseWindow): boolean
+  adoptTab(tabId: string, win: BaseWindow, beforeId?: string | null): boolean
+  /** Move one of the mini window's tabs to `index` in its strip (true when the order changed). */
+  reorderTab(win: BaseWindow, tabId: string, index: number): boolean
+  /** Put a mini window's tab into browser window `window`, before the sidebar row under screen point `point`. */
+  returnTabAt(win: BaseWindow, tabId: string, window: BaseWindow, point: { x: number; y: number }): Promise<boolean>
+  /** Visible browser windows (drop targets for a dragged mini window tab), with their bounds. */
+  browserWindows(): Array<{ window: BaseWindow; bounds: { x: number; y: number; width: number; height: number } }>
+  /** While a mini tab is dragged over browser window `window`: show where it would land in its sidebar (null window clears). */
+  dropHintAt(window: BaseWindow | null, point: { x: number; y: number }, tabId: string): Promise<void>
+  clearDropHint(): void
   /** The mini window's tabs, in strip order. */
   tabs(win: BaseWindow): MiniWindowTab[]
   /** Show one of the mini window's tabs. */
@@ -91,6 +100,8 @@ export interface MiniWindowListing {
   focused: boolean
   /** Lives in the menu bar (tucked: its popout is hidden). */
   menuBar: boolean
+  /** The tab on screen in its window (one per collection). */
+  active: boolean
 }
 
 export interface MiniWindowShortcutStatus {
@@ -202,6 +213,47 @@ export function startMiniWindowMenuBar(): void {
   const hasPages = Array.isArray(saved?.urls) && saved.urls.length > 0
   if (menuBarIcon !== 'always' && !hasPages) return
   void loadModule().then((module) => module.startMenuBar()).catch((error: unknown) => console.warn('Could not restore the menu bar mini windows:', error))
+}
+
+/**
+ * A sidebar tab let go outside its window (browser.ts dropBrowserTabOutside): over a mini window it
+ * joins it at the strip slot under the pointer. True when it did.
+ */
+export function dropBrowserTabOnMiniWindow(tabId: string, point: { x: number; y: number }): boolean {
+  return miniModule?.dropForeignTab(tabId, point) ?? false
+}
+
+/** A sidebar tab being dragged outside its window: hint the mini window under the pointer (null id: the drag ended). */
+export function noteBrowserTabDragOutside(tabId: string | null): void {
+  miniModule?.foreignTabDrag(tabId)
+}
+
+/** ⌘K "Split Tab Off Mini Window": the last used collection's tab on screen gets a window of its own. */
+export function splitMiniWindowTab(): boolean {
+  return miniModule?.splitCurrentTab() ?? false
+}
+
+export function canSplitMiniWindowTab(): boolean {
+  return miniModule?.canSplitCurrentTab() ?? false
+}
+
+/** ⌘K "Merge Mini Windows": every floating collection joins the last used one (grouping 'tabs'). */
+export function mergeMiniWindows(): boolean {
+  return miniModule?.mergeAllMinis() ?? false
+}
+
+export function canMergeMiniWindows(): boolean {
+  return miniModule?.canMergeMinis() ?? false
+}
+
+/** ⌘K "Move Mini Window Tab Left/Right". */
+export function stepMiniWindowTab(step: -1 | 1): boolean {
+  return miniModule?.stepCurrentTab(step) ?? false
+}
+
+/** ⌘K "Move Tab to Mini Window: …": tab `tabId` joins the collection holding `targetTabId`. */
+export function moveTabToMiniWindow(tabId: string, targetTabId: string): boolean {
+  return miniModule?.moveTabToMini(tabId, targetTabId) ?? false
 }
 
 /** Put one mini window's tab back into the browser: the mini window `window`, or the one holding `tabId`. */

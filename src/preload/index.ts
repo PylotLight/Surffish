@@ -219,6 +219,14 @@ const api = {
       move: (id: string, beforeId: string | null): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move', id, beforeId),
       /** A sidebar drag ended outside the list: main moves the tab to the window under the pointer, or a new one. */
       dropOutside: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:drop-outside', id),
+      /** A sidebar drag is outside the window (id) or no longer is (null): mini windows under the pointer show a drop slot. */
+      dragOutside: (id: string | null): void => ipcRenderer.send('browser:tabs:drag-outside', id),
+      /** Another window's tab (a mini window chip) is dragged over this sidebar: where it would land (null: no hint). */
+      onExternalDrop: (callback: (hint: { beforeId: string | null } | null) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, hint: { beforeId: string | null } | null) => callback(hint)
+        ipcRenderer.on('browser:tabs:external-drop', listener)
+        return () => ipcRenderer.removeListener('browser:tabs:external-drop', listener)
+      },
       moveToNewWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move-to-new-window', id),
       newWindow: (isPrivate = false): Promise<boolean> => ipcRenderer.invoke('browser:windows:new', isPrivate),
       setMuted: (id: string, muted: boolean): Promise<boolean> => ipcRenderer.invoke('browser:tabs:mute', id, muted),

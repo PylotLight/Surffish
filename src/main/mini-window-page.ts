@@ -66,6 +66,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   .tab.active { background: var(--hover); color: var(--text); font-weight: 600; }
   .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .tab.dragging { opacity: .55; }
+  body.chip-dragging, body.chip-dragging * { cursor: grabbing !important; }
+  #caret { position: fixed; width: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; display: none; z-index: 5; }
+  #caret.on { display: block; }
+  body.drop-target #strip, body.drop-target header { box-shadow: inset 0 0 0 1px var(--accent); }
   .tab img { width: 14px; height: 14px; border-radius: 3px; flex: none; }
   .tab .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab button { width: 18px; height: 18px; font-size: 13px; border-radius: 4px; }
@@ -275,6 +279,125 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   // The tab strip (grouping 'tabs', two or more tabs).
   const strip = document.getElementById('strip')
   let dragTab = null
+  let draggedTabs = null
+  // Where the chips are (header coordinates), for main's drop slots; reported when it changes.
+  let layoutKey = ''
+  function reportStripLayout() {
+    const shown = document.body.classList.contains('tabbed')
+    const r = strip.getBoundingClientRect()
+    const chips = shown ? [...strip.querySelectorAll('.tab')].map((el) => { const c = el.getBoundingClientRect(); return { id: el.dataset.tabId, left: Math.round(c.left), width: Math.round(c.width) } }) : []
+    const layout = { strip: { x: Math.round(r.left), y: Math.round(r.top), width: shown ? Math.round(r.width) : 0, height: shown ? Math.round(r.height) : 0 }, chips }
+    const key = JSON.stringify(layout)
+    if (key === layoutKey) return
+    layoutKey = key
+    window.miniWindow.stripLayout(layout)
+  }
+  new ResizeObserver(() => reportStripLayout()).observe(strip)
+  window.addEventListener('resize', () => reportStripLayout())
+  // The insertion caret: where a dragged chip (this strip's, or a tab from elsewhere) lands.
+  const caret = document.createElement('div')
+  caret.id = 'caret'
+  document.body.append(caret)
+  function chipSlot(x) {
+    const chips = [...strip.querySelectorAll('.tab')]
+    for (const [index, el] of chips.entries()) { const r = el.getBoundingClientRect(); if (x < r.left + r.width / 2) return index }
+    return chips.length
+  }
+  function showCaret(slot) {
+    const chips = [...strip.querySelectorAll('.tab')]
+    if (slot === null || slot === undefined || chips.length === 0 || !document.body.classList.contains('tabbed')) { caret.classList.remove('on'); return }
+    const s = strip.getBoundingClientRect()
+    const at = chips[slot] ? chips[slot].getBoundingClientRect().left - 2 : chips[chips.length - 1].getBoundingClientRect().right + 1
+    caret.style.left = Math.round(at) + 'px'
+    caret.style.top = Math.round(s.top + 3) + 'px'
+    caret.style.height = Math.max(0, Math.round(s.height - 6)) + 'px'
+    caret.classList.add('on')
+  }
+  window.miniWindow.onDropHint((hint) => {
+    if (dragTab) return
+    document.body.classList.toggle('drop-target', Boolean(hint))
+    showCaret(hint ? hint.slot : null)
+  })
+  function insideStrip(event) {
+    const r = strip.getBoundingClientRect()
+    return document.body.classList.contains('tabbed') && event.clientX >= r.left && event.clientX < r.right && event.clientY >= r.top - 6 && event.clientY < r.bottom + 6
+  }
+  // Document-level listeners for the drag's lifetime (pointer capture keeps them coming outside the
+  // window; without it, a pointerup lost to another window still ends it via lostpointercapture / blur).
+  function startChipDrag(id, item, event) {
+    dragTab = { id, item, pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false, frame: 0, last: null }
+    try { item.setPointerCapture(event.pointerId) } catch {}
+    document.addEventListener('pointermove', onChipMove, true)
+    document.addEventListener('pointerup', onChipUp, true)
+    document.addEventListener('pointercancel', onChipCancel, true)
+    item.addEventListener('lostpointercapture', onChipLost)
+    document.addEventListener('keydown', onChipKey, true)
+  }
+  function finishChipDrag() {
+    const drag = dragTab
+    dragTab = null
+    document.removeEventListener('pointermove', onChipMove, true)
+    document.removeEventListener('pointerup', onChipUp, true)
+    document.removeEventListener('pointercancel', onChipCancel, true)
+    document.removeEventListener('keydown', onChipKey, true)
+    if (drag) {
+      drag.item.removeEventListener('lostpointercapture', onChipLost)
+      try { if (drag.item.hasPointerCapture(drag.pointerId)) drag.item.releasePointerCapture(drag.pointerId) } catch {}
+      if (drag.frame) cancelAnimationFrame(drag.frame)
+      drag.item.classList.remove('dragging')
+    }
+    document.body.classList.remove('chip-dragging')
+    showCaret(null)
+    if (draggedTabs) { const tabs = draggedTabs; draggedTabs = null; renderTabs(tabs) }
+    return drag
+  }
+  function onChipMove(event) {
+    if (!dragTab || event.pointerId !== dragTab.pointerId) return
+    if (!dragTab.moved) {
+      if (Math.abs(event.clientX - dragTab.x) + Math.abs(event.clientY - dragTab.y) < 6) return
+      dragTab.moved = true
+      dragTab.item.classList.add('dragging')
+      document.body.classList.add('chip-dragging')
+      window.miniWindow.tabDrag('start', dragTab.id, event.screenX, event.screenY)
+    }
+    const inside = insideStrip(event)
+    showCaret(inside ? chipSlot(event.clientX) : null)
+    // Outside the strip: main hints the drop target under the pointer (once a frame).
+    dragTab.last = inside ? null : { x: event.screenX, y: event.screenY }
+    if (!dragTab.frame) dragTab.frame = requestAnimationFrame(() => {
+      if (!dragTab) return
+      dragTab.frame = 0
+      const at = dragTab.last ?? { x: -1e6, y: -1e6 }
+      window.miniWindow.tabDrag('move', dragTab.id, at.x, at.y)
+    })
+  }
+  function onChipUp(event) {
+    if (!dragTab || event.pointerId !== dragTab.pointerId) return
+    const inside = insideStrip(event)
+    const slot = chipSlot(event.clientX)
+    const drag = finishChipDrag()
+    if (!drag.moved) return window.miniWindow.activateTab(drag.id)
+    if (inside) return window.miniWindow.moveTab(drag.id, slot)
+    window.miniWindow.tabOut(drag.id, event.screenX, event.screenY)
+  }
+  function onChipCancel() {
+    const drag = finishChipDrag()
+    if (drag && drag.moved) window.miniWindow.tabDrag('cancel', drag.id, 0, 0)
+  }
+  function onChipLost(event) {
+    // A capture lost while still pressed (not the pointerup that comes after it): give up the drag.
+    if (!dragTab || event.pointerId !== dragTab.pointerId) return
+    setTimeout(() => { if (dragTab && dragTab.pointerId === event.pointerId && !(event.buttons & 1)) onChipCancel() }, 0)
+  }
+  function onChipKey(event) {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    onChipCancel()
+  }
+  // Main caught Esc (the header rarely has the keyboard): the drag is over, the release does nothing.
+  window.miniWindow.onTabDragCancel(() => { if (dragTab) finishChipDrag() })
+  window.addEventListener('blur', () => { if (dragTab && !dragTab.moved) finishChipDrag() })
   let deferredTabs = null
   let stripKey = ''
   const chipVolumes = new Map()
@@ -285,7 +408,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     const closeButton = document.getElementById('close')
     setHint(closeButton, tabs.length > 1 ? 'Close Tab' : 'Close')
     setAttr(closeButton, 'aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
-    if (dragTab) return
+    // Mid-drag the strip stays as it is; the latest tabs render when it is let go.
+    if (dragTab) { draggedTabs = tabs; return }
     // Only a speaker changed: update the chips in place (keeps a hovered slider open).
     const key = JSON.stringify(tabs.map((tab) => [tab.tabId, tab.title, tab.faviconUrl, tab.active]))
     if (key === stripKey) {
@@ -324,34 +448,20 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
       volume.update(tab)
       chipVolumes.set(tab.tabId, volume)
       item.append(label, volume.root, close)
-      item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.miniWindow.activateTab(tab.tabId) } })
-      // Click: switch. Press and drag out of the window: split off (or onto another mini window: move there).
+      item.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.miniWindow.activateTab(tab.tabId) }
+        // ⌥⇧← / ⌥⇧→ (like the sidebar's ⌥⇧↑ / ⌥⇧↓): move the chip along the strip.
+        else if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) { event.preventDefault(); window.miniWindow.stepTab(tab.tabId, event.key === 'ArrowLeft' ? -1 : 1) }
+      })
+      // Click: switch. Press and drag: along the strip reorders; out of the window splits off, onto
+      // another mini window joins it, onto a browser window goes back to its sidebar. Esc cancels.
       item.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0) return
-        dragTab = { id: tab.tabId, item, x: event.screenX, y: event.screenY, moved: false }
-        item.setPointerCapture(event.pointerId)
+        if (event.button !== 0 || dragTab) return
+        startChipDrag(tab.tabId, item, event)
       })
-      item.addEventListener('pointermove', (event) => {
-        if (!dragTab || dragTab.item !== item) return
-        if (!dragTab.moved && Math.abs(event.screenX - dragTab.x) + Math.abs(event.screenY - dragTab.y) < 6) return
-        dragTab.moved = true
-        item.classList.add('dragging')
-      })
-      const release = (event, done) => {
-        if (!dragTab || dragTab.item !== item) return
-        const drag = dragTab
-        dragTab = null
-        item.classList.remove('dragging')
-        if (!done) return
-        if (!drag.moved) return window.miniWindow.activateTab(drag.id)
-        // Let go outside the header: main decides (split off / move into the window under the pointer).
-        const outside = event.clientY < 0 || event.clientY > window.innerHeight || event.clientX < 0 || event.clientX > window.innerWidth
-        if (outside) window.miniWindow.tabOut(drag.id, event.screenX, event.screenY)
-      }
-      item.addEventListener('pointerup', (event) => release(event, true))
-      item.addEventListener('pointercancel', (event) => release(event, false))
       return item
     }))
+    requestAnimationFrame(reportStripLayout)
   }
   // Button hints: shown in the title's place (a native tooltip would drop over the tab strip).
   const hint = document.getElementById('hint')

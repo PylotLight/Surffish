@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BaseWindow, Menu, WebContentsView, app, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
+import { BaseWindow, Menu, WebContentsView, app, globalShortcut, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import {
   MINI_WINDOW_CASCADE_STEP,
   MINI_WINDOW_GEOMETRY_FILE,
@@ -19,8 +19,8 @@ import {
   miniHeaderUrl,
   miniMergeTarget,
   miniPageBounds,
+  MINI_WINDOW_DEFAULT_SIZE,
   miniSplitBounds,
-  miniTabDrop,
   parseMiniGeometry,
   parseMiniSlots,
   planMiniHeader,
@@ -56,6 +56,7 @@ import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type Throw
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { createHeaderStateGate, type HeaderStateGate } from '../shared/mini-window-header-sync'
+import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChipDrop } from '../shared/mini-window-tab-drag'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
@@ -157,6 +158,12 @@ interface Mini {
   glide: { key: object; placed: MiniRect[] } | null
   /** Native window drags (Windows: 'moved' says when it is let go): recent window positions for the throw. */
   moveSamples: VelocityTracker
+  /** One of its strip chips is being dragged (the header stays up until it is let go or Esc). */
+  tabDrag: { tabId: string; startedAt: number } | null
+  /** Where its strip and chips are (header view coordinates), as the header page last reported them. */
+  stripLayout: MiniStripLayout | null
+  /** A tab dragged from elsewhere is over it: its strip slot is hinted (and its header kept up). */
+  dropTarget: boolean
   /**
    * Lives in the menu bar: shown as a popout under the icon (null: floating or docked). `menuOpen` /
    * `menuClosedAt`: its ⋯ menu is up / went away then (the Esc that closes the menu never also hides the popout).
@@ -497,7 +504,7 @@ function setRevealed(m: Mini, revealed: boolean): void {
 
 /** Nothing needs the header right now: hidden, not hovered or dragged, loaded, not the menu bar popout's strip. */
 function headerIdle(m: Mini): boolean {
-  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || !m.headerLoaded || !m.header) return false
+  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || m.tabDrag || m.dropTarget || !m.headerLoaded || !m.header) return false
   // Still has the keyboard (clicked, then the pointer left): keep it so the keys don't go nowhere.
   return !(live(m.header.webContents) && m.header.webContents.isFocused())
 }
@@ -569,10 +576,10 @@ function ensureHeader(m: Mini): Promise<void> {
 }
 
 function scheduleHide(m: Mini): void {
-  if (!m.revealed || m.hovered || m.hideTimer || m.headerDrag) return
+  if (!m.revealed || m.hovered || m.hideTimer || m.headerDrag || m.tabDrag || m.dropTarget) return
   m.hideTimer = setTimeout(() => {
     m.hideTimer = null
-    if (!m.hovered && !m.headerDrag) setRevealed(m, false)
+    if (!m.hovered && !m.headerDrag && !m.tabDrag && !m.dropTarget) setRevealed(m, false)
   }, HIDE_DELAY_MS)
 }
 
@@ -591,7 +598,7 @@ function pollPointer(m: Mini): void {
   const onPanel = Boolean(m.panel && !m.panel.isDestroyed() && m.panel.isVisible() && within(point, m.panel.getBounds()))
   // The pointer position says whether it is on the header (its mouseleave can go missing, e.g. from a never-focused panel).
   m.hovered = m.mount === 'panel' ? onPanel : within(point, bounds) && point.y - bounds.y < headerHeight(m)
-  if (onWindow || onPanel || m.headerDrag) cancelHide(m)
+  if (onWindow || onPanel || m.headerDrag || m.tabDrag || m.dropTarget) cancelHide(m)
   else scheduleHide(m)
 }
 
@@ -958,7 +965,33 @@ function registerIpc(): void {
   ipcMain.on('mini-window:tab-out', (event, tabId: unknown, x: unknown, y: unknown) => {
     const m = fromHeader(event)
     if (!m || typeof tabId !== 'string' || typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
-    dropTabOutside(m, tabId, { x: Math.round(x), y: Math.round(y) })
+    if (m.tabDrag) endTabDrag(m)
+    void dropTabOutside(m, tabId, { x: Math.round(x), y: Math.round(y) })
+  })
+  // A strip chip drag: 'start' once it moves, 'move' as it goes (screen point), 'cancel' (Esc / lost).
+  ipcMain.on('mini-window:tab-drag', (event, phase: unknown, tabId: unknown, x: unknown, y: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || !tabsOf(m).some((tab) => tab.tabId === tabId)) return
+    const point = typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y) ? { x: Math.round(x), y: Math.round(y) } : null
+    if (phase === 'start') startTabDrag(m, tabId)
+    else if (phase === 'move' && point && m.tabDrag?.tabId === tabId) hintTabDrag(m, tabId, point)
+    else if (phase === 'cancel') endTabDrag(m)
+  })
+  // Let go on its own strip before slot `slot` (or a keyboard step): the strip reorders.
+  ipcMain.on('mini-window:move-tab', (event, tabId: unknown, slot: unknown) => {
+    const m = fromHeader(event)
+    if (m?.tabDrag) endTabDrag(m)
+    if (!m || typeof tabId !== 'string' || typeof slot !== 'number' || !Number.isInteger(slot)) return
+    reorderTab(m, tabId, miniReorderTarget(tabsOf(m).map((tab) => tab.tabId), tabId, slot))
+  })
+  ipcMain.on('mini-window:step-tab', (event, tabId: unknown, step: unknown) => {
+    const m = fromHeader(event)
+    if (!m || typeof tabId !== 'string' || (step !== -1 && step !== 1)) return
+    reorderTab(m, tabId, miniStepTarget(tabsOf(m).map((tab) => tab.tabId), tabId, step))
+  })
+  ipcMain.on('mini-window:strip-layout', (event, layout: unknown) => {
+    const m = fromHeader(event)
+    if (m) m.stripLayout = parseStripLayout(layout)
   })
   ipcMain.on('mini-window:header-drag', (event, active: unknown) => {
     const m = fromHeader(event)
@@ -1137,6 +1170,9 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     size: { width: bounds.width, height: bounds.height },
     revealBlockedUntil: 0,
     headerDrag: null,
+    tabDrag: null,
+    stripLayout: null,
+    dropTarget: false,
     glide: null,
     moveSamples: createVelocityTracker(),
     menuBar: null
@@ -1222,6 +1258,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     stopPolling(m)
     stopHeaderDrag(m)
     stopThrow(m)
+    if (m.tabDrag) endTabDrag(m)
+    if (m.dropTarget) clearDropTarget(m)
     if (m.geometryTimer) {
       clearTimeout(m.geometryTimer)
       m.geometryTimer = null
@@ -1382,6 +1420,11 @@ function othersOnScreen(m: Mini): Array<{ mini: Mini; bounds: MiniRect }> {
   return liveMinis().filter((other) => other !== m && showing(other) && host().header(other.window)).map((other) => ({ mini: other, bounds: other.window.getBounds() }))
 }
 
+/** The other mini windows on screen as tab drop targets: the window plus its floating header. */
+function othersForTabDrop(m: Mini): Array<{ mini: Mini; bounds: MiniRect }> {
+  return liveMinis().filter((other) => other !== m && showing(other) && host().header(other.window)).map((other) => ({ mini: other, bounds: ownArea(other) }))
+}
+
 /**
  * Move every tab of `from` into `into` (its active tab stays the active one); `from` closes with its
  * last tab. `show`: bring `into` up (a header dropped on it); a merge by docking leaves it as it was.
@@ -1422,25 +1465,302 @@ function splitOff(m: Mini, tabId: string, bounds: MiniRect, dock: { dock: MiniDo
   return n
 }
 
-/** A tab dragged out of `m`'s strip and let go at `point`: onto another window it moves there, elsewhere it splits off. */
-function dropTabOutside(m: Mini, tabId: string, point: { x: number; y: number }): void {
+/**
+ * A tab dragged out of `m`'s strip and let go at `point` (resolveMiniChipDrop): onto another mini
+ * window it joins that collection at the strip slot under the pointer; onto a browser window it goes
+ * back into its sidebar at the row under the pointer; anywhere else it splits off.
+ */
+async function dropTabOutside(m: Mini, tabId: string, point: { x: number; y: number }): Promise<void> {
+  clearAllDropHints()
   if (!tabsOf(m).some((tab) => tab.tabId === tabId)) return
-  const drop = miniTabDrop(point, ownArea(m), tabsOf(m).length, othersOnScreen(m))
+  const drop = resolveMiniChipDrop(point, { own: ownArea(m), ownStrip: stripOnScreen(m), tabCount: tabsOf(m).length, minis: othersForTabDrop(m), browsers: host().browserWindows() })
   if (drop.kind === 'merge') {
-    if (tabsOf(m).find((tab) => tab.tabId === tabId)?.active) unwirePage(m)
-    if (host().adoptTab(tabId, drop.into.mini.window)) {
-      lastActive = drop.into.mini
-      layout(drop.into.mini)
-      refreshHeaderOf(drop.into.mini)
-      present(drop.into.mini, true)
+    moveTabInto(m, tabId, drop.into, slotAt(drop.into, point))
+    return
+  }
+  if (drop.kind === 'return') {
+    const active = tabsOf(m).find((tab) => tab.tabId === tabId)?.active === true
+    if (active) unwirePage(m)
+    await host().returnTabAt(m.window, tabId, drop.into, point)
+    if (!m.closed && !m.window.isDestroyed()) {
+      rewirePage(m)
+      refreshHeaderOf(m)
     }
-    if (!m.closed && !m.window.isDestroyed()) refreshHeaderOf(m)
     return
   }
   if (drop.kind !== 'split') return
   const [width = 420, height = 620] = m.window.getSize()
   const n = splitOff(m, tabId, miniSplitBounds(point, { width, height }, screen.getDisplayNearestPoint(point).workArea), null)
   if (n) void finishOpen(n, true)
+}
+
+/** Move tab `tabId` of `from` into collection `into` before strip slot `slot` (its end when null), and show it there. */
+function moveTabInto(from: Mini, tabId: string, into: Mini, slot: number | null): boolean {
+  const beforeId = slot === null ? null : tabsOf(into)[slot]?.tabId ?? null
+  if (tabsOf(from).find((tab) => tab.tabId === tabId)?.active) unwirePage(from)
+  const moved = host().adoptTab(tabId, into.window, beforeId)
+  if (moved) {
+    lastActive = into
+    layout(into)
+    refreshHeaderOf(into)
+    present(into, true)
+  }
+  if (!from.closed && !from.window.isDestroyed()) {
+    if (!moved) rewirePage(from)
+    refreshHeaderOf(from)
+  }
+  return moved
+}
+
+// ---------------------------------------------------------------------------
+// Dragging tabs: strip chips (reorder / join another collection / back to the sidebar / split off),
+// and sidebar tabs onto a mini window (shared/mini-window-tab-drag.ts has the rules).
+
+/** A chip drag that never ends (pointer lost without an up or cancel) stops by itself. */
+const TAB_DRAG_MAX_MS = 15_000
+/** How often a sidebar drag outside its window checks which mini window is under the pointer. */
+const FOREIGN_DRAG_POLL_MS = 50
+
+interface MiniStripLayout { strip: MiniRect; chips: Array<{ id: string; left: number; width: number }> }
+
+function parseStripLayout(value: unknown): MiniStripLayout | null {
+  if (!value || typeof value !== 'object') return null
+  const { strip, chips } = value as { strip?: unknown; chips?: unknown }
+  const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+  const rect = strip as Partial<MiniRect> | null
+  if (!rect || !num(rect.x) || !num(rect.y) || !num(rect.width) || !num(rect.height) || !Array.isArray(chips)) return null
+  const parsed = chips.flatMap((chip: unknown) => {
+    const c = chip as { id?: unknown; left?: unknown; width?: unknown } | null
+    return c && typeof c.id === 'string' && num(c.left) && num(c.width) ? [{ id: c.id, left: c.left, width: c.width }] : []
+  })
+  return { strip: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, chips: parsed }
+}
+
+/** The header view's top-left on screen (null while it isn't on screen). */
+function headerOrigin(m: Mini): { x: number; y: number } | null {
+  if (m.closed || m.window.isDestroyed() || !m.window.isVisible()) return null
+  const owner = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
+  if (!owner || owner.isDestroyed() || !owner.isVisible()) return null
+  if (!m.header) return null
+  const view = m.header.getBounds()
+  if (view.height <= 0 || view.width <= 0) return null
+  const content = owner.getContentBounds()
+  return { x: content.x + view.x, y: content.y + view.y }
+}
+
+/** `m`'s strip on screen, when it is showing (revealed with two or more tabs, or the popout's). */
+function stripOnScreen(m: Mini): MiniRect | null {
+  const origin = headerOrigin(m)
+  const layout = m.stripLayout
+  if (!origin || !layout || layout.chips.length === 0 || layout.strip.width <= 0) return null
+  if (!m.header || layout.strip.y + layout.strip.height > m.header.getBounds().height) return null
+  return { x: origin.x + layout.strip.x, y: origin.y + layout.strip.y, width: layout.strip.width, height: layout.strip.height }
+}
+
+/** The strip slot a drop at `point` takes in `m` (null: no strip on screen, so the end). */
+function slotAt(m: Mini, point: { x: number; y: number }): number | null {
+  const origin = headerOrigin(m)
+  if (!origin || !stripOnScreen(m) || !m.stripLayout) return null
+  return miniStripInsertIndex(point.x - origin.x, m.stripLayout.chips)
+}
+
+function reorderTab(m: Mini, tabId: string, index: number): void {
+  if (index < 0 || !host().reorderTab(m.window, tabId, index)) return
+  refreshHeaderOf(m)
+}
+
+/** Esc anywhere ends a drag (the header rarely has the keyboard: it never takes focus from the page). */
+let escapeOwner: Mini | 'foreign' | null = null
+function grabEscape(owner: Mini | 'foreign'): void {
+  if (escapeOwner) {
+    escapeOwner = owner
+    return
+  }
+  try {
+    if (globalShortcut.register('Escape', onDragEscape)) escapeOwner = owner
+  } catch {
+    // The page's own Esc handling in the header still cancels.
+  }
+}
+function releaseEscape(owner: Mini | 'foreign'): void {
+  if (escapeOwner !== owner) return
+  escapeOwner = null
+  try { globalShortcut.unregister('Escape') } catch { /* gone */ }
+}
+function onDragEscape(): void {
+  const owner = escapeOwner
+  if (owner && owner !== 'foreign') {
+    const contents = owner.header?.webContents
+    if (live(contents)) contents.send('mini-window:tab-drag-cancel')
+    endTabDrag(owner)
+  } else {
+    releaseEscape('foreign')
+  }
+}
+
+function startTabDrag(m: Mini, tabId: string): void {
+  m.tabDrag = { tabId, startedAt: Date.now() }
+  cancelHide(m)
+  grabEscape(m)
+}
+
+function endTabDrag(m: Mini): void {
+  m.tabDrag = null
+  releaseEscape(m)
+  clearAllDropHints()
+  if (m.revealed) scheduleHide(m)
+}
+
+/** Hint what letting go of `m`'s chip at `point` would do: a slot in the collection under it, or a line in the sidebar. */
+function hintTabDrag(m: Mini, tabId: string, point: { x: number; y: number }): void {
+  if (m.tabDrag && Date.now() - m.tabDrag.startedAt > TAB_DRAG_MAX_MS) return endTabDrag(m)
+  const drop = resolveMiniChipDrop(point, { own: ownArea(m), ownStrip: stripOnScreen(m), tabCount: tabsOf(m).length, minis: othersForTabDrop(m), browsers: host().browserWindows() })
+  hintMini(drop.kind === 'merge' ? drop.into : null, point)
+  if (drop.kind === 'return') void host().dropHintAt(drop.into, point, tabId)
+  else host().clearDropHint()
+}
+
+/** Show `target`'s drop slot for `point` (revealing its header so the strip is there); every other mini clears. */
+function hintMini(target: Mini | null, point: { x: number; y: number }): void {
+  for (const other of liveMinis()) if (other !== target && other.dropTarget) clearDropTarget(other)
+  if (!target) return
+  if (!target.dropTarget) {
+    target.dropTarget = true
+    if (!target.menuBar) setRevealed(target, true)
+  }
+  const slot = slotAt(target, point)
+  const contents = target.header?.webContents
+  if (live(contents)) contents.send('mini-window:drop-hint', { slot })
+}
+
+function clearDropTarget(m: Mini): void {
+  m.dropTarget = false
+  const contents = m.header?.webContents
+  if (live(contents)) contents.send('mini-window:drop-hint', null)
+  if (m.revealed && !m.closed) scheduleHide(m)
+}
+
+function clearAllDropHints(): void {
+  for (const m of liveMinis()) if (m.dropTarget) clearDropTarget(m)
+  try { host().clearDropHint() } catch { /* host gone */ }
+}
+
+/** The mini window (a collection, on screen) under `point`, the floating header counting as part of it. */
+function miniAt(point: { x: number; y: number }): Mini | null {
+  return liveMinis().find((m) => showing(m) && host().header(m.window) && within(point, ownArea(m))) ?? null
+}
+
+let foreignDrag: { tabId: string; timer: ReturnType<typeof setInterval> } | null = null
+
+/** A sidebar tab is dragged outside its window (null: back in, or let go): hint the mini window under the pointer. */
+export function foreignTabDrag(tabId: string | null): void {
+  if (foreignDrag) clearInterval(foreignDrag.timer)
+  foreignDrag = null
+  if (!tabId || !host().canPopOut(tabId)) {
+    releaseEscape('foreign')
+    for (const m of liveMinis()) if (m.dropTarget) clearDropTarget(m)
+    return
+  }
+  const startedAt = Date.now()
+  const timer = setInterval(() => {
+    if (Date.now() - startedAt > TAB_DRAG_MAX_MS) return foreignTabDrag(null)
+    const point = screen.getCursorScreenPoint()
+    const target = miniAt(point)
+    hintMini(target && (grouping() === 'tabs' || tabsOf(target).length > 0) ? target : null, point)
+  }, FOREIGN_DRAG_POLL_MS)
+  foreignDrag = { tabId, timer }
+}
+
+/**
+ * A sidebar tab let go at `point`: over a mini window, grouping 'tabs' adds it to that collection at
+ * the strip slot under the pointer; the other groupings open it in a window of its own there. False
+ * when no mini window is under the pointer (or it can't go: the cap, private vs normal).
+ */
+export function dropForeignTab(tabId: string, point: { x: number; y: number }): boolean {
+  const target = miniAt(point)
+  if (foreignDrag?.tabId === tabId) foreignTabDrag(null)
+  for (const m of liveMinis()) if (m.dropTarget) clearDropTarget(m)
+  if (!target || target.menuBar && !target.menuBar.popout.shown() || atCap()) return false
+  if (grouping() === 'tabs') {
+    const slot = slotAt(target, point)
+    if (!host().adoptTab(tabId, target.window, slot === null ? null : tabsOf(target)[slot]?.tabId ?? null)) return false
+    lastActive = target
+    void finishOpen(target, true)
+    return true
+  }
+  const n = createMini({ bounds: miniSplitBounds(point, MINI_WINDOW_DEFAULT_SIZE, screen.getDisplayNearestPoint(point).workArea), dock: null })
+  if (!n) return false
+  if (!host().adoptTab(tabId, n.window)) {
+    if (!n.window.isDestroyed()) n.window.close()
+    return false
+  }
+  void finishOpen(n, true)
+  return true
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard (⌘K palette, and ⌥⇧←/→ on a focused strip chip): split, merge, move.
+
+/** Palette "Split Tab Off Mini Window": the last used collection's tab on screen gets a window of its own beside it. */
+export function splitCurrentTab(): boolean {
+  const m = currentMini()
+  const tabs = m ? tabsOf(m) : []
+  const active = tabs.find((tab) => tab.active)
+  if (!m || tabs.length < 2 || !active) return false
+  const bounds = cascadeMiniBounds(m.window.getBounds(), liveMinis().map((other) => other.window.getBounds()), screen.getDisplayMatching(m.window.getBounds()).workArea)
+  const n = splitOff(m, active.tabId, bounds, null)
+  if (!n) return false
+  void finishOpen(n, true)
+  return true
+}
+
+/** Can the palette split the last used collection (grouping 'tabs', two or more tabs)? */
+export function canSplitCurrentTab(): boolean {
+  const m = currentMini()
+  return grouping() === 'tabs' && Boolean(m && tabsOf(m).length > 1)
+}
+
+/** Floating collections that a merge can gather (not the menu bar's, which keeps its own). */
+function mergeable(): Mini[] {
+  return liveMinis().filter((m) => !m.menuBar && host().header(m.window))
+}
+
+/** Palette "Merge Mini Windows": every floating collection joins the last used one (grouping 'tabs'). */
+export function mergeAllMinis(): boolean {
+  if (grouping() !== 'tabs') return false
+  const into = currentMini()
+  if (!into) return false
+  let any = false
+  for (const m of mergeable()) if (m !== into) any = mergeInto(m, into, false) || any
+  if (any) present(into, true)
+  return any
+}
+
+export function canMergeMinis(): boolean {
+  return grouping() === 'tabs' && mergeable().length > 1
+}
+
+/** Palette "Move Mini Window Tab Left/Right": the last used collection's tab on screen, one step. */
+export function stepCurrentTab(step: -1 | 1): boolean {
+  const m = currentMini()
+  const active = m ? tabsOf(m).find((tab) => tab.active) : undefined
+  if (!m || !active) return false
+  const to = miniStepTarget(tabsOf(m).map((tab) => tab.tabId), active.tabId, step)
+  if (to < 0 || !host().reorderTab(m.window, active.tabId, to)) return false
+  refreshHeaderOf(m)
+  return true
+}
+
+/** Palette "Move Tab to Mini Window: …": a browser tab (or another collection's) joins the collection holding `targetTabId`. */
+export function moveTabToMini(tabId: string, targetTabId: string): boolean {
+  const into = miniWithTab(targetTabId)
+  if (!into || grouping() !== 'tabs' || miniWithTab(tabId) === into || atCap()) return false
+  const from = miniWithTab(tabId)
+  if (from) return moveTabInto(from, tabId, into, null)
+  if (!host().adoptTab(tabId, into.window)) return false
+  lastActive = into
+  void finishOpen(into, true)
+  return true
 }
 
 /** Settings → Mini window grouping changed: regroup what is open (planMiniRegroup). */
@@ -1595,11 +1915,11 @@ export function focusMini(tabId: string): boolean {
 }
 
 /** Open mini window tabs (a collection's in strip order), oldest window first, for the Window menu and the palette. */
-export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean; menuBar: boolean }> {
+export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean; menuBar: boolean; active: boolean }> {
   return liveMinis().flatMap((m) => {
     const focused = m.window.isFocused()
     const tucked = m.dock.isTucked() || (m.menuBar !== null && !m.menuBar.popout.shown())
-    return tabsOf(m).map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Mini Window', tucked, focused: focused && tab.active, menuBar: m.menuBar !== null }))
+    return tabsOf(m).map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Mini Window', tucked, focused: focused && tab.active, menuBar: m.menuBar !== null, active: tab.active }))
   })
 }
 

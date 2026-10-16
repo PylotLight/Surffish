@@ -328,7 +328,8 @@ async function run() {
   await smoke.evaluate(header, `window.miniWindow.tabOut(${JSON.stringify(h2.id)}, ${onPanel.x}, ${onPanel.y}); true`)
   await delay(600)
   assert.equal(miniWindows().length, 1, 'let go on its own panel: nothing happens')
-  const splitAt = { x: wa.x + 300, y: wa.y + 360 }
+  // Open desktop below the browser window (0..700; a drop on it puts the tab back in its sidebar).
+  const splitAt = { x: wa.x + 300, y: wa.y + 760 }
   await smoke.evaluate(header, `window.miniWindow.tabOut(${JSON.stringify(h2.id)}, ${splitAt.x}, ${splitAt.y}); true`)
   const w2 = await waitFor(() => { const win = miniWith(h2); return win && win !== w1 ? win : null }, 'h2 in a window of its own')
   await waitFor(() => w2.isVisible(), 'the split window shows')

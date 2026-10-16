@@ -57,7 +57,7 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
  * Neighbours slide out of the way while dragging, the dropped tab glides into its slot,
  * and new / closed / reordered tabs animate too.
  */
-export function useTabDragSort(ids: readonly string[], onMove: (id: string, beforeId: string | null) => void, onDropOutside?: (id: string) => void) {
+export function useTabDragSort(ids: readonly string[], onMove: (id: string, beforeId: string | null) => void, onDropOutside?: (id: string) => void, onOutsideChange?: (id: string | null) => void) {
   const listRef = useRef<HTMLDivElement>(null)
   const drag = useRef<DragState | null>(null)
   const suppressClick = useRef(false)
@@ -140,6 +140,8 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
     drag.current = null
     setDraggingId(null)
     if (!state?.started) return
+    // After the drop (same IPC pipe, so main sees the drop first): clears any mini window drop hint.
+    const wasOutside = state.outside
     suppressClick.current = true
     window.setTimeout(() => { suppressClick.current = false }, 0)
     const dragged = state.slots[state.from]
@@ -147,6 +149,7 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
     // Dropped outside the list: main moves it to the window under the pointer or tears it into a new one.
     const droppedOutside = commit && state.outside && onDropOutside !== undefined
     if (droppedOutside) onDropOutside(state.id)
+    if (wasOutside) onOutsideChange?.(null)
     if (commit && !droppedOutside && state.target !== state.from) {
       // Capture where everything is drawn right now (mid-drag) so the FLIP pass glides from there.
       rememberTops(true)
@@ -164,7 +167,7 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
         window.setTimeout(() => { slot.el.style.transition = ''; slot.el.style.zIndex = '' }, SETTLE_MS + 20)
       }
     }
-  }, [onMove, onDropOutside, rememberTops])
+  }, [onMove, onDropOutside, onOutsideChange, rememberTops])
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>, id: string): void => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
@@ -201,7 +204,9 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
     const clamped = Math.max(state.minDy - 8, Math.min(state.maxDy + 8, dy))
     const dragged = state.slots[state.from]!
     if (onDropOutside) {
-      state.outside = isOutsideSurface(event.clientX, event.clientY, window.innerWidth, window.innerHeight)
+      const outside = isOutsideSurface(event.clientX, event.clientY, window.innerWidth, window.innerHeight)
+      if (outside !== state.outside) onOutsideChange?.(outside ? state.id : null)
+      state.outside = outside
       // Faded while it would leave the window on release.
       dragged.el.style.opacity = state.outside ? '0.55' : ''
     }
@@ -219,7 +224,7 @@ export function useTabDragSort(ids: readonly string[], onMove: (id: string, befo
       })
     }
     event.preventDefault()
-  }, [items, onDropOutside])
+  }, [items, onDropOutside, onOutsideChange])
 
   const onPointerUp = useCallback((event: ReactPointerEvent<HTMLElement>): void => {
     if (drag.current?.pointerId === event.pointerId) finish(true)
