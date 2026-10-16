@@ -34,7 +34,7 @@ import {
   type MiniWindowHeaderState,
   type MiniWindowSettings
 } from '../shared/mini-window'
-import { dockArrow, dockedBounds, type MiniDock } from '../shared/mini-window-dock'
+import { dockArrow, dockedBounds, keepBelowTopEdge, type MiniDisplay, type MiniDock } from '../shared/mini-window-dock'
 import {
   MINI_MENU_BAR_DEFAULT_SIZE,
   MINI_WINDOW_MENU_BAR_FILE,
@@ -277,6 +277,20 @@ function sameRect(a: MiniRect, b: MiniRect): boolean {
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 }
 
+function miniDisplay(display: Display): MiniDisplay {
+  return { bounds: display.bounds, workArea: display.workArea }
+}
+
+function allMiniDisplays(): MiniDisplay[] {
+  return screen.getAllDisplays().map(miniDisplay)
+}
+
+/** `rect` with `top` px taken off its top (never below one px tall). */
+function insetTop(rect: MiniRect, top: number): MiniRect {
+  const cut = Math.max(0, Math.min(top, rect.height - 1))
+  return { ...rect, y: rect.y + cut, height: rect.height - cut }
+}
+
 function within(point: { x: number; y: number }, rect: MiniRect): boolean {
   return point.x >= rect.x && point.x < rect.x + rect.width && point.y >= rect.y && point.y < rect.y + rect.height
 }
@@ -499,7 +513,9 @@ function startHeaderDrag(m: Mini): void {
     const dy = cursor.y - drag.startCursor.y
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < HEADER_DRAG_THRESHOLD) return true
     drag.moved = true
-    const next = { ...drag.startBounds, x: drag.startBounds.x + dx, y: drag.startBounds.y + dy }
+    // Never under the menu bar (macOS keeps a native drag out of it; this drag is ours): the header
+    // floating above stays below the work area's top, where it can be grabbed again.
+    const next = keepBelowTopEdge({ ...drag.startBounds, x: drag.startBounds.x + dx, y: drag.startBounds.y + dy }, drag.side === 'above' ? headerHeight(m) : 0, miniDisplay(screen.getDisplayNearestPoint(cursor)), allMiniDisplays())
     if (sameRect(m.window.getBounds(), next)) return true
     m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
     placeWindow(m.window, next)
@@ -569,7 +585,9 @@ function throwMini(m: Mini, v: ThrowVelocity): boolean {
     scheduleGeometrySave(m)
     return true
   }
-  const plan = planGlide(from, v, screen.getAllDisplays().map((display) => ({ workArea: display.workArea })))
+  // A header floating above the window stays below the top of the work area (not under the menu bar).
+  const above = m.plan.kind === 'above' ? headerHeight(m) : 0
+  const plan = planGlide(from, v, screen.getAllDisplays().map((display) => ({ workArea: insetTop(display.workArea, above) })))
   if (!plan) return false
   const glide: NonNullable<Mini['glide']> = { key: {}, placed: [from] }
   m.glide = glide

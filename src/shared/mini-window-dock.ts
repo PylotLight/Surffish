@@ -121,6 +121,21 @@ export function nearestDockEdge(rect: MiniRect, display: MiniDisplay, displays: 
   return best
 }
 
+/**
+ * A window main moves itself (dragged by its floating header, or thrown): the OS keeps a natively
+ * dragged window out from under the macOS menu bar, but a window main places can go anywhere, and its
+ * header (the panel `above` px tall over it, or the window's own top when 0) would slide under the
+ * menu bar, out of reach. Keeps `rect`'s top minus `above` at or below the work area's top where that
+ * is an outer edge of `display` (with a display above it there, dragging up onto that one is fine).
+ * Docking to the top still works: pressing the pointer against the screen's top edge docks there.
+ */
+export function keepBelowTopEdge(rect: MiniRect, above: number, display: MiniDisplay, displays: readonly MiniDisplay[]): MiniRect {
+  const top = display.workArea.y + Math.max(0, above)
+  if (rect.y >= top) return rect
+  if (!isOuterEdge(display, 'top', displays, [rect.x, rect.x + rect.width])) return rect
+  return { ...rect, y: top }
+}
+
 /** Keep the window's start along the edge inside the work area. */
 export function clampDockOffset(offset: number, length: number, edge: MiniDockEdge, workArea: MiniRect): number {
   const room = (isHorizontalEdge(edge) ? workArea.width : workArea.height) - length
@@ -135,37 +150,44 @@ export function dockFor(rect: MiniRect, edge: MiniDockEdge, workArea: MiniRect):
 }
 
 /**
- * Where the window goes when docked: `tucked` fully past the edge (just off the work area), else
- * flush against it. Size is the window's own, shrunk to fit the work area.
+ * Where the window goes when docked: `tucked` fully past the edge, else flush against it. Size is the
+ * window's own, shrunk to fit the work area. Tucked, it goes past the work area's edge, and past the
+ * display's own edge too when `screen` (the display's bounds) reaches further: the band between them
+ * is the macOS menu bar (taller under a notch), the Dock or a taskbar, and a window left in it shows
+ * through a translucent menu bar or Dock, or sits over a taskbar.
  */
-export function dockedBounds(size: { width: number; height: number }, dock: MiniDock, workArea: MiniRect, tucked: boolean): MiniRect {
+export function dockedBounds(size: { width: number; height: number }, dock: MiniDock, workArea: MiniRect, tucked: boolean, screen?: MiniRect): MiniRect {
   const width = Math.min(Math.round(size.width), workArea.width)
   const height = Math.min(Math.round(size.height), workArea.height)
   const horizontal = isHorizontalEdge(dock.edge)
   const offset = clampDockOffset(dock.offset, horizontal ? width : height, dock.edge, workArea)
   const along = horizontal ? workArea.x + offset : workArea.y + offset
+  const s = screen ?? workArea
   switch (dock.edge) {
-    case 'left': return { x: tucked ? workArea.x - width : workArea.x, y: along, width, height }
-    case 'right': return { x: tucked ? workArea.x + workArea.width : workArea.x + workArea.width - width, y: along, width, height }
-    case 'top': return { x: along, y: tucked ? workArea.y - height : workArea.y, width, height }
-    case 'bottom': return { x: along, y: tucked ? workArea.y + workArea.height : workArea.y + workArea.height - height, width, height }
+    case 'left': return { x: tucked ? Math.min(workArea.x, s.x) - width : workArea.x, y: along, width, height }
+    case 'right': return { x: tucked ? Math.max(workArea.x + workArea.width, s.x + s.width) : workArea.x + workArea.width - width, y: along, width, height }
+    case 'top': return { x: along, y: tucked ? Math.min(workArea.y, s.y) - height : workArea.y, width, height }
+    case 'bottom': return { x: along, y: tucked ? Math.max(workArea.y + workArea.height, s.y + s.height) : workArea.y + workArea.height - height, width, height }
   }
 }
 
 /**
  * The handle tab for a window at `rect` docked to `edge`: on the window's inner edge (the side facing
- * the screen), centred along it. Tucked, that inner edge is the screen edge itself.
+ * the screen), centred along it. Tucked, that inner edge is the screen edge itself. With `workArea`,
+ * it never goes past the work area's edge: a window tucked past the menu bar (or the Dock, a taskbar)
+ * leaves its handle just inside, where it can be seen and clicked, not under the bar.
  */
-export function dockHandleBounds(rect: MiniRect, edge: MiniDockEdge): MiniRect {
+export function dockHandleBounds(rect: MiniRect, edge: MiniDockEdge, workArea?: MiniRect): MiniRect {
   const t = MINI_DOCK_HANDLE_THICKNESS
   const l = MINI_DOCK_HANDLE_LENGTH
   const midX = Math.round(rect.x + rect.width / 2 - l / 2)
   const midY = Math.round(rect.y + rect.height / 2 - l / 2)
+  const wa = workArea
   switch (edge) {
-    case 'left': return { x: rect.x + rect.width, y: midY, width: t, height: l }
-    case 'right': return { x: rect.x - t, y: midY, width: t, height: l }
-    case 'top': return { x: midX, y: rect.y + rect.height, width: l, height: t }
-    case 'bottom': return { x: midX, y: rect.y - t, width: l, height: t }
+    case 'left': return { x: wa ? Math.max(rect.x + rect.width, wa.x) : rect.x + rect.width, y: midY, width: t, height: l }
+    case 'right': return { x: wa ? Math.min(rect.x - t, wa.x + wa.width - t) : rect.x - t, y: midY, width: t, height: l }
+    case 'top': return { x: midX, y: wa ? Math.max(rect.y + rect.height, wa.y) : rect.y + rect.height, width: l, height: t }
+    case 'bottom': return { x: midX, y: wa ? Math.min(rect.y - t, wa.y + wa.height - t) : rect.y - t, width: l, height: t }
   }
 }
 
@@ -266,9 +288,9 @@ export function dockHandleAlong(rect: MiniRect, edge: MiniDockEdge): number {
   return isHorizontalEdge(edge) ? bounds.x : bounds.y
 }
 
-/** The handle bounds with its place along the edge moved to `along`. */
-export function dockHandleAt(rect: MiniRect, edge: MiniDockEdge, along: number): MiniRect {
-  const bounds = dockHandleBounds(rect, edge)
+/** The handle bounds with its place along the edge moved to `along` (kept inside `workArea` like dockHandleBounds). */
+export function dockHandleAt(rect: MiniRect, edge: MiniDockEdge, along: number, workArea?: MiniRect): MiniRect {
+  const bounds = dockHandleBounds(rect, edge, workArea)
   return isHorizontalEdge(edge) ? { ...bounds, x: along } : { ...bounds, y: along }
 }
 

@@ -345,6 +345,14 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     return { width, height }
   }
 
+  /**
+   * Where the window goes docked to `d` on `display`: flush with the work area's edge when out; tucked,
+   * past the display's own edge too (never left in the menu bar / Dock / taskbar band).
+   */
+  function dockedRect(d: MiniDock, isTucked: boolean, display: Display = dockDisplay()): MiniRect {
+    return dockedBounds(size(), d, display.workArea, isTucked, display.bounds)
+  }
+
   /** Place the window ourselves (not a user drop): in a frame it commits with everything else that moves. */
   function setOwnBounds(rect: MiniRect): void {
     ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
@@ -455,7 +463,9 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (isFollower(registration)) return closeHandle()
     const h = ensureHandle()
     // Settled on the screen edge beside other tucked handles: at its spread-out place along it.
-    const bounds = tucked && along !== null && !sliding && !drag ? dockHandleAt(rect, dock.edge, along) : dockHandleBounds(rect, dock.edge)
+    // Kept inside the work area: a window tucked past the menu bar leaves its handle just under it.
+    const wa = dockDisplay().workArea
+    const bounds = tucked && along !== null && !sliding && !drag ? dockHandleAt(rect, dock.edge, along, wa) : dockHandleBounds(rect, dock.edge, wa)
     if (!h.size || h.size.width !== bounds.width || h.size.height !== bounds.height) {
       h.size = { width: bounds.width, height: bounds.height }
       h.view.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height })
@@ -592,9 +602,8 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     const current = dock
     if (!current) return false
     tucked = true
-    const wa = dockDisplay().workArea
-    const from = win.isVisible() ? currentRect() : dockedBounds(size(), current, wa, true)
-    slide(from, dockedBounds(size(), current, wa, true), () => {
+    const from = win.isVisible() ? currentRect() : dockedRect(current, true)
+    slide(from, dockedRect(current, true), () => {
       // Off-screen and hidden: no painting, no stray pixels on a neighbouring display. The tab stays put.
       if (tucked && win.isVisible()) win.hide()
       relayoutHandles()
@@ -610,19 +619,18 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
 
   function slideOutOne(focus: boolean, offset?: number): void {
     if (!alive() || !dock) return
-    const wa = dockDisplay().workArea
     if (offset !== undefined && offset !== dock.offset) {
       dock = { ...dock, offset }
       remember()
     }
-    const target = dockedBounds(size(), dock, wa, false)
+    const target = dockedRect(dock, false)
     if (!tucked && win.isVisible() && !sliding && sameRect(win.getBounds(), target)) {
       if (focus) host.focusPage()
       return
     }
     tucked = false
     const shown = win.isVisible()
-    const from = shown ? currentRect() : dockedBounds(size(), dock, wa, true)
+    const from = shown ? currentRect() : dockedRect(dock, true)
     if (!shown) {
       setOwnBounds(from)
       win.showInactive()
@@ -678,7 +686,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
   function moveAlong(offset: number): void {
     if (!dock || offset === dock.offset) return
     dock = { ...dock, offset }
-    const rect = dockedBounds(size(), dock, dockDisplay().workArea, tucked)
+    const rect = dockedRect(dock, tucked)
     setOwnBounds(rect)
     placeHandle(rect, 'moving')
     // The others on this edge make room (and swap places as it passes them).
@@ -839,7 +847,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (!alive() || !dock) return
     if (isFollower(registration)) return closeHandle()
     if (sliding || drag) return sendHandleState()
-    if (tucked) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true))
+    if (tucked) placeHandle(dockedRect(dock, true))
     else if (win.isVisible()) placeHandle(win.getBounds())
   }
 
@@ -863,7 +871,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     placeOut: (offset) => {
       if (!alive() || !dock || tucked || sliding || drag) return
       dock = { ...dock, offset }
-      const rect = dockedBounds(size(), dock, dockDisplay().workArea, false)
+      const rect = dockedRect(dock, false)
       // In the leader's frame: same tick as the leader (and its header).
       setOwnBounds(rect)
       placeHandle(rect, 'moving')
@@ -882,7 +890,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     onEdge: () => {
       if (!alive() || !dock || !tucked || sliding) return null
       const display = dockDisplay()
-      const rect = dockedBounds(size(), dock, display.workArea, true)
+      const rect = dockedRect(dock, true, display)
       // The one being dragged stays under the pointer; the rest arrange around it.
       return { key: `${display.id}:${dock.edge}`, edge: dock.edge, desired: dockHandleAlong(rect, dock.edge), workArea: display.workArea }
     },
@@ -890,7 +898,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       const settled = next === null || drag ? null : next
       if (settled === along) return
       along = settled
-      if (alive() && dock && tucked && !sliding && handle && !handle.window.isDestroyed()) placeHandle(dockedBounds(size(), dock, dockDisplay().workArea, true), 'glide')
+      if (alive() && dock && tucked && !sliding && handle && !handle.window.isDestroyed()) placeHandle(dockedRect(dock, true), 'glide')
     }
   }
   controllers.add(registration)
@@ -916,7 +924,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     dock = next
     displayId = display.id
     if (groupKey() !== before) joinedAt = ++joinCounter
-    const rect = dockedBounds(size(), dock, display.workArea, tucked)
+    const rect = dockedRect(dock, tucked, display)
     setOwnBounds(rect)
     placeHandle(rect)
     remember()
@@ -1004,7 +1012,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       if (home.id === display.id && distanceFromDockEdge(bounds, dock.edge, home.workArea) <= MINI_DOCK_RELEASE_DISTANCE) {
         // Nudged along the edge: stay docked there.
         dockTo(dock.edge, home)
-        const rect = dockedBounds(size(), dock, home.workArea, false)
+        const rect = dockedRect(dock, false, home)
         setOwnBounds(rect)
         placeHandle(rect)
         // 'stack': the group closes up behind its leader (a follower nudged out of line goes back into it).
