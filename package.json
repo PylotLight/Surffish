@@ -63,6 +63,7 @@
   "test:electron-mini-window-menubar": "electron scripts/electron-mini-window-menubar-smoke.cjs",
     "test:electron-tab-volume": "electron scripts/electron-tab-volume-smoke.cjs",
     "test:electron-settings": "electron scripts/electron-settings-smoke.cjs",
+    "test:electron-settings-tab": "electron scripts/electron-settings-tab-smoke.cjs",
     "test:electron-settings-search": "electron scripts/electron-settings-search-smoke.cjs",
     "test:electron-newtab-customize": "electron scripts/electron-newtab-customize-smoke.cjs",
     "test:electron-newtab-clock": "electron scripts/electron-newtab-clock-smoke.cjs",
