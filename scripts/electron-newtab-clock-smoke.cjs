@@ -85,7 +85,13 @@ async function run() {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '${value}')
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })()`)
-  const reveal = (label, root = scope) => ev(`document.querySelector('${root} [aria-label="${label}"]').scrollIntoView({ block: 'center' })`)
+  // Scroll only the settings list (scrollIntoView would also scroll the overflow-hidden New Tab page).
+  const reveal = (label, root = scope) => ev(`(() => {
+    const control = document.querySelector('${root} [aria-label="${label}"]')
+    let scroller = control.parentElement
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+    if (scroller) scroller.scrollTop += control.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientHeight / 2
+  })()`)
   const setSelect = (label, value) => ev(`(() => {
     const select = document.querySelector('${scope} [aria-label="${label}"]')
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '${value}')
