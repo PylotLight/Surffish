@@ -6,6 +6,7 @@ import {
   glanceTitle,
   glanceUrlFromText,
   glanceWindowOpenAction,
+  glanceZoomAction,
   isGlanceableUrl,
   isShiftClickLinkOpen,
   parseGlanceSettings,
@@ -109,6 +110,14 @@ describe('glanceKeyAction', () => {
     expect(glanceKeyAction(key({ key: '=', control: true }), false)).toBe('zoom-in')
     expect(glanceKeyAction(key({ key: '-', control: true, isAutoRepeat: true }), false)).toBe('zoom-out')
     expect(glanceKeyAction(key({ key: '0', control: true }), false)).toBe('zoom-reset')
+  })
+  test('zoom keys map to the shared page-zoom steps (persisted per origin like a tab)', () => {
+    expect(glanceZoomAction('zoom-in')).toBe('in')
+    expect(glanceZoomAction('zoom-out')).toBe('out')
+    expect(glanceZoomAction('zoom-reset')).toBe('reset')
+    expect(glanceZoomAction('reload')).toBeNull()
+    expect(glanceZoomAction(null)).toBeNull()
+    expect(glanceZoomAction(glanceKeyAction(key({ key: '=', meta: true }), true))).toBe('in')
   })
   test('editing keys and typing stay with the page', () => {
     for (const k of ['a', 'c', 'v', 'x', 'z']) expect(glanceKeyAction(key({ key: k, meta: true }), true)).toBeNull()

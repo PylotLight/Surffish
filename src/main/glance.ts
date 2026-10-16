@@ -8,17 +8,19 @@ import {
   glanceLayout,
   glanceTitle,
   glanceWindowOpenAction,
+  glanceZoomAction,
   isGlanceableUrl,
   type GlanceHeaderState
 } from '../shared/glance'
 import { POPOVER_DISMISS_CHANNEL } from '../shared/popover-dismiss'
-import { stepZoomFactor } from '../shared/zoom'
+import { zoomActionForWheel, type PageZoomAction } from '../shared/zoom'
 import { sendToWindowRenderers } from './browser-shell'
 import { emitGlanceLinkHover, getGlanceHost, type GlanceHost, type GlanceSource } from './glance-entry'
 import { GLANCE_PAGE_HTML } from './glance-page'
 import { guardPageDragRegions } from './page-drag-guard'
 import { showBrowserContextMenu } from './context-menu'
 import { recordBrowsingVisit, updateLatestVisitTitle } from './history'
+import { applySavedPageZoom, enablePagePinchZoom, stepPageZoom } from './page-zoom'
 
 /**
  * Glance: a link opened in a floating sheet over the current tab. Lazy chunk (glance-entry.ts
@@ -147,19 +149,31 @@ function handleKey(glance: Glance, event: Electron.Event, input: Electron.Input)
     return
   }
   if (!live(page)) return
+  const zoom = glanceZoomAction(action)
+  if (zoom) return void zoomGlance(glance, zoom)
   switch (action) {
     case 'reload': page.reload(); break
     case 'back': if (page.navigationHistory.canGoBack()) page.navigationHistory.goBack(); break
     case 'forward': if (page.navigationHistory.canGoForward()) page.navigationHistory.goForward(); break
-    case 'zoom-in': case 'zoom-out': case 'zoom-reset':
-      page.setZoomFactor(action === 'zoom-reset' ? 1 : stepZoomFactor(page.getZoomFactor(), action === 'zoom-in' ? 1 : -1))
-      break
   }
+}
+
+/** Zoom the glance page like a tab: remembered per origin (in memory only for a private tab). */
+function zoomGlance(glance: Glance, action: PageZoomAction): void {
+  if (glance.ended) return
+  stepPageZoom(glance.page.webContents, action, glance.source.isPrivate)
 }
 
 function wirePage(glance: Glance): void {
   const contents = glance.page.webContents
   const { source } = glance
+  // Trackpad pinch / smart zoom, like a tab (Electron's default visual zoom limits are 1,1).
+  enablePagePinchZoom(contents)
+  // Ctrl+wheel (and Windows precision-touchpad zoom) step the glance page's zoom, like a tab.
+  onPage(glance, 'zoom-changed', (_event: Electron.Event, direction: string) => {
+    const action = zoomActionForWheel(direction)
+    if (action) zoomGlance(glance, action)
+  })
   // A site's app-region: drag CSS must not turn parts of the window into a drag handle.
   guardPageDragRegions(contents)
   contents.setWindowOpenHandler((details) => {
@@ -203,7 +217,11 @@ function wirePage(glance: Glance): void {
     if (!source.isPrivate && isGlanceableUrl(url)) recordBrowsingVisit(url, contents.getTitle() || url)
     header()
   }
-  onPage(glance, 'did-navigate', (_event: Electron.Event, url: string) => visit(url))
+  onPage(glance, 'did-navigate', (_event: Electron.Event, url: string) => {
+    // The origin's saved zoom, as a tab navigating there gets it.
+    applySavedPageZoom(contents, url, source.isPrivate)
+    visit(url)
+  })
   onPage(glance, 'did-navigate-in-page', (_event: Electron.Event, url: string, isMainFrame: boolean) => { if (isMainFrame) visit(url) })
   onPage(glance, 'enter-html-full-screen', () => { glance.fullscreen = true; layout(glance) })
   onPage(glance, 'leave-html-full-screen', () => { glance.fullscreen = false; layout(glance) })
@@ -337,6 +355,19 @@ export function syncGlanceWithActiveTab(window: BaseWindow): void {
   const glance = glances.get(window)
   if (!glance || glance.ended) return
   if (!live(glance.source.contents) || !host().isActiveTab(window, glance.source.tabId)) endGlance(glance, false)
+}
+
+export function glanceOpenIn(window: BaseWindow): boolean {
+  const glance = glances.get(window)
+  return Boolean(glance && !glance.ended)
+}
+
+/** View menu / palette zoom while this window's glance is open. False with no glance. */
+export function zoomGlanceIn(window: BaseWindow, action: PageZoomAction): boolean {
+  const glance = glances.get(window)
+  if (!glance || glance.ended || !live(glance.page.webContents)) return false
+  zoomGlance(glance, action)
+  return true
 }
 
 export function glanceContentsIds(): { page: number[]; chrome: number[] } {

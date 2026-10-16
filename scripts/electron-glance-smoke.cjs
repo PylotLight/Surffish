@@ -13,6 +13,10 @@
 //   6. A second glance replaces the first; a tab switch closes it; a backdrop click closes it.
 //   7. Settings off: Shift+click opens nothing (the old behaviour); back on works again.
 //   8. Private tab: the glance runs in the private session and writes no history.
+//   Zoom: the glance page gets trackpad pinch (visual zoom limits past 1x, like tabs); Cmd/Ctrl+=,
+//   Ctrl+wheel and View → Zoom In zoom the glance, not the tab under it; the level is remembered
+//   for the origin and carries into the tab when the glance is promoted; a private glance's zoom
+//   stays out of the normal session.
 // `bun run build && bun run test:electron-glance`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-glance-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -126,6 +130,16 @@ async function run() {
   const start = await waitFor(() => pageContents((url) => url === `${origin}/start`), 'the start page contents')
   await waitFor(() => smoke.evaluate(start, 'document.readyState === "complete" && Boolean(document.querySelector("#peek"))'), 'the start page links')
   const startTabId = (await tabs()).find((tab) => tab.active).id
+  // Record setVisualZoomLevelLimits per webContents (there is no getter): tabs and glances must enable pinch.
+  const visualZoomLimits = new Map()
+  let contentsProto = Object.getPrototypeOf(start)
+  while (contentsProto && !Object.prototype.hasOwnProperty.call(contentsProto, 'setVisualZoomLevelLimits')) contentsProto = Object.getPrototypeOf(contentsProto)
+  assert.ok(contentsProto, 'WebContents has setVisualZoomLevelLimits')
+  const originalSetLimits = contentsProto.setVisualZoomLevelLimits
+  contentsProto.setVisualZoomLevelLimits = function (min, max) {
+    visualZoomLimits.set(this.id, [min, max])
+    return originalSetLimits.call(this, min, max)
+  }
   // Let the lazily made overlays exist before the baseline: the link-status bubble (first link hover)
   // and the tab overview's detached preload (1.5 s after the window opens).
   const peekRect = await smoke.evaluate(start, '(() => { const r = document.querySelector("#peek").getBoundingClientRect(); return { x: Math.round(r.left + 5), y: Math.round(r.top + 5) } })()')
@@ -164,6 +178,8 @@ async function run() {
   const pageBounds = mainWindow.contentView.children.at(-1).getBounds()
   assert.ok(pageBounds.width > 900 && pageBounds.width < 1200 && pageBounds.x > 0, `the card is ~85% of the window (${JSON.stringify(pageBounds)})`)
   await waitFor(() => glance.isFocused(), 'keyboard focus in the glance page')
+  const glanceLimits = visualZoomLimits.get(glance.id)
+  assert.ok(glanceLimits && glanceLimits[0] === 1 && glanceLimits[1] > 1, `trackpad pinch enabled on the glance page (visual zoom limits ${JSON.stringify(glanceLimits)})`)
   if (process.env.GLANCE_SMOKE_SHOTS) {
     // Optional screenshots for a manual look: the header/backdrop view and the page view.
     await delay(400)
@@ -211,6 +227,64 @@ async function run() {
   const afterClose = await smoke.evaluate(content, 'window.api.browser.diagnostics.watch(true)')
   assert.ok(!JSON.stringify(afterClose).includes('Glance:'), 'Diagnostics no longer lists a glance')
   await smoke.evaluate(content, 'window.api.browser.diagnostics.watch(false)')
+
+  // --- Zoom inside a glance (another host than the tab's, so Chromium's per-host zoom can't blur the two)
+  smoke.step('zoom in a glance: Cmd/Ctrl+=, Ctrl+wheel and View menu zoom the glance, not the tab')
+  const zoomOrigin = `http://localhost:${server.address().port}`
+  const near = (a, b) => Math.abs(a - b) < 0.01
+  const tabZoom = start.getZoomFactor()
+  await smoke.evaluate(start, `document.querySelector("#other").href = ${JSON.stringify(`${zoomOrigin}/inner`)}; true`)
+  await clickElement(start, '#other', ['shift'])
+  const zoomGlance = await waitFor(() => pageContents((url, contents) => url === `${zoomOrigin}/inner` && contents !== start && !contents.isLoading()), 'a glance on the localhost origin')
+  await waitFor(() => glanceChromes().length === 1 && zoomGlance.isFocused(), 'the zoom glance focused')
+  assert.ok(near(zoomGlance.getZoomFactor(), 1), 'the glance opens at 100%')
+  key(zoomGlance, '=', [IS_MAC ? 'meta' : 'control'])
+  await waitFor(() => near(zoomGlance.getZoomFactor(), 1.1), `Cmd/Ctrl+= zooms the glance to 110% (${zoomGlance.getZoomFactor()})`)
+  assert.ok(near(start.getZoomFactor(), tabZoom), `the tab under the glance keeps its zoom (${start.getZoomFactor()})`)
+  // Ctrl+wheel up: Chromium turns it into Electron's zoom-changed, which the glance page handles like
+  // a tab. A synthetic wheel doesn't always reach that path (xvfb), so fall back to the event itself:
+  // what is under test is that the glance listens for it (it never did) and steps its own zoom.
+  zoomGlance.sendInputEvent({ type: 'mouseWheel', x: 200, y: 200, deltaX: 0, deltaY: 120, wheelTicksX: 0, wheelTicksY: 1, canScroll: true, modifiers: ['control'] })
+  const wheelZoomed = await waitFor(() => !near(zoomGlance.getZoomFactor(), 1.1), 'a real Ctrl+wheel zoom', 2000).then(() => true, () => false)
+  if (!wheelZoomed) {
+    smoke.step('synthetic Ctrl+wheel did not reach zoom-changed here; emitting zoom-changed on the glance page')
+    assert.ok(zoomGlance.listenerCount('zoom-changed') > 0, 'the glance page listens for zoom-changed (Ctrl+wheel)')
+    zoomGlance.emit('zoom-changed', { preventDefault() {} }, 'in')
+  }
+  // One notch can arrive as more than one zoom step from a synthetic wheel; it only has to zoom in.
+  await waitFor(() => zoomGlance.getZoomFactor() > 1.11, `Ctrl+wheel zooms the glance in (${zoomGlance.getZoomFactor()})`)
+  assert.ok(near(start.getZoomFactor(), tabZoom), `Ctrl+wheel in the glance leaves the tab alone (${start.getZoomFactor()})`)
+  const afterWheel = zoomGlance.getZoomFactor()
+  // View → Zoom In / the palette (runTabCommand) targets the open glance, not the active tab.
+  assert.equal(await smoke.evaluate(toolbar, 'window.api.browser.commands.run("view.zoomIn")'), true)
+  await waitFor(() => zoomGlance.getZoomFactor() > afterWheel + 0.01, `View → Zoom In zooms the glance past ${afterWheel} (${zoomGlance.getZoomFactor()})`)
+  const glanceZoom = zoomGlance.getZoomFactor()
+  assert.ok(near(start.getZoomFactor(), tabZoom), 'the tab still keeps its zoom')
+  assert.ok(!zoomGlance.isDestroyed() && glanceChromes().length === 1, 'zooming leaves the glance open')
+  zoomGlance.focus()
+  await waitFor(() => zoomGlance.isFocused(), 'the zoom glance focused again')
+  // Remembered for the origin: a fresh glance on it opens at the same level.
+  key(zoomGlance, 'Escape')
+  await waitFor(() => zoomGlance.isDestroyed() && glanceChromes().length === 0, 'the zoom glance closed')
+  await clickElement(start, '#other', ['shift'])
+  const zoomAgain = await waitFor(() => pageContents((url, contents) => url === `${zoomOrigin}/inner` && contents !== start && !contents.isLoading()), 'a second glance on the localhost origin')
+  await waitFor(() => near(zoomAgain.getZoomFactor(), glanceZoom), `the origin's zoom (${glanceZoom}) applies to a new glance (${zoomAgain.getZoomFactor()})`)
+  // Promote: the tab keeps the glance's zoom (same origin level, same webContents).
+  await waitFor(() => zoomAgain.isFocused(), 'the second zoom glance focused')
+  key(zoomAgain, 'Enter', [IS_MAC ? 'meta' : 'control'])
+  const zoomTab = await waitFor(async () => (await tabs()).find((tab) => tab.active && tab.url === `${zoomOrigin}/inner`), 'the zoomed glance promoted to a tab')
+  await delay(300)
+  assert.ok(near(zoomAgain.getZoomFactor(), glanceZoom), `the promoted tab keeps ${glanceZoom} (${zoomAgain.getZoomFactor()})`)
+  assert.ok(near((await state()).zoomFactor, glanceZoom), 'the toolbar sees the promoted tab at the glance zoom')
+  assert.ok(visualZoomLimits.get(zoomAgain.id)?.[1] > 1, 'the promoted tab keeps trackpad pinch')
+  // Reset the origin (Actual Size on the tab, no glance open now) so later steps start clean, then close it.
+  assert.equal(await smoke.evaluate(toolbar, 'window.api.browser.commands.run("view.zoomReset")'), true)
+  await waitFor(() => near(zoomAgain.getZoomFactor(), 1), 'Actual Size resets the promoted tab')
+  await smoke.evaluate(toolbar, `window.api.browser.tabs.close(${JSON.stringify(zoomTab.id)})`)
+  await smoke.evaluate(toolbar, `window.api.browser.tabs.activate(${JSON.stringify(startTabId)})`)
+  await waitFor(async () => (await tabs()).length === 1 && zoomAgain.isDestroyed(), 'back to one tab')
+  await smoke.evaluate(start, 'document.querySelector("#other").href = "/other"; true')
+  await assertClosed('zoom glance promote + close')
 
   // --- 5. Palette entry + promote to tab (no reload, history kept)
   smoke.step('palette opens a glance; Cmd/Ctrl+Enter promotes it to a tab without reloading')
@@ -323,6 +397,11 @@ async function run() {
   assert.equal(privateGlance.session, privateStart.session, 'the glance uses the private session')
   await delay(500)
   assert.ok(!(await history()).some((entry) => entry.url.includes('/private-peek')), 'a private glance writes no history')
+  assert.ok(visualZoomLimits.get(privateGlance.id)?.[1] > 1, 'trackpad pinch enabled on the private glance')
+  await waitFor(() => privateGlance.isFocused(), 'the private glance focused')
+  key(privateGlance, '=', [IS_MAC ? 'meta' : 'control'])
+  await waitFor(() => Math.abs(privateGlance.getZoomFactor() - 1.1) < 0.01, 'Cmd/Ctrl+= zooms the private glance')
+  assert.ok(Math.abs(startAgain.getZoomFactor() - 1) < 0.01, 'a private glance zoom never touches the normal session (same origin tab stays 100%)')
   key(privateGlance, 'Escape')
   await waitFor(() => privateGlance.isDestroyed() && glanceChromes().length === 0, 'the private glance closed')
 

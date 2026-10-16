@@ -129,6 +129,19 @@ export function noteGlanceWindowState(window: BaseWindow): void {
   glanceModule?.syncGlanceWithActiveTab(window)
 }
 
+/** Is a glance on screen in `window`? (A trackpad pinch then zooms its page, not the tab overview.) */
+export function isGlanceOpenIn(window: BaseWindow | null | undefined): boolean {
+  return Boolean(window && glanceModule?.glanceOpenIn(window))
+}
+
+/**
+ * View menu / palette zoom while a glance is open in `window`: zoom its page instead of the tab
+ * under it. False when there is no glance (the caller zooms the tab).
+ */
+export function zoomOpenGlance(window: BaseWindow | null | undefined, action: 'in' | 'out' | 'reset'): boolean {
+  return Boolean(window && glanceModule?.zoomGlanceIn(window, action))
+}
+
 /** Every live glance webContents id (page + header), for Diagnostics and leak checks. */
 export function getGlanceContentsIds(): { page: number[]; chrome: number[] } {
   return glanceModule?.glanceContentsIds() ?? { page: [], chrome: [] }
