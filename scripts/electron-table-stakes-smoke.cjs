@@ -209,8 +209,14 @@ async function run() {
   const tabsBefore = await evaluate(toolbar, 'window.api.browser.tabs.get()')
   const before = tabsBefore.length
   const secondId = tabsBefore.find((tab) => tab.url.endsWith('/second')).id
-  await waitFor(() => evaluate(sidebar, `Boolean(document.querySelector('[data-browser-tab-id="${secondId}"]'))`), 'the sidebar to list the second tab')
-  await evaluate(sidebar, `document.querySelector('[data-browser-tab-id="${secondId}"]').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))`)
+  // Find and click in one round trip: the row can re-render (History panel closing) between two
+  // evaluates, which made the second querySelector null on a busy Mac runner.
+  await waitFor(() => evaluate(sidebar, `(() => {
+    const row = document.querySelector('[data-browser-tab-id="${secondId}"]')
+    if (!row) return false
+    row.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    return true
+  })()`), 'the sidebar to list the second tab and take the middle-click')
   await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.tabs.get()')).length === before - 1, 'middle-click to close the tab')
 
   console.log('Electron table-stakes smoke passed.')
