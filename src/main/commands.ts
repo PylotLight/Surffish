@@ -52,7 +52,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -94,6 +94,18 @@ function openPanel(mode: BrowserSidebarMode): void {
   // Full panels (settings, downloads) show in the content renderer; give it the keyboard.
   focusVisibleShellPage()
 }
+
+// The menu bar icon's "Mini Window Settings…": a browser window forward (a new one when none is open), Settings open.
+setMiniWindowSettingsOpener(() => {
+  const win = getMainWindow()
+  if (!win || win.isDestroyed()) createBrowserWindow()
+  else {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+  openPanel('settings')
+})
 
 const COMMANDS: BrowserCommand[] = [
   // Tabs
@@ -209,6 +221,13 @@ const COMMANDS: BrowserCommand[] = [
     refocusPage: false,
     enabled: () => hasMiniWindows() && getMiniWindowSettings().tuckToEdge,
     run: () => tuckMiniWindow()
+  },
+  {
+    id: 'miniWindow.menuBar', title: 'Send Mini Window to Menu Bar', section: 'View',
+    keywords: ['mini window', 'menu bar', 'tray', 'status item', 'status bar', 'menubar', 'pop out'],
+    refocusPage: false,
+    enabled: () => canSendToMenuBar(canPopOutBrowserTab()),
+    run: () => sendMiniWindowToMenuBar()
   },
   {
     id: 'miniWindow.togglePeek', title: () => (getMiniWindowSettings().peekOnHover ? 'Turn Off Mini Window Peek on Hover' : 'Turn On Mini Window Peek on Hover'), section: 'Settings',
@@ -341,10 +360,11 @@ function miniWindowCommands(): BrowserCommand[] {
   const keywords = ['mini window', 'float', 'always on top']
   return open.flatMap((mini): BrowserCommand[] => [
     { id: `miniWindow.show:${mini.tabId}`, title: `Show Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'focus', 'switch to'], refocusPage: false, run: () => focusMiniWindow(mini.tabId) },
-    {
+    // In the menu bar there is no edge to tuck to (its icon's menu has Move to Edge).
+    ...(mini.menuBar ? [] : [{
       id: `miniWindow.tuck:${mini.tabId}`, title: `${isMiniWindowTucked(mini.tabId) ? 'Slide Out' : 'Tuck Away'} Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'tuck', 'edge', 'slide'], refocusPage: false,
       enabled: () => getMiniWindowSettings().tuckToEdge, run: () => tuckMiniWindow(mini.tabId)
-    },
+    } satisfies BrowserCommand]),
     { id: `miniWindow.return:${mini.tabId}`, title: `Return Mini Window to Browser: ${mini.title}`, section: 'View', keywords: [...keywords, 'pop in', 'back to browser'], run: () => returnMiniWindowToBrowser({ tabId: mini.tabId }) }
   ])
 }

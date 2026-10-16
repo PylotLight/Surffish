@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, MINI_WINDOW_PEEK_DELAYS, type MiniWindowGrouping, type MiniWindowHeaderPlacement, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
+import { acceleratorFromKeyEvent, formatAccelerator, MINI_WINDOW_MIN_OPACITY, MINI_WINDOW_PEEK_DELAYS, type MiniWindowGrouping, type MiniWindowHeaderPlacement, type MiniWindowMenuBarIcon, type MiniWindowSettings as Settings } from '../../../../shared/mini-window'
 import { SettingsGroup, SettingsRow, SettingsSlider } from './SettingsControls'
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC')
@@ -10,7 +10,8 @@ interface Status { shortcut: string; registered: boolean; error: string | null }
 /**
  * Settings → General → Mini window: the page the global shortcut opens (empty: pop out the current
  * tab), the shortcut itself (press keys to record, Clear to turn it off), how several mini windows
- * group, where the header shows, tuck to screen edge (and peek on hover, with its delay) and opacity.
+ * group, where the header shows, the menu bar icon, tuck to screen edge (and peek on hover, with its
+ * delay) and opacity.
  */
 
 const GROUPING_HINTS: Record<MiniWindowGrouping, string> = {
@@ -22,6 +23,13 @@ const HEADER_HINTS: Record<MiniWindowHeaderPlacement, string> = {
   float: 'The header and tab strip show just above the mini window (below it when there is no room above), so they never cover the page.',
   push: 'The header and tab strip show inside the mini window and move the page down while they are visible.',
   overlay: 'The header and tab strip slide over the top of the page while the pointer is near them.'
+}
+
+const MENU_BAR_NAME = IS_MAC ? 'menu bar' : 'system tray'
+const MENU_BAR_HINTS: Record<MiniWindowMenuBarIcon, string> = {
+  'in-use': `Send a mini window to the ${MENU_BAR_NAME} (its header's button, ⌘K, or a tab's right-click menu) and an icon there drops it in under the icon. The icon shows only while one lives there.`,
+  always: `The ${MENU_BAR_NAME} icon always shows; click it to drop in a mini window that lives there, or to send the current tab there.`,
+  never: `No ${MENU_BAR_NAME} icon, and mini windows can't be sent there.`
 }
 
 export function MiniWindowSettings(): React.JSX.Element {
@@ -137,6 +145,19 @@ export function MiniWindowSettings(): React.JSX.Element {
           <option value="float">Float above</option>
           <option value="push">Push content</option>
           <option value="overlay">Overlay</option>
+        </select>
+      </SettingsRow>
+      <SettingsRow label={IS_MAC ? 'Menu bar icon' : 'Tray icon'} hint={MENU_BAR_HINTS[settings?.menuBarIcon ?? 'in-use']}>
+        <select
+          className="settings-select"
+          value={settings?.menuBarIcon ?? 'in-use'}
+          disabled={!settings}
+          aria-label="Mini window menu bar icon"
+          onChange={(event) => update({ menuBarIcon: event.target.value as MiniWindowMenuBarIcon })}
+        >
+          <option value="in-use">When in use</option>
+          <option value="always">Always</option>
+          <option value="never">Never</option>
         </select>
       </SettingsRow>
       <SettingsRow

@@ -68,7 +68,7 @@ import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplit
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
-import { noteMiniWindowChanged, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
+import { getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
 import { canPopOutUrl } from '../shared/mini-window'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
@@ -992,6 +992,8 @@ function showBrowserTabContextMenu(id: string): void {
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Pop Out to Mini Window', ...tabMenuAccelerator('miniWindow'), enabled: canPopOutTab(tab), click: () => { void popOutTabToMiniWindow(id) } },
+    // Hidden with the menu bar icon set to Never.
+    ...(getMiniWindowSettings().menuBarIcon === 'never' ? [] : [{ label: 'Open in Menu Bar', enabled: canPopOutTab(tab), click: () => { void popOutTabToMenuBar(id) } }]),
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
     { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
     { type: 'separator' },
@@ -1906,7 +1908,7 @@ setMiniWindowHost({
   tabs: (win) => {
     const mini = miniStateFor(win)
     if (!mini) return []
-    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, ...miniTabAudio(tab) }))
+    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, playing: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()), ...miniTabAudio(tab) }))
   },
   activateTab: (win, tabId) => {
     const tab = miniTabOf(miniStateFor(win), tabId)
@@ -1990,7 +1992,10 @@ setMiniWindowHost({
     const tab = activeTabOf(miniStateFor(win))
     return tab ? handleBrowserShortcutInput(input, tab.id) : false
   },
-  notify: (message) => flashBrowserStatus(message, 3500)
+  notify: (message) => flashBrowserStatus(message, 3500),
+  browserTabs: () => windowStates
+    .filter((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
+    .flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab) => ({ tabId: tab.id, url: currentUrl(tab) })))
 })
 
 export interface ExtensionPageTabOptions {

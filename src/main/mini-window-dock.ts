@@ -84,6 +84,8 @@ export interface DockHost {
   peekContents(): WebContents[]
   /** Something is being dragged (a mini window by its floating header): no peek starts. */
   busy(): boolean
+  /** Right-click on the handle: the mini window's menu (Send to Menu Bar, Return, Close). */
+  menu(): void
 }
 
 export interface DockController {
@@ -111,6 +113,8 @@ export interface DockController {
   follow(rect?: MiniRect): void
   /** Settings changed (tuck turned off undocks). */
   applySettings(): void
+  /** Undock and stay hidden (the window is moving into the menu bar). */
+  release(): void
   refreshHandle(): void
   dispose(): void
 }
@@ -187,6 +191,7 @@ interface HandleListener {
   onClick: () => void
   onDrag: (active: boolean) => void
   onHover: (inside: boolean) => void
+  onMenu: () => void
   /** Sliding right now (a 'stack' group peeks only once all of it has settled). */
   sliding: () => boolean
   /** What keeps a peek out: its window and floating header while out. */
@@ -279,6 +284,7 @@ function registerIpc(): void {
   ipcMain.on('mini-window:handle-click', (event) => from(event)?.onClick())
   ipcMain.on('mini-window:handle-drag', (event, active: unknown) => from(event)?.onDrag(active === true))
   ipcMain.on('mini-window:handle-hover', (event, inside: unknown) => from(event)?.onHover(inside === true))
+  ipcMain.on('mini-window:handle-menu', (event) => from(event)?.onMenu())
 }
 
 /** Dock state for one mini window. `initial`: open already docked (out) to this remembered edge. */
@@ -609,7 +615,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     host.changed()
   }
 
-  function undock(): void {
+  function undock(show = true): void {
     if (!dock) return
     const display = dockDisplay()
     stopPeek()
@@ -622,7 +628,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     displayId = null
     closeHandle()
     relayoutHandles()
-    if (wasTucked && alive()) {
+    if (wasTucked && show && alive()) {
       // Bring it back on screen where it was along the edge.
       setOwnBounds(clampMiniBounds(win.getBounds(), display.workArea))
       win.showInactive()
@@ -797,6 +803,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     onClick,
     onDrag,
     onHover,
+    onMenu: () => { if (alive()) host.menu() },
     sliding: () => sliding,
     peekRects: () => (alive() && win.isVisible() ? [win.getBounds(), ...host.peekRects()] : []),
     peekContents: () => (alive() ? host.peekContents() : []),
@@ -921,6 +928,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       else if (!host.isPeekEnabled()) stopPeek()
       host.changed()
     },
+    release: () => undock(false),
     refreshHandle: sendHandleState,
     dispose: () => {
       if (disposed) return

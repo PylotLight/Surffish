@@ -6,6 +6,7 @@
  * arrow and the page's favicon; for a group (several tabs in one window, or a stack of windows on one
  * edge) a count badge too, and for a stack up to three favicons fanned behind each other. Hovering
  * reports in/out (no button held) so main can peek the tucked window (shared/mini-window-peek.ts).
+ * Right-click opens the mini window's menu (Send to Menu Bar, …).
  */
 export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -106,5 +107,7 @@ export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
   tab.addEventListener('pointermove', (event) => hover(event.buttons === 0 && !down))
   tab.addEventListener('pointerdown', () => hover(false))
   tab.addEventListener('pointerleave', () => hover(false))
+  // Right-click: the mini window's menu (Send to Menu Bar, Return to Browser, Close).
+  tab.addEventListener('contextmenu', (event) => { event.preventDefault(); window.miniWindow.handleMenu() })
 </script>
 </body></html>`
