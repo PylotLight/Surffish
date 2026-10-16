@@ -24,7 +24,7 @@ export function CommandPaletteSettings(): React.JSX.Element {
   const tabSearch = formatAccelerator('CmdOrCtrl+Shift+A', platform)
   return (
     <SettingsGroup title="Command palette" status={settings ? (settings.enabled ? 'On' : 'Off') : undefined} statusOn={settings?.enabled === true}>
-      <SettingsRow label={`${palette} command palette`} hint={`${palette} searches commands, tabs, favourites and history; ${tabSearch} searches tabs. Turn off to let sites use these keys.`}>
+      <SettingsRow label={`${palette} command palette`} hint={`Searches commands, tabs, favourites and history; ${tabSearch} searches tabs.`} info="Turn off to let sites use these keys.">
         <input
           type="checkbox"
           className="settings-switch"

@@ -20,7 +20,7 @@ export function TabArchiveSettings(): React.JSX.Element {
           <button className="settings-action secondary" type="button" onClick={() => update({ prompted: true })}>No thanks</button>
         </div>
       )}
-      <SettingsRow label="Archive unused tabs" hint="Closes tabs you haven't opened in a while into Archived (sidebar, and ⌘K / Ctrl+K search). Pinned, playing, private and unsaved PDF tabs are never archived. Up to 500 are kept.">
+      <SettingsRow label="Archive unused tabs" hint="Closes tabs you haven't opened in a while into Archived." info="Find them in the sidebar and ⌘K / Ctrl+K search. Pinned, playing, private and unsaved PDF tabs are never archived. Up to 500 are kept.">
         <select
           className="settings-select"
           value={settings.archiveAfter}

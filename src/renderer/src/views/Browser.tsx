@@ -45,7 +45,9 @@ import { useSearchKeywords } from './useSearchKeywords'
 import { parseKeywordSearch } from '../../../shared/search-keywords'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
 import { NavHistoryButtons } from './NavHistoryButtons'
-import { SettingsGroup, SettingsRow, SettingsSlider } from './settings/SettingsControls'
+import { SettingsCategory, SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from './settings/SettingsControls'
+import { SettingsSearchField, SettingsSearchStatus, SettingsToc } from './settings/SettingsSearch'
+import { useSettingsSearch } from './settings/useSettingsSearch'
 import { TabInterstitial } from './TabInterstitial'
 import { ProxyDownBanner } from './ProxyDownBanner'
 import { NetworkOverridesBadge } from './NetworkOverridesPanel'
@@ -213,6 +215,17 @@ const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: strin
   { mode: 'diagnostics', label: 'Diagnostics' }
 ]
 
+/** General is long: its groups sit in these categories (sticky headings + the jump list beside them). */
+const GENERAL_CATEGORIES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'browsing', label: 'Browsing' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'tabs', label: 'Tabs & windows' },
+  { id: 'mini-window', label: 'Mini window' },
+  { id: 'features', label: 'Features' },
+  { id: 'connection', label: 'Connection' },
+  { id: 'advanced', label: 'Advanced' }
+]
+
 function httpOrigin(value: string): string | null {
   try {
     const url = new URL(value)
@@ -325,6 +338,8 @@ function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: str
 
 export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
+  // Settings search: filters whichever settings page is on screen (see useSettingsSearch).
+  const [settingsQuery, setSettingsQuery] = useState('')
   const browserChromeRef = useRef<HTMLElement>(null)
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarPointerInsideRef = useRef(false)
@@ -410,6 +425,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const unseenWatchers = useUnseenWatcherCount(surface === 'content' && watchersEnabled === true)
   // Only while Settings is open, so launch never loads the feeds module for a badge.
   const unreadFeeds = useUnreadFeedCount(surface === 'content' && isSettingsSection(sidebarMode))
+  const settingsSearch = useSettingsSearch(viewportRef, surface === 'content' && isSettingsSection(sidebarMode) ? settingsQuery : '', sidebarMode)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
@@ -811,6 +827,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   function exitSettings(): void {
     setSidebarMode('tabs')
+    setSettingsQuery('')
   }
 
   /** The sidebar gear is a toggle: open General, or close settings from whichever section is showing. */
@@ -1891,6 +1908,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               {visibleWatcherSections(SETTINGS_SECTIONS, watchersEnabled !== false).filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
                 <button key={section.mode} type="button" className={settingsNavMode(sidebarMode) === section.mode ? 'is-current' : ''} aria-current={settingsNavMode(sidebarMode) === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}{section.mode === 'integrations' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread feed items`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}</button>
               ))}
+              <SettingsSearchField value={settingsQuery} onChange={setSettingsQuery} />
               <button
                 className="settings-subnav-close"
                 type="button"
@@ -1902,6 +1920,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
               </button>
             </nav>
+          )}
+          {surface === 'content' && settingsQuery.trim() !== '' && SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(sidebarMode)) && (
+            <SettingsSearchStatus
+              query={settingsQuery}
+              matches={settingsSearch.matches}
+              mode={sidebarMode as SettingsSectionMode}
+              available={(mode) => (mode !== 'network' || networkToolEnabled) && (mode !== 'watchers' || watchersEnabled !== false)}
+              labelFor={(mode) => mode === 'feeds' ? 'Integrations → Feeds' : SETTINGS_SECTIONS.find((section) => section.mode === mode)?.label ?? mode}
+              onOpen={(mode) => selectSettingsSection(mode as SettingsSectionMode)}
+              onClear={() => setSettingsQuery('')}
+            />
           )}
           {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
           {surface === 'content' && hasLoadErrorPage && browser.loadError && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && <LoadErrorPage loadError={browser.loadError} canGoBack={browser.canGoBack} />}
@@ -1926,8 +1955,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </div>
                 )}
               </header>
-              <div className="settings-content" key={sidebarMode}>
-                {sidebarMode === 'settings' && <>
+              <div className={`settings-content${sidebarMode === 'settings' ? ' has-toc' : ''}`} key={sidebarMode}>
+                {sidebarMode === 'settings' && <SettingsToc categories={GENERAL_CATEGORIES} counts={settingsQuery.trim() ? settingsSearch.categories : null} rootRef={viewportRef} />}
+                {sidebarMode === 'settings' && <div className="settings-categories">
+                <SettingsCategory id="browsing" title="Browsing">
                 <SettingsGroup title="Search">
                   <SettingsRow label="Search engine" hint="Used for searches typed into the address bar.">
                     <select className="settings-select" value={searchEngine} disabled={!searchEngineLoaded} onChange={(event) => setSearchEngine(event.target.value as SearchEngineId)} aria-label="Default search engine">
@@ -1935,15 +1966,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
-                <AppearanceSettings />
                 <SearchKeywordsSettings />
                 <CommandPaletteSettings />
                 <DefaultBrowserSettings />
                 <SettingsGroup title="Import">
                   <BookmarkImportPanel />
                 </SettingsGroup>
+                </SettingsCategory>
+                <SettingsCategory id="appearance" title="Appearance" single>
+                <AppearanceSettings />
+                </SettingsCategory>
+                <SettingsCategory id="tabs" title="Tabs & windows">
                 <SettingsGroup title="Tabs">
-                  <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake. Hibernated tabs reload their last page; unsaved form state is lost.">
+                  <SettingsRow label="Hibernate inactive tabs" hint="Audible tabs stay awake." info="Hibernated tabs reload their last page; unsaved form state is lost.">
                     <select
                       className="settings-select"
                       value={tabSleepMinutes}
@@ -1964,18 +1999,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </SettingsRow>
                   <MemorySaverSettings />
                   <PreloadPagesSettings />
-                  <SettingsRow label="Saved session" hint="Tabs restore on next launch. Tokens, codes and other credential-like URL parts are stripped before saving.">
+                  <SettingsRow label="Saved session" hint="Tabs restore on next launch; credential-like URL parts are stripped." info="Tokens, codes and other credential-like URL parts are removed before the session is saved.">
                     <button className="settings-action secondary" type="button" aria-label="Clear saved session" onClick={() => void clearSavedSession()}>Clear</button>
                   </SettingsRow>
                   {sessionMessage && <p className="settings-message" role="status">{sessionMessage}</p>}
                 </SettingsGroup>
                 <GlanceSettings />
-                <MiniWindowSettings />
-                <LocalAISettings />
                 <TabArchiveSettings />
                 <SpacesSettings />
+                </SettingsCategory>
+                <SettingsCategory id="mini-window" title="Mini window" single>
+                <MiniWindowSettings />
+                </SettingsCategory>
+                <SettingsCategory id="features" title="Features">
+                <LocalAISettings />
                 <PageWatchersToggle />
                 <SpellcheckSettings />
+                </SettingsCategory>
+                <SettingsCategory id="connection" title="Connection">
                 <SettingsGroup
                   title="SOCKS5 proxy"
                   status={appliedProxy.enabled ? `${appliedProxy.host}:${appliedProxy.port}` : 'Direct connection'}
@@ -1993,7 +2034,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       <input type="number" value={proxy.port} min={1} max={65535} onChange={(event) => setProxy((current) => ({ ...current, port: Number(event.target.value) }))} aria-label="Local SOCKS5 port" />
                     </label>
                   </div>
-                  <SettingsRow label="Local network goes direct" hint="Private addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, link-local) and .local names skip the proxy, so your router, NAS or printer opens like in other browsers. Turn off to send them through the tunnel too. Applies when you Save.">
+                  <SettingsRow label="Local network goes direct" hint="Your router, NAS, printer and .local names skip the proxy." info="Private addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, link-local) and .local names skip the proxy, so your router, NAS or printer opens like in other browsers. Turn off to send them through the tunnel too. Applies when you Save.">
                     <input type="checkbox" className="settings-switch" checked={proxy.bypassLocalNetwork !== false} onChange={(event) => setProxy((current) => ({ ...current, bypassLocalNetwork: event.target.checked }))} aria-label="Connect to local network addresses directly" />
                   </SettingsRow>
                   <ProxyKillSwitchSetting />
@@ -2005,14 +2046,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {(proxyMessage || browser.error) && <p className={`settings-message${proxyMessageIsError || browser.error ? ' is-error' : ''}`} role="status">{browser.error ? (() => { const copy = describeLoadError({ ...browser.loadError, message: browser.error }); return `${copy.title}. ${copy.detail}` })() : proxyMessage}</p>}
                 </SettingsGroup>
                 <NetworkRulesSettings />
+                </SettingsCategory>
+                <SettingsCategory id="advanced" title="Advanced">
                 <SettingsGroup title="Developer">
                   <SettingsRow label="Network inspector" hint="Adds a Network tab that records requests from every tab. Off saves CPU and memory; turning it off also stops capture and clears recorded requests.">
                     <input type="checkbox" className="settings-switch" checked={networkToolEnabled} onChange={(event) => setNetworkToolEnabled(event.target.checked)} aria-label="Enable network inspector" />
                   </SettingsRow>
                 </SettingsGroup>
                 <UpdateSettings />
+                </SettingsCategory>
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
-                </>}
+                </div>}
                 {sidebarMode === 'newtab' && <>
                 <SettingsGroup title="Page">
                   <SettingsRow label="New tab opens" hint="Applies to tabs opened from now on.">
@@ -2091,11 +2135,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 >
                   <SettingsRow label="City or town"><input type="text" className="settings-input" maxLength={100} value={newTabPreferences.weatherLocation} placeholder="e.g. Melbourne" disabled={!newTabPreferences.weatherEnabled} onChange={(event) => patchNewTabPreferences({ weatherLocation: event.target.value })} aria-label="Weather city or town" /></SettingsRow>
                   <SettingsRow label="Units">
-                    <div className="settings-segmented" role="radiogroup" aria-label="Weather temperature unit">
-                      {(['celsius', 'fahrenheit'] as const).map((unit) => (
-                        <button key={unit} type="button" role="radio" aria-checked={newTabPreferences.temperatureUnit === unit} className={newTabPreferences.temperatureUnit === unit ? 'is-selected' : ''} disabled={!newTabPreferences.weatherEnabled} onClick={() => patchNewTabPreferences({ temperatureUnit: unit })}>{unit === 'celsius' ? '°C' : '°F'}</button>
-                      ))}
-                    </div>
+                    <SettingsSegmented value={newTabPreferences.temperatureUnit} options={[{ value: 'celsius', label: '°C' }, { value: 'fahrenheit', label: '°F' }] as const} ariaLabel="Weather temperature unit" disabled={!newTabPreferences.weatherEnabled} onChange={(temperatureUnit) => patchNewTabPreferences({ temperatureUnit })} />
                   </SettingsRow>
                 </SettingsGroup>
                 </>}

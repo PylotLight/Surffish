@@ -18,7 +18,8 @@ export function PreloadPagesSettings(): React.JSX.Element {
   return (
     <SettingsRow
       label="Preload pages for faster browsing"
-      hint="Opens a connection to the site you're likely to visit next (the top address bar suggestion, or a link you rest the pointer on) through the same proxy and Space as the tab. Nothing is downloaded and search text is never sent. Off in private tabs."
+      hint="Connects ahead to the site you'll likely open next; nothing is downloaded."
+      info="Opens a connection to the site you're likely to visit next (the top address bar suggestion, or a link you rest the pointer on) through the same proxy and Space as the tab. Nothing is downloaded and search text is never sent. Off in private tabs."
     >
       <input
         type="checkbox"

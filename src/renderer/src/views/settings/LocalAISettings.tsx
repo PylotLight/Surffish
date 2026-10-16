@@ -32,7 +32,7 @@ export function LocalAISettings(): React.JSX.Element {
   const on = settings?.enabled === true
   return (
     <SettingsGroup title="Built-in AI (experimental)" status={settings === null ? undefined : on ? 'On' : 'Off'} statusOn={on}>
-      <SettingsRow label="Let pages use the built-in AI" hint="Pages and extensions that call the Prompt API (LanguageModel) get answers from Surffish's AI handler. Never in private tabs. Off: the API reports it's unavailable.">
+      <SettingsRow label="Let pages use the built-in AI" hint="Answers Prompt API (LanguageModel) calls from pages and extensions." info="Never in private tabs. Off: the API reports it's unavailable.">
         <input type="checkbox" className="settings-switch" checked={on} disabled={settings === null} onChange={(event) => save({ enabled: event.target.checked })} aria-label="Let pages use the built-in AI" />
       </SettingsRow>
       {on && settings && (

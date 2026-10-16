@@ -19,7 +19,8 @@ export function MemorySaverSettings(): React.JSX.Element {
   return (
     <SettingsRow
       label="Memory saver"
-      hint={`When your computer runs low on memory, or Surffish uses more than half of it, background tabs go to sleep early, least recently used first, but never before your sleep timer above (and never within 15 minutes of being looked at) unless memory is critically low. Playing, pinned and tabs with unsaved form input stay awake.${discarded > 0 ? ` ${discarded} tab${discarded === 1 ? '' : 's'} put to sleep this session.` : ''}`}
+      hint="Background tabs sleep early when memory runs low."
+      info={`When your computer runs low on memory, or Surffish uses more than half of it, background tabs go to sleep early, least recently used first, but never before your sleep timer above (and never within 15 minutes of being looked at) unless memory is critically low. Playing, pinned and tabs with unsaved form input stay awake.${discarded > 0 ? ` ${discarded} tab${discarded === 1 ? '' : 's'} put to sleep this session.` : ''}`}
     >
       <input
         type="checkbox"
