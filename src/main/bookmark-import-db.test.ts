@@ -32,7 +32,8 @@ function markWal(path: string): void {
   }
 }
 
-test('reads Chromium History (urls table), newest first, http(s) and visible only', () => {
+// Each of these builds and copies a real SQLite file; slow CI pods have taken 4-6 s (5 s default).
+test('reads Chromium History (urls table), newest first, http(s) and visible only', { timeout: 30_000 }, () => {
   const chrome = (ms: number): string => String((ms + WINDOWS_EPOCH_OFFSET_MS) * 1000)
   const path = fixture(`
     CREATE TABLE urls (id INTEGER PRIMARY KEY, url LONGVARCHAR, title LONGVARCHAR, visit_count INTEGER, typed_count INTEGER, last_visit_time INTEGER NOT NULL, hidden INTEGER DEFAULT 0 NOT NULL);
@@ -80,7 +81,7 @@ test('reads Firefox places.sqlite bookmarks and history, even from a WAL-mode fi
   db.close()
 })
 
-test('reads Safari History.db with the latest visit title per item', () => {
+test('reads Safari History.db with the latest visit title per item', { timeout: 30_000 }, () => {
   const mac = (ms: number): number => (ms - Date.UTC(2001, 0, 1)) / 1000
   const path = fixture(`
     CREATE TABLE history_items (id INTEGER PRIMARY KEY, url TEXT NOT NULL UNIQUE, visit_count INTEGER);
