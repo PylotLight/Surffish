@@ -28,7 +28,7 @@ import { clearDownloadHistory, clearDownloadHistorySince } from './downloads'
 import { clearBrowserSiteZoom, resetBrowserSiteSettings } from './browser-persistence'
 import { resetSiteVolumes } from './tab-volume'
 import { sendToMainWindowRenderers } from './browser-shell'
-import { getActiveTabWebContents } from './browser'
+import { getPageBehindSettings } from './browser'
 import { forgetArchivedTabsSince } from './tab-archive-store'
 
 /**
@@ -165,7 +165,8 @@ export async function deleteCookieSite(siteInput: unknown): Promise<CookieSiteSu
 }
 
 async function storageUsage(origin: string): Promise<number | null> {
-  const contents = getActiveTabWebContents()
+  // Settings → Sites shows it for the page you opened Settings from.
+  const contents = getPageBehindSettings()
   if (!contents || contents.isDestroyed() || normalizeHttpOrigin(contents.getURL()) !== origin) return null
   try {
     // Isolated world, so the page can't see or tamper with the call.

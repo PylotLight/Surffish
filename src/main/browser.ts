@@ -4080,9 +4080,22 @@ function settingsTabState(tab: BrowserTab): NonNullable<BrowserState['settings']
 function lastUsedTabInSpace(w: BrowserWindowState, spaceId: string): BrowserTab | undefined {
   for (const id of w.recentTabIds) {
     const candidate = w.tabs.find((tab) => tab.id === id)
-    if (candidate && candidate.spaceId === spaceId) return candidate
+    if (candidate && candidate.spaceId === spaceId && !isSettingsTab(candidate)) return candidate
   }
   return undefined
+}
+
+/**
+ * The page a "this page" action from Settings means: the active tab's page, or, while the Settings
+ * tab is active, the page of the tab used before it (the one closing Settings returns to).
+ */
+export function getPageBehindSettings(): WebContents | null {
+  const w = currentWindowState()
+  const active = w ? activeTabOf(w) : undefined
+  if (!w || !active) return null
+  const tab = isSettingsTab(active) ? lastUsedTabInSpace(w, active.spaceId) : active
+  const contents = tab?.view?.webContents
+  return contents && !contents.isDestroyed() ? contents : null
 }
 
 function sessionActiveIndex(w: BrowserWindowState, kept: readonly BrowserTab[]): number {

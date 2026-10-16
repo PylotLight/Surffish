@@ -199,7 +199,7 @@ async function run() {
   assert.equal(await evaluate(content, '[...document.querySelectorAll(".settings-subnav button")].some((b) => b.textContent.startsWith("Feeds"))'), false, 'no standalone Feeds settings tab')
   assert.equal(await evaluate(content, 'Boolean(document.querySelector(".feed-items-group"))'), false, 'Extensions does not mount Feeds')
   await evaluate(content, '[...document.querySelectorAll(".integrations-tabs button")].find((b) => b.textContent.startsWith("Feeds")).click()')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'feeds', 'the Feeds tab to select Integrations → Feeds')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).settings?.section === 'feeds', 'the Feeds tab to select Integrations → Feeds')
   await waitFor(() => evaluate(content, 'document.querySelectorAll(".settings-view-feeds .feed-items .feed-item").length === 3'), 'the Feeds view with three items')
   await waitFor(() => evaluate(content, '[...document.querySelectorAll(".integrations-tabs button")].some((b) => b.textContent.startsWith("Feeds") && b.getAttribute("aria-selected") === "true" && b.querySelector(".settings-subnav-badge")?.textContent === "3")'), 'the Feeds tab unread badge')
   assert.equal(await evaluate(content, 'document.querySelector(".settings-subnav button.is-current")?.textContent.startsWith("Integrations")'), true, 'Integrations stays the current nav entry on Feeds')
@@ -229,7 +229,7 @@ async function run() {
   ])
   // The palette path (Cmd+K "Add Feed from This Site…") lands on Integrations → Feeds.
   await evaluate(toolbar, 'window.api.browser.commands.run("feeds.addFromPage")')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'feeds', 'the palette command to open Integrations → Feeds')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).settings?.section === 'feeds', 'the palette command to open Integrations → Feeds')
   await waitFor(() => evaluate(content, 'document.querySelector(".settings-page-heading-copy h1")?.textContent === "Integrations"'), 'the Integrations heading')
   await waitFor(() => evaluate(content, 'Boolean(document.querySelector(".feed-discover-button"))'), 'the discover button')
   await evaluate(content, 'document.querySelector(".feed-discover-button").click()')

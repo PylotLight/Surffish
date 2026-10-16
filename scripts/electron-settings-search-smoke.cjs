@@ -60,7 +60,8 @@ async function run() {
   const toolbar = surface('toolbar').webContents
   const content = surface('content').webContents
   const ev = (expression) => smoke.evaluate(content, expression)
-  const mode = async () => (await smoke.evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode
+  // Settings pages live in the Settings tab: its page is the tab's section.
+  const mode = async () => (await smoke.evaluate(toolbar, 'window.api.browser.state()')).settings?.section ?? (await smoke.evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode
   const type = (text) => ev(`(() => { const input = document.querySelector('.settings-search input'); input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)}); input.dispatchEvent(new Event('input', { bubbles: true })) })()`)
   const key = (target, name) => ev(`${target}.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(name)}, bubbles: true, cancelable: true }))`)
   const visibleRows = () => ev('[...document.querySelectorAll(".settings-view .settings-row")].filter((row) => row.checkVisibility()).map((row) => row.querySelector(".settings-row-label")?.textContent ?? "")')
@@ -123,12 +124,13 @@ async function run() {
   }, 'New Tab filtered to the clock rows')
   assert.equal(await ev('document.querySelector(".settings-search input").value'), 'clock', 'query kept across pages')
 
-  smoke.step('Esc clears, Esc again leaves settings')
+  smoke.step('Esc clears the query; Settings is a tab, so Esc never closes it')
   await key('document.querySelector(".settings-search input")', 'Escape')
   await waitFor(() => ev('document.querySelector(".settings-search input").value === "" && !document.querySelector(".settings-search-status")'), 'Esc to clear the query')
   assert.equal(await mode(), 'newtab', 'still in settings after the first Esc')
   await key('document.querySelector(".settings-search input")', 'Escape')
-  await waitFor(async () => (await mode()) === 'tabs', 'the second Esc to close settings')
+  await delay(300)
+  assert.equal(await mode(), 'newtab', 'a second Esc keeps the Settings tab open (it closes like any tab)')
   console.log('Electron settings search smoke passed.')
 }
 
