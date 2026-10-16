@@ -26,7 +26,7 @@ import {
   type MiniDockEdge
 } from '../shared/mini-window-dock'
 import { createPeekDriver, type PeekDriver, type PeekPoint } from '../shared/mini-window-peek'
-import { lerpRect, motionDuration } from '../shared/mini-window-motion'
+import { frameClock, lerpRect, motionDuration } from '../shared/mini-window-motion'
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
 import { motion, placeWindow } from './mini-window-motion'
 import { readUserJson, writeUserJson } from './user-json'
@@ -465,10 +465,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       motion.cancel(glideKey)
       return placeWindow(h.window, to)
     }
-    const start = performance.now()
+    const elapsed = frameClock(motion)
     motion.run(glideKey, (now) => {
       if (h.window.isDestroyed() || handle !== h) return false
-      const t = (now - start) / duration
+      const t = elapsed(now) / duration
       placeWindow(h.window, t >= 1 ? to : lerpRect(from, to, t))
       return t < 1
     })
@@ -500,14 +500,16 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     const full = dock?.edge === 'left' || dock?.edge === 'right' ? to.width : to.height
     const duration = reducedMotion() ? 0 : motionDuration(from, to, full, MINI_DOCK_SLIDE_MS)
     if (duration === 0) return finish()
-    const start = performance.now()
+    // Timed from its first frame: a 'stack' group's windows all start in the same tick, however long
+    // showing the others took after this one was queued.
+    const elapsed = frameClock(motion)
     sliding = true
     motion.run(slideKey, (now) => {
       if (!alive()) {
         sliding = false
         return false
       }
-      const t = (now - start) / duration
+      const t = elapsed(now) / duration
       if (t >= 1) {
         finish()
         return false

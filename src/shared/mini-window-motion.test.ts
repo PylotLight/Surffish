@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createFrameLoop, easeOut, frameIntervalFor, lerpRect, motionDuration, type MotionRect } from './mini-window-motion'
+import { createFrameLoop, easeOut, frameClock, frameIntervalFor, lerpRect, motionDuration, type MotionRect } from './mini-window-motion'
 
 /** Fake clock: timeouts fire as time advances (late by `lag` ms when set, like a busy main thread). */
 function fakeTimers() {
@@ -69,6 +69,52 @@ describe('frame loop', () => {
     timers.advance(100)
     expect(ticks.length).toBe(2)
     expect((ticks[1] ?? 0) - started).toBeCloseTo(1000 / 60, 1)
+  })
+
+  test('a tick that runs late is never followed by a catch-up tick right behind it', () => {
+    const { timers, loop } = rig(60)
+    const ticks: number[] = []
+    const frame = 1000 / 60
+    loop.run('a', (now) => {
+      ticks.push(now)
+      // Main is busy before the next tick: its timer fires late, by just under a frame and then by 150 ms.
+      timers.lag = ticks.length === 2 ? frame - 1 : ticks.length === 5 ? 150 : 0
+      return ticks.length < 10
+    })
+    timers.advance(1000)
+    expect(ticks.length).toBe(10)
+    const gaps = ticks.slice(1).map((t, i) => t - (ticks[i] ?? 0))
+    // Every gap is at least half a frame (before, the tick after a late one came ~0-1 ms behind it).
+    for (const gap of gaps) expect(gap).toBeGreaterThan(frame / 2)
+    // And a timer firing up to half a frame late still keeps the schedule (no frame skipped).
+    const late = rig(60)
+    const lateTicks: number[] = []
+    late.timers.lag = 6
+    late.loop.run('a', (now) => { lateTicks.push(now); return lateTicks.length < 12 })
+    late.timers.advance(1000)
+    const span = (lateTicks[11] ?? 0) - (lateTicks[0] ?? 0)
+    expect(span / 11).toBeCloseTo(frame, 0)
+  })
+
+  test('frameClock: an animation is timed from its first tick, so a stall before it doesn\'t eat it', () => {
+    const { timers, loop } = rig(60)
+    const frame = 1000 / 60
+    const duration = 180
+    const steps: number[] = []
+    const elapsed = frameClock(loop)
+    // Queued, then main is busy for 150 ms (the rest of the group showing): the first tick runs that late.
+    timers.lag = 150
+    loop.run('slide', (now) => {
+      const t = elapsed(now) / duration
+      steps.push(Math.min(1, t))
+      return t < 1
+    })
+    timers.lag = 0
+    timers.advance(1000)
+    // The first step is one frame in, and the slide still gets its ~11 frames.
+    expect(steps[0]).toBeCloseTo(frame / duration, 5)
+    expect(steps.length).toBe(Math.ceil(duration / frame))
+    expect(steps[steps.length - 1]).toBe(1)
   })
 
   test('all jobs run in the same tick, and each window gets one setBounds per tick (last wins)', () => {
