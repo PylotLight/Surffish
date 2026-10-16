@@ -23,6 +23,13 @@ contextBridge.exposeInMainWorld('miniWindow', {
   setVolume: (tabId, volume) => ipcRenderer.send('mini-window:set-volume', String(tabId), Number(volume)),
   setMuted: (tabId, muted) => ipcRenderer.send('mini-window:set-muted', String(tabId), Boolean(muted)),
   tabOut: (tabId, x, y) => ipcRenderer.send('mini-window:tab-out', String(tabId), Number(x), Number(y)),
+  // A strip chip drag: 'start' / 'move' (screen point) / 'cancel'; let go on the strip: moveTab (before slot).
+  tabDrag: (phase, tabId, x, y) => ipcRenderer.send('mini-window:tab-drag', String(phase), String(tabId), Number(x), Number(y)),
+  moveTab: (tabId, slot) => ipcRenderer.send('mini-window:move-tab', String(tabId), Math.round(Number(slot))),
+  stepTab: (tabId, step) => ipcRenderer.send('mini-window:step-tab', String(tabId), step < 0 ? -1 : 1),
+  stripLayout: (layout) => ipcRenderer.send('mini-window:strip-layout', layout),
+  onDropHint: (callback) => ipcRenderer.on('mini-window:drop-hint', (_event, hint) => callback(hint)),
+  onTabDragCancel: (callback) => ipcRenderer.on('mini-window:tab-drag-cancel', () => callback()),
   // Dock handle.
   onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),
   handleClick: () => ipcRenderer.send('mini-window:handle-click'),

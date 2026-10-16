@@ -366,7 +366,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const tabDrag = useTabDragSort(unpinnedTabIds, moveSidebarEntry, (key) => {
     if (key.startsWith('group:')) void window.api.browser.tabGroups.dropOutside(key.slice('group:'.length))
     else void window.api.browser.tabs.dropOutside(key)
+  }, (key) => {
+    // Outside the window: a mini window under the pointer shows where the tab would join it.
+    window.api.browser.tabs.dragOutside(key && !key.startsWith('group:') ? key : null)
   })
+  // A mini window's tab dragged over this sidebar: a line where it would land (main says which row).
+  useEffect(() => window.api.browser.tabs.onExternalDrop((hint) => {
+    const list = tabDrag.listRef.current
+    if (!list) return
+    for (const el of list.querySelectorAll('[data-external-drop]')) el.removeAttribute('data-external-drop')
+    list.toggleAttribute('data-external-drop-end', hint !== null && hint.beforeId === null)
+    if (!hint?.beforeId) return
+    list.querySelector(`[data-browser-tab-id="${CSS.escape(hint.beforeId)}"]`)?.setAttribute('data-external-drop', 'before')
+  }), [tabDrag.listRef])
   /** A sidebar entry key as a tab id main understands: a group header stands for its first tab. */
   function entryTabId(key: string | null): string | null {
     if (!key?.startsWith('group:')) return key

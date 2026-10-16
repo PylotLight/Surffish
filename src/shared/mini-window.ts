@@ -463,20 +463,6 @@ export function miniMergeTarget<T extends { bounds: MiniRect }>(point: { x: numb
   return others.find((other) => inside(point, { ...other.bounds, y: other.bounds.y - above, height: Math.min(other.bounds.height, MINI_WINDOW_REVEAL_ZONE) + above })) ?? null
 }
 
-export type MiniTabDrop<T> = { kind: 'merge'; into: T } | { kind: 'split' } | { kind: 'none' }
-
-/**
- * A tab dragged out of a window's strip and let go at `point`: over another window it moves there,
- * back inside its own window nothing happens, anywhere else it splits off into a window of its own
- * (only when the window keeps another tab: a window's only tab just stays).
- */
-export function miniTabDrop<T extends { bounds: MiniRect }>(point: { x: number; y: number }, own: MiniRect, tabCount: number, others: readonly T[]): MiniTabDrop<T> {
-  const into = others.find((other) => inside(point, other.bounds))
-  if (into) return { kind: 'merge', into }
-  if (inside(point, own) || tabCount < 2) return { kind: 'none' }
-  return { kind: 'split' }
-}
-
 /** Where a window split off at `point` goes: its own size, header centred under the pointer, fitted to the work area. */
 export function miniSplitBounds(point: { x: number; y: number }, size: { width: number; height: number }, workArea: MiniRect): MiniRect {
   return clampMiniBounds({ x: Math.round(point.x - size.width / 2), y: Math.round(point.y - MINI_WINDOW_HEADER_HEIGHT / 2), width: size.width, height: size.height }, workArea)

@@ -51,8 +51,8 @@ import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
-import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { canPopOutBrowserTab, getBrowserActiveTabId, hasMiniWindows } from './browser'
+import { canMergeMiniWindows, canSplitMiniWindowTab, mergeMiniWindows, moveTabToMiniWindow, splitMiniWindowTab, stepMiniWindowTab, canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -223,6 +223,27 @@ const COMMANDS: BrowserCommand[] = [
     run: () => tuckMiniWindow()
   },
   {
+    id: 'miniWindow.splitTab', title: 'Split Tab Off Mini Window', section: 'View',
+    keywords: ['mini window', 'split', 'separate', 'tear off', 'own window', 'tab strip'],
+    refocusPage: false,
+    enabled: () => canSplitMiniWindowTab(),
+    run: () => splitMiniWindowTab()
+  },
+  {
+    id: 'miniWindow.merge', title: 'Merge Mini Windows', section: 'View',
+    keywords: ['mini window', 'merge', 'combine', 'join', 'collect', 'tab strip'],
+    refocusPage: false,
+    enabled: () => canMergeMiniWindows(),
+    run: () => mergeMiniWindows()
+  },
+  ...([[-1, 'Left'], [1, 'Right']] as const).map(([step, label]): BrowserCommand => ({
+    id: `miniWindow.moveTab${label}`, title: `Move Mini Window Tab ${label}`, section: 'View',
+    keywords: ['mini window', 'reorder', 'move tab', 'tab strip', label.toLowerCase()],
+    refocusPage: false,
+    enabled: () => canSplitMiniWindowTab(),
+    run: () => stepMiniWindowTab(step)
+  })),
+  {
     id: 'miniWindow.menuBar', title: 'Send Mini Window to Menu Bar', section: 'View',
     keywords: ['mini window', 'menu bar', 'tray', 'status item', 'status bar', 'menubar', 'pop out'],
     refocusPage: false,
@@ -374,9 +395,24 @@ function miniWindowCommands(): BrowserCommand[] {
   ])
 }
 
+/**
+ * Grouping 'tabs': "Move Tab to Mini Window: …" for each floating collection (one entry per window,
+ * named by the tab on screen), taking the current browser tab. With one collection Pop Out does it.
+ */
+function moveToMiniCommands(): BrowserCommand[] {
+  if (getMiniWindowSettings().grouping !== 'tabs' || !canPopOutBrowserTab()) return []
+  const collections = listMiniWindows().filter((mini) => !mini.menuBar && mini.active)
+  if (collections.length < 2) return []
+  return collections.map((mini): BrowserCommand => ({
+    id: `miniWindow.moveInto:${mini.tabId}`, title: `Move Tab to Mini Window: ${mini.title}`, section: 'View',
+    keywords: ['mini window', 'merge', 'join', 'add to', 'pop out', 'collection'], refocusPage: false,
+    run: () => { const id = getBrowserActiveTabId(); return id ? moveTabToMiniWindow(id, mini.tabId) : false }
+  }))
+}
+
 function allCommands(): BrowserCommand[] {
   const watchersEnabled = pageWatchersEnabled()
-  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands(), ...miniWindowCommands()]
+  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands(), ...miniWindowCommands(), ...moveToMiniCommands()]
 }
 
 function isEnabled(command: BrowserCommand): boolean {

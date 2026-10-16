@@ -29,7 +29,6 @@ import {
   miniHeaderHeight,
   miniMergeTarget,
   miniSplitBounds,
-  miniTabDrop,
   planMiniRegroup,
   inMiniRevealZone,
   miniHeaderPanelRect,
@@ -233,15 +232,6 @@ describe('grouping', () => {
     expect(miniMergeTarget({ x: 700, y: 143 }, [a, b])).toBe(b)
     expect(miniMergeTarget({ x: 300, y: 400 }, [a, b])).toBeNull()
     expect(miniMergeTarget({ x: 550, y: 120 }, [a, b])).toBeNull()
-  })
-
-  test('a tab dragged out: onto another window moves it, inside its own does nothing, elsewhere splits', () => {
-    const own = { x: 0, y: 0, width: 400, height: 600 }
-    const other = { id: 9, bounds: { x: 800, y: 0, width: 400, height: 600 } }
-    expect(miniTabDrop({ x: 900, y: 300 }, own, 2, [other])).toEqual({ kind: 'merge', into: other })
-    expect(miniTabDrop({ x: 200, y: 300 }, own, 2, [other])).toEqual({ kind: 'none' })
-    expect(miniTabDrop({ x: 600, y: 300 }, own, 2, [other])).toEqual({ kind: 'split' })
-    expect(miniTabDrop({ x: 600, y: 300 }, own, 1, [other])).toEqual({ kind: 'none' })
   })
 
   test('a split-off window opens under the pointer, inside the work area', () => {

@@ -71,8 +71,9 @@ import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } f
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, isGlanceOpenIn, noteGlanceWindowState, openGlance, setGlanceHost, zoomOpenGlance, type GlanceSource } from './glance-entry'
 import { applySavedPageZoom, enablePagePinchZoom, forgetPrivatePageZoom, stepPageZoom } from './page-zoom'
-import { getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
+import { dropBrowserTabOnMiniWindow, getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
 import { canPopOutUrl } from '../shared/mini-window'
+import { miniReturnBeforeId, miniTabOrigin, moveTabId, sidebarDropBeforeId, type MiniTabOrigin, type SidebarRowHit } from '../shared/mini-window-tab-drag'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
@@ -612,13 +613,23 @@ function persistOpenTabs(): void {
   // The mini window's tab is saved as the last tab of its home window (or the first window), so a
   // restart never loses it; it comes back as an ordinary tab.
   const miniTabs = windowStates.filter((w) => w.mini && !w.window.isDestroyed()).flatMap((w) => w.tabs.map((tab) => ({ tab, home: miniTabHomes.get(tab) ?? w.miniHome })))
-  const extraTabsFor = (w: BrowserWindowState): BrowserTab[] => miniTabs
-    .filter(({ home }) => (home && windows.includes(home) ? home : windows[0]) === w)
-    .map(({ tab }) => tab)
+  // Each at the slot it popped out of (mini-window-tab-drag.ts), so a restart puts it back there.
+  const withMiniTabs = (w: BrowserWindowState): BrowserTab[] => {
+    const list = w.tabs.slice()
+    for (const { tab } of miniTabs.filter(({ home }) => (home && windows.includes(home) ? home : windows[0]) === w)) {
+      const beforeId = miniTabOrigins.get(tab) ? miniReturnBeforeId(miniTabOrigins.get(tab), list.map((candidate) => candidate.id)) : null
+      const before = beforeId ? list.find((candidate) => candidate.id === beforeId) : undefined
+      // Never between a split's panes: before the split.
+      const split = before ? splitOf(before) : undefined
+      const anchor = split ? list.findIndex((candidate) => split.tabIds.includes(candidate.id)) : before ? list.indexOf(before) : -1
+      list.splice(anchor < 0 ? list.length : anchor, 0, tab)
+    }
+    return list
+  }
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
   const saved = windows.map((w) => {
     // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
-    const kept = [...w.tabs, ...extraTabsFor(w)].filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
+    const kept = withMiniTabs(w).filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
     const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
@@ -1741,6 +1752,35 @@ setGlanceHost({
 let creatingMiniTab = false
 /** The browser window each mini window tab came from (where Return to Browser puts it back). */
 const miniTabHomes = new WeakMap<BrowserTab, BrowserWindowState>()
+/** Where each mini window tab sat in its home window's sidebar (its neighbours), so it goes back there. */
+const miniTabOrigins = new WeakMap<BrowserTab, MiniTabOrigin>()
+
+/** The sidebar row under a screen point in `w` (its shell renderers), and which half of it. */
+async function sidebarRowAt(w: BrowserWindowState, point: { x: number; y: number }): Promise<SidebarRowHit | null> {
+  if (w.window.isDestroyed()) return null
+  const content = w.window.getContentBounds()
+  for (const contents of getWindowRenderers(w.window)) {
+    const offset = getMainRendererOrigin(contents)
+    if (!offset || contents.isDestroyed()) continue
+    const x = point.x - content.x - offset.x
+    const y = point.y - content.y - offset.y
+    try {
+      const hit = await contents.executeJavaScript(`(() => { const el = document.elementFromPoint(${x}, ${y}); const row = el && el.closest('[data-browser-tab-id]'); if (!row) return null; const r = row.getBoundingClientRect(); return { id: String(row.dataset.browserTabId), after: ${y} > r.top + r.height / 2 } })()`, false) as unknown
+      if (hit && typeof hit === 'object' && typeof (hit as SidebarRowHit).id === 'string') return { id: (hit as SidebarRowHit).id, after: (hit as SidebarRowHit).after === true }
+    } catch {
+      // Renderer busy or gone: no row.
+    }
+  }
+  return null
+}
+
+/** Show or clear a drop line in `window`'s sidebar: before `beforeId` (null: at the end), or none (`active` false). */
+function sendSidebarDropHint(window: BaseWindow | null, hint: { beforeId: string | null } | null): void {
+  for (const w of windowStates) {
+    if (w.mini || !isLiveWindow(w)) continue
+    try { sendToWindowRenderers(w.window, 'browser:tabs:external-drop', w.window === window ? hint : null) } catch { /* closing */ }
+  }
+}
 
 /** A mini window's tab (`tabId`, else its active one). */
 function miniTabOf(mini: BrowserWindowState | undefined, tabId?: string): BrowserTab | undefined {
@@ -1874,6 +1914,11 @@ export function canPopOutBrowserTab(id?: string | null): boolean {
   return canPopOutTab(getTab(id ?? undefined))
 }
 
+/** The current browser window's active tab (palette commands that take "this tab"). */
+export function getBrowserActiveTabId(): string | null {
+  return getTab()?.id ?? null
+}
+
 /** Any mini window open (with its tab)? */
 export function hasMiniWindows(): boolean {
   return windowStates.some((candidate) => candidate.mini && isLiveWindow(candidate) && candidate.activeTabId !== null)
@@ -1883,7 +1928,7 @@ setMiniWindowHost({
   attachWindow: (win) => { attachMiniWindowState(win) },
   activeTabId: () => getTab()?.id ?? null,
   canPopOut: (tabId) => canPopOutTab(findTab(tabId)),
-  adoptTab: (tabId, win) => {
+  adoptTab: (tabId, win, beforeId = null) => {
     const tab = findTab(tabId)
     const mini = miniStateFor(win)
     if (!tab || !isLiveWindow(mini) || tab.win === mini) return false
@@ -1897,14 +1942,18 @@ setMiniWindowHost({
       mini.isPrivate = tab.isPrivate
       mini.miniHome = fromMini ? miniTabHomes.get(tab) ?? from.miniHome : from
     }
-    if (!fromMini) miniTabHomes.set(tab, from)
+    if (!fromMini) {
+      miniTabHomes.set(tab, from)
+      const origin = miniTabOrigin(from.tabs.map((candidate) => candidate.id), tab.id)
+      if (origin) miniTabOrigins.set(tab, origin)
+    }
     mini.activeSpaceId = tab.spaceId
     // The window keeps a tab: popping out its last one leaves a New Tab behind (in the same Space).
     if (!fromMini && from.tabs.length === 1) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
     detachTabFromWindow(tab)
     // Its group stays behind; the mini window has none.
     tab.groupId = null
-    adoptTabIntoWindow(tab, mini, null)
+    adoptTabIntoWindow(tab, mini, beforeId && mini.tabs.some((candidate) => candidate.id === beforeId) ? beforeId : null)
     activateTabInternal(tab.id)
     persistOpenTabs()
     publishState(from)
@@ -1948,12 +1997,45 @@ setMiniWindowHost({
       ?? (() => { const focused = windowStateFor(lastFocusedBrowserWindow()); return isLiveWindow(focused) && !focused.mini && canMoveTabTo(tab, focused) ? focused : undefined })()
       ?? windowStates.find((w) => !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
     if (target) {
-      // Moving its only tab out closes the mini window (detachTabFromWindow).
-      return moveBrowserTabToWindow(tab.id, target.window)
+      // Back where it popped out of (home only); moving its only tab out closes the mini window (detachTabFromWindow).
+      const beforeId = target === home ? miniReturnBeforeId(miniTabOrigins.get(tab), target.tabs.map((candidate) => candidate.id)) : null
+      return moveBrowserTabToWindow(tab.id, target.window, beforeId)
     }
     // No browser window left (macOS keeps running without one): a new window takes the tab over.
     const created = browserWindowFactory?.({ private: home?.isPrivate === true && tab.isPrivate, adoptTabId: tab.id })
     return Boolean(created && findTab(tab.id)?.win.window === created)
+  },
+  returnTabAt: async (win, tabId, window, point) => {
+    const tab = miniTabOf(miniStateFor(win), tabId)
+    const to = windowStateFor(window)
+    if (!tab || !isLiveWindow(to) || to.mini || !canMoveTabTo(tab, to)) return false
+    const ids = to.tabs.map((candidate) => candidate.id)
+    const hit = await sidebarRowAt(to, point)
+    // Off the sidebar (on the page): back where it came from in its home window, else the end.
+    const beforeId = hit ? sidebarDropBeforeId(hit, ids, tab.id) : to === miniTabHomes.get(tab) ? miniReturnBeforeId(miniTabOrigins.get(tab), ids) : null
+    if (findTab(tab.id) !== tab || !tab.win.mini) return false
+    return moveBrowserTabToWindow(tab.id, to.window, beforeId)
+  },
+  dropHintAt: async (window, point, tabId) => {
+    const to = window ? windowStateFor(window) : undefined
+    if (!window || !isLiveWindow(to) || to.mini) return sendSidebarDropHint(null, null)
+    const hit = await sidebarRowAt(to, point)
+    sendSidebarDropHint(window, { beforeId: hit ? sidebarDropBeforeId(hit, to.tabs.map((candidate) => candidate.id), tabId) : null })
+  },
+  clearDropHint: () => sendSidebarDropHint(null, null),
+  browserWindows: () => windowStates
+    .filter((w) => !w.mini && isLiveWindow(w) && w.window.isVisible() && !w.window.isMinimized())
+    .map((w) => ({ window: w.window, bounds: w.window.getBounds() })),
+  reorderTab: (win, tabId, index) => {
+    const mini = miniStateFor(win)
+    const tab = miniTabOf(mini, tabId)
+    if (!mini || !tab) return false
+    const next = moveTabId(mini.tabs.map((candidate) => candidate.id), tabId, index)
+    if (next.every((id, at) => mini.tabs[at]?.id === id)) return false
+    mini.tabs.sort((a, b) => next.indexOf(a.id) - next.indexOf(b.id))
+    persistOpenTabs()
+    publishState(mini)
+    return true
   },
   closeTab: (win, tabId) => {
     const tab = miniTabOf(miniStateFor(win), tabId)
@@ -2480,6 +2562,8 @@ export function dropBrowserTabOutside(id: string): boolean {
     const bounds = window.getBounds()
     return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
   }
+  // Over a mini window (they float above every window): it joins that one at the strip slot under the pointer.
+  if (canPopOutTab(tab) && dropBrowserTabOnMiniWindow(id, point)) return true
   // Back over its own window: the left/right edge of the page area splits the page with the tab.
   if (contains(tab.win.window)) return dropTabOnPageEdge(tab, point)
   const target = windowStates.find((w) => w !== tab.win && !w.mini && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
