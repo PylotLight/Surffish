@@ -241,8 +241,16 @@ async function run() {
   key(zoomGlance, '=', [IS_MAC ? 'meta' : 'control'])
   await waitFor(() => near(zoomGlance.getZoomFactor(), 1.1), `Cmd/Ctrl+= zooms the glance to 110% (${zoomGlance.getZoomFactor()})`)
   assert.ok(near(start.getZoomFactor(), tabZoom), `the tab under the glance keeps its zoom (${start.getZoomFactor()})`)
-  // Ctrl+wheel up (Electron emits zoom-changed; the glance page steps its own zoom).
-  zoomGlance.sendInputEvent({ type: 'mouseWheel', x: 200, y: 200, deltaX: 0, deltaY: 1, wheelTicksX: 0, wheelTicksY: 1, phase: 'began', modifiers: ['control', 'meta'] })
+  // Ctrl+wheel up: Chromium turns it into Electron's zoom-changed, which the glance page handles like
+  // a tab. A synthetic wheel doesn't always reach that path (xvfb), so fall back to the event itself:
+  // what is under test is that the glance listens for it (it never did) and steps its own zoom.
+  zoomGlance.sendInputEvent({ type: 'mouseWheel', x: 200, y: 200, deltaX: 0, deltaY: 120, wheelTicksX: 0, wheelTicksY: 1, canScroll: true, modifiers: ['control'] })
+  const wheelZoomed = await waitFor(() => !near(zoomGlance.getZoomFactor(), 1.1), 'a real Ctrl+wheel zoom', 2000).then(() => true, () => false)
+  if (!wheelZoomed) {
+    smoke.step('synthetic Ctrl+wheel did not reach zoom-changed here; emitting zoom-changed on the glance page')
+    assert.ok(zoomGlance.listenerCount('zoom-changed') > 0, 'the glance page listens for zoom-changed (Ctrl+wheel)')
+    zoomGlance.emit('zoom-changed', { preventDefault() {} }, 'in')
+  }
   await waitFor(() => near(zoomGlance.getZoomFactor(), 1.25), `Ctrl+wheel zooms the glance to 125% (${zoomGlance.getZoomFactor()})`)
   // View → Zoom In / the palette (runTabCommand) targets the open glance, not the active tab.
   assert.equal(await smoke.evaluate(toolbar, 'window.api.browser.commands.run("view.zoomIn")'), true)
