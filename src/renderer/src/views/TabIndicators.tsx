@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserTabSummary } from '../../../shared/types'
 import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
+import { formatTabVolume, stepTabVolume, TAB_VOLUME_WHEEL_STEP, tabVolumeLevel, type TabVolumeLevel } from '../../../shared/tab-volume'
 
-/** Favicon / loading spinner, audio mute button and pinned-tab icon used by the tab sidebar. */
+/** Favicon / loading spinner, audio mute + volume control and pinned-tab icon used by the tab sidebar. */
 /**
  * `animate` is false while this surface's sidebar is off screen: an animation keeps ticking (and
  * repainting the blurred sidebar) even under visibility:hidden, so the arc then sits still.
@@ -30,26 +31,109 @@ export function TabFavicon({ tab, animate = true }: { tab: BrowserTabSummary; an
   )
 }
 
+const SPEAKER_WAVES: Record<TabVolumeLevel, React.JSX.Element | null> = {
+  muted: <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />,
+  off: null,
+  low: <path className="tab-audio-wave1" d="M15 9.2a4 4 0 0 1 0 5.6" />,
+  high: <><path className="tab-audio-wave1" d="M15 9.2a4 4 0 0 1 0 5.6" /><path className="tab-audio-wave2" d="M17.6 6.8a7.4 7.4 0 0 1 0 10.4" /></>
+}
+/** Wheel pixels per 5% step (Chromium reports a mouse notch as 100px). */
+const WHEEL_PIXELS_PER_STEP = 100
+
+/**
+ * The tab's speaker (shown while it plays, holds media or is muted): click mutes, the scroll wheel
+ * steps the tab volume 5%, and hovering it slides out a volume slider (the title gives way).
+ */
 export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary; className?: string }): React.JSX.Element | null {
-  if (!tab.audible && !tab.muted) return null
-  const label = tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`
+  const saved = tab.volume ?? 1
+  // While the slider is dragged (and until main echoes the level back) the control shows its own value.
+  const [local, setLocal] = useState<number | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const volume = local ?? saved
+  const volumeRef = useRef(volume)
+  volumeRef.current = volume
+  const rootRef = useRef<HTMLSpanElement | null>(null)
+  const shown = tab.audible || tab.muted || tab.media === true
+  const tabId = tab.id
+
+  const send = useCallback((value: number) => {
+    const next = stepTabVolume(value, 0)
+    setLocal(next)
+    void window.api.browser.tabs.setVolume(tabId, next)
+  }, [tabId])
+
+  // Main's level caught up with what the control shows: let go of the local copy.
+  useEffect(() => {
+    if (local === null || dragging) return
+    if (Math.abs(local - saved) < 0.005) { setLocal(null); return }
+    const timer = setTimeout(() => setLocal(null), 1500)
+    return () => clearTimeout(timer)
+  }, [local, saved, dragging])
+
+  // React's wheel listener is passive; this one must stop the sidebar scrolling.
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    let carried = 0
+    const onWheel = (event: WheelEvent): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      // Line/page deltas: one step per event. Pixels: a mouse notch (~100px) is one step; trackpads add up.
+      carried += event.deltaMode === 0 ? event.deltaY : Math.sign(event.deltaY) * WHEEL_PIXELS_PER_STEP
+      const steps = Math.trunc(carried / WHEEL_PIXELS_PER_STEP)
+      if (steps === 0) return
+      carried -= steps * WHEEL_PIXELS_PER_STEP
+      send(stepTabVolume(volumeRef.current, -steps * TAB_VOLUME_WHEEL_STEP))
+    }
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
+  }, [send, shown])
+
+  if (!shown) return null
+  const level = tabVolumeLevel(volume, tab.muted)
+  const percent = formatTabVolume(volume)
+  const stop = (event: React.SyntheticEvent): void => event.stopPropagation()
   return (
-    <button
-      className={`tab-audio-button${tab.muted ? ' is-muted' : ' is-playing'} ${className}`.trim()}
-      type="button"
-      aria-label={label}
-      aria-pressed={tab.muted}
-      title={tab.muted ? 'Unmute tab' : 'Playing audio · click to mute'}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => { event.stopPropagation(); void window.api.browser.tabs.setMuted(tab.id, !tab.muted) }}
+    <span
+      ref={rootRef}
+      className={`tab-volume${dragging ? ' is-open' : ''}${level === 'muted' ? ' is-muted' : ''}`}
+      onPointerDown={stop}
+      onMouseDown={stop}
+      onClick={stop}
+      onDoubleClick={stop}
+      onAuxClick={stop}
+      onKeyDown={stop}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path className="tab-audio-speaker" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />
-        {tab.muted
-          ? <path d="M15.5 9.5l5 5M20.5 9.5l-5 5" />
-          : <><path className="tab-audio-wave1" d="M15 9.2a4 4 0 0 1 0 5.6" /><path className="tab-audio-wave2" d="M17.6 6.8a7.4 7.4 0 0 1 0 10.4" /></>}
-      </svg>
-    </button>
+      <button
+        className={`tab-audio-button${tab.muted ? ' is-muted' : tab.audible ? ' is-playing' : ''} ${className}`.trim()}
+        type="button"
+        aria-label={`${tab.muted ? 'Unmute' : 'Mute'} ${tab.title} (volume ${percent})`}
+        aria-pressed={tab.muted}
+        title={tab.muted ? `Muted · volume ${percent} · click to unmute` : `Volume ${percent} · click to mute, scroll to change`}
+        onClick={() => { void window.api.browser.tabs.setMuted(tab.id, !tab.muted) }}
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path className="tab-audio-speaker" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z" />
+          {SPEAKER_WAVES[level]}
+        </svg>
+      </button>
+      <input
+        className="tab-volume-slider"
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={Math.round(volume * 100)}
+        style={{ '--tab-volume-fill': percent } as React.CSSProperties}
+        aria-label={`Volume of ${tab.title}`}
+        aria-valuetext={percent}
+        onPointerDown={() => setDragging(true)}
+        onPointerUp={() => setDragging(false)}
+        onPointerCancel={() => setDragging(false)}
+        onBlur={() => setDragging(false)}
+        onChange={(event) => send(Number(event.target.value) / 100)}
+      />
+    </span>
   )
 }
 

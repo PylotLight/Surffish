@@ -19,10 +19,18 @@ contextBridge.exposeInMainWorld('miniWindow', {
   activateTab: (tabId) => ipcRenderer.send('mini-window:activate-tab', String(tabId)),
   closeTab: (tabId) => ipcRenderer.send('mini-window:close-tab', String(tabId)),
   returnAll: () => ipcRenderer.send('mini-window:return-all'),
+  // Speaker (header / strip chip): tab volume 0..1 and mute.
+  setVolume: (tabId, volume) => ipcRenderer.send('mini-window:set-volume', String(tabId), Number(volume)),
+  setMuted: (tabId, muted) => ipcRenderer.send('mini-window:set-muted', String(tabId), Boolean(muted)),
   tabOut: (tabId, x, y) => ipcRenderer.send('mini-window:tab-out', String(tabId), Number(x), Number(y)),
   // Dock handle.
   onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),
   handleClick: () => ipcRenderer.send('mini-window:handle-click'),
   handleDrag: (active) => ipcRenderer.send('mini-window:handle-drag', Boolean(active)),
-  handleHover: (inside) => ipcRenderer.send('mini-window:handle-hover', Boolean(inside))
+  handleHover: (inside) => ipcRenderer.send('mini-window:handle-hover', Boolean(inside)),
+  // The mini window's menu (right-click on the header or handle), and the menu bar (Send to / Float, Pin).
+  menu: () => ipcRenderer.send('mini-window:menu'),
+  handleMenu: () => ipcRenderer.send('mini-window:handle-menu'),
+  menuBar: () => ipcRenderer.send('mini-window:menubar'),
+  pin: () => ipcRenderer.send('mini-window:pin')
 })

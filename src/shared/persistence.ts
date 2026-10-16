@@ -1,5 +1,6 @@
 import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } from './navigation.ts'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
+import { parseSiteVolumes } from './tab-volume.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
@@ -55,6 +56,8 @@ export interface BrowserPreferences {
   siteSettings: Record<string, BrowserSiteSettings>
   /** Per-origin page zoom factor; only non-100% values are kept. */
   siteZoom: Record<string, number>
+  /** Per-origin tab volume (0..1); only non-100% values are kept. */
+  siteVolume: Record<string, number>
 }
 
 export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
@@ -264,7 +267,8 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     pinnedSites: [],
     sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
     siteSettings: {},
-    siteZoom: {}
+    siteZoom: {},
+    siteVolume: {}
   }
   if (!isRecord(value) || value.version !== 1) return defaults
 
@@ -284,7 +288,8 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
     pinnedSites: normalizePinnedSites(value.pinnedSites),
     sidebarWidth: normalizeSidebarWidth(value.sidebarWidth),
     siteSettings,
-    siteZoom: parseSiteZoom(value.siteZoom)
+    siteZoom: parseSiteZoom(value.siteZoom),
+    siteVolume: parseSiteVolumes(value.siteVolume, normalizeHttpOrigin)
   }
 }
 

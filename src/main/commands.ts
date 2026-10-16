@@ -23,6 +23,7 @@ import {
   savePdfEditor,
   selectBrowserTabByNumber,
   setBrowserTabMuted,
+  stepActiveBrowserTabVolume,
   suspendOtherBrowserTabs,
   togglePdfEditor,
   type TabCommand
@@ -51,7 +52,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, hasMiniWindows } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
+import { canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
  * Command registry: every browser action the palette (and anything else later) can list and run.
@@ -94,6 +95,18 @@ function openPanel(mode: BrowserSidebarMode): void {
   focusVisibleShellPage()
 }
 
+// The menu bar icon's "Mini Window Settings…": a browser window forward (a new one when none is open), Settings open.
+setMiniWindowSettingsOpener(() => {
+  const win = getMainWindow()
+  if (!win || win.isDestroyed()) createBrowserWindow()
+  else {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+  openPanel('settings')
+})
+
 const COMMANDS: BrowserCommand[] = [
   // Tabs
   { id: 'tab.new', title: 'New Tab', accelerator: APP_SHORTCUTS.newTab, section: 'Tab', keywords: ['open'], run: () => newBrowserTab() },
@@ -104,10 +117,12 @@ const COMMANDS: BrowserCommand[] = [
   tabCommand('tab.duplicate', 'duplicate', 'Duplicate Tab', { keywords: ['clone', 'copy tab'] }),
   tabCommand('tab.pin', 'pin', () => (activeTab()?.pinned ? 'Unpin Tab' : 'Pin Tab'), { enabled: () => Boolean(activeTab()) }),
   {
-    id: 'tab.mute', title: () => (activeTab()?.muted ? 'Unmute Tab' : 'Mute Tab'), section: 'Tab', keywords: ['audio', 'sound', 'silence'], refocusPage: true,
+    id: 'tab.mute', title: () => (activeTab()?.muted ? 'Unmute Tab' : 'Mute Tab'), section: 'Tab', keywords: ['audio', 'sound', 'silence', 'volume mute'], refocusPage: true,
     enabled: () => Boolean(getActiveTabWebContents()),
     run: () => { const tab = activeTab(); if (tab) setBrowserTabMuted(tab.id, !tab.muted) }
   },
+  { id: 'tab.volumeUp', title: 'Volume Up', section: 'Tab', keywords: ['tab volume', 'louder', 'sound', 'audio'], refocusPage: true, enabled: () => Boolean(getActiveTabWebContents()), run: () => stepActiveBrowserTabVolume(1) },
+  { id: 'tab.volumeDown', title: 'Volume Down', section: 'Tab', keywords: ['tab volume', 'quieter', 'softer', 'sound', 'audio'], refocusPage: true, enabled: () => Boolean(getActiveTabWebContents()), run: () => stepActiveBrowserTabVolume(-1) },
   tabCommand('tab.bookmark', 'bookmark', () => (activeIsBookmarked() ? 'Remove Bookmark' : 'Bookmark Tab'), { keywords: ['favorite', 'favourite', 'star'], enabled: activeIsWebPage }),
   {
     id: 'readingList.add', title: 'Add to Reading List', accelerator: TAB_COMMAND_SHORTCUTS.readingList.accelerator, section: 'Tab',
@@ -206,6 +221,19 @@ const COMMANDS: BrowserCommand[] = [
     refocusPage: false,
     enabled: () => hasMiniWindows() && getMiniWindowSettings().tuckToEdge,
     run: () => tuckMiniWindow()
+  },
+  {
+    id: 'miniWindow.menuBar', title: 'Send Mini Window to Menu Bar', section: 'View',
+    keywords: ['mini window', 'menu bar', 'tray', 'status item', 'status bar', 'menubar', 'pop out'],
+    refocusPage: false,
+    enabled: () => canSendToMenuBar(canPopOutBrowserTab()),
+    run: () => sendMiniWindowToMenuBar()
+  },
+  {
+    id: 'miniWindow.togglePeek', title: () => (getMiniWindowSettings().peekOnHover ? 'Turn Off Mini Window Peek on Hover' : 'Turn On Mini Window Peek on Hover'), section: 'Settings',
+    keywords: ['mini window', 'peek', 'hover', 'tuck', 'edge', 'handle', 'slide out'], refocusPage: true,
+    enabled: () => getMiniWindowSettings().tuckToEdge,
+    run: () => setMiniWindowPeekOnHover(!getMiniWindowSettings().peekOnHover)
   },
   ...(([['tabs', 'Tabs', ['tab strip', 'collection', 'merge']], ['stack', 'Stack', ['stack', 'edge group', 'slide out together']], ['separate', 'Separate', ['one window per tab', 'separate windows']]] as const).map(([grouping, label, extra]): BrowserCommand => ({
     id: `miniWindow.grouping.${grouping}`, title: `Mini Window Grouping: ${label}`, section: 'Settings',
@@ -332,10 +360,11 @@ function miniWindowCommands(): BrowserCommand[] {
   const keywords = ['mini window', 'float', 'always on top']
   return open.flatMap((mini): BrowserCommand[] => [
     { id: `miniWindow.show:${mini.tabId}`, title: `Show Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'focus', 'switch to'], refocusPage: false, run: () => focusMiniWindow(mini.tabId) },
-    {
+    // In the menu bar there is no edge to tuck to (its icon's menu has Move to Edge).
+    ...(mini.menuBar ? [] : [{
       id: `miniWindow.tuck:${mini.tabId}`, title: `${isMiniWindowTucked(mini.tabId) ? 'Slide Out' : 'Tuck Away'} Mini Window: ${mini.title}`, section: 'View', keywords: [...keywords, 'tuck', 'edge', 'slide'], refocusPage: false,
       enabled: () => getMiniWindowSettings().tuckToEdge, run: () => tuckMiniWindow(mini.tabId)
-    },
+    } satisfies BrowserCommand]),
     { id: `miniWindow.return:${mini.tabId}`, title: `Return Mini Window to Browser: ${mini.title}`, section: 'View', keywords: [...keywords, 'pop in', 'back to browser'], run: () => returnMiniWindowToBrowser({ tabId: mini.tabId }) }
   ])
 }

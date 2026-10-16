@@ -45,7 +45,7 @@ export function SiteDataSettings({ origin, onForgotten }: { origin: string; onFo
             <input type="checkbox" checked={includeHistory} onChange={(event) => setIncludeHistory(event.target.checked)} />
             <span>Also remove this site from history</span>
           </label>
-          <p className="settings-help">Clears cookies, storage and cache for {new URL(origin).hostname}, and resets its permissions and zoom. You’ll be signed out.</p>
+          <p className="settings-help">Clears cookies, storage and cache for {new URL(origin).hostname}, and resets its permissions, zoom and tab volume. You’ll be signed out.</p>
           <div className="settings-actions">
             <button className="settings-action secondary" type="button" onClick={() => setConfirming(false)}>Cancel</button>
             <button className="settings-action primary" type="button" disabled={busy} onClick={() => void forget()}>{busy ? 'Forgetting…' : 'Forget'}</button>

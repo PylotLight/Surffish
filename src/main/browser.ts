@@ -26,6 +26,8 @@ import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmark
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
+import { forgetPrivateTabVolumes, pushTabVolume, setTabVolumeHost, setTabVolumeLevel, tabVolumeForUrl } from './tab-volume'
+import { formatTabVolume, stepTabVolume, TAB_VOLUME_COMMAND_STEP } from '../shared/tab-volume'
 import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
 import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
 import { isLocalDocumentUrl } from '../shared/external-links'
@@ -66,7 +68,7 @@ import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplit
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, noteGlanceWindowState, openGlance, setGlanceHost, type GlanceSource } from './glance-entry'
-import { noteMiniWindowChanged, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost } from './mini-window-entry'
+import { getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
 import { canPopOutUrl } from '../shared/mini-window'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
@@ -111,6 +113,9 @@ interface BrowserTab {
   spaceId: string
   /** Tab group (BrowserWindowState.groups), or null. */
   groupId: string | null
+  /** Tab volume 0..1 (tab-volume.ts) and the site it belongs to; follows the tab across windows and sleep. */
+  volume: number
+  volumeOrigin: string | null
 }
 
 interface PdfEditorTabState {
@@ -380,6 +385,8 @@ function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
     private: tab.isPrivate,
     audible: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()),
     muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
+    ...(tab.volume !== 1 ? { volume: tab.volume } : {}),
+    ...(tabHoldsMediaSession(tab.view?.webContents) ? { media: true } : {}),
     crashed: isTabCrashed(tab.view?.webContents),
     ...(split ? { split } : {}),
     ...(group ? { group } : {})
@@ -985,6 +992,8 @@ function showBrowserTabContextMenu(id: string): void {
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Pop Out to Mini Window', ...tabMenuAccelerator('miniWindow'), enabled: canPopOutTab(tab), click: () => { void popOutTabToMiniWindow(id) } },
+    // Hidden with the menu bar icon set to Never.
+    ...(getMiniWindowSettings().menuBarIcon === 'never' ? [] : [{ label: 'Open in Menu Bar', enabled: canPopOutTab(tab), click: () => { void popOutTabToMenuBar(id) } }]),
     { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
     { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
     { type: 'separator' },
@@ -1138,8 +1147,9 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   contents.on('page-title-updated', pictureChanged)
   contents.on('zoom-changed', pictureChanged)
   contents.on('found-in-page', pictureChanged)
-  contents.on('media-started-playing', () => { if (isCurrentContents()) tabsPlayingMedia.add(tab) })
-  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab) } })
+  // Media starting/stopping can show or hide the tab's speaker (BrowserTabSummary.media).
+  contents.on('media-started-playing', () => { if (isCurrentContents()) { tabsPlayingMedia.add(tab); publishTabs(tab.win) } })
+  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab); publishTabs(tab.win) } })
   contents.once('destroyed', () => tabsPlayingMedia.delete(tab))
   contents.on('before-mouse-event', (_event, mouseEvent) => {
     if (!isCurrentContents()) return
@@ -1337,6 +1347,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     // Something committed: no longer a tab that only exists for a download.
     tab.closeIfOnlyDownload = false
     applySavedZoom(tab, url)
+    applyTabVolumeForUrl(tab, url)
     const { findState } = tab.win
     if (findState.open && findState.tabId === tab.id) {
       // A new document: the old matches are gone, so search the new page for the same text.
@@ -1794,6 +1805,14 @@ function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
   }
 }
 
+/** The mini header's speaker: shown while the tab plays, holds media or is muted. */
+function miniTabAudio(tab: BrowserTab): MiniWindowTabAudio {
+  const contents = tab.view?.webContents
+  const live = contents && !contents.isDestroyed() ? contents : null
+  const muted = live ? live.isAudioMuted() : false
+  return { audio: muted || tabHoldsMediaSession(live), muted, volume: tab.volume }
+}
+
 /** Make `win` the mini window's BrowserWindowState (no tabs yet). */
 function attachMiniWindowState(win: BaseWindow): BrowserWindowState {
   const existing = windowStateFor(win)
@@ -1889,7 +1908,7 @@ setMiniWindowHost({
   tabs: (win) => {
     const mini = miniStateFor(win)
     if (!mini) return []
-    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId }))
+    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, playing: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isCurrentlyAudible()), ...miniTabAudio(tab) }))
   },
   activateTab: (win, tabId) => {
     const tab = miniTabOf(miniStateFor(win), tabId)
@@ -1957,14 +1976,26 @@ setMiniWindowHost({
       faviconUrl: tab.faviconUrl,
       loading: live ? live.isLoading() : false,
       canGoBack: live ? live.navigationHistory.canGoBack() : false,
-      private: tab.isPrivate
+      private: tab.isPrivate,
+      ...miniTabAudio(tab)
     }
+  },
+  setTabVolume: (win, tabId, volume) => {
+    const tab = miniTabOf(miniStateFor(win), tabId)
+    if (tab) setBrowserTabVolume(tab.id, volume)
+  },
+  setTabMuted: (win, tabId, muted) => {
+    const tab = miniTabOf(miniStateFor(win), tabId)
+    if (tab) setBrowserTabMuted(tab.id, muted)
   },
   handleShortcut: (win, input) => {
     const tab = activeTabOf(miniStateFor(win))
     return tab ? handleBrowserShortcutInput(input, tab.id) : false
   },
-  notify: (message) => flashBrowserStatus(message, 3500)
+  notify: (message) => flashBrowserStatus(message, 3500),
+  browserTabs: () => windowStates
+    .filter((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
+    .flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab) => ({ tabId: tab.id, url: currentUrl(tab) })))
 })
 
 export interface ExtensionPageTabOptions {
@@ -2022,7 +2053,9 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     restoreHistory: null,
     // Extension pages need the profile session (that's where extensions load), so they stay in Default.
     spaceId: extensionPage ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId),
-    groupId: null
+    groupId: null,
+    volume: 1,
+    volumeOrigin: null
   }
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
@@ -3320,6 +3353,52 @@ export function reopenClosedBrowserTab(): string | null {
   return id
 }
 
+// ---------------------------------------------------------------------------
+// Tab volume (tab-volume.ts): kept on the tab, remembered per site, applied by the frame preload.
+
+/** A new document committed: another site takes its saved level (frames already asked; re-send if it changed). */
+function applyTabVolumeForUrl(tab: BrowserTab, url: string): void {
+  const before = tab.volume
+  if (tabVolumeForUrl(tab, url) === before) return
+  pushTabVolume(tab.view?.webContents, tab.volume)
+  publishTabs(tab.win)
+}
+
+/** Set a tab's volume (0..1) and remember it for its site. */
+export function setBrowserTabVolume(id: string, value: unknown): boolean {
+  const tab = findTab(id)
+  if (!tab) return false
+  const volume = setTabVolumeLevel(tab, currentUrl(tab), value)
+  if (volume === null) return false
+  pushTabVolume(tab.view?.webContents, volume)
+  publishTabs(tab.win)
+  return true
+}
+
+/** ⌘K Volume Up / Down: step the active tab's volume and say where it landed. */
+export function stepActiveBrowserTabVolume(direction: 1 | -1): void {
+  const tab = getTab()
+  if (!tab) return
+  setBrowserTabVolume(tab.id, stepTabVolume(tab.volume, direction * TAB_VOLUME_COMMAND_STEP))
+  flashBrowserStatus(`Tab volume ${formatTabVolume(tab.volume)}`, 1500)
+}
+
+setTabVolumeHost({
+  stateFor: (contents) => tabForContents(contents) ?? null,
+  sitesReset: (origins) => {
+    for (const w of windowStates) {
+      let changed = false
+      for (const tab of w.tabs) {
+        if (!tab.volumeOrigin || (origins && !origins.includes(tab.volumeOrigin)) || tab.volume === 1) continue
+        tab.volume = 1
+        pushTabVolume(tab.view?.webContents, 1)
+        changed = true
+      }
+      if (changed) publishTabs(w)
+    }
+  }
+})
+
 export function setBrowserTabMuted(id: string, muted: boolean): boolean {
   const contents = getTab(id)?.view?.webContents
   if (!contents || contents.isDestroyed()) return false
@@ -3386,6 +3465,7 @@ function hasOtherWindows(w: BrowserWindowState): boolean {
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
   privateSiteZoom.clear()
+  forgetPrivateTabVolumes()
   for (const [id, job] of [...pendingPictures]) if (job.wake?.isPrivate) cancelTabPictureEncode(id)
   dropPrivateWakeSnapshots()
   forgetPrivateDownloads()

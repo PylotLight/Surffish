@@ -5,6 +5,8 @@ import {
   clashingAppShortcut,
   isMiniWindowGrouping,
   isMiniWindowHeaderPlacement,
+  isMiniWindowMenuBarIcon,
+  isMiniWindowPeekDelay,
   normalizeAccelerator,
   normalizeMiniWindowUrl,
   parseMiniWindowSettings,
@@ -14,6 +16,9 @@ import {
 } from '../shared/mini-window'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeSettingsFile } from './user-json'
+
+/** Which pages live in the menu bar (shared/mini-window-menubar.ts MINI_WINDOW_MENU_BAR_FILE; not imported, to keep it out of startup). */
+const MENU_BAR_FILE = 'mini-window-menubar.json'
 
 /**
  * Mini window entry point: everything main loads at startup for it (settings, IPC, the global
@@ -49,14 +54,28 @@ export interface MiniWindowHost {
   /** Where the page goes inside the mini window (window coordinates). */
   setPageBounds(win: BaseWindow, bounds: { x: number; y: number; width: number; height: number }): void
   pageContents(win: BaseWindow): WebContents | null
-  header(win: BaseWindow): { tabId: string; title: string; url: string; faviconUrl: string | null; loading: boolean; canGoBack: boolean; private: boolean } | null
+  header(win: BaseWindow): ({ tabId: string; title: string; url: string; faviconUrl: string | null; loading: boolean; canGoBack: boolean; private: boolean } & MiniWindowTabAudio) | null
+  /** Set one of the mini window's tabs' volume (0..1) / mute. */
+  setTabVolume(win: BaseWindow, tabId: string, volume: number): void
+  setTabMuted(win: BaseWindow, tabId: string, muted: boolean): void
   /** Run a browser shortcut pressed in the mini window; true when it was one. */
   handleShortcut(win: BaseWindow, input: Electron.Input): boolean
   /** A short notice in the browser window (e.g. too many mini windows open). */
   notify(message: string): void
+  /** Tabs in the (normal) browser windows, for picking the menu bar's pages back out after a restart. */
+  browserTabs(): Array<{ tabId: string; url: string }>
 }
 
-export interface MiniWindowTab {
+/** What the header's speaker needs (shown while the tab is audible, holds media or is muted). */
+export interface MiniWindowTabAudio {
+  audio: boolean
+  muted: boolean
+  volume: number
+}
+
+export interface MiniWindowTab extends MiniWindowTabAudio {
+  /** Making sound right now (the menu bar icon's ♪). */
+  playing: boolean
   tabId: string
   title: string
   url: string
@@ -69,6 +88,8 @@ export interface MiniWindowListing {
   title: string
   tucked: boolean
   focused: boolean
+  /** Lives in the menu bar (tucked: its popout is hidden). */
+  menuBar: boolean
 }
 
 export interface MiniWindowShortcutStatus {
@@ -87,6 +108,7 @@ let loadingModule: Promise<MiniWindowModule> | null = null
 let registeredShortcut: string | null = null
 let shortcutError: string | null = null
 let appShortcuts: () => readonly string[] = () => []
+let settingsOpener: () => void = () => {}
 
 function current(): MiniWindowSettings {
   settings ??= parseMiniWindowSettings(readUserJson(MINI_WINDOW_SETTINGS_FILE))
@@ -110,6 +132,18 @@ export function setMiniWindowAppShortcuts(provider: () => readonly string[]): vo
   appShortcuts = provider
 }
 
+/** How the menu bar icon's "Settings…" opens Settings → Mini window (commands.ts knows the panels). */
+export function setMiniWindowSettingsOpener(open: () => void): void {
+  settingsOpener = open
+}
+
+/** The menu bar icon's "Mini Window Settings…": bring a browser window forward with Settings open. */
+export function openMiniWindowSettings(): void {
+  // A menu bar click never activates Surffish on macOS.
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  settingsOpener()
+}
+
 function loadModule(): Promise<MiniWindowModule> {
   loadingModule ??= import('./mini-window').then((module) => {
     miniModule = module
@@ -131,9 +165,52 @@ export async function popOutTabToMiniWindow(tabId?: string | null): Promise<bool
   }
 }
 
+/** Open a tab (default: the current window's active tab) in the menu bar (tab menu "Open in Menu Bar"). */
+export async function popOutTabToMenuBar(tabId?: string | null): Promise<boolean> {
+  if (!host || current().menuBarIcon === 'never') return false
+  const id = tabId ?? host.activeTabId()
+  if (!id || !host.canPopOut(id)) return false
+  try {
+    return (await loadModule()).popOutTabToMenuBar(id)
+  } catch (error) {
+    console.warn('Could not open the mini window in the menu bar:', error)
+    return false
+  }
+}
+
+/** ⌘K "Send Mini Window to Menu Bar": the last used floating mini window, else the current tab. */
+export async function sendMiniWindowToMenuBar(): Promise<boolean> {
+  if (miniModule?.sendCurrentToMenuBar()) return true
+  return popOutTabToMenuBar()
+}
+
+/** Can ⌘K "Send Mini Window to Menu Bar" do anything (icon not off; a floating mini or a tab that can pop out)? */
+export function canSendToMenuBar(canPopOutCurrentTab: boolean): boolean {
+  if (current().menuBarIcon === 'never') return false
+  return canPopOutCurrentTab || Boolean(miniModule?.list().some((mini) => !mini.menuBar))
+}
+
+/**
+ * After the first window paints: menu bar minis from the last run come back there, and with the icon
+ * set to 'always' it shows. Nothing loads (or is created) otherwise.
+ */
+export function startMiniWindowMenuBar(): void {
+  const { menuBarIcon } = current()
+  if (menuBarIcon === 'never') return
+  const saved = readUserJson(MENU_BAR_FILE) as { urls?: unknown } | null
+  const hasPages = Array.isArray(saved?.urls) && saved.urls.length > 0
+  if (menuBarIcon !== 'always' && !hasPages) return
+  void loadModule().then((module) => module.startMenuBar()).catch((error: unknown) => console.warn('Could not restore the menu bar mini windows:', error))
+}
+
 /** Put one mini window's tab back into the browser: the mini window `window`, or the one holding `tabId`. */
 export function returnMiniWindowToBrowser(target: { window?: BaseWindow; tabId?: string }): boolean {
   return miniModule?.returnToBrowser(target) ?? false
+}
+
+/** ⌘K: turn hover peek for tucked mini windows on/off (applies live). */
+export function setMiniWindowPeekOnHover(peekOnHover: boolean): boolean {
+  return updateMiniWindowSettings({ peekOnHover }).ok
 }
 
 /** Settings → Mini window grouping (also the Window menu and the palette). Regroups open mini windows without reloading. */
@@ -258,6 +335,10 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
     if (typeof patch.peekOnHover !== 'boolean') return { ok: false, error: 'Invalid settings' }
     next.peekOnHover = patch.peekOnHover
   }
+  if ('peekDelayMs' in patch) {
+    if (!isMiniWindowPeekDelay(patch.peekDelayMs)) return { ok: false, error: 'Invalid settings' }
+    next.peekDelayMs = patch.peekDelayMs
+  }
   if ('grouping' in patch) {
     if (!isMiniWindowGrouping(patch.grouping)) return { ok: false, error: 'Invalid settings' }
     next.grouping = patch.grouping
@@ -266,11 +347,17 @@ export function updateMiniWindowSettings(input: unknown): { ok: true; settings: 
     if (!isMiniWindowHeaderPlacement(patch.headerPlacement)) return { ok: false, error: 'Invalid settings' }
     next.headerPlacement = patch.headerPlacement
   }
+  if ('menuBarIcon' in patch) {
+    if (!isMiniWindowMenuBarIcon(patch.menuBarIcon)) return { ok: false, error: 'Invalid settings' }
+    next.menuBarIcon = patch.menuBarIcon
+  }
   const shortcutChanged = next.shortcut !== current().shortcut
   settings = parseMiniWindowSettings(next)
   writeSettingsFile(MINI_WINDOW_SETTINGS_FILE, settings)
   if (shortcutChanged) applyShortcut()
-  miniModule?.applySettings(getMiniWindowSettings())
+  if (miniModule) miniModule.applySettings(getMiniWindowSettings())
+  // 'always' with no mini window opened yet: the icon needs the (lazy) window module.
+  else if (settings.menuBarIcon === 'always') void loadModule().then((module) => module.applySettings(getMiniWindowSettings())).catch(() => undefined)
   publishSettings()
   return { ok: true, settings: getMiniWindowSettings(), status: getMiniWindowShortcutStatus() }
 }

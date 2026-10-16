@@ -222,7 +222,15 @@ const api = {
       moveToNewWindow: (id: string): Promise<boolean> => ipcRenderer.invoke('browser:tabs:move-to-new-window', id),
       newWindow: (isPrivate = false): Promise<boolean> => ipcRenderer.invoke('browser:windows:new', isPrivate),
       setMuted: (id: string, muted: boolean): Promise<boolean> => ipcRenderer.invoke('browser:tabs:mute', id, muted),
+      /** Tab volume 0..1 (remembered for the tab's site). */
+      setVolume: (id: string, volume: number): Promise<boolean> => ipcRenderer.invoke('browser:tabs:volume', id, volume),
       onChange: (callback: (tabs: BrowserTabSummary[]) => void): (() => void) => onTabsChange(callback)
+    },
+    /** Settings → Privacy → Tab volume: levels remembered per site. */
+    siteVolume: {
+      list: (): Promise<Array<{ origin: string; volume: number }>> => ipcRenderer.invoke('browser:site-volume:list'),
+      /** Forget one site's level (null = every site); open tabs there go back to 100%. */
+      reset: (origin: string | null): Promise<Array<{ origin: string; volume: number }>> => ipcRenderer.invoke('browser:site-volume:reset', origin)
     },
     split: splitViewApi,
     spaces: spacesApi,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CLEAR_RANGES, DEFAULT_CLEAR_OPTIONS, type ClearBrowsingDataOptions, type CookieSiteSummary } from '../../../../shared/browsing-data'
 import { SettingsGroup, SettingsRow } from './SettingsControls'
+import { formatTabVolume } from '../../../../shared/tab-volume'
 import '../Safety.css'
 
 type HttpsOnlyState = Awaited<ReturnType<typeof window.api.browser.safety.httpsOnly.get>>
@@ -11,7 +12,7 @@ const CLEAR_ITEMS: ReadonlyArray<{ key: keyof Omit<ClearBrowsingDataOptions, 'ra
   { key: 'cookies', label: 'Cookies and site data', hint: 'Signs you out of most sites' },
   { key: 'cache', label: 'Cached images and files', hint: 'Pages may load slower next time' },
   { key: 'permissions', label: 'Site permissions', hint: 'Camera, location, notifications, per-site settings' },
-  { key: 'zoom', label: 'Zoom levels', hint: 'Saved per-site page zoom' }
+  { key: 'zoom', label: 'Zoom and volume levels', hint: 'Saved per-site page zoom and tab volume' }
 ]
 
 function ClearBrowsingData(): React.JSX.Element {
@@ -49,7 +50,7 @@ function ClearBrowsingData(): React.JSX.Element {
           </label>
         ))}
       </div>
-      {options.range !== 'all' && <p className="settings-help">For a time range, cookies, site data, cache, permissions and zoom are cleared for the sites you visited in that period.</p>}
+      {options.range !== 'all' && <p className="settings-help">For a time range, cookies, site data, cache, permissions, zoom and volume levels are cleared for the sites you visited in that period.</p>}
       <div className="settings-actions">
         <button className="settings-action primary" type="button" disabled={busy || nothing} onClick={() => void clear()}>{busy ? 'Clearing…' : 'Clear data'}</button>
       </div>
@@ -83,6 +84,38 @@ function HttpsOnlySettings(): React.JSX.Element {
       )}
     </SettingsGroup>
   )
+}
+
+function SiteVolumes(): React.JSX.Element {
+  const [sites, setSites] = useState<Array<{ origin: string; volume: number }> | null>(null)
+  useEffect(() => {
+    void window.api.browser.siteVolume.list().then(setSites).catch(() => setSites([]))
+  }, [])
+  const reset = (origin: string | null): void => { void window.api.browser.siteVolume.reset(origin).then(setSites).catch(() => undefined) }
+  // Newest change first.
+  const shown = [...(sites ?? [])].reverse()
+  return (
+    <SettingsGroup title="Tab volume" status={sites ? `${sites.length} site${sites.length === 1 ? '' : 's'}` : undefined}>
+      <p className="settings-help">Volume set on a tab’s speaker is remembered for its site. Private tabs never save theirs.</p>
+      {sites === null ? <p className="settings-help">Loading…</p> : shown.length === 0 ? <p className="settings-help">No sites have a saved volume.</p> : (
+        <ul className="privacy-cookie-list" aria-label="Sites with a saved volume">
+          {shown.map((site) => (
+            <li key={site.origin}>
+              <span className="privacy-cookie-site">{hostOf(site.origin)}<small>{formatTabVolume(site.volume)}</small></span>
+              <button className="privacy-icon-button" type="button" title="Reset to 100%" aria-label={`Reset volume for ${hostOf(site.origin)}`} onClick={() => reset(site.origin)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {shown.length > 0 && <div className="settings-actions"><button className="settings-action secondary" type="button" onClick={() => reset(null)}>Reset all to 100%</button></div>}
+    </SettingsGroup>
+  )
+}
+
+function hostOf(origin: string): string {
+  try { return new URL(origin).host } catch { return origin }
 }
 
 function CookieSites(): React.JSX.Element {
@@ -133,12 +166,13 @@ export function PrivacySettings(): React.JSX.Element {
       <header className="settings-page-header">
         <div className="settings-page-heading-copy">
           <h1>Privacy</h1>
-          <p>Clear browsing data, HTTPS-only mode and stored cookies.</p>
+          <p>Clear browsing data, HTTPS-only mode, saved tab volumes and stored cookies.</p>
         </div>
       </header>
       <div className="settings-content">
         <ClearBrowsingData />
         <HttpsOnlySettings />
+        <SiteVolumes />
         <CookieSites />
       </div>
     </div>

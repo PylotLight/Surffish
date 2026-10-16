@@ -4,7 +4,9 @@
  * Loaded from a data: URL in its own tiny always-on-top window with the narrow preload in
  * preload/mini-window.cjs; never remote content. main/mini-window-dock.ts sends it the edge, the
  * arrow and the page's favicon; for a group (several tabs in one window, or a stack of windows on one
- * edge) a count badge too, and for a stack up to three favicons fanned behind each other.
+ * edge) a count badge too, and for a stack up to three favicons fanned behind each other. Hovering
+ * reports in/out (no button held) so main can peek the tucked window (shared/mini-window-peek.ts).
+ * Right-click opens the mini window's menu (Send to Menu Bar, …).
  */
 export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
 <html><head><meta charset="utf-8">
@@ -97,7 +99,15 @@ export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
   tab.addEventListener('pointerup', () => release(true))
   tab.addEventListener('pointercancel', () => release(false))
   tab.addEventListener('lostpointercapture', () => release(false))
-  tab.addEventListener('pointerenter', () => window.miniWindow.handleHover(true))
-  tab.addEventListener('pointerleave', () => window.miniWindow.handleHover(false))
+  // Hover (main peeks after the pointer rests here): only with no button held, so a drag or a
+  // selection passing over never peeks; releasing the button over the tab re-arms it.
+  let hovering = false
+  const hover = (inside) => { if (inside !== hovering) { hovering = inside; window.miniWindow.handleHover(inside) } }
+  tab.addEventListener('pointerenter', (event) => hover(event.buttons === 0))
+  tab.addEventListener('pointermove', (event) => hover(event.buttons === 0 && !down))
+  tab.addEventListener('pointerdown', () => hover(false))
+  tab.addEventListener('pointerleave', () => hover(false))
+  // Right-click: the mini window's menu (Send to Menu Bar, Return to Browser, Close).
+  tab.addEventListener('contextmenu', (event) => { event.preventDefault(); window.miniWindow.handleMenu() })
 </script>
 </body></html>`
