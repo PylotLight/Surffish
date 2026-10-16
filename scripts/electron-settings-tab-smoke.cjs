@@ -11,6 +11,7 @@
 //   7. ⌘/Ctrl+, pressed in a mini window opens Settings in the browser window, not in the mini window.
 //   8. It is not saved with the session.
 // `bun run build && bun run test:electron-settings-tab` (headless Linux: xvfb-run -a).
+// SURFFISH_SMOKE_SCREENSHOTS=<dir> also saves PNGs of the Settings tab, the site menu and Sites.
 const smoke = require('./smoke-harness.cjs')
 const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
@@ -51,6 +52,20 @@ const liveContents = () => allWebContents.getAllWebContents().filter((contents) 
 const pageContents = (predicate) => liveContents().find((contents) => predicate(contents.getURL(), contents))
 const isMiniHeader = (contents) => contents.getURL().startsWith('data:text/html') && decodeURIComponent(contents.getURL()).includes('<title>Mini Window</title>')
 const miniWindows = () => BaseWindow.getAllWindows().filter((win) => !win.isDestroyed() && win.contentView.children.some((view) => view.webContents && !view.webContents.isDestroyed() && isMiniHeader(view.webContents)))
+
+const SHOTS = process.env.SURFFISH_SMOKE_SCREENSHOTS ? resolve(process.env.SURFFISH_SMOKE_SCREENSHOTS) : null
+async function screenshot(name, contents) {
+  if (!SHOTS) return
+  try {
+    await delay(250)
+    mkdirSync(SHOTS, { recursive: true })
+    const image = await contents.capturePage()
+    writeFileSync(join(SHOTS, `${name}.png`), image.toPNG())
+    console.log(`settings tab smoke: screenshot ${join(SHOTS, `${name}.png`)}`)
+  } catch (error) {
+    console.log(`settings tab smoke: screenshot ${name} failed: ${error.message}`)
+  }
+}
 
 function findMenuItem(menu, predicate) {
   for (const item of menu?.items ?? []) {
@@ -110,6 +125,7 @@ async function run() {
   assert.equal(st.url, 'surffish://settings')
   assert.equal(st.settings?.section, 'settings')
   await waitFor(() => contentShowsSettings('General'), 'the content renderer to draw Settings → General')
+  await screenshot('settings-tab-general', content)
   assert.equal(await ev('Boolean(document.querySelector(".settings-subnav-close"))'), false, 'no Close button: it closes like a tab')
   assert.equal(await ev('document.querySelector(".omnibox input, input[aria-label=\'Address and search bar\'], .address-input")?.value ?? document.querySelector("input[type=text]")?.value'), 'surffish://settings', 'the address bar shows surffish://settings')
   assert.ok(await ev(`Boolean(document.querySelector('[data-browser-tab-id="${settingsTab.id}"] .tab-favicon-settings'))`), 'the sidebar row has the gear icon')
@@ -145,6 +161,7 @@ async function run() {
   await waitFor(() => smoke.evaluate(toolbar, 'Boolean(document.querySelector("[aria-label^=\\"Site actions for\\"]"))'), 'the site menu button')
   await smoke.evaluate(toolbar, 'document.querySelector("[aria-label^=\\"Site actions for\\"]").click()')
   await waitFor(() => smoke.evaluate(toolbar, 'Boolean(document.querySelector(".site-quick-settings [aria-label=\\"Allow notifications on this site\\"]"))'), 'the switches in the site menu')
+  await screenshot('site-menu-switches', toolbar)
   await smoke.evaluate(toolbar, 'document.querySelector(".site-quick-settings [aria-label=\\"Allow notifications on this site\\"]").click()')
   await waitFor(async () => (await smoke.evaluate(toolbar, `window.api.browser.siteSettings.get(${JSON.stringify(origin)})`))?.allowNotifications === true, 'the switch to save for this site')
   await smoke.evaluate(toolbar, '[...document.querySelectorAll(".site-quick-settings button")].find((b) => b.textContent.includes("All site settings")).click()')
@@ -157,6 +174,7 @@ async function run() {
     return Boolean(item && item.classList.contains('is-focused') && item.querySelector('.sites-settings-site-head').getAttribute('aria-expanded') === 'true' && document.activeElement === item.querySelector('.sites-settings-site-head') && item.querySelector('[aria-label^="Allow notifications on this site"]')?.checked)
   })()`), 'the site first in Sites, open and focused, its switch on')
   assert.equal(await ev('document.querySelector(".sites-settings-site").dataset.siteOrigin'), origin, 'listed first')
+  await screenshot('sites-deep-link', content)
   // A site with no overrides yet still lands (the list only shows sites with overrides otherwise).
   await smoke.evaluate(toolbar, 'window.api.browser.settings.open({ section: "site", host: "https://fresh.example" })')
   await waitFor(() => ev('document.querySelector(".sites-settings-site")?.dataset.siteOrigin === "https://fresh.example" && document.activeElement?.closest(".sites-settings-site")?.dataset.siteOrigin === "https://fresh.example"'), 'a fresh site deep link')
