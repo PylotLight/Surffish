@@ -55,6 +55,7 @@ import { motion, placeWindow } from './mini-window-motion'
 import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
+import { createHeaderStateGate, type HeaderStateGate } from '../shared/mini-window-header-sync'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
@@ -100,6 +101,15 @@ interface Mini {
   slot: number
   /** Last title the Window menu was told about. */
   menuTitle: string
+  /** Last window title set (setTitle only when it changes). */
+  windowTitle: string
+  /**
+   * What the header page last got (shared/mini-window-header-sync.ts): unchanged state is never
+   * re-sent (a page's per-keystroke replaceState/title churn repainted the popout's glass strip).
+   * `headerTimer`: the trailing push of a held title change.
+   */
+  headerGate: HeaderStateGate<NonNullable<ReturnType<typeof headerState>>>
+  headerTimer: ReturnType<typeof setTimeout> | null
   header: WebContentsView
   /** Header strip shown (the pointer is near the top of the window, or on the header). */
   revealed: boolean
@@ -715,29 +725,71 @@ function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { ta
   }
 }
 
+/**
+ * Anything outside the header's own state that should count as a change: the tabs as main knows them
+ * (URLs: the saved menu bar pages; playing: the icon's ♪). Not their titles: the active one is the
+ * header's title (throttled), and with a strip the chips carry them in the state.
+ */
+function headerExtraKey(m: Mini): string {
+  return JSON.stringify(tabsOf(m).map(({ title: _title, ...tab }) => tab))
+}
+
+/** 'stack': a group's handle shows every member's favicon; otherwise just this one's. */
+function refreshHandlesOf(m: Mini): void {
+  if (grouping() === 'stack') for (const other of liveMinis()) other.dock.refreshHandle()
+  else m.dock.refreshHandle()
+}
+
+function cancelHeaderPush(m: Mini): void {
+  if (m.headerTimer) clearTimeout(m.headerTimer)
+  m.headerTimer = null
+}
+
+/** The header page gets the state now, changed or not (just attached, or reloaded). */
 function sendHeaderState(m: Mini): void {
   const state = live(m.header.webContents) ? headerState(m) : null
-  if (state) m.header.webContents.send('mini-window:state', state)
+  if (!state) return
+  cancelHeaderPush(m)
+  m.header.webContents.send('mini-window:state', state)
+  m.headerGate.sent(state, headerExtraKey(m))
 }
 
 function refreshHeaderOf(m: Mini): void {
   if (m.closed || m.window.isDestroyed()) return
   rewirePage(m)
-  const state = headerState(m)
+  // A tab joined or left while the header is up: the strip comes or goes.
+  if (m.revealed && m.header.getBounds().height !== headerHeight(m)) layout(m)
+  let state = headerState(m)
   if (!state) return
-  m.window.setTitle(state.title ? `${state.title} — Mini Window` : 'Mini Window')
+  // Nothing the header shows changed (a page's replaceState per keystroke): no push, no repaint.
+  // A same-document load blip never shows as loading; a title flipping per keystroke ("typing…")
+  // lands at most every MINI_HEADER_TITLE_THROTTLE_MS (shared/mini-window-header-sync.ts).
+  const extra = headerExtraKey(m)
+  const plan = m.headerGate.plan(state, extra)
+  if (plan.recheckMs === null) cancelHeaderPush(m)
+  else {
+    m.headerTimer ??= setTimeout(() => {
+      m.headerTimer = null
+      refreshHeaderOf(m)
+    }, plan.recheckMs)
+  }
+  // The dock handle has its own state (dock side, the group's favicons); it diffs what it sends.
+  if (!plan.send) return refreshHandlesOf(m)
+  state = plan.send
+  m.headerGate.sent(state, extra)
+  const windowTitle = state.title ? `${state.title} — Mini Window` : 'Mini Window'
+  if (windowTitle !== m.windowTitle) {
+    m.windowTitle = windowTitle
+    m.window.setTitle(windowTitle)
+  }
   // The Window menu lists mini window tabs by title.
   const menuTitle = tabsOf(m).map((tab) => `${tab.tabId}\u0000${tab.title}`).join('\u0001')
   if (menuTitle !== m.menuTitle) {
     m.menuTitle = menuTitle
     notifyBrowserWindowsChanged()
   }
-  // A tab joined or left while the header is up: the strip comes or goes.
-  if (m.revealed && m.header.getBounds().height !== headerHeight(m)) layout(m)
   if (live(m.header.webContents)) m.header.webContents.send('mini-window:state', state)
-  // 'stack': a group's handle shows every member's favicon.
-  if (grouping() === 'stack') for (const other of liveMinis()) other.dock.refreshHandle()
-  else m.dock.refreshHandle()
+  refreshHandlesOf(m)
   // In the menu bar: the icon's title/menu (count, playing) and the saved pages follow.
   if (m.menuBar) {
     syncTray()
@@ -955,6 +1007,9 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     window,
     slot,
     menuTitle: '',
+    windowTitle: '',
+    headerGate: createHeaderStateGate({ now: () => performance.now() }),
+    headerTimer: null,
     header: header.view,
     revealed: false,
     hovered: false,
@@ -992,7 +1047,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   const documentUrl = headerDocumentUrl()
   void header.view.webContents.loadURL(documentUrl).catch(() => undefined)
   // A crashed or hung header reloads like the browser's own surfaces (crash-guard.ts).
-  watchShellSurface(header.view.webContents, () => header.view.webContents.loadURL(documentUrl).then(() => refreshHeaderOf(m)), () => !m.closed && !window.isDestroyed())
+  watchShellSurface(header.view.webContents, () => header.view.webContents.loadURL(documentUrl).then(() => { m.headerGate.reset(); refreshHeaderOf(m) }), () => !m.closed && !window.isDestroyed())
   // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
   header.view.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
@@ -1001,6 +1056,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   void header.ready.then(() => {
     if (m.closed || window.isDestroyed()) return
     m.headerLoaded = true
+    m.headerGate.reset()
     layout(m)
     refreshHeaderOf(m)
   })
@@ -1069,6 +1125,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   }
   window.on('closed', () => {
     m.closed = true
+    cancelHeaderPush(m)
     cancelHide(m)
     stopPolling(m)
     stopHeaderDrag(m)
