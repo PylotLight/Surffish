@@ -632,6 +632,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (wasLocalNewTabRef.current && !isLocalNewTab) setNewTabCustomizeOpen(false)
     wasLocalNewTabRef.current = isLocalNewTab
   }, [isLocalNewTab])
+  // Weather sits on its own line under the clocks (or in the top-right corner): one quiet row,
+  // temperature first, so it never competes with the time on the clock line.
+  const newTabWeatherPlacement = newTabPreferences.weatherEnabled && (newTabPreferences.weatherPlace || newTabPreferences.weatherLocation.trim()) ? newTabPreferences.weatherPosition : null
+  const newTabWeatherWidget = newTabWeatherPlacement && (
+    <div className={`new-tab-weather-widget is-${newTabWeatherPlacement}${newTabWeatherPlacement === 'corner' && newTabCustomizeOpen ? ' is-beside-panel' : ''}`} role="status" aria-live="polite">
+      {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
+        : newTabWeatherError ? <span>{newTabWeatherError}</span>
+          : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
+            : <span>Weather unavailable</span>}
+    </div>
+  )
   // The icons' free space starts under the clocks / weather: their bottom edge as a CSS variable,
   // written straight to the style (ResizeObserver runs before paint, so no re-render or jump).
   // Clock position: the clocks move down by a share of the space left above the icons' own height
@@ -641,7 +652,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const newTabWidgetsLayoutRef = useRef<(() => void) | null>(null)
   const clockVerticalPositionRef = useRef(newTabPreferences.clockVerticalPosition)
   clockVerticalPositionRef.current = newTabPreferences.clockVerticalPosition
-  const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting)
+  const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabWeatherPlacement === 'below' || newTabPreferences.showGreeting)
   useLayoutEffect(() => {
     const widgets = newTabWidgetsRef.current
     const page = widgets?.closest<HTMLElement>('.new-tab-page')
@@ -1905,7 +1916,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     <p>Nothing here is saved to history, tabs or downloads, and cookies and site data are wiped when you close the last private tab. You're signed out of everything, so searches aren't personalised. Extensions are off; your proxy and ad blocking still apply.</p>
                   </div>
                 )}
-                {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting) && (
+                {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabWeatherPlacement === 'below' || newTabPreferences.showGreeting) && (
                   <div className={`new-tab-widgets new-tab-clock-weight-${newTabPreferences.clockWeight}${newTabPreferences.clockTabularDigits ? '' : ' new-tab-clock-proportional'}`} style={{ '--new-tab-clock-scale': (newTabPreferences.clockScale / 100).toFixed(2) } as React.CSSProperties} aria-label="Time and weather" ref={newTabWidgetsRef}>
                     {newTabPreferences.showGreeting && <p className="new-tab-greeting">{clockGreeting(clockNow, newTabPreferences.timeZone)}</p>}
                     {newTabPreferences.showClock && (
@@ -1927,16 +1938,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                         </div>
                       )
                     })}
-                    {newTabPreferences.weatherEnabled && (newTabPreferences.weatherPlace || newTabPreferences.weatherLocation.trim()) && (
-                      <div className="new-tab-weather-widget" role="status" aria-live="polite">
-                        {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
-                          : newTabWeatherError ? <span>{newTabWeatherError}</span>
-                            : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
-                              : <span>Weather unavailable</span>}
-                      </div>
-                    )}
+                    {newTabWeatherPlacement === 'below' && newTabWeatherWidget}
                   </div>
                 )}
+                {newTabWeatherPlacement === 'corner' && newTabWeatherWidget}
                 {/* Vertical position: the icons sit at a fraction of the free space between the clocks and the photo credit (never off-screen; scrolls if a tiny window can't fit them). Private tabs keep the hero layout. */}
                 <div className={browser.private ? 'new-tab-icon-flow' : 'new-tab-icon-track'} style={{ '--new-tab-icon-position': (newTabPreferences.iconVerticalPosition / 100).toFixed(3) } as React.CSSProperties}>
                   {(browser.private ? favoriteSites.length > 0 : newTabSites.length > 0) ? (

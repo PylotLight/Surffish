@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  clockGreeting, clockScaleFromLegacySize, clockShift, formatClockDate, formatClockTime, formatZoneDifference, isClockDateFormat, isClockTimeFormat, isClockWeight,
+  clockGreeting, clockScaleFromLegacySize, clockShift, formatClockDate, formatClockTime, formatZoneDifference, isClockDateFormat, isClockTimeFormat, isClockWeight, isWeatherPosition, WEATHER_POSITIONS,
   relativeClockDay, usesTwelveHour, zoneDifferenceMinutes
 } from './new-tab-clock'
 
@@ -108,5 +108,15 @@ describe('greeting and guards', () => {
     expect(clockShift(100, 400)).toBe(400)
     expect(clockShift(150, 400)).toBe(400)
     expect(clockShift(100, -80)).toBe(0)
+  })
+})
+
+describe('weather position', () => {
+  test('below (default) and corner are the only positions', () => {
+    expect(WEATHER_POSITIONS).toEqual(['below', 'corner'])
+    expect(isWeatherPosition('below')).toBe(true)
+    expect(isWeatherPosition('corner')).toBe(true)
+    expect(isWeatherPosition('inline')).toBe(false)
+    expect(isWeatherPosition(undefined)).toBe(false)
   })
 })
