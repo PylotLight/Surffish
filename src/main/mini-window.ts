@@ -8,6 +8,7 @@ import {
   MINI_WINDOW_HEADER_HEIGHT,
   MINI_WINDOW_MAX,
   MINI_WINDOW_MIN_SIZE,
+  MINI_WINDOW_POPOUT_STRIP_HEIGHT,
   MINI_WINDOW_REVEAL_ZONE,
   cascadeMiniBounds,
   freeMiniSlot,
@@ -39,7 +40,9 @@ import {
   MINI_MENU_BAR_DEFAULT_SIZE,
   MINI_WINDOW_MENU_BAR_FILE,
   createMenuBarPopout,
+  menuBarPageSize,
   menuBarPopoutBounds,
+  menuBarWindowSize,
   parseMenuBarSaved,
   pickMenuBarMini,
   pickRestoredMenuBarTabs,
@@ -50,7 +53,7 @@ import { createDockController, savedDockFor, setDockGrouping, type DockControlle
 import { menuBarTrayBounds, syncMenuBarTray, type MenuBarTrayEntry, type MenuBarTrayHost } from './mini-window-menubar'
 import { motion, placeWindow } from './mini-window-motion'
 import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
-import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
+import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
@@ -84,8 +87,10 @@ import { notifyBrowserWindowsChanged } from './window-scope'
  * 'tabs', a collection; every menu bar mini merges into one) can live in the menu bar instead of
  * floating or being tucked: it hides, and the icon's click drops it in as a panel anchored under the
  * icon (shared frame loop), focused so Esc and a click elsewhere hide it again (unless pinned). It is
- * never docked or dragged there; 'float' headers push instead (no room above the menu bar). Hidden is
- * not closed. Which pages live there is saved (not private ones) and picked back out of the restored
+ * never docked or dragged there. Its header is not the auto-hiding one: whatever the placement, one
+ * slim strip is always there above the page ('strip': tabs or the title, ⋯ / Pin / Close; the
+ * strip adds to the window, so the page keeps the popout's size), so coming from the icon the pointer
+ * never slides a header in over the page. Hidden is not closed. Which pages live there is saved (not private ones) and picked back out of the restored
  * tabs after a restart.
  */
 
@@ -133,8 +138,11 @@ interface Mini {
   glide: { key: object; placed: MiniRect[] } | null
   /** Native window drags (Windows: 'moved' says when it is let go): recent window positions for the throw. */
   moveSamples: VelocityTracker
-  /** Lives in the menu bar: shown as a popout under the icon (null: floating or docked). */
-  menuBar: { popout: MenuBarPopout; pinned: boolean; joinedAt: number } | null
+  /**
+   * Lives in the menu bar: shown as a popout under the icon (null: floating or docked). `menuOpen` /
+   * `menuClosedAt`: its ⋯ menu is up / went away then (the Esc that closes the menu never also hides the popout).
+   */
+  menuBar: { popout: MenuBarPopout; pinned: boolean; joinedAt: number; menuOpen: boolean; menuClosedAt: number } | null
 }
 
 const IS_MAC = process.platform === 'darwin'
@@ -165,7 +173,7 @@ function headerPlacement(): MiniWindowHeaderPlacement {
   return getMiniWindowSettings().headerPlacement
 }
 
-/** Where this window's header goes: in the menu bar's popout there is no room above it, so 'float' pushes. */
+/** Where this window's header goes (the menu bar popout has its own always-on strip instead: updatePlan). */
 function placementOf(m: Mini): MiniWindowHeaderPlacement {
   const placement = headerPlacement()
   return m.menuBar && placement === 'float' ? 'push' : placement
@@ -289,7 +297,8 @@ function floats(plan: MiniHeaderLayout): plan is Extract<MiniHeaderLayout, { pan
 function updatePlan(m: Mini, at?: MiniRect): void {
   const bounds = at ?? m.window.getBounds()
   const workArea = screen.getDisplayMatching(bounds).workArea
-  m.plan = planMiniHeader(placementOf(m), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
+  // The menu bar popout: its strip, always there (never the auto-hiding header).
+  m.plan = m.menuBar ? { kind: 'strip' } : planMiniHeader(placementOf(m), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
 }
 
 /** The floating header's panel: frameless, never focused, at the window's level and on every Space like it. */
@@ -387,7 +396,8 @@ function layout(m: Mini): void {
   m.size = { width, height }
   updatePlan(m)
   const tall = headerHeight(m)
-  // The page fills the window; 'push' moves it under the revealed header, 'overlay' runs it under it.
+  // The page fills the window; 'push' moves it under the revealed header, 'overlay' runs it under it,
+  // 'strip' (menu bar popout) keeps it under the strip at all times (no reflow on hover).
   const page = miniPageBounds(m.plan.kind, m.revealed, m.size, tall)
   m.pageTop = page.y
   host().setPageBounds(m.window, page)
@@ -397,14 +407,15 @@ function layout(m: Mini): void {
     positionPanel(m)
   } else {
     mountHeader(m, 'window')
-    m.header.setBounds({ x: 0, y: 0, width, height: m.revealed ? tall : 0 })
+    m.header.setBounds({ x: 0, y: 0, width, height: m.revealed || m.plan.kind === 'strip' ? tall : 0 })
     hidePanel(m)
   }
   rewirePage(m)
 }
 
-/** The revealed header: its row, plus the tab strip for a collection of two or more ('tabs'). */
+/** The revealed header: its row, plus the tab strip for a collection of two or more ('tabs'); in the menu bar popout, its one strip (tabs and all). */
 function headerHeight(m: Mini): number {
+  if (m.menuBar) return MINI_WINDOW_POPOUT_STRIP_HEIGHT
   return miniHeaderHeight(tabsOf(m).length, grouping())
 }
 
@@ -419,7 +430,8 @@ function cancelHide(m: Mini): void {
 }
 
 function setRevealed(m: Mini, revealed: boolean): void {
-  if (m.closed || m.revealed === revealed) return
+  // The popout's strip is never revealed (it is always there).
+  if (m.closed || m.revealed === revealed || (revealed && m.menuBar)) return
   m.revealed = revealed
   cancelHide(m)
   if (revealed) {
@@ -646,7 +658,7 @@ function rewirePage(m: Mini): void {
   })
   // In the menu bar's popout, Esc hides it (the page still gets the key).
   onPage(m, contents, 'before-input-event', (_event: Electron.Event, input: Electron.Input) => {
-    if (m.menuBar && isEscape(input)) hidePopout(m)
+    if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
   })
   // There is no crash screen here (the browser window's content surface draws it): reload the page
   // once, under tab-health's auto-reload budget, and show "Page crashed" in the header otherwise.
@@ -786,6 +798,13 @@ function registerIpc(): void {
     if (!m) return
     if (m.menuBar) leaveMenuBar(m, 'float')
     else sendToMenuBar(m)
+  })
+  // The popout strip's ⋯ button: its menu, under the button (header coordinates are the window's).
+  ipcMain.on('mini-window:more', (event, x: unknown, y: unknown) => {
+    const m = fromHeader(event)
+    if (!m?.menuBar) return
+    const at = typeof x === 'number' && typeof y === 'number' && Number.isFinite(x) && Number.isFinite(y) ? { x: Math.round(x), y: Math.round(y) } : null
+    showPopoutMenu(m, at)
   })
   ipcMain.on('mini-window:pin', (event) => {
     const m = fromHeader(event)
@@ -959,7 +978,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
   header.view.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
-    else if (m.menuBar && isEscape(input)) hidePopout(m)
+    else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
   })
   void header.ready.then(() => {
     if (m.closed || window.isDestroyed()) return
@@ -1481,7 +1500,7 @@ function reducedMotion(): boolean {
   }
 }
 
-/** The popout's size: the last one the user resized it to (read from the file once), else the default. */
+/** The popout's page size (under its strip): the last one the user resized it to (read from the file once), else the default. */
 let popoutSize: { width: number; height: number } | null | undefined
 function menuBarSize(): { width: number; height: number } {
   if (popoutSize === undefined) popoutSize = parseMenuBarSaved(readUserJson(MINI_WINDOW_MENU_BAR_FILE)).size
@@ -1491,7 +1510,8 @@ function menuBarSize(): { width: number; height: number } {
 function rememberPopoutSize(m: Mini): void {
   const [width = 0, height = 0] = m.window.getSize()
   if (width <= 0 || height <= 0) return
-  popoutSize = { width, height }
+  // What is remembered is the page's size (the strip comes on top of it).
+  popoutSize = menuBarPageSize({ width, height })
   scheduleMenuBarSave()
 }
 
@@ -1577,7 +1597,8 @@ function popoutPlacement(anchor: MiniRect | null, m: Mini): { bounds: MiniRect; 
   const point = anchor ? { x: Math.round(anchor.x + anchor.width / 2), y: Math.round(anchor.y + anchor.height / 2) } : cursor
   const display = screen.getDisplayNearestPoint(point)
   const [width = 0, height = 0] = m.window.isVisible() ? m.window.getSize() : []
-  const size = width > 0 && height > 0 ? { width, height } : menuBarSize()
+  // The strip adds to the remembered page size.
+  const size = width > 0 && height > 0 ? { width, height } : menuBarWindowSize(menuBarSize())
   return menuBarPopoutBounds(anchor, cursor, size, { bounds: display.bounds, workArea: display.workArea })
 }
 
@@ -1626,6 +1647,8 @@ function enterMenuBar(m: Mini, show: boolean): void {
   const window = m.window
   m.menuBar = {
     pinned: false,
+    menuOpen: false,
+    menuClosedAt: Number.NEGATIVE_INFINITY,
     joinedAt: ++menuBarJoins,
     popout: createMenuBarPopout({
       now: () => performance.now(),
@@ -1703,7 +1726,9 @@ function leaveMenuBar(m: Mini, how: 'float' | 'edge'): void {
   setRevealed(m, false)
   window.setMovable(true)
   if (process.platform !== 'linux') window.setOpacity(getMiniWindowSettings().opacity)
-  const [width = 0, height = 0] = window.getSize()
+  // Floating, the page fills the window again: without the popout's strip it keeps its size.
+  const [windowWidth = 0, windowHeight = 0] = window.getSize()
+  const { width, height } = menuBarPageSize({ width: windowWidth, height: windowHeight })
   const others = liveMinis().filter((other) => other !== m).map((other) => other.window.getBounds())
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const saved = readGeometry()[m.slot]?.[miniDisplayKey(display.workArea)]
@@ -1777,9 +1802,75 @@ export async function startMenuBar(): Promise<void> {
   syncTray()
 }
 
+/** The Esc that closed the popout's ⋯ menu (or one right after it) closes only the menu, never the popout. */
+function popoutMenuJustClosed(m: Mini): boolean {
+  return Boolean(m.menuBar && (m.menuBar.menuOpen || Date.now() - m.menuBar.menuClosedAt < POPOUT_MENU_ESC_GRACE_MS))
+}
+const POPOUT_MENU_ESC_GRACE_MS = 250
+
+/** The popout strip's ⋯ menu: everything the strip has no room for (a native menu: arrow keys, Esc closes it). */
+function popoutMenuTemplate(m: Mini): Electron.MenuItemConstructorOptions[] {
+  const page = host().pageContents(m.window)
+  const many = tabsOf(m).length > 1
+  const settings = getMiniWindowSettings()
+  return [
+    { label: 'Back', enabled: Boolean(page?.navigationHistory.canGoBack()), click: () => { if (page && !page.isDestroyed() && page.navigationHistory.canGoBack()) page.navigationHistory.goBack() } },
+    { label: 'Reload', click: () => { if (page && !page.isDestroyed()) page.reload() } },
+    { type: 'separator' },
+    { label: 'Pin', type: 'checkbox', checked: m.menuBar?.pinned === true, click: () => togglePin(m) },
+    { label: 'Float as Mini Window', click: () => leaveMenuBar(m, 'float') },
+    { label: 'Move to Edge', enabled: settings.tuckToEdge, click: () => leaveMenuBar(m, 'edge') },
+    { label: many ? 'Return All to Window' : 'Return to Window', click: () => { returnAllOf(m) } },
+    {
+      label: 'Grouping',
+      submenu: ([['tabs', 'Tabs'], ['stack', 'Stack'], ['separate', 'Separate']] as const).map(([value, label]): Electron.MenuItemConstructorOptions => ({
+        label, type: 'radio', checked: settings.grouping === value, click: () => { setMiniWindowGrouping(value) }
+      }))
+    },
+    { type: 'separator' },
+    { label: 'Mini Window Settings…', click: () => openMiniWindowSettings() }
+  ]
+}
+
+let lastPopoutMenu: { template: Electron.MenuItemConstructorOptions[]; menu: Menu } | null = null
+
+/** The ⋯ menu (or a right-click on the strip) at `at` in the window (the strip sits at its top left), else at the pointer. */
+function showPopoutMenu(m: Mini, at: { x: number; y: number } | null): void {
+  const bar = m.menuBar
+  if (!bar || m.closed || m.window.isDestroyed()) return
+  const template = popoutMenuTemplate(m)
+  const menu = Menu.buildFromTemplate(template)
+  lastPopoutMenu = { template, menu }
+  bar.menuOpen = true
+  const closed = (): void => {
+    bar.menuOpen = false
+    bar.menuClosedAt = Date.now()
+    if (lastPopoutMenu?.menu === menu) lastPopoutMenu = null
+    if (live(m.header.webContents)) m.header.webContents.send('mini-window:menu-closed')
+  }
+  menu.popup({ window: m.window, ...(at ? { x: at.x, y: at.y } : {}), callback: closed })
+}
+
+// Smokes can't drive a native menu under Xvfb: the ⋯ menu as it was built, and its items by label.
+;(globalThis as { __surffishMiniPopoutMenu?: unknown }).__surffishMiniPopoutMenu = {
+  open: () => lastPopoutMenu !== null,
+  items: () => (lastPopoutMenu?.template ?? []).map((item) => ({ label: item.label ?? '', type: item.type ?? 'normal', checked: item.checked === true, enabled: item.enabled !== false, submenu: Array.isArray(item.submenu) ? item.submenu.map((sub) => sub.label ?? '') : [] })),
+  click: (label: string): boolean => {
+    const item = lastPopoutMenu?.template.find((candidate) => candidate.label === label)
+    const menu = lastPopoutMenu?.menu
+    if (!item?.click || item.enabled === false) return false
+    menu?.closePopup()
+    ;(item.click as () => void)()
+    return true
+  },
+  close: (): void => { lastPopoutMenu?.menu.closePopup() }
+}
+
 /** The mini window's menu (right-click on its header or handle). */
 function showMiniMenu(m: Mini, contents: WebContents | null): void {
   if (m.closed || m.window.isDestroyed()) return
+  // In the menu bar popout, the strip's right-click is its ⋯ menu.
+  if (m.menuBar && contents) return showPopoutMenu(m, null)
   const menuBarOn = getMiniWindowSettings().menuBarIcon !== 'never'
   const menu = Menu.buildFromTemplate([
     m.menuBar

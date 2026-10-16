@@ -248,14 +248,23 @@ export const MINI_WINDOW_HEADER_HEIGHT = 36
 export const MINI_WINDOW_REVEAL_ZONE = 44
 /** The tab strip under the header row (grouping 'tabs', two or more tabs in the window). */
 export const MINI_WINDOW_TAB_STRIP_HEIGHT = 28
+/**
+ * The menu bar popout's header: one slim strip that is always there (tabs or the page's title, then
+ * ⋯ / Pin / Close), never auto-hiding, never moving the page. It adds to the window (the page keeps
+ * the popout's size below it).
+ */
+export const MINI_WINDOW_POPOUT_STRIP_HEIGHT = 28
 
 /** Height of the revealed header: the header row, plus the tab strip when the window holds several tabs. */
 export function miniHeaderHeight(tabCount: number, grouping: MiniWindowGrouping): number {
   return MINI_WINDOW_HEADER_HEIGHT + (grouping === 'tabs' && tabCount > 1 ? MINI_WINDOW_TAB_STRIP_HEIGHT : 0)
 }
 
-/** How the revealed header sits: in a panel above or below the window, pushing the page down, or over it. */
-export type MiniHeaderLayout = { kind: 'above' | 'below'; panel: MiniRect } | { kind: 'push' } | { kind: 'overlay' }
+/**
+ * How the revealed header sits: in a panel above or below the window, pushing the page down, or over
+ * it; 'strip' (the menu bar popout): always shown above the page, never revealed or hidden.
+ */
+export type MiniHeaderLayout = { kind: 'above' | 'below'; panel: MiniRect } | { kind: 'push' } | { kind: 'overlay' } | { kind: 'strip' }
 
 /** The header panel's bounds on `side` of a window at `window` (same x and width, `height` tall, touching its edge). */
 export function miniHeaderPanelRect(window: MiniRect, height: number, side: 'above' | 'below'): MiniRect {
@@ -279,13 +288,14 @@ export function planMiniHeader(placement: MiniWindowHeaderPlacement, window: Min
 
 /** Is a pointer `y` px from the top of a window `height` tall in the zone that reveals the header (its bottom edge when the header floats below)? */
 export function inMiniRevealZone(kind: MiniHeaderLayout['kind'], y: number, height: number, zone = MINI_WINDOW_REVEAL_ZONE): boolean {
-  if (y < 0 || y >= height) return false
+  // The popout's strip is always there: nothing to reveal.
+  if (kind === 'strip' || y < 0 || y >= height) return false
   return kind === 'below' ? y >= height - zone : y <= zone
 }
 
-/** The page's bounds inside a window of `size`: everything, except 'push' moves it under the revealed header. */
+/** The page's bounds inside a window of `size`: everything, except 'push' moves it under the revealed header and 'strip' always sits under its strip. */
 export function miniPageBounds(kind: MiniHeaderLayout['kind'], revealed: boolean, size: { width: number; height: number }, headerHeight: number): MiniRect {
-  if (kind !== 'push' || !revealed) return { x: 0, y: 0, width: size.width, height: size.height }
+  if (kind !== 'strip' && (kind !== 'push' || !revealed)) return { x: 0, y: 0, width: size.width, height: size.height }
   const top = Math.min(headerHeight, Math.max(0, size.height - 1))
   return { x: 0, y: top, width: size.width, height: size.height - top }
 }
