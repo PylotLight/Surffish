@@ -67,7 +67,7 @@ import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from '.
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
-import { clockGreeting, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
+import { clockGreeting, clockShift, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
@@ -102,6 +102,9 @@ import './motion.css'
 
 const DEFAULT_PROXY: BrowserProxySettings = { enabled: true, host: '127.0.0.1', port: 1080, bypassLocalNetwork: true }
 const BONJOURR_START_PAGE = 'https://online.bonjourr.fr/'
+/** New Tab layout (Browser.css): the icon track's gap under the clocks and its inset above the photo credit. */
+const NEW_TAB_ICON_GAP = 14
+const NEW_TAB_CREDIT_SPACE = 58
 /** New Tab settings edits are saved to main at most this often (a slider drag is many patches). */
 const NEW_TAB_SAVE_COALESCE_MS = 150
 /** Preference broadcasts arriving this soon after a local edit are our own older values: ignored. */
@@ -620,22 +623,47 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [isLocalNewTab])
   // The icons' free space starts under the clocks / weather: their bottom edge as a CSS variable,
   // written straight to the style (ResizeObserver runs before paint, so no re-render or jump).
+  // Clock position: the clocks move down by a share of the space left above the icons' own height
+  // (page height − top spot − clocks − icons − photo credit), so at 100 % they sit just above the
+  // icons and never push them off the page. Private tabs keep the hero layout (no shift).
   const newTabWidgetsRef = useRef<HTMLDivElement>(null)
+  const newTabWidgetsLayoutRef = useRef<(() => void) | null>(null)
+  const clockVerticalPositionRef = useRef(newTabPreferences.clockVerticalPosition)
+  clockVerticalPositionRef.current = newTabPreferences.clockVerticalPosition
   const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting)
   useLayoutEffect(() => {
     const widgets = newTabWidgetsRef.current
     const page = widgets?.closest<HTMLElement>('.new-tab-page')
     if (!widgets || !page) return
-    const write = (): void => { page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(widgets.offsetTop + widgets.offsetHeight)}px`) }
-    write()
+    let observedIcons: HTMLElement | null = null
+    const write = (): void => {
+      const track = page.querySelector<HTMLElement>('.new-tab-icon-track')
+      const icons = track?.firstElementChild instanceof HTMLElement ? track.firstElementChild : null
+      if (icons !== observedIcons) {
+        if (observedIcons) observer.unobserve(observedIcons)
+        if (icons) observer.observe(icons)
+        observedIcons = icons
+      }
+      const baseTop = parseFloat(getComputedStyle(widgets).top) || 0
+      const free = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight - baseTop - widgets.offsetHeight : 0
+      const shift = clockShift(clockVerticalPositionRef.current, free)
+      page.style.setProperty('--new-tab-clock-shift', `${shift}px`)
+      page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(baseTop + shift + widgets.offsetHeight)}px`)
+    }
     const observer = new ResizeObserver(write)
     observer.observe(widgets)
     observer.observe(page)
+    write()
+    newTabWidgetsLayoutRef.current = write
     return () => {
       observer.disconnect()
+      newTabWidgetsLayoutRef.current = null
       page.style.removeProperty('--new-tab-widgets-bottom')
+      page.style.removeProperty('--new-tab-clock-shift')
     }
   }, [hasNewTabWidgets])
+  // A position drag moves the clocks before paint, step by step (the page follows every patch).
+  useLayoutEffect(() => { newTabWidgetsLayoutRef.current?.() }, [newTabPreferences.clockVerticalPosition])
   // Whether this surface's own sidebar is actually painted: the sidebar overlay while it is
   // revealed, the content surface only when it is the visible layer (New Tab or a full panel).
   // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
@@ -1880,7 +1908,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </div>
                 )}
                 {(newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabPreferences.weatherEnabled || newTabPreferences.showGreeting) && (
-                  <div className={`new-tab-widgets new-tab-clock-size-${newTabPreferences.clockSize} new-tab-clock-weight-${newTabPreferences.clockWeight}${newTabPreferences.clockTabularDigits ? '' : ' new-tab-clock-proportional'}`} aria-label="Time and weather" ref={newTabWidgetsRef}>
+                  <div className={`new-tab-widgets new-tab-clock-weight-${newTabPreferences.clockWeight}${newTabPreferences.clockTabularDigits ? '' : ' new-tab-clock-proportional'}`} style={{ '--new-tab-clock-scale': (newTabPreferences.clockScale / 100).toFixed(2) } as React.CSSProperties} aria-label="Time and weather" ref={newTabWidgetsRef}>
                     {newTabPreferences.showGreeting && <p className="new-tab-greeting">{clockGreeting(clockNow, newTabPreferences.timeZone)}</p>}
                     {newTabPreferences.showClock && (
                       <div className="new-tab-clock">

@@ -1,8 +1,10 @@
 // New Tab clock display options, against the production build, with a fixed fake time
 // (Friday 16 October 2026 23:05:07 in Melbourne) installed in the New Tab renderer:
-//   1. A profile saved before the options (use24HourTime: false) opens as 12-hour, unchanged look.
+//   1. A profile saved before the options (use24HourTime: false, S/M/L/XL clockSize 'm') opens as
+//      12-hour with the size slider at 100 % and the clocks at the top: unchanged look.
 //   2. Changes in the Customize panel apply live: seconds, 12/24-hour, AM/PM, date format, date off,
-//      size / weight / digit style, world-clock difference + "Tomorrow", greeting.
+//      size + position sliders (live while dragging, no bounce-back; the clocks never run into the
+//      icons or off the page), weight / digit style, world-clock difference + "Tomorrow", greeting.
 //   3. Seconds tick once a second only while shown; otherwise the next update is minute-aligned.
 //   4. Settings → New Tab shows and edits the same values.
 // `bun run build && bun run test:electron-newtab-clock` (headless Linux: xvfb-run -a ...).
@@ -49,7 +51,7 @@ async function run() {
   writeFileSync(join(userData, 'browser-preferences.json'), `${JSON.stringify({
     version: 1,
     newTabPreferences: {
-      showClock: true, showDate: true, use24HourTime: false, showSeconds: false, timeZone: 'Australia/Melbourne',
+      showClock: true, showDate: true, use24HourTime: false, clockSize: 'm', showSeconds: false, timeZone: 'Australia/Melbourne',
       worldClocks: [{ id: 'akl', label: 'Auckland', timeZone: 'Pacific/Auckland' }, { id: 'lon', label: 'London', timeZone: 'Europe/London' }]
     },
     pinnedSites: ['github.test', 'news.test'].map((host) => ({ title: host, url: `https://${host}/` }))
@@ -77,6 +79,13 @@ async function run() {
     if (!button) throw new Error('no ${text} in ${label}')
     button.click()
   })()`)
+  // React-controlled inputs need the native setter + an input event (as a slider drag sends).
+  const setRange = (label, value, root = scope) => ev(`(() => {
+    const input = document.querySelector('${root} [aria-label="${label}"]')
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '${value}')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })()`)
+  const reveal = (label, root = scope) => ev(`document.querySelector('${root} [aria-label="${label}"]').scrollIntoView({ block: 'center' })`)
   const setSelect = (label, value) => ev(`(() => {
     const select = document.querySelector('${scope} [aria-label="${label}"]')
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, '${value}')
@@ -100,15 +109,28 @@ async function run() {
   const timeStyle = () => ev(`(() => { const style = getComputedStyle(document.querySelector('.new-tab-page .new-tab-clock-time')); return { size: parseFloat(style.fontSize), weight: style.fontWeight, numeric: style.fontVariantNumeric } })()`)
   await waitFor(() => smoke.evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api?.browser?.chrome)'), 'the toolbar renderer')
 
-  smoke.step('Old profile: use24HourTime false → 12-hour, default size/weight/digits')
+  // Page-relative geometry (the content surface starts under the toolbar).
+  const geometry = () => ev(`(() => {
+    const page = document.querySelector('.new-tab-page').getBoundingClientRect()
+    const widgets = document.querySelector('.new-tab-widgets').getBoundingClientRect()
+    const groups = document.querySelector('.new-tab-link-groups').getBoundingClientRect()
+    const credit = document.querySelector('.new-tab-photo-footer').getBoundingClientRect()
+    return { widgetsTop: widgets.top - page.top, widgetsBottom: widgets.bottom - page.top, iconsTop: groups.top - page.top, iconsBottom: groups.bottom - page.top, creditTop: credit.top - page.top, height: page.height }
+  })()`)
+  const clockShiftVar = () => ev('document.querySelector(".new-tab-page").style.getPropertyValue("--new-tab-clock-shift")')
+  smoke.step('Old profile: use24HourTime false → 12-hour, clockSize M → 100 %, default weight/digits')
   await waitFor(() => ev('document.querySelectorAll(".new-tab-page .new-tab-clock").length === 3'), 'the main clock and two world clocks')
   const migrated = await prefs()
   assert.equal(migrated.timeFormat, '12h')
-  assert.deepEqual([migrated.dateFormat, migrated.clockSize, migrated.clockWeight, migrated.clockTabularDigits, migrated.showGreeting, migrated.worldClockShowDifference], ['long', 'm', 'light', true, false, false])
+  assert.deepEqual([migrated.dateFormat, migrated.clockScale, migrated.clockVerticalPosition, migrated.clockWeight, migrated.clockTabularDigits, migrated.showGreeting, migrated.worldClockShowDifference], ['long', 100, 0, 'light', true, false, false])
+  assert.equal('clockSize' in migrated, false, 'old S/M/L/XL key gone')
   const defaults = await timeStyle()
   assert.equal(defaults.weight, '300', 'Light, the original weight')
   assert.equal(defaults.numeric, 'tabular-nums')
-  assert.ok(Math.abs(defaults.size - 38.4) < 0.6, `M is the original clamp(24px, 3vw, 42px) at 1280 px (${defaults.size})`)
+  assert.ok(Math.abs(defaults.size - 38.4) < 0.6, `100 % is the original clamp(24px, 3vw, 42px) at 1280 px (${defaults.size})`)
+  const originalTop = (await geometry()).widgetsTop
+  assert.ok(originalTop >= 24 && originalTop <= 88, `clocks at the original top spot (${originalTop})`)
+  assert.equal(await clockShiftVar(), '0px', 'no shift by default')
 
   smoke.step('Fixed fake time in the New Tab renderer')
   await ev(`(() => {
@@ -126,7 +148,7 @@ async function run() {
   })()`)
   await ev('document.querySelector(".new-tab-customize-gear").click()')
   await waitFor(() => ev('Boolean(document.querySelector(".new-tab-customize.is-open [aria-label=\\"Time format\\"]"))'), 'the Customize panel with the clock options')
-  const missing = await ev(`${JSON.stringify(['Show local clock', 'Time format', 'Show AM/PM', 'Show seconds', 'Show date', 'Date format', 'Clock size', 'Clock weight', 'Monospaced digits', 'Show greeting', 'Show world clock time difference', 'Show world clock day'])}.filter((label) => !document.querySelector('${scope} [aria-label="' + label + '"]'))`)
+  const missing = await ev(`${JSON.stringify(['Show local clock', 'Time format', 'Show AM/PM', 'Show seconds', 'Show date', 'Date format', 'Clock size', 'Clock position', 'Clock weight', 'Monospaced digits', 'Show greeting', 'Show world clock time difference', 'Show world clock day'])}.filter((label) => !document.querySelector('${scope} [aria-label="' + label + '"]'))`)
   assert.deepEqual(missing, [], 'every clock option is in the panel')
   assert.equal(await ev(`document.querySelector('${scope} [aria-label="Time format"] [aria-checked=true]')?.textContent`), '12-hour')
 
@@ -175,33 +197,76 @@ async function run() {
   await toggle('Show date')
   await expectClocks('date', [null, null, null], 'dates hidden')
 
-  smoke.step('Size, weight, digits')
-  await segment('Clock size', 'XL')
-  await waitFor(async () => (await timeStyle()).size > 70, 'XL clock')
-  await segment('Clock size', 'S')
-  await waitFor(async () => (await timeStyle()).size < 30, 'S clock')
-  await segment('Clock size', 'L')
+  smoke.step('Size slider: 50–250 %, live while dragging, no bounce-back')
+  await setRange('Clock size', 250)
+  await waitFor(async () => Math.abs((await timeStyle()).size - 96) < 1, '250 % clock (2.5 × 38.4 px)')
+  await reveal('Clock size')
+  await shot('after-size-250')
+  await setRange('Clock size', 50)
+  await waitFor(async () => Math.abs((await timeStyle()).size - 19.2) < 1, '50 % clock')
+  // A fast drag: 31 steps, then hold still; the clock must not jump back to an older value.
+  for (let value = 50; value <= 200; value += 5) await setRange('Clock size', value === 200 ? 145 : value)
+  await delay(1_200)
+  const dragged = (await timeStyle()).size
+  assert.ok(Math.abs(dragged - 38.4 * 1.45) < 1, `the drag ends where it stopped (${dragged})`)
+  await waitFor(async () => (await prefs()).clockScale === 145, 'the final size saved')
+
+  smoke.step('Position slider: top to just above the icons, never overlapping or off-screen')
+  await setRange('Clock position', 100)
+  await waitFor(async () => (await geometry()).widgetsTop > originalTop + 150, 'clocks moved down')
+  const low = await geometry()
+  assert.ok(low.widgetsBottom <= low.iconsTop, `clocks stay above the icons at 100 % (${low.widgetsBottom} vs ${low.iconsTop})`)
+  assert.ok(low.iconsTop - low.widgetsBottom <= 40, `100 % sits right above the icons (${Math.round(low.iconsTop - low.widgetsBottom)}px gap)`)
+  assert.ok(low.iconsBottom <= low.creditTop + 4, `icons still clear the photo credit (${low.iconsBottom} vs ${low.creditTop})`)
+  await reveal('Clock position')
+  await shot('after-position-100')
+  const fullHeight = low.height
+  mainWindow.setSize(900, 540) // the window's minimum height
+  await waitFor(async () => (await geometry()).height < fullHeight - 200, `the short window (content was ${fullHeight}px)`)
+  await delay(200)
+  const short = await geometry()
+  assert.ok(short.widgetsTop >= 0 && short.widgetsBottom <= short.iconsTop + 1 && short.iconsBottom <= short.height, `clocks and icons on screen, not overlapping, in a short window (${JSON.stringify(short)})`)
+  mainWindow.setSize(1280, 860)
+  await waitFor(async () => (await geometry()).height >= fullHeight - 2, 'the window back to full size')
+  await setRange('Clock position', 0)
+  await waitFor(async () => Math.abs((await geometry()).widgetsTop - originalTop) <= 1, 'clocks back at the original top spot')
+  // A fast drag, then hold still: no bounce-back to an older value.
+  for (let value = 0; value <= 100; value += 5) await setRange('Clock position', value === 100 ? 30 : value)
+  await delay(1_200)
+  const held = await geometry()
+  await delay(300)
+  assert.equal((await geometry()).widgetsTop, held.widgetsTop, 'the clocks hold still after the drag')
+  assert.equal(await clockShiftVar(), `${Math.round(held.widgetsTop - originalTop)}px`, 'shift matches where the clocks are')
+  await waitFor(async () => (await prefs()).clockVerticalPosition === 30, 'the final position saved')
+  assert.ok(held.widgetsTop > originalTop + 20 && held.widgetsTop < low.widgetsTop - 20, `30 % sits between the ends (${held.widgetsTop})`)
+
+  smoke.step('Weight, digits')
   await segment('Clock weight', 'Bold')
   await waitFor(async () => Number((await timeStyle()).weight) >= 600, 'bold clock')
   await toggle('Monospaced digits')
   await waitFor(async () => (await timeStyle()).numeric === 'normal', 'proportional digits')
-  await shot('after-l-bold-no-date')
+  await reveal('Clock size')
+  await shot('after-145-pos30-bold-no-date')
 
   smoke.step('Saved, and Settings → New Tab shows the same values')
   await waitFor(async () => {
     const saved = await prefs()
-    return saved.timeFormat === '24h' && saved.showAmPm === false && saved.dateFormat === 'iso' && saved.clockSize === 'l' && saved.clockWeight === 'bold' &&
+    return saved.timeFormat === '24h' && saved.showAmPm === false && saved.dateFormat === 'iso' && saved.clockScale === 145 && saved.clockVerticalPosition === 30 && saved.clockWeight === 'bold' &&
       saved.clockTabularDigits === false && saved.showGreeting && saved.worldClockShowDifference && saved.worldClockShowDay && !saved.showDate && !saved.showSeconds
   }, 'every option saved')
   assert.equal('use24HourTime' in await prefs(), false, 'old key gone')
   await smoke.evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "newtab" })')
   const page = '.settings-view-newtab:not(.new-tab-customize)'
-  await waitFor(() => ev(`document.querySelector('${page} [aria-label="Clock size"] [aria-checked=true]')?.textContent === 'L'`), 'Settings → New Tab with size L')
+  await waitFor(() => ev(`document.querySelector('${page} [aria-label="Clock size"]')?.value === '145'`), 'Settings → New Tab with size 145 %')
+  assert.equal(await ev(`document.querySelector('${page} [aria-label="Clock position"]').value`), '30')
   assert.equal(await ev(`document.querySelector('${page} [aria-label="Time format"] [aria-checked=true]').textContent`), '24-hour')
   assert.equal(await ev(`document.querySelector('${page} [aria-label="Date format"]').value`), 'iso')
+  await reveal('Clock size', page)
   await shot('after-settings-page')
   await segment('Clock weight', 'Regular', page)
   await waitFor(async () => (await prefs()).clockWeight === 'regular', 'Settings edits the same preference')
+  await setRange('Clock size', 120, page)
+  await waitFor(async () => (await prefs()).clockScale === 120, 'Settings edits the size slider')
   console.log('Electron New Tab clock smoke passed.')
 }
 

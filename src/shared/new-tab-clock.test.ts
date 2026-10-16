@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  clockGreeting, formatClockDate, formatClockTime, formatZoneDifference, isClockDateFormat, isClockSize, isClockTimeFormat, isClockWeight,
+  clockGreeting, clockScaleFromLegacySize, clockShift, formatClockDate, formatClockTime, formatZoneDifference, isClockDateFormat, isClockTimeFormat, isClockWeight,
   relativeClockDay, usesTwelveHour, zoneDifferenceMinutes
 } from './new-tab-clock'
 
@@ -94,8 +94,19 @@ describe('greeting and guards', () => {
     expect(isClockTimeFormat('12h')).toBe(true)
     expect(isClockTimeFormat('12')).toBe(false)
     expect(isClockDateFormat('iso')).toBe(true)
-    expect(isClockSize('xl')).toBe(true)
-    expect(isClockSize('xxl')).toBe(false)
     expect(isClockWeight('bold')).toBe(true)
+  })
+  test('legacy S/M/L/XL sizes map onto the size slider (M = 100 %)', () => {
+    expect(['s', 'm', 'l', 'xl'].map(clockScaleFromLegacySize)).toEqual([75, 100, 145, 220])
+    expect(clockScaleFromLegacySize('xxl')).toBeNull()
+    expect(clockScaleFromLegacySize('toString')).toBeNull()
+    expect(clockScaleFromLegacySize(3)).toBeNull()
+  })
+  test('clock position: a share of the free space, never negative or past it', () => {
+    expect(clockShift(0, 400)).toBe(0)
+    expect(clockShift(50, 400)).toBe(200)
+    expect(clockShift(100, 400)).toBe(400)
+    expect(clockShift(150, 400)).toBe(400)
+    expect(clockShift(100, -80)).toBe(0)
   })
 })

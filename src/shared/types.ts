@@ -1,4 +1,4 @@
-import type { ClockDateFormat, ClockSize, ClockTimeFormat, ClockWeight } from './new-tab-clock'
+import type { ClockDateFormat, ClockTimeFormat, ClockWeight } from './new-tab-clock'
 import type { BrowserPageSecurity } from './certificates'
 import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
@@ -70,7 +70,10 @@ export interface NewTabPreferences {
   showAmPm: boolean
   showSeconds: boolean
   dateFormat: ClockDateFormat
-  clockSize: ClockSize
+  /** Clock size, percent of the original (MIN_CLOCK_SCALE–MAX_CLOCK_SCALE); replaced S/M/L/XL `clockSize`. */
+  clockScale: number
+  /** Vertical position of the clocks/weather, percent of the free space above the icons (0 = top). */
+  clockVerticalPosition: number
   clockWeight: ClockWeight
   /** Tabular (fixed-width) digits so the time doesn't jiggle as it ticks. */
   clockTabularDigits: boolean

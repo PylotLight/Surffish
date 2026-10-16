@@ -5,18 +5,31 @@
 
 export type ClockTimeFormat = 'auto' | '12h' | '24h'
 export type ClockDateFormat = 'long' | 'short' | 'numeric' | 'iso'
-export type ClockSize = 's' | 'm' | 'l' | 'xl'
 export type ClockWeight = 'light' | 'regular' | 'bold'
 
 export const CLOCK_TIME_FORMATS: readonly ClockTimeFormat[] = ['auto', '12h', '24h']
 export const CLOCK_DATE_FORMATS: readonly ClockDateFormat[] = ['long', 'short', 'numeric', 'iso']
-export const CLOCK_SIZES: readonly ClockSize[] = ['s', 'm', 'l', 'xl']
 export const CLOCK_WEIGHTS: readonly ClockWeight[] = ['light', 'regular', 'bold']
 
 export const isClockTimeFormat = (value: unknown): value is ClockTimeFormat => CLOCK_TIME_FORMATS.includes(value as ClockTimeFormat)
 export const isClockDateFormat = (value: unknown): value is ClockDateFormat => CLOCK_DATE_FORMATS.includes(value as ClockDateFormat)
-export const isClockSize = (value: unknown): value is ClockSize => CLOCK_SIZES.includes(value as ClockSize)
 export const isClockWeight = (value: unknown): value is ClockWeight => CLOCK_WEIGHTS.includes(value as ClockWeight)
+
+/** Clock size slider: percent of the original clock (clamp(24px, 3vw, 42px)); 100 is the default. */
+export const MIN_CLOCK_SCALE = 50
+export const MAX_CLOCK_SCALE = 250
+export const CLOCK_SCALE_STEP = 5
+/** Clock position slider: percent of the free space above the icons (0 = the original top spot). */
+export const MIN_CLOCK_POSITION = 0
+export const MAX_CLOCK_POSITION = 100
+/** The S/M/L/XL presets of the first clock-options build, as slider values (font size ratios to M at 1280 px). */
+const LEGACY_CLOCK_SIZE_SCALE: ReadonlyMap<unknown, number> = new Map([['s', 75], ['m', 100], ['l', 145], ['xl', 220]])
+export const clockScaleFromLegacySize = (value: unknown): number | null => LEGACY_CLOCK_SIZE_SCALE.get(value) ?? null
+
+/** Where the clocks sit: `position` percent of the free space between their top spot and the icons. */
+export function clockShift(position: number, freeSpace: number): number {
+  return Math.round(Math.max(0, freeSpace) * Math.min(MAX_CLOCK_POSITION, Math.max(MIN_CLOCK_POSITION, position)) / 100)
+}
 
 export interface ClockTimeOptions {
   /** 'local' = the device zone. */

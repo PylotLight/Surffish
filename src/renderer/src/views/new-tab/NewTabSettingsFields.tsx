@@ -3,7 +3,7 @@ import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, OpenMeteoM
 import { MAX_ICON_VERTICAL_POSITION, MAX_WORLD_CLOCKS, MIN_ICON_VERTICAL_POSITION } from '../../../../shared/persistence'
 import { formatTemperature, OPEN_METEO_MODELS, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
 import { WORLD_CITIES } from '../../../../shared/world-cities'
-import { CLOCK_DATE_FORMATS, formatClockDate, usesTwelveHour, type ClockDateFormat, type ClockSize, type ClockTimeFormat, type ClockWeight } from '../../../../shared/new-tab-clock'
+import { CLOCK_DATE_FORMATS, CLOCK_SCALE_STEP, formatClockDate, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE, usesTwelveHour, type ClockDateFormat, type ClockTimeFormat, type ClockWeight } from '../../../../shared/new-tab-clock'
 import { SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from '../settings/SettingsControls'
 import TimeZonePicker from '../TimeZonePicker'
 import WeatherCitySearch from './WeatherCitySearch'
@@ -14,7 +14,6 @@ const COMMON_TIME_ZONES = [
   'America/Los_Angeles', 'UTC'
 ]
 const TIME_FORMAT_OPTIONS: ReadonlyArray<{ value: ClockTimeFormat; label: string }> = [{ value: 'auto', label: 'Auto' }, { value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]
-const CLOCK_SIZE_OPTIONS: ReadonlyArray<{ value: ClockSize; label: string }> = [{ value: 's', label: 'S' }, { value: 'm', label: 'M' }, { value: 'l', label: 'L' }, { value: 'xl', label: 'XL' }]
 const CLOCK_WEIGHT_OPTIONS: ReadonlyArray<{ value: ClockWeight; label: string }> = [{ value: 'light', label: 'Light' }, { value: 'regular', label: 'Regular' }, { value: 'bold', label: 'Bold' }]
 let timeZoneOptions: string[] | null = null
 function allTimeZones(): string[] {
@@ -137,9 +136,8 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
             {CLOCK_DATE_FORMATS.map((format) => <option key={format} value={format}>{formatClockDate(sampleDate, 'local', format)}{format === 'iso' ? ' (ISO)' : ''}</option>)}
           </select>
         </SettingsRow>
-        <SettingsRow label="Clock size">
-          <SettingsSegmented value={preferences.clockSize} ariaLabel="Clock size" options={CLOCK_SIZE_OPTIONS} onChange={(clockSize) => onPatch({ clockSize })} />
-        </SettingsRow>
+        <SettingsSlider label="Clock size" value={preferences.clockScale} unit="%" min={MIN_CLOCK_SCALE} max={MAX_CLOCK_SCALE} step={CLOCK_SCALE_STEP} onChange={(clockScale) => onPatch({ clockScale })} />
+        <SettingsSlider label="Clock position" value={preferences.clockVerticalPosition} unit="%" min={MIN_CLOCK_POSITION} max={MAX_CLOCK_POSITION} onChange={(clockVerticalPosition) => onPatch({ clockVerticalPosition })} />
         <SettingsRow label="Clock weight">
           <SettingsSegmented value={preferences.clockWeight} ariaLabel="Clock weight" options={CLOCK_WEIGHT_OPTIONS} onChange={(clockWeight) => onPatch({ clockWeight })} />
         </SettingsRow>
