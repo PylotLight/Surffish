@@ -2512,29 +2512,6 @@
   border-radius: 10px;
   font-size: 13.5px;
 }
-.settings-subnav .settings-subnav-close {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-left: auto;
-  padding: 0 10px 0 13px;
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(245, 247, 250, 0.78);
-  box-shadow: none;
-  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
-}
-.settings-subnav .settings-subnav-close svg {
-  width: 15px;
-  height: 15px;
-}
-.settings-subnav .settings-subnav-close:hover,
-.settings-subnav .settings-subnav-close:focus-visible {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  outline: 0;
-}
 .settings-view {
   padding: 28px clamp(18px, 3.5vw, 48px) 36px;
 }
@@ -2638,9 +2615,6 @@
   .settings-subnav button {
     padding: 0 9px;
     font-size: 12.5px;
-  }
-  .settings-subnav .settings-subnav-close span {
-    display: none;
   }
   .settings-content {
     column-width: auto;
@@ -3432,7 +3406,7 @@
   /* Over the page's static gradient only: a translucent fill, no backdrop-filter (settings v4). */
   background: rgba(14, 17, 21, 0.82);
 }
-.settings-subnav button:not(.settings-subnav-close) {
+.settings-subnav button {
   min-height: 34px;
   padding: 0 14px;
   border: 1px solid transparent;
@@ -3440,14 +3414,13 @@
   color: rgba(235, 240, 245, 0.6);
   font-size: 13.5px;
 }
-.settings-subnav button:not(.settings-subnav-close):hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.settings-subnav button:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
 .settings-subnav button.is-current {
   border-color: rgba(255, 255, 255, 0.14);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.07));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 4px 14px rgba(0, 0, 0, 0.2);
   color: #fff;
 }
-.settings-subnav .settings-subnav-close { border-radius: 999px; }
 
 @media (max-width: 640px) {
   .settings-row { flex-direction: column; align-items: stretch; }
@@ -3906,7 +3879,6 @@
 }
 
 /* Search: field in the nav bar, a status strip under it, misses hidden, matches highlighted. */
-.settings-subnav .settings-subnav-close { margin-left: 8px; }
 .settings-search { position: relative; display: flex; flex: 0 1 260px; align-items: center; min-width: 170px; margin-left: auto; }
 .settings-search-icon { position: absolute; left: 10px; width: 14px; height: 14px; fill: none; stroke: rgba(235, 240, 245, 0.5); stroke-width: 1.6; stroke-linecap: round; pointer-events: none; }
 .settings-search input {
@@ -3963,10 +3935,9 @@
 .settings-disclosure-body > .settings-actions { padding: 4px 0 6px; }
 .settings-subnav { flex-wrap: nowrap; gap: 4px; padding-right: 14px; padding-left: 18px; }
 .settings-subnav button { flex: 0 0 auto; white-space: nowrap; }
-.settings-subnav button:not(.settings-subnav-close) { padding: 0 11px; }
+.settings-subnav button { padding: 0 11px; }
 @media (max-width: 1180px) {
-  .settings-subnav button:not(.settings-subnav-close) { padding: 0 8px; font-size: 13px; }
-  .settings-subnav .settings-subnav-close span { display: none; }
+  .settings-subnav button { padding: 0 8px; font-size: 13px; }
 }
 ::highlight(settings-search) { background-color: rgba(250, 204, 21, 0.32); color: #fff; }
 

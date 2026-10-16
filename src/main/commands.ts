@@ -39,6 +39,7 @@ import { archiveBrowserTab, archiveOtherBrowserTabs, canArchiveBrowserTab, canAr
 import { getArchivedTabs, getTabArchiveSettings } from './tab-archive-store'
 import { takeScreenshot } from './screenshot'
 import { readerStateFor, toggleReaderMode } from './reader-mode'
+import { openSettingsTab } from './browser'
 import { cycleBrowserSpace, getBrowserSpacesSnapshot, moveBrowserTabToSpace, switchBrowserSpace } from './browser'
 import { createBrowserSpace, deleteBrowserSpaceWithConfirm } from './spaces-ipc'
 import { activeBrowserTabGroupId, addBrowserTabsToGroup, createBrowserTabGroup, listBrowserTabGroups, newBrowserTabInGroup, removeBrowserTabsFromGroup, toggleBrowserTabGroupCollapsed, ungroupBrowserTabGroup } from './browser'
@@ -104,7 +105,8 @@ setMiniWindowSettingsOpener(() => {
     win.show()
     win.focus()
   }
-  openPanel('settings')
+  openSettingsTab({ section: 'settings', focus: 'mini-window' })
+  focusVisibleShellPage()
 })
 
 const COMMANDS: BrowserCommand[] = [
@@ -294,7 +296,7 @@ const COMMANDS: BrowserCommand[] = [
   { id: 'pdf.save', title: 'Save Edited PDF…', accelerator: APP_SHORTCUTS.savePdf, section: 'PDF', enabled: () => getBrowserState().pdf === 'editor', run: () => savePdfEditor() },
 
   // Settings
-  { id: 'settings.general', title: 'Settings: General', section: 'Settings', keywords: ['preferences', 'search engine', 'proxy', 'socks', 'keywords'], run: () => openPanel('settings') },
+  { id: 'settings.general', title: 'Settings: General', accelerator: APP_SHORTCUTS.settings, section: 'Settings', keywords: ['preferences', 'search engine', 'proxy', 'socks', 'keywords'], run: () => openPanel('settings') },
   { id: 'settings.newTab', title: 'Settings: New Tab', section: 'Settings', keywords: ['preferences', 'clock', 'weather', 'background'], run: () => openPanel('newtab') },
   { id: 'settings.extensions', title: 'Settings: Extensions', section: 'Settings', keywords: ['preferences', 'chrome web store', 'bramble', 'addons'], run: () => openPanel('integrations') },
   { id: 'settings.site', title: 'Settings: This Site', section: 'Settings', keywords: ['permissions', 'adblock', 'clipboard', 'popups'], enabled: activeIsWebPage, run: () => openPanel('site') },

@@ -170,7 +170,10 @@ async function run() {
     return tabs.find((tab) => tab.url.endsWith('/busy-a') && tab.sleeping) ? true : null
   }, 'the killed tab to go to sleep', 5000).catch(() => false)
   report.shellKillRefused = !(await content.webContents.executeJavaScript(`window.api.browser.diagnostics.kill(${content.webContents.getOSProcessId()})`))
-  await api('window.api.browser.chrome.set({ sidebarMode: "tabs" })')
+  // Diagnostics lives in the Settings tab: close it like a tab.
+  const settingsTab = (await api('window.api.browser.tabs.get()')).find((tab) => tab.url === 'surffish://settings')
+  if (settingsTab) await api(`window.api.browser.tabs.close(${JSON.stringify(settingsTab.id)})`)
+  else await api('window.api.browser.chrome.set({ sidebarMode: "tabs" })')
   await delay(300)
   report.hintAfterClose = await content.webContents.executeJavaScript('[...document.querySelectorAll("[data-browser-tab-id]")].some((node) => node.title.includes("CPU"))')
   console.log(`PERF_REPORT ${JSON.stringify(report)}`)

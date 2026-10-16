@@ -103,7 +103,7 @@ async function run() {
 
   // --- the badge opens Settings → About & updates
   await evaluate(sidebar, 'document.querySelector(".update-badge-button").click()')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'the badge to open settings')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).settings?.section === 'settings', 'the badge to open settings')
   await waitFor(() => evaluate(content, 'document.querySelector(".update-settings")?.textContent.includes("About & updates") && document.querySelector(".update-release-notes")?.textContent.includes("Surffish v9.9.9")'), 'the About & updates section with notes')
   assert.equal(await evaluate(content, 'document.querySelector(".update-release-notes").querySelectorAll("*").length'), 0, 'notes render as text, not HTML')
   if (process.env.UPDATES_SMOKE_SCREENSHOT) {

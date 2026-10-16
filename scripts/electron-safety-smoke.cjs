@@ -136,7 +136,7 @@ async function run() {
   assert.ok(clearItem, 'the menu has Clear Browsing Data…')
   assert.equal(clearItem.accelerator, 'CmdOrCtrl+Shift+Backspace')
   clearItem.click()
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'privacy', 'the Privacy settings to open')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).settings?.section === 'privacy', 'the Privacy settings to open')
   await waitFor(() => evaluate(content, 'document.querySelector(".settings-view-privacy h1")?.textContent === "Privacy"'), 'the Privacy page to render')
   await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "tabs" })')
 

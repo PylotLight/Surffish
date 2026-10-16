@@ -1,3 +1,4 @@
+import { siteSettingsHaveOverrides } from '../shared/settings-tab'
 import { app } from 'electron'
 import { cancelDeferredWrite, deferWrite } from './deferred-writes'
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -321,6 +322,12 @@ export function saveBrowserSiteSettings(origin: unknown, value: unknown): Browse
   preferences = { ...preferences, siteSettings: { ...preferences.siteSettings, [settings.origin]: settings } }
   savePreferences()
   return { ...settings }
+}
+
+/** Sites whose saved settings change something (Settings → Sites), most recently changed last. */
+export function listBrowserSiteSettings(): BrowserSiteSettings[] {
+  loadPreferencesIfNeeded()
+  return Object.values(preferences.siteSettings).filter((settings) => siteSettingsHaveOverrides(settings)).map((settings) => ({ ...settings }))
 }
 
 /** Saved page zoom for a site (1 when none), applied when a tab navigates to that origin. */

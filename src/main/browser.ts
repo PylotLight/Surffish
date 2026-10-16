@@ -10,6 +10,7 @@ import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow,
 import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSleep, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
 import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from '../shared/navigation'
+import { normalizeSettingsTarget, parseSettingsUrl, SETTINGS_TAB_TITLE, settingsSiteOrigin, SURFFISH_SETTINGS_URL, type SettingsTarget } from '../shared/settings-tab'
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { zoomActionForWheel, type PageZoomAction } from '../shared/zoom'
@@ -37,7 +38,7 @@ import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
 import { createBroadcastQueue } from '../shared/tab-broadcast'
 import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
-import { activeTabSinceFor, captureLocalNewTabPage, focusVisibleShellPage, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
+import { activeTabSinceFor, captureLocalNewTabPage, focusVisibleShellPage, setSettingsSectionOpener, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
 import { attachPagePopups, type PagePopupHost, userPopupResponse } from './page-popups'
 import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, lastFocusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
@@ -338,6 +339,7 @@ export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boo
 function pageTitle(tab: BrowserTab): string {
   if (tab.pdfEditor) return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty)
   if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return 'New Tab'
+  if (isSettingsTab(tab)) return SETTINGS_TAB_TITLE
   const title = tab.view?.webContents.getTitle().trim()
   if (title) return title
   try {
@@ -365,7 +367,8 @@ function getState(w = currentWindowState()): BrowserState {
     interstitial: getTabInterstitial(contents),
     loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents : undefined) : null,
     security: tab && !tab.pdfEditor && !tab.error ? pageSecurityFor(contents) : null,
-    activeTabSince: w ? activeTabSinceFor(w.window) : 0
+    activeTabSince: w ? activeTabSinceFor(w.window) : 0,
+    settings: tab && isSettingsTab(tab) ? settingsTabState(tab) : null
   }
 }
 
@@ -572,7 +575,8 @@ function publishState(w = currentWindowState()): void {
   noteActiveTabForHistoryPanel(w.activeTabId, w.window)
   const state = getState(w)
   // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
-  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
+  // So is the Settings tab (it has no page view).
+  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.settings != null || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
   broadcastQueue.mark(w, true)
   // A glance belongs to the tab it opened over: a tab switch (or the tab closing) closes it.
   noteGlanceWindowState(w.window)
@@ -629,13 +633,15 @@ function persistOpenTabs(): void {
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
   const saved = windows.map((w) => {
     // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
-    const kept = withMiniTabs(w).filter((tab) => !tab.isPrivate && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
+    // Nor is the Settings tab: it is opened again from the gear / ⌘, and costs nothing to rebuild.
+    const kept = withMiniTabs(w).filter((tab) => !tab.isPrivate && !isSettingsTab(tab) && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
     const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
     return {
       urls: kept.map(currentUrl),
-      activeIndex: kept.findIndex((tab) => tab.id === w.activeTabId),
+      // Settings active at quit: the tab used before it comes back as the active one.
+      activeIndex: sessionActiveIndex(w, kept),
       pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
       geometry: windowGeometry(w.window),
       tabIds: kept.map((tab) => tab.id),
@@ -811,7 +817,8 @@ function disposeTabView(tab: BrowserTab): void {
 function ensureTabLoaded(tab: BrowserTab): void {
   if (tab.view || !isLiveWindow(tab.win)) return
   const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
-  if (target === SURFFISH_QUICK_LINKS_URL) {
+  // Drawn by the window's content renderer: never a page view (so never a web page's process).
+  if (target === SURFFISH_QUICK_LINKS_URL || target === SURFFISH_SETTINGS_URL) {
     tab.pendingUrl = ''
     return
   }
@@ -2114,6 +2121,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     ? requested
     : requested === SURFFISH_QUICK_LINKS_URL
     ? SURFFISH_QUICK_LINKS_URL
+    : requested === SURFFISH_SETTINGS_URL && creatingSettingsTab
+    ? SURFFISH_SETTINGS_URL
     : requested ? resolveAddressInput(requested, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
   const previous = activeTabOf(w)
   const shouldActivate = activate || w.activeTabId === null
@@ -3166,6 +3175,11 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
     sendFocusAddressToVisibleRenderer()
     return true
   }
+  // Cmd/Ctrl+, : the Settings tab (pressed in a mini window, it opens in a browser window).
+  if (key === ',' && !shift && primary) {
+    openSettingsTab(undefined, ownerTab?.win.window)
+    return true
+  }
   if (key === 't' && !shift) {
     newBrowserTab()
     return true
@@ -3215,8 +3229,7 @@ function closeOverviewForPanel(): void {
 
 /** Cmd+Shift+Backspace: Settings → Privacy (Clear browsing data). */
 export function openClearBrowsingData(): void {
-  closeOverviewForPanel()
-  setBrowserChromeState({ sidebarMode: 'privacy' })
+  openSettingsTab({ section: 'privacy' })
 }
 
 /** Cmd+Y / Cmd+Shift+J / Cmd+Opt+B: toggle the history sidebar, downloads or the bookmarks manager. */
@@ -3410,7 +3423,8 @@ function rememberClosedTab(tab: BrowserTab, index: number): void {
   // Private tabs leave no trace, so they can't be reopened either.
   if (tab.extensionPageOrigin || tab.isPrivate) return
   const url = currentUrl(tab)
-  if (!url || url === SURFFISH_QUICK_LINKS_URL) return
+  // Settings is one tab per window, opened from the gear / ⌘,; reopening it would make a second one.
+  if (!url || url === SURFFISH_QUICK_LINKS_URL || isSettingsTab(tab)) return
   recentlyClosedTabs.push({ url, index, pinned: tab.pinned })
   if (recentlyClosedTabs.length > MAX_RECENTLY_CLOSED_TABS) recentlyClosedTabs.shift()
 }
@@ -3499,6 +3513,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (wasActive) hideLinkStatus(false, w.window)
   if (w.findState.tabId === id) closeFindBar(false, w)
   if (rememberClosed) rememberClosedTab(tab, index)
+  const wasSettings = isSettingsTab(tab)
   // Closing a pane leaves its partner on screen (and focused, when the closed pane was).
   const { groups, partners } = removeTabFromSplits(w.splits, id)
   w.splits = groups
@@ -3521,7 +3536,8 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
     return
   }
   if (wasActive) {
-    const replacement = findTab(partners[0]) ?? (w.mini ? tabs[Math.min(index, tabs.length - 1)] : neighbourInSpace(tabs, index, tab.spaceId))
+    // Closing Settings goes back to the tab you were on before it (Settings is a detour, not a place).
+    const replacement = findTab(partners[0]) ?? (wasSettings ? lastUsedTabInSpace(w, tab.spaceId) : undefined) ?? (w.mini ? tabs[Math.min(index, tabs.length - 1)] : neighbourInSpace(tabs, index, tab.spaceId))
     if (replacement) activateTabInternal(replacement.id)
     // The Space's last tab closed while other Spaces still have tabs: the Space keeps a New Tab.
     else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
@@ -3639,7 +3655,8 @@ export function moveBrowserTab(id: string, beforeId: string | null, groupId?: st
 
 export function duplicateBrowserTab(id: string): string | null {
   const tab = getTab(id)
-  if (!tab) return null
+  // One Settings tab per window.
+  if (!tab || isSettingsTab(tab)) return null
   const duplicateId = createTab(currentUrl(tab), selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, tab.win)
   if (duplicateId) persistOpenTabs()
   return duplicateId
@@ -3687,6 +3704,9 @@ function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'oth
 }
 
 export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<NavigateResult> {
+  // surffish://settings typed in the address bar: the window's Settings tab (focused, or opened).
+  const settingsTarget = parseSettingsUrl(input)
+  if (settingsTarget) return openSettingsTab(settingsTarget) ? { ok: true } : { ok: false, reason: 'cancelled' }
   const url = resolveAddressInput(input, engine)
   if (!url) return { ok: false, reason: 'invalid' }
   const tab = getTab()
@@ -3698,7 +3718,9 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     return tab.view ? { ok: true } : { ok: false, reason: 'cancelled' }
   }
   const typedHttpFallback = typedHttpsFallbackUrl(input, url)
-  if (tab.lastUrl === SURFFISH_QUICK_LINKS_URL && !tab.view) {
+  // A URL typed on the New Tab or the Settings tab loads in that tab (it stops being Settings).
+  if ((tab.lastUrl === SURFFISH_QUICK_LINKS_URL || tab.lastUrl === SURFFISH_SETTINGS_URL) && !tab.view) {
+    settingsTabTargets.delete(tab)
     tab.lastUrl = url
     tab.pendingUrl = url
     tab.error = null
@@ -4029,6 +4051,153 @@ function wakeSnapshotMinShownMs(): number {
 function isLocalNewTab(tab: BrowserTab): boolean {
   return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
 }
+
+// ---------------------------------------------------------------------------
+// Settings tab (shared/settings-tab.ts)
+//
+// One reusable tab per browser window at surffish://settings. Like the local New Tab it has no page
+// view: the window's trusted content renderer draws it, so the settings IPC never reaches a web
+// page. It is never slept, discarded or archived (nothing to unload; archive skips non-web URLs),
+// never in history, the omnibox (http(s) only), the recently-closed list or the saved session, and
+// can't be split, duplicated or popped out to a mini window.
+
+/** Where each Settings tab should be (section / site / category) and a revision bumped per request. */
+const settingsTabTargets = new WeakMap<BrowserTab, { target: SettingsTarget; revision: number }>()
+let settingsTargetRevision = 0
+/** createTab only makes a Settings tab when openSettingsTab asks (a typed address goes through openSettingsTab). */
+let creatingSettingsTab = false
+
+function isSettingsTab(tab: BrowserTab | undefined): boolean {
+  return Boolean(tab && !tab.view && !tab.pdfEditor && !tab.extensionPageOrigin && tab.lastUrl === SURFFISH_SETTINGS_URL)
+}
+
+function settingsTabState(tab: BrowserTab): NonNullable<BrowserState['settings']> {
+  const entry = settingsTabTargets.get(tab) ?? { target: { section: 'settings' as const }, revision: 0 }
+  return { ...entry.target, revision: entry.revision }
+}
+
+/** The tab used most recently before `except` in that Space (Settings closing returns there). */
+function lastUsedTabInSpace(w: BrowserWindowState, spaceId: string): BrowserTab | undefined {
+  for (const id of w.recentTabIds) {
+    const candidate = w.tabs.find((tab) => tab.id === id)
+    if (candidate && candidate.spaceId === spaceId && !isSettingsTab(candidate)) return candidate
+  }
+  return undefined
+}
+
+/**
+ * The page a "this page" action from Settings means: the active tab's page, or, while the Settings
+ * tab is active, the page of the tab used before it (the one closing Settings returns to).
+ */
+export function getPageBehindSettings(): WebContents | null {
+  const w = currentWindowState()
+  const active = w ? activeTabOf(w) : undefined
+  if (!w || !active) return null
+  const tab = isSettingsTab(active) ? lastUsedTabInSpace(w, active.spaceId) : active
+  const contents = tab?.view?.webContents
+  return contents && !contents.isDestroyed() ? contents : null
+}
+
+function sessionActiveIndex(w: BrowserWindowState, kept: readonly BrowserTab[]): number {
+  const active = kept.findIndex((tab) => tab.id === w.activeTabId)
+  if (active >= 0) return active
+  for (const id of w.recentTabIds) {
+    const index = kept.findIndex((tab) => tab.id === id)
+    if (index >= 0) return index
+  }
+  return -1
+}
+
+/** The browser window Settings opens in: never a mini window (its tabs go to a browser window). */
+function settingsWindowFor(window?: BaseWindow | null): BrowserWindowState | undefined {
+  const own = windowStateFor(window)
+  if (own && !own.mini) return own
+  if (own?.mini) return browserTargetForMini(own)
+  const current = currentWindowState()
+  if (current && !current.mini) return current
+  const focused = windowStateFor(lastFocusedBrowserWindow())
+  if (focused && !focused.mini) return focused
+  return browserTargetForMini(undefined)
+}
+
+/** Index in `w.tabs` right after the active tab, past the rest of its split or tab group. */
+function settingsTabInsertAt(w: BrowserWindowState): number {
+  const active = activeTabOf(w)
+  let index = active ? w.tabs.indexOf(active) : -1
+  if (index < 0) return w.tabs.length
+  const split = splitOf(active!)
+  while (index + 1 < w.tabs.length) {
+    const next = w.tabs[index + 1]!
+    const sameGroup = active!.groupId !== null && next.groupId === active!.groupId
+    const sameSplit = split ? split.tabIds.includes(next.id) : false
+    if (!sameGroup && !sameSplit) break
+    index += 1
+  }
+  return index + 1
+}
+
+/** The Settings tab of a window, if it has one. */
+export function getSettingsTabId(window?: BaseWindow | null): string | null {
+  const w = settingsWindowFor(window)
+  return w?.tabs.find(isSettingsTab)?.id ?? null
+}
+
+/**
+ * Open Settings: focus the window's Settings tab (pointing it at `input`'s section / site), or open
+ * one right after the active tab. From a mini window or the menu bar popout it opens in a browser
+ * window, which comes forward. Returns the Settings tab's id.
+ */
+export function openSettingsTab(input?: unknown, window?: BaseWindow | null): string | null {
+  const target = normalizeSettingsTarget(input)
+  const w = settingsWindowFor(window ?? currentBrowserWindow())
+  if (!isLiveWindow(w)) return null
+  closeOverviewForPanel()
+  settingsTargetRevision += 1
+  const revision = settingsTargetRevision
+  let tab = w.tabs.find(isSettingsTab)
+  if (tab) {
+    settingsTabTargets.set(tab, { target, revision })
+    // Settings belongs to whichever Space you are in.
+    if (tab.spaceId !== w.activeSpaceId) tab.spaceId = w.activeSpaceId
+    if (w.activeTabId === tab.id) publishState(w)
+    else activateTabInternal(tab.id)
+  } else {
+    creatingSettingsTab = true
+    let id: string | null = null
+    try {
+      id = createTab(SURFFISH_SETTINGS_URL, selectedSearchEngine, true, false, false, false, undefined, settingsTabInsertAt(w), false, false, w)
+    } finally {
+      creatingSettingsTab = false
+    }
+    tab = findTab(id)
+    if (!tab) return null
+    settingsTabTargets.set(tab, { target, revision })
+    publishState(w)
+  }
+  // A full-page panel (Downloads, Bookmarks) or History over the page closes so Settings shows.
+  const mode = getBrowserChromeState(w.window).sidebarMode
+  if (mode === 'downloads' || mode === 'bookmarks' || mode === 'history') setBrowserChromeState({ sidebarMode: 'tabs' }, w.window, 'settings tab')
+  if (!w.window.isDestroyed()) {
+    if (w.window.isMinimized()) w.window.restore()
+    if (!w.window.isFocused()) {
+      w.window.show()
+      w.window.focus()
+    }
+  }
+  // Keyboard to the content renderer (the one drawing Settings) once the layout has switched to it.
+  const shown = w.window
+  setImmediate(() => { if (!shown.isDestroyed()) focusVisibleShellPage(shown) })
+  return tab.id
+}
+
+/** A settings page named by the chrome state (old callers, ⌘K): Sites lands on the active tab's site. */
+function openSettingsSectionFromChrome(section: string, window: BaseWindow): void {
+  const w = settingsWindowFor(window)
+  const active = w ? activeTabOf(w) : undefined
+  const host = section === 'site' && active && !isSettingsTab(active) ? settingsSiteOrigin(currentUrl(active)) : null
+  openSettingsTab({ section, ...(host ? { host } : {}) }, w?.window ?? window)
+}
+setSettingsSectionOpener(openSettingsSectionFromChrome)
 
 function thumbnailDataUrl(image: Electron.NativeImage): string {
   const size = image.getSize()
@@ -4479,7 +4648,7 @@ function keepSplitTabsTogether(w: BrowserWindowState): void {
 
 /** Can this tab be a pane? Not pinned (Favourites strip), and not the local New Tab page (it has no page view). */
 function canSplitTab(tab: BrowserTab | undefined): tab is BrowserTab {
-  return Boolean(tab && isLiveWindow(tab.win) && !tab.pinned && currentUrl(tab) !== SURFFISH_QUICK_LINKS_URL)
+  return Boolean(tab && isLiveWindow(tab.win) && !tab.pinned && currentUrl(tab) !== SURFFISH_QUICK_LINKS_URL && !isSettingsTab(tab))
 }
 
 /** Same window, both splittable, and never a private tab next to a normal one. */

@@ -32,8 +32,10 @@ import {
   togglePdfEditor,
   dismissActiveLoadError,
   activeTabHasLoadError,
-  getActiveTabWebContents
+  getActiveTabWebContents,
+  openSettingsTab
 } from './browser'
+import { windowForContents } from './window-scope'
 import { certificateInfoFor, proceedPastCertificateError, showNativeCertificate } from './certificates'
 import { isSearchEngineId } from '../shared/navigation'
 import { isNavHistoryDisposition } from '../shared/nav-history-menu'
@@ -85,6 +87,7 @@ import {
   getBrowserSiteFaviconCache,
   getBrowserPinnedSites,
   getBrowserSiteSettings,
+  listBrowserSiteSettings,
   getBrowserSearchEngine,
   getBrowserPreferencesSnapshot,
   saveBrowserNewTabPage,
@@ -293,6 +296,16 @@ export function registerIpc(): void {
   ipcMain.handle('browser:site-settings:get', (event, origin: unknown) => {
     assertMainRenderer(event)
     return getBrowserSiteSettings(origin)
+  })
+  ipcMain.handle('browser:site-settings:list', (event) => {
+    assertMainRenderer(event)
+    return listBrowserSiteSettings()
+  })
+  // Settings tab (shared/settings-tab.ts): focus or open it at a section / site. Shell surfaces only:
+  // the settings UI is the trusted content renderer, never a page (pages get no preload at all).
+  ipcMain.handle('browser:settings:open', (event, target: unknown) => {
+    assertMainRenderer(event)
+    return openSettingsTab(target, windowForContents(event.sender))
   })
   ipcMain.handle('browser:site-settings:set', (event, origin: unknown, settings: unknown) => {
     assertMainRenderer(event)

@@ -260,7 +260,7 @@ async function run() {
     const tabs = await evaluate(rendererViews.content, 'window.api.browser.tabs.get()')
     return tabs.length === 2 && tabs.some((tab) => tab.active && tab.id !== replacementTab.id)
   }, 'Command-T creates and activates a new tab')
-  await waitFor(() => evaluate(rendererViews.content, 'document.activeElement === document.querySelector(".omnibox input")'), 'the address field receives focus on the new tab')
+  await waitFor(() => evaluate(rendererViews.content, 'document.activeElement === document.querySelector(".omnibox > input[type=text]")'), 'the address field receives focus on the new tab')
   rendererViews.content.webContents.focus()
   execFileSync('xdotool', ['key', 'ctrl+w'])
   await waitFor(async () => {

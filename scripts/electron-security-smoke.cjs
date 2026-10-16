@@ -285,29 +285,28 @@ async function run() {
   assert.equal(toolbarSiteControls.favoriteAfterAddress, true, 'the bookmark star sits at the address bar trailing edge')
   await evaluate(views.toolbar, `document.querySelector('.site-actions-button').click()`)
   const siteActionsMenu = await waitFor(async () => evaluate(views.toolbar, `document.querySelector('#site-actions-menu')?.innerText || null`), 'the site-actions menu')
-  assert.match(siteActionsMenu, /Site settings/)
+  assert.match(siteActionsMenu, /All site settings/)
   assert.match(siteActionsMenu, /Picture in Picture/)
-  await evaluate(views.toolbar, `Array.from(document.querySelectorAll('#site-actions-menu [role="menuitem"]')).find((item) => item.textContent?.includes('Site settings'))?.click()`)
-  await waitFor(async () => (await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'site', 'the Site settings menu action')
-  // Site settings is a settings section, so the gear closes settings first, then opens them.
-  // sidebarMode reaches the sidebar surface by broadcast, so main can report a mode a frame before the
-  // sidebar renders it; clicking the gear in that window toggles from the stale mode. Wait until the
-  // sidebar's gear shows the expected pressed state (what a person would see) before each click.
+  await evaluate(views.toolbar, `Array.from(document.querySelectorAll('#site-actions-menu [role="menuitem"]')).find((item) => item.textContent?.includes('All site settings'))?.click()`)
+  const settingsSection = async (contents = views.toolbar) => (await evaluate(contents, 'window.api.browser.state()')).settings?.section ?? null
+  await waitFor(async () => (await settingsSection()) === 'site', 'the All site settings menu action (Settings tab on Sites)')
+  // Settings is a tab now: the gear focuses it (never closes it), and it closes like any tab.
   const gear = `document.querySelector('.sidebar-footer-icon-button[aria-label="Settings"]')`
-  const clickGear = async (pressed, description) => {
-    await waitFor(() => evaluate(views.sidebar, `${gear}?.getAttribute('aria-pressed') === '${pressed}'`), `the sidebar Settings gear to show ${description}`)
-    await evaluate(views.sidebar, `${gear}.click()`)
-  }
-  await clickGear(true, 'Site settings open')
-  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the Settings gear closing Site settings')
-  await clickGear(false, 'settings closed')
-  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'the Settings gear action')
-  // The Done button went away in #56; the gear (title "Close settings (Esc)") closes settings now.
-  await waitFor(() => evaluate(views.sidebar, `${gear}?.getAttribute('aria-pressed') === 'true'`), 'the sidebar Settings gear to show settings open')
+  await waitFor(() => evaluate(views.content, `${gear}?.getAttribute('aria-current') === 'page'`), 'the Settings gear to show the Settings tab as current')
+  await evaluate(views.content, `${gear}.click()`)
+  await delay(200)
+  assert.equal(await settingsSection(), 'site', 'the gear on the Settings tab keeps it open')
+  const settingsTabId = (await evaluate(views.toolbar, 'window.api.browser.tabs.get()')).find((tab) => tab.url === 'surffish://settings')?.id
+  assert.ok(settingsTabId, 'one Settings tab')
+  await evaluate(views.toolbar, `window.api.browser.tabs.close(${JSON.stringify(settingsTabId)})`)
+  await waitFor(async () => (await settingsSection()) === null, 'closing the Settings tab returning to the page')
+  // The sidebar renderer gets the closed-tab state a beat after main (slow on macOS CI): until then its
+  // gear still points at the closed tab's section (Sites), so wait for it to stop showing Settings as current.
+  await waitFor(() => evaluate(views.sidebar, `Boolean(${gear}) && ${gear}.getAttribute('aria-current') !== 'page'`), 'the sidebar Settings gear (Settings tab closed)')
+  await evaluate(views.sidebar, `${gear}.click()`)
+  await waitFor(async () => (await settingsSection()) === 'settings', 'the Settings gear action')
   const gearTitle = await evaluate(views.sidebar, `${gear}?.title || null`)
-  assert.match(gearTitle || '', /Close settings/)
-  await clickGear(true, 'settings open')
-  await waitFor(async () => (await evaluate(views.sidebar, 'window.api.browser.chrome.get()')).sidebarMode === 'tabs', 'the gear returning to browser tabs')
+  assert.match(gearTitle || '', /^Settings/)
   await evaluate(views.toolbar, `window.api.browser.chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })`)
   const browserSession = session.fromPartition('persist:surffish-browser')
   const trustedReleaseHosts = new Set(['api.github.com', 'github.com', 'release-assets.githubusercontent.com'])
@@ -321,7 +320,7 @@ async function run() {
     const state = await evaluate(views.toolbar, 'window.api.browser.bramble.get()')
     return state.error?.match(/ZIP|archive|directory/i) ? state : null
   }, 'the toolbar Bramble install request to reject the deliberately invalid archive')
-  assert.equal((await evaluate(views.toolbar, 'window.api.browser.chrome.get()')).sidebarMode, 'integrations', 'the Bramble toolbar install action opens Integrations')
+  assert.equal((await evaluate(views.toolbar, 'window.api.browser.state()')).settings?.section, 'integrations', 'the Bramble toolbar install action opens Integrations')
   assert.match(brambleState.error || '', /ZIP|archive|directory/i, 'the synthetic release is fetched and rejected before activation because its archive is deliberately invalid')
 
   const savedSessionPath = join(userData, 'browser-session.json')

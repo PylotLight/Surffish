@@ -35,7 +35,7 @@ import {
 } from '../shared/feeds'
 import { APP_NAME } from '../shared/config'
 import { backgroundNetworkBlockedReason } from './background-network'
-import { getActiveTabWebContents, openExternalBrowserTab } from './browser'
+import { getPageBehindSettings, openExternalBrowserTab } from './browser'
 import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { deferWrite } from './deferred-writes'
@@ -414,7 +414,8 @@ export type DiscoverResult = { ok: true; pageUrl: string; pageTitle: string; fee
 /** "Add feed from this site": feeds the active tab's page advertises, plus GitHub repo presets. */
 export async function discoverFeedsOnActivePage(): Promise<DiscoverResult> {
   load()
-  const contents = getActiveTabWebContents()
+  // From Settings → Feeds this is the page you opened Settings from.
+  const contents = getPageBehindSettings()
   if (!contents) return { ok: false, error: 'Open a web page first.' }
   const pageUrl = contents.getURL()
   if (!/^https?:\/\//i.test(pageUrl)) return { ok: false, error: 'Open a web page first.' }

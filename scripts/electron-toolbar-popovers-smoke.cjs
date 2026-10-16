@@ -129,7 +129,7 @@ async function run() {
       sidebar.webContents.sendInputEvent({ type: 'mouseDown', x: 60, y: 300, button: 'left', clickCount: 1 })
       sidebar.webContents.sendInputEvent({ type: 'mouseUp', x: 60, y: 300, button: 'left', clickCount: 1 })
     }],
-    ['a press elsewhere in the toolbar', () => clickInToolbar('.omnibox input')],
+    ['a press elsewhere in the toolbar', () => clickInToolbar('.omnibox > input[type=text]')],
     ['Escape', () => {
       toolbar.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' })
       toolbar.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
@@ -201,7 +201,7 @@ async function run() {
       if (!closed) {
         // Reset for the next case.
         if (popover.name === 'history') await inToolbar(`window.api.browser.chrome.set({ sidebarMode: 'tabs' })`)
-        else await clickInToolbar('.omnibox input')
+        else await clickInToolbar('.omnibox > input[type=text]')
         await delay(200)
       }
       // A press on the page/omnibox may leave the address bar focused; start each case clean.

@@ -55,3 +55,9 @@ test('bookmarks rank above open tabs and history, after pinned sites', () => {
     ['Bookmark', 'https://docs.github.com/']
   ])
 })
+
+test('the Settings tab is never an address suggestion', () => {
+  const settingsTab: BrowserTabSummary = { id: 's', url: 'surffish://settings', title: 'Settings', faviconUrl: null, loading: false, active: false, pinned: false, sleeping: false, audible: false, muted: false, private: false }
+  assert.deepEqual(buildAddressSuggestions('settings', [], [settingsTab], []), [])
+  assert.deepEqual(buildAddressSuggestions('surffish', [], [settingsTab], []), [])
+})

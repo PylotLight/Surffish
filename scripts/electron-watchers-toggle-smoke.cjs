@@ -147,7 +147,7 @@ async function run() {
   assert.equal((await commandIds()).includes('settings.watchers'), false)
   // Opening the hidden section falls back to General.
   await evaluate(toolbar, 'window.api.browser.chrome.set({ sidebarMode: "watchers" })')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.chrome.get()')).sidebarMode === 'settings', 'Settings → Watchers to fall back to General')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).settings?.section === 'settings', 'Settings → Watchers to fall back to General')
   const firstHits = hits.first
   console.log(`turned off; waiting ${Math.max(0, secondDueAt - Date.now()) + 3000} ms past the second watcher's due time`)
   await delay(Math.max(0, secondDueAt - Date.now()) + 3000)

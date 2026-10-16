@@ -5,7 +5,6 @@ import type {
   BrowserPreferencesSnapshot,
   BrowserSidebarMode,
   BrowserProxySettings,
-  BrowserSiteSettings,
   BrowserState,
   BrowserTabSummary,
   BrowsingHistoryEntry,
@@ -52,6 +51,7 @@ import { ProxyDownBanner } from './ProxyDownBanner'
 import { NetworkOverridesBadge } from './NetworkOverridesPanel'
 import { isInsecurePageUrl, pageTransportSecurity } from '../../../shared/https-only'
 import { UpdateBadge } from './settings/UpdateBadge'
+import { SiteSettingsQuick } from './sites/SiteSettingsQuick'
 import { formatVisitedAt } from '../lib/format'
 import { dismissPopovers, usePopoverDismiss } from '../lib/popover-dismiss'
 import { useDismissOnTabSwitch, useHistoryPanelDismiss, useToolbarExtent } from './useToolbarPopovers'
@@ -82,8 +82,8 @@ import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigat
 import {
   AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
   DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, BrambleQuickUnlockSettings, PrivacySettings,
-  MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SiteDataSettings, SiteRouteSettings, SpacesSettings, SpellcheckSettings,
-  TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel
+  MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SpacesSettings, SpellcheckSettings,
+  TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel, SitesSettings
 } from './lazy-views'
 import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
@@ -201,7 +201,7 @@ const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: strin
   { mode: 'integrations', label: 'Integrations' },
   { mode: 'privacy', label: 'Privacy' },
   { mode: 'watchers', label: 'Watchers' },
-  { mode: 'site', label: 'This site' },
+  { mode: 'site', label: 'Sites' },
   { mode: 'network', label: 'Network' },
   { mode: 'diagnostics', label: 'Diagnostics' }
 ]
@@ -403,13 +403,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [cachedSiteIcons, setCachedSiteIcons] = useState<Record<string, string>>({})
   const [chromeState, setChromeState] = useState<BrowserChromeState>(DEFAULT_CHROME_STATE)
   const { sidebarMode, sidebarPinned, sidebarHovered, sidebarFocused, sidebarWidth, sidebarResizing } = chromeState
+  // The Settings tab (shared/settings-tab.ts): main says which page it shows; a section picked here
+  // shows at once (until main's answer, with a newer revision, lands).
+  const settingsTab = browser.settings ?? null
+  const [settingsSectionPick, setSettingsSectionPick] = useState<{ section: SettingsSectionMode; revision: number } | null>(null)
+  const settingsMode: SettingsSectionMode | null = settingsTab
+    ? (settingsSectionPick && settingsSectionPick.revision === settingsTab.revision ? settingsSectionPick.section : settingsTab.section)
+    : null
+  // What the page area shows: a full panel (Downloads, Bookmarks) over anything, else Settings, else the sidebar mode.
+  // Only the content surface draws Settings (the toolbar and sidebar views never load its chunk).
+  const pageMode: SidebarMode = sidebarMode === 'downloads' || sidebarMode === 'bookmarks' ? sidebarMode : (surface === 'content' ? settingsMode : null) ?? sidebarMode
+  const settingsOnScreen = surface === 'content' && settingsMode !== null && pageMode === settingsMode
   // Watchers with a change the user hasn't opened yet (badge on Settings → Watchers). Content surface only.
   // Settings → General → "Enable page watchers": off hides the Watchers section and its badge.
   const watchersEnabled = usePageWatchersEnabled()
   const unseenWatchers = useUnseenWatcherCount(surface === 'content' && watchersEnabled === true)
   // Only while Settings is open, so launch never loads the feeds module for a badge.
-  const unreadFeeds = useUnreadFeedCount(surface === 'content' && isSettingsSection(sidebarMode))
-  const settingsSearch = useSettingsSearch(viewportRef, surface === 'content' && isSettingsSection(sidebarMode) ? settingsQuery : '', sidebarMode)
+  const unreadFeeds = useUnreadFeedCount(settingsOnScreen)
+  const settingsSearch = useSettingsSearch(viewportRef, settingsOnScreen ? settingsQuery : '', pageMode)
   const [historyQuery, setHistoryQuery] = useState('')
   const [address, setAddress] = useState(EMPTY_BROWSER.url)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
@@ -453,8 +464,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [networkToolEnabled, setNetworkToolEnabled] = useNetworkToolEnabled()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
-  const [siteSettings, setSiteSettings] = useState<BrowserSiteSettings | null>(null)
-  const [siteSettingsLoading, setSiteSettingsLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [proxyMessage, setProxyMessage] = useState('')
   const [sessionMessage, setSessionMessage] = useState('')
@@ -602,6 +611,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }, [siteIconOriginsKey])
   const isLocalNewTab = browser.url === SURFFISH_QUICK_LINKS_URL
+  // A tab the content renderer draws (no site, no page view): the New Tab or Settings.
+  const isLocalPage = isLocalNewTab || settingsTab !== null
   const hasInterstitial = browser.interstitial !== null
   // A main-frame load failure leaves an empty error page: show the in-page error over it instead.
   const hasLoadErrorPage = !hasInterstitial && browser.loadError?.fullPage === true
@@ -612,7 +623,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const newTabBackground = newTabBackgrounds[newTabBackgroundIndex] ?? newTabBackgrounds[0]!
   // The New Tab page (clock, photos) is only on screen in the content surface, on a New Tab,
   // with no settings/downloads panel over it. Nothing behind it needs to tick otherwise.
-  const newTabOnScreen = surface === 'content' && isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads'
+  const newTabOnScreen = surface === 'content' && isLocalNewTab && sidebarMode !== 'downloads'
   // Leaving the New Tab (a site opened from it, a tab switch) closes the Customize panel. Opening it
   // from Settings while on a site sets it open before the New Tab arrives, so only a true → false
   // change of isLocalNewTab closes it.
@@ -668,7 +679,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // revealed, the content surface only when it is the visible layer (New Tab or a full panel).
   // Tooltip hints only arrive while Diagnostics samples; the toolbar has no tab list.
   const tabUsage = useTabUsageHints(surface !== 'toolbar')
-  const sidebarOnScreen = sidebarVisible && (surface === 'sidebar' || (surface === 'content' && (isLocalNewTab || (sidebarMode !== 'tabs' && sidebarMode !== 'history'))))
+  const sidebarOnScreen = sidebarVisible && (surface === 'sidebar' || (surface === 'content' && (isLocalPage || (sidebarMode !== 'tabs' && sidebarMode !== 'history'))))
   // Cmd/Ctrl-click and Shift-click multi-select (a split entry stands for all its panes);
   // only the surface showing the tab list mirrors its selection to main.
   const activeEntryKey = useMemo(() => tabEntries.find((entry) => entry.kind === 'split' ? entry.tabs.some((tab) => tab.active) : entry.kind === 'tab' && entry.tab.active)?.key ?? null, [tabEntries])
@@ -767,9 +778,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null
   // A full-page error (DNS, refused, TLS handshake…) means nothing loaded: no lock, no Not secure pill.
   const pageLoadError = !certificateLoadError && browser.error && browser.loadError?.fullPage ? browser.loadError.name ?? (browser.loadError.code !== null ? `Error ${browser.loadError.code}` : 'ERR_FAILED') : null
-  const siteConnection = isLocalNewTab ? null : siteConnectionSummary((certificateLoadError || pageLoadError) && browser.loadError ? browser.loadError.url : browser.url, browser.security, certificateLoadError, pageLoadError)
+  const siteConnection = isLocalPage ? null : siteConnectionSummary((certificateLoadError || pageLoadError) && browser.loadError ? browser.loadError.url : browser.url, browser.security, certificateLoadError, pageLoadError)
   const pageTransport = pageTransportSecurity(browser.url)
-  const certificateBypassed = !isLocalNewTab && browser.security?.level === 'bypassed'
+  const certificateBypassed = !isLocalPage && browser.security?.level === 'bypassed'
 
   function revealSidebar(): void {
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current)
@@ -887,8 +898,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     await window.api.browser.navigate(site.url, searchEngine)
   }
 
-  function selectSettingsSection(mode: SettingsSectionMode): void {
-    setSidebarMode(mode)
+  /**
+   * Show a settings page: in the Settings tab when it is the one on screen, else main focuses the
+   * window's Settings tab (or opens one next to this tab). `host` deep-links Sites to that site.
+   */
+  function selectSettingsSection(mode: SettingsSectionMode, host?: string | null): void {
+    if (settingsTab && !host) setSettingsSectionPick({ section: mode, revision: settingsTab.revision })
+    if (sidebarMode === 'downloads' || sidebarMode === 'bookmarks') setSidebarMode('tabs')
+    void window.api.browser.settings.open({ section: mode, ...(host ? { host } : {}) }).catch(() => undefined)
   }
 
   const closeNewTabCustomize = useCallback(() => setNewTabCustomizeOpen(false), [])
@@ -899,7 +916,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   function customizeOnNewTab(): void {
     setNewTabCustomizeLoaded(true)
     setNewTabCustomizeOpen(true)
-    exitSettings()
+    setSettingsQuery('')
     if (!isLocalNewTab) void window.api.browser.tabs.create(SURFFISH_QUICK_LINKS_URL)
   }
   const newTabFieldsProps = {
@@ -913,25 +930,31 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     onWeatherKeyChange: () => setNewTabWeatherKeyVersion((version) => version + 1)
   }
 
-  function exitSettings(): void {
-    setSidebarMode('tabs')
-    setSettingsQuery('')
-  }
-
-  /** The sidebar gear is a toggle: open General, or close settings from whichever section is showing. */
-  function toggleSettings(): void {
-    if (isSettingsSection(sidebarMode)) exitSettings()
-    else selectSettingsSection('settings')
-  }
-
-  async function updateSiteSetting(key: Exclude<keyof BrowserSiteSettings, 'origin'>, value: boolean): Promise<void> {
-    if (!siteSettings || !activeOrigin) return
-    try {
-      const updated = await window.api.browser.siteSettings.set(activeOrigin, { ...siteSettings, [key]: value })
-      if (updated) setSiteSettings(updated)
-    } catch (error) {
-      setNavigationError(error instanceof Error ? error.message : String(error))
+  // A deep link to a General category (e.g. Mini Window Settings… from the menu bar icon) scrolls to it
+  // once the lazy settings chunk has drawn it.
+  const settingsFocus = settingsOnScreen && settingsMode === 'settings' ? settingsTab?.focus ?? null : null
+  useEffect(() => {
+    if (!settingsFocus) return
+    let tries = 0
+    let frame = 0
+    const scroll = (): void => {
+      const element = document.getElementById(`settings-category-${settingsFocus}`)
+      if (element) element.scrollIntoView({ block: 'start' })
+      else if (tries++ < 60) frame = requestAnimationFrame(scroll)
     }
+    scroll()
+    return () => cancelAnimationFrame(frame)
+  }, [settingsFocus, settingsTab?.revision])
+
+  /** Leave a full-page panel (Downloads, Bookmarks) for the tab under it. */
+  function exitPanel(): void {
+    if (sidebarMode !== 'tabs') setSidebarMode('tabs')
+  }
+
+  /** The sidebar gear opens (or focuses) the Settings tab; it closes like any tab. */
+  function openSettings(): void {
+    if (settingsOnScreen) return
+    selectSettingsSection(settingsMode ?? 'settings')
   }
 
   // Keep main told where the Bramble button sits, so popups Bramble opens itself (autofill
@@ -990,7 +1013,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     await dispatchBrambleToolbarAction(bramblePoc, {
       open: () => openBramblePoc(),
       install: async () => {
-        setSidebarMode('integrations')
+        selectSettingsSection('integrations')
         try {
           setBramblePoc(await window.api.browser.bramble.installLatest())
         } catch (error) {
@@ -1064,36 +1087,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [surface])
 
   useEffect(() => {
-    if (sidebarMode !== 'site') return
-    let cancelled = false
-    if (!activeOrigin) {
-      setSiteSettings(null)
-      setSiteSettingsLoading(false)
-      return
-    }
-    setSiteSettings(null)
-    setSiteSettingsLoading(true)
-    void window.api.browser.siteSettings.get(activeOrigin).then((settings) => {
-      if (!cancelled) setSiteSettings(settings)
-    }).catch(() => {
-      if (!cancelled) setSiteSettings(null)
-    }).finally(() => {
-      if (!cancelled) setSiteSettingsLoading(false)
-    })
-    // The toolbar's ad-blocker switch changes the same settings.
-    const stop = window.api.browser.adblock.onSiteSettingsChanged((settings) => {
-      if (!cancelled && settings?.origin === activeOrigin) setSiteSettings(settings)
-    })
-    return () => { cancelled = true; stop() }
-  }, [sidebarMode, activeOrigin])
+    if (settingsMode === 'network' && !networkToolEnabled) selectSettingsSection('settings')
+  }, [settingsMode, networkToolEnabled])
 
   useEffect(() => {
-    if (sidebarMode === 'network' && !networkToolEnabled) setSidebarMode('settings')
-  }, [sidebarMode, networkToolEnabled])
-
-  useEffect(() => {
-    if (surface === 'content' && watchersEnabled === false && sidebarModeForWatchers(sidebarMode, false) !== sidebarMode) setSidebarMode('settings')
-  }, [surface, sidebarMode, watchersEnabled])
+    if (surface === 'content' && watchersEnabled === false && settingsMode && sidebarModeForWatchers(settingsMode, false) !== settingsMode) selectSettingsSection('settings')
+  }, [surface, settingsMode, watchersEnabled])
 
   useEffect(() => {
     const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc)
@@ -1107,13 +1106,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   usePopoverDismiss(downloadsPopupOpen, downloadsControlRef, () => setDownloadsPopupOpen(false), { returnFocusRef: downloadsButtonRef })
 
+  // Esc leaves the Downloads / Bookmarks panels. Settings is a tab now: it closes like one (⌘W, ×),
+  // so Esc there only clears the settings search (SettingsSearchField).
   useEffect(() => {
-    if (surface === 'sidebar' || (!isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks')) return
+    if (surface === 'sidebar' || (sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks')) return
     const exitOnEscape = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented || downloadsPopupOpen || siteActionsOpen || extensionsMenuOpen) return
       const target = event.target as HTMLElement | null
       if (target?.tagName === 'SELECT') return
-      exitSettings()
+      exitPanel()
     }
     window.addEventListener('keydown', exitOnEscape)
     return () => window.removeEventListener('keydown', exitOnEscape)
@@ -1191,7 +1192,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (!element) return
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect()
-      const canShow = !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && !isLocalNewTab && !coversPage && rect.width > 0 && rect.height > 0
+      const canShow = sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && !isLocalPage && !coversPage && rect.width > 0 && rect.height > 0
       void window.api.browser.setBounds(canShow
         ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
         : { x: 0, y: 0, width: 0, height: 0 })
@@ -1205,7 +1206,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.removeEventListener('resize', updateBounds)
       void window.api.browser.setBounds({ x: 0, y: 0, width: 0, height: 0 })
     }
-  }, [surface, sidebarMode, isLocalNewTab, coversPage])
+  }, [surface, sidebarMode, isLocalPage, coversPage])
 
   // Address-bar notices belong to the tab they were raised on.
   useEffect(() => {
@@ -1469,7 +1470,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 titleFor={(tab) => withTabUsageHint(tab.sleeping ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload` : tab.title, tabUsage[tab.id])}
                 onActivate={(id) => {
                   void window.api.browser.tabs.activate(id)
-                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
+                  if (sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitPanel()
                 }}
               />
             ) : (({ tab }) => (
@@ -1488,7 +1489,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 onClick={(event) => {
                   if (tabSelection.handleClick(event, tab.id)) return
                   void window.api.browser.tabs.activate(tab.id)
-                  if (isSettingsSection(sidebarMode) || sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitSettings()
+                  if (sidebarMode === 'downloads' || sidebarMode === 'bookmarks') exitPanel()
                 }}
                 // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
                 onMouseDown={(event) => { if (event.button === 1) event.preventDefault() }}
@@ -1545,7 +1546,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </button>
           )}
           <UpdateBadge />
-          <button className={`sidebar-footer-icon-button${SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? ' is-current' : ''}`} type="button" aria-label="Settings" aria-current={SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) ? 'page' : undefined} aria-pressed={isSettingsSection(sidebarMode)} title={isSettingsSection(sidebarMode) ? 'Close settings (Esc)' : 'Settings'} onClick={toggleSettings}>
+          <button className={`sidebar-footer-icon-button${settingsTab ? ' is-current' : ''}`} type="button" aria-label="Settings" aria-current={settingsTab ? 'page' : undefined} title={`Settings (${window.api.platform === 'darwin' ? '⌘,' : 'Ctrl+,'})`} onClick={openSettings}>
             <span aria-hidden="true">⚙</span>
           </button>
           <button className="sidebar-footer-icon-button sidebar-quit-button" type="button" aria-label="Quit Surffish" title="Quit Surffish" onClick={() => void window.api.browser.quit()}>
@@ -1630,13 +1631,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                         <span className="site-connection-chevron" aria-hidden="true">›</span>
                       </button>}
                     </div>}
-                    <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
+                    {activeOrigin && <SiteSettingsQuick origin={activeOrigin} onAllSiteSettings={() => {
                       setSiteActionsOpen(false)
-                      selectSettingsSection('site')
-                    }}>
-                      <span className="site-actions-menu-icon" aria-hidden="true">⛨</span>
-                      <span>Site settings</span>
-                    </button>
+                      selectSettingsSection('site', activeOrigin)
+                    }} />}
                     <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
                       setSiteActionsOpen(false)
                       void openPictureInPicture()
@@ -1718,7 +1716,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </button>}
                 <BookmarkStarControl
                   bookmarks={bookmarks}
-                  url={isLocalNewTab ? '' : browser.url}
+                  url={isLocalPage ? '' : browser.url}
                   title={browser.title}
                   faviconUrl={tabs.find((tab) => tab.active)?.faviconUrl ?? null}
                   isPrivate={browser.private}
@@ -1780,16 +1778,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   onLayout={bumpBookmarksMenuLayout}
                 />}
                 {surface !== 'sidebar' && <ReadingListButton
-                  url={isLocalNewTab ? '' : browser.url}
+                  url={isLocalPage ? '' : browser.url}
                   title={browser.title}
                   isPrivate={browser.private}
                   onOpenChange={setReadingListOpen}
                 />}
                 {surface !== 'sidebar' && <AdblockButton
                   tabId={activeTabId}
-                  url={isLocalNewTab ? '' : browser.url}
+                  url={isLocalPage ? '' : browser.url}
                   onOpenChange={setAdblockOpen}
-                  onOpenSettings={() => selectSettingsSection('site')}
+                  onOpenSettings={() => { if (activeOrigin) selectSettingsSection('site', activeOrigin) }}
                 />}
                 <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
@@ -1802,7 +1800,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   disabled={webStoreExtensions.busy}
                   title="Install this Chrome Web Store extension in Surffish"
                   onClick={() => {
-                    setSidebarMode('integrations')
+                    selectSettingsSection('integrations')
                     void runExtensionAction(() => window.api.browser.extensions.install(browser.url), setWebStoreExtensions, webStoreExtensions)
                   }}
                 >
@@ -1883,9 +1881,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           )}
           {surface !== 'sidebar' && brandEgg.open && <BrandEasterEgg onClose={brandEgg.close} />}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' ? 'Settings content' : sidebarMode === 'downloads' ? 'Downloads content' : sidebarMode === 'bookmarks' ? 'Bookmark manager' : sidebarMode === 'network' ? 'Network inspector' : sidebarMode === 'diagnostics' ? 'Diagnostics' : sidebarMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'integrations' ? 'Settings content' : pageMode === 'downloads' ? 'Downloads content' : pageMode === 'bookmarks' ? 'Bookmark manager' : pageMode === 'network' ? 'Network inspector' : pageMode === 'diagnostics' ? 'Diagnostics' : pageMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
-          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && (
+          {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === pageMode) && pageMode !== 'downloads' && pageMode !== 'bookmarks' && (
             <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
               '--new-tab-dim': (newTabPreferences.backgroundDim / 100).toFixed(2),
               '--new-tab-dim-soft': (newTabPreferences.backgroundDim / 350).toFixed(2),
@@ -2029,61 +2027,51 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               )}
             </section>
           )}
-          {SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(sidebarMode)) && (
+          {SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(pageMode)) && (
             <nav className="settings-subnav" aria-label="Browser settings sections">
               {visibleWatcherSections(SETTINGS_SECTIONS, watchersEnabled !== false).filter((section) => section.mode !== 'network' || networkToolEnabled).map((section) => (
-                <button key={section.mode} type="button" className={settingsNavMode(sidebarMode) === section.mode ? 'is-current' : ''} aria-current={settingsNavMode(sidebarMode) === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}{section.mode === 'integrations' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread feed items`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}</button>
+                <button key={section.mode} type="button" className={settingsNavMode(pageMode) === section.mode ? 'is-current' : ''} aria-current={settingsNavMode(pageMode) === section.mode ? 'page' : undefined} onClick={() => selectSettingsSection(section.mode)}>{section.label}{section.mode === 'watchers' && unseenWatchers > 0 && <span className="settings-subnav-badge" aria-label={`${unseenWatchers} changed`}>{unseenWatchers}</span>}{section.mode === 'integrations' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread feed items`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}</button>
               ))}
               <SettingsSearchField value={settingsQuery} onChange={setSettingsQuery} />
-              <button
-                className="settings-subnav-close"
-                type="button"
-                aria-label="Close settings and return to web content"
-                title="Close settings (Esc)"
-                onClick={exitSettings}
-              >
-                <span>Close</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-              </button>
             </nav>
           )}
-          {surface === 'content' && settingsQuery.trim() !== '' && SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(sidebarMode)) && (
+          {surface === 'content' && settingsQuery.trim() !== '' && SETTINGS_SECTIONS.some((section) => section.mode === settingsNavMode(pageMode)) && (
             <SettingsSearchStatus
               query={settingsQuery}
               matches={settingsSearch.matches}
-              mode={sidebarMode as SettingsSectionMode}
+              mode={pageMode as SettingsSectionMode}
               available={(mode) => (mode !== 'network' || networkToolEnabled) && (mode !== 'watchers' || watchersEnabled !== false)}
               labelFor={(mode) => mode === 'feeds' ? 'Integrations → Feeds' : SETTINGS_SECTIONS.find((section) => section.mode === mode)?.label ?? mode}
               onOpen={(mode) => selectSettingsSection(mode as SettingsSectionMode)}
               onClear={() => setSettingsQuery('')}
             />
           )}
-          {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
-          {surface === 'content' && hasLoadErrorPage && browser.loadError && !isLocalNewTab && !isSettingsSection(sidebarMode) && sidebarMode !== 'downloads' && sidebarMode !== 'bookmarks' && <LoadErrorPage loadError={browser.loadError} canGoBack={browser.canGoBack} />}
-          {sidebarMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
-          {sidebarMode === 'privacy' && <PrivacySettings />}
-          {sidebarMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
-          {sidebarMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
-          {(sidebarMode === 'settings' || sidebarMode === 'newtab' || sidebarMode === 'integrations' || sidebarMode === 'feeds') && (
-            <div className={`settings-view settings-view-${sidebarMode}`}>
+          {surface === 'content' && browser.interstitial && !isLocalNewTab && !isSettingsSection(pageMode) && pageMode !== 'downloads' && <TabInterstitial interstitial={browser.interstitial} canGoBack={browser.canGoBack} />}
+          {surface === 'content' && hasLoadErrorPage && browser.loadError && !isLocalNewTab && !isSettingsSection(pageMode) && pageMode !== 'downloads' && pageMode !== 'bookmarks' && <LoadErrorPage loadError={browser.loadError} canGoBack={browser.canGoBack} />}
+          {pageMode === 'downloads' && <DownloadsPanel mode="page" onClose={() => setSidebarMode('tabs')} />}
+          {pageMode === 'privacy' && <PrivacySettings />}
+          {pageMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
+          {pageMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
+          {(pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'integrations' || pageMode === 'feeds') && (
+            <div className={`settings-view settings-view-${pageMode}`}>
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>{sidebarMode === 'integrations' || sidebarMode === 'feeds' ? 'Integrations' : sidebarMode === 'newtab' ? 'New Tab' : 'General'}</h1>
-                  <p>{sidebarMode === 'integrations' || sidebarMode === 'feeds' ? 'Extensions and feeds.' : sidebarMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
+                  <h1>{pageMode === 'integrations' || pageMode === 'feeds' ? 'Integrations' : pageMode === 'newtab' ? 'New Tab' : 'General'}</h1>
+                  <p>{pageMode === 'integrations' || pageMode === 'feeds' ? 'Extensions and feeds.' : pageMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
-                {(sidebarMode === 'integrations' || sidebarMode === 'feeds') && (
+                {(pageMode === 'integrations' || pageMode === 'feeds') && (
                   <div className="settings-segmented integrations-tabs" role="tablist" aria-label="Integrations">
                     {INTEGRATIONS_TABS.map((tab) => (
-                      <button key={tab.mode} type="button" role="tab" aria-selected={sidebarMode === tab.mode} className={sidebarMode === tab.mode ? 'is-selected' : ''} onClick={() => selectSettingsSection(tab.mode)}>
+                      <button key={tab.mode} type="button" role="tab" aria-selected={pageMode === tab.mode} className={pageMode === tab.mode ? 'is-selected' : ''} onClick={() => selectSettingsSection(tab.mode)}>
                         {tab.label}{tab.mode === 'feeds' && unreadFeeds > 0 && <span className="settings-subnav-badge" aria-label={`${unreadFeeds} unread`}>{unreadFeeds > 99 ? '99+' : unreadFeeds}</span>}
                       </button>
                     ))}
                   </div>
                 )}
               </header>
-              <div className={`settings-content${sidebarMode === 'settings' ? ' has-toc' : ''}`} key={sidebarMode}>
-                {sidebarMode === 'settings' && <SettingsToc categories={GENERAL_CATEGORIES} counts={settingsQuery.trim() ? settingsSearch.categories : null} rootRef={viewportRef} />}
-                {sidebarMode === 'settings' && <div className="settings-categories">
+              <div className={`settings-content${pageMode === 'settings' ? ' has-toc' : ''}`} key={pageMode}>
+                {pageMode === 'settings' && <SettingsToc categories={GENERAL_CATEGORIES} counts={settingsQuery.trim() ? settingsSearch.categories : null} rootRef={viewportRef} />}
+                {pageMode === 'settings' && <div className="settings-categories">
                 <SettingsCategory id="browsing" title="Browsing">
                 <SettingsGroup title="Search">
                   <SettingsRow label="Search engine" hint="Used for searches typed into the address bar.">
@@ -2183,8 +2171,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsCategory>
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
                 </div>}
-                {sidebarMode === 'newtab' && <NewTabSettingsFields {...newTabFieldsProps} variant="page" onCustomizeOnNewTab={customizeOnNewTab} />}
-                {sidebarMode === 'integrations' && <>
+                {pageMode === 'newtab' && <NewTabSettingsFields {...newTabFieldsProps} variant="page" onCustomizeOnNewTab={customizeOnNewTab} />}
+                {pageMode === 'integrations' && <>
                 <SettingsGroup
                   title="Bramble password manager"
                   status={bramblePoc.loading ? 'Working…' : bramblePoc.installed ? `Installed · ${bramblePoc.version ?? 'version unknown'}${bramblePoc.updateAvailable ? ' · update available' : ''}` : 'Not installed'}
@@ -2216,62 +2204,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <ExtensionsSettings state={webStoreExtensions} setState={setWebStoreExtensions} />
                 </>}
                 {/* Lazy chunk: Integrations opening on Extensions never loads the Feeds view. */}
-                {sidebarMode === 'feeds' && <FeedsSettings />}
+                {pageMode === 'feeds' && <FeedsSettings />}
               </div>
             </div>
           )}
-          {sidebarMode === 'site' && (
-            <div className="settings-view site-settings-view">
-              <header className="settings-page-header">
-                <h1>{activeOrigin ? new URL(activeOrigin).hostname : 'Site settings'}</h1>
-                <p>{activeOrigin ? `Privacy and permissions for ${activeOrigin}` : 'Site controls are available on HTTP or HTTPS pages.'}</p>
-              </header>
-              <div className="settings-content">
-                {siteSettingsLoading ? <section className="settings-section"><p className="settings-help">Loading this site’s controls…</p></section> : siteSettings ? (
-                  <>
-                    <section className="settings-section">
-                      <div className="settings-section-heading"><div><strong>Privacy</strong><span className="settings-status is-on">Applies to this origin only</span></div></div>
-                      <label className="site-setting-row">
-                        <span><strong>Block ads and trackers</strong><small>Uses the browser’s network filter for future requests on this site.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.blockAds} onChange={(event) => void updateSiteSetting('blockAds', event.target.checked)} aria-label="Block ads and trackers on this site" />
-                      </label>
-                      <label className="site-setting-row">
-                        <span><strong>Open pop-ups in tabs</strong><small>Routes pop-up windows from this site into a regular browser tab.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.openPopupsInTabs} onChange={(event) => void updateSiteSetting('openPopupsInTabs', event.target.checked)} aria-label="Open this site’s pop-ups in tabs" />
-                      </label>
-                    </section>
-                    <section className="settings-section">
-                      <div className="settings-section-heading"><div><strong>Permissions</strong><span className="settings-status">Denied unless allowed below</span></div></div>
-                      <label className="site-setting-row">
-                        <span><strong>Camera and microphone</strong><small>Allows media access requests for this origin; the operating system may still require approval.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowMedia} onChange={(event) => void updateSiteSetting('allowMedia', event.target.checked)} aria-label="Allow camera and microphone on this site" />
-                      </label>
-                      <label className="site-setting-row">
-                        <span><strong>Location</strong><small>Allows location requests for this origin.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowGeolocation} onChange={(event) => void updateSiteSetting('allowGeolocation', event.target.checked)} aria-label="Allow location on this site" />
-                      </label>
-                      <label className="site-setting-row">
-                        <span><strong>Notifications</strong><small>Allows notification requests for this origin.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowNotifications} onChange={(event) => void updateSiteSetting('allowNotifications', event.target.checked)} aria-label="Allow notifications on this site" />
-                      </label>
-                      <label className="site-setting-row">
-                        <span><strong>Read clipboard</strong><small>Lets this site read what you’ve copied (paste buttons). Copying to the clipboard is always allowed.</small></span>
-                        <input type="checkbox" className="settings-switch" checked={siteSettings.allowClipboardRead} onChange={(event) => void updateSiteSetting('allowClipboardRead', event.target.checked)} aria-label="Allow this site to read the clipboard" />
-                      </label>
-                      <p className="settings-help">Copying, fullscreen and pointer lock work everywhere, like Chrome. All other web permissions stay denied, and you'll see a short notice when a site is blocked. Turning a permission on does not bypass macOS or Windows privacy prompts.</p>
-                    </section>
-                    {activeOrigin && <SiteRouteSettings url={browser.url} />}
-                    {activeOrigin && <SiteDataSettings origin={activeOrigin} onForgotten={() => {
-                      void window.api.browser.siteSettings.get(activeOrigin).then(setSiteSettings).catch(() => undefined)
-                    }} />}
-                    <div className="settings-actions"><button className="settings-action primary" type="button" onClick={() => void window.api.browser.reload()}>Reload page to apply</button></div>
-                  </>
-                ) : <section className="settings-section"><p className="settings-help">Select an HTTP or HTTPS page to manage its privacy controls.</p></section>}
-              </div>
-            </div>
-          )}
-          {sidebarMode === 'network' && networkToolEnabled && <NetworkView tabs={tabs} live={surface === 'content'} />}
-          {sidebarMode === 'diagnostics' && <DiagnosticsView live={surface === 'content'} />}
+          {pageMode === 'site' && <SitesSettings focusHost={settingsTab?.host} revision={settingsTab?.revision} />}
+          {pageMode === 'network' && networkToolEnabled && <NetworkView tabs={tabs} live={surface === 'content'} />}
+          {pageMode === 'diagnostics' && <DiagnosticsView live={surface === 'content'} />}
         </div>
       </div>
     </section>

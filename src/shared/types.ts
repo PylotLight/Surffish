@@ -193,6 +193,26 @@ export interface BrowserState {
    * (shared/popover-dismiss.ts `tabSwitchClosesPopover`).
    */
   activeTabSince?: number
+  /**
+   * The active tab is the window's Settings tab (shared/settings-tab.ts): which page to show, the
+   * site to focus on Sites, the General category to scroll to. `revision` changes with every request
+   * to open Settings, so asking for the same page again still re-applies it (scroll, focus).
+   */
+  settings?: BrowserSettingsTabState | null
+}
+
+/** Where to open Settings (shared/settings-tab.ts normalizes it). */
+export interface BrowserSettingsTarget {
+  section: BrowserSettingsTabState['section']
+  host?: string
+  focus?: string
+}
+
+export interface BrowserSettingsTabState {
+  section: 'settings' | 'newtab' | 'integrations' | 'feeds' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+  host?: string
+  focus?: string
+  revision: number
 }
 
 export type BrowserTabInterstitial =
