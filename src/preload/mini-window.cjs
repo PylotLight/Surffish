@@ -27,5 +27,10 @@ contextBridge.exposeInMainWorld('miniWindow', {
   onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),
   handleClick: () => ipcRenderer.send('mini-window:handle-click'),
   handleDrag: (active) => ipcRenderer.send('mini-window:handle-drag', Boolean(active)),
-  handleHover: (inside) => ipcRenderer.send('mini-window:handle-hover', Boolean(inside))
+  handleHover: (inside) => ipcRenderer.send('mini-window:handle-hover', Boolean(inside)),
+  // The mini window's menu (right-click on the header or handle), and the menu bar (Send to / Float, Pin).
+  menu: () => ipcRenderer.send('mini-window:menu'),
+  handleMenu: () => ipcRenderer.send('mini-window:handle-menu'),
+  menuBar: () => ipcRenderer.send('mini-window:menubar'),
+  pin: () => ipcRenderer.send('mini-window:pin')
 })

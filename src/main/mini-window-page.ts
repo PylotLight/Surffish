@@ -11,6 +11,9 @@
  * Tab volume: a speaker shows on a chip (or, with one tab, next to the title) while the tab plays,
  * holds media or is muted; hovering it slides out a volume slider (the title gives way), click mutes,
  * the scroll wheel steps 5%.
+ * Menu bar (shared/mini-window-menubar.ts): a Send to Menu Bar button (in the menu bar it floats the
+ * mini out again) and, in the menu bar's popout, a Pin button (pinned: clicking elsewhere keeps it
+ * open). Right-click on the header opens the mini window's menu.
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
 export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
@@ -42,6 +45,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   #tuck[data-dir=right] svg { transform: rotate(180deg); }
   #tuck[data-dir=up] svg { transform: rotate(90deg); }
   #tuck[data-dir=down] svg { transform: rotate(-90deg); }
+  #menubar svg, #pin svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  body.inmenubar #menubar svg .arrow { transform: rotate(180deg); transform-origin: 8px 10px; }
+  #pin.on { color: var(--accent); background: var(--hover); }
+  #pin.on svg { fill: currentColor; }
   #progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); opacity: 0; transition: width 400ms ease-out, opacity 200ms; }
   body.loading #progress { width: 70%; opacity: 1; }
   body.crashed #title { color: #d33; }
@@ -82,6 +89,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   <span id="vol" class="vol"></span>
   <span id="badge">Private</span>
   <button id="tuck" data-hint="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button id="menubar" data-hint="Send to Menu Bar" aria-label="Send to Menu Bar" hidden><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2 2.5h12"/><path class="arrow" d="M8 13.5v-7M5.2 9.2 8 6.4l2.8 2.8"/></svg></button>
+  <button id="pin" data-hint="Pin (stay open when clicking elsewhere)" aria-label="Pin" aria-pressed="false" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2h4l-.6 4 2.3 2.3H4.3L6.6 6z"/><path d="M8 8.3v5.2"/></svg></button>
   <button id="return" data-hint="Return to Browser" aria-label="Return to Browser">&#8689;</button>
   <button id="returnAll" data-hint="Return All Tabs to Browser" aria-label="Return All Tabs to Browser">&#8648;</button>
   <button id="close" data-hint="Close" aria-label="Close Mini Window">&#215;</button>
@@ -104,6 +113,20 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.dataset.hint = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
     if (state.faviconUrl && icon.getAttribute('src') !== state.faviconUrl) { icon.hidden = false; icon.src = state.faviconUrl }
     else if (!state.faviconUrl) icon.hidden = true
+    // Menu bar: Send to Menu Bar (in it: Float as Mini Window) and, in it, Pin.
+    const menuBar = state.menuBar || { available: false, inMenuBar: false, pinned: false }
+    document.body.classList.toggle('inmenubar', Boolean(menuBar.inMenuBar))
+    const menuButton = document.getElementById('menubar')
+    menuButton.hidden = !menuBar.available && !menuBar.inMenuBar
+    const menuLabel = menuBar.inMenuBar ? 'Float as Mini Window' : 'Send to Menu Bar'
+    menuButton.dataset.hint = menuLabel
+    menuButton.setAttribute('aria-label', menuLabel)
+    const pin = document.getElementById('pin')
+    pin.hidden = !menuBar.inMenuBar
+    pin.classList.toggle('on', Boolean(menuBar.pinned))
+    pin.setAttribute('aria-pressed', menuBar.pinned ? 'true' : 'false')
+    pin.dataset.hint = menuBar.pinned ? 'Pinned (stays open when clicking elsewhere)' : 'Pin (stay open when clicking elsewhere)'
+    if (hinted === pin || hinted === menuButton) showHint(hinted)
     const tabs = Array.isArray(state.tabs) ? state.tabs : []
     headerVolume.update({ tabId: state.tabId, audio: Boolean(state.audio) && tabs.length < 2, muted: Boolean(state.muted), volume: state.volume })
     renderTabs(tabs)
@@ -328,5 +351,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   document.getElementById('return').addEventListener('click', () => window.miniWindow.returnToBrowser())
   document.getElementById('returnAll').addEventListener('click', () => window.miniWindow.returnAll())
   document.getElementById('close').addEventListener('click', () => window.miniWindow.close())
+  document.getElementById('menubar').addEventListener('click', () => window.miniWindow.menuBar())
+  document.getElementById('pin').addEventListener('click', () => window.miniWindow.pin())
+  // Right-click on the header (not a tab chip or the volume): the mini window's menu.
+  for (const surface of [bar, strip]) surface.addEventListener('contextmenu', (event) => { if (event.target.closest('.tab, .vol')) return; event.preventDefault(); window.miniWindow.menu() })
 </script>
 </body></html>`

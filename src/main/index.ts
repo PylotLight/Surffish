@@ -41,7 +41,7 @@ import { registerReadingListIpc } from './reading-list-ipc'
 import { registerAdblockStatsIpc } from './adblock-stats'
 import { registerTabVolume } from './tab-volume'
 import { registerGlanceIpc } from './glance-entry'
-import { registerMiniWindowIpc, setMiniWindowAppShortcuts } from './mini-window-entry'
+import { registerMiniWindowIpc, setMiniWindowAppShortcuts, startMiniWindowMenuBar } from './mini-window-entry'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { initializeLocalAI, registerLocalAIIpc } from './local-ai'
 import { chromeUserAgent } from './adblock-policy'
@@ -188,6 +188,9 @@ app.whenReady().then(async () => {
   traceStartup('extensions ready, page requests released')
   // Feeds: the store and poller load now (not at launch); no feeds means no timer.
   startFeedsAfterFirstPaint()
+  // Mini windows that lived in the menu bar come back there (and the icon shows when set to Always);
+  // with nothing there and the default setting, nothing loads.
+  startMiniWindowMenuBar()
   try {
     await initializeBramblePoc()
   } catch (error) {

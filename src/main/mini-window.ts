@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BaseWindow, WebContentsView, ipcMain, screen, type Display, type IpcMainEvent, type WebContents } from 'electron'
+import { BaseWindow, Menu, WebContentsView, app, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import {
   MINI_WINDOW_CASCADE_STEP,
   MINI_WINDOW_GEOMETRY_FILE,
@@ -35,10 +35,21 @@ import {
   type MiniWindowSettings
 } from '../shared/mini-window'
 import { dockArrow, dockedBounds, type MiniDock } from '../shared/mini-window-dock'
+import {
+  MINI_MENU_BAR_DEFAULT_SIZE,
+  MINI_WINDOW_MENU_BAR_FILE,
+  createMenuBarPopout,
+  menuBarPopoutBounds,
+  parseMenuBarSaved,
+  pickMenuBarMini,
+  pickRestoredMenuBarTabs,
+  type MenuBarPopout
+} from '../shared/mini-window-menubar'
 import { watchShellSurface } from './crash-guard'
 import { createDockController, savedDockFor, setDockGrouping, type DockController } from './mini-window-dock'
+import { menuBarTrayBounds, syncMenuBarTray, type MenuBarTrayEntry, type MenuBarTrayHost } from './mini-window-menubar'
 import { motion, placeWindow } from './mini-window-motion'
-import { getMiniWindowHost, getMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
+import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
@@ -67,6 +78,14 @@ import { notifyBrowserWindowsChanged } from './window-scope'
  * drags the window (main follows the pointer). 'push' keeps it in the window and moves the page down
  * while it shows; 'overlay' lays it over the page. The header view moves between the window and the
  * panel without reloading.
+ *
+ * Menu bar (shared/mini-window-menubar.ts; the Tray is mini-window-menubar.ts): a mini window (with
+ * 'tabs', a collection; every menu bar mini merges into one) can live in the menu bar instead of
+ * floating or being tucked: it hides, and the icon's click drops it in as a panel anchored under the
+ * icon (shared frame loop), focused so Esc and a click elsewhere hide it again (unless pinned). It is
+ * never docked or dragged there; 'float' headers push instead (no room above the menu bar). Hidden is
+ * not closed. Which pages live there is saved (not private ones) and picked back out of the restored
+ * tabs after a restart.
  */
 
 interface Mini {
@@ -109,6 +128,8 @@ interface Mini {
   revealBlockedUntil: number
   /** Dragging the window by its floating header: main follows the pointer from where it was pressed. */
   headerDrag: { startCursor: { x: number; y: number }; startBounds: MiniRect; side: 'above' | 'below' | null; moved: boolean; startedAt: number } | null
+  /** Lives in the menu bar: shown as a popout under the icon (null: floating or docked). */
+  menuBar: { popout: MenuBarPopout; pinned: boolean; joinedAt: number } | null
 }
 
 const IS_MAC = process.platform === 'darwin'
@@ -136,6 +157,12 @@ function grouping(): MiniWindowGrouping {
 function headerPlacement(): MiniWindowHeaderPlacement {
   return getMiniWindowSettings().headerPlacement
 }
+
+/** Where this window's header goes: in the menu bar's popout there is no room above it, so 'float' pushes. */
+function placementOf(m: Mini): MiniWindowHeaderPlacement {
+  const placement = headerPlacement()
+  return m.menuBar && placement === 'float' ? 'push' : placement
+}
 let appliedPlacement: MiniWindowHeaderPlacement = headerPlacement()
 setDockGrouping(grouping)
 
@@ -162,9 +189,9 @@ function miniWithTab(tabId: string): Mini | null {
   return liveMinis().find((m) => tabsOf(m).some((tab) => tab.tabId === tabId)) ?? null
 }
 
-/** The palette's single-window commands act on the last one used. */
+/** The palette's single-window commands act on the last one used (floating or docked; never one in the menu bar). */
 function currentMini(): Mini | null {
-  const open = liveMinis().filter((m) => host().header(m.window))
+  const open = liveMinis().filter((m) => !m.menuBar && host().header(m.window))
   return lastActive && open.includes(lastActive) ? lastActive : open.at(-1) ?? null
 }
 
@@ -195,8 +222,9 @@ function readGeometry(): Array<Record<string, MiniRect>> {
 }
 
 function saveGeometry(m: Mini): void {
-  // Tucked (off screen) or mid-slide: not a place to come back to.
+  // Tucked (off screen) or mid-slide: not a place to come back to. The menu bar's popout keeps its size only.
   if (m.closed || m.window.isDestroyed() || m.window.isMinimized() || m.dock.isTucked()) return
+  if (m.menuBar) return
   const bounds = m.window.getBounds()
   const key = miniDisplayKey(screen.getDisplayMatching(bounds).workArea)
   const all = readGeometry()
@@ -254,7 +282,7 @@ function floats(plan: MiniHeaderLayout): plan is Extract<MiniHeaderLayout, { pan
 function updatePlan(m: Mini, at?: MiniRect): void {
   const bounds = at ?? m.window.getBounds()
   const workArea = screen.getDisplayMatching(bounds).workArea
-  m.plan = planMiniHeader(headerPlacement(), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
+  m.plan = planMiniHeader(placementOf(m), bounds, headerHeight(m), workArea, m.dock.state()?.dock.edge ?? null, m.headerDrag?.side ?? null)
 }
 
 /** The floating header's panel: frameless, never focused, at the window's level and on every Space like it. */
@@ -518,6 +546,10 @@ function rewirePage(m: Mini): void {
       scheduleHide(m)
     }
   })
+  // In the menu bar's popout, Esc hides it (the page still gets the key).
+  onPage(m, contents, 'before-input-event', (_event: Electron.Event, input: Electron.Input) => {
+    if (m.menuBar && isEscape(input)) hidePopout(m)
+  })
   // There is no crash screen here (the browser window's content surface draws it): reload the page
   // once, under tab-health's auto-reload budget, and show "Page crashed" in the header otherwise.
   onPage(m, contents, 'render-process-gone', (_event: Electron.Event, details: Electron.RenderProcessGoneDetails) => {
@@ -530,7 +562,7 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { tabId: string; crashed: boolean; floating: boolean; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean } & MiniWindowTabAudio> } | null {
+function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { tabId: string; crashed: boolean; floating: boolean; menuBar: { available: boolean; inMenuBar: boolean; pinned: boolean }; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean } & MiniWindowTabAudio> } | null {
   const info = host().header(m.window)
   if (!info) return null
   const tuckEdge = m.dock.tuckEdge()
@@ -546,6 +578,7 @@ function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { ta
     private: info.private,
     crashed: isTabCrashed(m.page),
     floating: m.mount === 'panel',
+    menuBar: { available: getMiniWindowSettings().menuBarIcon !== 'never', inMenuBar: m.menuBar !== null, pinned: m.menuBar?.pinned === true },
     // The header's own speaker (single tab; with a strip each chip has one).
     tabId: info.tabId,
     audio: info.audio,
@@ -577,6 +610,11 @@ function refreshHeaderOf(m: Mini): void {
   // 'stack': a group's handle shows every member's favicon.
   if (grouping() === 'stack') for (const other of liveMinis()) other.dock.refreshHandle()
   else m.dock.refreshHandle()
+  // In the menu bar: the icon's title/menu (count, playing) and the saved pages follow.
+  if (m.menuBar) {
+    syncTray()
+    scheduleMenuBarSave()
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -644,6 +682,20 @@ function registerIpc(): void {
     if (!m) return
     if (active === true) startHeaderDrag(m)
     else endHeaderDrag(m)
+  })
+  ipcMain.on('mini-window:menubar', (event) => {
+    const m = fromHeader(event)
+    if (!m) return
+    if (m.menuBar) leaveMenuBar(m, 'float')
+    else sendToMenuBar(m)
+  })
+  ipcMain.on('mini-window:pin', (event) => {
+    const m = fromHeader(event)
+    if (m) togglePin(m)
+  })
+  ipcMain.on('mini-window:menu', (event) => {
+    const m = fromHeader(event)
+    if (m) showMiniMenu(m, m.header.webContents)
   })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
@@ -736,7 +788,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   } else {
     window.setAlwaysOnTop(true)
   }
-  // Callbacks run later (m exists by then).
+  // Callbacks run later (m exists by then); `self` for any that could run while the controller is made.
+  const self: { mini: Mini | null } = { mini: null }
   const dock = createDockController({
     window,
     slot,
@@ -750,7 +803,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     },
     changed: () => refreshHeaderOf(m),
     moved: (rect) => followPanel(m, rect),
-    isTuckEnabled: () => getMiniWindowSettings().tuckToEdge,
+    // Never docked while in the menu bar.
+    isTuckEnabled: () => getMiniWindowSettings().tuckToEdge && !self.mini?.menuBar,
     isPeekEnabled: () => getMiniWindowSettings().peekOnHover,
     peekDelayMs: () => getMiniWindowSettings().peekDelayMs,
     peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
@@ -758,7 +812,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       const page = window.isDestroyed() ? null : host().pageContents(window)
       return [page, m.header.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
     },
-    busy: () => liveMinis().some((other) => other.headerDrag !== null)
+    busy: () => liveMinis().some((other) => other.headerDrag !== null),
+    menu: () => showMiniMenu(m, null)
   }, savedDock ? { dock: savedDock, display } : null)
   const m: Mini = {
     window,
@@ -783,8 +838,10 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     pageTop: 0,
     size: { width: bounds.width, height: bounds.height },
     revealBlockedUntil: 0,
-    headerDrag: null
+    headerDrag: null,
+    menuBar: null
   }
+  self.mini = m
   minis.push(m)
   lastActive = m
   window.on('focus', () => {
@@ -801,6 +858,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
   header.view.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
+    else if (m.menuBar && isEscape(input)) hidePopout(m)
   })
   void header.ready.then(() => {
     if (m.closed || window.isDestroyed()) return
@@ -808,10 +866,25 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     layout(m)
     refreshHeaderOf(m)
   })
-  // Hidden (Show/Hide, tucked away): the header goes with it.
-  window.on('hide', () => setRevealed(m, false))
+  // Hidden (Show/Hide, tucked away): the header goes with it (and a menu bar popout counts as hidden).
+  window.on('hide', () => {
+    setRevealed(m, false)
+    if (m.menuBar?.popout.shown()) {
+      m.menuBar.popout.close()
+      syncTray()
+    }
+  })
+  // In the menu bar: clicking anywhere else hides the popout, unless it is pinned.
+  window.on('blur', () => {
+    if (m.menuBar?.popout.blur(m.menuBar.pinned)) syncTray()
+  })
   window.on('resize', () => {
     layout(m)
+    // The popout remembers its size (a resize by the user, not one of ours), never a place.
+    if (m.menuBar) {
+      if (m.menuBar.popout.shown() && !m.menuBar.popout.animating() && Date.now() >= m.ownMoveUntil) rememberPopoutSize(m)
+      return
+    }
     if (m.dock.ignoringMoves()) return
     m.dock.follow()
     scheduleGeometrySave(m)
@@ -819,14 +892,14 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   // macOS/Windows say when a drag ends ('moved'); Linux only streams 'move', so act after it settles.
   // Moves the dock makes itself (sliding, placing) are not drops.
   const dropped = (): void => {
-    if (m.closed || window.isDestroyed() || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
+    if (m.closed || window.isDestroyed() || m.menuBar || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
     droppedMini(m, null)
   }
   if (process.platform === 'linux') {
     let settle: ReturnType<typeof setTimeout> | null = null
     window.on('move', () => {
       followPanel(m)
-      if (m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
+      if (m.menuBar || m.dock.ignoringMoves() || Date.now() < m.ownMoveUntil) return
       m.dock.follow()
       if (settle) clearTimeout(settle)
       settle = setTimeout(() => { settle = null; dropped() }, 350)
@@ -835,7 +908,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   } else {
     window.on('move', () => {
       followPanel(m)
-      if (m.dock.ignoringMoves()) return
+      if (m.menuBar || m.dock.ignoringMoves()) return
       m.dock.follow()
       scheduleGeometrySave(m)
     })
@@ -852,6 +925,9 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     }
     unwirePage(m)
     m.dock.dispose()
+    const wasInMenuBar = m.menuBar !== null
+    m.menuBar?.popout.dispose()
+    m.menuBar = null
     // A closed BaseWindow doesn't destroy its views' webContents.
     if (live(header.view.webContents)) header.view.webContents.close()
     // The floating header's panel goes with its window.
@@ -859,6 +935,11 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     const index = minis.indexOf(m)
     if (index >= 0) minis.splice(index, 1)
     if (lastActive === m) lastActive = null
+    if (lastMenuBar === m) lastMenuBar = null
+    if (wasInMenuBar) {
+      saveMenuBar()
+      syncTray()
+    }
     notifyBrowserWindowsChanged()
   })
   notifyBrowserWindowsChanged()
@@ -868,6 +949,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
 /** Bring the window up. `focus`: take the keyboard (shortcut/toggle); otherwise stay out of the way (pop out). */
 function present(m: Mini, focus: boolean): void {
   if (m.closed || m.window.isDestroyed()) return
+  // In the menu bar: drop in under the icon (focused: Esc and a click elsewhere hide it).
+  if (m.menuBar) return showPopout(m, menuBarTrayBounds())
   // Tucked behind its handle: slide out instead.
   if (m.dock.isTucked()) return m.dock.slideOut(focus)
   if (focus) {
@@ -902,6 +985,13 @@ async function finishOpen(m: Mini, focus: boolean): Promise<boolean> {
  */
 export async function popOutTab(tabId: string): Promise<boolean> {
   const existing = miniWithTab(tabId)
+  if (existing?.menuBar) {
+    // "Pop out" a tab living in the menu bar: it floats out of it.
+    host().activateTab(existing.window, tabId)
+    if (tabsOf(existing).length > 1) return Boolean(floatTabOut(existing, tabId))
+    leaveMenuBar(existing, 'float')
+    return true
+  }
   if (existing) {
     host().activateTab(existing.window, tabId)
     present(existing, false)
@@ -1054,9 +1144,22 @@ function regroup(next: MiniWindowGrouping): void {
       if (source) mergeInto(source, target, false)
     }
   }
+  // 'tabs': every menu bar mini is one collection (a private one stays apart).
+  if (next === 'tabs') {
+    const [into, ...rest] = menuBarMinis()
+    if (into) for (const from of rest) mergeInto(from, into, false)
+  }
   for (const id of plan.split) {
     const m = open[id]
     if (!m) continue
+    if (m.menuBar) {
+      // Split out of a menu bar collection: each tab gets its own menu bar mini (hidden until picked).
+      for (const tab of tabsOf(m).filter((candidate) => !candidate.active)) {
+        const n = splitOff(m, tab.tabId, m.window.getBounds(), null)
+        if (n) enterMenuBar(n, false)
+      }
+      continue
+    }
     const state = m.dock.state()
     let previous = m.window.getBounds()
     for (const [index, tab] of tabsOf(m).filter((candidate) => !candidate.active).entries()) {
@@ -1091,7 +1194,8 @@ function showing(m: Mini): boolean {
 /** Hide one: docked ones tuck behind their handle (with their group), the rest hide. */
 function hideMini(m: Mini): void {
   setRevealed(m, false)
-  if (m.dock.isDocked()) m.dock.tuckAway()
+  if (m.menuBar) hidePopout(m)
+  else if (m.dock.isDocked()) m.dock.tuckAway()
   else m.window.hide()
 }
 
@@ -1106,8 +1210,15 @@ export function toggleVisible(): boolean {
     for (const m of open) hideMini(m)
     return true
   }
+  // Menu bar minis stay up there (one popout at a time); with only those, the last shown drops in.
+  const floating = open.filter((m) => !m.menuBar)
+  if (floating.length === 0) {
+    const pick = pickMenuBarMini(menuBarMinis(), lastMenuBar)
+    if (pick) showPopout(pick, menuBarTrayBounds())
+    return Boolean(pick)
+  }
   const focused = currentMini()
-  for (const m of open) if (m !== focused) present(m, false)
+  for (const m of floating) if (m !== focused) present(m, false)
   if (focused) present(focused, true)
   return true
 }
@@ -1173,11 +1284,11 @@ export function focusMini(tabId: string): boolean {
 }
 
 /** Open mini window tabs (a collection's in strip order), oldest window first, for the Window menu and the palette. */
-export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean }> {
+export function list(): Array<{ tabId: string; title: string; tucked: boolean; focused: boolean; menuBar: boolean }> {
   return liveMinis().flatMap((m) => {
     const focused = m.window.isFocused()
-    const tucked = m.dock.isTucked()
-    return tabsOf(m).map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Mini Window', tucked, focused: focused && tab.active }))
+    const tucked = m.dock.isTucked() || (m.menuBar !== null && !m.menuBar.popout.shown())
+    return tabsOf(m).map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Mini Window', tucked, focused: focused && tab.active, menuBar: m.menuBar !== null }))
   })
 }
 
@@ -1191,6 +1302,8 @@ export function refreshHeader(window: BaseWindow): void {
 }
 
 export function applySettings(settings: MiniWindowSettings): void {
+  // Menu bar icon 'never': what lived there floats out again.
+  if (settings.menuBarIcon === 'never') for (const m of menuBarMinis()) leaveMenuBar(m, 'float')
   if (settings.grouping !== appliedGrouping) {
     appliedGrouping = settings.grouping
     regroup(settings.grouping)
@@ -1206,4 +1319,352 @@ export function applySettings(settings: MiniWindowSettings): void {
     }
   }
   for (const m of liveMinis()) applyWindowSettings(m, settings)
+  syncTray()
+  for (const m of liveMinis()) refreshHeaderOf(m)
+}
+
+// ---------------------------------------------------------------------------
+// Menu bar: minis that live behind the Tray icon and drop in as a popout under it.
+
+/** The one a click on the icon shows (the last shown). */
+let lastMenuBar: Mini | null = null
+let menuBarJoins = 0
+let menuBarSaveTimer: ReturnType<typeof setTimeout> | null = null
+let menuBarSavedKey: string | null = null
+/** Quitting: windows close one by one, which must not empty the saved list. */
+let menuBarFrozen = false
+app.once('before-quit', () => {
+  if (menuBarSaveTimer) saveMenuBar()
+  menuBarFrozen = true
+})
+const MENU_BAR_SAVE_DELAY_MS = 500
+
+function isEscape(input: Electron.Input): boolean {
+  return input.type === 'keyDown' && input.key === 'Escape' && !input.control && !input.meta && !input.alt && !input.shift
+}
+
+/** Minis in the menu bar (with a tab), in the order they went there. */
+function menuBarMinis(): Mini[] {
+  return liveMinis().filter((m) => m.menuBar && host().header(m.window)).sort((a, b) => (a.menuBar?.joinedAt ?? 0) - (b.menuBar?.joinedAt ?? 0))
+}
+
+function reducedMotion(): boolean {
+  try {
+    return systemPreferences.getAnimationSettings().prefersReducedMotion
+  } catch {
+    return false
+  }
+}
+
+/** The popout's size: the last one the user resized it to (read from the file once), else the default. */
+let popoutSize: { width: number; height: number } | null | undefined
+function menuBarSize(): { width: number; height: number } {
+  if (popoutSize === undefined) popoutSize = parseMenuBarSaved(readUserJson(MINI_WINDOW_MENU_BAR_FILE)).size
+  return popoutSize ?? MINI_MENU_BAR_DEFAULT_SIZE
+}
+
+function rememberPopoutSize(m: Mini): void {
+  const [width = 0, height = 0] = m.window.getSize()
+  if (width <= 0 || height <= 0) return
+  popoutSize = { width, height }
+  scheduleMenuBarSave()
+}
+
+/** Write which pages live in the menu bar (never private ones) and the popout's size. */
+function saveMenuBar(): void {
+  if (menuBarSaveTimer) clearTimeout(menuBarSaveTimer)
+  menuBarSaveTimer = null
+  if (menuBarFrozen) return
+  const urls = menuBarMinis().flatMap((m) => (host().header(m.window)?.private ? [] : tabsOf(m).map((tab) => tab.url)))
+  menuBarSize()
+  const next = { size: popoutSize ?? null, urls }
+  const key = JSON.stringify(next)
+  if (key === menuBarSavedKey) return
+  // Nothing there and never was: no file at all.
+  if (menuBarSavedKey === null && next.urls.length === 0 && !next.size && readUserJson(MINI_WINDOW_MENU_BAR_FILE) === null) return
+  menuBarSavedKey = key
+  writeUserJson(MINI_WINDOW_MENU_BAR_FILE, next)
+}
+
+/** A page navigated in a menu bar mini: save the new address once it settles. */
+function scheduleMenuBarSave(): void {
+  if (menuBarFrozen || menuBarSaveTimer) return
+  menuBarSaveTimer = setTimeout(() => {
+    menuBarSaveTimer = null
+    saveMenuBar()
+  }, MENU_BAR_SAVE_DELAY_MS)
+}
+
+const trayHost: MenuBarTrayHost = {
+  mode: () => getMiniWindowSettings().menuBarIcon,
+  entries: (): MenuBarTrayEntry[] => {
+    const all = menuBarMinis()
+    const current = pickMenuBarMini(all, lastMenuBar)
+    return all.map((m) => {
+      const info = host().header(m.window)
+      const count = tabsOf(m).length
+      const title = (info?.title || miniHeaderUrl(info?.url ?? '') || 'Mini Window') + (count > 1 ? ` (+${count - 1})` : '')
+      return { key: m.slot, title, shown: m.menuBar?.popout.shown() === true, pinned: m.menuBar?.pinned === true, current: m === current }
+    })
+  },
+  playing: () => menuBarMinis().some((m) => tabsOf(m).some((tab) => tab.playing)),
+  click: (anchor) => trayClick(anchor),
+  show: (key, anchor) => {
+    const m = menuBarMinis().find((candidate) => candidate.slot === key)
+    if (m) showPopout(m, anchor)
+  },
+  hide: (key) => {
+    const m = menuBarMinis().find((candidate) => candidate.slot === key)
+    if (m) hidePopout(m)
+  },
+  togglePin: (key) => {
+    const m = menuBarMinis().find((candidate) => candidate.slot === key)
+    if (m) togglePin(m)
+  },
+  returnToBrowser: (key) => {
+    const m = menuBarMinis().find((candidate) => candidate.slot === key)
+    if (m) returnAllOf(m)
+  },
+  moveToEdge: (key) => {
+    const m = menuBarMinis().find((candidate) => candidate.slot === key)
+    if (m) leaveMenuBar(m, 'edge')
+  },
+  canMoveToEdge: () => getMiniWindowSettings().tuckToEdge,
+  sendCurrentTab: () => {
+    const tabId = host().activeTabId()
+    if (tabId) void popOutTabToMenuBar(tabId)
+  },
+  canSendCurrentTab: () => {
+    const tabId = host().activeTabId()
+    return Boolean(tabId && host().canPopOut(tabId))
+  },
+  openSettings: () => openMiniWindowSettings(),
+  hideIcon: () => { updateMiniWindowSettings({ menuBarIcon: 'never' }) }
+}
+
+function syncTray(): void {
+  syncMenuBarTray(trayHost)
+}
+
+/** The display the icon is on (the pointer's, when the icon has no bounds). */
+function popoutPlacement(anchor: MiniRect | null, m: Mini): { bounds: MiniRect; side: 'below' | 'above' } {
+  const cursor = screen.getCursorScreenPoint()
+  const point = anchor ? { x: Math.round(anchor.x + anchor.width / 2), y: Math.round(anchor.y + anchor.height / 2) } : cursor
+  const display = screen.getDisplayNearestPoint(point)
+  const [width = 0, height = 0] = m.window.isVisible() ? m.window.getSize() : []
+  const size = width > 0 && height > 0 ? { width, height } : menuBarSize()
+  return menuBarPopoutBounds(anchor, cursor, size, { bounds: display.bounds, workArea: display.workArea })
+}
+
+/** Drop `m` in under the icon at `anchor` (one popout at a time; the others hide). */
+function showPopout(m: Mini, anchor: MiniRect | null): void {
+  if (!m.menuBar || m.closed || m.window.isDestroyed()) return
+  for (const other of menuBarMinis()) if (other !== m) other.menuBar?.popout.close()
+  lastMenuBar = m
+  lastActive = m
+  const { bounds, side } = popoutPlacement(anchor, m)
+  m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+  m.menuBar.popout.open(bounds, side, true)
+  syncTray()
+}
+
+function hidePopout(m: Mini): void {
+  if (!m.menuBar?.popout.shown()) return
+  setRevealed(m, false)
+  m.menuBar.popout.close()
+  syncTray()
+}
+
+/** A left click on the icon: hide what is shown, else drop in the last shown (not the click that just blurred it shut). */
+function trayClick(anchor: MiniRect | null): void {
+  const all = menuBarMinis()
+  const shown = all.find((m) => m.menuBar?.popout.shown())
+  if (shown) return hidePopout(shown)
+  const pick = pickMenuBarMini(all, lastMenuBar)
+  if (!pick?.menuBar) return
+  if (pick.menuBar.popout.click() === 'show') showPopout(pick, anchor)
+}
+
+function togglePin(m: Mini): void {
+  if (!m.menuBar) return
+  m.menuBar.pinned = !m.menuBar.pinned
+  refreshHeaderOf(m)
+  syncTray()
+}
+
+/** Make `m` a menu bar mini: undocked (staying hidden), not movable, its header pushing instead of floating. `show`: drop it in under the icon. */
+function enterMenuBar(m: Mini, show: boolean): void {
+  if (m.menuBar || m.closed || m.window.isDestroyed()) return
+  setRevealed(m, false)
+  stopHeaderDrag(m)
+  m.dock.release()
+  const window = m.window
+  m.menuBar = {
+    pinned: false,
+    joinedAt: ++menuBarJoins,
+    popout: createMenuBarPopout({
+      now: () => performance.now(),
+      loop: motion,
+      place: (rect) => {
+        m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+        placeWindow(window, rect)
+      },
+      setOpacity: process.platform === 'linux' ? null : (opacity) => { if (!window.isDestroyed()) window.setOpacity(opacity) },
+      opacity: () => getMiniWindowSettings().opacity,
+      show: (focus) => {
+        if (window.isDestroyed()) return
+        if (focus) {
+          window.show()
+          window.focus()
+          host().pageContents(window)?.focus()
+        } else {
+          window.showInactive()
+        }
+        if (IS_MAC) window.setAlwaysOnTop(true, 'floating')
+        else window.setAlwaysOnTop(true)
+      },
+      hide: () => { if (!window.isDestroyed() && window.isVisible()) window.hide() },
+      reducedMotion
+    })
+  }
+  if (window.isVisible()) window.hide()
+  // Dragged around, the popout would leave the icon (resizing it is fine: the size is kept).
+  window.setMovable(false)
+  if (headerPlacement() === 'float') closePanel(m)
+  layout(m)
+  refreshHeaderOf(m)
+  saveMenuBar()
+  syncTray()
+  if (show) void m.headerReady.then(() => showPopout(m, menuBarTrayBounds()))
+}
+
+/**
+ * Put a mini window in the menu bar. 'tabs': into the menu bar collection when there is one (a
+ * private page and a normal collection stay apart). Unavailable with the icon set to 'never'.
+ */
+function sendToMenuBar(m: Mini): boolean {
+  if (m.closed || m.window.isDestroyed() || m.menuBar) return false
+  if (getMiniWindowSettings().menuBarIcon === 'never') {
+    host().notify('The menu bar icon is off (Settings → Mini window).')
+    return false
+  }
+  if (grouping() === 'tabs') {
+    const into = menuBarMinis().find((other) => other !== m)
+    if (into && mergeInto(m, into, false)) {
+      // Anything that couldn't come (private) gets a menu bar mini of its own.
+      if (!m.closed && !m.window.isDestroyed() && tabsOf(m).length > 0) enterMenuBar(m, false)
+      showPopout(into, menuBarTrayBounds())
+      return true
+    }
+  }
+  enterMenuBar(m, true)
+  return true
+}
+
+/** One tab of a menu bar collection floats out into a window of its own. */
+function floatTabOut(m: Mini, tabId: string): Mini | null {
+  const n = splitOff(m, tabId, openingBounds(freeMiniSlot(liveMinis().map((other) => other.slot)) ?? 0), null)
+  if (n) void finishOpen(n, true)
+  return n
+}
+
+/** Out of the menu bar: back on screen as a floating mini ('float', where its slot was last), or tucked to the nearest edge ('edge'). */
+function leaveMenuBar(m: Mini, how: 'float' | 'edge'): void {
+  if (!m.menuBar || m.closed || m.window.isDestroyed()) return
+  const window = m.window
+  m.menuBar.popout.dispose()
+  m.menuBar = null
+  if (lastMenuBar === m) lastMenuBar = null
+  setRevealed(m, false)
+  window.setMovable(true)
+  if (process.platform !== 'linux') window.setOpacity(getMiniWindowSettings().opacity)
+  const [width = 0, height = 0] = window.getSize()
+  const others = liveMinis().filter((other) => other !== m).map((other) => other.window.getBounds())
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  const saved = readGeometry()[m.slot]?.[miniDisplayKey(display.workArea)]
+  const bounds = cascadeMiniBounds(initialMiniBounds(display.workArea, saved ?? { ...window.getBounds(), width, height }), others, display.workArea)
+  m.ownMoveUntil = Date.now() + OWN_MOVE_GRACE_MS
+  window.setBounds(bounds)
+  layout(m)
+  refreshHeaderOf(m)
+  saveMenuBar()
+  syncTray()
+  if (how === 'edge' && getMiniWindowSettings().tuckToEdge) {
+    // Docks to the nearest outer edge and slides in behind its handle (shown first so it slides from there).
+    window.showInactive()
+    m.dock.toggle(false)
+  } else {
+    present(m, true)
+  }
+}
+
+/** A tab (from a browser window) straight into the menu bar ('tabs': into the menu bar collection). */
+export async function popOutTabToMenuBar(tabId: string, options: { show?: boolean } = {}): Promise<boolean> {
+  const show = options.show ?? true
+  if (getMiniWindowSettings().menuBarIcon === 'never') {
+    host().notify('The menu bar icon is off (Settings → Mini window).')
+    return false
+  }
+  const existing = miniWithTab(tabId)
+  if (existing) {
+    host().activateTab(existing.window, tabId)
+    if (existing.menuBar) {
+      if (show) showPopout(existing, menuBarTrayBounds())
+      return true
+    }
+    return sendToMenuBar(existing)
+  }
+  if (atCap()) return false
+  if (grouping() === 'tabs') {
+    const into = menuBarMinis().find((m) => host().adoptTab(tabId, m.window))
+    if (into) {
+      layout(into)
+      refreshHeaderOf(into)
+      if (show) showPopout(into, menuBarTrayBounds())
+      return true
+    }
+  }
+  const m = createMini()
+  if (!m) return false
+  if (!host().adoptTab(tabId, m.window)) {
+    if (!host().header(m.window) && !m.window.isDestroyed()) m.window.close()
+    return false
+  }
+  await m.headerReady
+  if (m.closed) return false
+  enterMenuBar(m, show)
+  return true
+}
+
+/** Send the last used floating mini window to the menu bar (palette); false when there is none. */
+export function sendCurrentToMenuBar(): boolean {
+  const m = currentMini()
+  return m ? sendToMenuBar(m) : false
+}
+
+/** After a restart: the pages that lived in the menu bar come back there (picked out of the restored tabs), and the icon shows when wanted. */
+export async function startMenuBar(): Promise<void> {
+  const { menuBarIcon } = getMiniWindowSettings()
+  if (menuBarIcon !== 'never') {
+    const { urls } = parseMenuBarSaved(readUserJson(MINI_WINDOW_MENU_BAR_FILE))
+    for (const tabId of pickRestoredMenuBarTabs(urls, host().browserTabs())) await popOutTabToMenuBar(tabId, { show: false })
+  }
+  syncTray()
+}
+
+/** The mini window's menu (right-click on its header or handle). */
+function showMiniMenu(m: Mini, contents: WebContents | null): void {
+  if (m.closed || m.window.isDestroyed()) return
+  const menuBarOn = getMiniWindowSettings().menuBarIcon !== 'never'
+  const menu = Menu.buildFromTemplate([
+    m.menuBar
+      ? { label: 'Float as Mini Window', click: () => leaveMenuBar(m, 'float') }
+      : { label: 'Send to Menu Bar', enabled: menuBarOn, click: () => { sendToMenuBar(m) } },
+    ...(m.menuBar ? [{ label: 'Pin', type: 'checkbox' as const, checked: m.menuBar.pinned, click: () => togglePin(m) }, { label: 'Move to Edge', enabled: getMiniWindowSettings().tuckToEdge, click: () => leaveMenuBar(m, 'edge') }] : []),
+    { type: 'separator' },
+    { label: tabsOf(m).length > 1 ? 'Return All to Browser' : 'Return to Browser', click: () => { returnAllOf(m) } },
+    { label: tabsOf(m).length > 1 ? 'Close Tab' : 'Close', click: () => host().closeTab(m.window) }
+  ])
+  const window = contents ? (m.mount === 'panel' && m.panel ? m.panel : m.window) : undefined
+  menu.popup(window && !window.isDestroyed() ? { window } : {})
 }
