@@ -1760,8 +1760,10 @@ async function sidebarRowAt(w: BrowserWindowState, point: { x: number; y: number
   if (w.window.isDestroyed()) return null
   const content = w.window.getContentBounds()
   for (const contents of getWindowRenderers(w.window)) {
-    const offset = getMainRendererOrigin(contents)
-    if (!offset || contents.isDestroyed()) continue
+    // Where its view sits now (an overlay sidebar is its own view; its shell metrics can lag a slide).
+    const view = w.window.contentView.children.find((child) => child instanceof WebContentsView && child.webContents === contents)
+    if (!view || !view.getVisible() || contents.isDestroyed()) continue
+    const offset = view.getBounds()
     const x = point.x - content.x - offset.x
     const y = point.y - content.y - offset.y
     try {

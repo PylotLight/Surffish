@@ -59,6 +59,7 @@
     "test:electron-mini-window-peek": "electron scripts/electron-mini-window-peek-smoke.cjs",
     "test:electron-mini-window-motion": "electron scripts/electron-mini-window-motion-smoke.cjs",
     "test:electron-mini-window-throw": "electron scripts/electron-mini-window-throw-smoke.cjs",
+    "test:electron-mini-window-tab-drag": "electron scripts/electron-mini-window-tab-drag-smoke.cjs",
   "test:electron-mini-window-menubar": "electron scripts/electron-mini-window-menubar-smoke.cjs",
     "test:electron-tab-volume": "electron scripts/electron-tab-volume-smoke.cjs",
     "test:electron-settings": "electron scripts/electron-settings-smoke.cjs",
