@@ -86,13 +86,15 @@ export function createFrameLoop(deps: FrameLoopDeps): FrameLoop {
 
   const idle = (): boolean => jobs.size === 0 && onces.size === 0 && pending.size === 0
 
-  function schedule(): void {
+  /** `restart`: the loop was stopped and new work just came in (not the end of a tick carrying on). */
+  function schedule(restart = true): void {
     if (timer !== null || inTick || idle()) return
     const now = deps.now()
     const interval = deps.interval()
-    // Idle (or main was busy for more than a frame): the next frame is one interval from now, so the
-    // first step of a slide is a real step, not a repeat of where it starts.
-    if (due < now - interval) due = now + interval
+    // Starting from idle (even if the last tick was under a frame ago, when the old due time can already
+    // have passed), or main was busy for more than a frame: the next frame is one interval from now, so
+    // the first step of a slide is a real step, not a repeat of where it starts in the same ms.
+    if (restart || due < now - interval) due = now + interval
     timer = deps.setTimeout(tick, Math.max(0, due - now))
   }
 
@@ -127,7 +129,7 @@ export function createFrameLoop(deps: FrameLoopDeps): FrameLoop {
     }
     flush()
     inTick = false
-    schedule()
+    schedule(false)
   }
 
   return {
