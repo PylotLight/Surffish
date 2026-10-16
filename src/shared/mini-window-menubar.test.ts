@@ -7,6 +7,7 @@ import {
   MINI_MENU_BAR_DROP_PX,
   MINI_MENU_BAR_GAP,
   MINI_MENU_BAR_MARGIN,
+  MINI_MENU_BAR_OPEN_BLUR_GRACE_MS,
   createMenuBarPopout,
   menuBarDropFrame,
   menuBarPageSize,
@@ -254,10 +255,55 @@ describe('popout (fake timers)', () => {
     // The next click opens it again.
     expect(popout.click()).toBe('show')
     popout.open(target, 'below', true)
-    popout.blur(false)
+    clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS)
+    expect(popout.blur(false)).toBe(true)
     // A click on the icon well after a blur shows it.
     clock.advance(MINI_MENU_BAR_BLUR_CLICK_MS + 10)
     expect(popout.click()).toBe('show')
+  })
+
+  test('a blur right as it opens is held: focus back keeps it open, else it hides when the grace is up', () => {
+    const { clock, popout, log } = rig()
+    // macOS took the key window away for a moment while it came up (a Space change, Surffish activating).
+    popout.open(target, 'below', true)
+    clock.advance(20)
+    expect(popout.blur(false)).toBe(false)
+    expect(popout.shown()).toBe(true)
+    expect(popout.blurPendingMs()).toBe(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS - 20)
+    popout.focused()
+    expect(popout.blurPendingMs()).toBe(0)
+    clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS)
+    expect(popout.settle(false)).toBe(false)
+    expect(popout.shown()).toBe(true)
+    popout.close()
+    // Never got the focus back: hides when the grace is up, and that counts as a blur for the icon click.
+    log.length = 0
+    clock.advance(1000)
+    popout.open(target, 'below', true)
+    clock.advance(10)
+    expect(popout.blur(false)).toBe(false)
+    clock.advance(popout.blurPendingMs())
+    expect(popout.settle(false)).toBe(true)
+    expect(popout.shown()).toBe(false)
+    expect(log.at(-1)).toBe('hide')
+    expect(popout.click()).toBe('none')
+    expect(popout.click()).toBe('show')
+    // Pinned meanwhile, or already closed: settling does nothing.
+    popout.open(target, 'below', true)
+    expect(popout.blur(false)).toBe(false)
+    expect(popout.settle(true)).toBe(false)
+    expect(popout.shown()).toBe(true)
+    expect(popout.blurPendingMs()).toBe(0)
+    expect(popout.blur(false)).toBe(false)
+    popout.close()
+    expect(popout.blurPendingMs()).toBe(0)
+    expect(popout.settle(false)).toBe(false)
+    // Re-anchored without focus while up (open again, unfocused) does not restart the grace.
+    clock.advance(1000)
+    popout.open(target, 'below', true)
+    clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS + 5)
+    popout.open({ ...target, x: 300 }, 'below', false)
+    expect(popout.blur(false)).toBe(true)
   })
 
   test('a blur while hidden does nothing', () => {

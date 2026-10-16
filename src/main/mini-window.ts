@@ -60,6 +60,7 @@ import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChi
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
+import { makeFloatingPanel, showFloatingPanel } from './mac-panel'
 
 /**
  * Mini windows: small frameless windows that float above other apps, each holding one tab's live
@@ -122,6 +123,8 @@ interface Mini {
   /** Pointer is on the header view itself. */
   hovered: boolean
   hideTimer: ReturnType<typeof setTimeout> | null
+  /** A menu bar popout's blur held right after it opened, settled when this fires. */
+  blurTimer: ReturnType<typeof setTimeout> | null
   /** While revealed: polls the cursor so leaving the window (no page event) hides the header. */
   pollTimer: ReturnType<typeof setInterval> | null
   geometryTimer: ReturnType<typeof setTimeout> | null
@@ -375,12 +378,7 @@ function ensurePanel(m: Mini): BaseWindow {
     acceptFirstMouse: true,
     backgroundColor: '#00000000'
   })
-  if (IS_MAC) {
-    panel.setAlwaysOnTop(true, 'floating')
-    panel.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-  } else {
-    panel.setAlwaysOnTop(true)
-  }
+  makeFloatingPanel(panel)
   if (process.platform !== 'linux') panel.setOpacity(getMiniWindowSettings().opacity)
   panel.on('closed', () => {
     if (m.panel !== panel) return
@@ -1107,12 +1105,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   })
   // Above normal windows ('floating' is NSFloatingWindowLevel), and on every Space and over full-screen
   // apps. The panel type does that without turning Surffish into an accessory app (no Dock flicker).
-  if (IS_MAC) {
-    window.setAlwaysOnTop(true, 'floating')
-    window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-  } else {
-    window.setAlwaysOnTop(true)
-  }
+  // Never activating Surffish either: that would pull the user to the Space of a browser window.
+  makeFloatingPanel(window)
   // Callbacks run later (m exists by then); `self` for any that could run while the controller is made.
   const self: { mini: Mini | null } = { mini: null }
   const dock = createDockController({
@@ -1152,6 +1146,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     revealed: false,
     hovered: false,
     hideTimer: null,
+    blurTimer: null,
     pollTimer: null,
     geometryTimer: null,
     page: null,
@@ -1181,6 +1176,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   minis.push(m)
   lastActive = m
   window.on('focus', () => {
+    m.menuBar?.popout.focused()
     lastActive = m
     // The Window menu checks the focused one.
     notifyBrowserWindowsChanged()
@@ -1196,9 +1192,22 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       syncTray()
     }
   })
-  // In the menu bar: clicking anywhere else hides the popout, unless it is pinned.
+  // In the menu bar: clicking anywhere else hides the popout, unless it is pinned. A blur right as it
+  // opens (macOS moving the key window about while it comes up, a Space change) is held for a moment:
+  // the focus coming back keeps it open, else it hides then.
   window.on('blur', () => {
-    if (m.menuBar?.popout.blur(m.menuBar.pinned)) syncTray()
+    const bar = m.menuBar
+    if (!bar) return
+    if (bar.popout.blur(bar.pinned)) return syncTray()
+    const wait = bar.popout.blurPendingMs()
+    if (wait <= 0) return
+    if (m.blurTimer) clearTimeout(m.blurTimer)
+    m.blurTimer = setTimeout(() => {
+      m.blurTimer = null
+      if (m.closed || window.isDestroyed() || !m.menuBar) return
+      if (window.isFocused()) m.menuBar.popout.focused()
+      if (m.menuBar.popout.settle(m.menuBar.pinned)) syncTray()
+    }, wait)
   })
   window.on('resize', () => {
     layout(m)
@@ -1264,6 +1273,10 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       clearTimeout(m.geometryTimer)
       m.geometryTimer = null
     }
+    if (m.blurTimer) {
+      clearTimeout(m.blurTimer)
+      m.blurTimer = null
+    }
     unwirePage(m)
     m.dock.dispose()
     const wasInMenuBar = m.menuBar !== null
@@ -1296,17 +1309,13 @@ function present(m: Mini, focus: boolean): void {
   if (m.menuBar) return showPopout(m, menuBarTrayBounds())
   // Tucked behind its handle: slide out instead.
   if (m.dock.isTucked()) return m.dock.slideOut(focus)
+  // On the Space the user is on, without activating Surffish (it re-asserts the level too: some window
+  // managers drop it while a window is hidden).
+  showFloatingPanel(m.window, focus)
   if (focus) {
-    m.window.show()
-    m.window.focus()
     const page = host().pageContents(m.window)
     if (page) page.focus()
-  } else if (!m.window.isVisible()) {
-    m.window.showInactive()
   }
-  // Re-assert the level: some window managers drop it while a window is hidden.
-  if (IS_MAC) m.window.setAlwaysOnTop(true, 'floating')
-  else m.window.setAlwaysOnTop(true)
   if (m.panel && !m.panel.isDestroyed() && m.panel.isVisible()) m.panel.setAlwaysOnTop(true, IS_MAC ? 'floating' : undefined)
   // Docked: its handle shows with it.
   m.dock.follow()
@@ -2150,15 +2159,10 @@ function enterMenuBar(m: Mini, show: boolean): void {
       opacity: () => getMiniWindowSettings().opacity,
       show: (focus) => {
         if (window.isDestroyed()) return
-        if (focus) {
-          window.show()
-          window.focus()
-          host().pageContents(window)?.focus()
-        } else {
-          window.showInactive()
-        }
-        if (IS_MAC) window.setAlwaysOnTop(true, 'floating')
-        else window.setAlwaysOnTop(true)
+        // Clicked on Space 1 with the browser on Space 2: it comes up here, and Surffish is never
+        // activated for it (that would switch the user to the browser's Space).
+        showFloatingPanel(window, focus)
+        if (focus) host().pageContents(window)?.focus()
       },
       hide: () => { if (!window.isDestroyed() && window.isVisible()) window.hide() },
       reducedMotion

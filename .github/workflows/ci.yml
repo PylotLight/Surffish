@@ -353,7 +353,7 @@ jobs:
       - name: Build Electron, the native AppKit trackpad bridge and the Google sign-in helper
         run: bun run build
       - name: Load the compiled native addon
-        run: bun -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function') throw new Error('Native trackpad addon exports are missing')"
+        run: bun -e "const addon = require('./out/native/mac-trackpad-swipe.node'); if (typeof addon.start !== 'function' || typeof addon.stop !== 'function' || typeof addon.preventActivation !== 'function') throw new Error('Native trackpad addon exports are missing'); if (addon.preventActivation(Buffer.alloc(8)) !== false) throw new Error('preventActivation must refuse a null handle')"
       - name: Check the compiled Google sign-in helper
         run: |
           helper=out/native/google-sign-in

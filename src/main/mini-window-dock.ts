@@ -32,6 +32,7 @@ import { createVelocityTracker, flingAlong, flingSlideMs, flingTuckEdge, glideAx
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
 import { motion, placeWindow } from './mini-window-motion'
 import { readUserJson, writeUserJson } from './user-json'
+import { makeFloatingPanel } from './mac-panel'
 
 /**
  * Tuck to screen edge (part of the lazy mini-window chunk). Docked, the mini window sits flush with an
@@ -418,12 +419,9 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       acceptFirstMouse: true,
       backgroundColor: '#00000000'
     })
-    if (IS_MAC) {
-      window.setAlwaysOnTop(true, 'floating')
-      window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-    } else {
-      window.setAlwaysOnTop(true)
-    }
+    // On every Space, and never activating Surffish: a click on the handle (it never takes focus) would
+    // otherwise activate the app and macOS would switch to the Space holding a browser window.
+    makeFloatingPanel(window)
     const view = new WebContentsView({
       webPreferences: { preload: host.preload, sandbox: true, contextIsolation: true, nodeIntegration: false, transparent: true, disableWakeLocks: true }
     })

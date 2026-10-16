@@ -3,6 +3,14 @@
 
 #include <node_api.h>
 
+// Private AppKit (what NSPanel calls at init for a nonactivating style mask): sets the window
+// server's "prevents activation" tag so clicks and key focus on the window never activate the app.
+// Electron's `type: 'panel'` only fakes the style mask at runtime, which newer macOS stops honouring
+// (electron/electron#53889; the upstream fix proposed in #54807 makes this same call).
+@interface NSWindow (SurffishPanelActivation)
+- (void)_setPreventsActivation:(BOOL)preventsActivation;
+@end
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -460,11 +468,40 @@ napi_value IsSwipeTrackingEnabled(napi_env env, napi_callback_info) {
   return result;
 }
 
+// preventActivation(windowHandle: Buffer): boolean. `windowHandle` is BaseWindow.getNativeWindowHandle()
+// (the content NSView*, packed as the raw pointer). True when the window took the tag; false when the
+// handle is unusable or this macOS has no such method (then nothing changes).
+napi_value PreventActivation(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1] = {nullptr};
+  bool applied = false;
+  void* data = nullptr;
+  size_t length = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) == napi_ok && argc >= 1 &&
+      napi_get_buffer_info(env, argv[0], &data, &length) == napi_ok && data != nullptr &&
+      length >= sizeof(void*)) {
+    void* pointer = nullptr;
+    std::memcpy(&pointer, data, sizeof(pointer));
+    id object = (__bridge id)pointer;
+    NSWindow* window = nil;
+    if ([object isKindOfClass:[NSView class]]) window = ((NSView*)object).window;
+    else if ([object isKindOfClass:[NSWindow class]]) window = (NSWindow*)object;
+    if (window != nil && [window respondsToSelector:@selector(_setPreventsActivation:)]) {
+      [window _setPreventsActivation:YES];
+      applied = true;
+    }
+  }
+  napi_value result = nullptr;
+  napi_get_boolean(env, applied, &result);
+  return result;
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_property_descriptor methods[] = {
       {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"stop", nullptr, Stop, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"isSwipeTrackingEnabled", nullptr, IsSwipeTrackingEnabled, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"preventActivation", nullptr, PreventActivation, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
   return exports;
