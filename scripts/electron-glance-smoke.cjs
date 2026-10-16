@@ -76,9 +76,27 @@ const isGlanceChrome = (contents) => contents.getURL().startsWith('data:text/htm
 const glanceChromes = () => liveContents().filter(isGlanceChrome)
 const rendererCount = () => app.getAppMetrics().filter((metric) => metric.type === 'Tab').length
 
-/** Real mouse click (down + up) at the centre of `selector` in `contents`, with modifiers. */
+/**
+ * Real mouse click (down + up) at the centre of `selector` in `contents`, with modifiers.
+ *
+ * Waits for the page's first paint first. A page that has loaded (DOM ready, not loading) but not
+ * painted yet can drop input: on CI the browser forwarded the mouseDown/mouseUp (webContents
+ * 'input-event') and the page never saw a mousedown, on a just-opened glance and on a just-created
+ * private tab, while the same events went through once it had painted. A user can't click a page
+ * before it is on screen, so this is a test-timing issue, not an app one. The point is taken in
+ * the same check and must hit the element (elementFromPoint), so measuring and the state it was
+ * measured in can't drift apart.
+ */
 async function clickElement(contents, selector, modifiers = []) {
-  const rect = await smoke.evaluate(contents, `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } })()`)
+  const rect = await waitFor(() => smoke.evaluate(contents, `(() => {
+    if (performance.getEntriesByType('paint').length === 0) return null
+    const element = document.querySelector(${JSON.stringify(selector)})
+    if (!element) return null
+    const r = element.getBoundingClientRect()
+    const point = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+    const hit = document.elementFromPoint(point.x, point.y)
+    return hit && (hit === element || element.contains(hit)) ? point : null
+  })()`), `${selector} painted and under the pointer in ${contents.getURL()}`)
   const base = { x: rect.x, y: rect.y, button: 'left', clickCount: 1, modifiers }
   contents.sendInputEvent({ type: 'mouseMove', x: rect.x, y: rect.y, modifiers })
   contents.sendInputEvent({ type: 'mouseDown', ...base })

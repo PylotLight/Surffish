@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
-import { isTypingIn, nextAddressValue, type AddressSyncReason } from '../../../shared/address-bar-sync'
+import { isTypingIn, liveAddressValue, nextAddressValue, type AddressSyncReason } from '../../../shared/address-bar-sync'
 
 /**
  * Keeps the address bar in step with the active tab (see shared/address-bar-sync): the tab's URL
@@ -34,10 +34,12 @@ export function useAddressBarSync({
     const input = inputRef.current
     const next = displayRef.current
     const typing = isTypingIn(input, document)
-    const value = nextAddressValue({ value: valueRef.current, synced: syncedRef.current, next, typing, reason })
+    // The field itself, not the last render: a keystroke can be in the input before its state is.
+    const shown = liveAddressValue(input, valueRef.current)
+    const value = nextAddressValue({ value: shown, synced: syncedRef.current, next, typing, reason })
     if (value === null) {
       // Already showing the tab URL (e.g. after Esc): that's the new "unedited" baseline.
-      if (valueRef.current === next) syncedRef.current = next
+      if (shown === next) syncedRef.current = next
       return
     }
     // A focused bar with the whole URL selected stays fully selected, so typing still replaces it.

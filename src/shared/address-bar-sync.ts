@@ -37,6 +37,19 @@ export function addressDisplayValue(url: string, isLocalNewTab: boolean): string
   return isLocalNewTab ? '' : url
 }
 
+/**
+ * What the bar really shows: the input's own value, falling back to the last rendered value.
+ *
+ * React state can trail the input by a keystroke: an `input` event updates the field at once, but
+ * the state it sets is only committed after any pending effects run. A tab URL update that landed
+ * just before the keystroke has its sync effect flushed right then, and comparing the rendered
+ * (stale, unedited) value made it look like the user had typed nothing, so the fresh URL replaced
+ * the text they had just typed. Reading the input itself never sees an "unedited" bar mid-typing.
+ */
+export function liveAddressValue(input: { value: string } | null | undefined, rendered: string): string {
+  return input ? input.value : rendered
+}
+
 /** The user changed the text since it was last synced from the tab. */
 export function isAddressEdited(value: string, synced: string): boolean {
   return value !== synced
