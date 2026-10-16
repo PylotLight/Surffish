@@ -6,6 +6,9 @@
 //   3. Dragging the leader by its floating header: the panel and the follower move in the same tick as
 //      the window, coalesced to one move per frame.
 //   4. Handle re-spread (two handles on one edge, one slides out): the other handle glides, not jumps.
+// Each phase starts with the frame loop idle (no setBounds for a while) and hover peek is off except in
+// the peek phase, so nothing left over from setup moves a window inside a traced phase. setBounds on a
+// hidden window (placed at its start before it shows) is not a motion step and isn't counted.
 // Prints the numbers (MOTION_OUT=<file> also writes them as JSON). SURFFISH_MOTION_REPORT=1 only
 // reports (used to measure the old build); otherwise the thresholds below are asserted.
 // `bun run build && bun run test:electron-mini-window-motion` (headless Linux: xvfb-run; needs xdotool).
@@ -52,9 +55,16 @@ function pointerMove(x, y) {
 
 // --- setBounds trace.
 let trace = null
+let lastSetBounds = 0
+let lastMoved = ''
 const realSetBounds = BaseWindow.prototype.setBounds
 BaseWindow.prototype.setBounds = function setBounds(rect, ...rest) {
-  if (!trace || this.isDestroyed()) return realSetBounds.call(this, rect, ...rest)
+  if (!this.isDestroyed()) {
+    lastSetBounds = performance.now()
+    lastMoved = `${this.getTitle()} ${JSON.stringify(rect)}`
+  }
+  // A hidden window being placed before it shows isn't on screen: not a step of any motion.
+  if (!trace || this.isDestroyed() || !this.isVisible()) return realSetBounds.call(this, rect, ...rest)
   const entry = { t: performance.now(), end: 0, id: this.id, rect: { ...rect } }
   trace.push(entry)
   try {
@@ -64,6 +74,8 @@ BaseWindow.prototype.setBounds = function setBounds(rect, ...rest) {
   }
 }
 const startTrace = () => { trace = [] }
+/** The frame loop has gone idle: no window moved for `ms` (a slide, glide or follow left over from the last step). */
+const quiet = (ms = 300) => waitFor(() => performance.now() - lastSetBounds >= ms, 'the mini windows to stop moving', smoke.waitMs).catch((error) => { throw new Error(`${error.message} Still moving: ${lastMoved}`) })
 const stopTrace = () => { const out = trace; trace = null; return out }
 
 const pct = (values, p) => {
@@ -145,6 +157,9 @@ async function clickHandle(win) {
   contents.sendInputEvent({ type: 'mouseMove', x, y })
   contents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
   contents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+  // Synthetic events: the real pointer never was there, so the page mustn't keep thinking it rests on the
+  // handle (a stale hover would swallow the real one in the peek phase).
+  contents.sendInputEvent({ type: 'mouseLeave', x: -1, y: -1 })
 }
 
 async function run() {
@@ -157,7 +172,7 @@ async function run() {
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const origin = `http://127.0.0.1:${server.address().port}`
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [`${origin}/start`], activeIndex: 0 }))
-  writeFileSync(join(userData, 'browser-mini-window.json'), JSON.stringify({ defaultUrl: '', shortcut: 'CommandOrControl+Shift+Space', opacity: 1, tuckToEdge: true, peekOnHover: true, peekDelayMs: 200, grouping: 'stack', headerPlacement: 'float' }))
+  writeFileSync(join(userData, 'browser-mini-window.json'), JSON.stringify({ defaultUrl: '', shortcut: 'CommandOrControl+Shift+Space', opacity: 1, tuckToEdge: true, peekOnHover: false, peekDelayMs: 200, grouping: 'stack', headerPlacement: 'float' }))
 
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
@@ -212,11 +227,13 @@ async function run() {
   const settle = () => delay(700)
 
   smoke.step('stack group slide-out and tuck')
+  await quiet()
   startTrace()
   await clickHandle(handle)
   await waitFor(() => w1.isVisible() && w2.isVisible(), 'the group out')
   await settle()
   const slideOut = report('group slide-out', stopTrace(), [{ id: w1.id, label: 'w1' }, { id: w2.id, label: 'w2' }, { id: handle.id, label: 'handle' }], { 'skew w1-w2': [w1.id, w2.id], 'skew lead-handle': [stackLeader().id, handle.id] })
+  await quiet()
   startTrace()
   await runCommand('miniWindow.toggle')
   await waitFor(() => !w1.isVisible() && !w2.isVisible(), 'the group tucked')
@@ -224,7 +241,10 @@ async function run() {
   const tuck = report('group tuck', stopTrace(), [{ id: w1.id, label: 'w1' }, { id: w2.id, label: 'w2' }], { 'skew w1-w2': [w1.id, w2.id] })
 
   smoke.step('peek slide-out')
+  // Peek on only for this phase (the handle clicks elsewhere also hover the handle).
+  assert.equal((await update({ peekOnHover: true })).ok, true)
   await delay(300)
+  await quiet()
   const hc = centre(handle.getBounds())
   startTrace()
   pointerMove(hc.x, hc.y - 4)
@@ -242,6 +262,7 @@ async function run() {
   await park()
   await delay(800)
   assert.ok(w1.isVisible() && w2.isVisible(), 'pinned out')
+  assert.equal((await update({ peekOnHover: false })).ok, true)
 
   smoke.step('drag the leader by its floating header')
   const lb = leaderWin.getContentBounds()
@@ -257,6 +278,7 @@ async function run() {
   await delay(100)
   header.sendInputEvent({ type: 'mouseDown', x: at.x, y: at.y, button: 'left', clickCount: 1 })
   await delay(100)
+  await quiet(200)
   startTrace()
   // ~250 px down in many small, fast pointer moves (faster than the frame rate).
   // One xdotool process (async: a blocking exec would stall main's own timers) moving every 4 ms.
@@ -291,6 +313,7 @@ async function run() {
   await clickHandle(handleOf(w2))
   await waitFor(() => w2.isVisible() && !w1.isVisible(), 'm2 out')
   await delay(800)
+  await quiet()
   startTrace()
   w2.setBounds({ x: edgeX - 420 + 60, y: w1.getBounds().y - 20, width: 420, height: 300 })
   await waitFor(() => !w2.isVisible(), 'm2 tucked just above m1')
@@ -313,7 +336,9 @@ async function run() {
     for (const [name, row] of [['group slide-out', slideOut], ['group tuck', tuck], ['peek', peek], ['drag', drag]]) {
       for (const [key, value] of Object.entries(row)) if (key.startsWith('skew')) assert.ok(value.p95 <= 2, `${name}: ${key} same tick (p95 ${value.p95} ms)`)
     }
-    assert.ok(respread['other handle'].steps >= 4, `the other handle glides to its new place (${respread['other handle'].steps} steps)`)
+    // A short glide (making room: 40% of 160 ms, ~4 frames): one late frame on a busy runner ends it a
+    // step early, so 3 steps (two in-between places, then there) still glides; a jump is 1.
+    assert.ok(respread['other handle'].steps >= 3, `the other handle glides to its new place (${respread['other handle'].steps} steps)`)
   }
 
   await runCommand('miniWindow.return')

@@ -4,7 +4,11 @@
  * to the display's refresh rate with drift correction (each tick aims at start + n·interval, so a late
  * tick doesn't push the rest back). Each tick runs every job, then commits the bounds they queued:
  * one setBounds per window per tick (the last rect queued wins; unchanged rects are skipped), so a
- * window, its header panel, its handle and its stack followers all move in the same tick.
+ * window, its header panel, its handle and its stack followers all move in the same tick. A tick that
+ * runs late never brings the next one forward to catch up (two ticks back to back would move a
+ * window twice within a frame); the frames it missed are skipped. Time-based animations
+ * start their clock on their first tick (frameClock), so main stalling before that frame (showing the
+ * rest of a group, say) doesn't eat the animation.
  * Pure (clock/timers injected) so it unit-tests with fake time; main/mini-window-motion.ts wires it.
  */
 
@@ -38,6 +42,22 @@ export interface FrameLoop {
   flush(): void
   /** A tick is scheduled. */
   running(): boolean
+  /** The current frame interval (ms). */
+  interval(): number
+}
+
+/**
+ * The clock for a time-based animation on `loop`: called with each tick's time, it returns how long the
+ * animation has run, starting at its first tick (counted as one frame in, so the first step is a real
+ * step). Measuring from when the animation was queued instead lets a stall before that first tick
+ * (showing windows, under load) use up the duration, so it would jump to its end in a frame or two.
+ */
+export function frameClock(loop: Pick<FrameLoop, 'interval'>): (now: number) => number {
+  let start: number | null = null
+  return (now) => {
+    if (start === null) start = now - loop.interval()
+    return now - start
+  }
 }
 
 /** The frame interval for a display refresh rate (Hz), clamped to 30–240 Hz; 60 Hz when unknown. */
@@ -112,7 +132,11 @@ export function createFrameLoop(deps: FrameLoopDeps): FrameLoop {
     timer = null
     inTick = true
     const now = deps.now()
-    due = Math.max(due, now - deps.interval()) + deps.interval()
+    const interval = deps.interval()
+    // On time (or a little late): the next frame stays on the schedule. Late by most of a frame or more:
+    // the next one is a full frame from now, never a catch-up tick right behind this one.
+    due = Math.max(due, now - interval) + interval
+    if (due - now < interval / 2) due = now + interval
     const queued = [...onces.values()]
     onces.clear()
     for (const fn of queued) fn(now)
@@ -153,6 +177,7 @@ export function createFrameLoop(deps: FrameLoopDeps): FrameLoop {
     drop: (target) => { pending.delete(target) },
     inTick: () => inTick,
     flush,
-    running: () => timer !== null
+    running: () => timer !== null,
+    interval: () => deps.interval()
   }
 }

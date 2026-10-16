@@ -7,7 +7,7 @@
  * Pure rules only (geometry, the show/hide state, the drop-in animation on the shared frame loop,
  * what is remembered); main/mini-window-menubar.ts owns the Tray and main/mini-window.ts the windows.
  */
-import { easeOut, type FrameLoop } from './mini-window-motion'
+import { easeOut, frameClock, type FrameLoop } from './mini-window-motion'
 import { MINI_WINDOW_MAX, MINI_WINDOW_MIN_SIZE, canPopOutUrl, type MiniRect, type MiniWindowMenuBarIcon } from './mini-window'
 
 /** Which mini windows live in the menu bar and the popout's size, kept across restarts (private tabs never). */
@@ -160,13 +160,13 @@ export function createMenuBarPopout(deps: MenuBarPopoutDeps): MenuBarPopout {
       deps.show(focus)
       shown = true
       animating = true
-      const start = deps.now()
+      const elapsed = frameClock(deps.loop)
       deps.loop.run(key, (now) => {
         if (!shown) {
           animating = false
           return false
         }
-        const t = Math.min(1, (now - start) / MINI_MENU_BAR_DROP_MS)
+        const t = Math.min(1, elapsed(now) / MINI_MENU_BAR_DROP_MS)
         const frame = menuBarDropFrame(target, side, t, opacity)
         deps.place(frame.rect)
         deps.setOpacity?.(frame.opacity)
