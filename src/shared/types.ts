@@ -1,4 +1,4 @@
-import type { ClockDateFormat, ClockTimeFormat, ClockWeight } from './new-tab-clock'
+import type { ClockDateFormat, ClockTimeFormat, ClockWeight, WeatherPosition } from './new-tab-clock'
 import type { BrowserPageSecurity } from './certificates'
 import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
@@ -94,6 +94,8 @@ export interface NewTabPreferences {
   /** Only used when weatherProvider is Open-Meteo. */
   openMeteoModel: OpenMeteoModelId
   temperatureUnit: TemperatureUnit
+  /** Weather on its own line under the clocks, or in the top-right corner. */
+  weatherPosition: WeatherPosition
   iconSize: number
   linksPerRow: number
   showLinkLabels: boolean

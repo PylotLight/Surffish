@@ -5,6 +5,8 @@
 //   2. Changes in the Customize panel apply live: seconds, 12/24-hour, AM/PM, date format, date off,
 //      size + position sliders (live while dragging, no bounce-back; the clocks never run into the
 //      icons or off the page), weight / digit style, world-clock difference + "Tomorrow", greeting.
+//      Weather keeps its own centred line under the clocks at every size and position, scaled gently
+//      (0.9×–1.5×) with the clock, and never runs into the icons.
 //   3. Seconds tick once a second only while shown; otherwise the next update is minute-aligned.
 //   4. Settings → New Tab shows and edits the same values.
 // `bun run build && bun run test:electron-newtab-clock` (headless Linux: xvfb-run -a ...).
@@ -41,6 +43,14 @@ async function waitFor(predicate, description) {
 app.commandLine.appendSwitch('lang', 'en-US')
 const FIXED_ISO = '2026-10-16T12:05:07.000Z' // 23:05:07 AEDT
 
+// Weather is on (one Open-Meteo reading from a fake fetch in this main process, so CI never touches
+// the network) to check it keeps its own line under the clocks.
+globalThis.__surffishWeatherFetch = async (input) => {
+  const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+  if (url.hostname !== 'api.open-meteo.com') throw new Error(`net::ERR_BLOCKED_BY_CLIENT (unexpected weather host ${url.hostname} in the smoke)`)
+  return new Response(JSON.stringify({ current: { temperature_2m: 15.3, weather_code: 2 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+
 async function run() {
   app.setPath('userData', userData)
   mkdirSync(userData, { recursive: true, mode: 0o700 })
@@ -52,7 +62,8 @@ async function run() {
     version: 1,
     newTabPreferences: {
       showClock: true, showDate: true, use24HourTime: false, clockSize: 'm', showSeconds: false, timeZone: 'Australia/Melbourne',
-      worldClocks: [{ id: 'akl', label: 'Auckland', timeZone: 'Pacific/Auckland' }, { id: 'lon', label: 'London', timeZone: 'Europe/London' }]
+      worldClocks: [{ id: 'akl', label: 'Auckland', timeZone: 'Pacific/Auckland' }, { id: 'lon', label: 'London', timeZone: 'Europe/London' }],
+      weatherEnabled: true, weatherLocation: 'Melbourne, Victoria, Australia', weatherPlace: { name: 'Melbourne', region: 'Victoria', country: 'Australia', latitude: -37.814, longitude: 144.9633 }
     },
     pinnedSites: ['github.test', 'news.test'].map((host) => ({ title: host, url: `https://${host}/` }))
   })}\n`)
@@ -124,6 +135,25 @@ async function run() {
     return { widgetsTop: widgets.top - page.top, widgetsBottom: widgets.bottom - page.top, iconsTop: groups.top - page.top, iconsBottom: groups.bottom - page.top, creditTop: credit.top - page.top, height: page.height }
   })()`)
   const clockShiftVar = () => ev('document.querySelector(".new-tab-page").style.getPropertyValue("--new-tab-clock-shift")')
+  // Weather: below every clock, centred on the clock block, inside it (so the icons clear it too).
+  const weatherBox = () => ev(`(() => {
+    const weather = document.querySelector('.new-tab-weather-widget')
+    const widgets = document.querySelector('.new-tab-widgets')
+    if (!weather || !widgets) return null
+    const w = weather.getBoundingClientRect()
+    const g = widgets.getBoundingClientRect()
+    const clockBottom = Math.max(...[...widgets.querySelectorAll('.new-tab-clock')].map((clock) => clock.getBoundingClientRect().bottom))
+    const icons = document.querySelector('.new-tab-link-groups')?.getBoundingClientRect()
+    return { text: weather.textContent, inWidgets: widgets.contains(weather), top: w.top, bottom: w.bottom, centre: (w.left + w.right) / 2, widgetsCentre: (g.left + g.right) / 2, clockBottom, iconsTop: icons?.top ?? null, font: parseFloat(getComputedStyle(weather.querySelector('strong') ?? weather).fontSize) }
+  })()`)
+  const expectWeatherLine = async (what) => {
+    const box = await waitFor(async () => { const b = await weatherBox(); return b && /15°C · Partly cloudy/.test(b.text) ? b : null }, `the weather reading (${what})`)
+    assert.ok(box.inWidgets, `weather is part of the clock block (${what})`)
+    assert.ok(box.top >= box.clockBottom - 1, `weather on its own line under the clocks (${what}: ${box.top} vs ${box.clockBottom})`)
+    assert.ok(Math.abs(box.centre - box.widgetsCentre) <= 4, `weather centred (${what}: ${box.centre} vs ${box.widgetsCentre})`)
+    if (box.iconsTop !== null) assert.ok(box.bottom <= box.iconsTop, `weather clears the icons (${what}: ${box.bottom} vs ${box.iconsTop})`)
+    return box
+  }
   smoke.step('Old profile: use24HourTime false → 12-hour, clockSize M → 100 %, default weight/digits')
   await waitFor(() => ev('document.querySelectorAll(".new-tab-page .new-tab-clock").length === 3'), 'the main clock and two world clocks')
   const migrated = await prefs()
@@ -137,6 +167,7 @@ async function run() {
   const originalTop = (await geometry()).widgetsTop
   assert.ok(originalTop >= 24 && originalTop <= 88, `clocks at the original top spot (${originalTop})`)
   assert.equal(await clockShiftVar(), '0px', 'no shift by default')
+  await expectWeatherLine('default look')
 
   smoke.step('Fixed fake time in the New Tab renderer')
   await ev(`(() => {
@@ -206,10 +237,12 @@ async function run() {
   smoke.step('Size slider: 50–250 %, live while dragging, no bounce-back')
   await setRange('Clock size', 250)
   await waitFor(async () => Math.abs((await timeStyle()).size - 96) < 1, '250 % clock (2.5 × 38.4 px)')
+  assert.ok(Math.abs((await expectWeatherLine('250 % clock')).font - 21) < 0.6, 'weather grows with the clock, capped at 1.5× (21 px)')
   await reveal('Clock size')
   await shot('after-size-250')
   await setRange('Clock size', 50)
   await waitFor(async () => Math.abs((await timeStyle()).size - 19.2) < 1, '50 % clock')
+  assert.ok(Math.abs((await expectWeatherLine('50 % clock')).font - 12.6) < 0.6, 'weather shrinks only to 0.9× (12.6 px)')
   // A fast drag: 31 steps, then hold still; the clock must not jump back to an older value.
   for (let value = 50; value <= 200; value += 5) await setRange('Clock size', value === 200 ? 145 : value)
   await delay(1_200)
@@ -224,6 +257,7 @@ async function run() {
   assert.ok(low.widgetsBottom <= low.iconsTop, `clocks stay above the icons at 100 % (${low.widgetsBottom} vs ${low.iconsTop})`)
   assert.ok(low.iconsTop - low.widgetsBottom <= 40, `100 % sits right above the icons (${Math.round(low.iconsTop - low.widgetsBottom)}px gap)`)
   assert.ok(low.iconsBottom <= low.creditTop + 4, `icons still clear the photo credit (${low.iconsBottom} vs ${low.creditTop})`)
+  await expectWeatherLine('position 100 %')
   await reveal('Clock position')
   await shot('after-position-100')
   const fullHeight = low.height
@@ -251,6 +285,7 @@ async function run() {
   await waitFor(async () => Number((await timeStyle()).weight) >= 600, 'bold clock')
   await toggle('Monospaced digits')
   await waitFor(async () => (await timeStyle()).numeric === 'normal', 'proportional digits')
+  await expectWeatherLine('145 %, position 30 %, bold, no date')
   await reveal('Clock size')
   await shot('after-145-pos30-bold-no-date')
 

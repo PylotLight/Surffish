@@ -26,6 +26,11 @@ export const MAX_CLOCK_POSITION = 100
 const LEGACY_CLOCK_SIZE_SCALE: ReadonlyMap<unknown, number> = new Map([['s', 75], ['m', 100], ['l', 145], ['xl', 220]])
 export const clockScaleFromLegacySize = (value: unknown): number | null => LEGACY_CLOCK_SIZE_SCALE.get(value) ?? null
 
+/** Where the New Tab weather reading sits: its own line under the clocks (default) or the page's top-right corner. */
+export type WeatherPosition = 'below' | 'corner'
+export const WEATHER_POSITIONS: readonly WeatherPosition[] = ['below', 'corner']
+export const isWeatherPosition = (value: unknown): value is WeatherPosition => WEATHER_POSITIONS.includes(value as WeatherPosition)
+
 /** Where the clocks sit: `position` percent of the free space between their top spot and the icons. */
 export function clockShift(position: number, freeSpace: number): number {
   return Math.round(Math.max(0, freeSpace) * Math.min(MAX_CLOCK_POSITION, Math.max(MIN_CLOCK_POSITION, position)) / 100)

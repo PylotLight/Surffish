@@ -3,10 +3,12 @@ import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, OpenMeteoM
 import { MAX_ICON_VERTICAL_POSITION, MAX_WORLD_CLOCKS, MIN_ICON_VERTICAL_POSITION } from '../../../../shared/persistence'
 import { formatTemperature, OPEN_METEO_MODELS, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
 import { WORLD_CITIES } from '../../../../shared/world-cities'
-import { CLOCK_DATE_FORMATS, CLOCK_SCALE_STEP, formatClockDate, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE, usesTwelveHour, type ClockDateFormat, type ClockTimeFormat, type ClockWeight } from '../../../../shared/new-tab-clock'
+import { CLOCK_DATE_FORMATS, CLOCK_SCALE_STEP, formatClockDate, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE, usesTwelveHour, type ClockDateFormat, type ClockTimeFormat, type ClockWeight, type WeatherPosition } from '../../../../shared/new-tab-clock'
 import { SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from '../settings/SettingsControls'
 import TimeZonePicker from '../TimeZonePicker'
 import WeatherCitySearch from './WeatherCitySearch'
+
+const WEATHER_POSITION_OPTIONS: ReadonlyArray<{ value: WeatherPosition; label: string }> = [{ value: 'below', label: 'Below clock' }, { value: 'corner', label: 'Top right' }]
 
 const COMMON_TIME_ZONES = [
   'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'Asia/Kolkata', 'Asia/Tokyo', 'Asia/Singapore',
@@ -213,6 +215,9 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
           </SettingsRow>
         )}
         {provider.needsKey && preferences.weatherEnabled && <OpenWeatherKeyRow onKeyChange={onWeatherKeyChange} />}
+        <SettingsRow label="Position" hint="Its own line under the clocks, or the page's top-right corner.">
+          <SettingsSegmented value={preferences.weatherPosition} options={WEATHER_POSITION_OPTIONS} ariaLabel="Weather position" disabled={!preferences.weatherEnabled} onChange={(weatherPosition) => onPatch({ weatherPosition })} />
+        </SettingsRow>
         <SettingsRow label="Units">
           <SettingsSegmented value={preferences.temperatureUnit} options={[{ value: 'celsius', label: '°C' }, { value: 'fahrenheit', label: '°F' }] as const} ariaLabel="Weather temperature unit" disabled={!preferences.weatherEnabled} onChange={(temperatureUnit) => onPatch({ temperatureUnit })} />
         </SettingsRow>

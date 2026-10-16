@@ -300,3 +300,10 @@ test('per-site zoom keeps valid http origins with non-default factors only', () 
   })
   assert.deepEqual(parsed.siteZoom, { 'https://example.com': 1.25, 'https://big.test': 5 })
 })
+
+test('weather position: below the clocks by default, corner kept, junk ignored', () => {
+  assert.equal(parseNewTabPreferences({}).weatherPosition, 'below')
+  assert.equal(parseNewTabPreferences({ weatherPosition: 'corner' }).weatherPosition, 'corner')
+  assert.equal(parseNewTabPreferences({ weatherPosition: 'inline' }).weatherPosition, 'below')
+  assert.equal(parseNewTabPreferences({ weatherPosition: 1 }).weatherPosition, 'below')
+})
