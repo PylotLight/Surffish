@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
-import { copyFileSync, cpSync, mkdirSync, rmSync } from 'node:fs'
+import { minifySync } from 'vite'
+import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
@@ -16,11 +17,13 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/bramble-poc.cjs'),
       join(outputDirectory, 'bramble-poc.cjs')
     )
-    // Sandboxed ad-filter frame preload (plain CommonJS, registered on the browser session).
-    copyFileSync(
-      resolve(projectDirectory, 'src/preload/adblock-frame.cjs'),
-      join(outputDirectory, 'adblock-frame.cjs')
-    )
+    // Session frame preloads (plain CommonJS, run in every frame of every page): the ad filter and
+    // tab volume. Minified, since every frame parses them.
+    for (const name of ['adblock-frame.cjs', 'tab-volume-frame.cjs']) {
+      const result = minifySync(name, readFileSync(resolve(projectDirectory, 'src/preload', name), 'utf8'))
+      if (result.errors.length > 0) throw new Error(`Could not minify ${name}: ${result.errors.map((error) => error.message).join('; ')}`)
+      writeFileSync(join(outputDirectory, name), result.code)
+    }
     copyFileSync(
       resolve(projectDirectory, 'src/preload/mac-trackpad-swipe.cjs'),
       join(outputDirectory, 'mac-trackpad-swipe.cjs')

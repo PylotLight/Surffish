@@ -11,6 +11,7 @@ import { RowMirror, type DesiredRow, type MirrorResult } from './row-mirror'
  *                      sidebarWidth and the legacy pinnedSites copy (device: never synced)
  *   site:<hash>        one site's permissions/settings, value { origin, ...settings } (synced)
  *   zoom:<hash>        one site's page zoom, value { origin, factor } (device, like Chrome/Safari)
+ *   volume:<hash>      one site's tab volume, value { origin, volume } (device)
  *
  * Per-site keys use a hash of the origin, not the origin, so when Forget this site / Clear browsing
  * data removes them the row is hard-deleted and the change log keeps only a `delete` op with the
@@ -21,8 +22,8 @@ const SAVED_KEY = 'store:preferences:saved_at'
 const SYNCED_PREFS = ['searchEngine', 'tabSleepMinutes', 'newTabPage', 'newTabPreferences'] as const
 const DEVICE_PREFS = ['sidebarWidth', 'pinnedSites'] as const
 
-const ownsKey = (key: string): boolean => key.startsWith('pref.') || key.startsWith('site:') || key.startsWith('zoom:')
-const isPerSite = (key: string): boolean => key.startsWith('site:') || key.startsWith('zoom:')
+const isPerSite = (key: string): boolean => key.startsWith('site:') || key.startsWith('zoom:') || key.startsWith('volume:')
+const ownsKey = (key: string): boolean => key.startsWith('pref.') || isPerSite(key)
 
 export class PreferencesTable {
   private readonly mirror: RowMirror
@@ -42,6 +43,7 @@ export class PreferencesTable {
     const result: Record<string, unknown> = { version: 1 }
     const siteSettings: Record<string, unknown> = {}
     const siteZoom: Record<string, unknown> = {}
+    const siteVolume: Record<string, unknown> = {}
     // Oldest write first, so siteZoom keeps "most recently changed last" (the cap drops the oldest).
     for (const row of this.mirror.loadLive()) {
       let value: unknown
@@ -49,13 +51,15 @@ export class PreferencesTable {
       if (row.key.startsWith('pref.')) {
         result[row.key.slice(5)] = value
       } else if (typeof value === 'object' && value !== null && typeof (value as { origin?: unknown }).origin === 'string') {
-        const { origin, ...rest } = value as { origin: string; factor?: unknown }
+        const { origin, ...rest } = value as { origin: string; factor?: unknown; volume?: unknown }
         if (row.key.startsWith('site:')) siteSettings[origin] = { origin, ...rest }
+        else if (row.key.startsWith('volume:')) siteVolume[origin] = rest.volume
         else siteZoom[origin] = rest.factor
       }
     }
     result.siteSettings = siteSettings
     result.siteZoom = siteZoom
+    result.siteVolume = siteVolume
     return result
   }
 
@@ -69,6 +73,9 @@ export class PreferencesTable {
     }
     for (const [origin, factor] of Object.entries(preferences.siteZoom)) {
       desired.set(`zoom:${this.hash(origin)}`, { values: { value: JSON.stringify({ origin, factor }), scope: 'device' } })
+    }
+    for (const [origin, volume] of Object.entries(preferences.siteVolume)) {
+      desired.set(`volume:${this.hash(origin)}`, { values: { value: JSON.stringify({ origin, volume }), scope: 'device' } })
     }
     try {
       return this.db.transaction(() => {

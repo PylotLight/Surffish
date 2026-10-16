@@ -131,6 +131,7 @@ glue in `preferences-persistence.ts`):
 | `pref.sidebarWidth`, `pref.pinnedSites` (legacy copy for older builds) | JSON value | device |
 | `site:<sha256(origin)[0:32]>` | `{ origin, ...site settings }` | synced |
 | `zoom:<sha256(origin)[0:32]>` | `{ origin, factor }` | device (like Chrome/Safari) |
+| `volume:<sha256(origin)[0:32]>` | `{ origin, volume }` (tab volume 0..1; 100% not kept) | device |
 
 A change writes the changed row right away (the JSON write used to be immediate too); the JSON copy
 follows on the 30 s timer and at quit. Per-site keys are hashes, so Forget this site / Clear

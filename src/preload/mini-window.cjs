@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('miniWindow', {
   activateTab: (tabId) => ipcRenderer.send('mini-window:activate-tab', String(tabId)),
   closeTab: (tabId) => ipcRenderer.send('mini-window:close-tab', String(tabId)),
   returnAll: () => ipcRenderer.send('mini-window:return-all'),
+  // Speaker (header / strip chip): tab volume 0..1 and mute.
+  setVolume: (tabId, volume) => ipcRenderer.send('mini-window:set-volume', String(tabId), Number(volume)),
+  setMuted: (tabId, muted) => ipcRenderer.send('mini-window:set-muted', String(tabId), Boolean(muted)),
   tabOut: (tabId, x, y) => ipcRenderer.send('mini-window:tab-out', String(tabId), Number(x), Number(y)),
   // Dock handle.
   onHandleState: (callback) => ipcRenderer.on('mini-window:handle-state', (_event, state) => callback(state)),

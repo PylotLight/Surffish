@@ -2762,7 +2762,58 @@
   transition: background 120ms ease, color 120ms ease;
 }
 .tab-audio-button + .tab-sleep-indicator,
-.tab-audio-button + .tab-close { margin-left: 0; }
+.tab-audio-button + .tab-close,
+.tab-volume + .tab-sleep-indicator,
+.tab-volume + .tab-close { margin-left: 0; }
+/* Tab volume: the speaker slides a slider out on hover (the title gives way). */
+.tab-volume {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-left: auto;
+  border-radius: 7px;
+  transition: background 120ms ease;
+}
+.tab-volume .tab-audio-button { margin-left: 0; }
+.tab-volume:hover,
+.tab-volume.is-open,
+.tab-volume:focus-within { background: rgba(255, 255, 255, 0.1); }
+.tab-volume:hover .tab-audio-button { background: transparent; }
+.tab-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: width 140ms ease-out, opacity 140ms ease-out, margin 140ms ease-out;
+}
+.tab-volume:hover .tab-volume-slider,
+.tab-volume.is-open .tab-volume-slider,
+.tab-volume:focus-within .tab-volume-slider { width: 56px; margin: 0 7px 0 1px; opacity: 1; }
+.tab-volume-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #7ee2a8 var(--tab-volume-fill, 100%), rgba(245, 247, 250, 0.22) var(--tab-volume-fill, 100%));
+}
+.tab-volume.is-muted .tab-volume-slider::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, rgba(245, 247, 250, 0.55) var(--tab-volume-fill, 100%), rgba(245, 247, 250, 0.22) var(--tab-volume-fill, 100%));
+}
+.tab-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3.5px;
+  border: 0;
+  border-radius: 50%;
+  background: #f5f7fa;
+}
+.tab-volume-slider:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.8); outline-offset: 2px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { .tab-volume-slider { transition: none; } }
 .tab-audio-button:hover { background: rgba(255, 255, 255, 0.1); }
 .tab-audio-button.is-muted { color: rgba(245, 247, 250, 0.55); }
 .tab-audio-button svg,

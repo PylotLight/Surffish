@@ -8,6 +8,9 @@
  * click to switch, drag a tab out of the window to split it off or onto another mini window to move it)
  * and a Return All button joins the row.
  * Button hints show in place of the title (never as native tooltips, which would cover the tab strip).
+ * Tab volume: a speaker shows on a chip (or, with one tab, next to the title) while the tab plays,
+ * holds media or is muted; hovering it slides out a volume slider (the title gives way), click mutes,
+ * the scroll wheel steps 5%.
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
 export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
@@ -54,12 +57,29 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   .tab img { width: 14px; height: 14px; border-radius: 3px; flex: none; }
   .tab .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tab button { width: 18px; height: 18px; font-size: 13px; border-radius: 4px; }
+  .vol { -webkit-app-region: no-drag; display: none; align-items: center; flex: none; border-radius: 6px; }
+  .vol * { -webkit-app-region: no-drag; }
+  .vol.shown { display: inline-flex; }
+  .vol:hover, .vol.open, .vol:focus-within { background: var(--hover); }
+  .vol .spk:hover { background: transparent; }
+  .vol .spk svg { flex: none; width: 17px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .vol .spk .cone { fill: currentColor; }
+  .vol.muted .spk { color: var(--muted); }
+  .vol input { -webkit-appearance: none; appearance: none; width: 0; height: 16px; margin: 0; padding: 0; opacity: 0; background: transparent; transition: width 140ms ease-out, opacity 140ms ease-out, margin 140ms ease-out; accent-color: var(--accent); }
+  .vol:hover input, .vol.open input, .vol:focus-within input { width: 60px; opacity: 1; margin: 0 6px 0 2px; }
+  .tab .vol .spk svg { width: 15px; height: 13px; }
+  .tab .vol:hover input, .tab .vol.open input, .tab .vol:focus-within input { width: 44px; margin: 0 4px 0 1px; }
+  .vol input::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--fill, 100%), var(--line) var(--fill, 100%)); }
+  .vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 50%; background: var(--text); border: 0; }
+  .vol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
+  @media (prefers-reduced-motion: reduce) { .vol input { transition: none; } }
 </style></head>
 <body>
 <header id="bar">
   <button id="back" data-hint="Back" aria-label="Back" disabled>&#8249;</button>
   <button id="reload" data-hint="Reload" aria-label="Reload">&#8635;</button>
   <div id="where"><img id="icon" alt="" hidden><div id="text"><div id="title"></div><div id="url"></div></div><div id="hint" aria-hidden="true"></div></div>
+  <span id="vol" class="vol"></span>
   <span id="badge">Private</span>
   <button id="tuck" data-hint="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button id="return" data-hint="Return to Browser" aria-label="Return to Browser">&#8689;</button>
@@ -84,11 +104,102 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     if (state.tuck) { tuck.dataset.dir = state.tuck.arrow; tuck.dataset.hint = state.tuck.label; tuck.setAttribute('aria-label', state.tuck.label) }
     if (state.faviconUrl && icon.getAttribute('src') !== state.faviconUrl) { icon.hidden = false; icon.src = state.faviconUrl }
     else if (!state.faviconUrl) icon.hidden = true
-    renderTabs(Array.isArray(state.tabs) ? state.tabs : [])
+    const tabs = Array.isArray(state.tabs) ? state.tabs : []
+    headerVolume.update({ tabId: state.tabId, audio: Boolean(state.audio) && tabs.length < 2, muted: Boolean(state.muted), volume: state.volume })
+    renderTabs(tabs)
   })
+  // Tab volume: the speaker (click: mute; wheel: ±5%) and its slider, shown on hover.
+  const SPEAKER_WAVES = { muted: '<path d="M15.5 9.5l5 5M20.5 9.5l-5 5"/>', off: '', low: '<path d="M15 9.2a4 4 0 0 1 0 5.6"/>', high: '<path d="M15 9.2a4 4 0 0 1 0 5.6"/><path d="M17.6 6.8a7.4 7.4 0 0 1 0 10.4"/>' }
+  let volumeBusy = 0
+  function levelOf(volume, muted) { return muted ? 'muted' : volume <= 0.005 ? 'off' : volume < 0.5 ? 'low' : 'high' }
+  function clampVolume(value) { const number = Number(value); return Number.isFinite(number) ? Math.round(Math.min(1, Math.max(0, number)) * 100) / 100 : 1 }
+  function makeVolume(root, small) {
+    root.classList.add('vol')
+    const speaker = document.createElement('button')
+    speaker.className = 'spk'
+    speaker.type = 'button'
+    if (small) { speaker.style.width = '18px'; speaker.style.height = '18px' }
+    const slider = document.createElement('input')
+    slider.type = 'range'
+    slider.min = '0'
+    slider.max = '100'
+    slider.step = '1'
+    root.append(speaker, slider)
+    const control = { tabId: null, muted: false, volume: 1, level: '', dragging: false, pending: null, frame: 0 }
+    function draw() {
+      const level = levelOf(control.volume, control.muted)
+      if (level !== control.level) {
+        control.level = level
+        speaker.innerHTML = '<svg viewBox="3 4 19 16" aria-hidden="true"><path class="cone" d="M4.5 9.5h3l4-3.5v12l-4-3.5h-3z"/>' + SPEAKER_WAVES[level] + '</svg>'
+      }
+      const percent = Math.round(control.volume * 100)
+      if (!control.dragging) slider.value = String(percent)
+      slider.style.setProperty('--fill', percent + '%')
+      root.classList.toggle('muted', control.muted)
+      const label = control.muted ? 'Unmute tab (volume ' + percent + '%)' : 'Mute tab (volume ' + percent + '%)'
+      speaker.setAttribute('aria-label', label)
+      speaker.dataset.hint = control.muted ? 'Muted · click to unmute' : 'Volume ' + percent + '% · click to mute'
+      slider.setAttribute('aria-label', 'Tab volume')
+      slider.setAttribute('aria-valuetext', percent + '%')
+      if (hinted === speaker) showHint(speaker)
+    }
+    function send(volume) {
+      control.volume = clampVolume(volume)
+      draw()
+      // Until main's state echoes it back, show this value (not a stale one from an earlier update).
+      control.pending = control.volume
+      clearTimeout(control.frame)
+      control.frame = setTimeout(() => { control.pending = null }, 600)
+      if (control.tabId) window.miniWindow.setVolume(control.tabId, control.volume)
+    }
+    speaker.addEventListener('click', (event) => { event.stopPropagation(); if (control.tabId) window.miniWindow.setMuted(control.tabId, !control.muted) })
+    for (const type of ['pointerdown', 'mousedown', 'dblclick']) root.addEventListener(type, (event) => event.stopPropagation())
+    slider.addEventListener('pointerdown', () => { control.dragging = true; volumeBusy += 1; root.classList.add('open') })
+    const endDrag = () => { if (!control.dragging) return; control.dragging = false; volumeBusy = Math.max(0, volumeBusy - 1); root.classList.remove('open'); if (volumeBusy === 0 && deferredTabs) { const tabs = deferredTabs; deferredTabs = null; renderTabs(tabs) } }
+    slider.addEventListener('pointerup', endDrag)
+    slider.addEventListener('pointercancel', endDrag)
+    slider.addEventListener('lostpointercapture', endDrag)
+    slider.addEventListener('blur', endDrag)
+    slider.addEventListener('input', () => send(Number(slider.value) / 100))
+    slider.addEventListener('click', (event) => event.stopPropagation())
+    slider.addEventListener('keydown', (event) => event.stopPropagation())
+    let wheel = 0
+    root.addEventListener('wheel', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      // Lines/pages: one step per event; pixels: a mouse notch (~100px) is one step, trackpads add up.
+      wheel += event.deltaMode === 0 ? event.deltaY : Math.sign(event.deltaY) * 100
+      const steps = Math.trunc(wheel / 100)
+      if (steps === 0) return
+      wheel -= steps * 100
+      send(control.volume - steps * 0.05)
+    }, { passive: false })
+    if (!small) {
+      speaker.addEventListener('mouseenter', () => showHint(speaker))
+      speaker.addEventListener('mouseleave', () => hideHint(speaker))
+      speaker.addEventListener('focus', () => showHint(speaker))
+      speaker.addEventListener('blur', () => hideHint(speaker))
+    }
+    return {
+      root,
+      update(state) {
+        control.tabId = state.tabId || null
+        root.classList.toggle('shown', Boolean(state.audio) && Boolean(control.tabId))
+        control.muted = Boolean(state.muted)
+        const incoming = clampVolume(state.volume)
+        if (control.pending !== null && Math.abs(incoming - control.pending) < 0.005) control.pending = null
+        if (!control.dragging && control.pending === null) control.volume = incoming
+        draw()
+      }
+    }
+  }
+  const headerVolume = makeVolume(document.getElementById('vol'), false)
   // The tab strip (grouping 'tabs', two or more tabs).
   const strip = document.getElementById('strip')
   let dragTab = null
+  let deferredTabs = null
+  let stripKey = ''
+  const chipVolumes = new Map()
   function renderTabs(tabs) {
     document.body.classList.toggle('tabbed', tabs.length > 1)
     // With a strip, the header's close button closes the tab on screen (the rest stay).
@@ -96,6 +207,16 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     closeButton.dataset.hint = tabs.length > 1 ? 'Close Tab' : 'Close'
     closeButton.setAttribute('aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
     if (dragTab) return
+    // Only a speaker changed: update the chips in place (keeps a hovered slider open).
+    const key = JSON.stringify(tabs.map((tab) => [tab.tabId, tab.title, tab.faviconUrl, tab.active]))
+    if (key === stripKey) {
+      for (const tab of tabs) chipVolumes.get(tab.tabId)?.update(tab)
+      return
+    }
+    // Never rebuild under a slider being dragged.
+    if (volumeBusy > 0) { deferredTabs = tabs; return }
+    stripKey = key
+    chipVolumes.clear()
     strip.replaceChildren(...tabs.map((tab) => {
       const item = document.createElement('div')
       item.className = 'tab' + (tab.active ? ' active' : '')
@@ -120,7 +241,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
       close.setAttribute('aria-label', 'Close ' + tab.title)
       close.addEventListener('pointerdown', (event) => event.stopPropagation())
       close.addEventListener('click', (event) => { event.stopPropagation(); window.miniWindow.closeTab(tab.tabId) })
-      item.append(label, close)
+      const volume = makeVolume(document.createElement('span'), true)
+      volume.update(tab)
+      chipVolumes.set(tab.tabId, volume)
+      item.append(label, volume.root, close)
       item.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.miniWindow.activateTab(tab.tabId) } })
       // Click: switch. Press and drag out of the window: split off (or onto another mini window: move there).
       item.addEventListener('pointerdown', (event) => {
@@ -163,7 +287,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     hinted = null
     document.body.classList.remove('hinting')
   }
-  for (const button of document.querySelectorAll('header button')) {
+  for (const button of document.querySelectorAll('header > button')) {
     button.addEventListener('mouseenter', () => showHint(button))
     button.addEventListener('mouseleave', () => hideHint(button))
     button.addEventListener('focus', () => showHint(button))
@@ -175,7 +299,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   let dragging = null
   function startDrag(event) {
     if (!document.body.classList.contains('floating') || event.button !== 0 || dragging !== null) return
-    if (event.target.closest('button, .tab')) return
+    if (event.target.closest('button, .tab, .vol')) return
     dragging = { id: event.pointerId, target: event.currentTarget }
     event.currentTarget.setPointerCapture(event.pointerId)
     window.miniWindow.dragHeader(true)

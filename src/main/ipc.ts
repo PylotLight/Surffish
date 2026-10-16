@@ -28,6 +28,7 @@ import {
   setBrowserFindQuery,
   stepFind,
   zoomActiveBrowserTab,
+  setBrowserTabVolume,
   togglePdfEditor,
   dismissActiveLoadError,
   activeTabHasLoadError,
@@ -196,6 +197,10 @@ export function registerIpc(): void {
   ipcMain.handle('browser:tabs:mute', (event, id: unknown, muted: unknown) => {
     assertMainRenderer(event)
     return typeof id === 'string' && typeof muted === 'boolean' && setBrowserTabMuted(id, muted)
+  })
+  ipcMain.handle('browser:tabs:volume', (event, id: unknown, volume: unknown) => {
+    assertMainRenderer(event)
+    return typeof id === 'string' && typeof volume === 'number' && setBrowserTabVolume(id, volume)
   })
   ipcMain.handle('browser:tabs:move', (event, id: unknown, beforeId: unknown) => {
     assertMainRenderer(event)

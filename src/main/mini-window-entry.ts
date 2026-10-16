@@ -50,14 +50,24 @@ export interface MiniWindowHost {
   /** Where the page goes inside the mini window (window coordinates). */
   setPageBounds(win: BaseWindow, bounds: { x: number; y: number; width: number; height: number }): void
   pageContents(win: BaseWindow): WebContents | null
-  header(win: BaseWindow): { tabId: string; title: string; url: string; faviconUrl: string | null; loading: boolean; canGoBack: boolean; private: boolean } | null
+  header(win: BaseWindow): ({ tabId: string; title: string; url: string; faviconUrl: string | null; loading: boolean; canGoBack: boolean; private: boolean } & MiniWindowTabAudio) | null
+  /** Set one of the mini window's tabs' volume (0..1) / mute. */
+  setTabVolume(win: BaseWindow, tabId: string, volume: number): void
+  setTabMuted(win: BaseWindow, tabId: string, muted: boolean): void
   /** Run a browser shortcut pressed in the mini window; true when it was one. */
   handleShortcut(win: BaseWindow, input: Electron.Input): boolean
   /** A short notice in the browser window (e.g. too many mini windows open). */
   notify(message: string): void
 }
 
-export interface MiniWindowTab {
+/** What the header's speaker needs (shown while the tab is audible, holds media or is muted). */
+export interface MiniWindowTabAudio {
+  audio: boolean
+  muted: boolean
+  volume: number
+}
+
+export interface MiniWindowTab extends MiniWindowTabAudio {
   tabId: string
   title: string
   url: string

@@ -23,6 +23,7 @@ import {
   savePdfEditor,
   selectBrowserTabByNumber,
   setBrowserTabMuted,
+  stepActiveBrowserTabVolume,
   suspendOtherBrowserTabs,
   togglePdfEditor,
   type TabCommand
@@ -104,10 +105,12 @@ const COMMANDS: BrowserCommand[] = [
   tabCommand('tab.duplicate', 'duplicate', 'Duplicate Tab', { keywords: ['clone', 'copy tab'] }),
   tabCommand('tab.pin', 'pin', () => (activeTab()?.pinned ? 'Unpin Tab' : 'Pin Tab'), { enabled: () => Boolean(activeTab()) }),
   {
-    id: 'tab.mute', title: () => (activeTab()?.muted ? 'Unmute Tab' : 'Mute Tab'), section: 'Tab', keywords: ['audio', 'sound', 'silence'], refocusPage: true,
+    id: 'tab.mute', title: () => (activeTab()?.muted ? 'Unmute Tab' : 'Mute Tab'), section: 'Tab', keywords: ['audio', 'sound', 'silence', 'volume mute'], refocusPage: true,
     enabled: () => Boolean(getActiveTabWebContents()),
     run: () => { const tab = activeTab(); if (tab) setBrowserTabMuted(tab.id, !tab.muted) }
   },
+  { id: 'tab.volumeUp', title: 'Volume Up', section: 'Tab', keywords: ['tab volume', 'louder', 'sound', 'audio'], refocusPage: true, enabled: () => Boolean(getActiveTabWebContents()), run: () => stepActiveBrowserTabVolume(1) },
+  { id: 'tab.volumeDown', title: 'Volume Down', section: 'Tab', keywords: ['tab volume', 'quieter', 'softer', 'sound', 'audio'], refocusPage: true, enabled: () => Boolean(getActiveTabWebContents()), run: () => stepActiveBrowserTabVolume(-1) },
   tabCommand('tab.bookmark', 'bookmark', () => (activeIsBookmarked() ? 'Remove Bookmark' : 'Bookmark Tab'), { keywords: ['favorite', 'favourite', 'star'], enabled: activeIsWebPage }),
   {
     id: 'readingList.add', title: 'Add to Reading List', accelerator: TAB_COMMAND_SHORTCUTS.readingList.accelerator, section: 'Tab',
