@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { debugPageDrags } from './page-drag-debug'
 
 /**
  * Electron hit-tests window drag regions across every WebContentsView in the window, and a
@@ -18,4 +19,6 @@ export function guardPageDragRegions(contents: WebContents): void {
     void contents.insertCSS(PAGE_NO_DRAG_CSS, { cssOrigin: 'user' }).catch(() => undefined)
   }
   contents.on('dom-ready', apply)
+  // SURFFISH_DEBUG_DRAG=1 only: logs each text/link drag out of the page (macOS drag triage).
+  debugPageDrags(contents)
 }
