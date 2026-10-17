@@ -67,6 +67,8 @@ import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from '.
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
+import { conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, largestWeatherFit, placeToday, visibleForecast } from '../../../shared/weather-forecast'
+import WeatherGlyph, { RainChanceGlyph } from './new-tab/WeatherGlyph'
 import { clockGreeting, clockShift, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
@@ -448,6 +450,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [newTabCustomizeOpen, setNewTabCustomizeOpen] = useState(false)
   /** Bumped when a weather API key changes, so the reading reloads at once. */
   const [newTabWeatherKeyVersion, setNewTabWeatherKeyVersion] = useState(0)
+  /** Provider + model + place of the reading on screen (see the weather effect). */
+  const newTabWeatherIdentityRef = useRef('')
   /** The panel's chunk has been asked for (first hover / focus / open of the gear); then it stays mounted. */
   const [newTabCustomizeLoaded, setNewTabCustomizeLoaded] = useState(false)
   const newTabGearRef = useRef<HTMLButtonElement>(null)
@@ -635,11 +639,50 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Weather sits on its own line under the clocks (or in the top-right corner): one quiet row,
   // temperature first, so it never competes with the time on the clock line.
   const newTabWeatherPlacement = newTabPreferences.weatherEnabled && (newTabPreferences.weatherPlace || newTabPreferences.weatherLocation.trim()) ? newTabPreferences.weatherPosition : null
+  // Forecast view (Settings → New Tab → Weather): today's high/low or 3/5/7 daily columns under the
+  // reading, as far as the provider goes. Private tabs keep the single-line reading.
+  const newTabForecastView = browser.private ? 'current' : newTabPreferences.weatherForecast
+  const newTabWantsDaily = forecastDayCount(newTabForecastView) > 0
+  const newTabPlaceToday = newTabWeather && newTabWantsDaily ? placeToday(newTabWeather.place.timeZone, clockNow.getTime()) : undefined
+  const newTabForecast = newTabWeather && newTabWantsDaily ? visibleForecast(newTabForecastView, newTabWeather.provider, newTabWeather.daily, newTabPlaceToday) : null
+  const newTabForecastToday = newTabForecast?.days[0]
+  const newTabWeatherHasRows = newTabForecastView !== 'today' && Boolean(newTabForecast?.days.length)
+  const newTabWeatherCornerRef = useRef<HTMLDivElement>(null)
+  const weatherUnit = newTabPreferences.temperatureUnit
   const newTabWeatherWidget = newTabWeatherPlacement && (
-    <div className={`new-tab-weather-widget is-${newTabWeatherPlacement}${newTabWeatherPlacement === 'corner' && newTabCustomizeOpen ? ' is-beside-panel' : ''}`} role="status" aria-live="polite">
+    <div
+      className={`new-tab-weather-widget is-${newTabWeatherPlacement}${newTabWeatherPlacement === 'corner' && newTabCustomizeOpen ? ' is-beside-panel' : ''}${newTabWeatherHasRows ? ' has-forecast' : ''}`}
+      style={{ '--new-tab-weather-size': (newTabPreferences.weatherScale / 100).toFixed(2) } as React.CSSProperties}
+      ref={newTabWeatherPlacement === 'corner' ? newTabWeatherCornerRef : undefined}
+      role="status"
+      aria-live="polite"
+    >
       {newTabWeatherLoading && !newTabWeather ? <span>Loading weather…</span>
         : newTabWeatherError ? <span>{newTabWeatherError}</span>
-          : newTabWeather ? <><strong>{formatTemperature(newTabWeather.temperatureCelsius, newTabPreferences.temperatureUnit)} · {newTabWeather.description}</strong><small title={newTabWeather.location}>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location.split(',')[0]}</small>{newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}</>
+          : newTabWeather ? <>
+            <strong>{newTabWantsDaily && <WeatherGlyph condition={newTabWeather.condition ?? conditionFromDescription(newTabWeather.description)} />}{formatTemperature(newTabWeather.temperatureCelsius, weatherUnit)} · {newTabWeather.description}</strong>
+            <small title={newTabWeather.location}>{weatherProviderLabel(newTabWeather.provider)} · {newTabWeather.location.split(',')[0]}{newTabForecast?.capped ? ` · ${newTabForecast.limit}-day max` : ''}</small>
+            {newTabWeather.notice && <small className="new-tab-weather-notice">{newTabWeather.notice}</small>}
+            {newTabForecastView === 'today' && newTabForecastToday && (
+              <small className="new-tab-weather-today" aria-label="Today's high and low">
+                <span>↑{formatTemperatureShort(newTabForecastToday.highCelsius, weatherUnit)}</span><span>↓{formatTemperatureShort(newTabForecastToday.lowCelsius, weatherUnit)}</span>
+                {newTabForecastToday.precipitationChance !== null && <span className="new-tab-weather-pop"><RainChanceGlyph />{newTabForecastToday.precipitationChance}%</span>}
+              </small>
+            )}
+            {newTabWeatherHasRows && newTabForecast && (
+              <ol className="new-tab-weather-days" aria-label="Forecast">
+                {newTabForecast.days.map((day, index) => (
+                  <li key={day.date}>
+                    <span className="new-tab-weather-day">{forecastDayLabel(day.date, newTabPlaceToday, index)}</span>
+                    <WeatherGlyph condition={day.condition} label={day.description} />
+                    <span className="new-tab-weather-hi">{formatTemperatureShort(day.highCelsius, weatherUnit)}</span>
+                    <span className="new-tab-weather-lo">{formatTemperatureShort(day.lowCelsius, weatherUnit)}</span>
+                    <span className="new-tab-weather-pop">{day.precipitationChance !== null && <><RainChanceGlyph />{day.precipitationChance}%</>}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </>
             : <span>Weather unavailable</span>}
     </div>
   )
@@ -653,10 +696,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const clockVerticalPositionRef = useRef(newTabPreferences.clockVerticalPosition)
   clockVerticalPositionRef.current = newTabPreferences.clockVerticalPosition
   const hasNewTabWidgets = newTabOnScreen && (newTabPreferences.showClock || newTabPreferences.worldClocks.length > 0 || newTabWeatherPlacement === 'below' || newTabPreferences.showGreeting)
+  // A corner forecast is several rows tall: the clocks and icons make room for it (below).
+  const hasCornerForecast = newTabOnScreen && newTabWeatherPlacement === 'corner' && newTabWantsDaily
   useLayoutEffect(() => {
     const widgets = newTabWidgetsRef.current
-    const page = widgets?.closest<HTMLElement>('.new-tab-page')
-    if (!widgets || !page) return
+    const corner = newTabWeatherCornerRef.current
+    const page = (widgets ?? corner)?.closest<HTMLElement>('.new-tab-page')
+    if ((!widgets && !corner) || !page) return
     let observedIcons: HTMLElement | null = null
     const write = (): void => {
       const track = page.querySelector<HTMLElement>('.new-tab-icon-track')
@@ -666,14 +712,53 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         if (icons) observer.observe(icons)
         observedIcons = icons
       }
-      const baseTop = parseFloat(getComputedStyle(widgets).top) || 0
-      const free = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight - baseTop - widgets.offsetHeight : 0
-      const shift = clockShift(clockVerticalPositionRef.current, free)
+      const pageTop = page.getBoundingClientRect().top
+      // Space the clocks, weather and icons share above the photo credit.
+      const room = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight : Infinity
+      const baseTop = widgets ? parseFloat(getComputedStyle(widgets).top) || 0 : 0
+      // Only a reading with forecast rows makes room or shrinks to fit (a one-line reading never did).
+      const cornerForecast = corner?.classList.contains('has-forecast') ? corner : null
+      const belowWeather = widgets?.querySelector<HTMLElement>('.new-tab-weather-widget') ?? null
+      const belowForecast = belowWeather?.classList.contains('has-forecast') ? belowWeather : null
+      for (const element of [corner, belowWeather]) if (element && element !== cornerForecast && element !== belowForecast) element.style.removeProperty('--new-tab-weather-fit')
+      // A window too short for the forecast at its size shrinks it (down to half) instead of
+      // pushing the icons off the page; it grows back as the window does. Measured, not estimated
+      // (the columns re-wrap as they shrink), and only while a forecast shows; the result depends
+      // on the page size alone, so the resize it causes settles on the same value.
+      const fitTo = (element: HTMLElement, available: number): void => {
+        const fit = largestWeatherFit((candidate) => {
+          element.style.setProperty('--new-tab-weather-fit', String(candidate))
+          return element.offsetHeight <= available
+        })
+        if (fit === 1) element.style.removeProperty('--new-tab-weather-fit')
+        else element.style.setProperty('--new-tab-weather-fit', String(fit))
+      }
+      const besideBox = (box: DOMRect, other: DOMRect | undefined): boolean => Boolean(other && other.right > box.left - 8 && other.left < box.right + 8)
+      if (cornerForecast && Number.isFinite(room)) {
+        const box = cornerForecast.getBoundingClientRect()
+        const clocksBelow = widgets && besideBox(box, widgets.getBoundingClientRect()) ? widgets.offsetHeight + 8 : 0
+        if (clocksBelow || besideBox(box, icons?.getBoundingClientRect())) fitTo(cornerForecast, room - clocksBelow - (box.top - pageTop) - 8)
+      }
+      const cornerBox = cornerForecast ? cornerForecast.getBoundingClientRect() : null
+      const cornerBottom = cornerBox ? cornerBox.bottom - pageTop + 8 : 0
+      const besideCorner = (box: DOMRect | undefined): boolean => Boolean(cornerBox && besideBox(cornerBox, box))
+      const iconsClearCorner = besideCorner(icons?.getBoundingClientRect()) ? cornerBottom : 0
+      if (!widgets) {
+        if (iconsClearCorner) page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(iconsClearCorner)}px`)
+        else page.style.removeProperty('--new-tab-widgets-bottom')
+        return
+      }
+      // Clocks that would run into a corner forecast start under it instead.
+      const push = besideCorner(widgets.getBoundingClientRect()) ? Math.max(0, Math.ceil(cornerBottom - baseTop)) : 0
+      if (belowForecast && Number.isFinite(room)) fitTo(belowForecast, room - baseTop - push - (widgets.offsetHeight - belowForecast.offsetHeight))
+      const free = icons ? room - baseTop - push - widgets.offsetHeight : 0
+      const shift = push + clockShift(clockVerticalPositionRef.current, free)
       page.style.setProperty('--new-tab-clock-shift', `${shift}px`)
-      page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(baseTop + shift + widgets.offsetHeight)}px`)
+      page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(Math.max(baseTop + shift + widgets.offsetHeight, iconsClearCorner))}px`)
     }
     const observer = new ResizeObserver(write)
-    observer.observe(widgets)
+    if (widgets) observer.observe(widgets)
+    if (corner) observer.observe(corner)
     observer.observe(page)
     write()
     newTabWidgetsLayoutRef.current = write
@@ -683,7 +768,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       page.style.removeProperty('--new-tab-widgets-bottom')
       page.style.removeProperty('--new-tab-clock-shift')
     }
-  }, [hasNewTabWidgets])
+  }, [hasNewTabWidgets, hasCornerForecast])
   // A position drag moves the clocks before paint, step by step (the page follows every patch).
   useLayoutEffect(() => { newTabWidgetsLayoutRef.current?.() }, [newTabPreferences.clockVerticalPosition])
   // Whether this surface's own sidebar is actually painted: the sidebar overlay while it is
@@ -750,16 +835,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       setNewTabWeather(null)
       setNewTabWeatherError('')
       setNewTabWeatherLoading(false)
+      newTabWeatherIdentityRef.current = ''
       return
     }
     let mounted = true
-    setNewTabWeather(null)
-    setNewTabWeatherError('')
     const provider = newTabPreferences.weatherProvider
     const model = newTabPreferences.openMeteoModel
+    // Switching the forecast view keeps the reading on screen while daily rows load; a new place,
+    // provider, model or key clears it so a stale reading never shows under the wrong name.
+    const identity = `${provider}|${model}|${place ? `${place.latitude},${place.longitude}` : legacyLocation}|${newTabWeatherKeyVersion}`
+    if (newTabWeatherIdentityRef.current !== identity) {
+      setNewTabWeather(null)
+      setNewTabWeatherError('')
+    }
+    newTabWeatherIdentityRef.current = identity
+    const daily = newTabWantsDaily
     const refresh = (): void => {
       setNewTabWeatherLoading(true)
-      void window.api.browser.newTabWeather.get({ provider, model, place, location: legacyLocation }).then((reply) => {
+      void window.api.browser.newTabWeather.get({ provider, model, place, location: legacyLocation, daily }).then((reply) => {
         if (!mounted) return
         if (!reply.ok) { setNewTabWeatherError(reply.error); return }
         const weather = reply.value
@@ -783,7 +876,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       window.clearInterval(refreshTimer)
     }
     // The place is compared by its coordinates: a re-sent identical place doesn't refetch.
-  }, [surface, isLocalNewTab, newTabWeatherKeyVersion, newTabPreferences.weatherEnabled, newTabPreferences.weatherProvider, newTabPreferences.openMeteoModel, newTabPreferences.weatherPlace?.latitude, newTabPreferences.weatherPlace?.longitude, newTabPreferences.weatherPlace ? '' : newTabPreferences.weatherLocation])
+  }, [surface, isLocalNewTab, newTabWeatherKeyVersion, newTabWantsDaily, newTabPreferences.weatherEnabled, newTabPreferences.weatherProvider, newTabPreferences.openMeteoModel, newTabPreferences.weatherPlace?.latitude, newTabPreferences.weatherPlace?.longitude, newTabPreferences.weatherPlace ? '' : newTabPreferences.weatherLocation])
 
   const activeOrigin = httpOrigin(browser.url)
   const certificateLoadError = browser.loadError && browser.error && describeLoadError(browser.loadError).kind === 'certificate' ? browser.loadError.name ?? 'ERR_CERT_INVALID' : null

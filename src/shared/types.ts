@@ -1,4 +1,5 @@
 import type { ClockDateFormat, ClockTimeFormat, ClockWeight, WeatherPosition } from './new-tab-clock'
+import type { WeatherCondition, WeatherDay, WeatherForecastView } from './weather-forecast'
 import type { BrowserPageSecurity } from './certificates'
 import type { BrowserLoadError } from './navigation-errors'
 import type { TabSplitInfo } from './split-view'
@@ -96,6 +97,10 @@ export interface NewTabPreferences {
   temperatureUnit: TemperatureUnit
   /** Weather on its own line under the clocks, or in the top-right corner. */
   weatherPosition: WeatherPosition
+  /** Weather size, percent (MIN_WEATHER_SCALE–MAX_WEATHER_SCALE) on top of the gentle clock-following scale; 100 = the original look. */
+  weatherScale: number
+  /** Current only (the original look), today's high/low, or 3/5/7 daily rows. */
+  weatherForecast: WeatherForecastView
   iconSize: number
   linksPerRow: number
   showLinkLabels: boolean
@@ -120,6 +125,10 @@ export interface NewTabWeatherSnapshot {
   model?: OpenMeteoModelId
   /** One short line when the reading isn't exactly what was asked for ("BOM ACCESS-G data unavailable, showing best match."). */
   notice?: string
+  /** Icon family for the current reading. */
+  condition?: WeatherCondition
+  /** Daily rows (the place's local dates, today first) when the request asked for them. */
+  daily?: WeatherDay[]
 }
 
 export interface PinnedSite {

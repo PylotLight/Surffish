@@ -142,7 +142,7 @@ const api = {
       set: (preferences: NewTabPreferences): Promise<NewTabPreferences | null> => ipcRenderer.invoke('browser:new-tab-preferences:set', preferences)
     },
     newTabWeather: {
-      get: (request: { provider: WeatherProviderId; model?: OpenMeteoModelId; place: WeatherPlace | null; location: string }): Promise<WeatherResult<NewTabWeatherSnapshot>> => ipcRenderer.invoke('browser:new-tab-weather:get', request),
+      get: (request: { provider: WeatherProviderId; model?: OpenMeteoModelId; place: WeatherPlace | null; location: string; daily?: boolean }): Promise<WeatherResult<NewTabWeatherSnapshot>> => ipcRenderer.invoke('browser:new-tab-weather:get', request),
       search: (query: string): Promise<WeatherResult<WeatherPlace[]>> => ipcRenderer.invoke('browser:new-tab-weather:search', query),
       locate: (): Promise<WeatherResult<WeatherPlace>> => ipcRenderer.invoke('browser:new-tab-weather:locate'),
       keys: (): Promise<WeatherKeyStatus> => ipcRenderer.invoke('browser:new-tab-weather:keys:get'),

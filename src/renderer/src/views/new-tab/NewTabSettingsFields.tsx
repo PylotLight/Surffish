@@ -3,6 +3,7 @@ import type { NewTabPageId, NewTabPreferences, NewTabWeatherSnapshot, OpenMeteoM
 import { MAX_ICON_VERTICAL_POSITION, MAX_WORLD_CLOCKS, MIN_ICON_VERTICAL_POSITION } from '../../../../shared/persistence'
 import { formatTemperature, OPEN_METEO_MODELS, WEATHER_PROVIDERS, weatherPlaceLabel, weatherProviderLabel } from '../../../../shared/weather'
 import { WORLD_CITIES } from '../../../../shared/world-cities'
+import { forecastDayCount, MAX_WEATHER_SCALE, MIN_WEATHER_SCALE, WEATHER_FORECAST_LABELS, WEATHER_FORECAST_VIEWS, WEATHER_PROVIDER_DAY_LIMITS, WEATHER_SCALE_STEP, type WeatherForecastView } from '../../../../shared/weather-forecast'
 import { CLOCK_DATE_FORMATS, CLOCK_SCALE_STEP, formatClockDate, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE, usesTwelveHour, type ClockDateFormat, type ClockTimeFormat, type ClockWeight, type WeatherPosition } from '../../../../shared/new-tab-clock'
 import { SettingsGroup, SettingsRow, SettingsSegmented, SettingsSlider } from '../settings/SettingsControls'
 import TimeZonePicker from '../TimeZonePicker'
@@ -95,6 +96,11 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
   const twelveAuto = usesTwelveHour('auto')
   const twelveHour = usesTwelveHour(preferences.timeFormat)
   const sampleDate = new Date()
+  const forecastDays = forecastDayCount(preferences.weatherForecast)
+  const providerDays = WEATHER_PROVIDER_DAY_LIMITS[provider.id]
+  const forecastHint = forecastDays > providerDays ? `${provider.label} gives ${providerDays} days, so ${providerDays} show.`
+    : forecastDays === 1 ? 'Today’s high and low, and the chance of rain where the provider gives it.'
+      : forecastDays > 1 ? 'Each day’s high, low, conditions and chance of rain.' : 'Only the current temperature and conditions.'
   return (
     <>
       <SettingsGroup title="Page">
@@ -218,6 +224,12 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
         <SettingsRow label="Position" hint="Its own line under the clocks, or the page's top-right corner.">
           <SettingsSegmented value={preferences.weatherPosition} options={WEATHER_POSITION_OPTIONS} ariaLabel="Weather position" disabled={!preferences.weatherEnabled} onChange={(weatherPosition) => onPatch({ weatherPosition })} />
         </SettingsRow>
+        <SettingsRow label="Forecast" hint={forecastHint}>
+          <select className="settings-select" value={preferences.weatherForecast} disabled={!preferences.weatherEnabled} onChange={(event) => onPatch({ weatherForecast: event.target.value as WeatherForecastView })} aria-label="Weather forecast">
+            {WEATHER_FORECAST_VIEWS.map((view) => <option key={view} value={view}>{WEATHER_FORECAST_LABELS[view]}{forecastDayCount(view) > providerDays ? ` (${providerDays} with ${provider.label})` : ''}</option>)}
+          </select>
+        </SettingsRow>
+        <SettingsSlider label="Weather size" value={preferences.weatherScale} unit="%" min={MIN_WEATHER_SCALE} max={MAX_WEATHER_SCALE} step={WEATHER_SCALE_STEP} onChange={(weatherScale) => onPatch({ weatherScale })} />
         <SettingsRow label="Units">
           <SettingsSegmented value={preferences.temperatureUnit} options={[{ value: 'celsius', label: '°C' }, { value: 'fahrenheit', label: '°F' }] as const} ariaLabel="Weather temperature unit" disabled={!preferences.weatherEnabled} onChange={(temperatureUnit) => onPatch({ temperatureUnit })} />
         </SettingsRow>

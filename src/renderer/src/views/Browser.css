@@ -2188,9 +2188,12 @@
 }
 /* Weather: its own quiet line under the clocks/date (flex-basis 100 % breaks the wrapping widget row),
    or the page's top-right corner. It follows the clock size slider, but gently (0.9×–1.5×), so an XL
-   clock doesn't drag a huge reading after it, and a small one doesn't shrink it past legibility. */
+   clock doesn't drag a huge reading after it, and a small one doesn't shrink it past legibility.
+   The Weather size slider (--new-tab-weather-size, 1 = 100 %) multiplies on top, so 100 % is the
+   original look at every clock size. */
 .new-tab-weather-widget {
-  --new-tab-weather-scale: clamp(0.9, var(--new-tab-clock-scale, 1), 1.5);
+  /* --new-tab-weather-fit (< 1 only for a forecast too tall for a short window) is set by Browser.tsx. */
+  --new-tab-weather-scale: calc(clamp(0.9, var(--new-tab-clock-scale, 1), 1.5) * var(--new-tab-weather-size, 1) * var(--new-tab-weather-fit, 1));
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -2220,10 +2223,86 @@
   max-width: 320px;
   margin: 0 auto;
   color: rgba(250, 252, 253, 0.62);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--new-tab-weather-scale));
+}
+/* Forecast (Today / 3 / 5 / 7 days). Icons are 1em line glyphs, so the size slider scales them too. */
+.new-tab-weather-glyph {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
+  vertical-align: -0.2em;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.55));
+}
+.new-tab-weather-widget strong .new-tab-weather-glyph {
+  margin-right: 0.35em;
+}
+.new-tab-weather-drop {
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.15em;
+  vertical-align: -0.05em;
+  opacity: 0.8;
+}
+.new-tab-weather-widget .new-tab-weather-today {
+  display: inline-flex;
+  flex-basis: 100%;
+  justify-content: center;
+  gap: 0.6em;
+  color: rgba(250, 252, 253, 0.86);
+  font-size: calc(12.5px * var(--new-tab-weather-scale));
+  font-variant-numeric: tabular-nums;
+}
+.new-tab-weather-days {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(4px * var(--new-tab-weather-scale)) calc(6px * var(--new-tab-weather-scale));
+  margin: calc(4px * var(--new-tab-weather-scale)) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: calc(12.5px * var(--new-tab-weather-scale));
+  font-variant-numeric: tabular-nums;
+}
+/* Under the clocks: a column per day (weekday, icon, high | low, rain). */
+.new-tab-weather-days li {
+  display: grid;
+  min-width: 3.9em;
+  grid-template-columns: 1fr 1fr;
+  justify-items: center;
+  gap: 0.15em 0.35em;
+  padding: 0.35em 0.3em 0.3em;
+  border-radius: 0.7em;
+  background: rgba(10, 14, 20, 0.16);
+}
+.new-tab-weather-days li > .new-tab-weather-day,
+.new-tab-weather-days li > .new-tab-weather-glyph,
+.new-tab-weather-days li > .new-tab-weather-pop {
+  grid-column: 1 / -1;
+}
+.new-tab-weather-days .new-tab-weather-glyph {
+  width: 1.6em;
+  height: 1.6em;
+}
+.new-tab-weather-day {
+  color: rgba(250, 252, 253, 0.86);
+  font-weight: 550;
+  white-space: nowrap;
+}
+.new-tab-weather-hi {
+  font-weight: 600;
+}
+.new-tab-weather-lo {
+  color: rgba(250, 252, 253, 0.66);
+}
+.new-tab-weather-pop {
+  min-height: 1.2em;
+  color: rgba(198, 226, 255, 0.86);
+  font-size: 0.92em;
+  white-space: nowrap;
 }
 .new-tab-weather-widget.is-corner {
-  --new-tab-weather-scale: 1;
+  --new-tab-weather-scale: calc(var(--new-tab-weather-size, 1) * var(--new-tab-weather-fit, 1));
   position: absolute;
   z-index: 2;
   top: clamp(14px, 2.6vh, 26px);
@@ -2236,6 +2315,33 @@
 }
 .new-tab-weather-widget.is-corner .new-tab-weather-notice {
   margin: 0;
+}
+.new-tab-weather-widget.is-corner .new-tab-weather-today {
+  justify-content: flex-end;
+}
+.new-tab-weather-widget.is-corner.has-forecast {
+  max-width: min(46vw, calc(300px * var(--new-tab-weather-scale)));
+}
+/* Top right: a row per day (weekday, icon, high, low, rain), right-aligned like the reading. */
+.new-tab-weather-widget.is-corner .new-tab-weather-days {
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  align-items: center;
+  justify-content: end;
+  gap: 0.2em 0.55em;
+}
+.new-tab-weather-widget.is-corner .new-tab-weather-days li {
+  display: contents;
+}
+.new-tab-weather-widget.is-corner .new-tab-weather-days li > * {
+  grid-column: auto;
+}
+.new-tab-weather-widget.is-corner .new-tab-weather-day {
+  text-align: left;
+}
+.new-tab-weather-widget.is-corner .new-tab-weather-days .new-tab-weather-glyph {
+  width: 1.3em;
+  height: 1.3em;
 }
 /* The Customize panel covers the right edge: keep the corner reading visible beside it. */
 .new-tab-weather-widget.is-corner.is-beside-panel {

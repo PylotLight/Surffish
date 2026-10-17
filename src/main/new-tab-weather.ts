@@ -5,6 +5,7 @@ import {
   normalizeWeatherPlace, openMeteoModelLabel, parseGeocodingResults, parseIpLocation, parseMetNorway, parseOpenMeteoCurrent, parseOpenWeatherMap, parseWttr,
   WEATHER_CACHE_MS, weatherCacheKey, weatherErrorMessage, weatherPlaceLabel, weatherProviderLabel, type WeatherNetworkFailure
 } from '../shared/weather'
+import { conditionFromDescription, localClock, longitudeOffsetMinutes, parseMetNorwayDaily, parseOpenMeteoDaily, parseOpenWeatherForecast, parseWttrDaily, type WeatherDay } from '../shared/weather-forecast'
 import { backgroundNetworkBlockedReason } from './background-network'
 import { getBrowserSession } from './browser-session'
 import { readUserJson, writeUserJson } from './user-json'
@@ -12,6 +13,11 @@ import { readUserJson, writeUserJson } from './user-json'
 /**
  * New Tab weather. Every provider is asked by coordinates; Open-Meteo's keyless geocoder powers the
  * city search. Readings are cached 10 min per provider (+ Open-Meteo model) + place.
+ *
+ * Daily forecast rows ride on the same request where the provider allows it (Open-Meteo `daily=`,
+ * MET Norway's timeseries, wttr.in's three days); OpenWeather's free 5-day/3-hour forecast is one
+ * extra request, made in parallel and only while a forecast view is on. A cached reading without
+ * daily rows is refetched once when a forecast view asks for them; otherwise the 10 min cache holds.
  *
  * Requests go through the browser session's Chromium network stack (`session.fetch`), like feeds,
  * page watchers and the New Tab photos: the user's SOCKS proxy / network rules, the system proxy +
@@ -26,6 +32,8 @@ type WeatherFetch = (url: string, init: RequestInit) => Promise<Response>
 interface CachedWeather {
   expiresAt: number
   value: NewTabWeatherSnapshot
+  /** Fetched with daily rows (a forecast view was on). */
+  withDaily: boolean
 }
 
 const weatherCache = new Map<string, CachedWeather>()
@@ -165,54 +173,82 @@ export async function setWeatherApiKey(provider: unknown, keyInput: unknown): Pr
   return getWeatherKeyStatus()
 }
 
-type Reading = Pick<NewTabWeatherSnapshot, 'temperatureCelsius' | 'description'>
+type Reading = Pick<NewTabWeatherSnapshot, 'temperatureCelsius' | 'description' | 'daily'>
 
-async function readProvider(provider: WeatherProviderId, place: WeatherPlace, model: OpenMeteoModelId = DEFAULT_OPEN_METEO_MODEL): Promise<Reading> {
+async function readProvider(provider: WeatherProviderId, place: WeatherPlace, model: OpenMeteoModelId = DEFAULT_OPEN_METEO_MODEL, daily = false): Promise<Reading> {
   const lat = place.latitude.toFixed(4)
   const lon = place.longitude.toFixed(4)
   let url: URL
   let parse: (json: unknown) => Reading | null
+  let parseDaily: ((json: unknown) => WeatherDay[]) | null = null
+  let dailyUrl: URL | null = null
   if (provider === 'met-norway') {
-    url = new URL('https://api.met.no/weatherapi/locationforecast/2.0/compact')
+    // `complete` adds precipitation probability and 6-hour max/min (about twice the bytes): only for a forecast view.
+    url = new URL(`https://api.met.no/weatherapi/locationforecast/2.0/${daily ? 'complete' : 'compact'}`)
     url.search = new URLSearchParams({ lat, lon }).toString()
     parse = parseMetNorway
+    if (daily) {
+      const clock = localClock(place.timeZone, longitudeOffsetMinutes(place.longitude))
+      parseDaily = (json) => parseMetNorwayDaily(json, clock)
+    }
   } else if (provider === 'wttr') {
     url = new URL(`https://wttr.in/${lat},${lon}`)
     url.search = new URLSearchParams({ format: 'j1' }).toString()
     parse = parseWttr
+    if (daily) parseDaily = parseWttrDaily
   } else if (provider === 'openweathermap') {
     const key = (await readKeys()).openweathermap
     if (!key) throw new Error('Add your OpenWeather API key in New Tab settings, or pick a free provider.')
     url = new URL('https://api.openweathermap.org/data/2.5/weather')
     url.search = new URLSearchParams({ lat, lon, units: 'metric', appid: key }).toString()
     parse = parseOpenWeatherMap
+    if (daily) {
+      dailyUrl = new URL('https://api.openweathermap.org/data/2.5/forecast')
+      dailyUrl.search = url.search
+      parseDaily = parseOpenWeatherForecast
+    }
   } else {
     url = new URL('https://api.open-meteo.com/v1/forecast')
-    const params = new URLSearchParams({ latitude: lat, longitude: lon, current: 'temperature_2m,weather_code', timezone: 'auto', forecast_days: '1' })
+    const params = new URLSearchParams({ latitude: lat, longitude: lon, current: 'temperature_2m,weather_code', timezone: 'auto', forecast_days: daily ? '7' : '1' })
+    if (daily) {
+      params.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max')
+      parseDaily = parseOpenMeteoDaily
+    }
     if (model !== DEFAULT_OPEN_METEO_MODEL) params.set('models', model)
     url.search = params.toString()
     parse = parseOpenMeteoCurrent
   }
-  const reading = parse(await getJson(url, provider))
+  // OpenWeather's forecast is its own request: asked alongside the current one, never after it,
+  // and its failure only costs the daily rows.
+  const forecastUrl = dailyUrl
+  const [json, dailyJson] = await Promise.all([
+    getJson(url, provider),
+    forecastUrl ? getJson(forecastUrl, provider).catch((error: unknown) => {
+      console.warn(`[weather] ${logUrl(forecastUrl)} forecast failed: ${error instanceof Error ? error.message : String(error)}`)
+      return null
+    }) : Promise.resolve(undefined)
+  ])
+  const reading = parse(json)
   if (!reading) {
     console.warn(`[weather] ${logUrl(url)}${provider === 'open-meteo' ? ` (model ${model})` : ''} had no current reading`)
     throw new WeatherRequestError(weatherErrorMessage(provider, {}), { unreadable: true })
   }
+  if (parseDaily) reading.daily = parseDaily(forecastUrl ? dailyJson : json)
   return reading
 }
 
 type ProviderReading = Reading & Pick<NewTabWeatherSnapshot, 'provider' | 'model' | 'notice'>
 
 /** Open-Meteo with a chosen model. A model with no data (BOM delivery paused) or one Open-Meteo rejects falls back to best match, with a notice. */
-async function readOpenMeteo(place: WeatherPlace, model: OpenMeteoModelId): Promise<ProviderReading> {
-  if (model === DEFAULT_OPEN_METEO_MODEL) return { ...await readProvider('open-meteo', place), provider: 'open-meteo', model }
+async function readOpenMeteo(place: WeatherPlace, model: OpenMeteoModelId, daily: boolean): Promise<ProviderReading> {
+  if (model === DEFAULT_OPEN_METEO_MODEL) return { ...await readProvider('open-meteo', place, model, daily), provider: 'open-meteo', model }
   try {
-    return { ...await readProvider('open-meteo', place, model), provider: 'open-meteo', model }
+    return { ...await readProvider('open-meteo', place, model, daily), provider: 'open-meteo', model }
   } catch (error) {
     const failure = error instanceof WeatherRequestError ? error.failure : null
     if (!failure || !(failure.unreadable || failure.status === 400)) throw error
     return {
-      ...await readProvider('open-meteo', place),
+      ...await readProvider('open-meteo', place, DEFAULT_OPEN_METEO_MODEL, daily),
       provider: 'open-meteo',
       model: DEFAULT_OPEN_METEO_MODEL,
       notice: `${openMeteoModelLabel(model)} data unavailable, showing best match.`
@@ -223,15 +259,15 @@ async function readOpenMeteo(place: WeatherPlace, model: OpenMeteoModelId): Prom
 /** The other keyless provider to try when one is busy or broken (429, 5xx, timeout); never for offline/DNS/proxy/kill switch. */
 const KEYLESS_FALLBACK: Partial<Record<WeatherProviderId, WeatherProviderId>> = { 'open-meteo': 'met-norway', 'met-norway': 'open-meteo' }
 
-async function readWithFallback(provider: WeatherProviderId, place: WeatherPlace, model: OpenMeteoModelId): Promise<ProviderReading> {
+async function readWithFallback(provider: WeatherProviderId, place: WeatherPlace, model: OpenMeteoModelId, daily: boolean): Promise<ProviderReading> {
   try {
-    if (provider === 'open-meteo') return await readOpenMeteo(place, model)
-    return { ...await readProvider(provider, place), provider }
+    if (provider === 'open-meteo') return await readOpenMeteo(place, model, daily)
+    return { ...await readProvider(provider, place, DEFAULT_OPEN_METEO_MODEL, daily), provider }
   } catch (error) {
     const fallback = KEYLESS_FALLBACK[provider]
     if (!fallback || !(error instanceof WeatherRequestError) || !isProviderSideFailure(error.failure)) throw error
     try {
-      const reading = await readProvider(fallback, place)
+      const reading = await readProvider(fallback, place, DEFAULT_OPEN_METEO_MODEL, daily)
       return { ...reading, provider: fallback, notice: `${error.message.replace(/ Trying again later\.$/, '')} Showing ${weatherProviderLabel(fallback)}.` }
     } catch (fallbackError) {
       console.warn(`[weather] fallback to ${weatherProviderLabel(fallback)} failed too: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`)
@@ -247,12 +283,15 @@ export interface NewTabWeatherRequest {
   place?: unknown
   /** Settings saved before city search: free text, geocoded once (the renderer then saves the place). */
   location?: unknown
+  /** A forecast view is on: include daily rows. */
+  daily?: unknown
 }
 
 export async function getNewTabWeather(request: NewTabWeatherRequest | string): Promise<NewTabWeatherSnapshot> {
   const input = typeof request === 'string' ? { location: request } : request
   const provider = isWeatherProviderId(input.provider) ? input.provider : DEFAULT_WEATHER_PROVIDER
   const model = provider === 'open-meteo' && isOpenMeteoModelId(input.model) ? input.model : DEFAULT_OPEN_METEO_MODEL
+  const daily = input.daily === true
   let place = normalizeWeatherPlace(input.place)
   if (!place) {
     const location = typeof input.location === 'string' ? input.location.trim().slice(0, 100) : ''
@@ -261,13 +300,22 @@ export async function getNewTabWeather(request: NewTabWeatherRequest | string): 
   }
   const cacheKey = weatherCacheKey(provider, place, model)
   const cached = weatherCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) return { ...cached.value }
-  const { notice, model: usedModel, ...reading } = await readWithFallback(provider, place, model)
-  const value: NewTabWeatherSnapshot = { ...reading, location: weatherPlaceLabel(place), place, fetchedAt: Date.now() }
+  if (cached && cached.expiresAt > Date.now() && (cached.withDaily || !daily)) return rendererCopy(cached.value, daily)
+  const { notice, model: usedModel, daily: days, ...reading } = await readWithFallback(provider, place, model, daily)
+  const value: NewTabWeatherSnapshot = { ...reading, condition: conditionFromDescription(reading.description), location: weatherPlaceLabel(place), place, fetchedAt: Date.now() }
+  if (days) value.daily = days
   if (usedModel) value.model = usedModel
   if (notice) value.notice = notice
-  weatherCache.set(cacheKey, { value, expiresAt: Date.now() + WEATHER_CACHE_MS })
-  return { ...value, place: { ...place } }
+  weatherCache.set(cacheKey, { value, expiresAt: Date.now() + WEATHER_CACHE_MS, withDaily: daily })
+  return rendererCopy(value, daily)
+}
+
+/** A copy for the renderer: daily rows only when asked (Current only keeps the IPC reply as small as before). */
+function rendererCopy(value: NewTabWeatherSnapshot, daily: boolean): NewTabWeatherSnapshot {
+  const { daily: days, ...rest } = value
+  const copy: NewTabWeatherSnapshot = { ...rest, place: { ...rest.place } }
+  if (daily && days) copy.daily = days.map((day) => ({ ...day }))
+  return copy
 }
 
 
