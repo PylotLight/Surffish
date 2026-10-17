@@ -86,6 +86,8 @@ interface BrowserTab {
   win: BrowserWindowState
   view: WebContentsView | null
   faviconUrl: string | null
+  /** The icon URL the page last reported that `faviconUrl` shows (its http URL; `faviconUrl` may be its cached data: copy). */
+  faviconSource: string | null
   faviconRevision: number
   error: string | null
   downloadStartedForCurrentLoad: boolean
@@ -522,19 +524,41 @@ function refreshTabFavicon(tab: BrowserTab): void {
       }
     }
     if (!faviconUrl) return
-    if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
+    showTabFavicon(tab, contents, pageUrl, faviconUrl, revision)
+  }).catch(() => undefined)
+}
+
+/**
+ * The page reported `faviconUrl` as its icon: the tab shows it, then its cached data: copy.
+ *
+ * Pages re-report the same icon on every load, same-document ones included (did-stop-loading after
+ * each pushState: a chat app does that per message while it streams). That used to flip the tab's
+ * favicon to the icon's http URL and, once the re-fetch landed, back to the data: copy, twice per
+ * load; in the menu bar popout every flip rebuilt the strip and reloaded each chip's favicon, so the
+ * strip blinked while the page streamed. The icon the tab already shows now stays as it is (no
+ * re-fetch either), and a new icon replaces a cached one only once its own copy (or, failing that,
+ * its URL) is ready, so the tab never shows a blank in between.
+ */
+function showTabFavicon(tab: BrowserTab, contents: WebContents, pageUrl: string, faviconUrl: string, revision: number): void {
+  if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
+  if (tab.faviconSource === faviconUrl && tab.faviconUrl) return
+  tab.faviconSource = faviconUrl
+  const showingCopy = tab.faviconUrl?.startsWith('data:') === true
+  if (tab.isPrivate || !showingCopy) {
     if (tab.faviconUrl !== faviconUrl) {
       tab.faviconUrl = faviconUrl
       publishTabs(tab.win)
     }
-    if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
-      if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
-      if (tab.faviconUrl !== cachedIcon) {
-        tab.faviconUrl = cachedIcon
-        publishTabs(tab.win)
-      }
-    })
-  }).catch(() => undefined)
+    if (tab.isPrivate) return
+  }
+  void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
+    if (tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
+    const next = cachedIcon ?? faviconUrl
+    if (tab.faviconUrl !== next) {
+      tab.faviconUrl = next
+      publishTabs(tab.win)
+    }
+  })
 }
 
 let historyChangedTimer: ReturnType<typeof setTimeout> | null = null
@@ -1318,8 +1342,12 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
     if (!isInPlace && isActiveTab(tab)) hideLinkStatus(false, tab.win.window)
     tab.downloadStartedForCurrentLoad = false
     tab.lastUrl = url
-    tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
-    tab.faviconRevision += 1
+    // Same document (pushState / replaceState / #hash): same icon, which stays.
+    if (!isInPlace) {
+      tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
+      tab.faviconSource = null
+      tab.faviconRevision += 1
+    }
     persistOpenTabs()
     publishTabs(tab.win)
   })
@@ -1331,19 +1359,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
       .map((candidate) => normalizeFaviconUrl(candidate) ?? normalizeCachedFaviconDataUrl(candidate))
       .find((candidate): candidate is string => candidate !== null)
     if (!faviconUrl) return
-    const revision = ++tab.faviconRevision
-    if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
-    if (tab.faviconUrl !== faviconUrl) {
-      tab.faviconUrl = faviconUrl
-      publishTabs(tab.win)
-    }
-    if (!tab.isPrivate) void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
-      if (!cachedIcon || tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
-      if (tab.faviconUrl !== cachedIcon) {
-        tab.faviconUrl = cachedIcon
-        publishTabs(tab.win)
-      }
-    })
+    showTabFavicon(tab, contents, pageUrl, faviconUrl, ++tab.faviconRevision)
   })
   contents.on('did-stop-loading', () => {
     if (!isCurrentContents()) return
@@ -1464,6 +1480,7 @@ function openPageMadeTab(opener: BrowserTab, url: string, activate: boolean, opt
   tab.lastUrl = url
   tab.pendingUrl = ''
   tab.faviconUrl = null
+  tab.faviconSource = null
   tab.closeIfOnlyDownload = true
   const view = createTabView(tab, { webContents: opened, webPreferences: options.webPreferences })
   if (view && isActiveTab(tab)) tab.inactiveSince = null
@@ -1710,6 +1727,7 @@ setGlanceHost({
     tab.lastUrl = url
     tab.pendingUrl = ''
     tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
+    tab.faviconSource = null
     if (opener?.groupId) tab.groupId = opener.groupId
     const view = createTabView(tab, { view: pageView })
     if (!view) {
@@ -2131,6 +2149,7 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     win: w,
     view: null,
     faviconUrl: getCachedBrowserSiteFavicon(target),
+    faviconSource: null,
     faviconRevision: 0,
     error: null,
     downloadStartedForCurrentLoad: false,

@@ -12,8 +12,8 @@
  *  - loading shows only once it has lasted MINI_HEADER_LOADING_DELAY_MS (a same-document blip is over
  *    in a frame or two and never shows; a real load shows a beat later) and goes away at once;
  *  - an update that then changes nothing the header shows is dropped;
- *  - only the title changing is held to one push per MINI_HEADER_TITLE_THROTTLE_MS (the trailing
- *    push carries the last title);
+ *  - only the title (or a strip chip's title) changing is held to one push per
+ *    MINI_HEADER_TITLE_THROTTLE_MS (the trailing push carries the last titles);
  *  - anything else goes out at once.
  */
 
@@ -46,8 +46,12 @@ interface Keys {
 }
 
 function keysOf<S extends { title: string; loading: boolean }>(state: S, extra: string): Keys {
-  const rest = JSON.stringify({ ...state, title: '' }) + '\u0000' + extra
-  return { full: `${rest}\u0000${state.title}`, rest }
+  // The strip's chip titles count as titles too (a background chat tab retitling while it streams).
+  const tabs = (state as { tabs?: unknown }).tabs
+  const chips = Array.isArray(tabs) ? tabs.map((tab: { title?: unknown }) => ({ ...tab, title: '' })) : tabs
+  const titles = Array.isArray(tabs) ? tabs.map((tab: { title?: unknown }) => String(tab.title ?? '')).join('\u0001') : ''
+  const rest = JSON.stringify({ ...state, title: '', tabs: chips }) + '\u0000' + extra
+  return { full: `${rest}\u0000${state.title}\u0002${titles}`, rest }
 }
 
 export function createHeaderStateGate<S extends { title: string; loading: boolean }>(options: { now: () => number; titleThrottleMs?: number; loadingDelayMs?: number }): HeaderStateGate<S> {
@@ -78,9 +82,10 @@ export function createHeaderStateGate<S extends { title: string; loading: boolea
       return { send: shown, recheckMs: recheck }
     },
     sent(state, extra = '') {
+      const keys = keysOf(state, extra)
       // A title change (not the first push) starts the throttle window.
-      if (last && state.title !== last.title) titleAt = options.now()
-      last = { ...keysOf(state, extra), title: state.title, loading: state.loading }
+      if (last && keys.full.slice(keys.rest.length) !== last.full.slice(last.rest.length)) titleAt = options.now()
+      last = { ...keys, title: state.title, loading: state.loading }
     },
     reset() {
       last = null

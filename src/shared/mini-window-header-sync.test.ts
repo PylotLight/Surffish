@@ -106,4 +106,23 @@ describe('mini window header state gate', () => {
     g.reset()
     expect(push(base).send).toEqual(base)
   })
+
+  test('a strip chip retitling is throttled like the title, and the last titles land', () => {
+    type Tabbed = State & { tabs: Array<{ tabId: string; title: string; faviconUrl: string | null }> }
+    let now = 1000
+    const g = createHeaderStateGate<Tabbed>({ now: () => now })
+    const push = (state: Tabbed) => { const plan = g.plan(state); if (plan.send) g.sent(plan.send); return plan }
+    const tabs = (title: string) => [{ tabId: 'a', title: 'Hark', faviconUrl: 'data:a' }, { tabId: 'b', title, faviconUrl: 'data:b' }]
+    push({ ...base, tabs: tabs('Chat') })
+    expect(push({ ...base, tabs: tabs('Chat 1') }).send).not.toBeNull()
+    now += 16
+    const held = push({ ...base, tabs: tabs('Chat 2') })
+    expect(held.send).toBeNull()
+    expect(held.recheckMs).toBe(MINI_HEADER_TITLE_THROTTLE_MS - 16)
+    now += MINI_HEADER_TITLE_THROTTLE_MS
+    expect(push({ ...base, tabs: tabs('Chat 3') }).send?.tabs[1]?.title).toBe('Chat 3')
+    // A chip's favicon changing is not a title: it goes out at once.
+    now += 16
+    expect(push({ ...base, tabs: tabs('Chat 3').map((tab) => ({ ...tab, faviconUrl: 'data:new' })) }).send).not.toBeNull()
+  })
 })

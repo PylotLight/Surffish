@@ -399,8 +399,55 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   window.miniWindow.onTabDragCancel(() => { if (dragTab) finishChipDrag() })
   window.addEventListener('blur', () => { if (dragTab && !dragTab.moved) finishChipDrag() })
   let deferredTabs = null
-  let stripKey = ''
-  const chipVolumes = new Map()
+  // The chips, by tab id. A tab update touches only what changed on its chip (label, tooltip, icon,
+  // active, speaker): rebuilding the strip re-created every chip and re-set every favicon's src, and a
+  // page that updates often (a chat app streaming a reply) made the whole strip blink.
+  const chips = new Map()
+  function setIcon(chip, url) {
+    if (chip.icon === url) return
+    chip.icon = url
+    if (!url) { if (chip.img) chip.img.hidden = true; return }
+    if (!chip.img) {
+      chip.img = document.createElement('img')
+      chip.img.alt = ''
+      chip.img.hidden = true
+      chip.img.addEventListener('error', () => { chip.img.hidden = true })
+      chip.item.prepend(chip.img)
+    }
+    // Swapped in once decoded, so the chip never shows a blank icon in between.
+    const img = chip.img
+    const next = new Image()
+    next.src = url
+    next.decode().then(() => { if (chip.icon === url) { img.src = url; img.hidden = false } }, () => { if (chip.icon === url) img.hidden = true })
+  }
+  function makeChip(tabId) {
+    const item = document.createElement('div')
+    item.className = 'tab'
+    item.dataset.tabId = tabId
+    item.setAttribute('role', 'tab')
+    item.tabIndex = 0
+    const label = document.createElement('span')
+    label.className = 'label'
+    const close = document.createElement('button')
+    close.innerHTML = '&#215;'
+    close.title = 'Close Tab'
+    close.addEventListener('pointerdown', (event) => event.stopPropagation())
+    close.addEventListener('click', (event) => { event.stopPropagation(); window.miniWindow.closeTab(tabId) })
+    const volume = makeVolume(document.createElement('span'), true)
+    item.append(label, volume.root, close)
+    item.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.miniWindow.activateTab(tabId) }
+      // ⌥⇧← / ⌥⇧→ (like the sidebar's ⌥⇧↑ / ⌥⇧↓): move the chip along the strip.
+      else if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) { event.preventDefault(); window.miniWindow.stepTab(tabId, event.key === 'ArrowLeft' ? -1 : 1) }
+    })
+    // Click: switch. Press and drag: along the strip reorders; out of the window splits off, onto
+    // another mini window joins it, onto a browser window goes back to its sidebar. Esc cancels.
+    item.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || dragTab) return
+      startChipDrag(tabId, item, event)
+    })
+    return { item, label, close, volume, img: null, icon: null }
+  }
   function renderTabs(tabs) {
     document.body.classList.toggle('tabbed', tabs.length > 1)
     syncPopoutTitles()
@@ -410,57 +457,25 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     setAttr(closeButton, 'aria-label', tabs.length > 1 ? 'Close Tab' : 'Close Mini Window')
     // Mid-drag the strip stays as it is; the latest tabs render when it is let go.
     if (dragTab) { draggedTabs = tabs; return }
-    // Only a speaker changed: update the chips in place (keeps a hovered slider open).
-    const key = JSON.stringify(tabs.map((tab) => [tab.tabId, tab.title, tab.faviconUrl, tab.active]))
-    if (key === stripKey) {
-      for (const tab of tabs) chipVolumes.get(tab.tabId)?.update(tab)
-      return
+    const ids = tabs.map((tab) => tab.tabId)
+    const same = ids.length === strip.children.length && ids.every((id, index) => strip.children[index].dataset.tabId === id)
+    // Never take a chip away or move it under a slider being dragged.
+    if (!same && volumeBusy > 0) { deferredTabs = tabs; return }
+    for (const tab of tabs) {
+      let chip = chips.get(tab.tabId)
+      if (!chip) { chip = makeChip(tab.tabId); chips.set(tab.tabId, chip) }
+      chip.item.classList.toggle('active', Boolean(tab.active))
+      setAttr(chip.item, 'aria-selected', tab.active ? 'true' : 'false')
+      setAttr(chip.item, 'title', tab.title + ' (drag out of the window to split it off)')
+      setText(chip.label, tab.title)
+      setAttr(chip.close, 'aria-label', 'Close ' + tab.title)
+      setIcon(chip, tab.faviconUrl || null)
+      chip.volume.update(tab)
     }
-    // Never rebuild under a slider being dragged.
-    if (volumeBusy > 0) { deferredTabs = tabs; return }
-    stripKey = key
-    chipVolumes.clear()
-    strip.replaceChildren(...tabs.map((tab) => {
-      const item = document.createElement('div')
-      item.className = 'tab' + (tab.active ? ' active' : '')
-      item.dataset.tabId = tab.tabId
-      item.setAttribute('role', 'tab')
-      item.setAttribute('aria-selected', tab.active ? 'true' : 'false')
-      item.tabIndex = 0
-      item.title = tab.title + ' (drag out of the window to split it off)'
-      if (tab.faviconUrl) {
-        const img = document.createElement('img')
-        img.alt = ''
-        img.src = tab.faviconUrl
-        img.addEventListener('error', () => img.remove())
-        item.append(img)
-      }
-      const label = document.createElement('span')
-      label.className = 'label'
-      label.textContent = tab.title
-      const close = document.createElement('button')
-      close.innerHTML = '&#215;'
-      close.title = 'Close Tab'
-      close.setAttribute('aria-label', 'Close ' + tab.title)
-      close.addEventListener('pointerdown', (event) => event.stopPropagation())
-      close.addEventListener('click', (event) => { event.stopPropagation(); window.miniWindow.closeTab(tab.tabId) })
-      const volume = makeVolume(document.createElement('span'), true)
-      volume.update(tab)
-      chipVolumes.set(tab.tabId, volume)
-      item.append(label, volume.root, close)
-      item.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.miniWindow.activateTab(tab.tabId) }
-        // ⌥⇧← / ⌥⇧→ (like the sidebar's ⌥⇧↑ / ⌥⇧↓): move the chip along the strip.
-        else if (event.altKey && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) { event.preventDefault(); window.miniWindow.stepTab(tab.tabId, event.key === 'ArrowLeft' ? -1 : 1) }
-      })
-      // Click: switch. Press and drag: along the strip reorders; out of the window splits off, onto
-      // another mini window joins it, onto a browser window goes back to its sidebar. Esc cancels.
-      item.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0 || dragTab) return
-        startChipDrag(tab.tabId, item, event)
-      })
-      return item
-    }))
+    if (same) return
+    const keep = new Set(ids)
+    for (const id of [...chips.keys()]) if (!keep.has(id)) chips.delete(id)
+    strip.replaceChildren(...ids.map((id) => chips.get(id).item))
     requestAnimationFrame(reportStripLayout)
   }
   // Button hints: shown in the title's place (a native tooltip would drop over the tab strip).
