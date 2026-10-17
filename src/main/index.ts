@@ -58,6 +58,11 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
   const profileName = profileOverride ? `${APP_NAME} ${profileOverride}` : `${APP_NAME} Dev`
   app.setName(profileName)
   app.setPath('userData', join(app.getPath('appData'), profileName))
+  // macOS Keychain ACLs pin to the requesting binary's code signature. A dev run is the ad-hoc
+  // signed Electron in node_modules, which changes on every Electron bump, so "Always Allow" never
+  // sticks and every launch asks for the login password. Dev profiles use Chromium's mock keychain
+  // instead (a fixed, non-secret key: fine for throwaway dev data). SURFFISH_REAL_KEYCHAIN=1 opts out.
+  if (process.platform === 'darwin' && !app.isPackaged && process.env['SURFFISH_REAL_KEYCHAIN'] !== '1') app.commandLine.appendSwitch('use-mock-keychain')
 }
 // One user agent everywhere, before any session or page exists. Sessions get theirs from
 // browser-session.ts, but service workers and the workers inside cross-site iframes (Cloudflare
