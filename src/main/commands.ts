@@ -54,6 +54,7 @@ import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glan
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, getBrowserActiveTabId, hasMiniWindows } from './browser'
 import { miniHeaderDebugEnabled, setMiniHeaderDebug } from './mini-header-debug'
+import { getDebugLoggingState, revealStallLog, setDebugLogging } from './stall-logger'
 import { canMergeMiniWindows, canSplitMiniWindowTab, mergeMiniWindows, moveTabToMiniWindow, splitMiniWindowTab, stepMiniWindowTab, canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
@@ -263,6 +264,31 @@ const COMMANDS: BrowserCommand[] = [
       const path = setMiniHeaderDebug(on)
       if (on) flashBrowserStatus('Logging mini window header events to ' + path, 5000)
       else setTimeout(() => shell.showItemInFolder(path), 400)
+      return true
+    }
+  },
+  {
+    // Debug logging (main/stall-logger.ts): stalls, crashes and a heartbeat to ~/Library/Logs/Surffish/stalls.log.
+    // Same setting as Settings → Advanced → Developer → Debug logging.
+    id: 'debug.stallLogging',
+    title: () => {
+      const state = getDebugLoggingState()
+      return state.active ? (state.forcedByEnv ? 'Debug Logging Is On (SURFFISH_DEBUG_STALLS)' : 'Turn Off Debug Logging (Stalls & Crashes)') : 'Turn On Debug Logging (Stalls & Crashes)'
+    },
+    section: 'Settings',
+    keywords: ['debug', 'logging', 'stall', 'freeze', 'hang', 'lockup', 'beachball', 'crash', 'diagnostics', 'log', 'developer'], refocusPage: true,
+    enabled: () => !getDebugLoggingState().forcedByEnv,
+    run: () => {
+      const state = setDebugLogging({ enabled: !getDebugLoggingState().enabled })
+      flashBrowserStatus(state.active ? `Logging stalls and crashes to ${state.logPath}` : 'Debug logging off', 5000)
+      return true
+    }
+  },
+  {
+    id: 'debug.revealStallLog', title: 'Reveal Stall Log', section: 'Settings',
+    keywords: ['debug', 'logging', 'stall', 'freeze', 'hang', 'crash', 'log', 'finder', 'show', 'open'], refocusPage: true,
+    run: () => {
+      void revealStallLog()
       return true
     }
   },

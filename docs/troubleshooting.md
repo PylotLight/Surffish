@@ -1,5 +1,15 @@
 # Troubleshooting
 
+## The app (or the whole Mac) freezes for a while
+
+Turn on **Debug logging** in **Settings → Advanced → Developer** (or ⌘K → *Turn On Debug Logging*, or launch with `SURFFISH_DEBUG_STALLS=1`). It is off by default and costs nothing while off; the setting survives restarts. While on, Surffish appends to `~/Library/Logs/Surffish/stalls.log` (`stalls.1.log` holds the previous ~5 MB):
+
+- `STALL`: the main process was blocked ≥ 500 ms, with a snapshot (per-process type, CPU and memory, free memory, macOS memory pressure, load average, windows, tabs, awake tabs, hidden prerender views, wake snapshot disk writes). `app in background` means no window was focused (macOS may throttle timers then).
+- `HEARTBEAT` every 30 s with the same snapshot. A gap between heartbeats with no `SUSPEND` line means the whole machine stopped, not just Surffish.
+- `UNRESPONSIVE` / `RESPONSIVE` / `RENDERER-GONE` / `GPU-GONE` / `CHILD-GONE` / `RECOVERY-*` / `MAIN-ERROR` from the crash guard.
+
+Pages are named by host only; private tabs are never named. ⌘K → *Reveal Stall Log* shows the file in Finder.
+
 ## The proxy is on but pages do not load
 
 Surffish only talks to a local SOCKS5 endpoint; it does not start SSH for you. A typical one:

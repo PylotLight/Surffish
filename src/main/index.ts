@@ -45,6 +45,11 @@ import { registerMiniWindowIpc, setMiniWindowAppShortcuts, startMiniWindowMenuBa
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { initializeLocalAI, registerLocalAIIpc } from './local-ai'
 import { chromeUserAgent } from './adblock-policy'
+import { initializeStallLogger, registerDebugLoggingIpc, setStallLogContext } from './stall-logger'
+import { getBrowserTabProcessEntries } from './browser'
+import { isMainWindowRenderer } from './browser-shell'
+import { getOmniboxPrerenderStats } from './omnibox-prerender'
+import { getWakeSnapshotDiskWriteStats } from './wake-snapshot-disk'
 
 installIpcWindowScope()
 app.setName(APP_NAME)
@@ -88,6 +93,18 @@ if (!hasInstanceLock) app.quit()
 else registerExternalOpenHandlers()
 app.whenReady().then(async () => {
   traceStartup('app ready')
+  // Debug logging (off by default; Settings → Advanced → Developer, or SURFFISH_DEBUG_STALLS=1):
+  // started first so stalls during startup are caught too.
+  setStallLogContext({
+    windows: () => browserWindows().length,
+    tabs: () => {
+      const tabs = getBrowserTabProcessEntries()
+      return { total: tabs.length, awake: tabs.filter((tab) => tab.contents !== null).length }
+    },
+    prerenders: () => (getOmniboxPrerenderStats().active ? 1 : 0),
+    snapshotWrites: getWakeSnapshotDiskWriteStats
+  })
+  initializeStallLogger()
   if (!app.isPackaged) console.info('Surffish browser profile:', app.getPath('userData'))
   try {
     // Space definitions first: the proxy reads each Space partition's forced route.
@@ -118,6 +135,7 @@ app.whenReady().then(async () => {
   registerIpc()
   registerUpdateIpc()
   registerDiagnosticsIpc()
+  registerDebugLoggingIpc(isMainWindowRenderer)
   registerBookmarkIpc()
   registerWindowIpc()
   registerTabArchiveIpc()

@@ -8,6 +8,7 @@ import {
   stabilityFailureTotal,
   type StabilityCounters
 } from '../shared/stability'
+import { stallLogActive, stallLogContentsEvent, stallLogEvent } from './stall-logger'
 
 /**
  * Main-process crash guard (installed first thing in index.ts):
@@ -39,6 +40,8 @@ const GPU_REPAINT_DELAY_MS = 750
 
 function logThrottled(kind: string, error: unknown): void {
   const signature = `${kind} ${errorSignature(error)}`
+  // Debug logging (stall-logger.ts): every occurrence, signature only.
+  if (stallLogActive()) stallLogEvent('main-error', signature.slice(0, 300))
   const occurrence = throttle.shouldLog(signature)
   if (!occurrence) return
   const suffix = occurrence > 1 ? ` (seen ${occurrence}×)` : ''
@@ -93,11 +96,13 @@ export function watchShellSurface(contents: WebContents, reload: () => Promise<v
     if (!isLive() || contents.isDestroyed()) return
     if (!budget.tryTake()) {
       console.error(`[crash guard] ${describe(contents)} ${why} again; not reloading it (more than 3 times in a minute).`)
+      stallLogContentsEvent('recovery-skipped', contents, `${why} again (more than 3 times in a minute)`)
       return
     }
     setTimeout(() => {
       if (!isLive() || contents.isDestroyed()) return
       countStabilityEvent(counters, 'shellReloads', `${describe(contents)} after ${why}`)
+      stallLogContentsEvent('recovery-reload', contents, `after ${why}`)
       reload().catch((error: unknown) => console.error(`[crash guard] could not reload ${describe(contents)}:`, error))
     }, SHELL_RELOAD_DELAY_MS)
   }
@@ -114,6 +119,7 @@ export function watchShellSurface(contents: WebContents, reload: () => Promise<v
       // Paused in a debugger is not a hang.
       if (!isLive() || contents.isDestroyed() || contents.isDevToolsOpened()) return
       console.warn(`[crash guard] app surface ${describe(contents)} unresponsive for ${SHELL_HANG_RECOVERY_MS / 1000}s; restarting it`)
+      stallLogContentsEvent('recovery-restart', contents, `unresponsive for ${SHELL_HANG_RECOVERY_MS / 1000}s`)
       // render-process-gone ('killed') follows and reloads it through the budget above.
       try {
         contents.forcefullyCrashRenderer()
@@ -156,11 +162,13 @@ export function installCrashGuard(): void {
       if (details.reason === 'clean-exit') return
       const key = shellSurfaces.has(contents) ? 'shellRendererGone' : tabContents.has(contents) ? 'tabRendererGone' : 'otherRendererGone'
       countStabilityEvent(counters, key, `${describe(contents)} ${details.reason} (exit ${details.exitCode})`)
+      stallLogContentsEvent('renderer-gone', contents, `${details.reason} (exit ${details.exitCode})`)
     })
     app.on('child-process-gone', (_event, details) => {
       if (details.reason === 'clean-exit') return
       const summary = `${details.type}${details.name ? ` ${details.name}` : ''}${details.serviceName ? ` (${details.serviceName})` : ''} ${details.reason} (exit ${details.exitCode})`
       console.warn(`[crash guard] child process gone: ${summary}`)
+      stallLogEvent(details.type === 'GPU' ? 'gpu-gone' : 'child-gone', summary)
       if (details.type === 'GPU') {
         countStabilityEvent(counters, 'gpuGone', summary)
         setTimeout(repaintEverything, GPU_REPAINT_DELAY_MS)
@@ -169,7 +177,11 @@ export function installCrashGuard(): void {
       }
     })
     app.on('web-contents-created', (_event, contents) => {
-      contents.on('unresponsive', () => countStabilityEvent(counters, 'unresponsive', describe(contents)))
+      contents.on('unresponsive', () => {
+        countStabilityEvent(counters, 'unresponsive', describe(contents))
+        stallLogContentsEvent('unresponsive', contents)
+      })
+      contents.on('responsive', () => stallLogContentsEvent('responsive', contents))
     })
     app.on('will-quit', () => {
       if (stabilityFailureTotal(counters) === 0) return

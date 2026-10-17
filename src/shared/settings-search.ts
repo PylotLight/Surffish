@@ -154,7 +154,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
     ['Tuck to screen edge', 'dock hide'], ['Peek on hover', 'hover'], ['Hover delay'],
     ['Built-in AI (experimental)', 'model provider server'], ['Page Watchers', 'watch changes'], ['Spellcheck', 'languages spelling'],
     ['SOCKS5 proxy', 'host port tunnel'], ['Local network goes direct', 'bypass'], ['Kill switch', 'block'],
-    ['Network rules', 'route override'], ['Developer'], ['Network inspector', 'requests'], ['About & updates', 'version check']
+    ['Network rules', 'route override'], ['Developer'], ['Network inspector', 'requests'], ['Debug logging', 'stall freeze hang lockup crash log diagnostics'], ['About & updates', 'version check']
   ]),
   ...entries('newtab', [
     ['New tab opens', 'page'], ['Show site names'], ['Icon size'], ['Links per row'], ['Vertical position'], ['Dim', 'background'], ['Blur', 'background'],
