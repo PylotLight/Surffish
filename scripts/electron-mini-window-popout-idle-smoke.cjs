@@ -23,6 +23,9 @@ const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { app, BaseWindow, View, WebContentsView, webContents: allWebContents } = require('electron')
+// Turning the trace off shows the log in Finder / the file manager: not on a CI runner.
+let revealed = 0
+require('electron').shell.showItemInFolder = () => { revealed += 1 }
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const userData = join(tmpdir(), `surffish-mini-window-popout-idle-smoke-${process.pid}`)
@@ -265,6 +268,21 @@ async function run() {
     assert.match(log, /dom .*title/, 'debug log: the header DOM write')
     assert.match(log, /page .*did-frame-navigate subframe/, 'debug log: the page events')
   }
+
+  smoke.step('⌘K turns the trace off and on again mid-session (header page and native tracers follow)')
+  await runCommand('miniWindow.debugHeader')
+  await delay(300)
+  const offAt = readFileSync(logFile, 'utf8').length
+  await smoke.evaluate(chat, 'document.title = "Quiet · Hark"; true')
+  await waitFor(() => smoke.evaluate(header, 'document.getElementById("title").textContent === "Quiet · Hark"'), 'the quiet retitle')
+  await delay(600)
+  assert.equal(readFileSync(logFile, 'utf8').length, offAt, 'off: nothing more is logged')
+  assert.equal(revealed, 1, 'off: the log is shown in the file manager')
+  await runCommand('miniWindow.debugHeader')
+  await smoke.evaluate(chat, 'document.title = "Loud · Hark"; true')
+  await waitFor(() => /dom .*trace on/.test(readFileSync(logFile, 'utf8').slice(offAt)) && /dom .*Loud · Hark/.test(readFileSync(logFile, 'utf8').slice(offAt)), 'the trace back on (header page and push)')
+  win.setBounds(win.getBounds())
+  await waitFor(() => /native \[mini 0 popout\]\.setBounds/.test(readFileSync(logFile, 'utf8').slice(offAt)), 'the native tracer back on')
 
   smoke.step('Return leaves nothing behind')
   await runCommand('miniWindow.return')
