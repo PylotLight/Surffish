@@ -32,9 +32,12 @@ const mainCpuMs = () => { const u = process.threadCpuUsage ? process.threadCpuUs
 const PAGE = (path) => `<!doctype html><html><head><title>Page ${path}</title><style>body{font:15px system-ui;margin:24px;background:#fdfcf8}.c{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.c div{background:hsl(${path.length * 37 % 360} 60% 85%);padding:12px;border-radius:6px}</style></head>
 <body><h1>Fixture ${path}</h1><div class="c" id="c"></div>
 <script>const c=document.getElementById('c');for(let i=0;i<600;i++){const d=document.createElement('div');d.textContent='Cell '+i+' of ${path} '+'lorem ipsum dolor sit amet '.repeat(3);c.appendChild(d)};window.__blob=new Array(200000).fill(0).map((_,i)=>i*2)</script></body></html>`
-const server = createServer((req, res) => {
+// RESTORE_PAGE_DELAY_MS: every page answers this late (a slow site / network), so the restored tabs' pictures have something to cover.
+const PAGE_DELAY_MS = Number(process.env.RESTORE_PAGE_DELAY_MS || 0)
+const server = createServer(async (req, res) => {
   if (req.url === '/favicon.ico') { res.writeHead(404); res.end(); return }
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'max-age=3600' })
+  if (PAGE_DELAY_MS > 0) await delay(PAGE_DELAY_MS)
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': PAGE_DELAY_MS > 0 ? 'no-store' : 'max-age=3600' })
   res.end(PAGE(req.url))
 })
 
@@ -99,10 +102,21 @@ async function run() {
     app.quit()
     return null
   }
+  // When the restored active tab's saved picture (if any) first shows in the toolbar surface.
+  let activePictureAt = NaN
+  let watching = true
+  void (async () => {
+    while (watching && Date.now() - T_PROCESS_START < 15000) {
+      const shown = await toolbar.webContents.executeJavaScript(`Boolean(document.querySelector('img.wake-snapshot'))`).catch(() => false)
+      if (shown) { activePictureAt = Date.now(); return }
+      await delay(5)
+    }
+  })()
   const tabsNow = (await api('window.api.browser.tabs.get()')).filter((t) => t.url.startsWith(origin))
   const activeUrl = `${origin}/p0`
   const active = await waitFor(() => pageContents(origin).find((c) => c.getURL() === activeUrl), 'active tab contents', 30000)
   const tActiveFcp = await Promise.race([fcpOf(active), delay(15000).then(() => NaN)])
+  watching = false
   const sidebar = win.contentView.children.find((v) => surfaceOf(v.webContents) === 'sidebar')
   const rowsReady = sidebar
     ? await waitFor(() => sidebar.webContents.executeJavaScript(`document.querySelectorAll('[data-browser-tab-id]').length >= ${tabsNow.length} ? Date.now() : 0`), 'sidebar rows', 20000).catch(() => NaN)
@@ -129,6 +143,7 @@ async function run() {
     tabs: tabsNow.length,
     windowMs: round(tWindow - T_PROCESS_START),
     activeTabFcpMs: round(tActiveFcp - T_PROCESS_START),
+    activeTabPictureMs: Number.isFinite(activePictureAt) ? round(activePictureAt - T_PROCESS_START) : null,
     sidebarRowsMs: Number.isFinite(rowsReady) ? round(rowsReady - T_PROCESS_START) : null,
     early,
     settled,

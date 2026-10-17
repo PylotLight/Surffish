@@ -46,7 +46,7 @@ import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot } from './wake-snapshot'
+import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, presentWakeSnapshotAtStartup } from './wake-snapshot'
 import { forgetWakeSnapshotOnDisk, pruneWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
@@ -2409,6 +2409,8 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     const pane = findTab(id)
     if (pane) ensureTabLoaded(pane)
   }
+  // Its saved picture covers the restored active tab until the page paints (wake-snapshot.ts).
+  if (init.session && !w.isPrivate) presentRestoredTabPicture(w)
   const visibleAtStart = new Set(onScreenTabIds(w))
   const now = Date.now()
   for (const tab of w.tabs) {
@@ -4380,6 +4382,15 @@ function forgetSavedWakeSnapshot(tab: BrowserTab): void {
   const partition = partitionForTab(tab)
   if (allTabs().some((other) => other !== tab && !other.isPrivate && currentUrl(other) === url && partitionForTab(other) === partition)) return
   forgetWakeSnapshotOnDisk(url, partition)
+}
+
+/** The restored window's tab on screen (alone, not a split) shows its saved picture while it loads. */
+function presentRestoredTabPicture(w: BrowserWindowState): void {
+  const shown = onScreenTabIds(w)
+  const tab = shown.length === 1 ? findTab(shown[0]) : undefined
+  const contents = tab?.view?.webContents
+  if (!tab || !contents || tab.isPrivate || tab.pdfEditor) return
+  presentWakeSnapshotAtStartup(w.window, tab.id, contents, () => pageBoundsOf(tab), currentUrl(tab), partitionForTab(tab), () => isActiveTab(tab) && tab.view?.webContents === contents)
 }
 
 /** After start-up: saved pictures of pages no open tab shows any more are removed (wake-snapshot-disk.ts). */

@@ -134,6 +134,14 @@ export function readWakeSnapshotFromDisk(url: string, partition: string, pageAre
   }
 }
 
+/** Whether a picture of `url` is saved (index only; no file read). */
+export function hasWakeSnapshotOnDisk(url: string, partition: string): boolean {
+  const urlKey = wakeSnapshotUrlKey(url)
+  if (!urlKey) return false
+  const key = keyFor(urlKey, partition)
+  return pending.has(key) || loaded().has(key)
+}
+
 /** The page's tab was closed (and no other open tab shows it): its picture goes too. */
 export function forgetWakeSnapshotOnDisk(url: string, partition: string): void {
   const urlKey = wakeSnapshotUrlKey(url)

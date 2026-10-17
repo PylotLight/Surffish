@@ -21,7 +21,7 @@ import {
   type WakeSnapshotShowMessage
 } from '../shared/wake-snapshot'
 import { getOverlayToolbarContents, setPageCoverLostListener, setToolbarPageCover } from './browser-shell'
-import { readWakeSnapshotFromDisk, saveWakeSnapshotToDisk } from './wake-snapshot-disk'
+import { hasWakeSnapshotOnDisk, readWakeSnapshotFromDisk, saveWakeSnapshotToDisk } from './wake-snapshot-disk'
 
 /**
  * Wake snapshots (rules in shared/wake-snapshot.ts): the last on-screen picture of a tab, shown by
@@ -259,6 +259,46 @@ export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: Web
   }
   toolbar.send(WAKE_SNAPSHOT_SHOW_CHANNEL, message)
   return true
+}
+
+const STARTUP_RETRY_MS = 16
+const STARTUP_MAX_TRIES = 150
+
+/**
+ * Start-up: a restored window's active tab is loading while the window comes up. When a picture of
+ * it was saved (wake-snapshot-disk.ts), it shows as soon as the toolbar surface can draw it, unless
+ * the page got there first (its DOM is ready) or the tab is no longer the one on screen.
+ * Nothing at all (no listener, no timer) when no picture is saved.
+ */
+export function presentWakeSnapshotAtStartup(window: BaseWindow, tabId: string, page: WebContents, rect: () => { x: number; y: number; width: number; height: number }, targetUrl: string, partition: string, stillOnScreen: () => boolean): void {
+  if (page.isDestroyed() || !hasWakeSnapshotOnDisk(targetUrl, partition)) return
+  let pageReady = false
+  const onPageReady = (): void => { pageReady = true }
+  page.once('dom-ready', onPageReady)
+  const attempt = (tries: number): void => {
+    if (window.isDestroyed() || page.isDestroyed() || pageReady || !stillOnScreen() || presentations.has(window)) {
+      if (DEBUG) console.info(`[wake-snapshot] start-up picture skipped: ready=${pageReady} onScreen=${stillOnScreen()} try ${tries}`)
+      if (!page.isDestroyed()) page.off('dom-ready', onPageReady)
+      return
+    }
+    const toolbar = getOverlayToolbarContents(window)
+    const area = rect()
+    if (!toolbar || toolbar.isLoadingMainFrame() || !(area.width > 0 && area.height > 0)) {
+      if (tries >= STARTUP_MAX_TRIES) {
+        if (DEBUG) console.info(`[wake-snapshot] start-up picture gave up: toolbar=${Boolean(toolbar)} loading=${toolbar?.isLoadingMainFrame()} area=${area.width}x${area.height}`)
+        page.off('dom-ready', onPageReady)
+        return
+      }
+      // The toolbar's own load is one event; the page area and overlay settle a frame or two after.
+      // The toolbar's page and the page area (reported by the shell's first layout) settle within a few frames.
+      setTimeout(() => attempt(tries + 1), STARTUP_RETRY_MS)
+      return
+    }
+    page.off('dom-ready', onPageReady)
+    const shown = presentWakeSnapshot(window, tabId, page, area, targetUrl, partition)
+    if (DEBUG) console.info(`[wake-snapshot] start-up picture for ${tabId}: ${shown ? 'shown' : 'not shown'} (try ${tries})`)
+  }
+  attempt(0)
 }
 
 function forwardToPage(presentation: Presentation, input: WakeSnapshotInput): void {
