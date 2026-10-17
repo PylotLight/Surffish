@@ -49,6 +49,7 @@
     "test:electron-certificates": "electron scripts/electron-certificates-smoke.cjs",
     "test:electron-address-bar-sync": "electron scripts/electron-address-bar-sync-smoke.cjs",
     "test:electron-omnibox-fill": "electron scripts/electron-omnibox-fill-smoke.cjs",
+    "test:electron-omnibox-prerender": "electron scripts/electron-omnibox-prerender-smoke.cjs",
     "test:electron-blob-links": "electron scripts/electron-blob-links-smoke.cjs",
     "test:electron-page-popups": "electron scripts/electron-page-popups-smoke.cjs",
     "test:electron-adblock-toolbar": "electron scripts/electron-adblock-toolbar-smoke.cjs",
