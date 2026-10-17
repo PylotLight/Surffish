@@ -30,6 +30,7 @@ import { resetSiteVolumes } from './tab-volume'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getPageBehindSettings } from './browser'
 import { forgetArchivedTabsSince } from './tab-archive-store'
+import { clearWakeSnapshotsOnDisk, forgetWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 
 /**
  * Clear browsing data (Settings → Privacy) and per-site data controls. Clearing and Forget This
@@ -40,6 +41,14 @@ import { forgetArchivedTabsSince } from './tab-archive-store'
  * cleared for the sites visited in that range (from Surffish history), like "sites you used".
  */
 const STORAGE_TYPES = ['backgroundFetch', 'fileSystems', 'indexedDB', 'localStorage', 'serviceWorkers', 'webSQL'] as const
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
 
 function siteOf(host: string): string {
   return getDomain(host, { allowPrivateDomains: true }) ?? host
@@ -125,6 +134,11 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
     }
   }
   }
+  // Saved tab pictures (wake-snapshot-disk.ts) are a record of pages seen: they go with history or cache.
+  if (options.history || options.cache) {
+    if (allTime) clearWakeSnapshotsOnDisk()
+    else if (scoped) forgetWakeSnapshotsOnDisk((url) => (origins ?? []).includes(originOf(url)))
+  }
   if (options.permissions && (allTime || scoped)) resetBrowserSiteSettings(origins)
   if (options.zoom && (allTime || scoped)) {
     clearBrowserSiteZoom(origins)
@@ -202,6 +216,7 @@ export async function forgetSite(originInput: unknown, includeHistory: unknown):
   clearBrowserSiteZoom(origins)
   resetZoomOnOpenPages(origins)
   resetSiteVolumes(origins)
+  forgetWakeSnapshotsOnDisk((url) => origins.includes(originOf(url)))
   if (includeHistory === true) {
     removeBrowsingHistory((entry) => {
       try {

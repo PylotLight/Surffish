@@ -7,7 +7,7 @@ import { dirname } from 'node:path'
  * rename, so a crash mid-write never leaves a half-written file. Creates the directory if needed.
  * Throws on failure, after removing the temp file; callers decide how to log it.
  */
-export function writeFileAtomic(path: string, data: string): void {
+export function writeFileAtomic(path: string, data: string | Uint8Array): void {
   const temporaryPath = `${path}.${randomUUID()}.tmp`
   try {
     mkdirSync(dirname(path), { recursive: true })

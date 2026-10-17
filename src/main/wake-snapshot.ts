@@ -21,11 +21,14 @@ import {
   type WakeSnapshotShowMessage
 } from '../shared/wake-snapshot'
 import { getOverlayToolbarContents, setPageCoverLostListener, setToolbarPageCover } from './browser-shell'
+import { hasWakeSnapshotOnDisk, readWakeSnapshotFromDisk, saveWakeSnapshotToDisk } from './wake-snapshot-disk'
 
 /**
  * Wake snapshots (rules in shared/wake-snapshot.ts): the last on-screen picture of a tab, shown by
  * the toolbar surface over the page area while a sleeping/discarded tab reloads, cross-faded out
- * on the page's first contentful paint. In memory only, capped, dropped on use and on close.
+ * on the page's first contentful paint. In memory (capped, dropped on use and on close), and for
+ * non-private tabs also on disk (wake-snapshot-disk.ts), so a restored tab shows its picture the
+ * first time it is opened after a restart.
  */
 
 interface StoredSnapshot {
@@ -85,13 +88,15 @@ function scaleForWakeSnapshot(image: NativeImage): NativeImage {
  * thumbnail is made from (no extra capture), kept at its device pixels. The caller defers this past
  * the switch so the tab coming on screen gets its frames first (browser.ts, encodeTabPicture).
  */
-export function keepWakeSnapshot(tabId: string, capture: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
+export function keepWakeSnapshot(tabId: string, capture: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean, partition: string): void {
   try {
     if (capture.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0)) return
     const started = DEBUG ? performance.now() : 0
     const scaled = scaleForWakeSnapshot(capture)
     const jpeg = scaled.toJPEG(WAKE_SNAPSHOT_JPEG_QUALITY)
     const kept = store.set(tabId, { jpeg, width: pageSize.width, height: pageSize.height, url, isPrivate, bytes: jpeg.length })
+    // The same bytes go to disk a moment later (one write per burst of switches); never a private page.
+    if (kept && !isPrivate) saveWakeSnapshotToDisk(url, partition, jpeg, pageSize)
     if (DEBUG) console.info(`[wake-snapshot] ${kept ? 'kept' : 'dropped'} ${tabId} ${scaled.getSize().width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`)
   } catch (error) {
     console.warn('[wake-snapshot] could not keep a snapshot:', error)
@@ -217,9 +222,10 @@ function watchFirstPaint(presentation: Presentation): () => void {
  * show its snapshot over the page area until the page paints. False when there is nothing fit to
  * show (no snapshot, another page, a different page-area size, New Tab/a panel on screen).
  */
-export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: WebContents, rect: { x: number; y: number; width: number; height: number }, targetUrl: string): boolean {
+export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: WebContents, rect: { x: number; y: number; width: number; height: number }, targetUrl: string, diskPartition: string | null = null): boolean {
   endWakeSnapshot(window)
-  const snapshot = store.take(tabId)
+  // Nothing in memory (a restored tab's first wake, or evicted): the picture saved on disk, if any.
+  const snapshot = store.take(tabId) ?? (diskPartition !== null ? readWakeSnapshotFromDisk(targetUrl, diskPartition, rect) : null)
   const skip = (reason: string): false => {
     if (DEBUG) console.info(`[wake-snapshot] not shown for ${tabId}: ${reason}`)
     return false
@@ -253,6 +259,46 @@ export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: Web
   }
   toolbar.send(WAKE_SNAPSHOT_SHOW_CHANNEL, message)
   return true
+}
+
+const STARTUP_RETRY_MS = 16
+const STARTUP_MAX_TRIES = 150
+
+/**
+ * Start-up: a restored window's active tab is loading while the window comes up. When a picture of
+ * it was saved (wake-snapshot-disk.ts), it shows as soon as the toolbar surface can draw it, unless
+ * the page got there first (its DOM is ready) or the tab is no longer the one on screen.
+ * Nothing at all (no listener, no timer) when no picture is saved.
+ */
+export function presentWakeSnapshotAtStartup(window: BaseWindow, tabId: string, page: WebContents, rect: () => { x: number; y: number; width: number; height: number }, targetUrl: string, partition: string, stillOnScreen: () => boolean): void {
+  if (page.isDestroyed() || !hasWakeSnapshotOnDisk(targetUrl, partition)) return
+  let pageReady = false
+  const onPageReady = (): void => { pageReady = true }
+  page.once('dom-ready', onPageReady)
+  const attempt = (tries: number): void => {
+    if (window.isDestroyed() || page.isDestroyed() || pageReady || !stillOnScreen() || presentations.has(window)) {
+      if (DEBUG) console.info(`[wake-snapshot] start-up picture skipped: ready=${pageReady} onScreen=${stillOnScreen()} try ${tries}`)
+      if (!page.isDestroyed()) page.off('dom-ready', onPageReady)
+      return
+    }
+    const toolbar = getOverlayToolbarContents(window)
+    const area = rect()
+    if (!toolbar || toolbar.isLoadingMainFrame() || !(area.width > 0 && area.height > 0)) {
+      if (tries >= STARTUP_MAX_TRIES) {
+        if (DEBUG) console.info(`[wake-snapshot] start-up picture gave up: toolbar=${Boolean(toolbar)} loading=${toolbar?.isLoadingMainFrame()} area=${area.width}x${area.height}`)
+        page.off('dom-ready', onPageReady)
+        return
+      }
+      // The toolbar's own load is one event; the page area and overlay settle a frame or two after.
+      // The toolbar's page and the page area (reported by the shell's first layout) settle within a few frames.
+      setTimeout(() => attempt(tries + 1), STARTUP_RETRY_MS)
+      return
+    }
+    page.off('dom-ready', onPageReady)
+    const shown = presentWakeSnapshot(window, tabId, page, area, targetUrl, partition)
+    if (DEBUG) console.info(`[wake-snapshot] start-up picture for ${tabId}: ${shown ? 'shown' : 'not shown'} (try ${tries})`)
+  }
+  attempt(0)
 }
 
 function forwardToPage(presentation: Presentation, input: WakeSnapshotInput): void {

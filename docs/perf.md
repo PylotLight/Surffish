@@ -148,6 +148,28 @@ currently the start-up phases, responsiveness, mixed-sites and ad-filter cosmeti
 Improvements past the same margins show as "better". Per-metric overrides go on the metric entry
 (`"failPct"`, `"warnPct"`, `"abs"`); per-platform behaviour under `platforms`.
 
+## Session restore
+
+A restored session only creates the WebContents of the tabs on screen (the active tab, or both panes
+of a split); every other tab is a sidebar row until it is opened, so 40 restored tabs start about as
+fast and as small as 1 (Linux xvfb, fixture site: first paint ~0.7 s, ~375 MB PSS, 7 processes either way).
+
+What a restored tab used to lack was a picture: its wake snapshot (the last on-screen capture, see
+`src/shared/wake-snapshot.ts`) lived in memory only, so after a restart opening a tab showed a blank
+page until the site painted. Non-private snapshots are now also saved in the profile
+(`wake-snapshots/`, one 0600 JPEG per page and Space partition plus `index.json`; 48 MB / 7 days cap;
+`src/main/wake-snapshot-disk.ts`), written in one deferred write per burst of tab switches and flushed
+on quit. They are read back only when a tab with nothing in memory is opened, and the restored active
+tab shows its saved picture as soon as the toolbar surface can draw it. Pictures of pages no restored
+tab has go at start-up, a closed tab's goes with it, and Clear Browsing Data (history or cache) and
+Forget This Site remove them.
+
+`scripts/perf/restore-bench.cjs` measures it (local only, not in CI): it seeds a `RESTORE_TABS`-tab
+session, `RESTORE_PREPARE=1` opens the tabs it will measure and quits (so they get snapshots), then a
+`RESTORE_KEEP_PROFILE=1` launch reports cold start to window / active tab painted / its picture shown,
+memory and processes, and select → picture / page painted for three background tabs.
+`RESTORE_PAGE_DELAY_MS` makes the fixture site slow (and uncached).
+
 ## Run it locally
 
 ```sh
