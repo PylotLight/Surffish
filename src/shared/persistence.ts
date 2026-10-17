@@ -2,6 +2,7 @@ import { DEFAULT_SEARCH_ENGINE, isSearchEngineId, SURFFISH_QUICK_LINKS_URL } fro
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from './zoom.ts'
 import { parseSiteVolumes } from './tab-volume.ts'
 import { isOpenMeteoModelId, isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
+import { clampWeatherScale, DEFAULT_WEATHER_FORECAST, DEFAULT_WEATHER_SCALE, isWeatherForecastView } from './weather-forecast.ts'
 import { CLOCK_SCALE_STEP, clockScaleFromLegacySize, isClockDateFormat, isClockTimeFormat, isClockWeight, isWeatherPosition, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE } from './new-tab-clock.ts'
 import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
@@ -38,6 +39,8 @@ export const DEFAULT_NEW_TAB_PREFERENCES: NewTabPreferences = {
   openMeteoModel: 'best_match',
   temperatureUnit: 'celsius',
   weatherPosition: 'below',
+  weatherScale: DEFAULT_WEATHER_SCALE,
+  weatherForecast: DEFAULT_WEATHER_FORECAST,
   iconSize: 30,
   linksPerRow: 8,
   showLinkLabels: false,
@@ -162,6 +165,8 @@ export function parseNewTabPreferences(value: unknown): NewTabPreferences {
     openMeteoModel: isOpenMeteoModelId(record.openMeteoModel) ? record.openMeteoModel : DEFAULT_NEW_TAB_PREFERENCES.openMeteoModel,
     temperatureUnit: record.temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius',
     weatherPosition: isWeatherPosition(record.weatherPosition) ? record.weatherPosition : DEFAULT_NEW_TAB_PREFERENCES.weatherPosition,
+    weatherScale: clampWeatherScale(record.weatherScale),
+    weatherForecast: isWeatherForecastView(record.weatherForecast) ? record.weatherForecast : DEFAULT_NEW_TAB_PREFERENCES.weatherForecast,
     iconSize: boundedNumber(record.iconSize, DEFAULT_NEW_TAB_PREFERENCES.iconSize, 20, 52),
     linksPerRow: boundedNumber(record.linksPerRow, DEFAULT_NEW_TAB_PREFERENCES.linksPerRow, 3, 12),
     showLinkLabels: typeof record.showLinkLabels === 'boolean' ? record.showLinkLabels : DEFAULT_NEW_TAB_PREFERENCES.showLinkLabels,
