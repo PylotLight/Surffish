@@ -2,8 +2,8 @@
 //   PERF_APP_DIR=<repo with out/> RESTORE_TABS=40 PERF_OUT=sample.json electron scripts/perf/restore-bench.cjs
 // Local only (not part of the CI perf job). Seeds a profile whose browser-session.json holds
 // RESTORE_TABS tabs on a local fixture site (active tab first). RESTORE_PREPARE=1 with
-// PERF_USER_DATA instead visits every tab of an existing profile (so each gets a wake snapshot) and
-// quits, and RESTORE_KEEP_PROFILE=1 then measures that profile. Measures: cold start → window,
+// PERF_USER_DATA instead opens the tabs the measurement selects in that profile (so each gets a
+// wake snapshot) and quits, and RESTORE_KEEP_PROFILE=1 then measures that profile. Measures: cold start → window,
 // → active tab painted, → every sidebar row drawn; processes, page views and memory a few seconds
 // after start-up; then selecting background tabs: select → picture on screen and → page painted.
 const T_PROCESS_START = Date.now() - process.uptime() * 1000
@@ -20,6 +20,7 @@ const TABS = Number(process.env.RESTORE_TABS || 40)
 // A fixed port keeps a prepared profile's URLs valid across launches.
 const PORT = Number(process.env.RESTORE_PORT || 0)
 const PREPARE = process.env.RESTORE_PREPARE === '1'
+const WAKE_INDEXES = [5, 17, 29]
 const userData = process.env.PERF_USER_DATA || join(tmpdir(), `surffish-restore-${process.pid}`)
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 const step = (t) => process.stderr.write(`[restore] ${((Date.now() - T_PROCESS_START) / 1000).toFixed(2)}s ${t}\n`)
@@ -85,8 +86,9 @@ async function run() {
   const api = (expr) => toolbar.webContents.executeJavaScript(expr)
   if (PREPARE) {
     // Every tab on screen long enough for its wake snapshot (≥1.5 s, then switched away), then a normal quit.
+    // Only the tabs the measured launch opens (WAKE_INDEXES), then back to the first.
     const tabs = (await api('window.api.browser.tabs.get()')).filter((t) => t.url.startsWith(origin))
-    for (const tab of [...tabs.slice(1), tabs[0]]) {
+    for (const tab of [...WAKE_INDEXES.filter((i) => i < tabs.length).map((i) => tabs[i]), tabs[0]]) {
       await api(`window.api.browser.tabs.activate(${JSON.stringify(tab.id)})`)
       const wc = await waitFor(() => pageContents(origin).find((c) => c.getURL() === tab.url && !c.isLoading()), `load ${tab.url}`, 20000)
       await twoFrames(wc)
@@ -112,7 +114,7 @@ async function run() {
   const settled = { ...memory(), pageViews: pageContents(origin).length }
   // Select background tabs: select → something on screen (wake snapshot or the page), → page painted.
   const wakes = []
-  for (const index of [5, 17, 29].filter((i) => i < tabsNow.length)) {
+  for (const index of WAKE_INDEXES.filter((i) => i < tabsNow.length)) {
     const tab = tabsNow[index]
     const s = Date.now()
     await api(`window.api.browser.tabs.activate(${JSON.stringify(tab.id)})`)
