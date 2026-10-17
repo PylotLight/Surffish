@@ -35,6 +35,12 @@ interface PendingPicture {
 let entries: Map<string, WakeSnapshotDiskEntry> | null = null
 const pending = new Map<string, PendingPicture>()
 let manifestDirty = false
+/** Debug logging (stall-logger.ts): since launch, pictures written, their bytes, flushes and main-thread time spent in them. */
+const writeStats = { files: 0, bytes: 0, flushes: 0, flushMs: 0 }
+
+export function getWakeSnapshotDiskWriteStats(): { files: number; bytes: number; flushes: number; flushMs: number } {
+  return { ...writeStats }
+}
 
 function dirPath(): string {
   return join(app.getPath('userData'), DIR)
@@ -78,10 +84,22 @@ function enforce(keepKeys?: ReadonlySet<string>): void {
 }
 
 function flush(): void {
+  const startedAt = performance.now()
+  try {
+    flushPending()
+  } finally {
+    writeStats.flushes += 1
+    writeStats.flushMs += performance.now() - startedAt
+  }
+}
+
+function flushPending(): void {
   const all = loaded()
   for (const [key, picture] of pending) {
     try {
       writeFileAtomic(fileFor(key), picture.jpeg)
+      writeStats.files += 1
+      writeStats.bytes += picture.jpeg.length
       all.set(key, picture.entry)
       manifestDirty = true
     } catch (error) {

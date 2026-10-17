@@ -87,7 +87,7 @@ import {
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel, SitesSettings
 } from './lazy-views'
-import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings } from './lazy-views'
+import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings, DebugLoggingSetting } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
@@ -2283,6 +2283,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <SettingsRow label="Network inspector" hint="Adds a Network tab that records requests from every tab. Off saves CPU and memory; turning it off also stops capture and clears recorded requests.">
                     <input type="checkbox" className="settings-switch" checked={networkToolEnabled} onChange={(event) => setNetworkToolEnabled(event.target.checked)} aria-label="Enable network inspector" />
                   </SettingsRow>
+                  <DebugLoggingSetting />
                 </SettingsGroup>
                 <UpdateSettings />
                 </SettingsCategory>
