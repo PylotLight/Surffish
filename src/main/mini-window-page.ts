@@ -26,8 +26,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https: http: data:">
 <title>Mini Window</title>
 <style>
-  :root { color-scheme: light dark; --bar: rgba(246,246,247,.94); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; }
-  @media (prefers-color-scheme: dark) { :root { --bar: rgba(38,38,41,.94); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; } }
+  /* The bar is opaque on purpose: the window is transparent, so any see-through bar shows whatever macOS composites behind it, which flips between the desktop and black while the page view below repaints (a visible flash). */
+  :root { color-scheme: light dark; --bar: rgb(246,246,247); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; }
+  @media (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; } }
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font: 12px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); user-select: none; }
   header { position: fixed; left: 0; right: 0; top: 0; height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 6px; box-sizing: border-box; background: var(--bar); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
   #where { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 4px; }
