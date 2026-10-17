@@ -145,6 +145,7 @@ async function run() {
         pop: li.querySelector('.new-tab-weather-pop')?.textContent
       })),
       font: parseFloat(getComputedStyle(widget.querySelector('strong') ?? widget).fontSize),
+      fit: parseFloat(widget.style.getPropertyValue('--new-tab-weather-fit')) || 1,
       dayFont: widget.querySelector('.new-tab-weather-days') ? parseFloat(getComputedStyle(widget.querySelector('.new-tab-weather-days')).fontSize) : null,
       box: rel(widget),
       rows: rel(widget.querySelector('.new-tab-weather-days')),
@@ -212,13 +213,15 @@ async function run() {
   assert.equal(requests.length, daily, 'switching between forecast views reuses the reading')
 
   smoke.step('Weather size: live while dragging, holds where it stops, scales the reading and the rows')
+  // The reading is 14 px × size × fit (fit < 1 only when a window is too short for the forecast).
   await setRange('Weather size', 250)
-  await waitFor(async () => Math.abs((await weather()).font - 35) < 0.6, '250 % reading (2.5 × 14 px)')
+  await waitFor(async () => { const w = await weather(); return Math.abs(w.font - 14 * 2.5 * w.fit) < 0.6 && w.fit >= 0.5 }, '250 % reading (2.5 × 14 px, fitted to the window)')
   await setRange('Weather size', 50)
-  await waitFor(async () => Math.abs((await weather()).font - 7) < 0.6, '50 % reading')
+  await waitFor(async () => { const w = await weather(); return Math.abs(w.font - 7) < 0.6 && w.fit === 1 }, '50 % reading')
   for (let value = 50; value <= 250; value += 5) await setRange('Weather size', value === 250 ? 200 : value)
   await delay(1_200)
   const big = await weather()
+  assert.equal(big.fit, 1, '200 % 5-day fits a 1280×860 window as is')
   assert.ok(Math.abs(big.font - 28) < 0.6, `the drag ends where it stopped (${big.font})`)
   assert.ok(Math.abs(big.dayFont - 25) < 0.6, `the rows scale too (${big.dayFont})`)
   await waitFor(async () => (await prefs()).weatherScale === 200, 'the final size saved')
