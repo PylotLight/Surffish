@@ -26,7 +26,10 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 const userData = join(tmpdir(), `surffish-mini-window-popout-flash-smoke-${process.pid}`)
 const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M1 8l14-7-4 14-3-5z" fill="#fff" stroke="#000"/></svg>'
 const PAGE = (name) => `<!doctype html><meta charset="utf-8"><link rel="icon" href="/icon.svg"><title>${name}</title>
-<body><p>${name}</p><script>window.loadId = Math.random()
+<body><p>${name}</p><iframe id="frame" hidden src="/frame"></iframe><script>
+// A live connection (server-sent events) open the whole time.
+addEventListener('load', () => setTimeout(() => { window.events = new EventSource('/sse') }, 100))
+window.loadId = Math.random()
 window.churnTimer = 0
 // A chat app streaming a reply: same-document navigations, a streamed fetch, the icon link re-added, the same title.
 window.startChurn = () => {
@@ -36,6 +39,8 @@ window.startChurn = () => {
     n += 1
     history.pushState({ n }, '', location.pathname)
     if (n % 3 === 0) fetch('/stream').then((r) => r.text()).catch(() => {})
+    // A hidden frame reloading (did-start/stop-loading for a subframe) every half second.
+    if (n % 8 === 0) document.getElementById('frame').src = '/frame?' + n
     const link = document.querySelector('link[rel=icon]')
     const again = link.cloneNode(); link.remove(); document.head.append(again)
     document.title = document.title
@@ -49,12 +54,22 @@ window.stopFlap = () => { clearInterval(window.flapTimer); window.tone.gain.gain
 </script></body>`
 const server = createServer((request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname
-  if (path === '/icon.svg') {
+  if (path === '/icon.svg' || path === '/icon2.svg') {
     // A real site's icon is a network round trip away (main re-fetches it to cache it as a data: URL).
     setTimeout(() => {
       response.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' })
-      response.end(ICON)
+      response.end(path === '/icon2.svg' ? ICON.replace('#fff', '#e5484d') : ICON)
     }, 150)
+    return
+  }
+  if (path === '/frame') {
+    response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' })
+    return response.end('<!doctype html><title>frame</title>')
+  }
+  if (path === '/sse') {
+    response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' })
+    const timer = setInterval(() => response.write('data: tick\n\n'), 100)
+    request.on('close', () => clearInterval(timer))
     return
   }
   if (path === '/stream') {
@@ -155,6 +170,8 @@ async function run() {
   await waitFor(() => win.isVisible(), 'the popout shows')
   const header = await waitFor(() => headerOf(win), 'the popout strip')
   await waitFor(() => smoke.evaluate(header, 'document.body.classList.contains("popout") && document.querySelectorAll("#bar .tab").length === 3 && document.querySelectorAll("#bar .tab img").length === 3'), 'three chips with favicons')
+  // Each chat already has history (Back enabled), as a real chat does once it has been used.
+  for (const name of ['chat1', 'chat2']) await smoke.evaluate(pages[name].contents, 'history.pushState(null, "", location.pathname); true')
   const played = await pages.music.contents.executeJavaScript('window.startAudio()', true)
   // Let favicons settle (fetched, cached as data: URLs) and the audio state land.
   await delay(1500)
@@ -217,6 +234,15 @@ async function run() {
   results['background-retitle'] = await take()
   console.log(`[flash] background-retitle: ${JSON.stringify(results['background-retitle'])}`)
 
+  smoke.step('5. a tab really changes its icon: that chip swaps to the new one, once, with no blank in between')
+  const iconOf = (index) => smoke.evaluate(header, `document.querySelectorAll("#bar .tab")[${index}].querySelector("img")?.getAttribute("src") ?? ""`)
+  const before = await iconOf(1)
+  await smoke.evaluate(pages.chat1.contents, 'document.querySelector("link[rel=icon]").href = "/icon2.svg"; true')
+  await waitFor(async () => { const src = await iconOf(1); return src !== before && src.startsWith('data:image/svg+xml') }, 'the new icon (its cached copy) on the chip')
+  await delay(600)
+  results['icon-change'] = await take()
+  console.log(`[flash] icon-change: ${JSON.stringify(results['icon-change'])}`)
+
   if (process.env.FLASH_MEASURE_ONLY !== '1') {
     for (const label of ['active-chat-churn', 'background-chat-churn', 'audio-flap']) {
       const r = results[label]
@@ -230,11 +256,15 @@ async function run() {
     assert.equal(r.chipsReplaced, 0, 'retitle: no chip rebuilt')
     assert.equal(r.setBounds, 0, 'retitle: no setBounds')
     assert.ok(r.mutations <= 3, `retitle: only the label (and its tooltip) written (${r.mutations}: ${r.detail.join(' | ')})`)
+    const icon = results['icon-change']
+    assert.equal(icon.srcWrites, 1, `icon change: one src write on that chip (${icon.detail.join(' | ')})`)
+    assert.equal(icon.chipsReplaced, 0, 'icon change: no chip rebuilt')
   }
 
   smoke.step('Return All leaves nothing behind')
   await runCommand('miniWindow.return')
   await waitFor(() => miniWindows().length === 0, 'all closed')
+  server.closeAllConnections?.()
   console.log('Electron mini window popout flash smoke passed.')
 }
 
