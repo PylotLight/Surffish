@@ -2192,7 +2192,8 @@
    The Weather size slider (--new-tab-weather-size, 1 = 100 %) multiplies on top, so 100 % is the
    original look at every clock size. */
 .new-tab-weather-widget {
-  --new-tab-weather-scale: calc(clamp(0.9, var(--new-tab-clock-scale, 1), 1.5) * var(--new-tab-weather-size, 1));
+  /* --new-tab-weather-fit (< 1 only for a forecast too tall for a short window) is set by Browser.tsx. */
+  --new-tab-weather-scale: calc(clamp(0.9, var(--new-tab-clock-scale, 1), 1.5) * var(--new-tab-weather-size, 1) * var(--new-tab-weather-fit, 1));
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -2301,7 +2302,7 @@
   white-space: nowrap;
 }
 .new-tab-weather-widget.is-corner {
-  --new-tab-weather-scale: var(--new-tab-weather-size, 1);
+  --new-tab-weather-scale: calc(var(--new-tab-weather-size, 1) * var(--new-tab-weather-fit, 1));
   position: absolute;
   z-index: 2;
   top: clamp(14px, 2.6vh, 26px);

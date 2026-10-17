@@ -67,7 +67,7 @@ import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from '.
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
-import { conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, placeToday, visibleForecast } from '../../../shared/weather-forecast'
+import { conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, placeToday, visibleForecast, weatherFit } from '../../../shared/weather-forecast'
 import WeatherGlyph, { RainChanceGlyph } from './new-tab/WeatherGlyph'
 import { clockGreeting, clockShift, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
@@ -712,20 +712,42 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
         if (icons) observer.observe(icons)
         observedIcons = icons
       }
-      // Only a corner reading with forecast rows makes room (a one-line corner reading never did).
-      const cornerBox = corner?.classList.contains('has-forecast') ? corner.getBoundingClientRect() : null
-      const cornerBottom = cornerBox ? cornerBox.bottom - page.getBoundingClientRect().top + 8 : 0
-      const besideCorner = (box: DOMRect | undefined): boolean => Boolean(cornerBox && box && box.right > cornerBox.left - 8 && box.left < cornerBox.right + 8)
+      const pageTop = page.getBoundingClientRect().top
+      // Space the clocks, weather and icons share above the photo credit.
+      const room = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight : Infinity
+      const baseTop = widgets ? parseFloat(getComputedStyle(widgets).top) || 0 : 0
+      // Only a reading with forecast rows makes room or shrinks to fit (a one-line reading never did).
+      const cornerForecast = corner?.classList.contains('has-forecast') ? corner : null
+      const belowWeather = widgets?.querySelector<HTMLElement>('.new-tab-weather-widget') ?? null
+      const belowForecast = belowWeather?.classList.contains('has-forecast') ? belowWeather : null
+      for (const element of [corner, belowWeather]) if (element && element !== cornerForecast && element !== belowForecast) element.style.removeProperty('--new-tab-weather-fit')
+      // A window too short for the forecast at its size shrinks it (down to half) instead of
+      // pushing the icons off the page; it grows back as the window does. Reading offsetHeight
+      // after the write lays out again, so everything below sees the fitted size.
+      const fitTo = (element: HTMLElement, available: number): void => {
+        const current = parseFloat(element.style.getPropertyValue('--new-tab-weather-fit')) || 1
+        const fit = weatherFit(available, element.offsetHeight, current)
+        if (fit !== current) element.style.setProperty('--new-tab-weather-fit', String(fit))
+      }
+      const besideBox = (box: DOMRect, other: DOMRect | undefined): boolean => Boolean(other && other.right > box.left - 8 && other.left < box.right + 8)
+      if (cornerForecast && Number.isFinite(room)) {
+        const box = cornerForecast.getBoundingClientRect()
+        const clocksBelow = widgets && besideBox(box, widgets.getBoundingClientRect()) ? widgets.offsetHeight + 8 : 0
+        if (clocksBelow || besideBox(box, icons?.getBoundingClientRect())) fitTo(cornerForecast, room - clocksBelow - (box.top - pageTop) - 8)
+      }
+      const cornerBox = cornerForecast ? cornerForecast.getBoundingClientRect() : null
+      const cornerBottom = cornerBox ? cornerBox.bottom - pageTop + 8 : 0
+      const besideCorner = (box: DOMRect | undefined): boolean => Boolean(cornerBox && besideBox(cornerBox, box))
       const iconsClearCorner = besideCorner(icons?.getBoundingClientRect()) ? cornerBottom : 0
       if (!widgets) {
         if (iconsClearCorner) page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(iconsClearCorner)}px`)
         else page.style.removeProperty('--new-tab-widgets-bottom')
         return
       }
-      const baseTop = parseFloat(getComputedStyle(widgets).top) || 0
       // Clocks that would run into a corner forecast start under it instead.
       const push = besideCorner(widgets.getBoundingClientRect()) ? Math.max(0, Math.ceil(cornerBottom - baseTop)) : 0
-      const free = icons ? page.clientHeight - NEW_TAB_CREDIT_SPACE - NEW_TAB_ICON_GAP - icons.offsetHeight - baseTop - push - widgets.offsetHeight : 0
+      if (belowForecast && Number.isFinite(room)) fitTo(belowForecast, room - baseTop - push - (widgets.offsetHeight - belowForecast.offsetHeight))
+      const free = icons ? room - baseTop - push - widgets.offsetHeight : 0
       const shift = push + clockShift(clockVerticalPositionRef.current, free)
       page.style.setProperty('--new-tab-clock-shift', `${shift}px`)
       page.style.setProperty('--new-tab-widgets-bottom', `${Math.ceil(Math.max(baseTop + shift + widgets.offsetHeight, iconsClearCorner))}px`)

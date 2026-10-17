@@ -162,7 +162,7 @@ async function run() {
     assert.ok(!overlaps(w.box, w.icons), `weather clears the icons (${what}: weather ${JSON.stringify(w.box)}, icons ${JSON.stringify(w.icons)})`)
     if (w.corner) assert.ok(!overlaps(w.box, w.widgets), `the top-right forecast clears the clocks (${what}: weather ${JSON.stringify(w.box)}, clocks ${JSON.stringify(w.widgets)})`)
     else assert.ok(w.box.bottom <= w.widgets.bottom + 1, `weather is part of the clock block (${what})`)
-    assert.ok(w.icons.bottom <= w.credit.top + 4 || w.icons.bottom <= w.height, `icons still on the page (${what})`)
+    assert.ok(w.icons.top < w.height - 40, `icons start on the page (${what}: ${JSON.stringify(w.icons)} in ${w.height})`)
   }
   await waitFor(() => smoke.evaluate(toolbar, 'document.readyState === "complete" && Boolean(window.api?.browser?.chrome)'), 'the toolbar renderer')
 
@@ -222,7 +222,10 @@ async function run() {
   mainWindow.setSize(900, 540)
   await waitFor(async () => (await weather()).height < 600, 'the short window')
   await delay(300)
-  expectLayout(await weather(), '5 days at 200 %, 900×540')
+  const small = await weather()
+  expectLayout(small, '5 days at 200 %, 900×540')
+  assert.ok(small.font < 28 && small.font >= 14 - 0.5, `a forecast too tall for the short window shrinks to fit, at most to half (${small.font})`)
+  await shot('weather-small-200-5day')
   await setRange('Weather size', 100)
   await setSelect('Weather forecast', 'days7')
   await waitFor(async () => (await weather()).days.length === 7, 'seven columns')

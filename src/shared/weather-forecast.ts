@@ -32,6 +32,17 @@ export function clampWeatherScale(value: unknown): number {
 }
 
 /**
+ * How far a forecast too tall for the window shrinks (its "fit", 0.5–1 in 0.05 steps): what it
+ * would need at full size (`height / currentFit`, since everything in it scales with the fit) against
+ * the `available` px. 1 when it fits; never below half (the icon track scrolls past that, as before).
+ */
+export function weatherFit(available: number, height: number, currentFit: number): number {
+  const natural = height / (currentFit > 0 ? currentFit : 1)
+  if (!(natural > 0) || !Number.isFinite(available)) return 1
+  return Math.min(1, Math.max(0.5, Math.floor((available / natural) * 20 + 1e-6) / 20))
+}
+
+/**
  * Daily days each provider can give (today included). wttr.in's JSON has 3; OpenWeather's free
  * forecast is 5 days of 3-hour steps; Open-Meteo goes to 16 and MET Norway ~9, both capped at 7.
  */

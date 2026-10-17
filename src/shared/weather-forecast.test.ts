@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampWeatherScale, conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, isWeatherForecastView, localClock, longitudeOffsetMinutes, metSymbolCondition,
-  openWeatherCondition, parseMetNorwayDaily, parseOpenMeteoDaily, parseOpenWeatherForecast, parseWttrDaily, placeToday, visibleForecast, WEATHER_PROVIDER_DAY_LIMITS, wmoCondition, wttrCondition
+  openWeatherCondition, parseMetNorwayDaily, parseOpenMeteoDaily, parseOpenWeatherForecast, parseWttrDaily, placeToday, visibleForecast, WEATHER_PROVIDER_DAY_LIMITS, weatherFit, wmoCondition, wttrCondition
 } from './weather-forecast'
 import { parseNewTabPreferences } from './persistence'
 
@@ -34,6 +34,17 @@ describe('forecast setting and weather size', () => {
     expect([bad.weatherScale, bad.weatherForecast]).toEqual([250, 'current'])
     expect(parseNewTabPreferences({ weatherScale: 12 }).weatherScale).toBe(50)
     expect(parseNewTabPreferences({ weatherScale: 133 }).weatherScale).toBe(135)
+  })
+
+  test('a forecast too tall for the window shrinks to fit, never below half', () => {
+    expect(weatherFit(400, 200, 1)).toBe(1)
+    expect(weatherFit(150, 200, 1)).toBe(0.75)
+    expect(weatherFit(150, 150, 0.75)).toBe(0.75) // already fitted: stays put
+    expect(weatherFit(400, 150, 0.75)).toBe(1) // the window grew: back to full size
+    expect(weatherFit(20, 200, 1)).toBe(0.5)
+    expect(weatherFit(-50, 200, 1)).toBe(0.5)
+    expect(weatherFit(Infinity, 200, 1)).toBe(1)
+    expect(weatherFit(100, 0, 1)).toBe(1)
   })
 
   test('provider day limits: wttr.in 3, OpenWeather 5, the rest 7', () => {
