@@ -21,11 +21,14 @@ import {
   type WakeSnapshotShowMessage
 } from '../shared/wake-snapshot'
 import { getOverlayToolbarContents, setPageCoverLostListener, setToolbarPageCover } from './browser-shell'
+import { readWakeSnapshotFromDisk, saveWakeSnapshotToDisk } from './wake-snapshot-disk'
 
 /**
  * Wake snapshots (rules in shared/wake-snapshot.ts): the last on-screen picture of a tab, shown by
  * the toolbar surface over the page area while a sleeping/discarded tab reloads, cross-faded out
- * on the page's first contentful paint. In memory only, capped, dropped on use and on close.
+ * on the page's first contentful paint. In memory (capped, dropped on use and on close), and for
+ * non-private tabs also on disk (wake-snapshot-disk.ts), so a restored tab shows its picture the
+ * first time it is opened after a restart.
  */
 
 interface StoredSnapshot {
@@ -85,13 +88,15 @@ function scaleForWakeSnapshot(image: NativeImage): NativeImage {
  * thumbnail is made from (no extra capture), kept at its device pixels. The caller defers this past
  * the switch so the tab coming on screen gets its frames first (browser.ts, encodeTabPicture).
  */
-export function keepWakeSnapshot(tabId: string, capture: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean): void {
+export function keepWakeSnapshot(tabId: string, capture: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean, partition: string): void {
   try {
     if (capture.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0)) return
     const started = DEBUG ? performance.now() : 0
     const scaled = scaleForWakeSnapshot(capture)
     const jpeg = scaled.toJPEG(WAKE_SNAPSHOT_JPEG_QUALITY)
     const kept = store.set(tabId, { jpeg, width: pageSize.width, height: pageSize.height, url, isPrivate, bytes: jpeg.length })
+    // The same bytes go to disk a moment later (one write per burst of switches); never a private page.
+    if (kept && !isPrivate) saveWakeSnapshotToDisk(url, partition, jpeg, pageSize)
     if (DEBUG) console.info(`[wake-snapshot] ${kept ? 'kept' : 'dropped'} ${tabId} ${scaled.getSize().width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`)
   } catch (error) {
     console.warn('[wake-snapshot] could not keep a snapshot:', error)
@@ -217,9 +222,10 @@ function watchFirstPaint(presentation: Presentation): () => void {
  * show its snapshot over the page area until the page paints. False when there is nothing fit to
  * show (no snapshot, another page, a different page-area size, New Tab/a panel on screen).
  */
-export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: WebContents, rect: { x: number; y: number; width: number; height: number }, targetUrl: string): boolean {
+export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: WebContents, rect: { x: number; y: number; width: number; height: number }, targetUrl: string, diskPartition: string | null = null): boolean {
   endWakeSnapshot(window)
-  const snapshot = store.take(tabId)
+  // Nothing in memory (a restored tab's first wake, or evicted): the picture saved on disk, if any.
+  const snapshot = store.take(tabId) ?? (diskPartition !== null ? readWakeSnapshotFromDisk(targetUrl, diskPartition, rect) : null)
   const skip = (reason: string): false => {
     if (DEBUG) console.info(`[wake-snapshot] not shown for ${tabId}: ${reason}`)
     return false

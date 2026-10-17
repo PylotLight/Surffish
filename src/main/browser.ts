@@ -47,6 +47,7 @@ import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
 import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot } from './wake-snapshot'
+import { forgetWakeSnapshotOnDisk, pruneWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
 import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
 import { copyImageAtPoint, isCopyImageClick } from './copy-image'
@@ -957,7 +958,8 @@ function activateTabInternal(id: string): boolean {
   }
   applyTabBounds(w)
   if (wakeUrl && tab.view && !tab.pdfEditor && !readerViewFor(tab.view.webContents)) {
-    presentWakeSnapshot(w.window, tab.id, tab.view.webContents, pageBoundsOf(tab), wakeUrl)
+    // A restored tab's first wake after a restart has no snapshot in memory: the saved one (never private).
+    presentWakeSnapshot(w.window, tab.id, tab.view.webContents, pageBoundsOf(tab), wakeUrl, tab.isPrivate ? null : partitionForTab(tab))
   } else if (wakeUrl) {
     dropWakeSnapshot(tab.id)
   }
@@ -3610,6 +3612,7 @@ export function closeBrowserTab(id: string, rememberClosed = true): void {
   if (tab.pdfEditor) tab.pdfEditor.dirty = false
   endWakeSnapshotForTab(id)
   forgetTabPicture(id)
+  forgetSavedWakeSnapshot(tab)
   const wasActive = w.activeTabId === id
   if (wasActive) cancelActiveMacTrackpadSwipe()
   if (wasActive) hideLinkStatus(false, w.window)
@@ -4320,7 +4323,7 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
 interface PendingTabPicture {
   tab: BrowserTab
   image: Electron.NativeImage
-  wake: { pageArea: { width: number; height: number }; url: string; isPrivate: boolean } | null
+  wake: { pageArea: { width: number; height: number }; url: string; isPrivate: boolean; partition: string } | null
   timer: ReturnType<typeof setTimeout>
 }
 const pendingPictures = new Map<string, PendingTabPicture>()
@@ -4354,7 +4357,7 @@ function encodeTabPicture(id: string): void {
   setImmediate(() => {
     // Closed meanwhile, or a newer capture is already waiting: this one is stale.
     if (!allTabs().includes(tab) || pendingPictures.has(id)) return
-    keepWakeSnapshot(id, image, wake.pageArea, wake.url, wake.isPrivate)
+    keepWakeSnapshot(id, image, wake.pageArea, wake.url, wake.isPrivate, wake.partition)
   })
 }
 
@@ -4368,6 +4371,20 @@ function forgetTabPicture(id: string): void {
   cancelTabPictureEncode(id)
   tabThumbnails.delete(id)
   dropWakeSnapshot(id)
+}
+
+/** A tab closed by the user: its saved picture goes, unless another open tab shows the same page (quitting keeps them all). */
+function forgetSavedWakeSnapshot(tab: BrowserTab): void {
+  if (sessionFrozen || tab.isPrivate) return
+  const url = currentUrl(tab)
+  const partition = partitionForTab(tab)
+  if (allTabs().some((other) => other !== tab && !other.isPrivate && currentUrl(other) === url && partitionForTab(other) === partition)) return
+  forgetWakeSnapshotOnDisk(url, partition)
+}
+
+/** After start-up: saved pictures of pages no open tab shows any more are removed (wake-snapshot-disk.ts). */
+export function pruneSavedWakeSnapshots(): void {
+  pruneWakeSnapshotsOnDisk(allTabs().filter((tab) => !tab.isPrivate).map((tab) => ({ url: currentUrl(tab), partition: partitionForTab(tab) })))
 }
 
 /** A wake snapshot of `url` fitting `pageArea` is stored or waiting to be encoded. */
@@ -4402,7 +4419,7 @@ async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<vo
     const image = await capturePageWithin(contents, undefined, { stayHidden: true })
     if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return
     tabPictureTaken.set(tab, taken)
-    const wake = pageArea && tab.view?.webContents === contents ? { pageArea, url, isPrivate: tab.isPrivate } : null
+    const wake = pageArea && tab.view?.webContents === contents ? { pageArea, url, isPrivate: tab.isPrivate, partition: partitionForTab(tab) } : null
     scheduleTabPictureEncode(tab, image, wake)
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.

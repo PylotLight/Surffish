@@ -2,9 +2,10 @@
  * Wake snapshots: when a sleeping or discarded tab (timed sleep, memory saver, Hibernate Tab) is
  * opened again, the last picture of it shows at once while the real page reloads underneath, then
  * cross-fades out when the page's first contentful paint lands. The picture is taken when the tab
- * leaves the screen (a hidden, detached page can't be captured), kept in memory only (never on
- * disk, so private tabs are covered too), capped in total size, and dropped once used or when its
- * tab closes. Input is never swallowed: a press or scroll on the picture removes it and goes to
+ * leaves the screen (a hidden, detached page can't be captured), kept in memory, capped in total
+ * size, and dropped once used or when its tab closes. Non-private tabs' snapshots are also saved
+ * in the profile (shared/wake-snapshot-disk.ts) so a restored session's tabs have one after a
+ * restart; private ones never leave memory. Input is never swallowed: a press or scroll on the picture removes it and goes to
  * the page.
  *
  * Pure rules live here; main/wake-snapshot.ts does the capture and the presentation.

@@ -19,7 +19,7 @@ import { initializeScreenSharing } from './screen-share'
 import { initializeSpacesStore } from './spaces-store'
 import { restoreWindows, setMainWindowCloseHandler } from './window'
 import { quietRetiredShellSenders } from './ipc-retired'
-import { freezeBrowserSession, setBrowserSearchEngine, TAB_COMMAND_SHORTCUTS } from './browser'
+import { freezeBrowserSession, pruneSavedWakeSnapshots, setBrowserSearchEngine, TAB_COMMAND_SHORTCUTS } from './browser'
 import { browserWindows } from './window-scope'
 import { getBrowserSearchEngine } from './browser-persistence'
 import { initializeSessionCookiePersistence } from './session-cookies'
@@ -163,6 +163,8 @@ app.whenReady().then(async () => {
   })
   await afterFirstWindowPaint(windows.at(-1))
   traceStartup('first window painted')
+  // Saved tab pictures of pages the restored session no longer has go (one small index read, a readdir).
+  pruneSavedWakeSnapshots()
   const originalSecurityWarnings = process.env.ELECTRON_DISABLE_SECURITY_WARNINGS
   let initializeNetworkAdblock: (() => Promise<void>) | undefined
   try {
