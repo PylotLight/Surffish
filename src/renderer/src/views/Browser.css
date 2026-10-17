@@ -2261,7 +2261,7 @@
   margin: calc(4px * var(--new-tab-weather-scale)) 0 0;
   padding: 0;
   list-style: none;
-  font-size: calc(11.5px * var(--new-tab-weather-scale));
+  font-size: calc(12.5px * var(--new-tab-weather-scale));
   font-variant-numeric: tabular-nums;
 }
 /* Under the clocks: a column per day (weekday, icon, high | low, rain). */

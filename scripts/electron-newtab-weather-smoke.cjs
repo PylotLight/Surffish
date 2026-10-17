@@ -220,7 +220,7 @@ async function run() {
   await delay(1_200)
   const big = await weather()
   assert.ok(Math.abs(big.font - 28) < 0.6, `the drag ends where it stopped (${big.font})`)
-  assert.ok(Math.abs(big.dayFont - 23) < 0.6, `the rows scale too (${big.dayFont})`)
+  assert.ok(Math.abs(big.dayFont - 25) < 0.6, `the rows scale too (${big.dayFont})`)
   await waitFor(async () => (await prefs()).weatherScale === 200, 'the final size saved')
   await delay(300)
   assert.ok(Math.abs((await weather()).font - 28) < 0.6, 'no bounce-back after saving')
