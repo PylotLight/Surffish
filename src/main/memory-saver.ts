@@ -62,6 +62,11 @@ async function sample(): Promise<MemorySample> {
   return { totalMB, availableMB, macPressureLevel: null, surffishMB }
 }
 
+/** Whether memory counts as tight right now (any pressure reason); the omnibox prerender holds off then. */
+export async function isMemoryTight(): Promise<boolean> {
+  return memoryPressure(await sample()) !== null
+}
+
 function hasUnsavedFormInput(id: string): Promise<boolean> {
   const contents = getBrowserTabWebContents(id)
   if (!contents) return Promise.resolve(false)
