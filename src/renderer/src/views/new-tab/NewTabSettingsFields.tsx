@@ -100,7 +100,7 @@ export default function NewTabSettingsFields({ preferences, onPatch, newTabPage,
   const providerDays = WEATHER_PROVIDER_DAY_LIMITS[provider.id]
   const forecastHint = forecastDays > providerDays ? `${provider.label} gives ${providerDays} days, so ${providerDays} show.`
     : forecastDays === 1 ? 'Today’s high and low, and the chance of rain where the provider gives it.'
-      : forecastDays > 1 ? 'A column per day: high, low, conditions and chance of rain.' : 'Only the current temperature and conditions.'
+      : forecastDays > 1 ? 'Each day’s high, low, conditions and chance of rain.' : 'Only the current temperature and conditions.'
   return (
     <>
       <SettingsGroup title="Page">

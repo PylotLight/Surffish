@@ -155,6 +155,16 @@ async function run() {
       height: p.height
     }
   })()`)
+  // New Tab screenshots without the Customize panel over the right of the page, then reopen it.
+  const panelOpen = () => ev('Boolean(document.querySelector(".new-tab-customize.is-open"))')
+  const shotWithoutPanel = async (name) => {
+    if (!shots) return
+    await ev('document.querySelector(".new-tab-customize-gear").click()')
+    await waitFor(async () => !(await panelOpen()), 'the Customize panel to close')
+    await shot(name)
+    await ev('document.querySelector(".new-tab-customize-gear").click()')
+    await waitFor(panelOpen, 'the Customize panel to reopen')
+  }
   const overlaps = (a, b) => Boolean(a && b && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)
   const expectLayout = (w, what) => {
     assert.ok(w.box.left >= -1 && w.box.right <= w.width + 1, `weather inside the page horizontally (${what}: ${JSON.stringify(w.box)} in ${w.width})`)
@@ -215,8 +225,7 @@ async function run() {
   await delay(300)
   assert.ok(Math.abs((await weather()).font - 28) < 0.6, 'no bounce-back after saving')
   expectLayout(big, '5 days at 200 %')
-  await reveal('Weather size')
-  await shot('weather-200-5day')
+  await shotWithoutPanel('weather-200-5day')
 
   smoke.step('Small window: the forecast and icons stay apart and on screen')
   mainWindow.setSize(900, 540)
@@ -250,8 +259,7 @@ async function run() {
   await setSelect('Weather forecast', 'days3')
   const three = await waitFor(async () => { const w = await weather(); return w && !w.corner && w.days.length === 3 ? w : null }, 'three columns')
   expectLayout(three, '3 days')
-  await reveal('Weather forecast')
-  await shot('weather-3day')
+  await shotWithoutPanel('weather-3day')
   await setSelect('Weather forecast', 'days7')
   await setSelect('Weather provider', 'wttr')
   const wttr = await waitFor(async () => { const w = await weather(); return w && /16°C · Sunny/.test(w.text) && w.days.length === 3 ? w : null }, 'wttr.in\'s three days')

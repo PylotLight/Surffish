@@ -116,6 +116,10 @@ async function run() {
   assert.deepEqual(await visibleRows(), [])
   const chips = await ev('[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)')
   assert.deepEqual(chips, ['New Tab 7'], 'New Tab offered with its match count (clock display options + size/position sliders + weather position, Oct 2026)')
+  await type('forecast')
+  await waitFor(async () => JSON.stringify(await ev('[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)')) === JSON.stringify(['New Tab 4']), 'New Tab offered for "forecast" (Weather, Provider, Forecast, Weather size, Oct 2026)')
+  await type('clock')
+  await waitFor(async () => JSON.stringify(await ev('[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)')) === JSON.stringify(['New Tab 7']), 'the clock chip again')
   await ev('document.querySelector(".settings-search-chip").click()')
   await waitFor(async () => (await mode()) === 'newtab', 'the chip to open New Tab')
   await waitFor(async () => {
