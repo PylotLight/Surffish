@@ -163,8 +163,8 @@ export function pruneWakeSnapshotsOnDisk(openPages: readonly { url: string; part
   const known = new Set([...loaded().keys(), ...pending.keys()])
   try {
     for (const name of readdirSync(dirPath())) {
-      const match = /^([a-f0-9]{32})\.jpg$/.exec(name)
-      if (match && !known.has(match[1])) removeFile(match[1])
+      const key = /^([a-f0-9]{32})\.jpg$/.exec(name)?.[1]
+      if (key && !known.has(key)) removeFile(key)
       else if (name.endsWith('.tmp')) rmSync(join(dirPath(), name), { force: true })
     }
   } catch {
