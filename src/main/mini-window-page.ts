@@ -26,8 +26,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src https: http: data:">
 <title>Mini Window</title>
 <style>
-  :root { color-scheme: light dark; --bar: rgba(246,246,247,.94); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; }
-  @media (prefers-color-scheme: dark) { :root { --bar: rgba(38,38,41,.94); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; } }
+  /* The bar is opaque on purpose: the window is transparent, so any see-through bar shows whatever macOS composites behind it, which flips between the desktop and black while the page view below repaints (a visible flash). */
+  :root { color-scheme: light dark; --bar: rgb(246,246,247); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; }
+  @media (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; } }
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font: 12px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); user-select: none; }
   header { position: fixed; left: 0; right: 0; top: 0; height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 6px; box-sizing: border-box; background: var(--bar); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
   #where { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 4px; }
@@ -547,5 +548,60 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   // Right-click on the header (not a tab chip or the volume): the mini window's menu.
   // (In the popout the strip sits inside the header row: one menu per right-click.)
   for (const surface of [bar, strip]) surface.addEventListener('contextmenu', (event) => { if (event.target.closest('.tab, .vol')) return; event.preventDefault(); event.stopPropagation(); window.miniWindow.menu() })
+  // SURFFISH_DEBUG_HEADER (main/mini-header-debug.ts): while main has it on, every DOM write, class
+  // toggle, focus / visibility / hover change and theme flip here goes to the debug log, batched.
+  let debugTrace = null
+  function debugNode(node) {
+    if (!node) return '?'
+    if (node.nodeType !== 1) return debugNode(node.parentNode) + '>' + node.nodeName
+    if (node.id) return '#' + node.id
+    if (node.classList && node.classList.contains('tab')) return '.tab[' + (node.dataset.tabId || '') + ']'
+    const cls = typeof node.className === 'string' ? node.className.trim().split(' ').filter(Boolean).join('.') : ''
+    return node.tagName.toLowerCase() + (cls ? '.' + cls : '')
+  }
+  function debugClip(value) { const text = String(value == null ? '' : value); return text.length > 80 ? text.slice(0, 77) + '...' : text }
+  function startDebugTrace() {
+    if (debugTrace) return
+    const queue = []
+    let timer = 0
+    const push = (line) => {
+      queue.push(Math.round(performance.now()) + 'ms ' + line)
+      if (!timer) timer = setTimeout(() => { timer = 0; window.miniWindow.debugLog(queue.splice(0, queue.length)) }, 200)
+    }
+    const observer = new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'attributes') {
+          const now = r.target.getAttribute(r.attributeName)
+          push((r.attributeName === 'class' ? 'class ' : 'attr ') + debugNode(r.target) + (r.attributeName === 'class' ? '' : ' ' + r.attributeName) + ': ' + JSON.stringify(debugClip(r.oldValue)) + ' -> ' + JSON.stringify(debugClip(now)))
+        } else if (r.type === 'characterData') {
+          push('text ' + debugNode(r.target) + ': ' + JSON.stringify(debugClip(r.oldValue)) + ' -> ' + JSON.stringify(debugClip(r.target.data)))
+        } else {
+          push('children ' + debugNode(r.target) + ': +' + r.addedNodes.length + ' -' + r.removedNodes.length + (r.target.id === 'title' || r.target.id === 'url' || r.target.id === 'hint' ? ' ' + JSON.stringify(debugClip(r.target.textContent)) : ''))
+        }
+      }
+    })
+    observer.observe(document.documentElement, { subtree: true, attributes: true, attributeOldValue: true, childList: true, characterData: true, characterDataOldValue: true })
+    const abort = new AbortController()
+    const on = (target, type, line) => target.addEventListener(type, () => push(typeof line === 'function' ? line() : line), { signal: abort.signal, capture: true })
+    on(window, 'focus', 'window focus')
+    on(window, 'blur', 'window blur')
+    on(document, 'visibilitychange', () => 'visibility ' + document.visibilityState)
+    on(bar, 'mouseenter', 'hover enter (strip)')
+    on(bar, 'mouseleave', 'hover leave (strip)')
+    on(icon, 'load', () => 'icon loaded ' + debugClip(icon.currentSrc))
+    on(icon, 'error', 'icon failed')
+    on(window, 'resize', () => 'resize ' + innerWidth + 'x' + innerHeight)
+    const queries = ['(prefers-color-scheme: dark)', '(prefers-reduced-transparency: reduce)', '(prefers-contrast: more)']
+    for (const query of queries) { const list = matchMedia(query); list.addEventListener('change', () => push('media ' + query + ' = ' + list.matches), { signal: abort.signal }) }
+    push('trace on: body.' + document.body.className.trim().split(' ').filter(Boolean).join('.') + ' title=' + JSON.stringify(debugClip(document.getElementById('title').textContent)) + ' dark=' + matchMedia('(prefers-color-scheme: dark)').matches + ' visibility=' + document.visibilityState + ' focused=' + document.hasFocus())
+    debugTrace = { observer, abort }
+  }
+  function stopDebugTrace() {
+    if (!debugTrace) return
+    debugTrace.observer.disconnect()
+    debugTrace.abort.abort()
+    debugTrace = null
+  }
+  if (window.miniWindow.onDebug) window.miniWindow.onDebug((on) => { if (on) startDebugTrace(); else stopDebugTrace() })
 </script>
 </body></html>`

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { MINI_HEADER_LOADING_DELAY_MS, MINI_HEADER_TITLE_THROTTLE_MS, createHeaderStateGate } from './mini-window-header-sync'
+import { MINI_HEADER_LOADING_DELAY_MS, MINI_HEADER_TITLE_THROTTLE_MS, changedHeaderFields, createHeaderStateGate } from './mini-window-header-sync'
 
 type State = { title: string; url: string; loading: boolean }
 const base: State = { title: 'Chat · Hark', url: 'hark.example/chat', loading: false }
@@ -124,5 +124,16 @@ describe('mini window header state gate', () => {
     // A chip's favicon changing is not a title: it goes out at once.
     now += 16
     expect(push({ ...base, tabs: tabs('Chat 3').map((tab) => ({ ...tab, faviconUrl: 'data:new' })) }).send).not.toBeNull()
+  })
+})
+
+describe('changedHeaderFields (debug log)', () => {
+  test('names the first push, flags, plain fields and strip chip fields', () => {
+    expect(changedHeaderFields(null, { title: 'a' })).toEqual(['(first push)'])
+    expect(changedHeaderFields({ title: 'a', loading: false, url: 'x' }, { title: 'a', loading: true, url: 'y' })).toEqual(['loading=true', 'url'])
+    const tabs = (title: string, icon: string) => [{ tabId: 'a', title: 'Hark', faviconUrl: 'data:a' }, { tabId: 'b', title, faviconUrl: icon }]
+    expect(changedHeaderFields({ tabs: tabs('one', 'data:b') }, { tabs: tabs('two', 'http://b') })).toEqual(['tabs[1].title', 'tabs[1].faviconUrl'])
+    expect(changedHeaderFields({ tabs: tabs('one', 'data:b') }, { tabs: tabs('one', 'data:b').slice(1) })).toEqual(['tabs(2→1)'])
+    expect(changedHeaderFields({ title: 'a' }, { title: 'a' })).toEqual([])
   })
 })
