@@ -1,4 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent, type Session, type WebContents } from 'electron'
+import { omniboxPrerenderUrl } from '../shared/omnibox-prerender'
 import {
   Debouncer,
   HOVER_DWELL_MS,
@@ -11,6 +12,8 @@ import {
 import { getActiveTabNetworkContext, getSelectedSearchEngine, getSleepingTabPreconnectTarget } from './browser'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { onGlanceLinkHover } from './glance-entry'
+import { isMemoryTight } from './memory-saver'
+import { cancelOmniboxPrerender, getOmniboxPrerenderStats, hintOmniboxPrerender, setPrerenderMemorySampler, type PrerenderStats } from './omnibox-prerender'
 import { getProxyGuardStatus } from './proxy-kill-switch'
 import { resolveAddressInput } from './search-keywords'
 import { readUserJson, writeUserJson } from './user-json'
@@ -87,8 +90,8 @@ export function noteLinkHover(contents: WebContents, url: string, context: () =>
   dwell.push(url)
 }
 
-function snapshot(): PreconnectSettings & { issued: number } {
-  return { ...current(), issued }
+function snapshot(): PreconnectSettings & { issued: number; prerender: PrerenderStats } {
+  return { ...current(), issued, prerender: getOmniboxPrerenderStats() }
 }
 
 function assertAppRenderer(event: IpcMainInvokeEvent): void {
@@ -96,6 +99,7 @@ function assertAppRenderer(event: IpcMainInvokeEvent): void {
 }
 
 export function registerPreconnectIpc(): void {
+  setPrerenderMemorySampler(isMemoryTight)
   ipcMain.handle('browser:preconnect:get', (event) => {
     assertAppRenderer(event)
     return snapshot()
@@ -106,7 +110,10 @@ export function registerPreconnectIpc(): void {
     if (typeof record.enabled === 'boolean') {
       settings = { ...current(), enabled: record.enabled }
       writeUserJson(FILE, settings)
-      if (!settings.enabled) limiter.clear()
+      if (!settings.enabled) {
+        limiter.clear()
+        cancelOmniboxPrerender()
+      }
       sendToMainWindowRenderers('browser:preconnect:changed', snapshot())
     }
     return snapshot()
@@ -129,12 +136,23 @@ export function registerPreconnectIpc(): void {
     const target = getSleepingTabPreconnectTarget(tabId)
     if (target) speculativePreconnect(target.url, target.context, 'sleeping-tab')
   })
-  // Address bar, already debounced in the renderer: the typed text and the top suggestion's URL.
-  ipcMain.on('browser:preconnect:typed', (event, input: unknown, topSuggestionUrl: unknown) => {
+  // Address bar, already debounced in the renderer: the typed text and the suggestion Enter is
+  // about (the selected row, else the top one) with its source. A sure match is also prerendered
+  // (omnibox-prerender.ts); anything else drops the previous prerender.
+  ipcMain.on('browser:preconnect:typed', (event, input: unknown, topSuggestionUrl: unknown, topSuggestionSource: unknown) => {
     if (!isMainWindowRenderer(event.sender, event.senderFrame)) return
     if (typeof input !== 'string' || input.length > 2048 || !current().enabled) return
     const suggestion = typeof topSuggestionUrl === 'string' ? topSuggestionUrl : null
-    const target = typedPreconnectUrl(input, suggestion, (text) => resolveAddressInput(text, getSelectedSearchEngine()))
+    const resolve = (text: string): string | null => resolveAddressInput(text, getSelectedSearchEngine())
+    const target = typedPreconnectUrl(input, suggestion, resolve)
     if (target) speculativePreconnect(target, getActiveTabNetworkContext(), 'typing')
+    const source = typeof topSuggestionSource === 'string' ? topSuggestionSource : null
+    const prerenderUrl = suggestion && source ? omniboxPrerenderUrl({ input, suggestionUrl: suggestion, suggestionSource: source, resolvedUrl: resolve(input.trim()) }) : null
+    hintOmniboxPrerender(prerenderUrl, current().enabled)
+  })
+  // The address bar stopped editing (blur, Escape, the text went back to the page URL).
+  ipcMain.on('browser:preconnect:typing-ended', (event) => {
+    if (!isMainWindowRenderer(event.sender, event.senderFrame)) return
+    cancelOmniboxPrerender()
   })
 }

@@ -76,6 +76,7 @@ import { dropBrowserTabOnMiniWindow, getMiniWindowSettings, noteMiniWindowChange
 import { canPopOutUrl } from '../shared/mini-window'
 import { miniReturnBeforeId, miniTabOrigin, moveTabId, sidebarDropBeforeId, type MiniTabOrigin, type SidebarRowHit } from '../shared/mini-window-tab-drag'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
+import { setOmniboxPrerenderHost, takeOmniboxPrerender, type PrerenderTabHistory } from './omnibox-prerender'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
 
@@ -1763,6 +1764,88 @@ setGlanceHost({
   isActiveTab: (window, tabId) => {
     const tab = findTab(tabId)
     return Boolean(tab && tab.win.window === window && isTabOnScreen(tab))
+  },
+  bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
+})
+
+/** The tab's back history as an omnibox prerender copies it (null on the New Tab / Settings tab). */
+function tabHistoryForPrerender(tab: BrowserTab): PrerenderTabHistory | null {
+  const contents = tab.view?.webContents
+  if (!contents || contents.isDestroyed()) return null
+  return { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
+}
+
+/** Only a site tab showing its page, or the New Tab / Settings tab, can take a swapped-in page. */
+function canTakePrerender(tab: BrowserTab): boolean {
+  if (tab.pdfEditor || tab.extensionPageOrigin || tab.win.mini || !isLiveWindow(tab.win)) return false
+  if (tab.view) return !tab.view.webContents.isDestroyed()
+  return tab.lastUrl === SURFFISH_QUICK_LINKS_URL || tab.lastUrl === SURFFISH_SETTINGS_URL
+}
+
+/**
+ * Enter on a prerendered address: the hidden view becomes the tab's page (like a promoted Glance),
+ * the old page closes. Its load already happened unobserved, so the tab state a load would have set
+ * (URL, favicon, history visit, zoom, volume) is set here. Keeps the old page's mute.
+ */
+function adoptPrerenderedView(tab: BrowserTab, view: WebContentsView): boolean {
+  const contents = view.webContents
+  if (contents.isDestroyed() || !isLiveWindow(tab.win) || !canTakePrerender(tab)) {
+    if (!contents.isDestroyed()) contents.close()
+    return false
+  }
+  const old = tab.view?.webContents
+  const muted = Boolean(old && !old.isDestroyed() && old.isAudioMuted())
+  const url = contents.getURL()
+  settingsTabTargets.delete(tab)
+  // Drops the old page (its destroyed event no longer belongs to the tab); nothing paints until
+  // the new view is attached below, in the same task.
+  disposeTabView(tab)
+  tab.pendingUrl = ''
+  tab.lastUrl = url
+  tab.error = null
+  tab.showingPdf = false
+  tab.closeIfOnlyDownload = false
+  tab.downloadStartedForCurrentLoad = false
+  tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
+  tab.faviconSource = null
+  tab.faviconRevision += 1
+  if (!createTabView(tab, { view })) {
+    if (!contents.isDestroyed()) contents.close()
+    return false
+  }
+  if (muted) contents.setAudioMuted(true)
+  tab.sleep = null
+  if (isActiveTab(tab)) tab.inactiveSince = null
+  applySavedZoom(tab, url)
+  applyTabVolumeForUrl(tab, url)
+  applyTabBounds(tab.win)
+  if (isActiveTab(tab)) contents.focus()
+  if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
+    recordBrowsingVisit(url, pageTitle(tab))
+    notifyHistoryChanged()
+  }
+  refreshTabFavicon(tab)
+  persistOpenTabs()
+  publishTabs(tab.win)
+  publishState(tab.win)
+  return true
+}
+
+setOmniboxPrerenderHost({
+  activeTarget: () => {
+    const tab = getTab()
+    if (!tab || !isLiveWindow(tab.win)) return null
+    return {
+      tabId: tab.id,
+      window: tab.win.window,
+      session: pageSessionForTab(tab),
+      isPrivate: tab.isPrivate,
+      eligible: canTakePrerender(tab),
+      webPreferences: tabWebPreferences(tab, false),
+      bounds: pageBoundsOf(tab),
+      contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
+      history: tabHistoryForPrerender(tab)
+    }
   },
   bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
 })
@@ -3736,6 +3819,9 @@ export async function navigateBrowser(input: string, engine: SearchEngineId = se
     replaceTabView(tab, null, url)
     return tab.view ? { ok: true } : { ok: false, reason: 'cancelled' }
   }
+  // The address bar already prerendered exactly this page for this tab (omnibox-prerender.ts): swap it in.
+  const prerendered = takeOmniboxPrerender(tab.id, url, tabHistoryForPrerender(tab))
+  if (prerendered && adoptPrerenderedView(tab, prerendered)) return { ok: true }
   const typedHttpFallback = typedHttpsFallbackUrl(input, url)
   // A URL typed on the New Tab or the Settings tab loads in that tab (it stops being Settings).
   if ((tab.lastUrl === SURFFISH_QUICK_LINKS_URL || tab.lastUrl === SURFFISH_SETTINGS_URL) && !tab.view) {

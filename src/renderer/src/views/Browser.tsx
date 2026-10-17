@@ -1235,11 +1235,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
   // Toolbar view sized to the toolbar + open popovers (useToolbarPopovers.ts).
   // Speculative preconnect while typing (shared/preconnect.ts): ~150 ms after the last keystroke,
-  // main opens one socket to the top suggestion's (or the typed URL's / search engine's) origin.
-  const preconnectTypingRef = useRef<Debouncer<{ input: string; top: string | null }> | null>(null)
+  // main opens one socket to the top suggestion's (or the typed URL's / search engine's) origin, and
+  // prerenders the page when Enter is sure to open a History/Bookmark URL (shared/omnibox-prerender.ts).
+  const preconnectTypingRef = useRef<Debouncer<{ input: string; top: string | null; source: string | null }> | null>(null)
+  // A hint went out since the bar last stopped editing: main may hold a prerender to drop.
+  const prerenderHintSentRef = useRef(false)
   useEffect(() => {
     if (surface === 'sidebar') return
-    const debouncer = new Debouncer<{ input: string; top: string | null }>(TYPING_DEBOUNCE_MS, ({ input, top }) => window.api.browser.preconnect.typed(input, top))
+    const debouncer = new Debouncer<{ input: string; top: string | null; source: string | null }>(TYPING_DEBOUNCE_MS, ({ input, top, source }) => {
+      prerenderHintSentRef.current = true
+      window.api.browser.preconnect.typed(input, top, source)
+    })
     preconnectTypingRef.current = debouncer
     return () => {
       debouncer.cancel()
@@ -1256,16 +1262,23 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       sleepingTabHoverRef.current = null
     }
   }, [])
-  const topSuggestionUrl = addressSuggestions[0]?.url ?? null
+  // The row Enter is about: the one arrowed onto (the bar holds its URL), else the top one.
+  const hintSuggestion = addressSuggestions[activeSuggestionIndex >= 0 ? activeSuggestionIndex : 0] ?? null
+  const topSuggestionUrl = hintSuggestion?.url ?? null
+  const topSuggestionSource = hintSuggestion?.source ?? null
   useEffect(() => {
     const debouncer = preconnectTypingRef.current
     if (!debouncer) return
     if (!suggestionsActive || !typedInputQualifies(address) || address === addressDisplayValue(browser.url, isLocalNewTab)) {
       debouncer.cancel()
+      if (prerenderHintSentRef.current) {
+        prerenderHintSentRef.current = false
+        window.api.browser.preconnect.typingEnded()
+      }
       return
     }
-    debouncer.push({ input: address, top: topSuggestionUrl })
-  }, [suggestionsActive, address, topSuggestionUrl, browser.url, isLocalNewTab])
+    debouncer.push({ input: address, top: topSuggestionUrl, source: topSuggestionSource })
+  }, [suggestionsActive, address, topSuggestionUrl, topSuggestionSource, browser.url, isLocalNewTab])
   // The centered address bar shrinks to keep clear of the right-aligned icons, whose width varies
   // (extension icons, badges, the ad-blocker count): Browser.css reads --toolbar-trailing-width.
   useEffect(() => {
@@ -1334,11 +1347,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   async function navigateTo(valueInput: string): Promise<void> {
     const value = valueInput.trim()
     if (!value) return
+    // Enter consumes (or drops) any omnibox prerender in main; closing the dropdown below must not
+    // tell main the typing ended first, or it would drop the page this navigation is about to use.
+    const hadPrerenderHint = prerenderHintSentRef.current
+    prerenderHintSentRef.current = false
+    preconnectTypingRef.current?.cancel()
     setSuggestionsOpen(false)
     setOmniboxPreview(null)
     setSidebarMode('tabs')
     // "Switch to open tabs" (Settings → Tab archive): main switches instead of loading a duplicate.
     if (await window.api.browser.tabArchive.switchToOpenTab(value, searchEngine).catch(() => false)) {
+      if (hadPrerenderHint) window.api.browser.preconnect.typingEnded()
       setNavigationError('')
       addressRef.current?.blur()
       return

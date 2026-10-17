@@ -172,7 +172,10 @@ export function initializeDownloads(): void {
   initialized = true
   loadHistory()
   void onPageSessionCreated((target, info) => {
-    target.on('will-download', (_event, item, webContents) => trackDownload(item, webContents, info.isPrivate))
+    // Skip what an earlier listener already turned down (an omnibox prerender that hit a download).
+    target.on('will-download', (event, item, webContents) => {
+      if (!event.defaultPrevented) trackDownload(item, webContents, info.isPrivate)
+    })
   })
 }
 
