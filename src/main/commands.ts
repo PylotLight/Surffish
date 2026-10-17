@@ -1,4 +1,4 @@
-import { clipboard } from 'electron'
+import { clipboard, shell } from 'electron'
 import { isBookmarksBarVisible } from './bookmarks-bar'
 import { normalizeHttpOrigin } from '../shared/persistence'
 import type { BrowserSidebarMode } from '../shared/types'
@@ -53,6 +53,7 @@ import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, getBrowserActiveTabId, hasMiniWindows } from './browser'
+import { miniHeaderDebugEnabled, setMiniHeaderDebug } from './mini-header-debug'
 import { canMergeMiniWindows, canSplitMiniWindowTab, mergeMiniWindows, moveTabToMiniWindow, splitMiniWindowTab, stepMiniWindowTab, canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
@@ -251,6 +252,19 @@ const COMMANDS: BrowserCommand[] = [
     refocusPage: false,
     enabled: () => canSendToMenuBar(canPopOutBrowserTab()),
     run: () => sendMiniWindowToMenuBar()
+  },
+  {
+    // Diagnostics for a flashing mini window header / menu bar popout strip (main/mini-header-debug.ts);
+    // the same as launching with SURFFISH_DEBUG_HEADER=1. Stopping shows the log file in Finder.
+    id: 'miniWindow.debugHeader', title: () => (miniHeaderDebugEnabled() ? 'Stop Logging Mini Window Header Events (Show Log)' : 'Start Logging Mini Window Header Events'), section: 'Settings',
+    keywords: ['mini window', 'menu bar', 'popout', 'header', 'strip', 'flash', 'flicker', 'debug', 'diagnostics', 'log', 'trace'], refocusPage: true,
+    run: () => {
+      const on = !miniHeaderDebugEnabled()
+      const path = setMiniHeaderDebug(on)
+      if (on) flashBrowserStatus('Logging mini window header events to ' + path, 5000)
+      else setTimeout(() => shell.showItemInFolder(path), 400)
+      return true
+    }
   },
   {
     id: 'miniWindow.togglePeek', title: () => (getMiniWindowSettings().peekOnHover ? 'Turn Off Mini Window Peek on Hover' : 'Turn On Mini Window Peek on Hover'), section: 'Settings',

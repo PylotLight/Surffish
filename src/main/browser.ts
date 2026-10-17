@@ -2174,7 +2174,12 @@ setMiniWindowHost({
       title: pageTitle(tab),
       url: currentUrl(tab),
       faviconUrl: tab.faviconUrl,
-      loading: live ? live.isLoading() : false,
+      // The page itself loading (a navigation of its main frame), never just one of its frames: a chat
+      // app's hidden iframes (auth refresh, analytics, a widget) reload on their own every few seconds,
+      // and isLoading() counts those too. Each one put the accent loading line under the menu bar
+      // popout's strip for the length of the frame's load, so an idle page made the strip flash.
+      // (Chrome shows loading the same way: ShouldShowLoadingUI, which isLoadingMainFrame reads.)
+      loading: live ? live.isLoadingMainFrame() : false,
       canGoBack: live ? live.navigationHistory.canGoBack() : false,
       private: tab.isPrivate,
       ...miniTabAudio(tab)

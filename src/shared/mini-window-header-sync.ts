@@ -92,3 +92,27 @@ export function createHeaderStateGate<S extends { title: string; loading: boolea
     }
   }
 }
+
+/** Which fields differ between two pushed header states (tabs: which tab fields), for SURFFISH_DEBUG_HEADER's log (main/mini-header-debug.ts). */
+export function changedHeaderFields(previous: object | null, next: object): string[] {
+  if (!previous) return ['(first push)']
+  const before = previous as Record<string, unknown>
+  const after = next as Record<string, unknown>
+  const out: string[] = []
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const a = JSON.stringify(before[key])
+    const b = JSON.stringify(after[key])
+    if (a === b) continue
+    if (key === 'tabs' && Array.isArray(before[key]) && Array.isArray(after[key])) {
+      const was = before[key] as Array<Record<string, unknown>>
+      const now = after[key] as Array<Record<string, unknown>>
+      if (was.length !== now.length) { out.push(`tabs(${was.length}→${now.length})`); continue }
+      now.forEach((tab, index) => {
+        for (const field of Object.keys(tab)) if (JSON.stringify(tab[field]) !== JSON.stringify(was[index]?.[field])) out.push(`tabs[${index}].${field}`)
+      })
+      continue
+    }
+    out.push(key === 'loading' || key === 'canGoBack' || key === 'crashed' ? `${key}=${b}` : key)
+  }
+  return out
+}

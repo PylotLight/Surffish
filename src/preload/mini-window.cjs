@@ -42,5 +42,9 @@ contextBridge.exposeInMainWorld('miniWindow', {
   pin: () => ipcRenderer.send('mini-window:pin'),
   // The menu bar popout's strip: its ⋯ menu at (x, y) in the window, and word that it closed.
   more: (x, y) => ipcRenderer.send('mini-window:more', Number(x), Number(y)),
-  onMenuClosed: (callback) => ipcRenderer.on('mini-window:menu-closed', () => callback())
+  onMenuClosed: (callback) => ipcRenderer.on('mini-window:menu-closed', () => callback()),
+  // SURFFISH_DEBUG_HEADER (main/mini-header-debug.ts): main turns the header's own trace on/off; it
+  // sends batches of lines (DOM writes, class toggles, focus, hover, theme) to the debug log.
+  onDebug: (callback) => ipcRenderer.on('mini-window:debug', (_event, on) => callback(Boolean(on))),
+  debugLog: (lines) => ipcRenderer.send('mini-window:debug-log', Array.isArray(lines) ? lines.slice(0, 200).map(String) : [])
 })

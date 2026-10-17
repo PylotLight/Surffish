@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BaseWindow, Menu, WebContentsView, app, globalShortcut, ipcMain, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
+import { BaseWindow, Menu, WebContentsView, app, globalShortcut, ipcMain, nativeTheme, screen, systemPreferences, type Display, type IpcMainEvent, type WebContents } from 'electron'
 import {
   MINI_WINDOW_CASCADE_STEP,
   MINI_WINDOW_GEOMETRY_FILE,
@@ -55,12 +55,13 @@ import { motion, placeWindow } from './mini-window-motion'
 import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
-import { createHeaderStateGate, type HeaderStateGate } from '../shared/mini-window-header-sync'
+import { changedHeaderFields, createHeaderStateGate, type HeaderStateGate } from '../shared/mini-window-header-sync'
 import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChipDrop } from '../shared/mini-window-tab-drag'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
 import { makeFloatingPanel, showFloatingPanel } from './mac-panel'
+import { headerDebug, miniHeaderDebugEnabled, onMiniHeaderDebugChange, traceHeaderContents, traceMiniWindow, untraceHeaderContents, untraceMiniWindow } from './mini-header-debug'
 
 /**
  * Mini windows: small frameless windows that float above other apps, each holding one tab's live
@@ -260,6 +261,65 @@ function live(contents: WebContents | null | undefined): contents is WebContents
   return Boolean(contents && !contents.isDestroyed())
 }
 
+// ---------------------------------------------------------------------------
+// SURFFISH_DEBUG_HEADER / ⌘K "Start Logging Mini Window Header Events" (mini-header-debug.ts).
+
+/** The state each mini's header page last got, for the debug log's "which fields changed". */
+const debugPushed = new WeakMap<Mini, object>()
+
+function miniLabel(m: Mini): string {
+  return `[mini ${m.slot}${m.menuBar ? ' popout' : ''}]`
+}
+
+function debugHost(url: string): string {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'data:' ? 'data:' : `${parsed.protocol}//${parsed.host}${parsed.pathname.length > 1 ? '/…' : ''}`
+  } catch {
+    return url.slice(0, 40)
+  }
+}
+
+function traceMini(m: Mini): void {
+  if (m.closed || m.window.isDestroyed()) return
+  const name = (view: Electron.View): string => {
+    if (view === m.header) return 'header'
+    const contents = (view as Partial<WebContentsView>).webContents
+    if (!contents || contents.isDestroyed()) return 'view'
+    return contents === m.page || contents === host().pageContents(m.window) ? `page(${debugHost(contents.getURL())})` : `view(${debugHost(contents.getURL())})`
+  }
+  traceMiniWindow(m.window, () => miniLabel(m), name)
+  if (m.panel && !m.panel.isDestroyed()) traceMiniWindow(m.panel, () => `${miniLabel(m)} floating-header-panel`, name)
+  if (m.header && live(m.header.webContents)) traceHeaderContents(m.header.webContents, () => miniLabel(m))
+}
+
+let debugWired = false
+function wireHeaderDebug(): void {
+  if (debugWired) return
+  debugWired = true
+  headerDebug('debug', `logging on at launch (SURFFISH_DEBUG_HEADER=1; Surffish ${app.getVersion()}, Electron ${process.versions.electron}, ${process.platform} ${process.arch})`)
+  onMiniHeaderDebugChange((on) => {
+    for (const m of liveMinis()) {
+      if (on) traceMini(m)
+      else {
+        untraceMiniWindow(m.window)
+        if (m.panel && !m.panel.isDestroyed()) untraceMiniWindow(m.panel)
+        if (m.header && live(m.header.webContents)) untraceHeaderContents(m.header.webContents)
+      }
+      if (m.header && live(m.header.webContents) && m.headerLoaded) m.header.webContents.send('mini-window:debug', on)
+      if (on) headerDebug('state', `${miniLabel(m)} mount=${m.mount} revealed=${m.revealed} plan=${m.plan.kind} pinned=${m.menuBar?.pinned === true} focused=${m.window.isFocused()} visible=${m.window.isVisible()} views=[${m.window.contentView.children.map((view) => (view === m.header ? 'header' : 'page/view')).join(', ')}]`)
+    }
+  })
+  // The header page's own trace (DOM writes, class toggles, focus, hover, theme), batched.
+  ipcMain.on('mini-window:debug-log', (event, lines: unknown) => {
+    if (!miniHeaderDebugEnabled() || !Array.isArray(lines)) return
+    const m = fromHeader(event)
+    const label = m ? miniLabel(m) : '[header ?]'
+    for (const line of lines.slice(0, 200)) if (typeof line === 'string') headerDebug('dom', `${label} ${line.slice(0, 300)}`)
+  })
+  nativeTheme.on('updated', () => headerDebug('theme', `dark=${nativeTheme.shouldUseDarkColors} reducedTransparency=${nativeTheme.prefersReducedTransparency} highContrast=${nativeTheme.shouldUseHighContrastColors}`))
+}
+
 function preloadPath(): string | null {
   const path = join(dirname(fileURLToPath(import.meta.url)), '../preload/mini-window.cjs')
   return existsSync(path) ? path : null
@@ -387,6 +447,7 @@ function ensurePanel(m: Mini): BaseWindow {
     if (m.mount === 'panel') m.mount = null
   })
   m.panel = panel
+  if (miniHeaderDebugEnabled()) traceMini(m)
   return panel
 }
 
@@ -531,6 +592,7 @@ function releaseHeader(m: Mini): void {
   cancelHeaderRelease(m)
   const view = m.header
   if (!view) return
+  headerDebug('header', `${miniLabel(m)} header page released`)
   const from = m.mount === 'panel' ? m.panel : m.mount === 'window' ? m.window : null
   if (from && !from.isDestroyed()) from.contentView.removeChildView(view)
   m.header = null
@@ -553,6 +615,10 @@ function ensureHeader(m: Mini): Promise<void> {
   m.mount = null
   const window = m.window
   const documentUrl = headerDocumentUrl()
+  if (miniHeaderDebugEnabled()) {
+    headerDebug('header', `${miniLabel(m)} header page created`)
+    traceHeaderContents(view.webContents, () => miniLabel(m))
+  }
   void view.webContents.loadURL(documentUrl).catch(() => undefined)
   // A crashed or hung header reloads like the browser's own surfaces (crash-guard.ts).
   watchShellSurface(view.webContents, () => view.webContents.loadURL(documentUrl).then(() => { m.headerGate.reset(); refreshHeaderOf(m) }), () => !m.closed && !window.isDestroyed() && m.header === view)
@@ -566,6 +632,7 @@ function ensureHeader(m: Mini): Promise<void> {
     m.headerLoaded = true
     // A new page (made again after a release) has seen nothing yet.
     m.headerGate.reset()
+    if (miniHeaderDebugEnabled()) view.webContents.send('mini-window:debug', true)
     layout(m)
     refreshHeaderOf(m)
     scheduleHeaderRelease(m)
@@ -790,6 +857,16 @@ function rewirePage(m: Mini): void {
       if (!m.revealed) scheduleHeaderRelease(m)
     }
   })
+  // SURFFISH_DEBUG_HEADER: what the page does while the header sits there (cheap no-ops while off).
+  const pageDebug = (event: string, detail: () => unknown): void => { if (miniHeaderDebugEnabled()) headerDebug('page', `${miniLabel(m)} ${event} ${String(detail() ?? '')}`) }
+  onPage(m, contents, 'did-start-loading', () => pageDebug('did-start-loading', () => `isLoading=${contents.isLoading()} mainFrame=${contents.isLoadingMainFrame()}`))
+  onPage(m, contents, 'did-stop-loading', () => pageDebug('did-stop-loading', () => ''))
+  onPage(m, contents, 'did-frame-navigate', (_event: Electron.Event, url: string, _code: number, _status: string, isMainFrame: boolean) => pageDebug('did-frame-navigate', () => `${isMainFrame ? 'main' : 'subframe'} ${debugHost(url)}`))
+  onPage(m, contents, 'did-navigate-in-page', (_event: Electron.Event, url: string, isMainFrame: boolean) => pageDebug('did-navigate-in-page', () => `${isMainFrame ? 'main' : 'subframe'} ${debugHost(url)}`))
+  onPage(m, contents, 'page-title-updated', (_event: Electron.Event, title: string) => pageDebug('page-title-updated', () => JSON.stringify(title)))
+  onPage(m, contents, 'page-favicon-updated', (_event: Electron.Event, favicons: string[]) => pageDebug('page-favicon-updated', () => favicons.map((url) => url.slice(0, 60)).join(' ')))
+  onPage(m, contents, 'focus', () => pageDebug('focus', () => ''))
+  onPage(m, contents, 'blur', () => pageDebug('blur', () => ''))
   // In the menu bar's popout, Esc hides it (the page still gets the key).
   onPage(m, contents, 'before-input-event', (_event: Electron.Event, input: Electron.Input) => {
     if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
@@ -859,6 +936,10 @@ function sendHeaderState(m: Mini): void {
   cancelHeaderPush(m)
   contents.send('mini-window:state', state)
   m.headerGate.sent(state, headerExtraKey(m))
+  if (miniHeaderDebugEnabled()) {
+    headerDebug('push', `${miniLabel(m)} full (header page attached / reloaded)`)
+    debugPushed.set(m, state)
+  }
 }
 
 function refreshHeaderOf(m: Mini): void {
@@ -881,9 +962,16 @@ function refreshHeaderOf(m: Mini): void {
     }, plan.recheckMs)
   }
   // The dock handle has its own state (dock side, the group's favicons); it diffs what it sends.
-  if (!plan.send) return refreshHandlesOf(m)
+  if (!plan.send) {
+    if (miniHeaderDebugEnabled()) headerDebug('update', `${miniLabel(m)} dropped (nothing shown changed${plan.recheckMs === null ? '' : `; recheck in ${plan.recheckMs}ms`}${state.loading ? '; page loading, not shown yet' : ''})`)
+    return refreshHandlesOf(m)
+  }
   state = plan.send
   m.headerGate.sent(state, extra)
+  if (miniHeaderDebugEnabled()) {
+    headerDebug('push', `${miniLabel(m)} ${changedHeaderFields(debugPushed.get(m) ?? null, state).join(' ') || '(extra key only: tab urls / audio)'}`)
+    debugPushed.set(m, state)
+  }
   const windowTitle = state.title ? `${state.title} — Mini Window` : 'Mini Window'
   if (windowTitle !== m.windowTitle) {
     m.windowTitle = windowTitle
@@ -911,6 +999,7 @@ function refreshHeaderOf(m: Mini): void {
 function registerIpc(): void {
   if (ipcRegistered) return
   ipcRegistered = true
+  wireHeaderDebug()
   ipcMain.on('mini-window:back', (event) => {
     const m = fromHeader(event)
     const page = m ? host().pageContents(m.window) : null
@@ -1175,6 +1264,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   self.mini = m
   minis.push(m)
   lastActive = m
+  if (miniHeaderDebugEnabled()) traceMini(m)
   window.on('focus', () => {
     m.menuBar?.popout.focused()
     lastActive = m
