@@ -32,14 +32,21 @@ export function clampWeatherScale(value: unknown): number {
 }
 
 /**
- * How far a forecast too tall for the window shrinks (its "fit", 0.5–1 in 0.05 steps): what it
- * would need at full size (`height / currentFit`, since everything in it scales with the fit) against
- * the `available` px. 1 when it fits; never below half (the icon track scrolls past that, as before).
+ * How far a forecast too tall for the window shrinks: the largest "fit" (1, or 0.5–0.95 in 0.05
+ * steps) at which `fitsAt` says it fits, by binary search (≤ 5 probes; the rows re-wrap as they
+ * shrink, so height isn't proportional and has to be measured). Never below half: past that the icon
+ * track scrolls, as before.
  */
-export function weatherFit(available: number, height: number, currentFit: number): number {
-  const natural = height / (currentFit > 0 ? currentFit : 1)
-  if (!(natural > 0) || !Number.isFinite(available)) return 1
-  return Math.min(1, Math.max(0.5, Math.floor((available / natural) * 20 + 1e-6) / 20))
+export function largestWeatherFit(fitsAt: (fit: number) => boolean): number {
+  if (fitsAt(1)) return 1
+  let low = 10
+  let high = 19
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (fitsAt(middle / 20)) low = middle
+    else high = middle - 1
+  }
+  return low / 20
 }
 
 /**

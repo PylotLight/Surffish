@@ -67,7 +67,7 @@ import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from '.
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
-import { conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, placeToday, visibleForecast, weatherFit } from '../../../shared/weather-forecast'
+import { conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, largestWeatherFit, placeToday, visibleForecast } from '../../../shared/weather-forecast'
 import WeatherGlyph, { RainChanceGlyph } from './new-tab/WeatherGlyph'
 import { clockGreeting, clockShift, formatClockDate, formatClockTime, formatZoneDifference, relativeClockDay, zoneDifferenceMinutes } from '../../../shared/new-tab-clock'
 import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
@@ -722,12 +722,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
       const belowForecast = belowWeather?.classList.contains('has-forecast') ? belowWeather : null
       for (const element of [corner, belowWeather]) if (element && element !== cornerForecast && element !== belowForecast) element.style.removeProperty('--new-tab-weather-fit')
       // A window too short for the forecast at its size shrinks it (down to half) instead of
-      // pushing the icons off the page; it grows back as the window does. Reading offsetHeight
-      // after the write lays out again, so everything below sees the fitted size.
+      // pushing the icons off the page; it grows back as the window does. Measured, not estimated
+      // (the columns re-wrap as they shrink), and only while a forecast shows; the result depends
+      // on the page size alone, so the resize it causes settles on the same value.
       const fitTo = (element: HTMLElement, available: number): void => {
-        const current = parseFloat(element.style.getPropertyValue('--new-tab-weather-fit')) || 1
-        const fit = weatherFit(available, element.offsetHeight, current)
-        if (fit !== current) element.style.setProperty('--new-tab-weather-fit', String(fit))
+        const fit = largestWeatherFit((candidate) => {
+          element.style.setProperty('--new-tab-weather-fit', String(candidate))
+          return element.offsetHeight <= available
+        })
+        if (fit === 1) element.style.removeProperty('--new-tab-weather-fit')
+        else element.style.setProperty('--new-tab-weather-fit', String(fit))
       }
       const besideBox = (box: DOMRect, other: DOMRect | undefined): boolean => Boolean(other && other.right > box.left - 8 && other.left < box.right + 8)
       if (cornerForecast && Number.isFinite(room)) {

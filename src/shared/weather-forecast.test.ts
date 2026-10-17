@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   clampWeatherScale, conditionFromDescription, forecastDayCount, forecastDayLabel, formatTemperatureShort, isWeatherForecastView, localClock, longitudeOffsetMinutes, metSymbolCondition,
-  openWeatherCondition, parseMetNorwayDaily, parseOpenMeteoDaily, parseOpenWeatherForecast, parseWttrDaily, placeToday, visibleForecast, WEATHER_PROVIDER_DAY_LIMITS, weatherFit, wmoCondition, wttrCondition
+  openWeatherCondition, parseMetNorwayDaily, parseOpenMeteoDaily, parseOpenWeatherForecast, parseWttrDaily, placeToday, visibleForecast, WEATHER_PROVIDER_DAY_LIMITS, largestWeatherFit, wmoCondition, wttrCondition
 } from './weather-forecast'
 import { parseNewTabPreferences } from './persistence'
 
@@ -36,15 +36,14 @@ describe('forecast setting and weather size', () => {
     expect(parseNewTabPreferences({ weatherScale: 133 }).weatherScale).toBe(135)
   })
 
-  test('a forecast too tall for the window shrinks to fit, never below half', () => {
-    expect(weatherFit(400, 200, 1)).toBe(1)
-    expect(weatherFit(150, 200, 1)).toBe(0.75)
-    expect(weatherFit(150, 150, 0.75)).toBe(0.75) // already fitted: stays put
-    expect(weatherFit(400, 150, 0.75)).toBe(1) // the window grew: back to full size
-    expect(weatherFit(20, 200, 1)).toBe(0.5)
-    expect(weatherFit(-50, 200, 1)).toBe(0.5)
-    expect(weatherFit(Infinity, 200, 1)).toBe(1)
-    expect(weatherFit(100, 0, 1)).toBe(1)
+  test('a forecast too tall for the window shrinks to the largest fit that fits, never below half', () => {
+    const probe = (limit: number) => { const probes: number[] = []; return { probes, fitsAt: (fit: number) => { probes.push(fit); return fit <= limit } } }
+    expect(largestWeatherFit(probe(1).fitsAt)).toBe(1)
+    const shrink = probe(0.72)
+    expect(largestWeatherFit(shrink.fitsAt)).toBe(0.7)
+    expect(shrink.probes.length).toBeLessThanOrEqual(5)
+    expect(largestWeatherFit(probe(0.95).fitsAt)).toBe(0.95)
+    expect(largestWeatherFit(probe(0.1).fitsAt)).toBe(0.5)
   })
 
   test('provider day limits: wttr.in 3, OpenWeather 5, the rest 7', () => {
