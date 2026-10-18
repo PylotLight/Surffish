@@ -1,20 +1,22 @@
 // End to end against a local HTTP server: download (through a redirect) -> verify -> unpack -> cache
-// -> --path, plus the unsupported-platform path. Needs `zip`/`unzip` (those tests skip without them).
+// -> --path, plus the unsupported-platform path. The fixture zip is written in JS; unpacking needs
+// `unzip` (ditto on macOS is only used for platform 'darwin'), so those tests skip without it.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import config from '../app.config.mjs'
 import { run } from '../lib/launcher.mjs'
 import { createUI } from '../lib/ui.mjs'
+import { storeZip } from './zip-fixture.mjs'
 
 // the local server must not go through a runner/sandbox HTTP(S)_PROXY (bun's fetch honours them)
 for (const key of ['NO_PROXY', 'no_proxy']) process.env[key] = [process.env[key], '127.0.0.1', 'localhost'].filter(Boolean).join(',')
 
-const hasZip = spawnSync('zip', ['-v'], { stdio: 'ignore' }).status === 0 && spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status === 0
+const hasZip = spawnSync('unzip', ['-v'], { stdio: 'ignore' }).status === 0
 const work = mkdtempSync(join(tmpdir(), 'cli-e2e-'))
 let server
 let base = ''
@@ -27,15 +29,13 @@ const sink = () => {
 }
 
 beforeAll(async () => {
-  if (hasZip) {
-    const app = join(work, 'src', 'Surffish.app', 'Contents')
-    mkdirSync(app, { recursive: true })
-    writeFileSync(join(app, 'Info.plist'), '<plist/>')
-    writeFileSync(join(app, 'blob'), Buffer.alloc(256 * 1024, 7))
-    spawnSync('zip', ['-qr', join(work, 'app.zip'), 'Surffish.app'], { cwd: join(work, 'src') })
-    zipBytes = readFileSync(join(work, 'app.zip'))
-    sha = createHash('sha256').update(zipBytes).digest('hex')
-  }
+  zipBytes = storeZip([
+    { name: 'Surffish.app/' },
+    { name: 'Surffish.app/Contents/' },
+    { name: 'Surffish.app/Contents/Info.plist', data: Buffer.from('<plist/>') },
+    { name: 'Surffish.app/Contents/blob', data: Buffer.alloc(256 * 1024, 7) },
+  ])
+  sha = createHash('sha256').update(zipBytes).digest('hex')
   server = createServer((req, res) => {
     if (req.url === '/redirect') { res.writeHead(302, { Location: '/app.zip' }); res.end(); return }
     if (req.url === '/app.zip') { res.writeHead(200, { 'Content-Length': zipBytes.length }); res.end(zipBytes); return }
@@ -80,6 +80,16 @@ describe('launcher', () => {
     const env = { SURFFISH_CLI_CACHE_DIR: cacheDir, SURFFISH_CLI_ASSET_URL: `${base}/app.zip`, SURFFISH_CLI_SHA256: 'a'.repeat(64) }
     await expect(run(config, { argv: ['--no-launch'], packageVersion: '0.1.22', env, platform: 'linux', arch: 'x64', ui: createUI({ stream: sink(), env: {} }), stdout: sink() })).rejects.toThrow(/SHA-256 mismatch/)
     expect(readdirSync(cacheDir)).toEqual([])
+  })
+
+  test.skipIf(process.platform !== 'darwin')('macOS: unpacks with ditto and finds the .app', async () => {
+    const cacheDir = join(work, 'cache-ditto')
+    const env = { SURFFISH_CLI_CACHE_DIR: cacheDir, SURFFISH_CLI_ASSET_URL: `${base}/app.zip`, SURFFISH_CLI_SHA256: sha }
+    const err = sink()
+    const code = await run(config, { argv: ['--no-launch'], packageVersion: '0.1.22', env, platform: 'darwin', arch: 'arm64', ui: createUI({ stream: err, env: {} }), stdout: sink() })
+    expect(code).toBe(0)
+    expect(err.text()).toContain('ok: unpacked with ditto')
+    expect(existsSync(join(cacheDir, '0.1.22', 'Surffish.app', 'Contents', 'Info.plist'))).toBe(true)
   })
 
   test('--clear-cache removes the cache dir', async () => {

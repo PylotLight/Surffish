@@ -433,8 +433,8 @@ jobs:
       - name: bun install (fails if any Node.js process runs)
         run: bash scripts/ci/bun-install-mac.sh
       - run: swift --version
-      - name: Typecheck and unit tests on macOS
-        run: bun run typecheck && bun run test
+      - name: Typecheck and unit tests on macOS (+ the npx launcher's, incl. its ditto unpack)
+        run: bun run typecheck && bun run test && bun run test:cli
       - name: Build Electron, the native AppKit trackpad bridge and the Google sign-in helper
         run: bun run build
       - name: Load the compiled native addon
