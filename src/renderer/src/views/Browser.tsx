@@ -75,6 +75,7 @@ import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
 import { ReadingListButton } from './reading-list/ReadingListButton'
 import { AdblockButton } from './adblock/AdblockButton'
+import { CastButton, TabCastBadge, useCastTabId } from './cast/CastButton'
 import { BookmarksBar } from './bookmarks/BookmarksBar'
 import { SpacesSwitcher, useSpaces } from './spaces/SpacesSwitcher'
 import { SPACE_COLOR_VALUES } from '../../../shared/spaces'
@@ -87,7 +88,7 @@ import {
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel, SitesSettings
 } from './lazy-views'
-import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings } from './lazy-views'
+import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings, CastSettings } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
@@ -388,6 +389,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [bookmarksMenuOpen, setBookmarksMenuOpen] = useState(false)
   const [readingListOpen, setReadingListOpen] = useState(false)
   const [adblockOpen, setAdblockOpen] = useState(false)
+  const [castOpen, setCastOpen] = useState(false)
+  const castTabId = useCastTabId()
   const [bookmarksBarMenuOpen, setBookmarksBarMenuOpen] = useState(false)
   const [bookmarksMenuLayout, setBookmarksMenuLayout] = useState(0)
   const bumpBookmarksMenuLayout = useCallback(() => setBookmarksMenuLayout((value) => value + 1), [])
@@ -1291,7 +1294,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     update()
     return () => observer.disconnect()
   }, [surface])
-  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, castOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
   const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
@@ -1637,6 +1640,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 {tab.private && <span className="tab-private-badge" title="Private tab" aria-label="Private tab"><PrivateGlyph /></span>}
                 {tab.crashed && <span className="tab-crashed-badge" title="This tab crashed · it reloads when you open it" aria-label="Crashed tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 10v4" /><path d="M12 17h.01" /></svg></span>}
                 <TabAudioButton tab={tab} />
+                {castTabId === tab.id && <TabCastBadge />}
                 {tab.sleeping && <span className={`tab-sleep-indicator${isRestoredSleep(tab.sleep) ? ' is-restored' : ''}`} title={describeTabSleep(tab.sleep)} aria-label={`Sleeping tab: ${describeTabSleep(tab.sleep)}`}>☾</span>}
                 <button
                   className="tab-close"
@@ -1911,6 +1915,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   url={isLocalPage ? '' : browser.url}
                   onOpenChange={setAdblockOpen}
                   onOpenSettings={() => { if (activeOrigin) selectSettingsSection('site', activeOrigin) }}
+                />}
+                {surface !== 'sidebar' && <CastButton
+                  tabId={activeTabId}
+                  url={isLocalPage ? '' : browser.url}
+                  onOpenChange={setCastOpen}
+                  onOpenSettings={() => { void window.api.browser.settings.open({ section: 'settings', focus: 'features' }) }}
                 />}
                 <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
@@ -2244,6 +2254,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsCategory>
                 <SettingsCategory id="features" title="Features">
                 <LocalAISettings />
+                <CastSettings />
                 <PageWatchersToggle />
                 <SpellcheckSettings />
                 </SettingsCategory>

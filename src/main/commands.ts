@@ -54,6 +54,7 @@ import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glan
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, getBrowserActiveTabId, hasMiniWindows } from './browser'
 import { miniHeaderDebugEnabled, setMiniHeaderDebug } from './mini-header-debug'
+import { castEnabled, isCasting, openCastPicker, stopCasting } from './cast-entry'
 import { canMergeMiniWindows, canSplitMiniWindowTab, mergeMiniWindows, moveTabToMiniWindow, splitMiniWindowTab, stepMiniWindowTab, canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
@@ -181,6 +182,9 @@ const COMMANDS: BrowserCommand[] = [
     id: 'view.reader', title: () => (readerStateFor(getActiveTabWebContents()) === 'active' ? 'Exit Reader View' : 'Reader View'), accelerator: APP_SHORTCUTS.readerView, section: 'View',
     keywords: ['reader mode', 'article', 'readability', 'distraction free', 'clean'], enabled: () => readerStateFor(getActiveTabWebContents()) !== null, run: () => toggleReaderMode()
   },
+  // Cast (Chromecast)
+  { id: 'cast.open', title: 'Cast…', section: 'View', keywords: ['chromecast', 'cast video', 'tv', 'google cast', 'mirror tab', 'screen'], enabled: castEnabled, run: () => openCastPicker() },
+  { id: 'cast.stop', title: 'Stop Casting', section: 'View', keywords: ['chromecast', 'cast', 'tv', 'disconnect'], refocusPage: true, enabled: isCasting, run: () => stopCasting() },
   // Glance (link peek)
   {
     id: 'glance.openCopiedLink', title: 'Open Copied Link in Glance', section: 'View',

@@ -44,6 +44,7 @@ import { registerGlanceIpc } from './glance-entry'
 import { registerMiniWindowIpc, setMiniWindowAppShortcuts, startMiniWindowMenuBar } from './mini-window-entry'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { initializeLocalAI, registerLocalAIIpc } from './local-ai'
+import { registerCastIpc } from './cast-entry'
 import { chromeUserAgent } from './adblock-policy'
 
 installIpcWindowScope()
@@ -139,6 +140,8 @@ app.whenReady().then(async () => {
   // Built-in AI (Prompt API, experimental): off by default; nothing is forked until it's on.
   registerLocalAIIpc()
   initializeLocalAI()
+  // Cast to a Chromecast: settings + IPC only; discovery and CASTV2 load on first use (cast.ts).
+  registerCastIpc()
   installAppMenu()
   setBrowserSearchEngine(getBrowserSearchEngine())
   setMainWindowCloseHandler(() => {

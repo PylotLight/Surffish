@@ -16,11 +16,12 @@ export const TOOLBAR_POPOVER_SELECTOR = [
   '.bookmarks-menu-panel',
   '#reading-list-popover',
   '#adblock-popover',
+  '#cast-popover',
   '#nav-history-menu'
 ].join(', ')
 
 /** Popovers proper (light-dismissed); the find bar, palette and notices manage themselves. */
-const LIGHT_DISMISS_SELECTOR = '#downloads-popup, #site-actions-menu, #extensions-menu, #bookmark-popover, .bookmarks-menu-panel, #reading-list-popover, #adblock-popover, #nav-history-menu'
+const LIGHT_DISMISS_SELECTOR = '#downloads-popup, #site-actions-menu, #extensions-menu, #bookmark-popover, .bookmarks-menu-panel, #reading-list-popover, #adblock-popover, #cast-popover, #nav-history-menu'
 
 /**
  * Where an element sits as laid out, ignoring transforms: an entry animation (scale 0.98,
