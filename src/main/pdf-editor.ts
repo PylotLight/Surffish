@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs'
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
+import { brotliDecompress as brotliDecompressCallback } from 'node:zlib'
 import { app, dialog, ipcMain, net, protocol, session, type BaseWindow, type CustomScheme, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import {
   decodePdfDataUrl,
@@ -27,6 +29,8 @@ import { addSignature, listSavedSignatures, removeSignature } from './pdf-signat
  * from the local file the tab showed, and handed over through a narrow preload API.
  */
 export const PDF_EDITOR_PARTITION = 'surffish-pdf-editor'
+
+const brotliDecompress = promisify(brotliDecompressCallback)
 
 const PAGE_CSP = [
   "default-src 'none'",
@@ -111,11 +115,21 @@ function contentType(path: string): string {
   return CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
+/** The file, or its build-time brotli copy (`<file>.br`, the pdf.js wasm and sandbox) inflated. */
+async function readServedFile(target: string): Promise<Uint8Array<ArrayBuffer>> {
+  try {
+    return new Uint8Array(await readFile(target))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return new Uint8Array(await brotliDecompress(await readFile(`${target}.br`)))
+  }
+}
+
 async function serveFile(root: string, relative: string): Promise<Response> {
   const target = resolve(root, relative)
   if (target !== root && !target.startsWith(root + sep)) return new Response('Not found', { status: 404 })
   try {
-    const body = await readFile(target)
+    const body = await readServedFile(target)
     const headers: Record<string, string> = { 'Content-Type': contentType(target), 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' }
     if (target.endsWith('.html')) headers['Content-Security-Policy'] = PAGE_CSP
     return new Response(body, { status: 200, headers })
