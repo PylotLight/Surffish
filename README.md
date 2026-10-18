@@ -128,6 +128,7 @@ The [`@pylotlight/surffish`](https://www.npmjs.com/package/@pylotlight/surffish)
 - `--latest` runs the newest GitHub release instead, `--path` prints the cached `.app` path, `--clear-cache` frees the space, `--help` lists the rest. Anything else (a URL, say) is passed to the app.
 - `npm i -g @pylotlight/surffish` gives you a `surffish` command.
 - The cache respects `XDG_CACHE_HOME`. Homebrew is still the better choice if you want `/Applications` and `brew upgrade`.
+- `bunx @pylotlight/surffish --uninstall` removes the cached app and prints what else is left (your profile, caches, keychain item); `--uninstall --all` deletes those too, after asking.
 
 Same platform limits as above: Apple silicon Macs only. On other systems the launcher says so and exits. More in [packages/cli/README.md](packages/cli/README.md).
 

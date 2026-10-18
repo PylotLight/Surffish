@@ -24,7 +24,7 @@ The manual steps below are what it automates.
 
 ## npm launcher (`npx @pylotlight/surffish`)
 
-The release workflow's `npm` job runs after the `mac` job (release + Cask) succeeds, on a GitHub-hosted runner: it stamps `packages/cli` with the released version and the zip's SHA-256, then `npm publish --provenance --access public` through npm trusted publishing (no token). Dry runs do `npm publish --dry-run`. It skips with a warning until the repo variable `NPM_PUBLISH=true` is set; one-time setup in [packages/cli/README.md](../packages/cli/README.md#publishing). `bun run release` run locally doesn't publish to npm.
+The release workflow's `npm` job runs after the `mac` job (release + Cask) succeeds, on a GitHub-hosted runner: it stamps `packages/cli` with the released version and the zip's SHA-256, then `npm publish --provenance --access public` through npm trusted publishing (no token). Dry runs do `npm publish --dry-run`. It skips with a warning until the repo variable `NPM_PUBLISH=true` is set; one-time setup in [packages/cli/DEVELOPING.md](../packages/cli/DEVELOPING.md#publishing). `bun run release` run locally doesn't publish to npm.
 
 ## Release notes
 

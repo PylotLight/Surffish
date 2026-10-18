@@ -41,6 +41,32 @@ export default {
   firstRunNote:
     'Surffish is unsigned and not notarized. If macOS says it is damaged, see\n' +
     'https://github.com/PylotLight/Surffish#faq',
+  // --uninstall: what the app itself writes outside the launcher cache. Listed (and with --all
+  // deleted) only when it exists. Paths come from src/main (userData = Application Support/<name>,
+  // compile cache in boot.ts, logs, safeStorage) plus what macOS keeps per bundle id.
+  uninstall: {
+    // `pgrep -x` name of the main process; --uninstall refuses while it's running.
+    processName: 'Surffish',
+    // package.json build.appId
+    bundleId: 'com.pylotlight.surffish',
+    userData: [
+      { path: '~/Library/Application Support/Surffish', what: 'profile: bookmarks, history, cookies, settings, extensions' },
+      { path: '~/Library/Caches/Surffish', what: 'web + compile caches' },
+      { path: '~/Library/Caches/com.pylotlight.surffish', what: 'macOS cache' },
+      { path: '~/Library/HTTPStorages/com.pylotlight.surffish', what: 'macOS network storage' },
+      { path: '~/Library/Preferences/com.pylotlight.surffish.plist', what: 'macOS preferences' },
+      { path: '~/Library/Saved Application State/com.pylotlight.surffish.savedState', what: 'window restore state' },
+      { path: '~/Library/Logs/Surffish', what: 'logs' },
+    ],
+    // Electron safeStorage key (encrypts saved cookies, quick unlock and PDF signatures).
+    keychain: [{ service: 'Surffish Safe Storage', what: 'safeStorage key' }],
+    notes: [
+      'If Surffish is your default browser, pick another one first (System Settings → Desktop & Dock →',
+      'Default web browser); macOS forgets the registration once the app is gone.',
+      'Dev builds use their own profiles (~/Library/Application Support/Surffish Dev, "Surffish <name>"); those are not touched.',
+      'Installed with Homebrew too? brew uninstall --cask surffish',
+    ],
+  },
   // Rotated under the progress bar while downloading, between the "what's happening" lines.
   tips: [
     'Ad and tracker blocking is built in: uBlock Origin\'s lists, EasyList, EasyPrivacy and more',
