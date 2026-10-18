@@ -186,6 +186,13 @@ async function clickSelector(selector) {
   return false
 }
 
+/** A folded toolbar button (shared/toolbar-layout.ts) opens from the Surffish menu. */
+async function openFromSurffishMenu(id) {
+  if (!(await clickSelector('.toolbar-brand'))) return false
+  await waitFor(async () => evaluate(`Boolean(document.querySelector('#surffish-menu [data-toolbar-item="${id}"]'))`), `${id} in the Surffish menu`)
+  return evaluate(`(() => { const item = document.querySelector('#surffish-menu [data-toolbar-item="${id}"]'); if (!item) return false; item.click(); return true })()`)
+}
+
 async function captureScreenshot(name) {
   if (!screenshotDirectory) return
   mkdirSync(screenshotDirectory, { recursive: true })
@@ -264,7 +271,8 @@ async function seedNewTabDemo(siteBases) {
   await delay(300)
   await captureScreenshot('tabs-sidebar.png')
   if (screenshotDirectory) {
-    assert.equal(await clickSelector('[aria-label="Browsing history"]'), true, 'the browsing-history control should be available')
+    // History lives in the Surffish menu by default (pin it to get the toolbar button back).
+    assert.equal(await clickSelector('[aria-label="Browsing history"]') || await openFromSurffishMenu('history'), true, 'the browsing-history control should be available')
     await waitFor(async () => evaluateIn(rendererViews.sidebar, 'document.querySelectorAll(".history-list .history-item").length >= 2'), 'synthetic records in the History sidebar')
     await delay(300)
     await captureScreenshot('history-sidebar.png')
@@ -320,7 +328,9 @@ async function run() {
     return window
   }, 'the production Surffish BaseWindow and its renderer surfaces', 45000)
   await evaluate('window.api.browser.downloads.get()')
-  assert.equal(await clickSelector('.downloads-toolbar-button'), true, 'Downloads should open from its toolbar button')
+  // No downloads yet: the contextual Downloads button is folded into the Surffish menu.
+  assert.equal(await evaluate('document.querySelector(".downloads-toolbar-button")?.hidden'), true, 'no Downloads button before any download')
+  assert.equal(await openFromSurffishMenu('downloads'), true, 'Downloads should open from the Surffish menu')
   await waitFor(async () => evaluate('document.querySelector("#downloads-popup .downloads-empty")?.textContent.includes("No downloads yet")'), 'the empty Downloads state')
   await evaluate('window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))')
   await waitFor(async () => evaluate('document.querySelector(".downloads-toolbar-button")?.getAttribute("aria-expanded") === "false"'), 'Escape to close Downloads and restore the toolbar state')

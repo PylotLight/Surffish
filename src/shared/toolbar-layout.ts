@@ -207,7 +207,7 @@ export function fitToolbarItems(items: readonly ToolbarFitItem[], budget: number
 
 /** The address bar keeps at least this much (nav buttons + field) before buttons fold. */
 export const OMNIBOX_MIN_CENTERED = 400
-export const OMNIBOX_MIN_INLINE = 300
+export const OMNIBOX_MIN_INLINE = 420
 
 export interface ToolbarBudgetInput {
   /** Toolbar content width (padding excluded). */

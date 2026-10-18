@@ -437,7 +437,8 @@ async function run() {
   const playLocal = () => smoke.evaluate(page, 'new Promise((done) => { const v = document.getElementById("v"); const go = () => v.play().then(() => done(true), () => done(false)); if (v.readyState >= 1) go(); else v.addEventListener("loadedmetadata", go, { once: true }); v.addEventListener("error", () => done(false), { once: true }) })')
 
   smoke.step('no button before discovery; ⌘K "Cast…" opens the picker, which shows the known device at once')
-  assert.equal(await inToolbar('Boolean(document.querySelector(".cast-button"))'), false, 'no cast button with no devices known')
+  // The cast button is contextual (shared/toolbar-layout.ts): folded (hidden) until a device is known and the page played media.
+  assert.equal(await inToolbar('Boolean(document.querySelector(".cast-button:not([hidden])"))'), false, 'no cast button with no devices known')
   const pickerAt = Date.now()
   assert.equal(await inToolbar('window.api.browser.commands.run("cast.open")'), true)
   await waitFor(() => inToolbar('Boolean(document.querySelector("#cast-popover"))'), 'the cast picker')
@@ -477,7 +478,8 @@ async function run() {
   await waitFor(() => !page.isLoading() && page.getURL() === `${lanOrigin}/watch`, 'the LAN video page')
   const playing = lanAddress ? await playLocal() : false
   if (lanAddress) assert.equal(playing, true, 'the local video plays')
-  await waitFor(() => inToolbar('Boolean(document.querySelector(".cast-button"))'), 'the toolbar cast button (a device is known)')
+  if (playing) await waitFor(() => inToolbar('Boolean(document.querySelector(".cast-button:not([hidden])"))'), 'the toolbar cast button (a device is known and the page played video)')
+  else await waitFor(() => inToolbar('Boolean(document.querySelector(".cast-button"))'), 'the (folded) cast button')
   assert.equal(await click('.cast-button'), true)
   await waitFor(() => inToolbar('document.querySelector("#cast-popover .cast-media")?.dataset.castable === "true"'), 'the page video to be castable')
   assert.match(await inToolbar('document.querySelector("#cast-popover .cast-media").textContent'), /WebM video ready to cast/)
@@ -505,7 +507,7 @@ async function run() {
   assert.equal(await smoke.evaluate(page, 'document.getElementById("v").paused'), true, 'the local video is paused')
   const sidebar = surface('sidebar')
   await waitFor(() => smoke.evaluate(sidebar, 'Boolean(document.querySelector(".tab-cast-badge"))'), 'the cast badge on the tab row')
-  await waitFor(() => inToolbar('document.querySelector(".cast-button")?.classList.contains("is-casting")'), 'the toolbar button to show casting')
+  await waitFor(() => inToolbar('document.querySelector(".cast-button:not([hidden])")?.classList.contains("is-casting")'), 'the toolbar button to show casting (a live cast always shows it)')
   await waitFor(() => inToolbar('document.querySelector("#cast-popover .cast-session-status")?.textContent === "Playing"'), 'the session controls')
   await delay(300)
   screenGrab('cast-playing')

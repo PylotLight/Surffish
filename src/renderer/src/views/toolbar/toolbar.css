@@ -1,5 +1,5 @@
 /* ---- Toolbar pins, overflow and the Surffish menu (shared/toolbar-layout.ts) ----
- * Loaded eagerly with the toolbar. No backdrop-filter: the menus sit on an opaque gradient like
+ * Loaded eagerly with the toolbar. No CSS blur: the menus sit on an opaque gradient like
  * the other toolbar popovers, so opening one costs no extra blur pass. */
 
 /* Folded buttons (unpinned / idle / no room) stay mounted but out of the row: their popover then

@@ -102,7 +102,8 @@ export function SurffishMenu({ entries, menuButtonRef, attention, onPin, onCusto
   onPin: (id: ToolbarItemId) => void
   onCustomize: () => void
   onSettings: () => void
-  onBrandClick: () => void
+  /** Counts the logo's triple-click; true on the click that opens the easter egg. */
+  onBrandClick: () => boolean
   onOpenChange?: (open: boolean) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -121,9 +122,8 @@ export function SurffishMenu({ entries, menuButtonRef, attention, onPin, onCusto
         aria-controls="surffish-menu"
         title="Surffish menu"
         onClick={(event) => {
-          onBrandClick()
-          // The 3rd click of a triple-click is the easter egg, not a menu toggle.
-          if (event.detail >= 3) setOpen(false)
+          // The 3rd click of a triple-click opens the easter egg instead; a double-click's 2nd click is ignored.
+          if (onBrandClick()) setOpen(false)
           else if (event.detail <= 1) setOpen((value) => !value)
         }}
       >
