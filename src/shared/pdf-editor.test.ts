@@ -3,6 +3,9 @@ import test from 'node:test'
 import {
   editedPdfFilename,
   isEditablePdfSource,
+  isInMemoryPdfSource,
+  decodePdfDataUrl,
+  inMemoryPdfName,
   isPdfEditorUrl,
   looksLikePdf,
   PDF_EDITOR_URL,
@@ -64,4 +67,29 @@ test('PDF magic number check tolerates a short preamble', () => {
   assert.equal(looksLikePdf(encode('\n\n  %PDF-1.4')), true)
   assert.equal(looksLikePdf(encode('<!doctype html>')), false)
   assert.equal(looksLikePdf(new Uint8Array()), false)
+})
+
+test('page-made blob:/data: PDFs are read from the tab instead of fetched', () => {
+  assert.equal(isInMemoryPdfSource('blob:https://example.test/4f1c2d3e-1111-2222-3333-444455556666'), true)
+  assert.equal(isInMemoryPdfSource('blob:file:///4f1c2d3e-1111-2222-3333-444455556666'), true)
+  assert.equal(isInMemoryPdfSource('blob:chrome-extension://abc/123'), false)
+  assert.equal(isInMemoryPdfSource('data:application/pdf;base64,JVBERi0='), true)
+  assert.equal(isInMemoryPdfSource('data:text/html,<p>hi'), false)
+  assert.equal(isInMemoryPdfSource('https://example.test/a.pdf'), false)
+})
+
+test('data: PDF URLs decode (base64 and percent-encoded)', () => {
+  const text = (bytes: Uint8Array | null): string => new TextDecoder().decode(bytes ?? new Uint8Array())
+  assert.equal(text(decodePdfDataUrl('data:application/pdf;base64,JVBERi0xLjQ=')), '%PDF-1.4')
+  assert.equal(text(decodePdfDataUrl('data:application/pdf,%25PDF-1.7')), '%PDF-1.7')
+  assert.equal(decodePdfDataUrl('data:application/pdf;base64,***'), null)
+  assert.equal(decodePdfDataUrl('https://example.test/a.pdf'), null)
+})
+
+test('page-made PDFs get a readable name', () => {
+  assert.equal(inMemoryPdfName('Invoice 42'), 'Invoice 42.pdf')
+  assert.equal(inMemoryPdfName('report.pdf'), 'report.pdf')
+  assert.equal(inMemoryPdfName('4f1c2d3e-1111-2222-3333-444455556666'), 'document.pdf')
+  assert.equal(inMemoryPdfName('blob:https://example.test/x'), 'document.pdf')
+  assert.equal(inMemoryPdfName(''), 'document.pdf')
 })

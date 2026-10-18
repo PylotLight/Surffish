@@ -87,7 +87,7 @@ Surffish isn't signed or notarized yet, so the first launch needs one extra step
 | **Bramble password manager** | Built-in integration with the Bramble extension, with a Surffish PIN (and Touch ID) quick unlock so you don't retype the master password. | Settings → Integrations |
 | **Screenshots** | Region, visible area, full page, or a scrolling capture you stop where you like. Copy, save or annotate. | ⇧⌘S |
 | **Downloads** | Pause, resume, open and reveal downloads from a toolbar popover. | ⇧⌘J |
-| **PDF viewer & editor** | Built-in viewer. Edit mode fills forms, annotates, and rotates, reorders or deletes pages, then saves a copy. | ⇧⌘E · ⌘S to save |
+| **PDF viewer & editor** | Built-in viewer. Edit mode fills forms (calculations and formatting scripts included), signs signature fields with saved signatures or initials, annotates, and rotates, reorders or deletes pages, then saves or flattens a copy. Works for page-made (blob:) PDFs too. | ⇧⌘E · ⌘S to save |
 | **Feeds** | RSS, Atom and JSON Feed reader, page feed discovery, and presets for a GitHub repo's releases, commits, tags or Actions runs. | Settings → Integrations → Feeds |
 | **Page watchers** | Watch part of a page and get told when it changes. Can be switched off entirely. | Settings → Watchers |
 | **Spaces** | Separate sets of tabs, each with its own cookies and proxy. Off by default. | Settings → General → Enable Spaces · ⌃1–⌃9 |

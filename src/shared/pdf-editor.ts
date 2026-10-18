@@ -95,6 +95,51 @@ export function isEditablePdfSource(value: string): boolean {
   }
 }
 
+/**
+ * PDFs a page made itself (blob:, or a data: URL Chromium let through as a download-turned-tab).
+ * main can't fetch these, so the editor reads the bytes from the tab's own renderer instead.
+ */
+export function isInMemoryPdfSource(value: string): boolean {
+  if (/^data:application\/(?:pdf|x-pdf|octet-stream)[;,]/i.test(value)) return true
+  if (!/^blob:/i.test(value)) return false
+  try {
+    const inner = new URL(value.slice('blob:'.length))
+    return inner.protocol === 'https:' || inner.protocol === 'http:' || inner.protocol === 'file:'
+  } catch {
+    return false
+  }
+}
+
+/** Bytes of a `data:` PDF URL (base64 or percent-encoded), or null when it isn't one. */
+export function decodePdfDataUrl(value: string): Uint8Array | null {
+  const match = /^data:([^,]*),(.*)$/is.exec(value)
+  if (!match) return null
+  const meta = match[1] ?? ''
+  const payload = match[2] ?? ''
+  try {
+    if (/;base64$/i.test(meta)) {
+      const binary = atob(decodeURIComponent(payload).replace(/\s+/g, ''))
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+      return bytes
+    }
+    return new TextEncoder().encode(decodeURIComponent(payload))
+  } catch {
+    return null
+  }
+}
+
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\.pdf)?$/i
+
+/** A name for a page-made PDF: the viewer's title when it is a real file name, else `document.pdf`. */
+export function inMemoryPdfName(title: string | null | undefined): string {
+  const trimmed = (title ?? '').trim()
+  if (!trimmed || UUID_LIKE.test(trimmed) || /^(?:blob|data):/i.test(trimmed) || /^https?:\/\//i.test(trimmed)) return 'document.pdf'
+  const safe = cleanFilename(trimmed)
+  if (!safe) return 'document.pdf'
+  return /\.pdf$/i.test(safe) ? safe : `${safe}.pdf`
+}
+
 /** Quick magic-number check so a login page or an error HTML never reaches pdf.js as a "PDF". */
 export function looksLikePdf(bytes: Uint8Array): boolean {
   // %PDF- may follow up to 1 KB of junk per the spec's implementation notes.

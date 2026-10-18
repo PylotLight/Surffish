@@ -39,10 +39,15 @@
           <button type="button" id="zoomIn" title="Zoom in">+</button>
           <button type="button" id="togglePages" class="is-active" title="Show or hide page tools">Pages</button>
         </div>
+        <div class="group form-tools" id="formTools" hidden>
+          <button type="button" id="resetForm" title="Clear every form field back to its default">Reset form</button>
+          <label class="check" title="Bake the filled fields into the page when saving, so they can't be edited again"><input type="checkbox" id="flattenOnSave" /> Flatten on save</label>
+        </div>
         <div class="spacer"></div>
         <span id="dirtyNote" class="dirty-note" hidden>Unsaved changes</span>
         <button type="button" id="back" title="Back to the built-in viewer">Back to viewer</button>
-        <button type="button" id="save" class="primary" title="Save a copy (⌘S)" disabled>Save…</button>
+        <button type="button" id="saveAs" title="Save a copy under a new name" disabled>Save As…</button>
+        <button type="button" id="save" class="primary" title="Save (⌘S): asks where the first time, then saves to that file again" disabled>Save…</button>
       </header>
       <div id="workspace">
         <aside id="pages" aria-label="Pages">
@@ -52,15 +57,24 @@
           <div id="viewer" class="pdfViewer"></div>
         </div>
       </div>
+      <div id="formNotice" class="form-notice" role="note" hidden></div>
       <div id="message" class="message" role="status" aria-live="polite" hidden></div>
     </div>
 
     <dialog id="signatureDialog" aria-labelledby="signatureTitle">
       <form method="dialog" id="signatureForm">
         <h2 id="signatureTitle">Add a signature</h2>
+        <div class="tabs kinds" role="radiogroup" aria-label="Kind">
+          <button type="button" role="radio" data-signature-kind="signature" aria-checked="true">Signature</button>
+          <button type="button" role="radio" data-signature-kind="initials" aria-checked="false">Initials</button>
+        </div>
+        <section id="savedSignatures" class="saved" aria-label="Saved" hidden>
+          <ul id="savedSignatureList"></ul>
+        </section>
         <div class="tabs" role="tablist">
           <button type="button" role="tab" data-signature-tab="draw" aria-selected="true">Draw</button>
           <button type="button" role="tab" data-signature-tab="type" aria-selected="false">Type</button>
+          <button type="button" role="tab" data-signature-tab="image" aria-selected="false">Image</button>
         </div>
         <div class="signature-pane" data-signature-pane="draw">
           <canvas id="signaturePad" width="560" height="180" aria-label="Draw your signature"></canvas>
@@ -69,7 +83,15 @@
         <div class="signature-pane" data-signature-pane="type" hidden>
           <input type="text" id="signatureText" placeholder="Type your name" autocomplete="name" spellcheck="false" />
         </div>
-        <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" /></label>
+        <div class="signature-pane" data-signature-pane="image" hidden>
+          <input type="file" id="signatureImage" accept="image/png,image/jpeg,image/webp" />
+          <img id="signatureImagePreview" alt="Signature image preview" hidden />
+          <p class="hint">A photo or scan of your signature on white paper works best.</p>
+        </div>
+        <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" maxlength="80" /></label>
+        <label class="remember"><input type="checkbox" id="signatureRemember" checked /> Save for next time</label>
+        <p id="signatureStorageNote" class="hint" hidden>This system has no keychain to encrypt saved signatures, so they are kept only until Surffish quits.</p>
+        <p id="signatureError" class="error" role="alert" hidden></p>
         <div class="actions">
           <button type="button" id="signatureCancel">Cancel</button>
           <button type="submit" id="signatureAdd" class="primary">Add</button>

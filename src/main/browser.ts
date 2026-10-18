@@ -32,7 +32,7 @@ import { tabAudioIndicator } from '../shared/tab-audio'
 import { forgetPrivateTabVolumes, pushTabVolume, setTabVolumeHost, setTabVolumeLevel, tabVolumeForUrl } from './tab-volume'
 import { formatTabVolume, stepTabVolume, TAB_VOLUME_COMMAND_STEP } from '../shared/tab-volume'
 import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
-import { isEditablePdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
+import { inMemoryPdfName, isEditablePdfSource, isInMemoryPdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
 import { isLocalDocumentUrl } from '../shared/external-links'
 import { isBrambleExtensionUrl } from './bramble-poc-adapter'
 import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
@@ -132,6 +132,12 @@ interface PdfEditorTabState {
   sourceUrl: string
   name: string
   dirty: boolean
+  /**
+   * A page-made blob:/data: PDF can't be loaded again from main, so its original view is kept
+   * (hidden, off screen) while the editor is open: the editor reads the bytes from it, and Back to
+   * viewer puts it back as it was.
+   */
+  sourceView?: WebContentsView | null
 }
 
 /** Who opened an extension UI tab: Bramble's own integration or a Chrome Web Store extension. */
@@ -826,7 +832,18 @@ function openBackgroundTab(url: string, isPrivate = false, w = currentWindowStat
   if (id) persistOpenTabs()
 }
 
+/** Close a page-made PDF's original view kept behind the editor (tab or window closed). */
+function disposeStashedPdfSource(tab: BrowserTab): void {
+  const stash = tab.pdfEditor?.sourceView
+  if (!stash || !tab.pdfEditor) return
+  tab.pdfEditor.sourceView = null
+  detachNetworkInspector(stash.webContents)
+  if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, stash, false)
+  if (!stash.webContents.isDestroyed()) stash.webContents.close()
+}
+
 function disposeTabView(tab: BrowserTab): void {
+  disposeStashedPdfSource(tab)
   cancelSleepTimer(tab)
   // A view replaced or dropped for another load never comes back through an older history.
   tab.restoreHistory = null
@@ -1451,6 +1468,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
 
 /** A tab's page went away underneath it (not through closeBrowserTab): drop the tab and pick another. */
 function removeDestroyedTab(tab: BrowserTab): void {
+  disposeStashedPdfSource(tab)
   const w = tab.win
   const index = w.tabs.findIndex((candidate) => candidate.id === tab.id)
   if (index < 0) return
@@ -1577,9 +1595,21 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   return view
 }
 
-/** Swap a tab's view: the PDF editor in place of the page, or back. Navigation history is not kept. */
-function replaceTabView(tab: BrowserTab, editor: PdfEditorTabState | null, url: string): void {
-  disposeTabView(tab)
+/**
+ * Swap a tab's view: the PDF editor in place of the page, or back. Navigation history is not kept,
+ * except for a page-made PDF (`keepView`), whose page view is set aside on the editor state instead.
+ */
+function replaceTabView(tab: BrowserTab, editor: PdfEditorTabState | null, url: string, keepView = false): void {
+  const kept = keepView ? tab.view : null
+  if (kept && editor) {
+    cancelSleepTimer(tab)
+    tab.restoreHistory = null
+    tab.view = null
+    if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, kept, false)
+    editor.sourceView = kept
+  } else {
+    disposeTabView(tab)
+  }
   tab.pdfEditor = editor
   tab.showingPdf = false
   tab.error = null
@@ -1601,8 +1631,31 @@ export function openPdfEditor(id = getTab()?.id): boolean {
   const contents = tab?.view?.webContents
   if (!tab || tab.pdfEditor || tab.extensionPageOrigin || !contents || contents.isDestroyed() || !isShowingPdf(contents)) return false
   const sourceUrl = contents.getURL()
+  if (isInMemoryPdfSource(sourceUrl)) {
+    replaceTabView(tab, { sourceUrl, name: inMemoryPdfName(contents.getTitle()), dirty: false }, PDF_EDITOR_URL, true)
+    return true
+  }
   if (!isEditablePdfSource(sourceUrl)) return false
   replaceTabView(tab, { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false }, PDF_EDITOR_URL)
+  return true
+}
+
+/** Back to viewer for a page-made PDF: put its original view back, as it was. */
+function restoreStashedPdfSource(tab: BrowserTab): boolean {
+  const stash = tab.pdfEditor?.sourceView
+  if (!stash || !tab.pdfEditor || stash.webContents.isDestroyed()) return false
+  tab.pdfEditor.sourceView = null
+  disposeTabView(tab)
+  tab.pdfEditor = null
+  tab.view = stash
+  tab.showingPdf = isShowingPdf(stash.webContents)
+  tab.error = null
+  tab.lastUrl = stash.webContents.getURL()
+  tab.pendingUrl = ''
+  applyTabBounds(tab.win)
+  if (isActiveTab(tab) && !stash.webContents.isDestroyed()) stash.webContents.focus()
+  persistOpenTabs()
+  publishState(tab.win)
   return true
 }
 
@@ -1616,6 +1669,7 @@ export function closePdfEditor(id = getTab()?.id): boolean {
   const tab = id ? getTab(id) : undefined
   if (!tab?.pdfEditor) return false
   if (!allowLeavingPdfEditor(tab, 'Discard Changes')) return false
+  if (restoreStashedPdfSource(tab)) return true
   replaceTabView(tab, null, tab.pdfEditor.sourceUrl)
   return true
 }
@@ -1682,7 +1736,8 @@ attachPdfEditor({
       sourceUrl: tab.pdfEditor.sourceUrl,
       name: tab.pdfEditor.name,
       isPrivate: tab.isPrivate,
-      sourceSession: pageSessionForTab(tab)
+      sourceSession: pageSessionForTab(tab),
+      sourceContents: tab.pdfEditor.sourceView?.webContents ?? null
     }
   },
   setDirty: (contents, dirty) => {
@@ -2002,6 +2057,7 @@ function attachMiniWindowState(win: BaseWindow): BrowserWindowState {
     w.miniHome = null
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
+      disposeStashedPdfSource(tab)
       forgetTabPicture(tab.id)
       const view = tab.view
       tab.view = null
@@ -2505,6 +2561,7 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
     w.activeTabId = null
     for (const tab of closingTabs) {
       cancelSleepTimer(tab)
+      disposeStashedPdfSource(tab)
       forgetTabPicture(tab.id)
       const view = tab.view
       tab.view = null
