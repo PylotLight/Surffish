@@ -41,8 +41,11 @@ export function castEnabled(): boolean {
   return current().enabled
 }
 
+let lastDeviceId: string | null = null
+
 function emit(snapshot: CastSnapshot): void {
   lastSnapshot = snapshot
+  if (snapshot.session) lastDeviceId = snapshot.session.deviceId
   try { sendToMainWindowRenderers('browser:cast:state', snapshot) } catch { /* window closing */ }
 }
 
@@ -121,6 +124,29 @@ export function openCastPicker(): void {
   sendToVisibleToolbarSurface('browser:cast:show')
 }
 
+/**
+ * ⌘K "Mirror Tab": mirrors the active tab to the Chromecast used last when it is still around
+ * (after a short browse), otherwise opens the picker to choose one.
+ */
+export async function mirrorActiveTab(): Promise<void> {
+  const tabId = getBrowserActiveTabId()
+  if (!castEnabled() || !tabId) return
+  const loaded = await loadManager()
+  let devices = loaded.snapshot().devices
+  if (lastDeviceId && !devices.some((device) => device.id === lastDeviceId)) {
+    loaded.scanBriefly(3_000)
+    await new Promise((resolve) => setTimeout(resolve, 2_500))
+    devices = loaded.snapshot().devices
+  }
+  const device = devices.find((candidate) => candidate.id === lastDeviceId) ?? (devices.length === 1 ? devices[0] : undefined)
+  if (!device) {
+    openCastPicker()
+    return
+  }
+  const result = await loaded.mirrorTab(device.id, tabId)
+  if (!result.ok) openCastPicker()
+}
+
 export function stopCasting(): void {
   void manager?.stop()
 }
@@ -177,6 +203,12 @@ export function registerCastIpc(): void {
     const id = tabOrActive(tabId)
     if (!castEnabled() || typeof deviceId !== 'string' || !id) return { ok: false, error: 'Nothing to cast.' }
     return (await loadManager()).castMedia(deviceId, id)
+  })
+  ipcMain.handle('browser:cast:mirror', async (event, deviceId: unknown, tabId: unknown) => {
+    guard(event)
+    const id = tabOrActive(tabId)
+    if (!castEnabled() || typeof deviceId !== 'string' || !id) return { ok: false, error: 'Nothing to mirror.' }
+    return (await loadManager()).mirrorTab(deviceId, id)
   })
   ipcMain.handle('browser:cast:control', async (event, action: unknown, value: unknown) => {
     guard(event)

@@ -1,6 +1,8 @@
 import type { WebContents, WebFrameMain } from 'electron'
 import { CastBrowser } from './cast-discovery'
 import { CastClient } from './cast-client'
+import { MirrorSession } from './cast-mirror'
+import { MIRRORING_APP_ID } from '../shared/cast-streaming'
 import {
   DEFAULT_MEDIA_RECEIVER_APP_ID,
   NS_MEDIA,
@@ -74,6 +76,8 @@ interface LiveCast {
   state: CastSessionState
   local: ProbedElement | null
   poll: ReturnType<typeof setInterval> | null
+  /** Mirror tab: the Cast Streaming session (cast-mirror.ts). */
+  mirror?: MirrorSession | null
 }
 
 function cleanElement(raw: unknown): PageMediaElement | null {
@@ -252,6 +256,63 @@ export class CastManager {
     }
   }
 
+  /**
+   * Mirror tab: streams the tab itself (picture and sound) to the Chromecast's mirroring receiver,
+   * for pages "Cast video" can't hand over (MSE players, logins, localhost).
+   */
+  async mirrorTab(deviceId: string, tabId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const device = this.devices.find((candidate) => candidate.id === deviceId)
+    if (!device) return { ok: false, error: 'That Chromecast isn’t on the network any more.' }
+    const contents = this.host.tabContents(tabId)
+    if (!contents) return { ok: false, error: 'The tab isn’t loaded.' }
+    await this.stop()
+    const state: CastSessionState = {
+      deviceId: device.id, deviceName: device.name, tabId, kind: 'mirror', title: contents.getTitle() || contents.getURL(), status: 'connecting',
+      currentTime: 0, duration: null, live: true, updatedAt: Date.now(), volume: null, muted: false, error: null, mirror: null
+    }
+    const live: LiveCast = { client: null as unknown as CastClient, device, app: null, mediaSessionId: null, state, local: null, poll: null, mirror: null }
+    this.live = live
+    this.publish()
+    try {
+      const client = await this.connectTo(device)
+      live.client = client
+      if (this.live !== live) {
+        client.close()
+        return { ok: false, error: 'Cancelled.' }
+      }
+      client.on('receiver-status', (status: CastReceiverStatus) => this.onReceiverStatus(live, status))
+      client.on('close', (reason: string) => {
+        if (this.live !== live || live.state.status === 'error') return
+        this.end(live, `Disconnected: ${reason}`)
+      })
+      this.setState({ status: 'loading' })
+      const app = await client.launch(MIRRORING_APP_ID)
+      live.app = app
+      if (this.live !== live) return { ok: false, error: 'Cancelled.' }
+      const mirror = new MirrorSession(client, device.host, contents, {
+        onLive: () => { if (this.live === live) this.setState({ status: 'playing', updatedAt: Date.now() }) },
+        onStats: (stats) => { if (this.live === live) this.setState({ mirror: stats }) },
+        onError: (message) => {
+          if (this.live !== live) return
+          console.warn('[cast] mirroring failed:', message)
+          void this.stop()
+        }
+      })
+      live.mirror = mirror
+      await mirror.start(app.transportId)
+      return { ok: true }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (this.live === live) {
+        live.mirror?.stop()
+        this.setState({ status: 'error', error: message })
+        const failed = live
+        setTimeout(() => { if (this.live === failed) void this.stop() }, 8_000).unref?.()
+      }
+      return { ok: false, error: message }
+    }
+  }
+
   private async pauseLocal(target: ProbedElement | null): Promise<void> {
     if (!target || target.frame.detached) return
     try {
@@ -344,6 +405,7 @@ export class CastManager {
   private end(live: LiveCast, error: string | null): void {
     if (this.live !== live) return
     if (live.poll) clearInterval(live.poll)
+    live.mirror?.stop()
     this.live = null
     if (error) console.warn('[cast] session ended:', error)
     setTimeout(() => live.client?.close?.('stopped'), 200).unref?.()

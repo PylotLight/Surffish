@@ -17,6 +17,8 @@ export const castApi = {
   /** What "Cast video" would send from a tab (the active tab by default); null when it isn't loaded. */
   probe: (tabId?: string): Promise<{ choice: CastMediaChoice; proxied: boolean } | null> => ipcRenderer.invoke('browser:cast:probe', tabId ?? null),
   castMedia: (deviceId: string, tabId?: string): Promise<{ ok: true } | { ok: false; error: string }> => ipcRenderer.invoke('browser:cast:cast-media', deviceId, tabId ?? null),
+  /** Mirror tab: stream the tab itself (picture + sound) to the Chromecast. */
+  mirror: (deviceId: string, tabId?: string): Promise<{ ok: true } | { ok: false; error: string }> => ipcRenderer.invoke('browser:cast:mirror', deviceId, tabId ?? null),
   control: (action: CastControlAction, value?: number): Promise<boolean> => ipcRenderer.invoke('browser:cast:control', action, value),
   getSettings: (): Promise<CastSettings> => ipcRenderer.invoke('browser:cast:get-settings'),
   setSettings: (settings: Partial<CastSettings>): Promise<CastSettings> => ipcRenderer.invoke('browser:cast:set-settings', settings),

@@ -54,7 +54,7 @@ import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glan
 import { glanceUrlFromText } from '../shared/glance'
 import { canPopOutBrowserTab, getBrowserActiveTabId, hasMiniWindows } from './browser'
 import { miniHeaderDebugEnabled, setMiniHeaderDebug } from './mini-header-debug'
-import { castEnabled, isCasting, openCastPicker, stopCasting } from './cast-entry'
+import { castEnabled, isCasting, mirrorActiveTab, openCastPicker, stopCasting } from './cast-entry'
 import { canMergeMiniWindows, canSplitMiniWindowTab, mergeMiniWindows, moveTabToMiniWindow, splitMiniWindowTab, stepMiniWindowTab, canSendToMenuBar, focusMiniWindow, getMiniWindowSettings, isMiniWindowTucked, listMiniWindows, popOutTabToMiniWindow, returnAllMiniWindows, returnMiniWindowToBrowser, sendMiniWindowToMenuBar, setMiniWindowGrouping, setMiniWindowHeaderPlacement, setMiniWindowPeekOnHover, setMiniWindowSettingsOpener, setMiniWindowThrowMomentum, toggleMiniWindow, tuckMiniWindow } from './mini-window-entry'
 
 /**
@@ -184,6 +184,7 @@ const COMMANDS: BrowserCommand[] = [
   },
   // Cast (Chromecast)
   { id: 'cast.open', title: 'Cast…', section: 'View', keywords: ['chromecast', 'cast video', 'tv', 'google cast', 'mirror tab', 'screen'], enabled: castEnabled, run: () => openCastPicker() },
+  { id: 'cast.mirror', title: 'Mirror Tab', section: 'View', keywords: ['chromecast', 'cast tab', 'mirror', 'screen mirroring', 'tv'], enabled: castEnabled, run: () => { void mirrorActiveTab() } },
   { id: 'cast.stop', title: 'Stop Casting', section: 'View', keywords: ['chromecast', 'cast', 'tv', 'disconnect'], refocusPage: true, enabled: isCasting, run: () => stopCasting() },
   // Glance (link peek)
   {

@@ -35,5 +35,34 @@ export function setPageViewOnScreen(window: BaseWindow, view: WebContentsView, o
     return
   }
   if (view.getVisible()) view.setVisible(false)
+  // A captured tab (Mirror tab) stays attached: hidden but in a window, Chromium keeps rendering it
+  // for the capture; detached it would stop producing frames.
+  const contents = view.webContents
+  if (attached && !contents.isDestroyed() && capturedPages.has(contents)) {
+    capturedPages.set(contents, { window, view })
+    return
+  }
   if (attached) window.contentView.removeChildView(view)
+}
+
+const capturedPages = new Map<WebContents, { window: BaseWindow; view: WebContentsView } | null>()
+
+/**
+ * Keeps a tab's page rendering while it is captured (Mirror tab), even behind another tab, and
+ * keeps it awake (media-session-keeper counts it as playing). Returns the release.
+ */
+export function holdPageViewForCapture(contents: WebContents): () => void {
+  if (!capturedPages.has(contents)) capturedPages.set(contents, null)
+  return () => {
+    const kept = capturedPages.get(contents)
+    capturedPages.delete(contents)
+    // Hidden while held: take it off the window now, like any background tab.
+    if (kept && !kept.window.isDestroyed() && !kept.view.getVisible() && kept.window.contentView.children.includes(kept.view)) {
+      kept.window.contentView.removeChildView(kept.view)
+    }
+  }
+}
+
+export function isPageHeldForCapture(contents: WebContents): boolean {
+  return capturedPages.has(contents)
 }

@@ -35,9 +35,12 @@ function SessionControls({ session }: { session: CastSessionState }): React.JSX.
     <section className="cast-session" aria-label={`Casting to ${session.deviceName}`} data-status={session.status}>
       <div className="cast-session-head">
         <span className="cast-session-device">{session.deviceName}</span>
-        <span className={`cast-session-status${session.status === 'error' ? ' is-error' : ''}`} role="status">{STATUS_TEXT[session.status]}</span>
+        <span className={`cast-session-status${session.status === 'error' ? ' is-error' : ''}`} role="status">{session.kind === 'mirror' && session.status === 'playing' ? 'Live' : STATUS_TEXT[session.status]}</span>
       </div>
       <p className="cast-session-title" title={session.title}>{session.kind === 'mirror' ? `Mirroring: ${session.title}` : session.title}</p>
+      {session.kind === 'mirror' && session.mirror && session.mirror.height > 0 && (
+        <p className="cast-note cast-mirror-stats">{`${session.mirror.height}p · ${session.mirror.kbps >= 1000 ? `${(session.mirror.kbps / 1000).toFixed(1)} Mbps` : `${session.mirror.kbps} kbps`}${session.mirror.audio ? ' · sound on the TV' : ''}`}</p>
+      )}
       {session.error && <p className="cast-error" role="alert">{session.error}</p>}
       {session.kind === 'media' && (
         <div className="cast-transport">
@@ -138,11 +141,11 @@ export function CastPanel({ tabId, pageUrl, snapshot, onClose, onOpenSettings }:
     return () => { live = false }
   }, [tabId, pageUrl, snapshot.session?.status === 'playing'])
 
-  async function castTo(deviceId: string): Promise<void> {
-    setBusy(deviceId)
+  async function castTo(deviceId: string, mode: 'media' | 'mirror'): Promise<void> {
+    setBusy(`${mode}:${deviceId}`)
     setError('')
     try {
-      const result = await window.api.browser.cast.castMedia(deviceId, tabId)
+      const result = mode === 'mirror' ? await window.api.browser.cast.mirror(deviceId, tabId) : await window.api.browser.cast.castMedia(deviceId, tabId)
       if (!result.ok) setError(result.error)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -180,16 +183,28 @@ export function CastPanel({ tabId, pageUrl, snapshot, onClose, onOpenSettings }:
                   <span className="cast-device-name">{device.name}</span>
                   {device.model && <small>{device.model}</small>}
                 </span>
-                <button
-                  type="button"
-                  className="cast-action"
-                  disabled={!castable || busy !== null}
-                  aria-label={`Cast video to ${device.name}`}
-                  title={castable ? `Cast this video to ${device.name}` : 'No castable video on this page'}
-                  onClick={() => void castTo(device.id)}
-                >
-                  {busy === device.id ? 'Casting…' : 'Cast video'}
-                </button>
+                <span className="cast-device-actions">
+                  <button
+                    type="button"
+                    className="cast-action"
+                    disabled={!castable || busy !== null}
+                    aria-label={`Cast video to ${device.name}`}
+                    title={castable ? `Cast this video to ${device.name} (it plays it by itself)` : 'No video this page can hand over: use Mirror tab'}
+                    onClick={() => void castTo(device.id, 'media')}
+                  >
+                    {busy === `media:${device.id}` ? 'Casting…' : 'Cast video'}
+                  </button>
+                  <button
+                    type="button"
+                    className="cast-action cast-mirror"
+                    disabled={busy !== null || !pageUrl}
+                    aria-label={`Mirror this tab to ${device.name}`}
+                    title={`Show this tab on ${device.name}, picture and sound, live`}
+                    onClick={() => void castTo(device.id, 'mirror')}
+                  >
+                    {busy === `mirror:${device.id}` ? 'Starting…' : 'Mirror tab'}
+                  </button>
+                </span>
               </li>
             )
           })}

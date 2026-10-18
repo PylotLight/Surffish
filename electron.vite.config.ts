@@ -47,6 +47,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/screenshot.cjs'),
       join(outputDirectory, 'screenshot.cjs')
     )
+    // Mirror tab: hidden tab-capture + WebCodecs encoder page.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/cast-capture.cjs'),
+      join(outputDirectory, 'cast-capture.cjs')
+    )
     // Chrome Web Store extensions: popup/options bridge and the store page "Add to Surffish" hook.
     copyFileSync(
       resolve(projectDirectory, 'src/preload/extension-host.cjs'),
