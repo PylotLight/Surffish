@@ -49,6 +49,8 @@ export interface CastSessionState {
   volume: number | null
   muted: boolean
   error: string | null
+  /** Mirror tab: what is streaming (VP8 + Opus), refreshed every second. */
+  mirror?: { width: number; height: number; kbps: number; roundTripMs: number; audio: boolean } | null
 }
 
 export interface CastSnapshot {

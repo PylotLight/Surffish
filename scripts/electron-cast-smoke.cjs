@@ -10,6 +10,12 @@
 // Stop stops the app and leaves the local video at the cast position; a receiver that stops the app
 // (another phone) ends the session; MSE (blob:) pages are refused unless the tab fetched an HLS
 // manifest; LOAD_FAILED is reported; Settings off hides everything; ⌘K "Cast…" opens the picker.
+// Mirror tab: the fake receiver also plays Chrome's mirroring receiver (0F5096E8): it answers the
+// OFFER on the webrtc namespace, receives the Cast RTP stream on UDP, checks a Sender Report came
+// first, drops a packet and NACKs it (retransmit), sends a PLI (new key frame), ACKs frames,
+// decrypts (AES-128-CTR with the OFFER's key/IV mask), reassembles and decodes a VP8 key frame with
+// WebCodecs and checks it shows the tab (its colour); frames keep coming with another tab in front;
+// Stop ends the stream; ⌘K "Mirror Tab" mirrors again to the last device; closing the tab ends it.
 // `bun run build && bun run test:electron-cast`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-cast-smoke.cjs`).
 // SURFFISH_SCREENSHOT_DIR=<dir> also saves screen grabs of the picker (Linux: ImageMagick `import`).
@@ -18,12 +24,13 @@ const assert = require('node:assert/strict')
 const { createServer } = require('node:http')
 const { createServer: createTlsServer } = require('node:tls')
 const { createSocket } = require('node:dgram')
+const { createDecipheriv } = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { networkInterfaces, tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, webContents: allWebContents } = require('electron')
+const { app, BaseWindow, BrowserWindow, webContents: allWebContents } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const userData = join(tmpdir(), `surffish-cast-smoke-${process.pid}`)
@@ -69,6 +76,9 @@ const site = createServer((request, response) => {
   const pages = {
     '/watch': '<title>Smoke clip</title><video id="v" src="/clip.webm" poster="/poster.png" muted playsinline width="480" height="270"></video>',
     '/mse': '<title>MSE page</title><video id="v" width="480" height="270"></video><script>document.getElementById("v").src = URL.createObjectURL(new MediaSource())</script>',
+    '/blank': '<title>blank</title>',
+    // Green, with a small square in the corner that changes every 150 ms (so capture keeps producing frames).
+    '/mirror': '<title>Mirror me</title><style>html,body{margin:0;height:100%;background:rgb(30,160,90)}#b{position:fixed;left:0;top:0;width:24px;height:24px;background:#fff}</style><div id="b"></div><script>let n=0;setInterval(()=>{document.getElementById("b").style.background=(++n%2)?"#000":"#fff"},150)</script>',
     '/hls': '<title>HLS page</title><video id="v" width="480" height="270"></video><script>document.getElementById("v").src = URL.createObjectURL(new MediaSource()); fetch("/stream/master.m3u8")</script>'
   }
   response.writeHead(pages[url.pathname] ? 200 : 404, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
@@ -113,7 +123,8 @@ const NS = {
   connection: 'urn:x-cast:com.google.cast.tp.connection',
   heartbeat: 'urn:x-cast:com.google.cast.tp.heartbeat',
   receiver: 'urn:x-cast:com.google.cast.receiver',
-  media: 'urn:x-cast:com.google.cast.media'
+  media: 'urn:x-cast:com.google.cast.media',
+  webrtc: 'urn:x-cast:com.google.cast.webrtc'
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -154,7 +165,9 @@ const fakeCast = createTlsServer({
       if (message.namespace === NS.receiver) {
         if (payload.type === 'GET_STATUS') reply(receiverStatus(payload.requestId))
         if (payload.type === 'LAUNCH') {
-          receiver.apps = [{ appId: payload.appId, displayName: 'Default Media Receiver', sessionId: 'session-dmr', transportId: 'transport-dmr', namespaces: [{ name: NS.media }] }]
+          receiver.apps = payload.appId === '0F5096E8'
+            ? [{ appId: payload.appId, displayName: 'Chrome Mirroring', sessionId: 'session-mirror', transportId: 'transport-mirror', namespaces: [{ name: NS.webrtc }] }]
+            : [{ appId: payload.appId, displayName: 'Default Media Receiver', sessionId: 'session-dmr', transportId: 'transport-dmr', namespaces: [{ name: NS.media }] }]
           reply(receiverStatus(payload.requestId))
         }
         if (payload.type === 'SET_VOLUME') {
@@ -166,6 +179,9 @@ const fakeCast = createTlsServer({
           receiver.media = null
           broadcastStatus()
         }
+      }
+      if (message.namespace === NS.webrtc && message.destinationId === 'transport-mirror' && payload.type === 'OFFER') {
+        startMirrorReceiver(payload.offer).then((answer) => reply({ type: 'ANSWER', seqNum: payload.seqNum, result: 'ok', answer }), (error) => reply({ type: 'ANSWER', seqNum: payload.seqNum, result: 'error', error: { code: 1, description: String(error) } }))
       }
       if (message.namespace === NS.media && message.destinationId === 'transport-dmr') {
         if (payload.type === 'LOAD') {
@@ -190,6 +206,113 @@ const fakeCast = createTlsServer({
     }
   })
 })
+
+// ---------------------------------------------------------------------------------------------
+// Fake mirroring receiver (Cast Streaming over UDP), written from Open Screen's wire formats.
+const mirror = { offers: [], socket: null, sender: null, streams: new Map(), rtpBeforeSr: false, dropped: null, retransmitted: false, pliAt: 0, keyAfterPli: false, latencies: [], bytes: 0 }
+function castFeedback(stream, nacks = [], pictureLoss = false) {
+  const body = Buffer.alloc(20 + nacks.length * 4)
+  body[0] = 0x80 | 15
+  body[1] = 206
+  body.writeUInt16BE(body.length / 4 - 1, 2)
+  body.writeUInt32BE(stream.receiverSsrc, 4)
+  body.writeUInt32BE(stream.senderSsrc, 8)
+  body.write('CAST', 12, 'latin1')
+  body[16] = stream.checkpoint & 0xff
+  body[17] = nacks.length
+  body.writeUInt16BE(400, 18)
+  nacks.forEach((nack, index) => { body[20 + index * 4] = nack.frameId & 0xff; body.writeUInt16BE(nack.packetId, 21 + index * 4); body[23 + index * 4] = 0 })
+  if (!pictureLoss) return body
+  const pli = Buffer.alloc(12)
+  pli[0] = 0x80 | 1
+  pli[1] = 206
+  pli.writeUInt16BE(2, 2)
+  pli.writeUInt32BE(stream.receiverSsrc, 4)
+  pli.writeUInt32BE(stream.senderSsrc, 8)
+  return Buffer.concat([body, pli])
+}
+function sendFeedback(stream, nacks, pictureLoss) {
+  if (mirror.socket && mirror.sender) mirror.socket.send(castFeedback(stream, nacks, pictureLoss), mirror.sender.port, mirror.sender.address)
+}
+function expandId(stream, id8) {
+  let id = (Math.max(stream.latest, 0) & ~0xff) | id8
+  if (id < stream.latest - 128) id += 256
+  if (id > stream.latest + 128) id -= 256
+  return id
+}
+function onMirrorPacket(packet, from) {
+  mirror.sender = from
+  mirror.bytes += packet.length
+  if (packet[1] === 200) {
+    const stream = mirror.streams.get(packet.readUInt32BE(4))
+    if (stream) stream.sr = { unixMs: (packet.readUInt32BE(8) - 2208988800) * 1000 + packet.readUInt32BE(12) / 2 ** 32 * 1000, rtp: packet.readUInt32BE(16) }
+    return
+  }
+  if (packet[0] !== 0x80 || packet.length < 19) return
+  const stream = mirror.streams.get(packet.readUInt32BE(8))
+  if (!stream) return
+  if (!stream.sr) mirror.rtpBeforeSr = true
+  const flags = packet[12]
+  const frameId = expandId(stream, packet[13])
+  const packetId = packet.readUInt16BE(14)
+  const maxPacketId = packet.readUInt16BE(16)
+  let offset = 18 + (flags & 0x40 ? 1 : 0)
+  for (let extension = 0; extension < (flags & 0x3f); extension++) offset += 2 + (packet.readUInt16BE(offset) & 0x3ff)
+  if (frameId <= stream.checkpoint || stream.done.has(frameId)) {
+    if (mirror.dropped && frameId === mirror.dropped.frameId && packetId === mirror.dropped.packetId) mirror.retransmitted = true
+    return
+  }
+  stream.latest = Math.max(stream.latest, frameId)
+  // Lose packet 1 of the first multi-packet video key frame, then NACK it like a receiver would.
+  if (stream.kind === 'video' && !mirror.dropped && (flags & 0x80) && maxPacketId >= 1 && packetId === 1) {
+    mirror.dropped = { frameId, packetId }
+    setTimeout(() => sendFeedback(stream, [{ frameId, packetId }]), 120)
+    return
+  }
+  if (mirror.dropped && frameId === mirror.dropped.frameId && packetId === mirror.dropped.packetId) mirror.retransmitted = true
+  let frame = stream.pending.get(frameId)
+  if (!frame) {
+    frame = { parts: [], count: maxPacketId + 1, key: (flags & 0x80) !== 0, rtp: packet.readUInt32BE(4) }
+    stream.pending.set(frameId, frame)
+  }
+  frame.parts[packetId] = packet.subarray(offset)
+  if (frame.parts.filter(Boolean).length < frame.count) return
+  stream.pending.delete(frameId)
+  stream.done.add(frameId)
+  const nonce = Buffer.alloc(16)
+  nonce.writeUInt32BE(frameId >>> 0, 8)
+  for (let index = 0; index < 16; index++) nonce[index] ^= stream.mask[index]
+  const decipher = createDecipheriv('aes-128-ctr', stream.key, nonce)
+  const data = Buffer.concat([decipher.update(Buffer.concat(frame.parts)), decipher.final()])
+  stream.frames.push({ frameId, key: frame.key, data })
+  if (stream.kind === 'video' && stream.sr) {
+    // Capture time on the sender's clock (from the Sender Report) to arrival here.
+    const captureMs = stream.sr.unixMs + (((frame.rtp - stream.sr.rtp) | 0) / 90)
+    mirror.latencies.push(Date.now() - captureMs)
+  }
+  if (stream.kind === 'video' && frame.key && mirror.pliAt && Date.now() > mirror.pliAt) mirror.keyAfterPli = true
+  while (stream.done.has(stream.checkpoint + 1)) stream.checkpoint += 1
+  sendFeedback(stream, [])
+}
+async function startMirrorReceiver(offer) {
+  mirror.offers.push(offer)
+  if (!mirror.socket) {
+    mirror.socket = createSocket('udp4')
+    mirror.socket.on('message', onMirrorPacket)
+    await new Promise((resolvePromise) => mirror.socket.bind(0, '127.0.0.1', resolvePromise))
+  }
+  mirror.streams.clear()
+  const indexes = []
+  const ssrcs = []
+  for (const stream of offer.supportedStreams) {
+    const receiverSsrc = 0x5000 + stream.index
+    mirror.streams.set(stream.ssrc, { kind: stream.type === 'video_source' ? 'video' : 'audio', senderSsrc: stream.ssrc, receiverSsrc, key: Buffer.from(stream.aesKey, 'hex'), mask: Buffer.from(stream.aesIvMask, 'hex'), latest: -1, checkpoint: -1, pending: new Map(), done: new Set(), frames: [], sr: null })
+    indexes.push(stream.index)
+    ssrcs.push(receiverSsrc)
+  }
+  return { castMode: 'mirroring', udpPort: mirror.socket.address().port, sendIndexes: indexes, ssrcs }
+}
+const mirrorStream = (kind) => [...mirror.streams.values()].find((stream) => stream.kind === kind)
 
 // ---------------------------------------------------------------------------------------------
 // Fake mDNS responder: answers any query with the device's PTR/SRV/TXT/A (unicast to the asker).
@@ -387,6 +510,108 @@ async function run() {
   assert.equal(hls.choice.contentType, 'application/x-mpegurl')
   assert.equal(hls.proxied, false)
 
+  smoke.step('Mirror tab: LAUNCH 0F5096E8, OFFER (VP8 + Opus, AES keys) / ANSWER, Sender Report before RTP')
+  page.loadURL(`${origin}/mirror`)
+  await waitFor(() => !page.isLoading() && page.getURL().endsWith('/mirror'), 'the mirror page')
+  const tabs = await inToolbar('window.api.browser.tabs.get()')
+  const mirroredTabId = tabs.find((tab) => tab.url.endsWith('/mirror')).id
+  if (!(await inToolbar('Boolean(document.querySelector("#cast-popover"))'))) assert.equal(await click('.cast-button'), true)
+  await waitFor(() => inToolbar('Boolean(document.querySelector("#cast-popover .cast-mirror"))'), 'the Mirror tab button')
+  await delay(300)
+  screenGrab('cast-mirror-picker')
+  assert.equal(await click('#cast-popover .cast-mirror'), true)
+  await waitFor(async () => (await snapshot()).session?.status === 'playing', 'mirroring to go live')
+  assert.equal(received.filter((message) => message.type === 'LAUNCH').at(-1).appId, '0F5096E8')
+  const offer = mirror.offers.at(-1)
+  assert.equal(offer.castMode, 'mirroring')
+  const [audioOffer, videoOffer] = offer.supportedStreams
+  assert.deepEqual([audioOffer.type, audioOffer.codecName, audioOffer.timeBase, audioOffer.rtpPayloadType], ['audio_source', 'opus', '1/48000', 127])
+  assert.deepEqual([videoOffer.type, videoOffer.codecName, videoOffer.timeBase, videoOffer.rtpPayloadType, videoOffer.targetDelay], ['video_source', 'vp8', '1/90000', 96, 400])
+  assert.match(videoOffer.aesKey, /^[0-9a-f]{32}$/)
+  assert.notEqual(videoOffer.aesKey, audioOffer.aesKey)
+  const live = (await snapshot()).session
+  assert.equal(live.kind, 'mirror')
+  assert.equal(live.title, 'Mirror me')
+  await waitFor(() => inToolbar('document.querySelector("#cast-popover .cast-session-status")?.textContent === "Live"'), 'the Live label')
+  await waitFor(() => smoke.evaluate(sidebar, 'Boolean(document.querySelector(".tab-cast-badge"))'), 'the cast badge on the mirrored tab')
+  await waitFor(() => inToolbar('Boolean(document.querySelector("#cast-popover .cast-mirror-stats"))'), 'the stream line (resolution, bitrate)')
+  await delay(300)
+  screenGrab('cast-mirror-live')
+  const video = mirrorStream('video')
+  await waitFor(() => video.frames.length >= 3, 'video frames at the receiver')
+  assert.equal(mirror.rtpBeforeSr, false, 'a Sender Report arrived before the first RTP packet')
+
+  smoke.step('Mirror tab: a dropped packet is NACKed and resent; the key frame decrypts and decodes to the tab')
+  await waitFor(() => mirror.retransmitted, 'the NACKed packet to be resent')
+  const keyFrame = video.frames.find((frame) => frame.key)
+  assert.ok(keyFrame, 'a key frame arrived complete')
+  // VP8 key frame: frame tag bit 0 clear, then the 9d 01 2a start code.
+  assert.equal(keyFrame.data[0] & 1, 0)
+  assert.deepEqual([...keyFrame.data.subarray(3, 6)], [0x9d, 0x01, 0x2a])
+  const decoderWindow = new BrowserWindow({ show: false, webPreferences: { backgroundThrottling: false } })
+  await decoderWindow.loadURL(`${origin}/blank`)
+  const decoded = await smoke.evaluate(decoderWindow.webContents, `new Promise((done, fail) => {
+    const bytes = Uint8Array.from(atob(${JSON.stringify(keyFrame.data.toString('base64'))}), (c) => c.charCodeAt(0))
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        const width = frame.displayWidth, height = frame.displayHeight
+        const canvas = new OffscreenCanvas(width, height)
+        const context = canvas.getContext('2d')
+        context.drawImage(frame, 0, 0)
+        frame.close()
+        const pixels = context.getImageData(width >> 2, height >> 2, width >> 1, height >> 1).data
+        let r = 0, g = 0, b = 0
+        for (let i = 0; i < pixels.length; i += 4) { r += pixels[i]; g += pixels[i + 1]; b += pixels[i + 2] }
+        const n = pixels.length / 4
+        done({ width, height, r: r / n, g: g / n, b: b / n })
+      },
+      error: (error) => fail(String(error))
+    })
+    decoder.configure({ codec: 'vp8' })
+    decoder.decode(new EncodedVideoChunk({ type: 'key', timestamp: 0, data: bytes }))
+    decoder.flush().catch(fail)
+  })`)
+  decoderWindow.destroy()
+  console.log(`decoded key frame ${decoded.width}x${decoded.height}, centre rgb(${Math.round(decoded.r)}, ${Math.round(decoded.g)}, ${Math.round(decoded.b)})`)
+  assert.ok(decoded.width <= 1280 && decoded.height <= 720 && decoded.width >= 320, 'at most 720p')
+  assert.ok(Math.abs(decoded.r - 30) < 30 && Math.abs(decoded.g - 160) < 30 && Math.abs(decoded.b - 90) < 30, 'the decoded picture is the tab (green)')
+
+  smoke.step('Mirror tab: a Picture Loss Indicator gets a new key frame; frames keep coming with another tab in front')
+  mirror.pliAt = Date.now()
+  sendFeedback(video, [], true)
+  await waitFor(() => mirror.keyAfterPli, 'a key frame after the PLI')
+  const otherTabId = await inToolbar(`window.api.browser.tabs.create(${JSON.stringify(`${origin}/blank`)})`)
+  await waitFor(async () => (await inToolbar('window.api.browser.tabs.get()')).find((tab) => tab.id === otherTabId)?.active, 'the other tab in front')
+  const before = video.frames.length
+  await waitFor(() => video.frames.length >= before + 5, 'frames from the background (mirrored) tab')
+  const audio = mirrorStream('audio')
+  await delay(500)
+  const seconds = (Date.now() - mirror.pliAt) / 1000
+  const latencies = mirror.latencies.slice().sort((a, b) => a - b)
+  console.log(`mirror: ${video.frames.length} video frames, ${audio ? audio.frames.length : 0} audio frames, ~${Math.round(mirror.bytes * 8 / 1000 / Math.max(1, seconds + 3))} kbit/s, capture→receiver median ${Math.round(latencies[latencies.length >> 1])} ms (p90 ${Math.round(latencies[Math.floor(latencies.length * 0.9)])} ms)`)
+  if (audio && audio.frames.length > 0) assert.ok(audio.frames.every((frame) => frame.key), 'audio frames are independent')
+  await waitFor(async () => ((await snapshot()).session?.mirror?.height ?? 0) > 0, 'mirror stats in the session')
+  await inToolbar(`window.api.browser.tabs.activate(${JSON.stringify(mirroredTabId)})`)
+
+  smoke.step('Mirror tab: Stop ends the stream; ⌘K "Mirror Tab" mirrors again to the last device; closing the tab ends it')
+  await inToolbar('window.api.browser.cast.control("stop")')
+  await waitFor(() => received.some((message) => message.namespace === NS.receiver && message.type === 'STOP' && message.sessionId === 'session-mirror'), 'receiver STOP of the mirroring app')
+  await waitFor(async () => (await snapshot()).session === null, 'the mirror session to end')
+  await delay(400)
+  const after = video.frames.length
+  await delay(600)
+  assert.equal(video.frames.length, after, 'no frames after Stop')
+  const offers = mirror.offers.length
+  assert.equal(await inToolbar('window.api.browser.commands.run("cast.mirror")'), true)
+  await waitFor(() => mirror.offers.length === offers + 1, 'a new OFFER from ⌘K Mirror Tab')
+  await waitFor(async () => (await snapshot()).session?.status === 'playing', 'mirroring live again')
+  assert.equal((await snapshot()).session.tabId, mirroredTabId)
+  // Closing the mirrored tab ends the cast (and stops the receiver app).
+  const stops = received.filter((message) => message.namespace === NS.receiver && message.type === 'STOP').length
+  await inToolbar(`window.api.browser.tabs.close(${JSON.stringify(mirroredTabId)})`)
+  await waitFor(async () => (await snapshot()).session === null, 'the session to end with its tab')
+  assert.ok(received.filter((message) => message.namespace === NS.receiver && message.type === 'STOP').length > stops, 'receiver STOP after the tab closed')
+
   smoke.step('Settings off: no button, no commands; back on')
   const off = await inToolbar('window.api.browser.cast.setSettings({ enabled: false })')
   assert.equal(off.enabled, false)
@@ -403,6 +628,7 @@ function cleanup() {
   try { fakeCast.close() } catch {}
   for (const socket of receiver.sockets) socket.destroy()
   try { mdns.close() } catch {}
+  try { mirror.socket?.close() } catch {}
 }
 
 run().then(() => {

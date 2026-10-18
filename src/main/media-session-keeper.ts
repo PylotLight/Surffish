@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron'
+import { isPageHeldForCapture } from './tab-visibility'
 import { holdsMediaSession, mediaHoldRecheckMs, nextMediaActivity, NO_MEDIA_ACTIVITY, type MediaActivity, type MediaEvent } from '../shared/media-session-hold'
 
 /**
@@ -43,7 +44,8 @@ function current(contents: WebContents): MediaActivity {
  */
 export function tabHoldsMediaSession(contents: WebContents | null | undefined, now = Date.now()): boolean {
   if (!contents || contents.isDestroyed()) return false
-  return contents.isCurrentlyAudible() || holdsMediaSession(current(contents), now)
+  // A mirrored tab (Mirror tab) plays on the TV: never slept or discarded underneath the cast.
+  return contents.isCurrentlyAudible() || isPageHeldForCapture(contents) || holdsMediaSession(current(contents), now)
 }
 
 /** When a deferred sleep should look at this tab again. */

@@ -19,8 +19,9 @@ const bramblePreloadPlugin = {
       join(outputDirectory, 'bramble-poc.cjs')
     )
     // Session frame preloads (plain CommonJS, run in every frame of every page): the ad filter and
-    // tab volume. Minified, since every frame parses them.
-    for (const name of ['adblock-frame.cjs', 'tab-volume-frame.cjs']) {
+    // tab volume. Minified, since every frame parses them. Also Mirror tab's hidden capture page
+    // (minified for the preload size budget).
+    for (const name of ['adblock-frame.cjs', 'tab-volume-frame.cjs', 'cast-capture.cjs']) {
       const result = minifySync(name, readFileSync(resolve(projectDirectory, 'src/preload', name), 'utf8'))
       if (result.errors.length > 0) throw new Error(`Could not minify ${name}: ${result.errors.map((error) => error.message).join('; ')}`)
       writeFileSync(join(outputDirectory, name), result.code)

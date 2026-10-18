@@ -53,6 +53,7 @@
   background: rgba(127, 200, 255, 0.08);
 }
 .cast-note { color: rgba(245, 247, 250, 0.68); font-size: 11.5px; }
+.cast-mirror-stats { margin: 0; font-variant-numeric: tabular-nums; }
 .cast-devices {
   display: flex;
   flex-direction: column;
