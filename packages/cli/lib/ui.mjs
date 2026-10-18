@@ -47,7 +47,7 @@ export function progressLine({ received, total, elapsedMs, width = 80 }) {
 /**
  * @param {{ stream?: NodeJS.WriteStream | { write(s: string): unknown, isTTY?: boolean, columns?: number }, env?: Record<string, string | undefined>, now?: () => number, rotateMs?: number }} [opts]
  */
-export function createUI({ stream = process.stderr, env = process.env, now = Date.now, rotateMs = 4000 } = {}) {
+export function createUI({ stream = process.stderr, env = process.env, now = Date.now, rotateMs = 2000 } = {}) {
   const { interactive, color } = detectMode(stream, env)
   const paint = (code, s) => (color ? `${ESC}${code}m${s}${ESC}0m` : s)
   const c = {

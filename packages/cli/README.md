@@ -19,7 +19,7 @@ Requires macOS on Apple silicon (M-series), macOS 13 or newer, and Node.js 18.17
   › Cached in ~/.cache/surffish so the next launch is instant
 ```
 
-The last line rotates every few seconds between what the launcher is doing and a few Surffish tips. When the download finishes:
+The last line rotates every 2 seconds between what the launcher is doing and a few Surffish tips. When the download finishes:
 
 ```text
   ✓ downloaded 119.1 MB in 10s (11.8 MB/s)
