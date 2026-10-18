@@ -14,6 +14,16 @@
  * @property {Record<string, string>} unsupported  messages by `${platform}-${arch}`, platform, or "default"
  * @property {string} [firstRunNote]   printed after the first launch of a fresh download
  * @property {string[]} tips           rotated under the progress bar
+ * @property {UninstallConfig} [uninstall]  what --uninstall lists / deletes besides the cache
+ */
+
+/**
+ * @typedef {object} UninstallConfig
+ * @property {string} [processName]    `pgrep -x` name; --uninstall refuses while it runs
+ * @property {string} [bundleId]       macOS bundle id (`defaults delete` on --all)
+ * @property {{ path: string, what?: string }[]} [userData]  "~/..." or absolute paths the app writes
+ * @property {{ service: string, what?: string }[]} [keychain]  generic-password items by service
+ * @property {string[]} [notes]        printed at the end (default browser, Homebrew, ...)
  */
 
 /**

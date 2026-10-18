@@ -101,7 +101,7 @@ jobs:
   # npx/bunx launcher (packages/cli -> @pylotlight/surffish on npm), published only after the GitHub
   # release + Cask bump above succeeded. GitHub-hosted on purpose: npm trusted publishing (OIDC, no
   # NPM_TOKEN) doesn't support self-hosted runners. Gated by the repo variable NPM_PUBLISH=true so it
-  # skips with a warning until the one-time npm setup is done (packages/cli/README.md#publishing).
+  # skips with a warning until the one-time npm setup is done (packages/cli/DEVELOPING.md#publishing).
   # Dry runs always stamp + `npm publish --dry-run` (no auth needed) so the job gets exercised.
   npm:
     needs: mac
@@ -124,7 +124,7 @@ jobs:
           elif [ "$NPM_PUBLISH" = "true" ]; then mode=publish
           else
             mode=skip
-            echo "::warning::npm publish skipped: set the repo variable NPM_PUBLISH=true once ${PKG} exists on npm with release.yml as its trusted publisher (packages/cli/README.md#publishing)"
+            echo "::warning::npm publish skipped: set the repo variable NPM_PUBLISH=true once ${PKG} exists on npm with release.yml as its trusted publisher (packages/cli/DEVELOPING.md#publishing)"
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "npm: $mode ${PKG}@${VERSION}"
@@ -184,7 +184,7 @@ jobs:
           fi
           # npm view needs no auth for a public package; failure = the package doesn't exist yet
           if ! npm view "$PKG" name >/dev/null 2>&1; then
-            echo "::warning::${PKG} isn't on npm yet. Trusted publishing can only be set up on an existing package: do the one-time manual first publish (packages/cli/README.md#publishing); later releases then publish here."
+            echo "::warning::${PKG} isn't on npm yet. Trusted publishing can only be set up on an existing package: do the one-time manual first publish (packages/cli/DEVELOPING.md#publishing); later releases then publish here."
             exit 0
           fi
           if [ "$(npm view "$PKG@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then

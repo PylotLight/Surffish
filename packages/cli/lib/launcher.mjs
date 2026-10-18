@@ -10,6 +10,7 @@ import {
 } from './core.mjs'
 import { readManifest, resolveTarget } from './release.mjs'
 import { createUI, rotationLines } from './ui.mjs'
+import { runUninstall } from './uninstall.mjs'
 
 /** @typedef {import('./types.mjs').AppConfig} AppConfig */
 /** @typedef {import('./types.mjs').Target} Target */
@@ -104,6 +105,11 @@ function launchApp(bundle, args, platform = process.platform) {
   })
 }
 
+/** One line for the first run. bunx when running under Bun, else npx. */
+export function uninstallHint(config, isBun = Boolean(/** @type {any} */ (process.versions).bun)) {
+  return `remove it later with ${isBun ? 'bunx' : 'npx'} ${config.packageName} --uninstall`
+}
+
 /** @param {AppConfig} config */
 export function helpText(config, packageVersion) {
   const cmd = config.id
@@ -122,6 +128,11 @@ Options
   --latest        run the newest GitHub release instead of this package's version
   --path          print the cached .app path for the resolved version and exit
   --clear-cache   delete every cached download (${'$'}XDG_CACHE_HOME/${config.id} or ~/.cache/${config.id})
+  --uninstall     delete the cached downloads and print what else is left (app data, bun/npm cache)
+                  and how to remove it
+  --uninstall --all, --purge
+                  also delete ${config.displayName}'s own data (profile, settings${config.uninstall?.keychain?.length ? ', keychain item' : ''}); asks first
+  -y, --yes       with --uninstall --all: don't ask
   --no-launch     download, verify and unpack, but don't open the app
   -v, --version   print the launcher version and the ${config.displayName} version it runs
   -h, --help      this help
@@ -140,7 +151,9 @@ Environment
  * @param {AppConfig} config
  * @param {{ argv?: string[], packageVersion: string, manifestPath?: string | URL, env?: Record<string, string | undefined>,
  *   platform?: string, arch?: string, stdout?: { write(s: string): unknown }, ui?: ReturnType<typeof createUI>,
- *   fetchImpl?: typeof fetch, signal?: AbortSignal }} opts
+ *   fetchImpl?: typeof fetch, signal?: AbortSignal, home?: string, isRunning?: () => boolean,
+ *   confirm?: (q: string) => Promise<boolean>, keychainExists?: (s: string) => boolean | null,
+ *   exec?: (cmd: string, args: string[]) => number | null }} opts  (home and the last four are test seams for --uninstall)
  * @returns {Promise<number>} exit code
  */
 export async function run(config, opts) {
@@ -161,6 +174,11 @@ export async function run(config, opts) {
     const runs = request.kind === 'pinned' ? `${config.displayName} v${request.version}` : `the latest ${config.displayName} release`
     stdout.write(`${config.packageName} ${opts.packageVersion} (runs ${runs})\n`)
     return 0
+  }
+
+  if (args.uninstall) {
+    return runUninstall(config, { all: args.all, yes: args.yes, env, platform, ui, stdout, home: opts.home, isRunning: opts.isRunning, confirm: opts.confirm,
+      keychainExists: opts.keychainExists, exec: opts.exec, dirSize, formatBytes })
   }
 
   if (args.clearCache) {
@@ -308,6 +326,7 @@ export async function run(config, opts) {
     ui.next(`launching ${config.displayName} v${version}${fresh ? '' : ' (cached)'}`)
     await launchApp(bundle, args.passthrough, platform)
     if (fresh && config.firstRunNote) ui.info(config.firstRunNote.replace(/\n/g, '\n  '))
+    if (fresh) ui.info(uninstallHint(config))
     return 0
   }
 }

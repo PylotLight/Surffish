@@ -117,10 +117,16 @@ export function platformSupport(config, platform = process.platform, arch = proc
  * @param {string[]} argv  process.argv.slice(2)
  * Launcher flags are consumed; everything else (a URL, an app flag, anything after `--`) is passed
  * to the app.
- * @returns {{ help: boolean, version: boolean, latest: boolean, clearCache: boolean, path: boolean, noLaunch: boolean, passthrough: string[] }}
+ * `--all` and `-y/--yes` only mean something next to `--uninstall`; on their own they go to the app.
+ * `--purge` is `--uninstall --all`.
+ * @returns {{ help: boolean, version: boolean, latest: boolean, clearCache: boolean, path: boolean, noLaunch: boolean,
+ *   uninstall: boolean, all: boolean, yes: boolean, passthrough: string[] }}
  */
 export function parseArgs(argv) {
-  const out = { help: false, version: false, latest: false, clearCache: false, path: false, noLaunch: false, passthrough: /** @type {string[]} */ ([]) }
+  const out = { help: false, version: false, latest: false, clearCache: false, path: false, noLaunch: false, uninstall: false, all: false, yes: false, passthrough: /** @type {string[]} */ ([]) }
+  const end = argv.indexOf('--')
+  const own = end === -1 ? argv : argv.slice(0, end)
+  const uninstalling = own.includes('--uninstall') || own.includes('--purge')
   let rest = false
   for (const arg of argv) {
     if (rest) { out.passthrough.push(arg); continue }
@@ -132,6 +138,10 @@ export function parseArgs(argv) {
       case '--clear-cache': out.clearCache = true; break
       case '--path': out.path = true; break
       case '--no-launch': out.noLaunch = true; break
+      case '--uninstall': out.uninstall = true; break
+      case '--purge': out.uninstall = true; out.all = true; break
+      case '--all': if (uninstalling) out.all = true; else out.passthrough.push(arg); break
+      case '-y': case '--yes': if (uninstalling) out.yes = true; else out.passthrough.push(arg); break
       default: out.passthrough.push(arg)
     }
   }
