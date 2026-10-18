@@ -152,7 +152,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
     ['Glance', 'shift-click link peek'], ['Tab archive', 'archive unused tabs'], ['Spaces'], ['Mini window', 'pop out always on top'], ['Default page'],
     ['Toggle shortcut', 'global shortcut'], ['Grouping', 'tabs stack separate'], ['Header', 'float push overlay'], ['Throw with momentum', 'fling'],
     ['Tuck to screen edge', 'dock hide'], ['Peek on hover', 'hover'], ['Hover delay'],
-    ['Built-in AI (experimental)', 'model provider server'], ['Page Watchers', 'watch changes'], ['Spellcheck', 'languages spelling'],
+    ['Built-in AI (experimental)', 'model provider server'], ['Cast to Chromecast', 'cast tv google cast mirror screen'], ['Page Watchers', 'watch changes'], ['Spellcheck', 'languages spelling'],
     ['SOCKS5 proxy', 'host port tunnel'], ['Local network goes direct', 'bypass'], ['Kill switch', 'block'],
     ['Network rules', 'route override'], ['Developer'], ['Network inspector', 'requests'], ['About & updates', 'version check']
   ]),

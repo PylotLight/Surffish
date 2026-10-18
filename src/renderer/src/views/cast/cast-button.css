@@ -1,0 +1,35 @@
+/* Toolbar cast button (loads with the toolbar; the picker's styles are in cast.css, a lazy chunk). */
+.cast-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.cast-button.is-casting { color: #7fc8ff; }
+.cast-button .cast-glyph-fill { fill: currentColor; stroke: none; opacity: 0.85; }
+.browser-chrome .cast-popover {
+  width: min(340px, calc(100vw - 24px));
+  max-height: min(560px, var(--popover-room, 560px));
+  font-size: var(--pop-body);
+}
+.browser-chrome .cast-header strong { font-size: var(--pop-title); }
+/* Sidebar tab row badge while that tab is casting. */
+.tab-cast-badge {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: #7fc8ff;
+}
+.tab-cast-badge svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.tab-cast-badge .cast-glyph-fill { fill: currentColor; stroke: none; }
