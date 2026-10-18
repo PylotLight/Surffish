@@ -151,8 +151,14 @@ jobs:
             echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
             export PATH="$RUNNER_TEMP/node/bin:$PATH"
           fi
-          node -e 'const v=require("child_process").execSync("npm -v").toString().trim().split(".").map(Number);process.exit(v[0]>11||(v[0]===11&&(v[1]>5||(v[1]===5&&v[2]>=1)))?0:1)' \
-            || npm install -g --no-fund --no-audit npm@^11.5.1
+          if ! node -e 'const v=require("child_process").execSync("npm -v").toString().trim().split(".").map(Number);process.exit(v[0]>11||(v[0]===11&&(v[1]>5||(v[1]===5&&v[2]>=1)))?0:1)'; then
+            # the runner's global prefix (/usr/local) isn't writable (EACCES on man5), so install into a user prefix
+            prefix="$RUNNER_TEMP/npm-global"
+            npm install -g --prefix "$prefix" --no-fund --no-audit npm@^11.5.1
+            echo "$prefix/bin" >> "$GITHUB_PATH"
+            export PATH="$prefix/bin:$PATH"
+            hash -r
+          fi
           echo "node $(node -v), npm $(npm -v)"
       - name: Stamp packages/cli (version + release.json with the zip's SHA-256)
         if: steps.gate.outputs.mode != 'skip'
