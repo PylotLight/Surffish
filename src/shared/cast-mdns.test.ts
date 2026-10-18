@@ -1,5 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { CAST_SERVICE, castDevicesFromRecords, decodeMdnsRecords, encodeMdnsQuery } from './cast-mdns'
+import {
+  CAST_QUERY_SCHEDULE_MS,
+  CAST_SERVICE,
+  MDNS_TYPE,
+  MdnsRecordCache,
+  castDevicesFromRecords,
+  castInterfaces,
+  decodeMdnsRecords,
+  encodeMdnsQuery,
+  encodeMdnsQuestions,
+  interfaceForAddress,
+  nextQueryDelay,
+  parseDnsSdZoneLine,
+  type DnsRecord
+} from './cast-mdns'
 
 const hex = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 
@@ -86,5 +100,111 @@ describe('mDNS answers', () => {
     expect(() => decodeMdnsRecords(Uint8Array.from([0, 0, 0]))).toThrow()
     const loop = Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0])
     expect(() => decodeMdnsRecords(loop)).toThrow()
+  })
+})
+
+describe('follow-up questions', () => {
+  test('several questions in one packet, with QU', () => {
+    const packet = encodeMdnsQuestions([{ name: CAST_SERVICE, type: MDNS_TYPE.PTR }, { name: `tv.${CAST_SERVICE}`, type: MDNS_TYPE.SRV }], true)
+    expect(hex(packet.subarray(4, 6))).toBe('0002')
+    expect(hex(packet.subarray(-4))).toBe('00218001')
+  })
+})
+
+describe('MdnsRecordCache', () => {
+  const instance = `Living-Room-0123456789abcdef0123456789abcdef.${CAST_SERVICE}`
+  const ptr: DnsRecord = { name: CAST_SERVICE, type: MDNS_TYPE.PTR, ttl: 120, target: instance }
+  const srv: DnsRecord = { name: instance, type: MDNS_TYPE.SRV, ttl: 120, port: 8009, target: 'abcd.local' }
+  const txt: DnsRecord = { name: instance, type: MDNS_TYPE.TXT, ttl: 120, txt: { id: 'abc', fn: 'Living Room', md: 'Chromecast' } }
+  const a: DnsRecord = { name: 'abcd.local', type: MDNS_TYPE.A, ttl: 120, address: '192.168.1.50' }
+
+  test('a bare PTR asks for SRV and TXT and shows nothing yet', () => {
+    const cache = new MdnsRecordCache()
+    expect(cache.ingest([ptr], '192.168.1.50', 0)).toBe(true)
+    expect(cache.devices(0)).toEqual([])
+    expect(cache.followUps(0)).toEqual([{ name: instance.toLowerCase(), type: MDNS_TYPE.SRV }, { name: instance.toLowerCase(), type: MDNS_TYPE.TXT }])
+  })
+  test('records arriving in separate packets complete the device', () => {
+    const cache = new MdnsRecordCache()
+    cache.ingest([ptr], '192.168.1.50', 0)
+    cache.ingest([srv, txt], '192.168.1.50', 10)
+    expect(cache.followUps(10)).toEqual([])
+    expect(cache.devices(10)).toEqual([{ id: 'abc', name: 'Living Room', model: 'Chromecast', host: '192.168.1.50', port: 8009 }])
+    expect(cache.ingest([srv, txt], '192.168.1.50', 20)).toBe(false)
+  })
+  test('the A record wins over the sender; an address change is a change', () => {
+    const cache = new MdnsRecordCache()
+    cache.ingest([ptr, srv, txt, a], '10.0.0.1', 0)
+    expect(cache.devices(0)[0]?.host).toBe('192.168.1.50')
+    expect(cache.ingest([{ ...a, address: '192.168.1.51' }], '10.0.0.1', 5)).toBe(true)
+    expect(cache.devices(5)[0]?.host).toBe('192.168.1.51')
+  })
+  test('without a sender (dns-sd) the SRV host needs resolving', () => {
+    const cache = new MdnsRecordCache()
+    cache.ingest([ptr, srv, txt], '', 0)
+    expect(cache.devices(0)).toEqual([])
+    expect(cache.unresolvedHosts(0)).toEqual(['abcd.local'])
+    expect(cache.followUps(0)).toEqual([{ name: 'abcd.local', type: MDNS_TYPE.A }])
+    cache.ingest([a], '', 1)
+    expect(cache.devices(1)[0]?.host).toBe('192.168.1.50')
+  })
+  test('goodbyes and expiry forget the instance', () => {
+    const cache = new MdnsRecordCache()
+    cache.ingest([ptr, srv, txt, a], '192.168.1.50', 0)
+    expect(cache.ingest([{ ...srv, ttl: 0 }], '192.168.1.50', 1)).toBe(true)
+    expect(cache.devices(1)).toEqual([])
+    cache.ingest([ptr, srv, txt, a], '192.168.1.50', 0)
+    expect(cache.devices(121_000)).toEqual([])
+  })
+})
+
+describe('interfaces', () => {
+  const table = {
+    lo0: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', internal: true }],
+    utun4: [{ address: '10.8.0.2', netmask: '255.255.255.255', family: 'IPv4', internal: false }],
+    en0: [{ address: '192.168.1.20', netmask: '255.255.255.0', family: 'IPv4', internal: false }, { address: 'fe80::1', netmask: 'ffff::', family: 'IPv6', internal: false }]
+  }
+  test('every non-internal IPv4 address, LAN before tunnels', () => {
+    expect(castInterfaces(table)).toEqual([
+      { name: 'en0', address: '192.168.1.20', netmask: '255.255.255.0', tunnel: false },
+      { name: 'utun4', address: '10.8.0.2', netmask: '255.255.255.255', tunnel: true }
+    ])
+  })
+  test('finds the interface an answer came in on', () => {
+    expect(interfaceForAddress(castInterfaces(table), '192.168.1.50')?.name).toBe('en0')
+    expect(interfaceForAddress(castInterfaces(table), '172.16.0.1')).toBeNull()
+  })
+})
+
+describe('query schedule', () => {
+  test('quick early rounds, then 30 s; failed rounds retry every 2 s', () => {
+    const delays = CAST_QUERY_SCHEDULE_MS.map((_, index) => nextQueryDelay(index + 1, true))
+    expect(delays).toEqual([250, 750, 1_000, 2_000, 4_000, 30_000])
+    expect(nextQueryDelay(6, false)).toBe(2_000)
+    expect(nextQueryDelay(9, true)).toBe(30_000)
+  })
+})
+
+describe('dns-sd -Z output', () => {
+  const lines = [
+    'Browsing for _googlecast._tcp',
+    '; To direct clients to browse a different domain, substitute that domain in place of \'@\'',
+    'lb._dns-sd._udp                                 PTR     @',
+    '_googlecast._tcp                                PTR     Living\\032Room-0123._googlecast._tcp',
+    'Living\\032Room-0123._googlecast._tcp           SRV     0 0 8009 0123-ab.local. ; Replace with unicast FQDN of target host',
+    'Living\\032Room-0123._googlecast._tcp           TXT     "id=0123" "cd=x" "md=Chromecast Ultra" "fn=Living Room \\"TV\\"" "rs="'
+  ]
+  test('parses PTR/SRV/TXT, ignoring headers and other services', () => {
+    const records = lines.map(parseDnsSdZoneLine)
+    expect(records.slice(0, 3)).toEqual([null, null, null])
+    expect(records[3]).toEqual({ name: '_googlecast._tcp.local', type: MDNS_TYPE.PTR, ttl: 120, target: 'Living Room-0123._googlecast._tcp.local' })
+    expect(records[4]).toMatchObject({ name: 'Living Room-0123._googlecast._tcp.local', type: MDNS_TYPE.SRV, port: 8009, target: '0123-ab.local' })
+    expect(records[5]?.txt).toEqual({ id: '0123', cd: 'x', md: 'Chromecast Ultra', fn: 'Living Room "TV"', rs: '' })
+  })
+  test('feeds the cache like an mDNS answer', () => {
+    const cache = new MdnsRecordCache()
+    cache.ingest(lines.map(parseDnsSdZoneLine).filter((record) => record !== null), '', 0)
+    cache.ingest([{ name: '0123-ab.local', type: MDNS_TYPE.A, ttl: 120, address: '192.168.1.9' }], '', 0)
+    expect(cache.devices(0)).toEqual([{ id: '0123', name: 'Living Room "TV"', model: 'Chromecast Ultra', host: '192.168.1.9', port: 8009 }])
   })
 })
