@@ -22,6 +22,10 @@ It works out the next version from the latest `vX.Y.Z` tag and `package.json` (w
 
 The manual steps below are what it automates.
 
+## npm launcher (`npx @pylotlight/surffish`)
+
+The release workflow's `npm` job runs after the `mac` job (release + Cask) succeeds, on a GitHub-hosted runner: it stamps `packages/cli` with the released version and the zip's SHA-256, then `npm publish --provenance --access public` through npm trusted publishing (no token). Dry runs do `npm publish --dry-run`. It skips with a warning until the repo variable `NPM_PUBLISH=true` is set; one-time setup in [packages/cli/README.md](../packages/cli/README.md#publishing). `bun run release` run locally doesn't publish to npm.
+
 ## Release notes
 
 `docs/releases/vX.Y.Z.md` is published verbatim as the GitHub release body. Start from [docs/releases/TEMPLATE.md](releases/TEMPLATE.md); [docs/releases/v0.1.5.md](releases/v0.1.5.md) is the reference example. The draft `bun run release` writes from commit subjects is only raw material and needs rewriting to these rules:

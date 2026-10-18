@@ -31,6 +31,10 @@ on:
         description: Also download the real v0.1.22 zip with the npx launcher on the Mac (packages/cli)
         type: boolean
         default: false
+      cli_real_download:
+        description: Also download the real v0.1.22 zip with the npx launcher on the Mac (packages/cli)
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -254,6 +258,87 @@ jobs:
           codesign -dv "$app" 2>&1 | head -3 || true
           xattr -l "$app" | grep -c quarantine || echo "no quarantine xattr"
           rm -rf "$cache"
+          git checkout packages/cli/package.json
+
+  # npx/bunx launcher (packages/cli, published as @pylotlight/surffish). Its own tiny job: no bun
+  # install, no Electron, just bun test on the package (~1 s) and a smoke of the bin under Bun (and
+  # real Node when the runner has it), so it never waits on the lanes.
+  cli:
+    name: cli (npx launcher)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules
+      - name: Bun (pinned to .bun-version, persistent cache dir when the runner mounts one)
+        run: |
+          dir="${SURFFISH_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/surffish; fi
+          if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then BUN_INSTALL="$dir/bun"; else BUN_INSTALL="$HOME/.bun"; fi
+          export BUN_INSTALL PATH="$BUN_INSTALL/bin:$PATH"
+          want="$(tr -d ' \nv' < .bun-version)"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          bun --version
+      - name: Unit tests (version resolution, checksums, cache path, plain output, local download e2e)
+        run: bun run test:cli
+      - name: The bin runs under Bun, and under real Node when the runner has it
+        run: |
+          bun packages/cli/bin/surffish.mjs --version
+          if command -v node >/dev/null && ! node -e 'process.exit(process.versions.bun ? 0 : 1)'; then
+            node --version
+            node packages/cli/bin/surffish.mjs --version
+            node packages/cli/bin/surffish.mjs --help >/dev/null
+          else
+            echo "no Node.js on this runner, Bun only"
+          fi
+          # unsupported-platform path: friendly message, exit 1, no network
+          if bun packages/cli/bin/surffish.mjs; then echo "::error::expected exit 1 on linux"; exit 1; fi
+
+  # Manual only (Run workflow -> cli_real_download): the launcher downloads, verifies and unpacks the
+  # real v0.1.22 release into a temp cache on the Mac, without opening it.
+  cli-macos-real:
+    name: cli real download (macos)
+    if: github.event_name == 'workflow_dispatch' && inputs.cli_real_download
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules -e out/native
+      - name: Download v0.1.22 with the launcher (SOCKS proxy unset; Bun can't use one)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="$HOME/.bun/bin:$PATH"
+          for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy ALL_PROXY all_proxy; do case "${!v:-}" in socks*://*) unset "$v" ;; esac; done
+          export SURFFISH_CLI_CACHE_DIR="$RUNNER_TEMP/surffish-cli-cache"
+          rm -rf "$SURFFISH_CLI_CACHE_DIR"
+          js() { if command -v node >/dev/null && ! node -e 'process.exit(process.versions.bun ? 0 : 1)'; then node "$@"; else bun "$@"; fi; }
+          sed -i '' 's/"version": "0.0.0-dev"/"version": "0.1.22"/' packages/cli/package.json
+          js packages/cli/bin/surffish.mjs --no-launch
+          app="$(js packages/cli/bin/surffish.mjs --path)"
+          test -x "$app/Contents/MacOS/Surffish" || { echo "::error::$app/Contents/MacOS/Surffish is missing"; exit 1; }
+          echo "CFBundleShortVersionString: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          find "$app" -type l | head -3
+          xattr -l "$app" | grep quarantine || echo "no quarantine xattr"
+          js packages/cli/bin/surffish.mjs --clear-cache
           git checkout packages/cli/package.json
 
   # Per-PR perf regression check (docs/perf.md). Builds the PR (merge commit) and its base on the
