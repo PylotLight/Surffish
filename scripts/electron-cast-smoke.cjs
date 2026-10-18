@@ -4,6 +4,10 @@
 //   - a fake CASTV2 receiver: a local TLS server (self-signed, like a real device) speaking the
 //     length-prefixed protobuf CastMessage protocol: CONNECT, PING/PONG, GET_STATUS, LAUNCH of the
 //     Default Media Receiver, media LOAD/PLAY/PAUSE/SEEK/STOP, SET_VOLUME and receiver STOP.
+// Discovery: a Chromecast seen before (userData cast-devices.json) shows in the picker straight away
+// once a quick connect to its port answers, before any mDNS answer; one that doesn't answer stays
+// hidden; questions carry the QU bit (unicast answers); a PTR-only answer gets its SRV/TXT asked for
+// at once; the mDNS answer then updates the saved device.
 // Checks: the toolbar button appears once a device is found; the picker lists it and says what the
 // tab would cast; Cast video launches CC1AD845 and LOADs the page's video URL at the local position
 // and pauses the local video; the tab shows the cast badge; play/pause/seek/volume reach the device;
@@ -315,10 +319,30 @@ async function startMirrorReceiver(offer) {
 const mirrorStream = (kind) => [...mirror.streams.values()].find((stream) => stream.kind === kind)
 
 // ---------------------------------------------------------------------------------------------
-// Fake mDNS responder: answers any query with the device's PTR/SRV/TXT/A (unicast to the asker).
+// Fake mDNS responder (unicast to the asker): a PTR question gets the PTR alone (like a responder
+// that leaves the rest out), an SRV/TXT question for the instance gets PTR/SRV/TXT/A. Holds every
+// answer while `mdnsHold` is set (the cached-device step).
 const mdnsQueries = []
+const mdnsQuestions = []
+let mdnsHold = true
 const mdns = createSocket('udp4')
-function mdnsAnswer(castPort) {
+const MDNS_INSTANCE = 'Smoke-TV-00112233445566778899aabbccddeeff._googlecast._tcp.local'
+function mdnsParseQuestions(packet) {
+  const out = []
+  let offset = 12
+  for (let index = 0; index < packet.readUInt16BE(4); index++) {
+    const labels = []
+    while (packet[offset] !== 0) {
+      labels.push(packet.subarray(offset + 1, offset + 1 + packet[offset]).toString())
+      offset += 1 + packet[offset]
+    }
+    offset += 1
+    out.push({ name: labels.join('.'), type: packet.readUInt16BE(offset), qu: (packet.readUInt16BE(offset + 2) & 0x8000) !== 0 })
+    offset += 4
+  }
+  return out
+}
+function mdnsAnswer(castPort, full) {
   const out = []
   const u16 = (value) => out.push((value >> 8) & 0xff, value & 0xff)
   const u32 = (value) => { u16(value >>> 16); u16(value & 0xffff) }
@@ -332,9 +356,10 @@ function mdnsAnswer(castPort) {
     out[at] = (out.length - start) >> 8
     out[at + 1] = (out.length - start) & 0xff
   }
-  const instance = 'Smoke-TV-00112233445566778899aabbccddeeff._googlecast._tcp.local'
-  u16(0); u16(0x8400); u16(0); u16(4); u16(0); u16(0)
+  const instance = MDNS_INSTANCE
+  u16(0); u16(0x8400); u16(0); u16(full ? 4 : 1); u16(0); u16(0)
   record('_googlecast._tcp.local', 12, () => name(instance))
+  if (!full) return Buffer.from(out)
   record(instance, 33, () => { u16(0); u16(0); u16(castPort); name('smoke-tv.local') })
   record(instance, 16, () => { for (const entry of ['id=00112233445566778899aabbccddeeff', 'md=Chromecast', 'fn=Smoke TV']) { out.push(Buffer.byteLength(entry), ...Buffer.from(entry)) } })
   record('smoke-tv.local', 1, () => out.push(127, 0, 0, 1))
@@ -373,9 +398,22 @@ async function run() {
   const castPort = fakeCast.address().port
   mdns.on('message', (packet, info) => {
     mdnsQueries.push(packet)
-    // The question must be the PTR for _googlecast._tcp.local.
-    if (packet.includes(Buffer.from('_googlecast'))) mdns.send(mdnsAnswer(castPort), info.port, info.address)
+    const questions = mdnsParseQuestions(packet)
+    mdnsQuestions.push(...questions)
+    if (mdnsHold) return
+    const followUp = questions.some((question) => question.name.toLowerCase() === MDNS_INSTANCE.toLowerCase() && (question.type === 33 || question.type === 16))
+    const browse = questions.some((question) => question.name === '_googlecast._tcp.local' && question.type === 12)
+    if (followUp || browse) mdns.send(mdnsAnswer(castPort, followUp), info.port, info.address)
   })
+  // A Chromecast seen on an earlier run (saved under an older name), and one that has gone (its port refuses).
+  const closed = createTlsServer()
+  await new Promise((resolvePromise) => closed.listen(0, '127.0.0.1', resolvePromise))
+  const deadPort = closed.address().port
+  await new Promise((resolvePromise) => closed.close(resolvePromise))
+  writeFileSync(join(userData, 'cast-devices.json'), JSON.stringify({ version: 1, devices: [
+    { id: '00112233445566778899aabbccddeeff', name: 'Smoke TV (old name)', model: 'Chromecast', host: '127.0.0.1', port: castPort, seenAt: Date.now() - 60_000 },
+    { id: 'gone-tv', name: 'Gone TV', model: 'Chromecast', host: '127.0.0.1', port: deadPort, seenAt: Date.now() - 120_000 }
+  ] }))
   process.env.SURFFISH_CAST_MDNS_TARGET = `127.0.0.1:${mdns.address().port}`
   const origin = `http://127.0.0.1:${site.address().port}`
   const lanAddress = Object.values(networkInterfaces()).flat().find((entry) => entry && entry.family === 'IPv4' && !entry.internal)?.address
@@ -398,12 +436,26 @@ async function run() {
   const page = await waitFor(() => pageContents((url, contents) => url === watchUrl && !contents.isLoading()), 'the video tab')
   const playLocal = () => smoke.evaluate(page, 'new Promise((done) => { const v = document.getElementById("v"); const go = () => v.play().then(() => done(true), () => done(false)); if (v.readyState >= 1) go(); else v.addEventListener("loadedmetadata", go, { once: true }); v.addEventListener("error", () => done(false), { once: true }) })')
 
-  smoke.step('no button before discovery; ⌘K "Cast…" opens the picker, which browses and finds the fake device')
+  smoke.step('no button before discovery; ⌘K "Cast…" opens the picker, which shows the known device at once')
   assert.equal(await inToolbar('Boolean(document.querySelector(".cast-button"))'), false, 'no cast button with no devices known')
+  const pickerAt = Date.now()
   assert.equal(await inToolbar('window.api.browser.commands.run("cast.open")'), true)
   await waitFor(() => inToolbar('Boolean(document.querySelector("#cast-popover"))'), 'the cast picker')
-  await waitFor(async () => (await snapshot()).devices.some((device) => device.name === 'Smoke TV'), 'Smoke TV to be discovered')
+  await waitFor(() => inToolbar('document.querySelector("#cast-popover .cast-device-name")?.textContent === "Smoke TV (old name)"'), 'the known device row (before any mDNS answer)', 5_000)
+  const cachedMs = Date.now() - pickerAt
+  console.log(`known device shown ${cachedMs}ms after opening the picker`)
+  assert.ok(cachedMs < 2_000, `known device shown quickly (${cachedMs}ms)`)
+  assert.ok(!(await snapshot()).devices.some((device) => device.id === 'gone-tv'), 'a known device that refuses connections stays hidden')
   assert.ok(mdnsQueries.length >= 1, 'the app sent an mDNS question')
+  assert.ok(mdnsQuestions.every((question) => question.qu), 'questions ask for unicast answers (QU)')
+
+  smoke.step('mDNS: a PTR-only answer gets SRV/TXT asked for at once; the answer updates the device')
+  const releasedAt = Date.now()
+  mdnsHold = false
+  await waitFor(async () => (await snapshot()).devices.some((device) => device.name === 'Smoke TV'), 'Smoke TV to be discovered', 6_000)
+  console.log(`mDNS answer applied ${Date.now() - releasedAt}ms after the responder started answering`)
+  assert.ok(mdnsQuestions.some((question) => question.name.toLowerCase() === MDNS_INSTANCE.toLowerCase() && question.type === 33), 'an SRV follow-up for the instance')
+  assert.equal((await snapshot()).devices.length, 1, 'one device (cache and mDNS agree on its id)')
   const device = (await snapshot()).devices.find((entry) => entry.name === 'Smoke TV')
   assert.deepEqual({ ...device }, { id: '00112233445566778899aabbccddeeff', name: 'Smoke TV', model: 'Chromecast', host: '127.0.0.1', port: castPort })
   assert.equal((await snapshot()).scanning, true, 'browsing while the picker is open')
@@ -415,6 +467,10 @@ async function run() {
   assert.equal(await click('.cast-close'), true)
   await waitFor(async () => !(await inToolbar('Boolean(document.querySelector("#cast-popover"))')), 'the picker to close')
   await waitFor(async () => (await snapshot()).scanning === false, 'browsing to stop with the picker closed')
+  await waitFor(() => {
+    const saved = JSON.parse(readFileSync(join(userData, 'cast-devices.json'), 'utf8')).devices
+    return saved.find((entry) => entry.id === '00112233445566778899aabbccddeeff')?.name === 'Smoke TV'
+  }, 'the saved device to take the name mDNS gave it', 5_000)
 
   smoke.step('a LAN page\'s playing video is castable; the toolbar button shows once a device is known')
   page.loadURL(`${lanOrigin}/watch`)
