@@ -38,7 +38,7 @@ export function AppearanceSettings(): React.JSX.Element {
   // With blur on, a platform without a blur path still reports 'solid'; say so instead of promising one.
   const hint = settings?.blur === false ? MODE_HINT.solid : mode === 'solid' ? 'No blur on this platform yet: the sidebar uses a solid, high-contrast background over sites.' : MODE_HINT[mode]
   return (
-    <SettingsGroup title="Appearance">
+    <SettingsGroup title="Sidebar & bookmarks bar">
       <SettingsRow label="Sidebar blur" hint={hint}>
         <input
           type="checkbox"

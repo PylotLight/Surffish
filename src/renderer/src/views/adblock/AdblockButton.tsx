@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { adblockBadge, adblockButtonLabel, type AdblockCounts } from '../../../../shared/adblock-stats'
 import { usePopoverDismiss } from '../../lib/popover-dismiss'
+import { setToolbarBadge, useReturnFocusRef, useToolbarOpenRequest, useToolbarSlot } from '../toolbar/toolbar-slot'
 
 /** The popover body is its own chunk: launch only pays for this button. */
 const AdblockPanel = lazy(() => import('./AdblockPanel').then((module) => ({ default: module.AdblockPanel })))
@@ -63,15 +64,20 @@ export function AdblockButton({ tabId, url, onOpenChange, onOpenSettings }: {
   const origin = webOrigin(url)
   const enabled = useSiteBlocking(origin)
   useEffect(() => { onOpenChange?.(open) }, [open])
-  usePopoverDismiss(open, controlRef, () => setOpen(false), { returnFocusRef: buttonRef, preventEscapeDefault: true })
+  const { folded } = useToolbarSlot()
+  const returnFocusRef = useReturnFocusRef(buttonRef)
+  useToolbarOpenRequest('adblock', () => setOpen(true))
+  usePopoverDismiss(open, controlRef, () => setOpen(false), { returnFocusRef, preventEscapeDefault: true })
   const blocked = origin ? counts[tabId] ?? 0 : 0
   const badge = enabled ? adblockBadge(blocked) : ''
+  useEffect(() => setToolbarBadge('adblock', badge), [badge])
   const label = adblockButtonLabel({ web: origin !== null, enabled, blocked, host: origin ? new URL(origin).hostname : '' })
   return (
     <div className="adblock-control" ref={controlRef}>
       <button
         ref={buttonRef}
         type="button"
+        hidden={folded}
         className={`omnibox-action-button adblock-button${open ? ' is-current' : ''}${enabled ? '' : ' is-off'}`}
         aria-label={label}
         aria-haspopup="dialog"

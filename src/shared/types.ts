@@ -204,6 +204,8 @@ export interface BrowserState {
    * (shared/popover-dismiss.ts `tabSwitchClosesPopover`).
    */
   activeTabSince?: number
+  /** The active tab's page has played video or audio since it loaded (the toolbar's contextual Cast button). */
+  media?: boolean
   /**
    * The active tab is the window's Settings tab (shared/settings-tab.ts): which page to show, the
    * site to focus on Sites, the General category to scroll to. `revision` changes with every request

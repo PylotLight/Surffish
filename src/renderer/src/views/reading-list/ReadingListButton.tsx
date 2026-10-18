@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { readingListBadge, type ReadingListSnapshot } from '../../../../shared/reading-list'
 import { usePopoverDismiss } from '../../lib/popover-dismiss'
+import { setToolbarBadge, useReturnFocusRef, useToolbarOpenRequest, useToolbarSlot } from '../toolbar/toolbar-slot'
 
 /** The popover body (list, search, filters) is its own chunk: launch only pays for this button. */
 const ReadingListPanel = lazy(() => import('./ReadingListPanel').then((module) => ({ default: module.ReadingListPanel })))
@@ -43,14 +44,19 @@ export function ReadingListButton({ url, title, isPrivate, onOpenChange }: {
     const timer = setTimeout(() => setBadgeReady(true), BADGE_DELAY_MS)
     return () => clearTimeout(timer)
   }, [])
-  usePopoverDismiss(open, controlRef, () => setOpen(false), { returnFocusRef: buttonRef, preventEscapeDefault: true })
+  const { folded } = useToolbarSlot()
+  const returnFocusRef = useReturnFocusRef(buttonRef)
+  useToolbarOpenRequest('reading-list', () => setOpen(true))
+  usePopoverDismiss(open, controlRef, () => setOpen(false), { returnFocusRef, preventEscapeDefault: true })
   const badge = readingListBadge(snapshot?.unread ?? 0)
+  useEffect(() => setToolbarBadge('reading-list', badge), [badge])
   const isMac = window.api.platform === 'darwin'
   return (
     <div className="reading-list-control" ref={controlRef}>
       <button
         ref={buttonRef}
         type="button"
+        hidden={folded}
         className={`omnibox-action-button reading-list-button${open ? ' is-current' : ''}`}
         aria-label={badge ? `Reading List, ${snapshot?.unread} unread` : 'Reading List'}
         aria-haspopup="dialog"

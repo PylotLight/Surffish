@@ -1,5 +1,5 @@
 // Toolbar popover smoke: every toolbar popover (downloads + its … menu, extensions, bookmarks,
-// site menu, history panel) must
+// site menu, history panel, the Surffish menu) must
 //   1. close on a press on the page (a separate WebContentsView the toolbar never hears), a press on
 //      the sidebar view, a press elsewhere in the toolbar, Escape, the window losing focus, and a
 //      tab switch, and stay open on a press inside itself;
@@ -76,6 +76,11 @@ async function run() {
   const sidebar = await waitFor(() => viewFor('sidebar'), 'the sidebar surface')
   await waitFor(() => sidebar.webContents.executeJavaScript('document.readyState === "complete" && Boolean(window.api)'), 'the sidebar renderer')
   step('shell ready')
+  // Downloads (contextual) and History (in the Surffish menu by default) get pinned, so each has a
+  // toolbar button to click (shared/toolbar-layout.ts). Written from another surface: the toolbar
+  // picks it up through the storage event, like a change made in Settings.
+  await sidebar.webContents.executeJavaScript(`localStorage.setItem('surffish.toolbar.layout', JSON.stringify({ version: 1, placement: { downloads: 'pinned', history: 'pinned' } }))`)
+  await waitFor(() => toolbar.webContents.executeJavaScript('document.querySelector(".downloads-toolbar-button")?.hidden === false && document.querySelector("button[aria-label=\\"Browsing history\\"]")?.hidden === false'), 'Downloads and History pinned to the toolbar')
 
   // A few bookmarks and downloads-free history so the menus have rows.
   await inToolbar(`window.api.browser.navigate(${JSON.stringify(`${origin}/one`)})`)
@@ -115,7 +120,9 @@ async function run() {
     { name: 'extensions', open: () => clickInToolbar('.extension-overflow-button'), isOpen: () => isOpen('#extensions-menu'), selector: '#extensions-menu', lastRow: '#extensions-menu .extensions-menu-manage' },
     { name: 'bookmarks', open: () => clickInToolbar('.bookmarks-menu-button'), isOpen: () => isOpen('#bookmarks-menu'), selector: '#bookmarks-menu', lastRow: '#bookmarks-menu .bookmarks-menu-footer > :last-child' },
     { name: 'site menu', open: () => clickInToolbar('.site-actions-button'), isOpen: () => isOpen('#site-actions-menu'), selector: '#site-actions-menu', lastRow: '#site-actions-menu > :last-child' },
-    { name: 'history', open: () => clickInToolbar('button[aria-label="Browsing history"]'), isOpen: historyOpen, selector: null, lastRow: null }
+    { name: 'history', open: () => clickInToolbar('button[aria-label="Browsing history"]'), isOpen: historyOpen, selector: null, lastRow: null },
+    // Spaced out so back-to-back opens never add up to the logo's triple-click easter egg (450 ms bursts).
+    { name: 'surffish menu', open: async () => { await delay(500); await clickInToolbar('.toolbar-brand strong') }, isOpen: () => isOpen('#surffish-menu'), selector: '#surffish-menu', lastRow: '#surffish-menu > :last-child' }
   ]
 
   const pressPage = async () => {

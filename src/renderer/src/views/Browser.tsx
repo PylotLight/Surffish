@@ -64,6 +64,13 @@ import { useTabSelection } from './tab-groups/useTabSelection'
 import { TabGroupHeader } from './tab-groups/TabGroupHeader'
 import { useGroupReveal } from './tab-groups/useGroupReveal'
 import { BRAMBLE_TOOLBAR_ID, ExtensionToolbarButtons, useExtensionPins } from './ExtensionToolbarButtons'
+import { togglePinned, toolbarItemAvailable, TOOLBAR_ITEMS, wantedToolbarItems, type ToolbarContext, type ToolbarItemId } from '../../../shared/toolbar-layout'
+import { ToolbarItems } from './toolbar/ToolbarItems'
+import { SurffishMenu, type SurffishMenuEntry } from './toolbar/SurffishMenu'
+import { requestToolbarOpen } from './toolbar/toolbar-slot'
+import { DOWNLOADS_SEEN_STORAGE_KEY, useDownloadsAttention, useDownloadsProgress, useToolbarLayout, useToolbarOverflow } from './toolbar/useToolbarLayout'
+import type { CastToolbarContext } from './cast/CastButton'
+import { useStoredState } from '../lib/stored-state'
 import { runExtensionAction, useWebStoreExtensions } from './useWebStoreExtensions'
 import { isChromeWebStoreDetailUrl } from '../../../shared/chrome-web-store'
 import { formatTemperature, weatherProviderLabel } from '../../../shared/weather'
@@ -83,7 +90,7 @@ import { BrowserNotice, LoadErrorNotice, LoadErrorPage } from './BrowserNotice'
 import { describeLoadError, INVALID_ADDRESS_COPY } from '../../../shared/navigation-errors'
 // Rarely opened views load on first use (lazy-views); the hooks the always-on UI needs stay eager.
 import {
-  AppearanceSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
+  AppearanceSettings, ToolbarSettings, ArchivedTabsSidebar, BookmarkImportPanel, BookmarksManager, CommandPaletteSettings, DefaultBrowserSettings,
   DiagnosticsView, DownloadsPanel, ExtensionsSettings, NetworkRulesSettings, NetworkView, PageWatchersSettings, FeedsSettings, BrambleQuickUnlockSettings, PrivacySettings,
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel, SitesSettings
@@ -99,6 +106,7 @@ import './Browser.css'
 import './bookmarks/bookmarks.css'
 import './toolbar-popovers.css'
 import './toolbar-icons.css'
+import './toolbar/toolbar.css'
 import { SidebarBackdropLayer, sidebarBackdropClass, useSidebarBackdrop } from './SidebarBackdrop'
 import './SidebarBackdrop.css'
 import './motion.css'
@@ -311,6 +319,16 @@ function SuggestionFavicon({ url, title, faviconUrl }: { url: string; title: str
     : <span>{letter}</span>
 }
 
+/** Thin progress line on the Downloads button; its own component so progress never re-renders the shell. */
+function DownloadsToolbarProgress(): React.JSX.Element {
+  const progress = useDownloadsProgress(true)
+  return (
+    <span className={`downloads-toolbar-progress${progress === null ? ' is-indeterminate' : ''}`} aria-hidden="true">
+      <span style={progress === null ? undefined : { transform: `scaleX(${progress})` }} />
+    </span>
+  )
+}
+
 export default function Browser({ surface }: { surface: BrowserSurface }): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement>(null)
   // Settings search: filters whichever settings page is on screen (see useSettingsSearch).
@@ -327,6 +345,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const downloadsControlRef = useRef<HTMLDivElement>(null)
   const downloadsButtonRef = useRef<HTMLButtonElement>(null)
   const historyButtonRef = useRef<HTMLButtonElement>(null)
+  const toolbarFormRef = useRef<HTMLFormElement>(null)
   // Triple-click the Surffish logo (top right of the toolbar).
   const brandEgg = useBrandTripleClick()
   const [browser, setBrowser] = useState<BrowserState>(EMPTY_BROWSER)
@@ -468,6 +487,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [findOpen, setFindOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const extensionPins = useExtensionPins()
+  // Right-hand toolbar buttons: pins, order, contextual Cast / Downloads, narrow-window overflow (shared/toolbar-layout.ts).
+  const [toolbarLayout, setToolbarLayout] = useToolbarLayout()
+  const toolbarItemsRef = useRef<HTMLDivElement>(null)
+  const surffishMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const [surffishMenuOpen, setSurffishMenuOpen] = useState(false)
+  const [toolbarItemMenuOpen, setToolbarItemMenuOpen] = useState(false)
+  const [castToolbar, setCastToolbar] = useState<CastToolbarContext>({ enabled: false, live: false, devices: 0 })
+  const [downloadsSeenAt, setDownloadsSeenAt] = useStoredState<number>(DOWNLOADS_SEEN_STORAGE_KEY, 0)
+  // Escape from the Downloads popup goes back to its button, or to the Surffish menu while it's folded.
+  const downloadsFoldedRef = useRef(false)
+  const downloadsReturnFocusRef = useMemo(() => ({
+    get current(): HTMLElement | null { return downloadsFoldedRef.current ? surffishMenuButtonRef.current : downloadsButtonRef.current }
+  }) as React.RefObject<HTMLElement | null>, [])
   const [networkToolEnabled, setNetworkToolEnabled] = useNetworkToolEnabled()
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
   const [appliedProxy, setAppliedProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY)
@@ -1211,7 +1243,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     if (surface === 'content' && searchEngineLoaded) void window.api.browser.setSearchEngine(searchEngine)
   }, [searchEngine, searchEngineLoaded, surface])
 
-  usePopoverDismiss(downloadsPopupOpen, downloadsControlRef, () => setDownloadsPopupOpen(false), { returnFocusRef: downloadsButtonRef })
+  usePopoverDismiss(downloadsPopupOpen, downloadsControlRef, () => setDownloadsPopupOpen(false), { returnFocusRef: downloadsReturnFocusRef })
 
   // Esc leaves the Downloads / Bookmarks panels. Settings is a tab now: it closes like one (⌘W, ×),
   // so Esc there only clears the settings search (SettingsSearchField).
@@ -1294,7 +1326,40 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     update()
     return () => observer.disconnect()
   }, [surface])
-  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, castOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, surffishMenuOpen, toolbarItemMenuOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, castOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  // Right-hand toolbar buttons (shared/toolbar-layout.ts): which want a slot, which a narrow window folds.
+  const downloadsAttentionFlags = useDownloadsAttention(downloadsSeenAt)
+  useEffect(() => { if (downloadsPopupOpen) setDownloadsSeenAt(Date.now()) }, [downloadsPopupOpen])
+  const toolbarContext: ToolbarContext = {
+    castEnabled: castToolbar.enabled,
+    castLive: castToolbar.live,
+    castDevices: castToolbar.devices,
+    tabHasMedia: browser.media === true,
+    downloadsActive: downloadsAttentionFlags.active,
+    downloadsRecent: downloadsAttentionFlags.recent
+  }
+  // The sidebar surface draws only History, Extensions and Downloads on its (hidden) toolbar.
+  const toolbarSurfaceIds: readonly ToolbarItemId[] = surface === 'sidebar' ? ['history', 'extensions', 'downloads'] : toolbarLayout.order
+  const toolbarWanted = wantedToolbarItems(toolbarLayout, toolbarContext).filter((id) => toolbarSurfaceIds.includes(id))
+  const toolbarFolded = useToolbarOverflow(toolbarFormRef, toolbarItemsRef, toolbarWanted, surface !== 'sidebar')
+  const toolbarShown: ReadonlySet<ToolbarItemId> = new Set(toolbarWanted.filter((id) => !toolbarFolded.has(id)))
+  downloadsFoldedRef.current = !toolbarShown.has('downloads')
+  const isMacShell = window.api.platform === 'darwin'
+  const surffishMenuEntries: SurffishMenuEntry[] = toolbarSurfaceIds
+    .filter((id) => !toolbarShown.has(id) && toolbarItemAvailable(id, toolbarContext))
+    .map((id) => ({
+      id,
+      label: TOOLBAR_ITEMS[id].label,
+      shortcut: id === 'history' ? (isMacShell ? '⌘Y' : 'Ctrl+H') : id === 'downloads' ? (isMacShell ? '⇧⌘J' : 'Ctrl+J') : undefined,
+      pinned: toolbarLayout.placement[id] === 'pinned',
+      onSelect: () => {
+        if (id === 'history') toggleToolbarPanel('history')
+        else if (id === 'downloads') setDownloadsPopupOpen(true)
+        else requestToolbarOpen(id)
+      }
+    }))
+  const customizeToolbar = (): void => { void window.api.browser.settings.open({ section: 'settings', focus: 'appearance' }).catch(() => undefined) }
+
 
   // The History panel closes like a popover (the toolbar's clock button toggles it; it lives in the sidebar view).
   const closeHistoryPanel = (): void => setSidebarMode((current) => current === 'history' ? 'tabs' : current)
@@ -1700,7 +1765,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
       <div className="browser-main">
         <header className="browser-chrome" ref={browserChromeRef}>
-          <form className={`browser-toolbar${browser.private ? ' is-private' : ''}`} onSubmit={(event) => void navigate(event)}>
+          <form ref={toolbarFormRef} className={`browser-toolbar${browser.private ? ' is-private' : ''}`} onSubmit={(event) => void navigate(event)}>
             <div className="browser-toolbar-leading" aria-hidden="true" />
             <div className="omnibox-wrap">
               <NavHistoryButtons canGoBack={browser.canGoBack} canGoForward={browser.canGoForward} currentUrl={`${activeTabId}\n${browser.url}`} onShowFullHistory={() => { if (sidebarMode !== 'history') toggleToolbarPanel('history') }}>
@@ -1894,38 +1959,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
             </div>
             <div className="browser-toolbar-trailing">
               {surface === 'toolbar' && <NetworkOverridesBadge enabled={networkToolEnabled} onOpen={() => selectSettingsSection('network')} />}
-              <div className="omnibox-actions" role="group" aria-label="Browser panels">
-                {surface !== 'sidebar' && <BookmarksMenuButton
-                  bookmarks={bookmarks}
-                  cachedIcons={cachedSiteIcons}
-                  barVisible={bookmarksBarVisible}
-                  onToggleBar={() => void window.api.browser.bookmarks.bar.set(!bookmarksBarVisible).then(setBookmarksBarVisible).catch(() => undefined)}
-                  onShowManager={() => setSidebarMode('bookmarks')}
-                  onOpenChange={setBookmarksMenuOpen}
-                  onLayout={bumpBookmarksMenuLayout}
-                />}
-                {surface !== 'sidebar' && <ReadingListButton
-                  url={isLocalPage ? '' : browser.url}
-                  title={browser.title}
-                  isPrivate={browser.private}
-                  onOpenChange={setReadingListOpen}
-                />}
-                {surface !== 'sidebar' && <AdblockButton
-                  tabId={activeTabId}
-                  url={isLocalPage ? '' : browser.url}
-                  onOpenChange={setAdblockOpen}
-                  onOpenSettings={() => { if (activeOrigin) selectSettingsSection('site', activeOrigin) }}
-                />}
-                {surface !== 'sidebar' && <CastButton
-                  tabId={activeTabId}
-                  url={isLocalPage ? '' : browser.url}
-                  onOpenChange={setCastOpen}
-                  onOpenSettings={() => { void window.api.browser.settings.open({ section: 'settings', focus: 'features' }) }}
-                />}
-                <button ref={historyButtonRef} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title="Browsing history" onClick={() => toggleToolbarPanel('history')}>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
-                </button>
-              </div>
               {isChromeWebStoreDetailUrl(browser.url) && (
                 <button
                   className="store-add-button"
@@ -1940,61 +1973,121 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   {webStoreExtensions.busy ? 'Installing…' : 'Add to Surffish'}
                 </button>
               )}
-              {extensionPins.isPinned(BRAMBLE_TOOLBAR_ID, true) && (
-              <button
-                className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
-                ref={brambleButtonRef}
-                type="button"
-                aria-label={brambleToolbarAction === 'install' ? 'Install Bramble' : 'Open Bramble'}
-                aria-haspopup={brambleToolbarAction === 'open' ? 'dialog' : undefined}
-                aria-expanded={bramblePoc.popupOpen}
-                aria-busy={bramblePoc.loading}
-                title={brambleToolbarAction === 'install' ? 'Install Bramble in this Surffish profile · verified release and permission confirmation' : bramblePoc.version ? `Open Bramble ${bramblePoc.version}` : 'Open Bramble'}
-                disabled={brambleToolbarAction === 'busy'}
-                onClick={() => { void handleBrambleToolbarClick() }}
-              >
-                <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
-              </button>
-              )}
-              <ExtensionToolbarButtons
-                state={webStoreExtensions}
-                setState={setWebStoreExtensions}
-                pins={extensionPins}
-                onManage={() => selectSettingsSection('integrations')}
-                onMenuOpenChange={setExtensionsMenuOpen}
-                bramble={{
-                  label: brambleToolbarAction === 'install' ? 'Install Bramble' : 'Bramble',
-                  iconSrc: brambleExtensionIcon,
-                  disabled: brambleToolbarAction === 'busy',
-                  onOpen: () => { void handleBrambleToolbarClick() }
+              <ToolbarItems
+                layout={toolbarLayout}
+                onLayoutChange={setToolbarLayout}
+                shown={toolbarShown}
+                itemsRef={toolbarItemsRef}
+                menuButtonRef={surffishMenuButtonRef}
+                onCustomize={customizeToolbar}
+                onMenuOpenChange={setToolbarItemMenuOpen}
+                items={{
+                  ...(surface !== 'sidebar' ? {
+                    bookmarks: <BookmarksMenuButton
+                      bookmarks={bookmarks}
+                      cachedIcons={cachedSiteIcons}
+                      barVisible={bookmarksBarVisible}
+                      onToggleBar={() => void window.api.browser.bookmarks.bar.set(!bookmarksBarVisible).then(setBookmarksBarVisible).catch(() => undefined)}
+                      onShowManager={() => setSidebarMode('bookmarks')}
+                      onOpenChange={setBookmarksMenuOpen}
+                      onLayout={bumpBookmarksMenuLayout}
+                    />,
+                    'reading-list': <ReadingListButton
+                      url={isLocalPage ? '' : browser.url}
+                      title={browser.title}
+                      isPrivate={browser.private}
+                      onOpenChange={setReadingListOpen}
+                    />,
+                    adblock: <AdblockButton
+                      tabId={activeTabId}
+                      url={isLocalPage ? '' : browser.url}
+                      onOpenChange={setAdblockOpen}
+                      onOpenSettings={() => { if (activeOrigin) selectSettingsSection('site', activeOrigin) }}
+                    />,
+                    cast: <CastButton
+                      tabId={activeTabId}
+                      url={isLocalPage ? '' : browser.url}
+                      onOpenChange={setCastOpen}
+                      onContext={setCastToolbar}
+                      onOpenSettings={() => { void window.api.browser.settings.open({ section: 'settings', focus: 'features' }) }}
+                    />
+                  } : {}),
+                  history: (
+                    <button ref={historyButtonRef} hidden={!toolbarShown.has('history')} className={`omnibox-action-button${sidebarMode === 'history' ? ' is-current' : ''}`} type="button" aria-label="Browsing history" aria-pressed={sidebarMode === 'history'} title={`Browsing history (${isMacShell ? '⌘Y' : 'Ctrl+H'})`} onClick={() => toggleToolbarPanel('history')}>
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8.5A8 8 0 1 1 4 12" /><path d="M4.5 4.5v4h4M12 7.5v5l3 1.8" /></svg>
+                    </button>
+                  ),
+                  extensions: (
+                    <>
+                      {extensionPins.isPinned(BRAMBLE_TOOLBAR_ID, true) && toolbarShown.has('extensions') && (
+                      <button
+                        className={`toolbar-button bramble-toolbar-button${bramblePoc.installed ? ' is-installed' : ''}`}
+                        ref={brambleButtonRef}
+                        type="button"
+                        aria-label={brambleToolbarAction === 'install' ? 'Install Bramble' : 'Open Bramble'}
+                        aria-haspopup={brambleToolbarAction === 'open' ? 'dialog' : undefined}
+                        aria-expanded={bramblePoc.popupOpen}
+                        aria-busy={bramblePoc.loading}
+                        title={brambleToolbarAction === 'install' ? 'Install Bramble in this Surffish profile · verified release and permission confirmation' : bramblePoc.version ? `Open Bramble ${bramblePoc.version}` : 'Open Bramble'}
+                        disabled={brambleToolbarAction === 'busy'}
+                        onClick={() => { void handleBrambleToolbarClick() }}
+                      >
+                        <img className="bramble-toolbar-icon" src={brambleExtensionIcon} alt="" />
+                      </button>
+                      )}
+                      <ExtensionToolbarButtons
+                        state={webStoreExtensions}
+                        setState={setWebStoreExtensions}
+                        pins={extensionPins}
+                        onManage={() => selectSettingsSection('integrations')}
+                        onMenuOpenChange={setExtensionsMenuOpen}
+                        bramble={{
+                          label: brambleToolbarAction === 'install' ? 'Install Bramble' : 'Bramble',
+                          iconSrc: brambleExtensionIcon,
+                          disabled: brambleToolbarAction === 'busy',
+                          onOpen: () => { void handleBrambleToolbarClick() }
+                        }}
+                      />
+                    </>
+                  ),
+                  downloads: (
+                    <div className="downloads-toolbar-control" ref={downloadsControlRef}>
+                      <button
+                        className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
+                        ref={downloadsButtonRef}
+                        hidden={!toolbarShown.has('downloads')}
+                        type="button"
+                        aria-label={downloadsAttentionFlags.active ? 'Downloads, in progress' : 'Downloads'}
+                        aria-haspopup="dialog"
+                        aria-expanded={downloadsPopupOpen}
+                        aria-controls="downloads-popup"
+                        title="Downloads"
+                        onClick={() => setDownloadsPopupOpen((open) => !open)}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v12" /><path d="m7 10.5 5 5 5-5" /><path d="M4.5 16v3a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>
+                        {downloadsAttentionFlags.active && toolbarShown.has('downloads') && <DownloadsToolbarProgress />}
+                      </button>
+                      {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
+                        setDownloadsPopupOpen(false)
+                        setSidebarMode('downloads')
+                      }} onClose={() => {
+                        setDownloadsPopupOpen(false)
+                        downloadsReturnFocusRef.current?.focus()
+                      }} />}
+                    </div>
+                  )
                 }}
               />
-              <div className="downloads-toolbar-control" ref={downloadsControlRef}>
-                <button
-                  className={`toolbar-button downloads-toolbar-button${downloadsPopupOpen ? ' is-open' : ''}`}
-                  ref={downloadsButtonRef}
-                  type="button"
-                  aria-label="Downloads"
-                  aria-haspopup="dialog"
-                  aria-expanded={downloadsPopupOpen}
-                  aria-controls="downloads-popup"
-                  title="Downloads"
-                  onClick={() => setDownloadsPopupOpen((open) => !open)}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5v12" /><path d="m7 10.5 5 5 5-5" /><path d="M4.5 16v3a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-3" /></svg>
-                </button>
-                {downloadsPopupOpen && <DownloadsPanel mode="popup" onShowAll={() => {
-                  setDownloadsPopupOpen(false)
-                  setSidebarMode('downloads')
-                }} onClose={() => {
-                  setDownloadsPopupOpen(false)
-                  downloadsButtonRef.current?.focus()
-                }} />}
-              </div>
-              <div className="toolbar-brand" aria-label="Surffish" title="Surffish" onClick={brandEgg.onClick}>
-                <img className="toolbar-brand-icon" src="./surffish-brand-icon.png" alt="" aria-hidden="true" draggable={false} />
-                <strong>Surffish</strong>
-              </div>
+              <SurffishMenu
+                entries={surffishMenuEntries}
+                menuButtonRef={surffishMenuButtonRef}
+                attention={downloadsAttentionFlags.active && !toolbarShown.has('downloads')}
+                onPin={(id) => setToolbarLayout(togglePinned(toolbarLayout, id))}
+                onCustomize={customizeToolbar}
+                onSettings={openSettings}
+                onBrandClick={brandEgg.onClick}
+                onOpenChange={setSurffishMenuOpen}
+              />
             </div>
           </form>
           {surface !== 'sidebar' && bookmarksBarVisible && <BookmarksBar bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onShowManager={() => setSidebarMode('bookmarks')} onOpenChange={setBookmarksBarMenuOpen} onLayout={bumpBookmarksMenuLayout} />}
@@ -2214,8 +2307,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <BookmarkImportPanel />
                 </SettingsGroup>
                 </SettingsCategory>
-                <SettingsCategory id="appearance" title="Appearance" single>
+                <SettingsCategory id="appearance" title="Appearance">
                 <AppearanceSettings />
+                <ToolbarSettings />
                 </SettingsCategory>
                 <SettingsCategory id="tabs" title="Tabs & windows">
                 <SettingsGroup title="Tabs">
