@@ -3,6 +3,8 @@ import { useStoredState } from '../lib/stored-state'
 import { usePopoverDismiss } from '../lib/popover-dismiss'
 import type { WebStoreExtensionsState, WebStoreExtensionSummary } from '../../../shared/types'
 import { runExtensionAction } from './useWebStoreExtensions'
+import { useReturnFocusRef, useToolbarOpenRequest, useToolbarSlot } from './toolbar/toolbar-slot'
+import { PinGlyph } from './toolbar/ToolbarGlyph'
 
 /** Toolbar pin overrides by extension id (`bramble` for the built-in password manager). */
 const PIN_STORAGE_KEY = 'surffish.toolbar.extensionPins'
@@ -45,15 +47,6 @@ function ExtensionIcon({ extension }: { extension: WebStoreExtensionSummary }): 
     : <span className="extension-toolbar-fallback" aria-hidden="true">{extension.name.slice(0, 1).toUpperCase()}</span>
 }
 
-function PinGlyph({ pinned }: { pinned: boolean }): React.JSX.Element {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={pinned ? 'is-pinned' : undefined}>
-      <path d="M9 4.5h6l-1 5 3 3v1.5H7V12.5l3-3z" />
-      <path d="M12 14.5v5" />
-    </svg>
-  )
-}
-
 /** Pinned Web Store extensions on the toolbar, plus a puzzle-piece overflow menu for the rest. */
 export function ExtensionToolbarButtons({ state, setState, pins, bramble, onManage, onMenuOpenChange }: Props): React.JSX.Element | null {
   const [menuOpen, setMenuOpen] = useState(false)
@@ -64,7 +57,10 @@ export function ExtensionToolbarButtons({ state, setState, pins, bramble, onMana
 
   useEffect(() => { onMenuOpenChange?.(menuOpen) }, [menuOpen])
 
-  usePopoverDismiss(menuOpen, controlRef, () => setMenuOpen(false), { returnFocusRef: menuButtonRef, preventEscapeDefault: true })
+  const { folded } = useToolbarSlot()
+  const returnFocusRef = useReturnFocusRef(menuButtonRef)
+  useToolbarOpenRequest('extensions', () => setMenuOpen(true))
+  usePopoverDismiss(menuOpen, controlRef, () => setMenuOpen(false), { returnFocusRef, preventEscapeDefault: true })
 
   const openExtension = (extension: WebStoreExtensionSummary, anchorEl: HTMLElement): void => {
     if (!extension.hasPopup) {
@@ -80,7 +76,7 @@ export function ExtensionToolbarButtons({ state, setState, pins, bramble, onMana
 
   return (
     <div className="extension-toolbar-buttons" role="group" aria-label="Extensions" ref={controlRef}>
-      {pinned.map((extension) => (
+      {!folded && pinned.map((extension) => (
         <button
           key={extension.id}
           className={`toolbar-button extension-toolbar-button${state.popupOpenId === extension.id ? ' is-open' : ''}`}
@@ -102,6 +98,7 @@ export function ExtensionToolbarButtons({ state, setState, pins, bramble, onMana
       <div className="extension-overflow-control">
         <button
           ref={menuButtonRef}
+          hidden={folded}
           className={`toolbar-button extension-overflow-button${menuOpen ? ' is-open' : ''}`}
           type="button"
           aria-label="Extensions"
@@ -145,7 +142,7 @@ export function ExtensionToolbarButtons({ state, setState, pins, bramble, onMana
                       className="extensions-menu-open"
                       disabled={!canPin}
                       title={canPin ? `Open ${extension.name}` : `${extension.name} runs in the background`}
-                      onClick={(event) => { setMenuOpen(false); openExtension(extension, menuButtonRef.current ?? event.currentTarget) }}
+                      onClick={(event) => { setMenuOpen(false); openExtension(extension, (folded ? returnFocusRef.current : menuButtonRef.current) ?? event.currentTarget) }}
                     >
                       <ExtensionIcon extension={extension} />
                       <span className="extensions-menu-name">{extension.name}<small>{extension.hasPopup ? 'Popup' : extension.hasOptions ? 'Options only' : 'Background only'}</small></span>

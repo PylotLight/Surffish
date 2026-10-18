@@ -4,6 +4,7 @@ import { BOOKMARKS_ROOT_ID } from '../../../../shared/bookmarks'
 import { bookmarkMenuRows, submenuSide } from '../../../../shared/bookmarks-menu'
 import { BookmarkFavicon, FolderGlyph } from './BookmarkParts'
 import { usePopoverDismiss } from '../../lib/popover-dismiss'
+import { useReturnFocusRef, useToolbarOpenRequest, useToolbarSlot } from '../toolbar/toolbar-slot'
 import { bookmarkHost, bookmarksBelow, openBookmarkUrl, openBookmarksInTabs, type BookmarksState } from './useBookmarks'
 
 const SUBMENU_WIDTH = 280
@@ -156,13 +157,17 @@ export function BookmarksMenuButton({ bookmarks, cachedIcons, barVisible, onTogg
   const controlRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   useEffect(() => { onOpenChange?.(open) }, [open])
-  useDismiss(open, controlRef, () => setOpen(false), buttonRef)
+  const { folded } = useToolbarSlot()
+  const returnFocusRef = useReturnFocusRef(buttonRef)
+  useToolbarOpenRequest('bookmarks', () => setOpen(true))
+  useDismiss(open, controlRef, () => setOpen(false), returnFocusRef)
   const isMac = window.api.platform === 'darwin'
   return (
     <div className="bookmarks-menu-control" ref={controlRef}>
       <button
         ref={buttonRef}
         type="button"
+        hidden={folded}
         className={`omnibox-action-button bookmarks-menu-button${open ? ' is-current' : ''}`}
         aria-label="Bookmarks"
         aria-haspopup="menu"

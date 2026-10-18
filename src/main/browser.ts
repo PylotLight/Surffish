@@ -27,6 +27,7 @@ import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmark
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
+import { trackTabMedia, tabPlayedMedia } from './tab-media'
 import { tabAudioState, trackTabAudio } from './tab-audio'
 import { tabAudioIndicator } from '../shared/tab-audio'
 import { forgetPrivateTabVolumes, pushTabVolume, setTabVolumeHost, setTabVolumeLevel, tabVolumeForUrl } from './tab-volume'
@@ -378,6 +379,7 @@ function getState(w = currentWindowState()): BrowserState {
     loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents : undefined) : null,
     security: tab && !tab.pdfEditor && !tab.error ? pageSecurityFor(contents) : null,
     activeTabSince: w ? activeTabSinceFor(w.window) : 0,
+    ...(tabPlayedMedia(contents) ? { media: true } : {}),
     settings: tab && isSettingsTab(tab) ? settingsTabState(tab) : null
   }
 }
@@ -1275,6 +1277,7 @@ function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebCont
   guardPageDragRegions(contents)
   trackTabMediaSession(contents)
   trackTabAudio(contents, () => { if (isCurrentContents()) publishTabs(tab.win) })
+  trackTabMedia(contents, () => { if (isCurrentContents() && isActiveTab(tab)) publishState(tab.win) })
   contents.on('media-started-playing', () => {
     if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isTabOnScreen(tab) || contents.isDestroyed()) return
     void contents.executeJavaScript(`

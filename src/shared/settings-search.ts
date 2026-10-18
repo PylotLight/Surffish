@@ -146,7 +146,7 @@ const entries = (mode: SettingsSearchMode, rows: ReadonlyArray<readonly [string,
 /** Labels per page (group titles and row labels), in page order. */
 export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
   ...entries('settings', [
-    ['Search engine', 'address bar'], ['Sidebar blur', 'transparency'], ['Bookmarks bar', 'favourites'], ['Search keywords', 'keyword search bang'],
+    ['Search engine', 'address bar'], ['Sidebar blur', 'transparency'], ['Bookmarks bar', 'favourites'], ['Toolbar', 'pin unpin buttons overflow surffish menu customize reorder cast downloads history reading list'], ['Search keywords', 'keyword search bang'],
     ['Command palette', 'shortcut'], ['Default browser', 'open links'], ['Import', 'bookmarks chrome firefox safari'],
     ['Hibernate inactive tabs', 'sleep'], ['Memory saver', 'sleep'], ['Preload pages for faster browsing', 'preconnect'], ['Saved session', 'restore'],
     ['Glance', 'shift-click link peek'], ['Tab archive', 'archive unused tabs'], ['Spaces'], ['Mini window', 'pop out always on top'], ['Default page'],

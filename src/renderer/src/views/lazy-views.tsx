@@ -21,6 +21,7 @@ export const CommandPaletteSettings = deferred(() => settings().then((m) => m.Co
 export const DefaultBrowserSettings = deferred(() => settings().then((m) => m.DefaultBrowserSettings))
 export const SpellcheckSettings = deferred(() => settings().then((m) => m.SpellcheckSettings))
 export const AppearanceSettings = deferred(() => settings().then((m) => m.AppearanceSettings))
+export const ToolbarSettings = deferred(() => settings().then((m) => m.ToolbarSettings))
 export const ProxyKillSwitchSetting = deferred(() => settings().then((m) => m.ProxyKillSwitchSetting))
 export const PrivacySettings = deferred(() => settings().then((m) => m.PrivacySettings))
 export const PageWatchersSettings = deferred(() => settings().then((m) => m.PageWatchersSettings))

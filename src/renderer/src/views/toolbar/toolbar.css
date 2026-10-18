@@ -1,0 +1,331 @@
+/* ---- Toolbar pins, overflow and the Surffish menu (shared/toolbar-layout.ts) ----
+ * Loaded eagerly with the toolbar. No backdrop-filter: the menus sit on an opaque gradient like
+ * the other toolbar popovers, so opening one costs no extra blur pass. */
+
+/* Folded buttons (unpinned / idle / no room) stay mounted but out of the row: their popover then
+   hangs from the right edge, under the Surffish menu button. */
+.browser-toolbar-trailing {
+  position: relative;
+}
+.toolbar-slot {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.toolbar-slot.is-folded {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 0;
+}
+.toolbar-slot.is-folded > :is(.bookmarks-menu-control, .reading-list-control, .adblock-control, .cast-control, .downloads-toolbar-control, .extension-toolbar-buttons, .extension-overflow-control),
+.toolbar-slot.is-folded .extension-overflow-control {
+  position: static;
+}
+.toolbar-slot [hidden] {
+  display: none !important;
+}
+
+/* Drag to reorder: the dragged button dims, a 2px line marks where it lands. */
+.toolbar-items.is-dragging { cursor: grabbing; }
+.toolbar-slot.is-drag-source { opacity: 0.45; }
+.toolbar-slot.is-drop-before::before,
+.toolbar-slot.is-drop-after::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: #7ee2a8;
+  pointer-events: none;
+}
+.toolbar-slot.is-drop-before::before { left: -2px; }
+.toolbar-slot.is-drop-after::after { right: -2px; }
+
+/* Downloads: a thin progress line under the glyph while something downloads. */
+.downloads-toolbar-button { position: relative; }
+.downloads-toolbar-progress {
+  position: absolute;
+  right: 7px;
+  bottom: 4px;
+  left: 7px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.16);
+  pointer-events: none;
+}
+.downloads-toolbar-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #7ee2a8;
+  transform-origin: left center;
+  transition: transform 240ms ease;
+}
+.downloads-toolbar-progress.is-indeterminate > span {
+  width: 40%;
+  animation: downloads-toolbar-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes downloads-toolbar-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+/* ---- The Surffish menu button (logo + name) ---- */
+.surffish-menu-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
+}
+.browser-toolbar-trailing button.toolbar-brand {
+  position: relative;
+  margin: 0 0 0 4px;
+  padding: 0 8px 0 3px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 130ms ease;
+}
+.browser-toolbar-trailing button.toolbar-brand:hover,
+.browser-toolbar-trailing button.toolbar-brand.is-open {
+  background: rgba(255, 255, 255, 0.08);
+}
+.browser-toolbar-trailing button.toolbar-brand:focus-visible {
+  outline: 2px solid rgba(126, 226, 168, 0.75);
+  outline-offset: 1px;
+}
+.toolbar-brand-dot {
+  position: absolute;
+  top: 5px;
+  left: 31px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid rgba(20, 25, 31, 0.95);
+  border-radius: 50%;
+  background: #7ee2a8;
+}
+
+/* ---- Menus: the Surffish overflow menu and the right-click Pin / Unpin menu ---- */
+.surffish-menu,
+.toolbar-item-menu {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 13px;
+  background: linear-gradient(150deg, rgba(42, 50, 60, 0.99), rgba(18, 22, 28, 0.995));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.08);
+  color: rgba(248, 250, 252, 0.95);
+  font-size: 13px;
+  text-align: left;
+  -webkit-app-region: no-drag;
+  animation: surffish-menu-in 120ms ease-out;
+}
+@keyframes surffish-menu-in {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .surffish-menu,
+  .toolbar-item-menu { animation: none; }
+}
+.surffish-menu {
+  right: -2px;
+  width: 260px;
+  max-height: min(520px, var(--popover-room, 520px));
+  overflow: auto;
+}
+.toolbar-item-menu { width: 200px; }
+.surffish-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.surffish-menu-row {
+  display: flex;
+  align-items: center;
+  border-radius: 9px;
+}
+.surffish-menu-row:hover { background: rgba(255, 255, 255, 0.06); }
+.surffish-menu-item,
+.toolbar-item-menu-item {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.surffish-menu > .surffish-menu-item:hover,
+.surffish-menu-item:focus-visible,
+.toolbar-item-menu-item:hover,
+.toolbar-item-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+  outline: 0;
+}
+.surffish-menu-item:focus-visible,
+.toolbar-item-menu-item:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(126, 226, 168, 0.6);
+}
+.surffish-menu-icon {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  color: rgba(245, 247, 250, 0.78);
+}
+.surffish-menu-icon svg,
+.surffish-menu-pin svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.surffish-menu-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.surffish-menu-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(126, 226, 168, 0.16);
+  color: #a4edbd;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.surffish-menu kbd {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.5);
+  font: inherit;
+  font-size: 11.5px;
+}
+.surffish-menu-pin {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.4);
+  cursor: pointer;
+}
+.surffish-menu-pin:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.surffish-menu-pin.is-pinned { color: #7ee2a8; }
+.surffish-menu-pin svg.is-pinned path:first-child { fill: currentColor; fill-opacity: 0.25; }
+.surffish-menu-separator,
+.toolbar-item-menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.toolbar-item-menu-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.toolbar-item-menu-item small {
+  color: rgba(245, 247, 250, 0.5);
+  font-size: 11px;
+}
+
+/* ---- Settings → Appearance → Toolbar ---- */
+.toolbar-settings-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.toolbar-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 4px 14px;
+}
+.toolbar-settings-row + .toolbar-settings-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.toolbar-settings-row .surffish-menu-icon { color: rgba(245, 247, 250, 0.8); }
+.toolbar-settings-name {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  font-size: 13px;
+}
+.toolbar-settings-name small {
+  color: rgba(245, 247, 250, 0.52);
+  font-size: 11px;
+}
+.toolbar-settings-move {
+  display: inline-flex;
+  gap: 2px;
+}
+.toolbar-settings-move button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.7);
+  cursor: pointer;
+}
+.toolbar-settings-move button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); color: #fff; }
+.toolbar-settings-move button:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.7); outline-offset: 0; }
+.toolbar-settings-move button:disabled { opacity: 0.3; cursor: default; }
+.toolbar-settings-move svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.toolbar-settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 14px 10px;
+}
+.toolbar-settings-intro {
+  margin: 0;
+  padding: 10px 14px 2px;
+}
