@@ -7,6 +7,9 @@
 //      values and appearance streams (and the rendering with poppler when installed); Flatten on save.
 //   2. restart: the saved signature is still there (encrypted on disk); delete it.
 //   3. a page-made blob: PDF opened in a new tab (target=_blank), Edit PDF, fill, save, back to viewer.
+//   4. Fields mode on a plain PDF with no form: draw a text, paragraph, checkbox, radio group, dropdown,
+//      date and signature field, move one, delete one (undo / redo), fill them all, save, and check the
+//      file with pdf-lib (types, flags, font size, date action, rects) and poppler.
 //
 //   bun scripts/electron-pdf-forms-smoke.mjs            (macOS / Linux desktop or under xvfb-run)
 //   bun scripts/electron-pdf-forms-smoke.mjs --headless (Linux without a display: ozone headless)
@@ -27,6 +30,7 @@ const home = join(work, 'home')
 const input = join(work, 'form.pdf')
 const output = join(work, 'form-filled.pdf')
 const SIG_RECT = [60, 300, 280, 360]
+const plainInput = join(work, 'plain.pdf')
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 async function until(label, check, timeout = Number(process.env.SMOKE_WAIT_MS || 30_000)) {
@@ -108,6 +112,16 @@ async function makeFormPdf() {
   writeFileSync(input, await document.save())
 }
 
+async function makePlainPdf() {
+  const document = await PDFDocument.create()
+  const font = await document.embedFont(StandardFonts.Helvetica)
+  const page = document.addPage([500, 700])
+  for (const [text, y] of [['Plain PDF, no form', 660], ['Full name', 610], ['Notes', 560], ['I agree', 480], ['Size', 440], ['Country', 400], ['Date of birth', 360]]) page.drawText(text, { x: 40, y, size: text.startsWith('Plain') ? 18 : 11, font })
+  const page2 = document.addPage([500, 700])
+  page2.drawText('Sign here', { x: 40, y: 560, size: 11, font })
+  writeFileSync(plainInput, await document.save())
+}
+
 // --- App + DevTools ----------------------------------------------------------------------------
 
 const consoleLines = []
@@ -143,6 +157,22 @@ class Target {
     const result = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true })
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text)
     return result.result.value
+  }
+  async mouse(type, x, y, buttons = 0) {
+    await this.send('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 })
+  }
+  /** Drag from one PDF point to another on a page (page 500×700, unrotated), with real mouse input. */
+  async dragOnPage(pageNumber, [x1, y1], [x2, y2]) {
+    const [a, b] = await this.eval(`(() => {
+      const layer = document.querySelector('.page[data-page-number="${pageNumber}"] .fieldEditLayer')
+      const r = layer.getBoundingClientRect()
+      const at = (x, y) => [r.left + (x / 500) * r.width, r.top + ((700 - y) / 700) * r.height]
+      return [at(${x1}, ${y1}), at(${x2}, ${y2})]
+    })()`)
+    await this.mouse('mouseMoved', a[0], a[1])
+    await this.mouse('mousePressed', a[0], a[1], 1)
+    for (let i = 1; i <= 4; i += 1) await this.mouse('mouseMoved', a[0] + ((b[0] - a[0]) * i) / 4, a[1] + ((b[1] - a[1]) * i) / 4, 1)
+    await this.mouse('mouseReleased', b[0], b[1])
   }
   async type(selector, text) {
     await this.eval(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.scrollIntoView({ block: 'center' }); el.focus(); if ('select' in el) el.select() })()`)
@@ -438,6 +468,158 @@ try {
   third.close()
   maker.close()
   blobEditor.close()
+  await app.quit()
+
+  // 4. Fields mode: build a form on a plain PDF.
+  rmSync(output, { force: true })
+  await makePlainPdf()
+  await sleep(1000)
+  app = new App([plainInput])
+  const fourth = await openEditor(app)
+  const ed = fourth.editor
+  if (!(await ed.eval(`document.getElementById('formTools').hidden`))) throw new Error('a plain PDF should have no form tools')
+  await ed.eval(`(() => { const zoom = document.getElementById('zoom'); zoom.value = 'page-fit'; zoom.dispatchEvent(new Event('change')) })()`)
+  await sleep(500)
+  await ed.eval(`document.getElementById('fieldsMode').click()`)
+  await until('the field edit layer', () => ed.eval(`Boolean(document.querySelector('.page[data-page-number="1"] .fieldEditLayer'))`))
+  const boxCount = () => ed.eval(`document.querySelectorAll('.fieldBox:not(.is-draft)').length`)
+  const addField = async (kind, page, from, to, setup) => {
+    const before = await boxCount()
+    await ed.eval(`document.querySelector('[data-field-kind="${kind}"]').click()`)
+    if (page !== 1) {
+      await ed.eval(`document.querySelector('.page[data-page-number="${page}"]').scrollIntoView({ block: 'start' })`)
+      await until(`page ${page} edit layer`, () => ed.eval(`Boolean(document.querySelector('.page[data-page-number="${page}"] .fieldEditLayer'))`))
+      await sleep(300)
+    }
+    await ed.dragOnPage(page, from, to)
+    await until(`the ${kind} popover`, () => ed.eval(`!document.getElementById('fieldPopover').hidden && document.getElementById('fieldPopover').dataset.kind === '${kind}'`))
+    await ed.eval(`(() => { const $ = (id) => document.getElementById(id); ${setup} ; document.getElementById('fieldSubmit').click() })()`)
+    const name = await ed.eval(`document.getElementById('fieldName').value`)
+    await until(`the new ${kind} field (${name})`, async () => (await ed.eval(`document.getElementById('fieldPopover').hidden && Boolean(document.querySelector('.fieldBox[data-field-name="${name}"]'))`)) && (await boxCount()) > before, 20_000).catch(async (error) => {
+      console.error('popover error:', await ed.eval(`document.getElementById('fieldError').textContent`))
+      throw error
+    })
+    return name
+  }
+  const suggested = await (async () => {
+    await ed.eval(`document.querySelector('[data-field-kind="text"]').click()`)
+    await ed.dragOnPage(1, [140, 625], [360, 605])
+    await until('the text popover', () => ed.eval(`!document.getElementById('fieldPopover').hidden`))
+    const value = await ed.eval(`document.getElementById('fieldName').value`)
+    await ed.eval(`document.getElementById('fieldCancel').click()`)
+    return value
+  })()
+  if (suggested !== 'Text1') throw new Error(`suggested name ${suggested}, expected Text1`)
+  step('Fields mode on a plain PDF; drawing a text field suggests "Text1"')
+  await addField('text', 1, [140, 625], [360, 605], `$('fieldName').value = 'full_name'; $('fieldRequired').checked = true; $('fieldFontSize').value = '12'`)
+  if ((await ed.eval(`document.getElementById('zoom').value`)) !== 'page-fit') throw new Error('zoom not kept across the reload')
+  await addField('multiline', 1, [140, 575], [400, 520], `$('fieldName').value = 'notes'`)
+  // A click (no drag) places a default-size checkbox.
+  await addField('checkbox', 1, [140, 482], [140, 482], `$('fieldName').value = 'agree'`)
+  await addField('radio', 1, [140, 436], [260, 452], `$('fieldName').value = 'size'; $('fieldOptions').value = 'S\\nM\\nL'; $('fieldOptions').dispatchEvent(new Event('input')); $('fieldDefaultChoice').value = 'S'`)
+  await addField('dropdown', 1, [140, 395], [300, 415], `$('fieldName').value = 'country'; $('fieldOptions').value = 'Australia\\nFrance\\nJapan'; $('fieldOptions').dispatchEvent(new Event('input'))`)
+  await addField('date', 1, [140, 355], [260, 375], `$('fieldName').value = 'dob'; $('fieldDateFormat').value = 'yyyy-mm-dd'`)
+  await addField('text', 1, [300, 300], [450, 320], `$('fieldName').value = 'temp'`)
+  await addField('signature', 2, [60, 500], [280, 550], `$('fieldName').value = 'signer'`)
+  step('text, paragraph, checkbox (click), radio, dropdown, date and signature fields placed')
+
+  // Move "notes" right by dragging its box; delete "temp" (Delete key), undo, redo.
+  await ed.eval(`document.querySelector('.page[data-page-number="1"]').scrollIntoView({ block: 'start' })`)
+  await sleep(300)
+  await ed.dragOnPage(1, [300, 545], [340, 525])
+  await until('notes to move', () => ed.eval(`document.querySelector('.fieldBox[data-field-name="notes"]')?.classList.contains('is-selected') && !document.body.classList.contains('is-busy')`), 20_000)
+  const tempBox = `.fieldBox[data-field-name="temp"]`
+  const idle = `!document.body.classList.contains('is-busy')`
+  await until('the temp box', () => ed.eval(`${idle} && Boolean(document.querySelector('${tempBox}'))`))
+  await ed.dragOnPage(1, [375, 310], [375, 310])
+  await until('the temp popover', () => ed.eval(`!document.getElementById('fieldPopover').hidden && document.getElementById('fieldPopover').dataset.mode === 'edit'`))
+  await ed.eval(`document.getElementById('fieldCancel').click()`)
+  if (!(await ed.eval(`document.querySelector('${tempBox}').classList.contains('is-selected')`))) throw new Error('clicking a field should select it')
+  await ed.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 })
+  await ed.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46 })
+  await until('temp to be deleted', () => ed.eval(`!document.querySelector('${tempBox}') && document.querySelectorAll('.page[data-page-number="1"] .fieldBox').length > 0`), 20_000)
+  await ed.eval(`document.getElementById('undo').click()`)
+  await until('undo to bring temp back', () => ed.eval(`${idle} && Boolean(document.querySelector('${tempBox}'))`), 20_000)
+  await ed.eval(`document.getElementById('redo').click()`)
+  await until('redo to delete temp again', () => ed.eval(`!document.querySelector('${tempBox}') && !document.body.classList.contains('is-busy') && document.querySelectorAll('.page[data-page-number="1"] .fieldBox').length > 0`), 20_000)
+  step('field moved by dragging; Delete removes a field; Undo / Redo restore and remove it')
+
+  // Edit a field's properties: dropdown default.
+  await until('idle', () => ed.eval(idle))
+  await ed.dragOnPage(1, [220, 405], [220, 405])
+  await until('the dropdown popover', () => ed.eval(`!document.getElementById('fieldPopover').hidden && document.getElementById('fieldPopover').dataset.kind === 'dropdown'`))
+  await ed.eval(`document.getElementById('fieldDefaultChoice').value = 'France'; document.getElementById('fieldSubmit').click()`)
+  await until('the edit to apply', () => ed.eval(`document.getElementById('fieldPopover').hidden && !document.body.classList.contains('is-busy') && Boolean(document.querySelector('select[name="country"]'))`), 20_000)
+
+  // Fill the new form.
+  await ed.eval(`document.getElementById('fieldsMode').click()`)
+  await until('fillable fields', () => ed.eval(`!document.body.classList.contains('fields-mode') && Boolean(document.querySelector('.annotationLayer input[name="full_name"]')) && !document.getElementById('formTools').hidden`))
+  await until('form scripts', () => ed.eval(`document.body.dataset.formScripts === 'ready'`))
+  await sleep(1500)
+  if ((await ed.eval(`document.querySelector('input[name="full_name"]').getAttribute('aria-required')`)) !== 'true') throw new Error('new field not required')
+  await ed.type('input[name="full_name"]', 'Grace Hopper')
+  await ed.type('textarea[name="notes"]', 'Made in Surffish')
+  await ed.eval(`document.querySelector('input[name="agree"]').click()`)
+  await ed.eval(`document.querySelectorAll('input[name="size"]')[1].click()`)
+  await ed.eval(`(() => { const s = document.querySelector('select[name="country"]'); s.value = 'Japan'; s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+  // AFDate fields turn into a native date picker (input type=date) while focused.
+  await ed.eval(`(() => { const el = document.querySelector('input[name="dob"]'); el.scrollIntoView({ block: 'center' }); el.focus() })()`)
+  if ((await ed.eval(`document.querySelector('input[name="dob"]').type`)) !== 'date') throw new Error('the date field has no date picker')
+  await ed.eval(`(() => { const el = document.querySelector('input[name="dob"]'); el.value = '1906-12-09'; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+  await ed.eval(`document.querySelector('input[name="full_name"]').focus()`)
+  await until('the formatted date', () => ed.eval(`document.querySelector('input[name="dob"]').value === '1906-12-09' && document.querySelector('input[name="dob"]').type === 'text'`))
+  // Back in Fields mode, resize full_name by its corner handle: the unsaved fills must survive the reload.
+  await ed.eval(`document.getElementById('fieldsMode').click()`)
+  await until('the edit layer again', () => ed.eval(`Boolean(document.querySelector('.page[data-page-number="1"] .fieldBox[data-field-name="full_name"]'))`))
+  await ed.eval(`document.querySelector('.page[data-page-number="1"]').scrollIntoView({ block: 'start' })`)
+  await sleep(300)
+  await ed.dragOnPage(1, [250, 615], [250, 615])
+  await until('full_name selected', () => ed.eval(`document.querySelector('.fieldBox[data-field-name="full_name"]').classList.contains('is-selected') && !document.getElementById('fieldPopover').hidden`))
+  if (process.env.SURFFISH_SMOKE_SCREENSHOT) {
+    const shot = await ed.send('Page.captureScreenshot', { format: 'png' })
+    writeFileSync(process.env.SURFFISH_SMOKE_SCREENSHOT.replace(/(\.png)?$/, '-fields.png'), Buffer.from(shot.data, 'base64'))
+  }
+  await ed.eval(`document.getElementById('fieldCancel').click()`)
+  await ed.dragOnPage(1, [360, 605], [420, 598])
+  await until('the resize to apply', () => ed.eval(`${idle} && document.querySelector('.fieldBox[data-field-name="full_name"]')?.classList.contains('is-selected')`), 20_000)
+  await ed.eval(`document.getElementById('fieldsMode').click()`)
+  await until('the fills after the reload', () => ed.eval(`document.querySelector('input[name="full_name"]')?.value === 'Grace Hopper' && document.querySelector('input[name="agree"]').checked && document.querySelector('input[name="dob"]').value === '1906-12-09'`), 20_000)
+  step('resizing a field keeps the zoom and the unsaved fills')
+  await until('the sign-here overlay on page 2', () => ed.eval(`Boolean(document.querySelector('.page[data-page-number="2"] .signatureFieldOverlay'))`), 20_000)
+  step('the new fields are fillable straight away (and the signature field shows "Sign here")')
+  await ed.eval(`document.getElementById('save').click()`)
+  await until('the saved file', () => existsSync(output), 20_000)
+  const built = await PDFDocument.load(readFileSync(output))
+  const builtForm = built.getForm()
+  const names = builtForm.getFields().map((field) => field.getName()).sort()
+  if (names.join() !== 'agree,country,dob,full_name,notes,signer,size') throw new Error(`fields saved: ${names.join()}`)
+  const fullName = builtForm.getTextField('full_name')
+  if (fullName.getText() !== 'Grace Hopper' || !fullName.isRequired()) throw new Error(`full_name saved as ${fullName.getText()} (required ${fullName.isRequired()})`)
+  if (!/\b12 Tf/.test(fullName.acroField.getDefaultAppearance() ?? '')) throw new Error(`full_name DA ${fullName.acroField.getDefaultAppearance()}`)
+  if (!builtForm.getTextField('notes').isMultiline() || builtForm.getTextField('notes').getText() !== 'Made in Surffish') throw new Error('notes not saved')
+  const nameRect = fullName.acroField.getWidgets()[0].getRectangle()
+  if (!(nameRect.x + nameRect.width > 400 && nameRect.y < 603)) throw new Error(`full_name was not resized: ${JSON.stringify(nameRect)}`)
+  const notesRect = builtForm.getTextField('notes').acroField.getWidgets()[0].getRectangle()
+  if (!(notesRect.x > 160)) throw new Error(`notes was not moved: ${JSON.stringify(notesRect)}`)
+  if (!builtForm.getCheckBox('agree').isChecked()) throw new Error('checkbox not saved')
+  if (builtForm.getRadioGroup('size').getSelected() !== 'M') throw new Error(`radio saved as ${builtForm.getRadioGroup('size').getSelected()}`)
+  if (builtForm.getDropdown('country').getSelected()[0] !== 'Japan') throw new Error(`dropdown saved as ${builtForm.getDropdown('country').getSelected()}`)
+  const countryDefault = builtForm.getDropdown('country').acroField.dict.lookup(PDFName.of('DV'))
+  if (countryDefault?.decodeText?.() !== 'France') throw new Error(`dropdown default not saved: ${countryDefault}`)
+  const dob = builtForm.getTextField('dob')
+  if (dob.getText() !== '1906-12-09') throw new Error(`date saved as ${dob.getText()}`)
+  const dobFormat = dob.acroField.dict.lookup(PDFName.of('AA')).lookup(PDFName.of('F')).lookup(PDFName.of('JS')).decodeText()
+  if (!dobFormat.includes('AFDate_FormatEx("yyyy-mm-dd")')) throw new Error(`date format action ${dobFormat}`)
+  const signer = builtForm.getField('signer')
+  if (signer.acroField.dict.get(PDFName.of('FT'))?.toString() !== '/Sig' || annotationsOf(built, 1).length !== 1) throw new Error('signature field not saved on page 2')
+  step('saved form read back with pdf-lib: types, values, required, font size, date action, moved rect, signature field')
+  const builtText = poppler('pdftotext', ['-layout', output, '-'])
+  if (builtText && builtText.status === 0) {
+    for (const text of ['Grace Hopper', 'Made in Surffish', '1906-12-09', 'Japan']) if (!builtText.stdout.includes(text)) throw new Error(`poppler doesn't render ${text}:\n${builtText.stdout}`)
+    step('poppler renders the values of the new fields')
+  } else console.log('- poppler not installed; skipped the rendering check')
+  fourth.toolbar.close()
+  ed.close()
 } catch (error) {
   failed = true
   console.error('✗', error instanceof Error ? error.message : error)

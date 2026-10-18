@@ -16,6 +16,18 @@
           <button type="button" class="tool" data-tool="stamp" title="Add an image">Image</button>
           <button type="button" class="tool" data-tool="signature" title="Add a signature">Sign</button>
         </div>
+        <div class="group">
+          <button type="button" id="fieldsMode" aria-pressed="false" title="Add, move and edit form fields">Fields</button>
+        </div>
+        <div class="group field-kinds" id="fieldKinds" role="group" aria-label="Add field" hidden>
+          <button type="button" data-field-kind="text" title="Text field: click or drag on the page">Text</button>
+          <button type="button" data-field-kind="multiline" title="Paragraph (multi-line text) field">Paragraph</button>
+          <button type="button" data-field-kind="checkbox" title="Checkbox">Checkbox</button>
+          <button type="button" data-field-kind="radio" title="Radio group: drag the area its buttons go in">Radio</button>
+          <button type="button" data-field-kind="dropdown" title="Dropdown list">Dropdown</button>
+          <button type="button" data-field-kind="date" title="Date field">Date</button>
+          <button type="button" data-field-kind="signature" title="Signature field">Signature</button>
+        </div>
         <div class="group tool-options" id="toolOptions" hidden>
           <label class="color" title="Color"><span class="sr-only">Color</span><input type="color" id="toolColor" value="#ffd400" /></label>
           <label class="size" id="toolSizeLabel" title="Size"><span id="toolSizeName" class="sr-only">Size</span><input type="range" id="toolSize" min="1" max="40" value="10" /></label>
@@ -60,6 +72,39 @@
       <div id="formNotice" class="form-notice" role="note" hidden></div>
       <div id="message" class="message" role="status" aria-live="polite" hidden></div>
     </div>
+
+    <form id="fieldPopover" class="field-popover" role="dialog" aria-labelledby="fieldPopoverTitle" hidden>
+      <h2 id="fieldPopoverTitle">New field</h2>
+      <label class="row">Name <input type="text" id="fieldName" spellcheck="false" autocomplete="off" maxlength="120" /></label>
+      <div class="row" id="fieldOptionsRow">
+        <label for="fieldOptions">Choices (one per line)</label>
+        <textarea id="fieldOptions" rows="3" spellcheck="false"></textarea>
+        <p id="fieldOptionsHint" class="hint" hidden>A radio group’s buttons are fixed once placed. Delete it and add a new one to change its choices.</p>
+      </div>
+      <label class="row" id="fieldDefaultTextRow">Default value <input type="text" id="fieldDefaultText" autocomplete="off" /></label>
+      <label class="row" id="fieldDefaultChoiceRow">Default <select id="fieldDefaultChoice"></select></label>
+      <label class="check" id="fieldDefaultCheckRow"><input type="checkbox" id="fieldDefaultCheck" /> Checked by default</label>
+      <label class="row" id="fieldDateRow">Date format
+        <select id="fieldDateFormat">
+          <option value="" hidden>Custom</option>
+          <option value="dd/mm/yyyy">dd/mm/yyyy</option>
+          <option value="mm/dd/yyyy">mm/dd/yyyy</option>
+          <option value="yyyy-mm-dd">yyyy-mm-dd</option>
+        </select>
+      </label>
+      <label class="row" id="fieldFontRow">Font size <input type="number" id="fieldFontSize" min="4" max="72" step="0.5" value="10" /></label>
+      <div class="checks" id="fieldRequiredRow">
+        <label class="check"><input type="checkbox" id="fieldRequired" /> Required</label>
+        <label class="check"><input type="checkbox" id="fieldReadOnly" /> Read-only</label>
+      </div>
+      <p id="fieldError" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="fieldDelete" class="danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="fieldCancel">Cancel</button>
+        <button type="submit" id="fieldSubmit" class="primary">Add</button>
+      </div>
+    </form>
 
     <dialog id="signatureDialog" aria-labelledby="signatureTitle">
       <form method="dialog" id="signatureForm">
