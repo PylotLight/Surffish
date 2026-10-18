@@ -45,6 +45,8 @@ brew install --cask surffish
 
 Or grab `Surffish-<version>-mac-arm64.zip` from the [latest release](https://github.com/PylotLight/Surffish/releases/latest), unzip it and drag **Surffish.app** to Applications.
 
+Or just run it, no install: `npx @pylotlight/surffish` (or `bunx @pylotlight/surffish`). See [Run with bunx / npx](#run-with-bunx--npx).
+
 Surffish isn't signed or notarized yet, so the first launch needs one extra step. See [macOS says the app is damaged](#faq).
 
 ## Screenshots
@@ -113,6 +115,21 @@ brew install --cask surffish
 **Manual:** download `Surffish-<version>-mac-arm64.zip` from the [latest release](https://github.com/PylotLight/Surffish/releases/latest), unzip, and move **Surffish.app** to `/Applications`.
 
 There are no Intel Mac, Windows or Linux builds. The app runs from source on Linux for development and CI.
+
+### Run with bunx / npx
+
+```bash
+npx @pylotlight/surffish        # or: bunx @pylotlight/surffish
+```
+
+The [`@pylotlight/surffish`](https://www.npmjs.com/package/@pylotlight/surffish) package is a tiny launcher (no dependencies). The first run downloads the release zip from GitHub Releases (about 120 MB) with a progress bar, checks its SHA-256 against the one recorded when the package was published, unpacks it with `ditto` into `~/.cache/surffish/<version>` and opens it. Later runs open the cached copy straight away, offline too.
+
+- `npx @pylotlight/surffish@0.1.22` runs that exact release; the package version always matches the app version.
+- `--latest` runs the newest GitHub release instead, `--path` prints the cached `.app` path, `--clear-cache` frees the space, `--help` lists the rest. Anything else (a URL, say) is passed to the app.
+- `npm i -g @pylotlight/surffish` gives you a `surffish` command.
+- The cache respects `XDG_CACHE_HOME`. Homebrew is still the better choice if you want `/Applications` and `brew upgrade`.
+
+Same platform limits as above: Apple silicon Macs only. On other systems the launcher says so and exits. More in [packages/cli/README.md](packages/cli/README.md).
 
 ## Privacy
 

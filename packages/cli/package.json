@@ -1,0 +1,41 @@
+{
+  "name": "@pylotlight/surffish",
+  "version": "0.0.0-dev",
+  "description": "Run Surffish (a compact Electron browser for macOS) with npx or bunx: downloads the release, verifies it, caches it, opens it",
+  "license": "MIT",
+  "author": "PylotLight",
+  "homepage": "https://github.com/PylotLight/Surffish#run-with-bunx--npx",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PylotLight/Surffish.git",
+    "directory": "packages/cli"
+  },
+  "bugs": "https://github.com/PylotLight/Surffish/issues",
+  "keywords": [
+    "surffish",
+    "browser",
+    "electron",
+    "socks5",
+    "adblock",
+    "macos"
+  ],
+  "type": "module",
+  "bin": {
+    "surffish": "bin/surffish.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "app.config.mjs",
+    "release.json"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "bun test ./test"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
