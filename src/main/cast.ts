@@ -1,5 +1,15 @@
 import type { WebContents, WebFrameMain } from 'electron'
+import { connect } from 'node:net'
 import { CastBrowser } from './cast-discovery'
+import { readUserJson, writeUserJson } from './user-json'
+import {
+  CAST_DEVICES_FILE,
+  knownCastDevicesChanged,
+  parseKnownCastDevices,
+  rememberCastDevices,
+  serializeKnownCastDevices,
+  type KnownCastDevice
+} from '../shared/cast-known-devices'
 import { CastClient } from './cast-client'
 import { MirrorSession } from './cast-mirror'
 import { MIRRORING_APP_ID } from '../shared/cast-streaming'
@@ -65,6 +75,24 @@ const PROBE_SCRIPT = `(() => {
 })()`
 
 const ISOLATED_WORLD_ID = 1017
+/** A known Chromecast on the LAN accepts a TCP connect in a few ms; past this it's gone or elsewhere. */
+const VERIFY_TIMEOUT_MS = 300
+const DEBUG = process.env.SURFFISH_CAST_DEBUG === '1'
+
+/** True when host:port accepts a TCP connection within the timeout (the CASTV2 port; no TLS handshake). */
+function reachable(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((done) => {
+    const socket = connect({ host, port })
+    const finish = (ok: boolean): void => {
+      clearTimeout(timer)
+      socket.destroy()
+      done(ok)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+  })
+}
 
 interface ProbedElement { frame: WebFrameMain; index: number }
 
@@ -101,8 +129,13 @@ export class CastManager {
   private devices: CastDevice[] = []
   private browser = new CastBrowser((found) => {
     this.devices = mergeCastDevices(this.devices, found)
+    this.remember(found)
     this.publish()
   })
+  private known: KnownCastDevice[] | null = null
+  private saveTimer: ReturnType<typeof setTimeout> | null = null
+  private savedKnown: KnownCastDevice[] = []
+  private verifying = false
   private pickerOpen = false
   private scanTimer: ReturnType<typeof setTimeout> | null = null
   private live: LiveCast | null = null
@@ -129,15 +162,66 @@ export class CastManager {
 
   private updateBrowsing(): void {
     const want = this.host.enabled() && (this.pickerOpen || this.scanTimer !== null)
-    if (want && !this.browser.running) this.browser.start()
-    else if (!want && this.browser.running) this.browser.stop()
+    if (want && !this.browser.running) {
+      this.browser.start()
+      void this.showKnownDevices()
+    } else if (!want && this.browser.running) this.browser.stop()
+    this.browser.setSystemResolver(want && this.pickerOpen)
     this.publish()
+  }
+
+  private loadKnown(): KnownCastDevice[] {
+    if (!this.known) {
+      this.known = parseKnownCastDevices(readUserJson(CAST_DEVICES_FILE), Date.now())
+      this.savedKnown = this.known
+    }
+    return this.known
+  }
+
+  /**
+   * Devices seen before show up as soon as a quick connect to their CASTV2 port answers (a few ms on
+   * the LAN), without waiting for mDNS; ones that don't answer stay hidden until mDNS finds them.
+   */
+  private async showKnownDevices(): Promise<void> {
+    if (this.verifying) return
+    const candidates = this.loadKnown().filter((known) => !this.devices.some((device) => device.id === known.id))
+    if (candidates.length === 0) return
+    this.verifying = true
+    const started = Date.now()
+    try {
+      await Promise.all(candidates.map(async (known) => {
+        const ok = await reachable(known.host, known.port, VERIFY_TIMEOUT_MS)
+        if (DEBUG) console.log(`[cast-debug] known ${known.name} ${known.host}:${known.port} ${ok ? 'reachable' : 'not reachable'} after ${Date.now() - started}ms`)
+        if (!ok || !this.browser.running || this.devices.some((device) => device.id === known.id)) return
+        this.devices = mergeCastDevices(this.devices, [{ id: known.id, name: known.name, model: known.model, host: known.host, port: known.port }])
+        this.publish()
+      }))
+    } finally {
+      this.verifying = false
+    }
+  }
+
+  private remember(found: readonly CastDevice[]): void {
+    this.known = rememberCastDevices(this.loadKnown(), found, Date.now())
+    if (this.saveTimer || !knownCastDevicesChanged(this.savedKnown, this.known)) return
+    this.saveTimer = setTimeout(() => this.saveKnown(), 1_500)
+    this.saveTimer.unref?.()
+  }
+
+  private saveKnown(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer)
+    this.saveTimer = null
+    if (!this.known || !knownCastDevicesChanged(this.savedKnown, this.known)) return
+    if (writeUserJson(CAST_DEVICES_FILE, serializeKnownCastDevices(this.known))) this.savedKnown = this.known
   }
 
   /** The picker opened (browse until it closes) or closed. */
   setPickerOpen(open: boolean): void {
     this.pickerOpen = open
-    if (open && this.browser.running) this.browser.refresh()
+    if (open && this.browser.running) {
+      this.browser.refresh()
+      void this.showKnownDevices()
+    }
     this.updateBrowsing()
   }
 
@@ -419,6 +503,7 @@ export class CastManager {
     this.scanTimer = null
     this.pickerOpen = false
     this.browser.stop()
+    this.saveKnown()
     this.publish()
   }
 
