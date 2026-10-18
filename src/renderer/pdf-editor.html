@@ -16,6 +16,18 @@
           <button type="button" class="tool" data-tool="stamp" title="Add an image">Image</button>
           <button type="button" class="tool" data-tool="signature" title="Add a signature">Sign</button>
         </div>
+        <div class="group">
+          <button type="button" id="fieldsMode" aria-pressed="false" title="Add, move and edit form fields">Fields</button>
+        </div>
+        <div class="group field-kinds" id="fieldKinds" role="group" aria-label="Add field" hidden>
+          <button type="button" data-field-kind="text" title="Text field: click or drag on the page">Text</button>
+          <button type="button" data-field-kind="multiline" title="Paragraph (multi-line text) field">Paragraph</button>
+          <button type="button" data-field-kind="checkbox" title="Checkbox">Checkbox</button>
+          <button type="button" data-field-kind="radio" title="Radio group: drag the area its buttons go in">Radio</button>
+          <button type="button" data-field-kind="dropdown" title="Dropdown list">Dropdown</button>
+          <button type="button" data-field-kind="date" title="Date field">Date</button>
+          <button type="button" data-field-kind="signature" title="Signature field">Signature</button>
+        </div>
         <div class="group tool-options" id="toolOptions" hidden>
           <label class="color" title="Color"><span class="sr-only">Color</span><input type="color" id="toolColor" value="#ffd400" /></label>
           <label class="size" id="toolSizeLabel" title="Size"><span id="toolSizeName" class="sr-only">Size</span><input type="range" id="toolSize" min="1" max="40" value="10" /></label>
@@ -39,10 +51,15 @@
           <button type="button" id="zoomIn" title="Zoom in">+</button>
           <button type="button" id="togglePages" class="is-active" title="Show or hide page tools">Pages</button>
         </div>
+        <div class="group form-tools" id="formTools" hidden>
+          <button type="button" id="resetForm" title="Clear every form field back to its default">Reset form</button>
+          <label class="check" title="Bake the filled fields into the page when saving, so they can't be edited again"><input type="checkbox" id="flattenOnSave" /> Flatten on save</label>
+        </div>
         <div class="spacer"></div>
         <span id="dirtyNote" class="dirty-note" hidden>Unsaved changes</span>
         <button type="button" id="back" title="Back to the built-in viewer">Back to viewer</button>
-        <button type="button" id="save" class="primary" title="Save a copy (⌘S)" disabled>Save…</button>
+        <button type="button" id="saveAs" title="Save a copy under a new name" disabled>Save As…</button>
+        <button type="button" id="save" class="primary" title="Save (⌘S): asks where the first time, then saves to that file again" disabled>Save…</button>
       </header>
       <div id="workspace">
         <aside id="pages" aria-label="Pages">
@@ -52,15 +69,57 @@
           <div id="viewer" class="pdfViewer"></div>
         </div>
       </div>
+      <div id="formNotice" class="form-notice" role="note" hidden></div>
       <div id="message" class="message" role="status" aria-live="polite" hidden></div>
     </div>
+
+    <form id="fieldPopover" class="field-popover" role="dialog" aria-labelledby="fieldPopoverTitle" hidden>
+      <h2 id="fieldPopoverTitle">New field</h2>
+      <label class="row">Name <input type="text" id="fieldName" spellcheck="false" autocomplete="off" maxlength="120" /></label>
+      <div class="row" id="fieldOptionsRow">
+        <label for="fieldOptions">Choices (one per line)</label>
+        <textarea id="fieldOptions" rows="3" spellcheck="false"></textarea>
+        <p id="fieldOptionsHint" class="hint" hidden>A radio group’s buttons are fixed once placed. Delete it and add a new one to change its choices.</p>
+      </div>
+      <label class="row" id="fieldDefaultTextRow">Default value <input type="text" id="fieldDefaultText" autocomplete="off" /></label>
+      <label class="row" id="fieldDefaultChoiceRow">Default <select id="fieldDefaultChoice"></select></label>
+      <label class="check" id="fieldDefaultCheckRow"><input type="checkbox" id="fieldDefaultCheck" /> Checked by default</label>
+      <label class="row" id="fieldDateRow">Date format
+        <select id="fieldDateFormat">
+          <option value="" hidden>Custom</option>
+          <option value="dd/mm/yyyy">dd/mm/yyyy</option>
+          <option value="mm/dd/yyyy">mm/dd/yyyy</option>
+          <option value="yyyy-mm-dd">yyyy-mm-dd</option>
+        </select>
+      </label>
+      <label class="row" id="fieldFontRow">Font size <input type="number" id="fieldFontSize" min="4" max="72" step="0.5" value="10" /></label>
+      <div class="checks" id="fieldRequiredRow">
+        <label class="check"><input type="checkbox" id="fieldRequired" /> Required</label>
+        <label class="check"><input type="checkbox" id="fieldReadOnly" /> Read-only</label>
+      </div>
+      <p id="fieldError" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="fieldDelete" class="danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="fieldCancel">Cancel</button>
+        <button type="submit" id="fieldSubmit" class="primary">Add</button>
+      </div>
+    </form>
 
     <dialog id="signatureDialog" aria-labelledby="signatureTitle">
       <form method="dialog" id="signatureForm">
         <h2 id="signatureTitle">Add a signature</h2>
+        <div class="tabs kinds" role="radiogroup" aria-label="Kind">
+          <button type="button" role="radio" data-signature-kind="signature" aria-checked="true">Signature</button>
+          <button type="button" role="radio" data-signature-kind="initials" aria-checked="false">Initials</button>
+        </div>
+        <section id="savedSignatures" class="saved" aria-label="Saved" hidden>
+          <ul id="savedSignatureList"></ul>
+        </section>
         <div class="tabs" role="tablist">
           <button type="button" role="tab" data-signature-tab="draw" aria-selected="true">Draw</button>
           <button type="button" role="tab" data-signature-tab="type" aria-selected="false">Type</button>
+          <button type="button" role="tab" data-signature-tab="image" aria-selected="false">Image</button>
         </div>
         <div class="signature-pane" data-signature-pane="draw">
           <canvas id="signaturePad" width="560" height="180" aria-label="Draw your signature"></canvas>
@@ -69,7 +128,15 @@
         <div class="signature-pane" data-signature-pane="type" hidden>
           <input type="text" id="signatureText" placeholder="Type your name" autocomplete="name" spellcheck="false" />
         </div>
-        <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" /></label>
+        <div class="signature-pane" data-signature-pane="image" hidden>
+          <input type="file" id="signatureImage" accept="image/png,image/jpeg,image/webp" />
+          <img id="signatureImagePreview" alt="Signature image preview" hidden />
+          <p class="hint">A photo or scan of your signature on white paper works best.</p>
+        </div>
+        <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" maxlength="80" /></label>
+        <label class="remember"><input type="checkbox" id="signatureRemember" checked /> Save for next time</label>
+        <p id="signatureStorageNote" class="hint" hidden>This system has no keychain to encrypt saved signatures, so they are kept only until Surffish quits.</p>
+        <p id="signatureError" class="error" role="alert" hidden></p>
         <div class="actions">
           <button type="button" id="signatureCancel">Cancel</button>
           <button type="submit" id="signatureAdd" class="primary">Add</button>

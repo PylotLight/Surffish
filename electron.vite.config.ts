@@ -1,6 +1,7 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import { minifySync } from 'vite'
-import { copyFileSync, cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { brotliCompressSync, constants as zlibConstants } from 'node:zlib'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
@@ -85,9 +86,10 @@ const bramblePreloadPlugin = {
 
 // pdf.js data the editor loads at runtime (CJK cmaps, the 14 standard fonts, image decoders, the
 // CMYK profile) is bundled locally so the editor never fetches anything but the PDF itself.
-// Skipped: the scripting sandbox (quickjs; form JavaScript is not run) and no-wasm JS fallbacks.
+// The form-scripting sandbox (build/pdf.sandbox.min.mjs + wasm/quickjs-eval.*) runs AcroForm
+// JavaScript (formatting, validation, calculations) in a wasm interpreter. Skipped: no-wasm fallbacks.
 const PDFJS_DATA = ['cmaps', 'standard_fonts', 'iccs', 'wasm']
-const PDFJS_SKIPPED = /(?:quickjs|nowasm_fallback)/
+const PDFJS_SKIPPED = /nowasm_fallback/
 const pdfjsDataPlugin = {
   name: 'surffish-pdfjs-data',
   closeBundle() {
@@ -96,6 +98,17 @@ const pdfjsDataPlugin = {
     rmSync(target, { recursive: true, force: true })
     for (const folder of PDFJS_DATA) {
       cpSync(join(source, folder), join(target, folder), { recursive: true, filter: (path) => !PDFJS_SKIPPED.test(path) })
+    }
+    // Same relative path as in node_modules/pdfjs-dist, so dev (served from node_modules) matches.
+    mkdirSync(join(target, 'build'), { recursive: true })
+    copyFileSync(join(source, 'build/pdf.sandbox.min.mjs'), join(target, 'build/pdf.sandbox.min.mjs'))
+    // The wasm modules and the sandbox are only ever served by main's surffish-pdf:// handler, which
+    // inflates `<file>.br` on request (src/main/pdf-editor.ts): ~650 KB less in app.asar.
+    for (const relative of readdirSync(target, { recursive: true }) as string[]) {
+      if (!/(?:\.wasm|pdf\.sandbox\.min\.mjs)$/.test(relative)) continue
+      const path = join(target, relative)
+      writeFileSync(`${path}.br`, brotliCompressSync(readFileSync(path), { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11 } }))
+      rmSync(path)
     }
     // Annotation icons pdf.js resolves through imageResourcesPath.
     cpSync(join(source, 'web/images'), join(target, 'images'), { recursive: true })

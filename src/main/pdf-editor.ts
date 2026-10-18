@@ -3,10 +3,14 @@ import { existsSync } from 'node:fs'
 import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
+import { brotliDecompress as brotliDecompressCallback } from 'node:zlib'
 import { app, dialog, ipcMain, net, protocol, session, type BaseWindow, type CustomScheme, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import {
+  decodePdfDataUrl,
   editedPdfFilename,
   isEditablePdfSource,
+  isInMemoryPdfSource,
   isPdfEditorUrl,
   looksLikePdf,
   MAX_PDF_EDITOR_BYTES,
@@ -15,6 +19,7 @@ import {
   withPdfExtension
 } from '../shared/pdf-editor'
 import { recordSavedFile } from './downloads'
+import { addSignature, listSavedSignatures, removeSignature } from './pdf-signatures'
 
 /**
  * Built-in PDF editor (pdf.js editor layers + pdf-lib page tools). The page is served from the
@@ -24,6 +29,8 @@ import { recordSavedFile } from './downloads'
  * from the local file the tab showed, and handed over through a narrow preload API.
  */
 export const PDF_EDITOR_PARTITION = 'surffish-pdf-editor'
+
+const brotliDecompress = promisify(brotliDecompressCallback)
 
 const PAGE_CSP = [
   "default-src 'none'",
@@ -57,6 +64,11 @@ export interface PdfEditorDocument {
   isPrivate: boolean
   /** Session the tab browsed with, so the editor's fetch carries the same cookies and proxy. */
   sourceSession: Electron.Session
+  /**
+   * For a page-made blob:/data: PDF: the tab's original contents, kept alive (hidden) while the editor
+   * is open. A blob: URL only resolves inside the page that made it, so the bytes are read there.
+   */
+  sourceContents?: WebContents | null
 }
 
 export interface PdfEditorHost {
@@ -103,11 +115,21 @@ function contentType(path: string): string {
   return CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
+/** The file, or its build-time brotli copy (`<file>.br`, the pdf.js wasm and sandbox) inflated. */
+async function readServedFile(target: string): Promise<Uint8Array<ArrayBuffer>> {
+  try {
+    return new Uint8Array(await readFile(target))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return new Uint8Array(await brotliDecompress(await readFile(`${target}.br`)))
+  }
+}
+
 async function serveFile(root: string, relative: string): Promise<Response> {
   const target = resolve(root, relative)
   if (target !== root && !target.startsWith(root + sep)) return new Response('Not found', { status: 404 })
   try {
-    const body = await readFile(target)
+    const body = await readServedFile(target)
     const headers: Record<string, string> = { 'Content-Type': contentType(target), 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' }
     if (target.endsWith('.html')) headers['Content-Security-Policy'] = PAGE_CSP
     return new Response(body, { status: 200, headers })
@@ -206,12 +228,53 @@ async function readBounded(response: Response): Promise<Uint8Array> {
   return bytes
 }
 
+// Own isolated world: the page can't swap out fetch/FileReader under us.
+const BLOB_READ_WORLD_ID = 1984
+const BLOB_READ_SCRIPT = `(async () => {
+  try {
+    const response = await fetch(location.href)
+    if (!response.ok) return { error: 'gone' }
+    const blob = await response.blob()
+    if (blob.size > ${MAX_PDF_EDITOR_BYTES}) return { error: 'too-large' }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(blob)
+    })
+    return { dataUrl }
+  } catch (error) {
+    return { error: 'gone' }
+  }
+})()`
+
+/** Bytes of a page-made blob:/data: PDF, read from the tab that shows it. */
+async function readInMemoryPdf(document: PdfEditorDocument): Promise<Uint8Array> {
+  if (/^data:/i.test(document.sourceUrl)) {
+    const bytes = decodePdfDataUrl(document.sourceUrl)
+    if (!bytes) throw new Error('This PDF could not be read.')
+    return bytes
+  }
+  const contents = document.sourceContents
+  if (!contents || contents.isDestroyed()) throw new Error('The page that made this PDF is gone. Download it and open the file to edit it.')
+  const result: unknown = await contents.executeJavaScriptInIsolatedWorld(BLOB_READ_WORLD_ID, [{ code: BLOB_READ_SCRIPT }]).catch(() => ({ error: 'gone' }))
+  const { dataUrl, error } = (result ?? {}) as { dataUrl?: unknown; error?: unknown }
+  if (error === 'too-large') throw new Error('This PDF is too large to edit here.')
+  const bytes = typeof dataUrl === 'string' ? decodePdfDataUrl(dataUrl) : null
+  if (!bytes) throw new Error('The page released this PDF, so it can only be viewed. Download it and open the file to edit it.')
+  return bytes
+}
+
 /** Fetch the document the tab was showing: with the tab's session for the web, from disk for file://. */
 export async function loadPdfBytes(document: PdfEditorDocument): Promise<Uint8Array> {
-  if (!isEditablePdfSource(document.sourceUrl)) throw new Error('This PDF cannot be opened in the editor.')
-  const path = localPdfPath(document.sourceUrl)
+  const inMemory = isInMemoryPdfSource(document.sourceUrl)
+  if (!inMemory && !isEditablePdfSource(document.sourceUrl)) throw new Error('This PDF cannot be opened in the editor.')
+  const path = inMemory ? null : localPdfPath(document.sourceUrl)
   let bytes: Uint8Array
-  if (path) {
+  if (inMemory) {
+    bytes = await readInMemoryPdf(document)
+    if (bytes.byteLength > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
+  } else if (path) {
     const info = await stat(path)
     if (!info.isFile()) throw new Error('This PDF file is no longer available.')
     if (info.size > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
@@ -245,11 +308,21 @@ export interface PdfSaveResult {
   filename?: string
 }
 
+/** Where each editor tab last saved: a plain Save writes there again (Save As always asks). */
+const lastSavePaths = new WeakMap<WebContents, string>()
+
 /**
  * Native Save dialog. Defaults to `<name>-edited.pdf` next to a local source (or in Downloads for web
- * sources); picking the original local file overwrites it (the OS dialog asks to replace).
+ * sources); picking the original local file overwrites it (the OS dialog asks to replace). After a
+ * first save, Save (not Save As) writes to that same file again without asking; the original is only
+ * ever replaced when the user picked it in the dialog.
  */
-export async function savePdfWithDialog(window: BaseWindow | null, document: PdfEditorDocument, bytes: Uint8Array): Promise<PdfSaveResult> {
+export async function savePdfWithDialog(window: BaseWindow | null, document: PdfEditorDocument, bytes: Uint8Array, previousPath: string | null = null): Promise<PdfSaveResult & { filePath?: string }> {
+  if (previousPath) {
+    await writeFileAtomically(previousPath, bytes)
+    recordSavedFile({ filePath: previousPath, sourceUrl: document.sourceUrl, bytes: bytes.byteLength, isPrivate: document.isPrivate })
+    return { saved: true, filename: basename(previousPath), filePath: previousPath }
+  }
   const localPath = localPdfPath(document.sourceUrl)
   const directory = localPath ? dirname(localPath) : app.getPath('downloads')
   const options: Electron.SaveDialogOptions = {
@@ -267,7 +340,7 @@ export async function savePdfWithDialog(window: BaseWindow | null, document: Pdf
   const target = withPdfExtension(result.filePath)
   await writeFileAtomically(target, bytes)
   recordSavedFile({ filePath: target, sourceUrl: document.sourceUrl, bytes: bytes.byteLength, isPrivate: document.isPrivate })
-  return { saved: true, filename: basename(target) }
+  return { saved: true, filename: basename(target), filePath: target }
 }
 
 /** Unsaved edits: ask before they are thrown away. Returns true to go ahead. */
@@ -315,13 +388,31 @@ export function attachPdfEditor(editorHost: PdfEditorHost): void {
       return { ok: false, name: document.name, sourceUrl: document.sourceUrl, error: error instanceof Error ? error.message : String(error) }
     }
   })
-  ipcMain.handle('pdf-editor:save', async (event, value: unknown) => {
+  ipcMain.handle('pdf-editor:save', async (event, value: unknown, options: unknown) => {
     const document = requireEditorDocument(event)
     const bytes = toBytes(value)
     if (!bytes || bytes.byteLength > MAX_PDF_EDITOR_BYTES || !looksLikePdf(bytes)) throw new Error('The editor produced an invalid PDF.')
-    const result = await savePdfWithDialog(host?.window() ?? null, document, bytes)
-    if (result.saved) host?.setDirty(event.sender, false)
+    const saveAs = (options as { saveAs?: unknown } | null)?.saveAs === true
+    const previous = saveAs ? null : lastSavePaths.get(event.sender) ?? null
+    const { filePath, ...result } = await savePdfWithDialog(host?.window() ?? null, document, bytes, previous)
+    if (result.saved && filePath) {
+      lastSavePaths.set(event.sender, filePath)
+      host?.setDirty(event.sender, false)
+    }
     return result
+  })
+  // Saved signatures are the user's own (not per site), so private tabs see them too.
+  ipcMain.handle('pdf-editor:signatures:list', (event) => {
+    requireEditorDocument(event)
+    return listSavedSignatures()
+  })
+  ipcMain.handle('pdf-editor:signatures:add', (event, value: unknown) => {
+    requireEditorDocument(event)
+    return addSignature(value)
+  })
+  ipcMain.handle('pdf-editor:signatures:remove', (event, id: unknown) => {
+    requireEditorDocument(event)
+    return removeSignature(id)
   })
   ipcMain.on('pdf-editor:dirty', (event, dirty: unknown) => {
     if (editorDocument(event)) host?.setDirty(event.sender, dirty === true)

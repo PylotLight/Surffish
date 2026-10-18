@@ -3,12 +3,15 @@
 // Runs on surffish-pdf://editor/ in an isolated, network-less session; main supplies the bytes.
 import { pdfjsLib } from './pdfjs-global'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import { EventBus, LinkTarget, PDFLinkService, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
+import { EventBus, LinkTarget, PDFLinkService, PDFScriptingManager, PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs'
 import 'pdfjs-dist/web/pdf_viewer.css'
 import './pdf-editor.css'
 import { applyPageOps, PageOpError, type PageOp, type PageRotation } from '../../../shared/pdf-page-ops'
+import { applyFieldOps, FieldOpError, type FieldOp } from '../../../shared/pdf-form-fields'
 import { getBridge, type PdfEditorCommand } from './bridge'
-import { SimpleSignatureManager } from './signature'
+import { FieldTools } from './field-tools'
+import { flattenForm, FormSupport } from './forms'
+import { SavedSignatureManager } from './signature'
 
 type ToolName = 'none' | 'highlight' | 'freetext' | 'ink' | 'stamp' | 'signature'
 
@@ -35,6 +38,7 @@ const container = $<HTMLDivElement>('viewerContainer')
 const pageList = $<HTMLOListElement>('pageList')
 const message = $<HTMLDivElement>('message')
 const saveButton = $<HTMLButtonElement>('save')
+const saveAsButton = $<HTMLButtonElement>('saveAs')
 const undoButton = $<HTMLButtonElement>('undo')
 const redoButton = $<HTMLButtonElement>('redo')
 const zoomSelect = $<HTMLSelectElement>('zoom')
@@ -44,11 +48,19 @@ const toolSize = $<HTMLInputElement>('toolSize')
 
 const eventBus = new EventBus()
 const linkService = new PDFLinkService({ eventBus, externalLinkTarget: LinkTarget.BLANK, externalLinkRel: 'noopener noreferrer nofollow' })
-const signatureManager = new SimpleSignatureManager()
+const signatureManager = new SavedSignatureManager(bridge)
+// Form JavaScript (formatting, keystroke validation, calculations, buttons) runs in pdf.js's QuickJS
+// sandbox: a wasm interpreter with no DOM or network, only the field API pdf.js gives it.
+const scriptingManager = new PDFScriptingManager({
+  eventBus,
+  sandboxBundleSrc: new URL('pdfjs/build/pdf.sandbox.min.mjs', window.location.href).href,
+  wasmUrl: new URL('pdfjs/wasm/', window.location.href).href
+} as ConstructorParameters<typeof PDFScriptingManager>[0])
 const viewer = new PDFViewer({
   container,
   eventBus,
   linkService,
+  scriptingManager,
   annotationMode: AnnotationMode.ENABLE_FORMS,
   annotationEditorMode: EditorType.NONE,
   annotationEditorHighlightColors: HIGHLIGHT_COLORS,
@@ -58,8 +70,12 @@ const viewer = new PDFViewer({
   imageResourcesPath: './pdfjs/images/'
 } as ConstructorParameters<typeof PDFViewer>[0])
 linkService.setViewer(viewer)
+scriptingManager.setViewer(viewer)
 
 let pdfDocument: PDFDocumentProxy | null = null
+// Resolves once the form scripts of the open document have run their Open/format pass. Saving (or
+// baking bytes for a reload) before that can write a field's value as pdf.js has it mid-format.
+let scriptsReady: Promise<void> = Promise.resolve()
 let documentName = 'document.pdf'
 let currentTool: ToolName = 'none'
 let annotationsDirty = false
@@ -68,6 +84,8 @@ let reportedDirty = false
 let editorCanUndo = false
 let editorCanRedo = false
 let busy = false
+// Set on the first real input, so scripted values on open don't count as edits.
+let userEdited = false
 // Page tools reload the document, so they are undone by restoring the bytes from before the op.
 const pageUndo: Uint8Array[] = []
 const pageRedo: Uint8Array[] = []
@@ -99,6 +117,7 @@ function updateUndoButtons(): void {
   undoButton.disabled = busy || (!editorCanUndo && pageUndo.length === 0)
   redoButton.disabled = busy || (!editorCanRedo && pageRedo.length === 0)
   saveButton.disabled = busy || !pdfDocument
+  saveAsButton.disabled = busy || !pdfDocument
 }
 
 function setBusy(value: boolean): void {
@@ -107,7 +126,10 @@ function setBusy(value: boolean): void {
   updateUndoButtons()
 }
 
-async function openBytes(bytes: Uint8Array, pageNumber = 1): Promise<void> {
+/** Where the reader was, so a reload (page tools, field tools, undo) lands on the same spot. */
+interface ViewState { scale: string; scrollTop: number; scrollLeft: number }
+
+async function openBytes(bytes: Uint8Array, pageNumber = 1, view?: ViewState): Promise<void> {
   const previous = pdfDocument
   const task = pdfjsLib.getDocument({
     // pdf.js transfers the buffer to its worker; keep our copy intact for undo and page tools.
@@ -118,7 +140,8 @@ async function openBytes(bytes: Uint8Array, pageNumber = 1): Promise<void> {
     wasmUrl: dataUrl('pdfjs/wasm/'),
     iccUrl: dataUrl('pdfjs/iccs/'),
     useSystemFonts: false,
-    enableXfa: false
+    // Pure XFA forms render as HTML fields (pdf.js's partial XFA support); hybrid forms use AcroForm.
+    enableXfa: true
   })
   task.onPassword = (updatePassword: (password: string) => void, reason: number) => {
     const answer = window.prompt(reason === 2 ? 'Wrong password. Enter the PDF password:' : 'This PDF is password protected. Enter its password:')
@@ -136,10 +159,24 @@ async function openBytes(bytes: Uint8Array, pageNumber = 1): Promise<void> {
   annotationsDirty = false
   viewer.setDocument(loaded)
   linkService.setDocument(loaded, null)
+  // Opening scripts and calculations may set values; that isn't an edit, so don't mark it dirty.
+  delete document.body.dataset.formScripts
+  scriptsReady = scriptingManager.setDocument(loaded).then(() => {
+    if (pdfDocument !== loaded) return
+    if (!userEdited && !pageOpsDirty) loaded.annotationStorage.resetModified()
+    // Smokes wait for this before typing into calculated forms.
+    document.body.dataset.formScripts = 'ready'
+  }).catch((error: unknown) => console.warn('[pdf editor] form scripts unavailable', error))
+  void forms.setDocument(loaded, bytes).catch((error: unknown) => console.warn('[pdf editor] form setup failed', error))
+  fieldTools.setDocument(loaded)
   eventBus.on('pagesinit', function restore() {
     eventBus.off('pagesinit', restore)
-    viewer.currentScaleValue = zoomSelect.value
+    viewer.currentScaleValue = view?.scale || zoomSelect.value
     viewer.currentPageNumber = Math.min(pageNumber, loaded.numPages)
+    if (view) {
+      container.scrollTop = view.scrollTop
+      container.scrollLeft = view.scrollLeft
+    }
     if (currentTool !== 'none') setTool(currentTool, false)
   })
   if (previous && previous !== loaded) void previous.loadingTask.destroy()
@@ -188,9 +225,50 @@ function setTool(tool: ToolName, create = true): void {
   toolOptions.hidden = !toolSettings[tool]
 }
 
+/** setTool, resolving once pdf.js has actually switched mode (forms.ts signs fields with it). */
+function switchTool(tool: ToolName): Promise<void> {
+  const mode = TOOL_MODES[tool]
+  // The getter returns the plain mode number (pdfjs-dist's d.ts says an object).
+  if ((viewer.annotationEditorMode as unknown as number) === mode) {
+    setTool(tool, false)
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => { eventBus.off('annotationeditormodechanged', changed); resolve() }, 2000)
+    function changed({ mode: next }: { mode: number }): void {
+      if (next !== mode) return
+      window.clearTimeout(timer)
+      eventBus.off('annotationeditormodechanged', changed)
+      resolve()
+    }
+    eventBus.on('annotationeditormodechanged', changed)
+    setTool(tool, false)
+  })
+}
+
+const forms = new FormSupport({
+  viewer,
+  eventBus,
+  signatures: signatureManager,
+  switchTool: (tool) => switchTool(tool),
+  showMessage: (text, kind, timeout) => showMessage(text, kind, timeout)
+})
+for (const type of ['input', 'change', 'pointerdown', 'keydown']) container.addEventListener(type, (event) => { if (event.isTrusted) userEdited = true }, true)
+
+const fieldTools = new FieldTools({
+  viewer,
+  eventBus,
+  currentBytes: async () => (pdfDocument ? pdfDocument.saveDocument() : new Uint8Array()),
+  runFieldOps,
+  leaveEditorTool: () => { if (currentTool !== 'none') setTool('none') },
+  isBusy: () => busy,
+  showMessage: (text, kind, timeout) => showMessage(text, kind, timeout)
+})
+
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
   button.setAttribute('role', 'radio')
   button.addEventListener('click', () => {
+    fieldTools.setActive(false)
     const tool = (button.dataset.tool ?? 'none') as ToolName
     setTool(tool === currentTool && tool !== 'stamp' && tool !== 'signature' ? 'none' : tool)
   })
@@ -218,6 +296,7 @@ eventBus.on('switchannotationeditormode', (event: { source: unknown; mode: numbe
 eventBus.on('annotationeditormodechanged', ({ mode }: { mode: number }) => {
   const tool = (Object.entries(TOOL_MODES).find(([, value]) => value === mode)?.[0] ?? 'none') as ToolName
   currentTool = tool
+  document.body.dataset.tool = tool
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-tool]')) {
     button.classList.toggle('is-active', button.dataset.tool === tool)
     button.setAttribute('aria-checked', String(button.dataset.tool === tool))
@@ -289,17 +368,26 @@ window.addEventListener('keydown', (event) => {
  * Bake the current edits into bytes, swap in what `next` returns and reopen the document. Edits are
  * then part of the bytes rather than pending in pdf.js, so the editor stays dirty until a Save.
  */
-async function reloadWith(next: (current: Uint8Array) => Promise<Uint8Array>): Promise<void> {
-  if (!pdfDocument) return
+async function reloadWith(next: (current: Uint8Array) => Promise<Uint8Array>): Promise<boolean> {
+  if (!pdfDocument) return false
   setBusy(true)
   const page = viewer.currentPageNumber
+  const view: ViewState = { scale: viewer.currentScaleValue, scrollTop: container.scrollTop, scrollLeft: container.scrollLeft }
   try {
+    // Baking bytes is a save as far as the form is concerned: let the focused field commit and the
+    // scripts settle (a date field holds a raw timestamp until then).
+    if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.annotationLayer')) document.activeElement.blur()
+    await settledScripts()
+    await scriptingManager.dispatchWillSave().catch(() => undefined)
+    await commitDateFields(pdfDocument)
     const current = await pdfDocument.saveDocument()
     const bytes = await next(current)
-    await openBytes(bytes, page)
+    await openBytes(bytes, page, view)
     pageOpsDirty = true
+    return true
   } catch (error) {
-    showMessage(error instanceof PageOpError ? error.message : `Could not change the pages: ${error instanceof Error ? error.message : String(error)}`, 'error', 6000)
+    showMessage(error instanceof PageOpError || error instanceof FieldOpError ? error.message : `Could not change the document: ${error instanceof Error ? error.message : String(error)}`, 'error', 6000)
+    return false
   } finally {
     setBusy(false)
     updateDirty()
@@ -310,6 +398,17 @@ async function runPageOp(op: PageOp): Promise<void> {
   if (busy) return
   await reloadWith(async (current) => {
     const result = await applyPageOps(current, [op])
+    pageUndo.push(current)
+    pageRedo.length = 0
+    return result
+  })
+}
+
+/** Field tools (field-tools.ts): add / change / move / delete form fields, undoable like page ops. */
+async function runFieldOps(ops: FieldOp[]): Promise<boolean> {
+  if (busy) return false
+  return reloadWith(async (current) => {
+    const result = await applyFieldOps(current, ops)
     pageUndo.push(current)
     pageRedo.length = 0
     return result
@@ -430,20 +529,56 @@ $('togglePages').addEventListener('click', (event) => {
 
 // --- Save / back -----------------------------------------------------------------------------
 
-async function save(): Promise<void> {
+/**
+ * pdf.js keeps a date/time field (AFDate_* format) that the sandbox formatted on open as a timestamp
+ * number, and its save then writes that field as an empty string. Store the formatted text instead,
+ * which is what the field shows and what Acrobat writes as /V.
+ */
+async function commitDateFields(document_: PDFDocumentProxy): Promise<void> {
+  const storage = document_.annotationStorage as unknown as {
+    size: number
+    getRawValue(id: string): { value?: unknown; formattedValue?: unknown } | undefined
+    setValue(id: string, value: object): void
+  }
+  if (storage.size === 0) return
+  for (let pageNumber = 1; pageNumber <= document_.numPages; pageNumber += 1) {
+    const annotations = (await (await document_.getPage(pageNumber)).getAnnotations()) as { id: string; datetimeFormat?: string }[]
+    for (const annotation of annotations) {
+      if (!annotation.datetimeFormat) continue
+      const entry = storage.getRawValue(annotation.id)
+      if (typeof entry?.value === 'number' && typeof entry.formattedValue === 'string') storage.setValue(annotation.id, { value: entry.formattedValue })
+    }
+  }
+}
+
+/** scriptsReady, but never wait more than a few seconds on a document whose scripts hang. */
+function settledScripts(): Promise<void> {
+  return Promise.race([scriptsReady, new Promise<void>((resolve) => window.setTimeout(resolve, 5000))])
+}
+
+async function save(saveAs = false): Promise<void> {
   if (!pdfDocument || busy) return
   // Commit an in-progress text box first so it is part of the file.
   if (currentTool !== 'none') setTool('none', false)
+  // Let a focused field run its format/validate scripts (blur) before its value is saved.
+  if (document.activeElement instanceof HTMLElement && document.activeElement.closest('.annotationLayer')) document.activeElement.blur()
   setBusy(true)
   try {
-    const bytes = await pdfDocument.saveDocument()
-    const result = await bridge.save(bytes)
+    await settledScripts()
+    await scriptingManager.dispatchWillSave().catch(() => undefined)
+    await commitDateFields(pdfDocument)
+    let bytes: Uint8Array<ArrayBuffer> = await pdfDocument.saveDocument()
+    if (forms.hasForm && forms.flattenOnSave) bytes = await flattenForm(bytes)
+    const result = await bridge.save(bytes, { saveAs })
     if (result.saved) {
+      void scriptingManager.dispatchDidSave().catch(() => undefined)
       pdfDocument.annotationStorage.resetModified()
       annotationsDirty = false
       pageOpsDirty = false
       updateDirty()
-      showMessage(`Saved ${result.filename ?? documentName}`)
+      const empty = await forms.markEmptyRequired().catch(() => 0)
+      const name = result.filename ?? documentName
+      showMessage(empty > 0 ? `Saved ${name}. ${empty} required field${empty === 1 ? ' is' : 's are'} still empty (marked in red).` : `Saved ${name}`, 'info', empty > 0 ? 7000 : 4000)
     }
   } catch (error) {
     showMessage(`Could not save: ${error instanceof Error ? error.message : String(error)}`, 'error', 8000)
@@ -453,6 +588,9 @@ async function save(): Promise<void> {
 }
 
 saveButton.addEventListener('click', () => { void save() })
+saveAsButton.addEventListener('click', () => { void save(true) })
+// A form's own Save As button (app.execMenuItem('SaveAs')).
+eventBus.on('download', () => { void save(true) })
 $('back').addEventListener('click', () => bridge.backToViewer())
 bridge.onCommand((command: PdfEditorCommand) => {
   if (command === 'save') void save()
@@ -474,6 +612,7 @@ async function start(): Promise<void> {
       return
     }
     await openBytes(result.bytes)
+    void signatureManager.load()
     message.hidden = true
     container.focus()
   } catch (error) {
