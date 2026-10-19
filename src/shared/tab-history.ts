@@ -129,3 +129,63 @@ export function capSessionHistories(histories: ReadonlyArray<SavedTabHistory | n
   pass(() => null)
   return out
 }
+
+/**
+ * What a history clear takes out of open tabs' back/forward lists (Clear browsing data → History,
+ * History → Clear, Forget This Site with history), as Chrome's navigation entry remover does:
+ * 'all' for every entry, else the entries whose URL the test matches. The current entry always
+ * stays (Chrome can't delete it either), so the tab keeps showing its page.
+ */
+export type TabHistoryForget = 'all' | ((url: string) => boolean)
+
+/** Indexes to remove from a live tab's list (navigationHistory.removeEntryAtIndex), highest first so earlier ones don't shift. */
+export function forgottenEntryIndexes(urls: readonly string[], activeIndex: number, forget: TabHistoryForget): number[] {
+  const out: number[] = []
+  for (let at = urls.length - 1; at >= 0; at -= 1) {
+    if (at === activeIndex) continue
+    if (forget === 'all' || forget(urls[at]!)) out.push(at)
+  }
+  return out
+}
+
+/**
+ * A saved list (sleeping or restored tab, not loaded yet) with the forgotten entries removed and
+ * the index moved to follow the current one. Null when there was no list or its index is bad.
+ */
+export function forgetTabHistoryEntries<T extends { url: string }>(history: { entries: readonly T[]; index: number } | null | undefined, forget: TabHistoryForget): { entries: T[]; index: number } | null {
+  if (!history || !Number.isInteger(history.index) || history.index < 0 || history.index >= history.entries.length) return null
+  const drop = new Set(forgottenEntryIndexes(history.entries.map((entry) => entry.url), history.index, forget))
+  if (drop.size === 0) return { entries: history.entries.slice(), index: history.index }
+  const entries: T[] = []
+  let index = 0
+  history.entries.forEach((entry, at) => {
+    if (drop.has(at)) return
+    if (at === history.index) index = entries.length
+    entries.push(entry)
+  })
+  return { entries, index }
+}
+
+function withoutFragment(url: string): string {
+  const hash = url.indexOf('#')
+  return hash < 0 ? url : url.slice(0, hash)
+}
+
+/** Matches back/forward entries for the visits a time-range clear removed (by URL, ignoring #fragments). */
+export function visitedUrlMatcher(urls: Iterable<string>): (url: string) => boolean {
+  const set = new Set<string>()
+  for (const url of urls) if (url) set.add(withoutFragment(url))
+  return (url) => set.has(withoutFragment(url))
+}
+
+/** Matches back/forward entries on one host (Forget This Site), like its history removal. */
+export function hostUrlMatcher(host: string): (url: string) => boolean {
+  const wanted = host.toLowerCase()
+  return (url) => {
+    try {
+      return new URL(url).hostname.toLowerCase() === wanted
+    } catch {
+      return false
+    }
+  }
+}

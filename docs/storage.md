@@ -173,3 +173,8 @@ icon and proxy blanked.
   scrubbing as tab URLs, page states over 64 KB dropped (entry kept), 2 MB for all tabs together
   (page states go first, then whole lists). Private tabs, Glance and the Settings tab are never saved.
   A typical tab costs ~1 KB per entry (mostly page state).
+  Clearing history (Clear browsing data → History, History → Clear, Forget This Site with history)
+  takes those pages out of open tabs' lists too, as Chrome does: live tabs via `navigationHistory`
+  (`clear()` for all time, `removeEntryAtIndex` otherwise), sleeping/restored tabs in the list they
+  wake with, and both stores are rewritten at once. The current page always stays. Entries carry no
+  visit time, so a time range drops the URLs visited in that range.

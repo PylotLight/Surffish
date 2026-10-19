@@ -3,7 +3,7 @@ import type { SavedTabGroup } from '../../shared/tab-groups'
 import type { SavedSplit } from '../../shared/split-view'
 import { DEFAULT_SPACE_ID, type SavedWindowSpaces } from '../../shared/spaces'
 import { parseSavedWindowState } from '../../shared/window-geometry'
-import type { SavedTabHistory } from '../../shared/tab-history'
+import { forgetTabHistoryEntries, normalizeTabHistory, type SavedTabHistory, type TabHistoryForget } from '../../shared/tab-history'
 import type { SurffishDatabase } from './database'
 
 /**
@@ -217,6 +217,32 @@ export class SessionStore {
     this.tabRows.clear()
     this.derived.clear()
     this.adoptable = []
+  }
+
+  /**
+   * Take history-cleared pages out of every saved back/forward list (each tab's current page
+   * stays); a list left with nothing worth restoring is deleted. Clearing history runs this after
+   * the session save, so lists of tabs no longer open (or saved while no window was) go too.
+   */
+  forgetHistories(forget: TabHistoryForget): void {
+    this.prime()
+    const rows = this.db.all<HistoryRow & { url: string | null }>('SELECT h.tab_id, h.entries, h.active_index, t.url FROM session_tab_history h LEFT JOIN session_tabs t ON t.id = h.tab_id AND t.deleted_at IS NULL')
+    this.db.transaction(() => {
+      const now = Date.now()
+      for (const row of rows) {
+        const current = row.url ? normalizeTabHistory({ entries: parseJson(row.entries), index: row.active_index }, row.url) : null
+        const next = current ? normalizeTabHistory(forgetTabHistoryEntries(current, forget), row.url!) : null
+        if (!next) {
+          this.db.run('DELETE FROM session_tab_history WHERE tab_id = ?', row.tab_id)
+          this.writtenHistory.delete(row.tab_id)
+          continue
+        }
+        const serialized = JSON.stringify([next.entries, next.index])
+        if (serialized === JSON.stringify([parseJson(row.entries), row.active_index])) continue
+        this.db.run('UPDATE session_tab_history SET entries = ?, active_index = ?, updated_at = ? WHERE tab_id = ?', JSON.stringify(next.entries), next.index, now, row.tab_id)
+        this.writtenHistory.set(row.tab_id, serialized)
+      }
+    })
   }
 
   private apply(desired: Desired[], histories: ReadonlyMap<string, SavedTabHistory>): void {

@@ -173,3 +173,26 @@ test('orphaned back/forward lists (their tab row is gone) are purged on first us
   assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 0)
   db.close()
 })
+
+test('clearing history trims saved back/forward lists in place and deletes ones left with nothing to restore', () => {
+  const db = SurffishDatabase.open({ path: ':memory:' })
+  const store = new SessionStore(db)
+  const z = { url: 'https://z.test/', title: 'Z' }
+  const y = { url: 'https://y.test/', title: 'Y' }
+  const windows = (): SessionWindowInput[] => sampleWindows().map((window, index) => index === 0 ? { ...window, histories: [{ entries: [z, y, { url: 'https://a.test/', title: 'A', pageState: 's1' }], index: 2 }, null, { entries: [z, { url: 'https://c.test/', title: 'C' }], index: 1 }, null] } : window)
+  store.save(normalizeWindowsSession(windows(), 0))
+  assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 2)
+  store.forgetHistories((url) => url === 'https://y.test/')
+  assert.deepEqual(new SessionStore(db).load()!.windows[0]!.histories, [{ entries: [z, { url: 'https://a.test/', title: 'A', pageState: 's1' }], index: 1 }, null, { entries: [z, { url: 'https://c.test/', title: 'C' }], index: 1 }, null])
+  store.forgetHistories('all')
+  // a.test keeps only its current page (scroll state); c.test had nothing else, so its row is gone.
+  const rows = db.all<{ entries: string; active_index: number }>('SELECT entries, active_index FROM session_tab_history')
+  assert.deepEqual(rows.map((row) => [JSON.parse(row.entries), row.active_index]), [[[{ url: 'https://a.test/', title: 'A', pageState: 's1' }], 0]])
+  // A later save with the same (trimmed) live lists writes nothing back.
+  const trimmed = windows()
+  trimmed[0] = { ...trimmed[0]!, histories: [{ entries: [{ url: 'https://a.test/', title: 'A', pageState: 's1' }], index: 0 }, null, null, null] }
+  db.run('UPDATE session_tab_history SET updated_at = 1')
+  store.save(normalizeWindowsSession(trimmed, 0))
+  assert.equal(db.get<{ updated_at: number }>('SELECT updated_at FROM session_tab_history')!.updated_at, 1)
+  db.close()
+})

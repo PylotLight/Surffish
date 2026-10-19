@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { MAX_RESTORED_WINDOWS, normalizeWindowsSession, parseWindowsSession, serializeWindowsSession } from './window-session'
+import { forgetSessionHistories, MAX_RESTORED_WINDOWS, normalizeWindowsSession, parseWindowsSession, serializeWindowsSession } from './window-session'
 import { parseBrowserSession } from './persistence'
 
 const geometry = { bounds: { x: 10, y: 20, width: 1200, height: 800 }, maximized: false, fullScreen: false }
@@ -78,5 +78,17 @@ describe('window session', () => {
     // Garbage in an edited file is ignored per tab.
     const edited = parseWindowsSession({ version: 1, windows: [{ tabs: ['https://a.example/one'], activeIndex: 0, histories: 'nope' }] })
     expect(edited.windows[0]!.histories).toBeUndefined()
+  })
+  test('clearing history takes pages out of every saved list but keeps each tab and its current page', () => {
+    const history = { entries: [{ url: 'https://a.example/', title: 'A' }, { url: 'https://b.example/', title: 'B' }, { url: 'https://a.example/one', title: 'One', pageState: 'state' }], index: 2 }
+    const session = normalizeWindowsSession([{ urls: ['https://a.example/one', 'https://c.example/'], activeIndex: 0, pinnedIndexes: [], geometry: null, histories: [history, null] }], 0)
+    const some = forgetSessionHistories(session, (url) => url.startsWith('https://b.'))
+    expect(some.windows[0]!.histories).toEqual([{ entries: [history.entries[0]!, history.entries[2]!], index: 1 }, null])
+    const all = forgetSessionHistories(session, 'all')
+    expect(all.windows[0]!.urls).toEqual(session.windows[0]!.urls)
+    // Only the current page with its scroll state is left (no Back, no Forward).
+    expect(all.windows[0]!.histories).toEqual([{ entries: [history.entries[2]!], index: 0 }, null])
+    const bare = normalizeWindowsSession([{ urls: ['https://b.example/'], activeIndex: 0, pinnedIndexes: [], geometry: null, histories: [{ entries: [{ url: 'https://a.example/', title: 'A' }, { url: 'https://b.example/', title: 'B' }], index: 1 }] }], 0)
+    expect('histories' in forgetSessionHistories(bare, 'all').windows[0]!).toBe(false)
   })
 })

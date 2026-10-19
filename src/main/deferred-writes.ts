@@ -53,6 +53,15 @@ export function flushDeferredWrites(): void {
   }
 }
 
+/** Run one queued write now (a privacy action that must reach the disk before a crash or quit). */
+export function flushDeferredWrite(key: string): void {
+  const entry = pending.get(key)
+  if (!entry) return
+  clearTimeout(entry.timer)
+  pending.delete(key)
+  runSafely(key, entry.run)
+}
+
 /** Flush everything and run later writes at once: the app is going away (see the header). */
 export function beginShutdownWrites(): void {
   shuttingDown = true

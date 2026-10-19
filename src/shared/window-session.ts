@@ -3,7 +3,7 @@ import { parseSavedWindowState, type SavedWindowState } from './window-geometry'
 import { parseSessionSplits, remapSessionSplits, type SavedSplit } from './split-view'
 import { parseSavedWindowSpaces, remapSavedWindowSpaces, type SavedWindowSpaces } from './spaces'
 import { parseSavedTabGroups, remapSavedTabGroups, type SavedTabGroup } from './tab-groups'
-import { capSessionHistories, normalizeTabHistory, type SavedTabHistory } from './tab-history'
+import { capSessionHistories, forgetTabHistoryEntries, normalizeTabHistory, type SavedTabHistory, type TabHistoryForget } from './tab-history'
 
 /**
  * The saved session with several windows.
@@ -133,6 +133,22 @@ function capHistories(windows: SavedSessionWindow[]): void {
     offset += window.urls.length
     if (mine.some(Boolean)) window.histories = mine
     else delete window.histories
+  }
+}
+
+/**
+ * The saved session with history-cleared pages taken out of every back/forward list (each tab's
+ * current page stays); a list left with nothing worth restoring is dropped. Everything else is kept.
+ */
+export function forgetSessionHistories(session: SavedWindowsSession, forget: TabHistoryForget): SavedWindowsSession {
+  return {
+    ...session,
+    windows: session.windows.map((window) => {
+      if (!window.histories) return window
+      const histories = window.histories.map((history, index) => history ? normalizeTabHistory(forgetTabHistoryEntries(history, forget), window.urls[index] ?? '') : null)
+      const { histories: _old, ...rest } = window
+      return histories.some(Boolean) ? { ...rest, histories } : rest
+    })
   }
 }
 

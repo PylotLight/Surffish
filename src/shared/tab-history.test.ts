@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { capSessionHistories, MAX_SAVED_FORWARD_ENTRIES, MAX_SAVED_HISTORY_ENTRIES, MAX_SAVED_PAGE_STATE_CHARS, normalizeTabHistory, type SavedTabHistory } from './tab-history'
+import { capSessionHistories, forgetTabHistoryEntries, forgottenEntryIndexes, hostUrlMatcher, visitedUrlMatcher, MAX_SAVED_FORWARD_ENTRIES, MAX_SAVED_HISTORY_ENTRIES, MAX_SAVED_PAGE_STATE_CHARS, normalizeTabHistory, type SavedTabHistory } from './tab-history'
 
 const entry = (path: string, pageState?: string): { url: string; title: string; pageState?: string } => ({ url: `https://a.test/${path}`, title: `Page ${path}`, ...(pageState ? { pageState } : {}) })
 
@@ -111,5 +111,49 @@ describe('capSessionHistories', () => {
     const tiny = capSessionHistories(lists, 150)
     expect(tiny.filter(Boolean).length).toBe(1)
     expect(capSessionHistories(lists, 0).every((list) => list === null)).toBe(true)
+  })
+})
+
+describe('clearing history out of back/forward lists', () => {
+  const urls = ['https://a.test/a', 'https://b.test/b', 'https://a.test/c', 'https://b.test/d']
+  test('live tab: indexes to remove, highest first, never the current entry', () => {
+    expect(forgottenEntryIndexes(urls, 2, 'all')).toEqual([3, 1, 0])
+    expect(forgottenEntryIndexes(urls, 2, hostUrlMatcher('a.test'))).toEqual([0])
+    expect(forgottenEntryIndexes(urls, 0, () => false)).toEqual([])
+    expect(forgottenEntryIndexes(['https://a.test/a'], 0, 'all')).toEqual([])
+  })
+
+  test('saved list: all-time keeps only the current page, so Back and Forward go away', () => {
+    const history = { entries: [entry('a'), entry('b', 'st-b'), entry('c')], index: 1 }
+    expect(forgetTabHistoryEntries(history, 'all')).toEqual({ entries: [entry('b', 'st-b')], index: 0 })
+    // The input is left alone.
+    expect(history.entries.length).toBe(3)
+  })
+
+  test('saved list: matched pages go and the index follows the current one', () => {
+    const history = { entries: [entry('a'), entry('b'), entry('c'), entry('d')], index: 2 }
+    const out = forgetTabHistoryEntries(history, visitedUrlMatcher(['https://a.test/a#top', 'https://a.test/d']))
+    expect(out).toEqual({ entries: [entry('b'), entry('c')], index: 1 })
+    // The current page stays even when it was visited in the range.
+    expect(forgetTabHistoryEntries(history, visitedUrlMatcher(['https://a.test/c']))).toEqual(history)
+    expect(forgetTabHistoryEntries(null, 'all')).toBeNull()
+    expect(forgetTabHistoryEntries({ entries: [entry('a')], index: 4 }, 'all')).toBeNull()
+  })
+
+  test('a cleared list normalizes to nothing to save unless the current page has state', () => {
+    const plain = forgetTabHistoryEntries({ entries: [entry('a'), entry('b')], index: 1 }, 'all')
+    expect(normalizeTabHistory(plain, 'https://a.test/b')).toBeNull()
+    const scrolled = forgetTabHistoryEntries({ entries: [entry('a'), entry('b', 'st')], index: 1 }, 'all')
+    expect(normalizeTabHistory(scrolled, 'https://a.test/b')).toEqual({ entries: [entry('b', 'st')], index: 0 })
+  })
+
+  test('matchers: visited URLs ignore #fragments; host match is exact and safe on junk', () => {
+    const visited = visitedUrlMatcher(['https://a.test/x', ''])
+    expect(visited('https://a.test/x#y')).toBe(true)
+    expect(visited('https://a.test/xy')).toBe(false)
+    const host = hostUrlMatcher('A.test')
+    expect(host('https://a.test/q')).toBe(true)
+    expect(host('https://sub.a.test/q')).toBe(false)
+    expect(host('not a url')).toBe(false)
   })
 })

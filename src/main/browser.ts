@@ -20,7 +20,7 @@ import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, s
 import { forgetSessionCookieSnapshot } from './session-cookies'
 import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
 import { forgetPrivateDownloads } from './downloads'
-import { getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { forgetSavedTabHistories, getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
@@ -47,7 +47,7 @@ import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
-import type { SavedTabHistory } from '../shared/tab-history'
+import { forgetTabHistoryEntries, forgottenEntryIndexes, type SavedTabHistory, type TabHistoryForget } from '../shared/tab-history'
 import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, presentWakeSnapshotAtStartup } from './wake-snapshot'
 import { forgetWakeSnapshotOnDisk, pruneWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
@@ -717,6 +717,38 @@ function persistOpenTabs(captureHistoryNow = false): void {
   const collect = (): BrowserTab['restoreHistory'][][] => keptTabs.map((kept) => kept.map(sessionHistoryOf))
   const captured = captureHistoryNow ? collect() : null
   saveBrowserWindowsSession(saved, focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1, captured ? () => captured : collect)
+}
+
+/**
+ * A history clear (Clear browsing data → History, History → Clear, Forget This Site with history)
+ * also takes those pages out of open tabs' back/forward lists, as Chrome does: live pages through
+ * navigationHistory (the current entry stays), sleeping/restored tabs in the list they will wake
+ * with, then the saved session (browser-session.json + session_tab_history) is rewritten at once
+ * so a restart can't bring them back. Private tabs keep theirs (nothing of theirs is on disk).
+ */
+export function forgetTabNavigationHistory(forget: TabHistoryForget): void {
+  for (const tab of allTabs()) {
+    if (tab.isPrivate || tab.win.isPrivate) continue
+    if (tab.restoreHistory) tab.restoreHistory = forgetTabHistoryEntries(tab.restoreHistory, forget)
+    const cached = lastSessionHistory.get(tab)
+    if (cached) lastSessionHistory.set(tab, forgetTabHistoryEntries(cached, forget))
+    const contents = tab.view?.webContents
+    if (!contents || contents.isDestroyed() || tab.pdfEditor) continue
+    try {
+      const history = contents.navigationHistory
+      if (forget === 'all') {
+        history.clear()
+      } else {
+        const urls = history.getAllEntries().map((entry) => entry.url)
+        for (const at of forgottenEntryIndexes(urls, history.getActiveIndex(), forget)) history.removeEntryAtIndex(at)
+      }
+    } catch (error) {
+      console.error('Could not clear a tab\'s back/forward list:', error)
+    }
+  }
+  persistOpenTabs(true)
+  forgetSavedTabHistories(forget)
+  publishAllWindows()
 }
 
 function windowGeometry(window: BaseWindow): SavedWindowState | null {

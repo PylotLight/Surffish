@@ -6,6 +6,11 @@
 //   restore: tab 1 comes back on c with Back enabled and the hold-Back menu listing b, a; Back lands
 //            on b at its old scroll position, Forward returns to c. Tab 2 was restored asleep: opening
 //            it wakes it with its list, so Back goes to x.
+//   clear:   a new tab goes p -> q -> r. Clear browsing data (last hour, history) takes the visited
+//            pages out of every back/forward list: the live tab's Back goes off, the sleeping
+//            restored tab wakes with no Back/Forward, and neither store keeps a list longer than the
+//            current page. Then s -> t and History → Clear (all time) does the same. Quit.
+//   cleared: relaunch: every tab comes back with Back and Forward disabled, no list on disk.
 // Runs the production build: `bun run build && bun run test:electron-tab-history-restore`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-tab-history-restore-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -171,14 +176,91 @@ async function runRestore() {
   console.log('[tab-history-restore] restore phase passed')
 }
 
+/** Every saved list (JSON + database) is at most the current page: no Back/Forward survives. */
+function assertNoSavedBackForward(label) {
+  const json = JSON.parse(readFileSync(sessionFile, 'utf8'))
+  for (const window of json.windows ?? []) for (const history of window.histories ?? []) {
+    if (history) assert.equal(history.entries.length, 1, `${label}: browser-session.json keeps no back/forward entries`)
+  }
+  for (const row of sqlite('SELECT entries FROM session_tab_history')) {
+    assert.equal(JSON.parse(row.entries).length, 1, `${label}: session_tab_history keeps no back/forward entries`)
+  }
+}
+
+async function runClear() {
+  const { api, state, tabs, loaded, navigate } = await launch()
+  const restored = await tabs()
+  const sleeper = restored.find((tab) => tab.sleeping && tab.url === `${origin}/c`)
+  assert.ok(sleeper, 'tab 1 (a-b-c list) is restored asleep')
+  step('new tab: p -> q -> r')
+  await api(`window.api.browser.tabs.create(${JSON.stringify(`${origin}/p`)})`)
+  await loaded('/p')
+  await navigate('/q')
+  await navigate('/r')
+  assert.equal((await state()).canGoBack, true)
+  const live = (await tabs()).find((tab) => tab.active).id
+  await waitFor(() => sqlite('SELECT entries FROM session_tab_history').some((row) => row.entries.includes('/q')), 'the p-q-r list on disk')
+
+  step('Clear browsing data: last hour, history')
+  await api('window.api.browser.safety.privacy.clear({ range: "hour", history: true, downloads: false, cookies: false, cache: false, permissions: false, zoom: false })')
+  await waitFor(async () => (await state()).canGoBack === false, 'Back off on the live tab')
+  assert.equal((await state()).canGoForward, false)
+  // Written at once (no coalescing delay): a crash right after can't bring the pages back.
+  assertNoSavedBackForward('after the time-range clear')
+  assert.ok(!JSON.stringify(sqlite('SELECT entries FROM session_tab_history')).includes(`${origin}/a"`), 'a is gone from the database')
+
+  step('the sleeping tab wakes with no Back/Forward')
+  await api(`window.api.browser.tabs.activate(${JSON.stringify(sleeper.id)})`)
+  await loaded('/c')
+  await delay(300)
+  assert.equal((await state()).canGoBack, false, 'no Back on the woken tab')
+  assert.equal((await state()).canGoForward, false)
+
+  step('s -> t, then History → Clear (all time)')
+  await api(`window.api.browser.tabs.activate(${JSON.stringify(live)})`)
+  await loaded('/r')
+  await navigate('/s')
+  await navigate('/t')
+  assert.equal((await state()).canGoBack, true)
+  await api('window.api.browser.history.clear()')
+  await waitFor(async () => (await state()).canGoBack === false, 'Back off after History → Clear')
+  assertNoSavedBackForward('after History → Clear')
+
+  step('quit')
+  app.emit('before-quit', { preventDefault() {} })
+  app.emit('will-quit', { preventDefault() {} })
+  assertNoSavedBackForward('at quit')
+  console.log('[tab-history-restore] clear phase passed')
+}
+
+async function runCleared() {
+  const { api, state, tabs, loaded } = await launch()
+  assertNoSavedBackForward('on relaunch')
+  for (const tab of await tabs()) {
+    const path = new URL(tab.url).pathname
+    step(`${path}: no Back/Forward after relaunch`)
+    await api(`window.api.browser.tabs.activate(${JSON.stringify(tab.id)})`)
+    await loaded(path)
+    await delay(300)
+    const now = await state()
+    assert.equal(now.canGoBack, false, `${path}: Back disabled`)
+    assert.equal(now.canGoForward, false, `${path}: Forward disabled`)
+    const menu = await api('window.api.browser.navHistory.list("back")')
+    assert.deepEqual(menu.entries, [], `${path}: hold-Back menu empty`)
+  }
+  console.log('[tab-history-restore] cleared phase passed')
+}
+
 async function main() {
   if (phase === 'save') return runSave()
   if (phase === 'restore') return runRestore()
+  if (phase === 'clear') return runClear()
+  if (phase === 'cleared') return runCleared()
   // Orchestrator: serves the pages and runs each launch as its own Electron process.
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const serverPort = server.address().port
   mkdirSync(userData, { recursive: true, mode: 0o700 })
-  for (const next of ['save', 'restore']) assert.equal(await runPhase(next, serverPort), 0, `the ${next} phase passed`)
+  for (const next of ['save', 'restore', 'clear', 'cleared']) assert.equal(await runPhase(next, serverPort), 0, `the ${next} phase passed`)
   console.log('Electron tab history restore smoke passed.')
 }
 
