@@ -21,6 +21,28 @@ import type { BaseWindow } from 'electron'
 interface PanelActivationAddon {
   preventActivation?(windowHandle: Buffer): boolean
   showOnActiveSpace?(windowHandle: Buffer): SpaceShowReport | null
+  activeSpaceChanges?(): SpaceChanges
+  panelState?(windowHandle: Buffer): PanelNativeState | null
+  makeKeyQuietly?(windowHandle: Buffer): boolean
+}
+
+/** Active Space changes seen by the native watch (started on the first read). */
+export interface SpaceChanges {
+  spaceChanges: number
+  /** -1 before the first change seen. */
+  msSinceSpaceChange: number
+}
+
+/** What a blur / hide of a panel needs to know (native panelState). */
+export interface PanelNativeState extends SpaceChanges {
+  /** NSWindow.isVisible: still ordered in (Electron's `hide` also fires when it is only occluded). */
+  orderedIn: boolean
+  onActiveSpace: boolean
+  key: boolean
+  appActive: boolean
+  /** A mouse button is down right now (the click that took the focus away). */
+  mouseDown: boolean
+  occlusion: number
 }
 
 /** What the native showOnActiveSpace did (src/native/macos/mac-trackpad-swipe.mm), for the debug log. */
@@ -117,6 +139,12 @@ interface PanelActivationGuard {
    * the native side can't (not macOS, no addon / export, destroyed window, a throwing call).
    */
   showOnActiveSpace(window: GuardWindow, label: string): SpaceShowReport | null
+  /** Native Space changes (null: not macOS / no addon / stale build / a throwing call). Starts the watch. */
+  spaceChanges(): SpaceChanges | null
+  /** Native state of `window` (null where it can't tell). */
+  panelState(window: GuardWindow): PanelNativeState | null
+  /** Make a shown panel key again without activating Surffish. False where it can't (or it didn't take). */
+  makeKeyQuietly(window: GuardWindow): boolean
 }
 
 function errorText(error: unknown): string {
@@ -187,6 +215,36 @@ export function createPanelActivationGuard(deps: PanelActivationGuardDeps): Pane
         warn(`[mac panel] Could not show ${label} on the active Space:`, error)
         return null
       }
+    },
+    spaceChanges: () => {
+      const native = loaded()
+      if (typeof native?.activeSpaceChanges !== 'function') return null
+      try {
+        return native.activeSpaceChanges()
+      } catch (error) {
+        deps.log?.('space', `activeSpaceChanges failed: ${errorText(error)}`)
+        return null
+      }
+    },
+    panelState: (window) => {
+      const native = loaded()
+      if (typeof native?.panelState !== 'function' || window.isDestroyed()) return null
+      try {
+        return native.panelState(window.getNativeWindowHandle())
+      } catch (error) {
+        deps.log?.('space', `panelState failed: ${errorText(error)}`)
+        return null
+      }
+    },
+    makeKeyQuietly: (window) => {
+      const native = loaded()
+      if (typeof native?.makeKeyQuietly !== 'function' || window.isDestroyed()) return false
+      try {
+        return native.makeKeyQuietly(window.getNativeWindowHandle()) === true
+      } catch (error) {
+        deps.log?.('space', `makeKeyQuietly failed: ${errorText(error)}`)
+        return false
+      }
     }
   }
 }
@@ -242,6 +300,29 @@ export function joinActiveSpace(window: BaseWindow, label: string): SpaceShowRep
 }
 
 /**
+ * macOS: when the active Space last changed, on `performance.now()`'s clock (null: none seen, or no
+ * native watch). Also starts the watch, so call it when a panel shows.
+ */
+export function lastSpaceChangeAt(now = performance.now()): number | null {
+  if (process.platform !== 'darwin') return null
+  const changes = guard.spaceChanges()
+  if (!changes || changes.spaceChanges <= 0 || changes.msSinceSpaceChange < 0) return null
+  return now - changes.msSinceSpaceChange
+}
+
+/** macOS: native state of a panel (null elsewhere / no addon). */
+export function panelNativeState(window: BaseWindow): PanelNativeState | null {
+  if (process.platform !== 'darwin' || window.isDestroyed()) return null
+  return guard.panelState(window)
+}
+
+/** macOS: give a shown panel the key window back (after a Space switch took it) without activating Surffish. */
+export function restoreKeyQuietly(window: BaseWindow): boolean {
+  if (process.platform !== 'darwin' || window.isDestroyed()) return false
+  return guard.makeKeyQuietly(window)
+}
+
+/**
  * Make `window` a floating panel: above normal windows ('floating' on macOS), on every Space and over
  * full-screen apps, and (macOS) never activating Surffish. Call right after creating it.
  */
@@ -270,6 +351,8 @@ export function showFloatingPanel(window: BaseWindow, focus: boolean, label = 'p
     // every-Spaces behaviour: set it explicitly and order it front here, falling back to
     // MoveToActiveSpace when it still isn't on this Space (logged to the mini header debug log).
     joinActiveSpace(window, label)
+    // Start watching Space changes before the user can swipe away (a blur then is not a click-away).
+    guard.spaceChanges()
     if (focus) window.focus()
     window.setAlwaysOnTop(true, 'floating')
     return

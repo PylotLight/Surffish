@@ -601,6 +601,81 @@ napi_value ShowOnActiveSpace(napi_env env, napi_callback_info info) {
   return result;
 }
 
+// Active Space (desktop) changes, watched from the first activeSpaceChanges/panelState call. Swiping
+// to another Space takes the key window away from a floating panel on every Space (a blur that is not
+// a click elsewhere): JavaScript reads when the last change was to tell the two apart.
+id g_spaceObserver = nil;
+double g_spaceChanges = 0;
+CFTimeInterval g_spaceChangedAt = 0.0;
+
+void WatchActiveSpace() {
+  if (g_spaceObserver != nil) return;
+  g_spaceObserver = [[NSWorkspace sharedWorkspace].notificationCenter
+      addObserverForName:NSWorkspaceActiveSpaceDidChangeNotification
+                  object:nil
+                   queue:[NSOperationQueue mainQueue]
+              usingBlock:^(NSNotification* note) {
+                (void)note;
+                g_spaceChanges += 1;
+                g_spaceChangedAt = CACurrentMediaTime();
+              }];
+}
+
+void SetSpaceChanges(napi_env env, napi_value object) {
+  SetNumber(env, object, "spaceChanges", g_spaceChanges);
+  SetNumber(env, object, "msSinceSpaceChange",
+            g_spaceChanges > 0 ? std::max(0.0, (CACurrentMediaTime() - g_spaceChangedAt) * 1000.0) : -1.0);
+}
+
+// activeSpaceChanges(): { spaceChanges, msSinceSpaceChange } (-1 before the first change seen). Starts
+// watching on the first call.
+napi_value ActiveSpaceChanges(napi_env env, napi_callback_info) {
+  WatchActiveSpace();
+  napi_value result = nullptr;
+  napi_create_object(env, &result);
+  SetSpaceChanges(env, result);
+  return result;
+}
+
+// panelState(windowHandle: Buffer): object | null. What a blur or hide of a panel needs to know: is it
+// still ordered in (NSWindow.isVisible: Electron's `hide` also fires when it is only occluded, as in a
+// Space switch), on the active Space, key; is a mouse button down right now (the click that took the
+// focus away); the Space changes so far. Never changes anything (beyond starting the Space watch).
+napi_value PanelState(napi_env env, napi_callback_info info) {
+  WatchActiveSpace();
+  NSWindow* window = WindowFromHandle(env, info);
+  napi_value result = nullptr;
+  if (window == nil) {
+    napi_get_null(env, &result);
+    return result;
+  }
+  napi_create_object(env, &result);
+  SetBool(env, result, "orderedIn", window.isVisible);
+  SetBool(env, result, "onActiveSpace", window.isOnActiveSpace);
+  SetBool(env, result, "key", window.isKeyWindow);
+  SetBool(env, result, "appActive", NSApp.isActive);
+  SetBool(env, result, "mouseDown", NSEvent.pressedMouseButtons != 0);
+  SetNumber(env, result, "occlusion", static_cast<double>(window.occlusionState));
+  SetSpaceChanges(env, result);
+  return result;
+}
+
+// makeKeyQuietly(windowHandle: Buffer): boolean. Gives a shown panel the key window back after a Space
+// switch took it, without activating the app or ordering anything (prevents-activation re-set first,
+// then -makeKeyWindow only). True when it is key afterwards.
+napi_value MakeKeyQuietly(napi_env env, napi_callback_info info) {
+  NSWindow* window = WindowFromHandle(env, info);
+  bool key = false;
+  if (window != nil && window.isVisible) {
+    KeepFromActivating(window);
+    if (!window.isKeyWindow && window.canBecomeKeyWindow) [window makeKeyWindow];
+    key = window.isKeyWindow;
+  }
+  napi_value result = nullptr;
+  napi_get_boolean(env, key, &result);
+  return result;
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_property_descriptor methods[] = {
       {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -608,6 +683,9 @@ napi_value Initialize(napi_env env, napi_value exports) {
       {"isSwipeTrackingEnabled", nullptr, IsSwipeTrackingEnabled, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"preventActivation", nullptr, PreventActivation, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"showOnActiveSpace", nullptr, ShowOnActiveSpace, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"activeSpaceChanges", nullptr, ActiveSpaceChanges, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"panelState", nullptr, PanelState, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"makeKeyQuietly", nullptr, MakeKeyQuietly, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
   return exports;

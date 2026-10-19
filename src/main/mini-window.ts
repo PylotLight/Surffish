@@ -60,7 +60,7 @@ import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChi
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
-import { isSpaceReorderHide, joinActiveSpace, makeFloatingPanel, setPanelDebugLog, showFloatingPanel } from './mac-panel'
+import { isSpaceReorderHide, joinActiveSpace, lastSpaceChangeAt, makeFloatingPanel, panelNativeState, restoreKeyQuietly, setPanelDebugLog, showFloatingPanel, type PanelNativeState } from './mac-panel'
 import { headerDebug, miniHeaderDebugEnabled, onMiniHeaderDebugChange, traceHeaderContents, traceMiniWindow, untraceHeaderContents, untraceMiniWindow } from './mini-header-debug'
 
 /**
@@ -272,6 +272,47 @@ setPanelDebugLog((kind, detail) => headerDebug(kind, detail))
 
 function miniLabel(m: Mini): string {
   return `[mini ${m.slot}${m.menuBar ? ' popout' : ''}]`
+}
+
+/** A panel's native state for the debug log. */
+function describePanelState(state: PanelNativeState): string {
+  const since = state.msSinceSpaceChange < 0 ? 'none yet' : `${Math.round(state.msSinceSpaceChange)}ms ago`
+  return `mouseDown=${state.mouseDown} orderedIn=${state.orderedIn} onActiveSpace=${state.onActiveSpace} key=${state.key} appActive=${state.appActive} occlusion=${state.occlusion} lastSpaceChange=${since} (#${state.spaceChanges})`
+}
+
+/** A held popout blur: settle it when its time is up (a Space change meanwhile keeps it shown). */
+function schedulePopoutSettle(m: Mini): void {
+  const wait = m.menuBar?.popout.blurPendingMs() ?? 0
+  if (wait <= 0) return
+  if (m.blurTimer) clearTimeout(m.blurTimer)
+  m.blurTimer = setTimeout(() => {
+    m.blurTimer = null
+    const window = m.window
+    if (m.closed || window.isDestroyed() || !m.menuBar) return
+    if (window.isFocused()) m.menuBar.popout.focused()
+    const result = m.menuBar.popout.settle(m.menuBar.pinned, IS_MAC ? lastSpaceChangeAt() : null)
+    if (result !== 'none') headerDebug('space', `${miniLabel(m)} held popout blur settled -> ${result}`)
+    if (result === 'hide') syncTray()
+    else if (result === 'space') keepAcrossSpace(m, 'held blur')
+    else if (result === 'pending') schedulePopoutSettle(m)
+  }, wait)
+}
+
+/**
+ * The popout lost the key window to a Space switch: it stays shown (it is on every Space). Nothing is
+ * re-shown or reordered (no Space fallback, nothing activated); it only takes the key window back,
+ * quietly, so Esc and a click elsewhere still reach it.
+ */
+function keepAcrossSpace(m: Mini, why: string): void {
+  const window = m.window
+  if (m.closed || window.isDestroyed() || !m.menuBar?.popout.shown()) return
+  if (window.isFocused()) {
+    headerDebug('space', `${miniLabel(m)} popout kept across a Space change (${why}); still key`)
+    return
+  }
+  const key = restoreKeyQuietly(window)
+  const state = panelNativeState(window)
+  headerDebug('space', `${miniLabel(m)} popout kept across a Space change (${why}); key restored quietly=${key}${state ? `; ${describePanelState(state)}` : ''}`)
 }
 
 function debugHost(url: string): string {
@@ -1287,28 +1328,40 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       headerDebug('space', `${miniLabel(m)} hide from the active-Space reorder ignored`)
       return
     }
+    // macOS: Electron also emits `hide` when the window is only occluded (swiping to another Space, the
+    // switch animation covering it). The popout is on every Space and still ordered in: not a hide.
+    if (IS_MAC && m.menuBar?.popout.shown() && !window.isDestroyed()) {
+      const state = panelNativeState(window)
+      if (state?.orderedIn) {
+        headerDebug('space', `${miniLabel(m)} popout hide event while still ordered in ignored (occluded, not hidden): ${describePanelState(state)}`)
+        return
+      }
+    }
     setRevealed(m, false)
-    if (m.menuBar?.popout.shown()) {
-      m.menuBar.popout.close()
+    if (m.menuBar?.popout.shown() || m.menuBar?.popout.closing()) {
+      // Hidden underneath us (⌘H, the window server): no fade, it is gone already.
+      m.menuBar.popout.close(false)
       syncTray()
     }
   })
   // In the menu bar: clicking anywhere else hides the popout, unless it is pinned. A blur right as it
-  // opens (macOS moving the key window about while it comes up, a Space change) is held for a moment:
-  // the focus coming back keeps it open, else it hides then.
+  // opens (macOS moving the key window about while it comes up) is held for a moment: the focus coming
+  // back keeps it open, else it hides then. macOS: swiping to another Space takes the key window away
+  // too, but the popout is on every Space: a blur next to a Space change keeps it (key again, quietly);
+  // one with no mouse button down waits a moment for the Space change before it counts as a click-away.
   window.on('blur', () => {
     const bar = m.menuBar
     if (!bar) return
-    if (bar.popout.blur(bar.pinned)) return syncTray()
-    const wait = bar.popout.blurPendingMs()
-    if (wait <= 0) return
-    if (m.blurTimer) clearTimeout(m.blurTimer)
-    m.blurTimer = setTimeout(() => {
-      m.blurTimer = null
-      if (m.closed || window.isDestroyed() || !m.menuBar) return
-      if (window.isFocused()) m.menuBar.popout.focused()
-      if (m.menuBar.popout.settle(m.menuBar.pinned)) syncTray()
-    }, wait)
+    const now = performance.now()
+    const state = IS_MAC ? panelNativeState(window) : null
+    const spaceChangedAt = state ? lastSpaceChangeAt(now) : null
+    const verdict = bar.popout.blur(bar.pinned, state ? { mouseDown: state.mouseDown, spaceChangedAt } : undefined)
+    if (miniHeaderDebugEnabled() && verdict !== 'ignored') {
+      headerDebug('space', `${miniLabel(m)} popout blur -> ${verdict}; ${state ? describePanelState(state) : 'no native state (click-away assumed)'}`)
+    }
+    if (verdict === 'hide') return syncTray()
+    if (verdict === 'space') return keepAcrossSpace(m, 'blur')
+    schedulePopoutSettle(m)
   })
   window.on('resize', () => {
     layout(m)
