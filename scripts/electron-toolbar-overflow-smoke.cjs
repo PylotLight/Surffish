@@ -92,6 +92,8 @@ async function run() {
   const sidebar = await waitFor(() => viewFor('sidebar'), 'the sidebar surface')
   const content = await waitFor(() => viewFor('content'), 'the content surface')
   const ready = (view) => waitFor(() => smoke.evaluate(view.webContents, 'document.readyState === "complete" && Boolean(window.api?.browser)'), `the ${surfaceOf(view.webContents)} renderer`)
+  toolbar.webContents.on('console-message', (...args) => { const m = String(args[0]?.message ?? args[2]); if (m.includes('tb-debug')) console.log('[toolbar]', Date.now() % 100000, m) })
+  toolbar.webContents.on('did-start-navigation', (d) => console.log('[tb-debug] toolbar navigation', Date.now() % 100000, d?.url ?? ''))
   await ready(toolbar)
   await ready(sidebar)
   const inToolbar = (expression) => smoke.evaluate(toolbar.webContents, expression)
@@ -127,6 +129,7 @@ async function run() {
   const openMenu = async () => {
     // Spaced out so it never counts towards the logo's triple-click easter egg (450 ms bursts).
     await delay(500)
+    console.log('[tb-debug] test clicks brand', Date.now() % 100000)
     await clickAt('.toolbar-brand strong')
     await waitFor(() => inToolbar('Boolean(document.querySelector("#surffish-menu"))'), 'the Surffish menu')
   }

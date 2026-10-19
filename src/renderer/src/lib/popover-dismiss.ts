@@ -35,7 +35,7 @@ export function usePopoverDismiss(open: boolean, containerRef: React.RefObject<H
     const openedAt = Date.now()
     const dismiss = (): void => latest.current.close()
     const onPointerDown = (event: PointerEvent): void => {
-      if (!containerRef.current?.contains(event.target as Node)) dismiss()
+      if (!containerRef.current?.contains(event.target as Node)) { console.log('[tb-debug] dismiss pointerdown', (event.target as Element)?.className); dismiss() }
     }
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
@@ -44,12 +44,13 @@ export function usePopoverDismiss(open: boolean, containerRef: React.RefObject<H
       latest.current.options.returnFocusRef?.current?.focus()
     }
     const onBlur = (): void => {
-      if (kind === 'popover' && blurDismissesPopover(document.activeElement?.tagName)) dismiss()
+      if (kind === 'popover' && blurDismissesPopover(document.activeElement?.tagName)) { console.log('[tb-debug] dismiss blur'); dismiss() }
     }
     const onRequest = (event: Event): void => {
       const request = readDismissRequest((event as CustomEvent).detail)
       if (!dismissReasonCloses(kind, request.reason)) return
       if (request.reason === 'tab-switch' && !tabSwitchClosesPopover(openedAt, request.since)) return
+      console.log('[tb-debug] dismiss request', request.reason, openedAt, request.since)
       dismiss()
     }
     window.addEventListener('pointerdown', onPointerDown)

@@ -44,6 +44,7 @@ function MenuBody({ entries, onClose, onPin, onCustomize, onSettings }: {
   const badges = useToolbarBadges()
   const onKeyDown = useMenuKeyboard(menuRef, true)
   const isMac = window.api.platform === 'darwin'
+  console.log('[tb-debug] menu render entries', entries.map((entry) => entry.id).join(','))
   return (
     <div id="surffish-menu" className="surffish-menu" role="menu" aria-label="Surffish menu" ref={menuRef} onKeyDown={onKeyDown}>
       {entries.length > 0 && (
@@ -122,6 +123,7 @@ export function SurffishMenu({ entries, menuButtonRef, attention, onPin, onCusto
         aria-controls="surffish-menu"
         title="Surffish menu"
         onClick={(event) => {
+          console.log('[tb-debug] brand click detail', event.detail, 'open', open)
           // The 3rd click of a triple-click opens the easter egg instead; a double-click's 2nd click is ignored.
           if (onBrandClick()) setOpen(false)
           else if (event.detail <= 1) setOpen((value) => !value)
