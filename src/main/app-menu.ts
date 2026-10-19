@@ -4,7 +4,6 @@ import { getMainWindow } from './window'
 import { sendFocusAddressToVisibleRenderer } from './browser-shell'
 import { APP_NAME } from '../shared/config'
 import { checkForUpdatesFromMenu } from './updates'
-import { openFeedback } from './feedback'
 import { APP_SHORTCUTS } from './app-shortcuts'
 import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
@@ -66,7 +65,6 @@ export function installAppMenu(): void {
           submenu: [
             { role: 'about' },
             { label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() },
-            { label: 'Send Feedback…', click: () => { openFeedback() } },
             { type: 'separator' },
             { label: 'Settings…', accelerator: APP_SHORTCUTS.settings, click: () => { openSettingsTab() } },
             { type: 'separator' },
@@ -230,7 +228,7 @@ export function installAppMenu(): void {
       ]
     },
     // macOS has it in the app menu; elsewhere it lives under Help.
-    ...(isMac ? [] : [{ label: 'Help', submenu: [{ label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() }, { label: 'Send Feedback…', click: () => { openFeedback() } }] } satisfies MenuItemConstructorOptions])
+    ...(isMac ? [] : [{ label: 'Help', submenu: [{ label: 'Check for Updates…', click: () => checkForUpdatesFromMenu() }] } satisfies MenuItemConstructorOptions])
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
   if (!windowMenuWatched) {

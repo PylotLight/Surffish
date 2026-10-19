@@ -82,11 +82,6 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/reader.cjs'),
       join(outputDirectory, 'reader.cjs')
     )
-    // Feedback window bridge (main process owns the network call).
-    copyFileSync(
-      resolve(projectDirectory, 'src/preload/feedback.cjs'),
-      join(outputDirectory, 'feedback.cjs')
-    )
   }
 }
 
