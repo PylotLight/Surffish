@@ -32,7 +32,7 @@ import { createVelocityTracker, flingAlong, flingSlideMs, flingTuckEdge, glideAx
 import { MINI_WINDOW_HANDLE_HTML } from './mini-window-handle-page'
 import { motion, placeWindow } from './mini-window-motion'
 import { readUserJson, writeUserJson } from './user-json'
-import { makeFloatingPanel } from './mac-panel'
+import { joinActiveSpace, makeFloatingPanel } from './mac-panel'
 
 /**
  * Tuck to screen edge (part of the lazy mini-window chunk). Docked, the mini window sits flush with an
@@ -477,7 +477,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
     if (!shown) {
       h.window.showInactive()
       // Some window managers drop the level while a window is hidden.
-      if (IS_MAC) h.window.setAlwaysOnTop(true, 'floating')
+      if (IS_MAC) {
+        joinActiveSpace(h.window, `[mini ${host.slot}] edge handle`)
+        h.window.setAlwaysOnTop(true, 'floating')
+      }
     }
     if (mode !== 'moving') sendHandleState()
   }
@@ -633,7 +636,10 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       setOwnBounds(from)
       win.showInactive()
       // The level can drop while hidden; set once when it shows, not per frame.
-      if (IS_MAC) win.setAlwaysOnTop(true, 'floating')
+      if (IS_MAC) {
+        joinActiveSpace(win, `[mini ${host.slot}] slide out`)
+        win.setAlwaysOnTop(true, 'floating')
+      }
       else win.setAlwaysOnTop(true)
     }
     along = null
@@ -662,6 +668,7 @@ export function createDockController(host: DockHost, initial: { dock: MiniDock; 
       // Bring it back on screen where it was along the edge.
       setOwnBounds(clampMiniBounds(win.getBounds(), display.workArea))
       win.showInactive()
+      if (IS_MAC) joinActiveSpace(win, `[mini ${host.slot}] undock`)
     }
     host.changed()
   }

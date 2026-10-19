@@ -20,6 +20,78 @@ import type { BaseWindow } from 'electron'
 
 interface PanelActivationAddon {
   preventActivation?(windowHandle: Buffer): boolean
+  showOnActiveSpace?(windowHandle: Buffer): SpaceShowReport | null
+}
+
+/** What the native showOnActiveSpace did (src/native/macos/mac-trackpad-swipe.mm), for the debug log. */
+export interface SpaceShowReport {
+  behaviorBefore: number
+  behaviorJoined: number
+  behaviorAfter: number
+  wasVisible: boolean
+  wasOnActiveSpace: boolean
+  /** On the Space the user is on right after ordering it front (every-Spaces behaviour set). */
+  onActiveSpace: boolean
+  /** It wasn't: ordered out and back in with MoveToActiveSpace. */
+  fallback: boolean
+  fallbackOnActiveSpace: boolean
+  rejoinedAllSpaces: boolean
+  onActiveSpaceAfter: boolean
+  preventsActivation: boolean
+  appActive: boolean
+  isKey: boolean
+  level: number
+  occlusion: number
+  windowNumber: number
+}
+
+// NSWindowCollectionBehavior bits (AppKit NSWindow.h).
+const BEHAVIOR_BITS: ReadonlyArray<[number, string]> = [
+  [1 << 0, 'CanJoinAllSpaces'],
+  [1 << 1, 'MoveToActiveSpace'],
+  [1 << 2, 'Managed'],
+  [1 << 3, 'Transient'],
+  [1 << 4, 'Stationary'],
+  [1 << 5, 'ParticipatesInCycle'],
+  [1 << 6, 'IgnoresCycle'],
+  [1 << 7, 'FullScreenPrimary'],
+  [1 << 8, 'FullScreenAuxiliary'],
+  [1 << 9, 'FullScreenNone'],
+  [1 << 11, 'FullScreenAllowsTiling'],
+  [1 << 12, 'FullScreenDisallowsTiling'],
+  [1 << 16, 'Primary'],
+  [1 << 17, 'Auxiliary'],
+  [1 << 18, 'CanJoinAllApplications']
+]
+
+/** `0x101 CanJoinAllSpaces|FullScreenAuxiliary` (unknown bits as +0x…). */
+export function describeCollectionBehavior(value: number): string {
+  if (!Number.isInteger(value) || value < 0) return String(value)
+  let rest = value
+  const names: string[] = []
+  for (const [bit, name] of BEHAVIOR_BITS) {
+    if ((value & bit) !== 0) {
+      names.push(name)
+      rest &= ~bit
+    }
+  }
+  if (rest !== 0) names.push(`+0x${rest.toString(16)}`)
+  return `0x${value.toString(16)} ${names.join('|') || 'Default'}`
+}
+
+/** One debug log line for a native show on the active Space. */
+export function describeSpaceShow(label: string, report: SpaceShowReport): string {
+  let outcome = 'on active Space'
+  if (!report.onActiveSpace) {
+    outcome = !report.fallback
+      ? 'NOT on active Space'
+      : report.fallbackOnActiveSpace
+        ? `NOT on active Space after ordering front -> fallback MoveToActiveSpace: on active Space (rejoined all Spaces=${report.rejoinedAllSpaces})`
+        : 'NOT on active Space after ordering front -> fallback MoveToActiveSpace: STILL NOT on active Space'
+  }
+  return `${label} ${outcome}; onActiveSpaceAfter=${report.onActiveSpaceAfter} wasVisible=${report.wasVisible} wasOnActiveSpace=${report.wasOnActiveSpace}` +
+    ` behavior before=[${describeCollectionBehavior(report.behaviorBefore)}] joined=[${describeCollectionBehavior(report.behaviorJoined)}] after=[${describeCollectionBehavior(report.behaviorAfter)}]` +
+    ` preventsActivation=${report.preventsActivation} appActive=${report.appActive} key=${report.isKey} level=${report.level} occlusion=${report.occlusion} window=${report.windowNumber}`
 }
 
 interface PanelActivationGuardDeps {
@@ -28,49 +100,118 @@ interface PanelActivationGuardDeps {
   /** Load the native addon (null: not built in this run). Called at most once. */
   load(): PanelActivationAddon | null
   warn(message: string, error?: unknown): void
+  /** The mini header debug log (a no-op while it is off). */
+  log?(kind: string, detail: string): void
 }
+
+type GuardWindow = Pick<BaseWindow, 'isDestroyed' | 'getNativeWindowHandle'>
 
 interface PanelActivationGuard {
   /** Keep `window` (a `type: 'panel'` window) from activating Surffish. True when the tag was set. */
-  apply(window: Pick<BaseWindow, 'isDestroyed' | 'getNativeWindowHandle'>): boolean
+  apply(window: GuardWindow): boolean
   /** Whether the guard can do anything here (macOS, not opted out, the addon has the export). */
   available(): boolean
+  /**
+   * Order `window` front on the Space the user is on (every-Spaces behaviour set explicitly, a
+   * MoveToActiveSpace fallback when the window server kept it on its old Space). Logged. Null when
+   * the native side can't (not macOS, no addon / export, destroyed window, a throwing call).
+   */
+  showOnActiveSpace(window: GuardWindow, label: string): SpaceShowReport | null
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 export function createPanelActivationGuard(deps: PanelActivationGuardDeps): PanelActivationGuard {
   let addon: PanelActivationAddon | null | undefined
-  const enabled = deps.platform === 'darwin' && deps.env.SURFFISH_PANEL_ACTIVATION !== 'allow'
+  let spaceExportWarned = false
+  const activationEnabled = deps.env.SURFFISH_PANEL_ACTIVATION !== 'allow'
+
+  function warn(message: string, error?: unknown): void {
+    deps.warn(message, error)
+    deps.log?.('panel', error === undefined ? message : `${message} ${errorText(error)}`)
+  }
 
   function loaded(): PanelActivationAddon | null {
-    if (!enabled) return null
+    if (deps.platform !== 'darwin') return null
     if (addon !== undefined) return addon
     try {
       addon = deps.load()
+      if (addon === null) deps.log?.('panel', '[mac panel] Native addon not built (out/native/mac-trackpad-swipe.node missing): panels may activate Surffish and come up on another Space.')
     } catch (error) {
-      deps.warn('[mac panel] Native addon could not be loaded; panels may activate Surffish:', error)
+      warn('[mac panel] Native addon could not be loaded; panels may activate Surffish:', error)
       addon = null
     }
-    if (addon && typeof addon.preventActivation !== 'function') {
-      // An addon built before this export (a stale out/native): nothing to call.
-      deps.warn('[mac panel] Native addon has no preventActivation; panels may activate Surffish.')
+    if (addon && typeof addon.preventActivation !== 'function' && typeof addon.showOnActiveSpace !== 'function') {
+      // An addon built before these exports (a stale out/native): nothing to call.
+      warn('[mac panel] Native addon has no preventActivation; panels may activate Surffish.')
       addon = null
     }
     return addon
   }
 
   return {
-    available: () => loaded() !== null,
+    available: () => activationEnabled && typeof loaded()?.preventActivation === 'function',
     apply: (window) => {
+      if (!activationEnabled) return false
       const native = loaded()
-      if (!native?.preventActivation || window.isDestroyed()) return false
+      if (typeof native?.preventActivation !== 'function' || window.isDestroyed()) return false
       try {
         return native.preventActivation(window.getNativeWindowHandle()) === true
       } catch (error) {
-        deps.warn('[mac panel] Could not keep a panel from activating Surffish:', error)
+        warn('[mac panel] Could not keep a panel from activating Surffish:', error)
         return false
+      }
+    },
+    showOnActiveSpace: (window, label) => {
+      // Not gated on SURFFISH_PANEL_ACTIVATION: that opt-out is about activation, this is about Spaces.
+      const native = loaded()
+      if (!native || window.isDestroyed()) return null
+      if (typeof native.showOnActiveSpace !== 'function') {
+        if (!spaceExportWarned) {
+          spaceExportWarned = true
+          warn('[mac panel] Native addon has no showOnActiveSpace (stale build); panels may come up on another Space.')
+        }
+        return null
+      }
+      try {
+        const report = native.showOnActiveSpace(window.getNativeWindowHandle())
+        if (!report) {
+          deps.log?.('space', `${label} native showOnActiveSpace refused the window handle`)
+          return null
+        }
+        deps.log?.('space', describeSpaceShow(label, report))
+        return report
+      } catch (error) {
+        warn(`[mac panel] Could not show ${label} on the active Space:`, error)
+        return null
       }
     }
   }
+}
+
+let debugLog: ((kind: string, detail: string) => void) | null = null
+
+/** Route panel diagnostics to the mini header debug log (set by mini-window.ts; kept out of here so tests skip electron). */
+export function setPanelDebugLog(log: (kind: string, detail: string) => void): void {
+  debugLog = log
+}
+
+/** When a native Space fallback last ordered a window out and back in (that emits a `hide` that isn't one). */
+const reorderedAt = new WeakMap<object, number>()
+const REORDER_GRACE_MS = 500
+
+/** Record that `window` is being (or was just) reordered by the native Space fallback; `false` clears it. */
+export function noteSpaceReorder(window: object, reordering: boolean, now = Date.now()): void {
+  if (reordering) reorderedAt.set(window, now)
+  else reorderedAt.delete(window)
+}
+
+/** True for a moment after a native Space fallback reordered `window`: its `hide` event is not a real hide. */
+export function isSpaceReorderHide(window: object, now = Date.now()): boolean {
+  const at = reorderedAt.get(window)
+  return at !== undefined && now - at < REORDER_GRACE_MS
 }
 
 const requireFromMain = createRequire(import.meta.url)
@@ -83,8 +224,22 @@ const guard = createPanelActivationGuard({
     const addonPath = join(dirname(fileURLToPath(import.meta.url)), '../native/mac-trackpad-swipe.node')
     return existsSync(addonPath) ? (requireFromMain(addonPath) as PanelActivationAddon) : null
   },
-  warn: (message, error) => (error === undefined ? console.warn(message) : console.warn(message, error))
+  warn: (message, error) => (error === undefined ? console.warn(message) : console.warn(message, error)),
+  log: (kind, detail) => debugLog?.(kind, detail)
 })
+
+/**
+ * macOS: order a shown panel `window` front on the Space the user is on (native showOnActiveSpace).
+ * Call after Electron's showInactive so Chromium knows it is visible. `label`: what the debug log calls it.
+ */
+export function joinActiveSpace(window: BaseWindow, label: string): SpaceShowReport | null {
+  if (process.platform !== 'darwin' || window.isDestroyed()) return null
+  // Marked first: a fallback's orderOut emits `hide` from inside the native call.
+  noteSpaceReorder(window, true)
+  const report = guard.showOnActiveSpace(window, label)
+  noteSpaceReorder(window, report?.fallback === true)
+  return report
+}
 
 /**
  * Make `window` a floating panel: above normal windows ('floating' on macOS), on every Space and over
@@ -102,15 +257,19 @@ export function makeFloatingPanel(window: BaseWindow): void {
 
 /**
  * Bring a floating panel up on the Space the user is on. `focus`: it takes the keyboard too.
- * macOS: every Space again first, shown without focus, then made key on its own. `window.show()` on a
+ * macOS: every Space again first, shown without focus, ordered front on the active Space (native), then made key. `window.show()` on a
  * non-panel (and `app.focus()`) would activate Surffish, and macOS would switch to the Space holding a
  * browser window; `focus()` on a panel only makes it key. Elsewhere: show + focus as before.
  */
-export function showFloatingPanel(window: BaseWindow, focus: boolean): void {
+export function showFloatingPanel(window: BaseWindow, focus: boolean, label = 'panel'): void {
   if (window.isDestroyed()) return
   if (process.platform === 'darwin') {
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     if (!window.isVisible()) window.showInactive()
+    // The window server can keep a panel on the Space it was last shown on (the browser's) even with
+    // every-Spaces behaviour: set it explicitly and order it front here, falling back to
+    // MoveToActiveSpace when it still isn't on this Space (logged to the mini header debug log).
+    joinActiveSpace(window, label)
     if (focus) window.focus()
     window.setAlwaysOnTop(true, 'floating')
     return
