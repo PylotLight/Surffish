@@ -135,3 +135,41 @@ test('unsafe URLs written into the table are dropped on load, like the JSON file
   assert.deepEqual(new SessionStore(db).load()!.windows[0]!.urls, ['https://ok.test/'])
   db.close()
 })
+
+test('back/forward lists are saved beside their tab rows, rewritten only when they change, and gone with the tab', () => {
+  const db = SurffishDatabase.open({ path: ':memory:' })
+  const store = new SessionStore(db)
+  const history = (url: string, state: string) => ({ entries: [{ url: 'https://z.test/', title: 'Z' }, { url, title: 'Here', pageState: state }], index: 1 })
+  const windows = (): SessionWindowInput[] => sampleWindows().map((window, index) => index === 0 ? { ...window, histories: [history('https://a.test/', 's1'), null, history('https://c.test/', 's3'), null] } : window)
+  store.save(normalizeWindowsSession(windows(), 0))
+  assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 2)
+  const loaded = new SessionStore(db).load()!
+  assert.deepEqual(loaded.windows[0]!.histories, [history('https://a.test/', 's1'), null, history('https://c.test/', 's3'), null])
+  assert.equal(loaded.windows[1]!.histories, undefined)
+  // Not synced: nothing about it in the change log.
+  assert.ok(!JSON.stringify(db.all('SELECT payload FROM oplog')).includes('z.test'))
+  const stamp = (url: string): number => db.get<{ updated_at: number }>('SELECT h.updated_at FROM session_tab_history h JOIN session_tabs t ON t.id = h.tab_id WHERE t.url = ?', url)!.updated_at
+  const before = stamp('https://a.test/')
+  db.run('UPDATE session_tab_history SET updated_at = 1')
+  const changed = windows()
+  changed[0] = { ...changed[0]!, histories: [history('https://a.test/', 's1'), null, history('https://c.test/', 's3-scrolled'), null] }
+  store.save(normalizeWindowsSession(changed, 0))
+  assert.equal(stamp('https://a.test/'), 1, 'an unchanged list is not rewritten')
+  assert.ok(stamp('https://c.test/') >= before, 'the changed one is')
+  // Close the tab with a list: its row goes (hard delete, no tombstone keeping the pages).
+  const closed = windows()
+  closed[0] = { ...closed[0]!, urls: closed[0]!.urls.slice(1), tabIds: closed[0]!.tabIds!.slice(1), histories: closed[0]!.histories!.slice(1), groups: [], splits: [], spaces: undefined, activeIndex: 0 }
+  store.save(normalizeWindowsSession(closed, 0))
+  assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 1)
+  store.clear()
+  assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 0)
+  db.close()
+})
+
+test('orphaned back/forward lists (their tab row is gone) are purged on first use', () => {
+  const db = SurffishDatabase.open({ path: ':memory:' })
+  db.run("INSERT INTO session_tab_history (tab_id, entries, active_index, updated_at) VALUES ('ghost', '[]', 0, 1)")
+  new SessionStore(db).load()
+  assert.equal(db.all('SELECT tab_id FROM session_tab_history').length, 0)
+  db.close()
+})

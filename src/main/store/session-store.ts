@@ -3,6 +3,7 @@ import type { SavedTabGroup } from '../../shared/tab-groups'
 import type { SavedSplit } from '../../shared/split-view'
 import { DEFAULT_SPACE_ID, type SavedWindowSpaces } from '../../shared/spaces'
 import { parseSavedWindowState } from '../../shared/window-geometry'
+import type { SavedTabHistory } from '../../shared/tab-history'
 import type { SurffishDatabase } from './database'
 
 /**
@@ -16,6 +17,9 @@ import type { SurffishDatabase } from './database'
  * Stable ids across restarts: restored tabs get new runtime ids, so the first save after a load
  * adopts the loaded row whose window/position/URL matches; after that the runtime id → row id map
  * keeps a tab's row through navigations and moves.
+ *
+ * Each tab's back/forward list lives beside its row in session_tab_history (device-local, no
+ * change log), diffed the same way: a navigation rewrites that one tab's list, nothing else.
  */
 
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -25,6 +29,7 @@ interface WindowRow { id: string; position: number; focused: number; geometry: s
 interface TabRow { id: string; window_id: string; position: number; url: string; pinned: number; active: number; space_id: string | null; group_id: string | null }
 interface GroupRow { id: string; window_id: string; name: string; color: string; collapsed: number; position: number }
 interface SplitRow { id: string; window_id: string; tab_ids: string; sizes: string }
+interface HistoryRow { tab_id: string; entries: string; active_index: number }
 
 type Table = 'session_windows' | 'session_tabs' | 'tab_groups' | 'session_splits'
 
@@ -53,6 +58,8 @@ export class SessionStore {
   private readonly derived = new Map<string, string>()
   /** rowKey (table:id) → serialized values last written. */
   private written = new Map<string, string>()
+  /** Tab row id → back/forward list as last written (JSON of entries + index). */
+  private writtenHistory = new Map<string, string>()
   /** Rows from the last load, by window position, for adopting on the first save. */
   private adoptable: Array<{ windowId: string; tabs: Array<{ id: string; url: string }> }> = []
   private primed = false
@@ -77,6 +84,12 @@ export class SessionStore {
     for (const window of windows) {
       const tabs = this.db.all<TabRow>('SELECT id, window_id, position, url, pinned, active, space_id, group_id FROM session_tabs WHERE window_id = ? AND deleted_at IS NULL ORDER BY position', window.id)
       if (tabs.length === 0) continue
+      const historyRows = new Map(this.db.all<HistoryRow>('SELECT h.tab_id, h.entries, h.active_index FROM session_tab_history h JOIN session_tabs t ON t.id = h.tab_id WHERE t.window_id = ? AND t.deleted_at IS NULL', window.id).map((row) => [row.tab_id, row]))
+      // Validated against each tab's URL by normalizeWindowsSession below, like the JSON copy.
+      const histories = tabs.map((tab) => {
+        const row = historyRows.get(tab.id)
+        return row ? { entries: parseJson(row.entries), index: row.active_index } : null
+      })
       const indexOf = new Map(tabs.map((tab, index) => [tab.id, index]))
       const groups = this.db.all<GroupRow>('SELECT id, window_id, name, color, collapsed, position FROM tab_groups WHERE window_id = ? AND deleted_at IS NULL ORDER BY position', window.id)
       const splits = this.db.all<SplitRow>('SELECT id, window_id, tab_ids, sizes FROM session_splits WHERE window_id = ? AND deleted_at IS NULL', window.id)
@@ -109,7 +122,8 @@ export class SessionStore {
         geometry: parseSavedWindowState(parseJson(window.geometry)),
         splits: savedSplits,
         spaces,
-        groups: savedGroups
+        groups: savedGroups,
+        ...(histories.some(Boolean) ? { histories: histories as unknown as Array<SavedTabHistory | null> } : {})
       })
       this.adoptable.push({ windowId: window.id, tabs: tabs.map((tab) => ({ id: tab.id, url: tab.url })) })
       groups.forEach((group, index) => this.derived.set(`group:${window.id}:${index}:${group.name}:${group.color}`, group.id))
@@ -127,6 +141,7 @@ export class SessionStore {
   save(session: SavedWindowsSession): void {
     this.prime()
     const desired: Desired[] = []
+    const desiredHistory = new Map<string, SavedTabHistory>()
     const liveWindowRows = new Set<string>()
     session.windows.forEach((window, windowIndex) => {
       const windowId = this.windowRowId(window, windowIndex)
@@ -154,6 +169,8 @@ export class SessionStore {
         }
       })
       window.urls.forEach((url, index) => {
+        const history = window.histories?.[index]
+        if (history) desiredHistory.set(tabIds[index]!, history)
         desired.push({
           table: 'session_tabs',
           id: tabIds[index]!,
@@ -186,7 +203,7 @@ export class SessionStore {
       })
       : []
     for (const key of [...this.windowRows.keys()]) if (!liveWindowRows.has(this.windowRows.get(key)!)) this.windowRows.delete(key)
-    this.apply(desired)
+    this.apply(desired, desiredHistory)
     const liveRows = new Set(desired.map((row) => row.id))
     for (const [runtimeId, rowId] of [...this.tabRows]) if (!liveRows.has(rowId)) this.tabRows.delete(runtimeId)
     for (const [identity, rowId] of [...this.derived]) if (!liveRows.has(rowId)) this.derived.delete(identity)
@@ -195,15 +212,16 @@ export class SessionStore {
   /** Forget the saved session (Clear browsing data → "open tabs"): tombstone every row. */
   clear(): void {
     this.prime()
-    this.apply([])
+    this.apply([], new Map())
     this.windowRows.clear()
     this.tabRows.clear()
     this.derived.clear()
     this.adoptable = []
   }
 
-  private apply(desired: Desired[]): void {
+  private apply(desired: Desired[], histories: ReadonlyMap<string, SavedTabHistory>): void {
     const next = new Map<string, string>()
+    const nextHistory = new Map<string, string>()
     this.db.transaction(() => {
       const stamp = this.db.stamp()
       for (const row of desired) {
@@ -230,9 +248,23 @@ export class SessionStore {
         const blank = table === 'session_tabs' ? ", url = '', title = '', favicon_url = NULL" : ''
         this.db.run(`UPDATE ${table} SET deleted_at = ?, updated_at = ?, hlc = ?, device_id = ?${blank} WHERE id = ? AND deleted_at IS NULL`, now, now, hlc, deviceId, id)
       }
+      for (const [tabId, history] of histories) {
+        const serialized = JSON.stringify([history.entries, history.index])
+        nextHistory.set(tabId, serialized)
+        if (this.writtenHistory.get(tabId) === serialized) continue
+        this.db.run(
+          'INSERT INTO session_tab_history (tab_id, entries, active_index, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (tab_id) DO UPDATE SET entries = excluded.entries, active_index = excluded.active_index, updated_at = excluded.updated_at',
+          tabId, JSON.stringify(history.entries), history.index, stamp.now
+        )
+      }
+      // A closed tab (or one whose list is gone) keeps no back/forward pages on disk.
+      for (const tabId of this.writtenHistory.keys()) {
+        if (!nextHistory.has(tabId)) this.db.run('DELETE FROM session_tab_history WHERE tab_id = ?', tabId)
+      }
       this.db.setMeta(SAVED_AT_KEY, String(stamp.now))
     })
     this.written = next
+    this.writtenHistory = nextHistory
   }
 
   /** Read this device's live rows once, so the first save only writes what changed. */
@@ -246,12 +278,17 @@ export class SessionStore {
         this.db.run(`DELETE FROM oplog WHERE entity_id IN (SELECT id FROM ${table} WHERE device_id = ? AND deleted_at IS NOT NULL AND deleted_at < ?)`, device, cutoff)
         this.db.run(`DELETE FROM ${table} WHERE device_id = ? AND deleted_at IS NOT NULL AND deleted_at < ?`, device, cutoff)
       }
+      // Lists whose tab is gone (closed by a build without this table, or another device's row).
+      this.db.run('DELETE FROM session_tab_history WHERE tab_id NOT IN (SELECT id FROM session_tabs WHERE device_id = ? AND deleted_at IS NULL)', device)
     })
     for (const table of Object.keys(COLUMNS) as Table[]) {
       const columns = COLUMNS[table]
       for (const row of this.db.all<Record<string, string | number | null>>(`SELECT id, ${columns.join(', ')} FROM ${table} WHERE device_id = ? AND deleted_at IS NULL`, device)) {
         this.written.set(`${table}:${String(row.id)}`, JSON.stringify(columns.map((column) => row[column] ?? null)))
       }
+    }
+    for (const row of this.db.all<HistoryRow>('SELECT tab_id, entries, active_index FROM session_tab_history')) {
+      this.writtenHistory.set(row.tab_id, JSON.stringify([parseJson(row.entries), row.active_index]))
     }
   }
 

@@ -3,6 +3,7 @@ import { parseSavedWindowState, type SavedWindowState } from './window-geometry'
 import { parseSessionSplits, remapSessionSplits, type SavedSplit } from './split-view'
 import { parseSavedWindowSpaces, remapSavedWindowSpaces, type SavedWindowSpaces } from './spaces'
 import { parseSavedTabGroups, remapSavedTabGroups, type SavedTabGroup } from './tab-groups'
+import { capSessionHistories, normalizeTabHistory, type SavedTabHistory } from './tab-history'
 
 /**
  * The saved session with several windows.
@@ -27,6 +28,8 @@ export interface SavedSessionWindow {
   spaces?: SavedWindowSpaces
   /** Tab groups (indexes into `urls`, tab-groups.ts); left out when there are none. */
   groups?: SavedTabGroup[]
+  /** Each tab's back/forward list (tab-history.ts), same order as `urls`, null for none; left out when no tab has one. */
+  histories?: Array<SavedTabHistory | null>
   /** Runtime tab ids, same order as `urls` (lets the profile database keep stable row ids). Not written to JSON. */
   tabIds?: string[]
   /** Runtime window key (BaseWindow id). Not written to JSON. */
@@ -47,6 +50,8 @@ export interface SessionWindowInput {
   splits?: readonly SavedSplit[]
   spaces?: SavedWindowSpaces | null
   groups?: readonly SavedTabGroup[]
+  /** Back/forward lists, same order as `urls` (live captures or read from disk; validated here). */
+  histories?: readonly unknown[]
   tabIds?: readonly string[]
   windowKey?: string
 }
@@ -109,6 +114,28 @@ function normalizeTabIds(window: SessionWindowInput, keptCount: number): string[
   return out.length === keptCount ? out : null
 }
 
+/** Back/forward lists re-pointed at the kept tabs and validated against their URLs; null when none is left. */
+function normalizeHistories(window: SessionWindowInput, kept: readonly string[]): Array<SavedTabHistory | null> | null {
+  if (!window.histories || window.histories.length === 0) return null
+  const out: Array<SavedTabHistory | null> = kept.map(() => null)
+  for (const [index, at] of keptIndexMap(window, kept.length)) out[at] = normalizeTabHistory(window.histories[index], kept[at]!)
+  return out.some(Boolean) ? out : null
+}
+
+/** One size cap over every window's lists together (tab-history.ts). */
+function capHistories(windows: SavedSessionWindow[]): void {
+  const flat = windows.flatMap((window) => window.histories ?? window.urls.map(() => null))
+  if (!flat.some(Boolean)) return
+  const capped = capSessionHistories(flat)
+  let offset = 0
+  for (const window of windows) {
+    const mine = capped.slice(offset, offset + window.urls.length)
+    offset += window.urls.length
+    if (mine.some(Boolean)) window.histories = mine
+    else delete window.histories
+  }
+}
+
 /** Clean up windows to save: safe URLs only, windows left without tabs are dropped. */
 export function normalizeWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): SavedWindowsSession {
   const kept: SavedSessionWindow[] = []
@@ -121,8 +148,10 @@ export function normalizeWindowsSession(windows: readonly SessionWindowInput[], 
     const spaces = normalizeSpaces(window, session.urls.length)
     const groups = normalizeGroups(window, session.urls.length, session.pinnedIndexes)
     const tabIds = normalizeTabIds(window, session.urls.length)
-    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}), ...(groups.length > 0 ? { groups } : {}), ...(tabIds ? { tabIds } : {}), ...(typeof window.windowKey === 'string' ? { windowKey: window.windowKey } : {}) })
+    const histories = normalizeHistories(window, session.urls)
+    kept.push({ ...session, geometry: window.geometry ? parseSavedWindowState(window.geometry) : null, ...(splits.length > 0 ? { splits } : {}), ...(spaces ? { spaces } : {}), ...(groups.length > 0 ? { groups } : {}), ...(histories ? { histories } : {}), ...(tabIds ? { tabIds } : {}), ...(typeof window.windowKey === 'string' ? { windowKey: window.windowKey } : {}) })
   })
+  capHistories(kept)
   // A focused window that was dropped (or an out-of-range index) falls back to the last one.
   return { windows: kept, focusedIndex: clampFocused(focused, kept.length) }
 }
@@ -143,6 +172,7 @@ export function serializeWindowsSession(session: SavedWindowsSession): Record<st
       ...(window.splits && window.splits.length > 0 ? { splits: window.splits } : {}),
       ...(window.spaces ? { spaces: window.spaces } : {}),
       ...(window.groups && window.groups.length > 0 ? { groups: window.groups } : {}),
+      ...(window.histories ? { histories: window.histories } : {}),
       ...(window.geometry ? { bounds: window.geometry.bounds, maximized: window.geometry.maximized, fullScreen: window.geometry.fullScreen } : {})
     }))
   }
@@ -161,7 +191,9 @@ export function parseWindowsSession(value: unknown, legacyGeometry: SavedWindowS
       geometry: parseSavedWindowState(window),
       splits: Array.isArray(window.splits) ? window.splits as SavedSplit[] : [],
       spaces: parseSavedWindowSpaces(window.spaces, Array.isArray(window.tabs) ? window.tabs.length : 0),
-      groups: Array.isArray(window.groups) ? window.groups as SavedTabGroup[] : []
+      groups: Array.isArray(window.groups) ? window.groups as SavedTabGroup[] : [],
+      // Older files have none; each list is checked against its tab's URL in normalizeWindowsSession.
+      histories: Array.isArray(window.histories) ? window.histories as unknown[] : []
     }))
     const focused = typeof value.focusedWindow === 'number' ? value.focusedWindow : windows.length - 1
     const session = normalizeWindowsSession(windows, focused)

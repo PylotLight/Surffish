@@ -193,13 +193,18 @@ export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | nul
   return session
 }
 
-export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): void {
+/**
+ * `collectHistories` reads each window's back/forward lists (same order as its `urls`). It runs
+ * when the coalesced write does, not per call, so a burst of tab events captures them once.
+ */
+export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number, collectHistories?: () => ReadonlyArray<readonly unknown[] | undefined>): void {
   if (sessionPersistenceDisabled) return
-  const saved = normalizeWindowsSession(windows, focusedIndex)
   // The startup import is stale now; this save writes the current session instead.
   cancelDeferredWrite('session-import')
   deferWrite('session', () => {
     if (sessionPersistenceDisabled) return
+    const histories = collectHistories?.()
+    const saved = normalizeWindowsSession(histories ? windows.map((window, index) => ({ ...window, histories: histories[index] })) : windows, focusedIndex)
     const wroteJson = writeJson(SESSION_FILE, serializeWindowsSession(saved))
     // Only mark the JSON file as matching the database when both writes landed; otherwise the
     // next start sees a changed file and restores from JSON.

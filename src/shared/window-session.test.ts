@@ -57,4 +57,26 @@ describe('window session', () => {
     const parsed = parseWindowsSession({ version: 1, tabs: ['https://a.example/'], activeIndex: 0, windows: [{ tabs: ['nope'] }] })
     expect(parsed.windows).toEqual([{ urls: ['https://a.example/'], activeIndex: 0, pinnedIndexes: [], geometry: null }])
   })
+  test('back/forward lists ride along per tab, follow kept tabs, and older files without them still load', () => {
+    const history = (path: string) => ({ entries: [{ url: 'https://a.example/', title: 'A' }, { url: `https://a.example/${path}`, title: path, pageState: 'state' }], index: 1 })
+    const session = normalizeWindowsSession([{
+      urls: ['javascript:alert(1)', 'https://a.example/one', 'https://b.example/', 'https://a.example/two'],
+      activeIndex: 1,
+      pinnedIndexes: [],
+      geometry: null,
+      // The dropped tab's list goes with it; a list that doesn't end on its tab's URL is dropped.
+      histories: [history('x'), history('one'), history('nope'), history('two')]
+    }], 0)
+    expect(session.windows[0]!.urls).toEqual(['https://a.example/one', 'https://b.example/', 'https://a.example/two'])
+    expect(session.windows[0]!.histories).toEqual([history('one'), null, history('two')])
+    const text = JSON.stringify(serializeWindowsSession(session))
+    expect(parseWindowsSession(JSON.parse(text))).toEqual(session)
+    // No lists at all: the field is left out, so the file reads as before.
+    const plain = normalizeWindowsSession([{ urls: ['https://a.example/'], activeIndex: 0, pinnedIndexes: [], geometry: null, histories: [null] }], 0)
+    expect('histories' in plain.windows[0]!).toBe(false)
+    expect('histories' in (serializeWindowsSession(plain).windows as Array<Record<string, unknown>>)[0]!).toBe(false)
+    // Garbage in an edited file is ignored per tab.
+    const edited = parseWindowsSession({ version: 1, windows: [{ tabs: ['https://a.example/one'], activeIndex: 0, histories: 'nope' }] })
+    expect(edited.windows[0]!.histories).toBeUndefined()
+  })
 })

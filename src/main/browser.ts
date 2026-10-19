@@ -47,6 +47,7 @@ import { handleCommandPaletteShortcut } from './command-palette'
 import { resolveAddressInput } from './search-keywords'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
+import type { SavedTabHistory } from '../shared/tab-history'
 import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, presentWakeSnapshotAtStartup } from './wake-snapshot'
 import { forgetWakeSnapshotOnDisk, pruneWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
@@ -368,8 +369,9 @@ function getState(w = currentWindowState()): BrowserState {
     title: tab ? pageTitle(tab) : 'New tab',
     loading: contents?.isLoading() ?? false,
     // Back from the editor returns to the viewer.
-    canGoBack: tab?.pdfEditor ? true : contents?.navigationHistory.canGoBack() ?? false,
-    canGoForward: tab?.pdfEditor ? false : contents?.navigationHistory.canGoForward() ?? false,
+    // A restored tab that hasn't loaded yet answers from the list it will wake with.
+    canGoBack: tab?.pdfEditor ? true : contents?.navigationHistory.canGoBack() ?? (tab?.restoreHistory ? tab.restoreHistory.index > 0 : false),
+    canGoForward: tab?.pdfEditor ? false : contents?.navigationHistory.canGoForward() ?? (tab?.restoreHistory ? tab.restoreHistory.index < tab.restoreHistory.entries.length - 1 : false),
     error: tab?.error ?? null,
     private: tab?.isPrivate ?? w?.isPrivate ?? false,
     zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
@@ -639,11 +641,34 @@ function publishAllWindows(): void {
 /** Freeze the saved session while the app quits, so windows closing one by one don't drop out of it. */
 let sessionFrozen = false
 export function freezeBrowserSession(): void {
-  persistOpenTabs()
+  // Read the back/forward lists now: the flush at quit may run after the windows (and their pages) are gone.
+  persistOpenTabs(true)
   sessionFrozen = true
 }
 
-function persistOpenTabs(): void {
+/** The last back/forward list read from each live tab, for when its page is gone by the time the write runs. */
+const lastSessionHistory = new WeakMap<BrowserTab, BrowserTab['restoreHistory']>()
+
+/**
+ * What a tab's back/forward list is for the saved session: the live page's, else the one it went
+ * to sleep with (or was restored with and hasn't woken to yet). Validated and capped in
+ * shared/tab-history.ts; the editor's view (PDF editor) has no page history worth keeping.
+ */
+function sessionHistoryOf(tab: BrowserTab): BrowserTab['restoreHistory'] {
+  if (tab.pdfEditor || tab.extensionPageOrigin) return null
+  const contents = tab.view?.webContents
+  if (!contents) return tab.restoreHistory
+  if (contents.isDestroyed()) return lastSessionHistory.get(tab) ?? null
+  try {
+    const history = { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
+    lastSessionHistory.set(tab, history)
+    return history
+  } catch {
+    return lastSessionHistory.get(tab) ?? null
+  }
+}
+
+function persistOpenTabs(captureHistoryNow = false): void {
   if (sessionFrozen) return
   // Private windows are never saved; private tabs in normal windows are skipped.
   const windows = windowStates.filter((w) => !w.isPrivate && !w.mini && !w.window.isDestroyed())
@@ -665,6 +690,7 @@ function persistOpenTabs(): void {
     return list
   }
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
+  const keptTabs: BrowserTab[][] = []
   const saved = windows.map((w) => {
     // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
     // Nor is the Settings tab: it is opened again from the gear / ⌘, and costs nothing to rebuild.
@@ -672,6 +698,7 @@ function persistOpenTabs(): void {
     const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
     const spaces = encodeWindowSpaces(w, kept)
     const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
+    keptTabs.push(kept)
     return {
       urls: kept.map(currentUrl),
       // Settings active at quit: the tab used before it comes back as the active one.
@@ -686,7 +713,10 @@ function persistOpenTabs(): void {
     }
   })
   const focused = windowStateFor(focusedBrowserWindow())
-  saveBrowserWindowsSession(saved, focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1)
+  // Back/forward lists are read when the coalesced write runs (once per burst), or now at quit.
+  const collect = (): BrowserTab['restoreHistory'][][] => keptTabs.map((kept) => kept.map(sessionHistoryOf))
+  const captured = captureHistoryNow ? collect() : null
+  saveBrowserWindowsSession(saved, focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1, captured ? () => captured : collect)
 }
 
 function windowGeometry(window: BaseWindow): SavedWindowState | null {
@@ -2364,7 +2394,7 @@ export interface BrowserWindowInit {
   /** A private window: all of its tabs are private and it is never saved. */
   private?: boolean
   /** Tabs to restore (a saved window from the session file). */
-  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null; groups?: readonly SavedTabGroup[] }
+  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null; groups?: readonly SavedTabGroup[]; histories?: ReadonlyArray<SavedTabHistory | null> }
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string
 }
@@ -2432,6 +2462,10 @@ export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {})
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
       const tab = id ? getTab(id) : undefined
       if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
+      // Its back/forward list from the last run: the first load restores it (navigationHistory.restore),
+      // so Back/Forward, the hold-Back menu and the page's scroll position all come back.
+      const history = saved.histories?.[index]
+      if (tab && history && history.entries[history.index]?.url === currentUrl(tab)) tab.restoreHistory = { entries: history.entries.map((entry) => ({ ...entry })), index: history.index }
     })
     for (const split of saved.splits ?? []) {
       const ids = split.tabs.map((index) => restoredIds[index] ?? null)
