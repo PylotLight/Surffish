@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
-import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFRawStream, StandardFonts, decodePDFRawStream } from 'pdf-lib'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const electron = createRequire(import.meta.url)('electron')
@@ -189,9 +189,19 @@ try {
     const pad = document.getElementById('signaturePad')
     const box = pad.getBoundingClientRect()
     const at = (t) => ({ bubbles: true, clientX: box.left + box.width * (0.1 + t * 0.8), clientY: box.top + box.height * (0.5 + Math.sin(t * 6) * 0.3), pointerId: 2, isPrimary: true, pointerType: 'mouse', buttons: 1 })
+    // Pen weight + blue ink, then a stray stroke that Undo stroke takes back.
+    const weight = document.getElementById('signatureThickness')
+    weight.value = '3'
+    weight.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('[data-signature-ink="blue"]').click()
     pad.dispatchEvent(new PointerEvent('pointerdown', at(0)))
     for (let i = 1; i <= 20; i += 1) pad.dispatchEvent(new PointerEvent('pointermove', at(i / 20)))
     pad.dispatchEvent(new PointerEvent('pointerup', at(1)))
+    pad.dispatchEvent(new PointerEvent('pointerdown', at(0.5)))
+    pad.dispatchEvent(new PointerEvent('pointermove', at(0.6)))
+    pad.dispatchEvent(new PointerEvent('pointerup', at(0.6)))
+    document.getElementById('signatureUndo').click()
+    if (document.getElementById('signatureUndo').disabled) throw new Error('undo stroke removed every stroke')
     document.getElementById('signatureAdd').click()
   })()`)
   await until('a signature', () => editor.eval(`!document.getElementById('signatureDialog').open && Boolean(document.querySelector('.signatureEditor:not([hidden])'))`))
@@ -236,6 +246,15 @@ try {
   const ink = annots.find((annot) => annot.get(PDFName.of('Subtype'))?.toString() === '/Ink')
   const inkColor = ink?.get(PDFName.of('C'))?.asArray?.().map((part) => Math.round(part.asNumber() * 100) / 100)
   if (!inkColor || inkColor[0] < 0.7 || inkColor[1] > 0.3) throw new Error(`drawing did not use the chosen colour (C=${JSON.stringify(inkColor)})`)
+  // The signature (a /Stamp whose appearance stream fills the outline) keeps its ink, blue
+  // ballpoint #1f3a8a, rather than pdf.js's default black.
+  const fills = annots.filter((annot) => annot.get(PDFName.of('Subtype'))?.toString() === '/Stamp').map((annot) => {
+    const appearance = saved.context.lookup(saved.context.lookup(annot.get(PDFName.of('AP')))?.get(PDFName.of('N')))
+    if (!(appearance instanceof PDFRawStream)) return null
+    const text = Buffer.from(decodePDFRawStream(appearance).decode()).toString('latin1')
+    return text.match(/([\d.]+) ([\d.]+) ([\d.]+) rg/)?.slice(1).map(Number) ?? null
+  })
+  if (!fills.some((fill) => fill && Math.abs(fill[0] - 0.12) < 0.03 && Math.abs(fill[1] - 0.23) < 0.03 && Math.abs(fill[2] - 0.54) < 0.03)) throw new Error(`signature did not keep its blue ink (fills=${JSON.stringify(fills)})`)
   const value = saved.getForm().getTextField('smoke.name').getText()
   if (value !== 'Ada Lovelace') throw new Error(`form value not saved (got ${value})`)
   console.log(`✓ saved ${output}: 2 pages, page 1 rotated 90°, form value kept, annotations ${subtypes.join(', ')}`)

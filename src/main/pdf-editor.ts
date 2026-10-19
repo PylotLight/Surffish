@@ -55,6 +55,7 @@ const CONTENT_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.gif': 'image/gif',
   '.wasm': 'application/wasm',
+  '.woff2': 'font/woff2',
   '.json': 'application/json'
 }
 

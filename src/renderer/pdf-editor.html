@@ -123,15 +123,41 @@
         </div>
         <div class="signature-pane" data-signature-pane="draw">
           <canvas id="signaturePad" width="560" height="180" aria-label="Draw your signature"></canvas>
-          <button type="button" id="signatureClear" class="link">Clear</button>
+          <div class="pad-tools">
+            <label class="weight" title="Pen weight">Pen <input type="range" id="signatureThickness" min="0" max="4" step="1" value="2" aria-label="Pen weight, fine to bold" /></label>
+            <span class="spacer"></span>
+            <button type="button" id="signatureUndo" class="link" title="Undo the last stroke (⌘Z)" disabled>Undo stroke</button>
+            <button type="button" id="signatureClear" class="link">Clear</button>
+          </div>
         </div>
         <div class="signature-pane" data-signature-pane="type" hidden>
-          <input type="text" id="signatureText" placeholder="Type your name" autocomplete="name" spellcheck="false" />
+          <div class="typed-row">
+            <input type="text" id="signatureText" placeholder="Type your name" autocomplete="name" spellcheck="false" />
+            <button type="button" id="signatureBold" class="toggle" aria-pressed="false" title="Heavier lettering"><b>B</b></button>
+          </div>
+          <div id="signatureFonts" class="font-choices" role="radiogroup" aria-label="Signature style"></div>
         </div>
         <div class="signature-pane" data-signature-pane="image" hidden>
-          <input type="file" id="signatureImage" accept="image/png,image/jpeg,image/webp" />
-          <img id="signatureImagePreview" alt="Signature image preview" hidden />
-          <p class="hint">A photo or scan of your signature on white paper works best.</p>
+          <label id="signatureDrop" class="drop">
+            <input type="file" id="signatureImage" accept="image/png,image/jpeg,image/webp" />
+            <span>Choose, drop or paste (⌘V) a photo or scan of your signature</span>
+          </label>
+          <canvas id="signatureImagePreview" width="560" height="140" aria-label="Signature image preview" hidden></canvas>
+          <p class="hint">The paper background is removed and the image is cropped to the ink.</p>
+        </div>
+        <div class="style-row">
+          <div class="inks" role="radiogroup" aria-label="Ink">
+            <button type="button" role="radio" data-signature-ink="black" aria-checked="true" title="Black ink"><span class="swatch"></span></button>
+            <button type="button" role="radio" data-signature-ink="blue" aria-checked="false" title="Blue ballpoint"><span class="swatch"></span></button>
+            <button type="button" role="radio" data-signature-ink="fountain" aria-checked="false" title="Fountain blue"><span class="swatch"></span></button>
+          </div>
+          <span class="spacer"></span>
+          <div class="sizes tabs" role="radiogroup" aria-label="Size on the page">
+            <span class="label">Size</span>
+            <button type="button" role="radio" data-signature-size="s" aria-checked="false" title="Small">S</button>
+            <button type="button" role="radio" data-signature-size="m" aria-checked="true" title="Medium">M</button>
+            <button type="button" role="radio" data-signature-size="l" aria-checked="false" title="Large">L</button>
+          </div>
         </div>
         <label class="description">Description (alt text) <input type="text" id="signatureDescription" value="Signature" maxlength="80" /></label>
         <label class="remember"><input type="checkbox" id="signatureRemember" checked /> Save for next time</label>

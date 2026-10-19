@@ -241,7 +241,7 @@ export class FormSupport {
     host.signatures.setPlacement({
       onPlaced: (editor) => {
         const placed = editor as EditorGeometry
-        this.#fitToField(placed, pageIndex, widget)
+        this.#fitToField(placed, pageIndex, widget, host.signatures.placementHeight(initials ? 'initials' : 'signature'))
         this.#signed.set(widget.id, placed)
         this.#refreshSignedFields()
         void host.switchTool('none')
@@ -258,8 +258,12 @@ export class FormSupport {
     layer.addNewEditor()
   }
 
-  /** Scale the placed signature to fit the field (keeping its aspect ratio) and centre it there. */
-  #fitToField(editor: EditorGeometry, pageIndex: number, widget: WidgetData): void {
+  /**
+   * Fit the placed signature inside the field with some padding, keeping its aspect ratio, and no
+   * taller than the chosen signature size (a tall box shouldn't get a huge, bold signature). Centred
+   * across, sitting a little low, where the signing line usually is.
+   */
+  #fitToField(editor: EditorGeometry, pageIndex: number, widget: WidgetData, maxHeight: number): void {
     const view = this.#host.viewer.getPageView(pageIndex) as PageView | undefined
     const page = view?.pdfPage
     if (!page || view.viewport.rotation % 360 !== 0) return
@@ -271,10 +275,10 @@ export class FormSupport {
     const fieldHeight = Math.abs(r3 - r1)
     if (!(fieldWidth > 2 && fieldHeight > 2 && editor.width > 0 && editor.height > 0)) return
     const aspect = (editor.width * pageWidth) / (editor.height * pageHeight)
-    let height = fieldHeight * 0.9
+    let height = Math.min(fieldHeight * 0.8, maxHeight)
     let width = height * aspect
-    if (width > fieldWidth * 0.96) {
-      width = fieldWidth * 0.96
+    if (width > fieldWidth * 0.92) {
+      width = fieldWidth * 0.92
       height = width / aspect
     }
     editor.width = width / pageWidth
@@ -282,7 +286,7 @@ export class FormSupport {
     editor.setDims?.()
     editor._onResized?.()
     editor.x = (Math.min(r0, r2) - vx0 + (fieldWidth - width) / 2) / pageWidth
-    editor.y = (vy1 - Math.max(r1, r3) + (fieldHeight - height) / 2) / pageHeight
+    editor.y = (vy1 - Math.max(r1, r3) + (fieldHeight - height) * 0.6) / pageHeight
     editor.fixAndSetPosition?.()
     editor._onTranslated?.()
     editor.onScaleChanging?.()
