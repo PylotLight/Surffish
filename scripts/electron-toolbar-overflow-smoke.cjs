@@ -83,10 +83,19 @@ async function run() {
   const origin = `http://127.0.0.1:${server.address().port}`
   writeFileSync(join(userData, 'browser-session.json'), JSON.stringify({ version: 1, tabs: [`${origin}/start`], activeIndex: 0 }))
 
+  app.on('web-contents-created', (_e, wc) => {
+    wc.on('focus', () => console.log('[tb-debug] focus ->', Date.now() % 100000, wc.getURL().slice(-40), 'winFocused', BaseWindow.getAllWindows()[0]?.isFocused()))
+    const focusFn = wc.focus.bind(wc)
+    wc.focus = () => { console.log('[tb-debug] focus() call', Date.now() % 100000, new Error().stack.split('\n').slice(2, 7).map((l) => l.trim().replace(/\(.*\/out\/main\//, '(')).join(' | ')); return focusFn() }
+    wc.on('did-finish-load', () => console.log('[tb-debug] loaded', Date.now() % 100000, wc.getURL().slice(-40)))
+  })
   await import(pathToFileURL(resolve(__dirname, '../out/main/index.js')).href)
   await app.whenReady()
   const mainWindow = await waitFor(() => BaseWindow.getAllWindows()[0], 'the main window')
   mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 760 })
+  console.log('[tb-debug] window found focused', mainWindow.isFocused(), Date.now() % 100000)
+  mainWindow.on('focus', () => console.log('[tb-debug] window focus event', Date.now() % 100000))
+  mainWindow.on('blur', () => console.log('[tb-debug] window blur event', Date.now() % 100000))
   const viewFor = (surface) => mainWindow.contentView.children.find((view) => surfaceOf(view.webContents) === surface)
   const toolbar = await waitFor(() => viewFor('toolbar'), 'the toolbar surface')
   const sidebar = await waitFor(() => viewFor('sidebar'), 'the sidebar surface')
@@ -96,6 +105,11 @@ async function run() {
   toolbar.webContents.on('did-start-navigation', (d) => console.log('[tb-debug] toolbar navigation', Date.now() % 100000, d?.url ?? ''))
   await ready(toolbar)
   await ready(sidebar)
+  // The restored tab's page takes keyboard focus on its own once it attaches, a moment after the
+  // window shows (natively, no focus() call), which blurs the toolbar and light-dismisses whatever
+  // popover a fast test had already opened there. Start once the page has loaded and owns focus.
+  const page = await waitFor(() => mainWindow.contentView.children.find((view) => view.webContents.getURL().startsWith(origin)), 'the restored page view')
+  await waitFor(() => !page.webContents.isLoading() && page.webContents.isFocused(), 'the restored page to load and take focus')
   const inToolbar = (expression) => smoke.evaluate(toolbar.webContents, expression)
   await waitFor(() => inToolbar('Boolean(document.querySelector(".toolbar-items .toolbar-slot"))'), 'the toolbar buttons')
   const shown = () => inToolbar('[...document.querySelectorAll(".toolbar-items > .toolbar-slot:not(.is-folded)")].map((slot) => slot.dataset.toolbarItem)')
