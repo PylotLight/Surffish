@@ -149,11 +149,17 @@ async function run() {
   assert.equal(await inToolbar('document.querySelector(".toolbar-brand").getAttribute("aria-expanded")'), 'true')
   assert.ok(await inToolbar('[...document.querySelectorAll("#surffish-menu [role=menuitem]")].map((item) => item.textContent).join("|").includes("Customize toolbar…")'), 'Customize toolbar… in the menu')
   assert.ok(await inToolbar('[...document.querySelectorAll("#surffish-menu, #surffish-menu *")].every((el) => !el.textContent.trim() || parseFloat(getComputedStyle(el).fontSize) >= 11)'), 'menu text is at least 11px')
-  assert.equal(await inToolbar('document.activeElement?.closest("#surffish-menu") !== null && document.activeElement.getAttribute("role") === "menuitem"'), true, 'focus moves into the menu')
+  await waitFor(() => inToolbar('document.activeElement?.closest("#surffish-menu") !== null && document.activeElement.getAttribute("role") === "menuitem"'), 'focus to move into the menu')
+  assert.equal(await inToolbar('document.activeElement?.dataset.toolbarItem'), expected[0], 'focus starts on the first item')
+  // Input events and executeJavaScript travel on different pipes: the key can land after the next
+  // read, so wait for the focus to move rather than reading it straight away.
   key('Down')
-  assert.equal(await inToolbar('document.activeElement?.dataset.toolbarItem'), expected[1], 'arrow keys move through the items')
-  const menuFits = await inToolbar('Math.ceil(document.querySelector("#surffish-menu").getBoundingClientRect().bottom)')
-  assert.ok(menuFits <= toolbar.getBounds().height, `the menu fits the toolbar view (${menuFits} <= ${toolbar.getBounds().height})`)
+  await waitFor(async () => (await inToolbar('document.activeElement?.dataset.toolbarItem')) === expected[1], `arrow keys to move through the items (to ${expected[1]})`)
+  // The toolbar view grows to fit the menu once the renderer reports its extent (next frame + an
+  // IPC round trip to main), so the view height is read until it catches up.
+  const menuBottom = () => inToolbar('Math.ceil(document.querySelector("#surffish-menu").getBoundingClientRect().bottom)')
+  await waitFor(async () => (await menuBottom()) <= toolbar.getBounds().height, 'the toolbar view to grow to fit the menu', 10000)
+    .catch(async (error) => { throw new Error(`${error.message} (menu bottom ${await menuBottom()}, view height ${toolbar.getBounds().height})`) })
   await shot('surffish-menu', toolbar, rightPart())
   key('Escape')
   await waitFor(() => inToolbar('!document.querySelector("#surffish-menu") && document.activeElement?.classList.contains("toolbar-brand")'), 'Escape to close the menu and focus the menu button')

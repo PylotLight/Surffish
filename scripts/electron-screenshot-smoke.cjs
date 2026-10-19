@@ -142,6 +142,7 @@ async function run() {
   page.webContents.focus()
   key(page, 'S', [primary, 'shift'])
   const overlay = await waitFor(() => overlayView(), 'the screenshot overlay')
+  if (process.env.SURFFISH_SCREENSHOT_DEBUG === '1') overlay.webContents.on('console-message', (...args) => { const m = args[0]?.message ?? args[2]; if (String(m).includes('shot-debug')) console.log('[overlay]', Date.now() % 100000, m) })
   await waitFor(async () => (await mode(overlay)) === 'select', 'select mode')
   await waitFor(() => overlay.getVisible() && overlay.getBounds().width === pageBounds.width, 'the overlay to cover the page')
   assert.deepEqual(overlay.getBounds(), pageBounds, 'select overlay sits exactly over the page')
@@ -407,6 +408,7 @@ async function run() {
   process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '800'
   // Same renderer, same IPC pipe: the activity ping lands after the hover, so it can't arm a countdown.
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }))')
+  if (process.env.SURFFISH_SCREENSHOT_DEBUG === '1') console.log('[shot-debug] test: hover+key sent', Date.now() % 100000)
   const holdUntil = Date.now() + 2500
   while (Date.now() < holdUntil) {
     assert.ok(overlay.getVisible(), 'hovering the preview holds it open')

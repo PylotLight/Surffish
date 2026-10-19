@@ -1,0 +1,96 @@
+name: flaky-repro (temporary, remove before merge)
+on:
+  push:
+    branches: [fix/flaky-toolbar-screenshot]
+permissions:
+  contents: read
+concurrency:
+  group: flaky-repro-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  repro:
+    name: repro ${{ matrix.shard }}
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 40
+    env:
+      SMOKE_WAIT_MS: 90000
+      SURFFISH_SCREENSHOT_DEBUG: '1'
+      ITER: '5'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules
+      # Set SURFFISH_CI_CACHE on the runner (or mount a writable /cache) to keep bun, its package
+      # cache and the Electron zip across ephemeral pods. Without it nothing changes.
+      - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
+        run: |
+          dir="${SURFFISH_CI_CACHE:-}"
+          if [ -z "$dir" ] && [ -d /cache ] && [ -w /cache ]; then dir=/cache/surffish; fi
+          if [ -n "$dir" ] && mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+            echo "using persistent cache at $dir"
+            {
+              echo "BUN_INSTALL=$dir/bun"
+              echo "BUN_INSTALL_CACHE_DIR=$dir/bun-install-cache"
+              echo "ELECTRON_CACHE=$dir/electron"
+            } >> "$GITHUB_ENV"
+          else
+            echo "no persistent cache mounted, everything downloads fresh"
+            echo "BUN_INSTALL=$HOME/.bun" >> "$GITHUB_ENV"
+          fi
+      - name: Bun (pinned to .bun-version, installed into $BUN_INSTALL if missing)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          "$BUN_INSTALL/bin/bun" --version
+      - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
+        run: bash scripts/ci/bun-as-node.sh
+      - name: bun install (fails if any Node.js process runs)
+        run: bash scripts/ci/watch-node.sh bun install
+      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+        run: |
+          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+          if sudo -n true 2>/dev/null; then
+            sudo chown root:root "$helper" && sudo chmod 4755 "$helper"
+          else
+            echo "::warning::no passwordless sudo on this runner, Electron tests run with ELECTRON_DISABLE_SANDBOX=1"
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+          fi
+      - name: Check xvfb + system deps (baked into the runner image)
+        run: |
+          missing=""
+          for tool in xvfb-run xdotool dbus-daemon flock; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
+          for soname in libnspr4.so libnss3.so libatk-1.0.so.0 libatk-bridge-2.0.so.0 libcups.so.2 libdrm.so.2 libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3 libXrandr.so.2 libgbm.so.1 libpango-1.0.so.0 libcairo.so.2 libasound.so.2 libgtk-3.so.0 libXss.so.1 libXtst.so.6 libatspi.so.0; do ldconfig -p | grep -q "$soname" || missing="$missing $soname"; done
+          [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
+      - name: Start D-Bus (silences Chromium bus spam in containers)
+        run: |
+          sudo mkdir -p /run/dbus
+          sudo dbus-daemon --system --fork 2>/dev/null || true
+          addr="$(dbus-daemon --session --fork --print-address=1 | head -1)"
+          echo "DBUS_SESSION_BUS_ADDRESS=$addr" >> "$GITHUB_ENV"
+      - run: bun run build
+      - name: Repeat screenshot + toolbar-overflow (two at a time, like lane B)
+        run: |
+          mkdir -p "$RUNNER_TEMP/r"
+          one() { t="$1" i="$2" d="$3"; log="$RUNNER_TEMP/r/$t.$i.log"; if xvfb-run -n "$d" bun run "$t" >"$log" 2>&1; then echo "RESULT ok $t $i"; else echo "RESULT FAILED $t $i"; echo "::group::log $t $i"; grep -v 'Failed to adjust OOM' "$log"; echo "::endgroup::"; fi; }
+          export -f one
+          for i in $(seq 1 "$ITER"); do
+            one test:electron-screenshot "$i" $((100 + i * 2)) &
+            one test:electron-toolbar-overflow "$i" $((101 + i * 2)) &
+            wait
+          done | tee "$RUNNER_TEMP/r/summary"
+          echo "screenshot fails: $(grep -c 'RESULT FAILED test:electron-screenshot' "$RUNNER_TEMP/r/summary")/$ITER"
+          echo "toolbar-overflow fails: $(grep -c 'RESULT FAILED test:electron-toolbar-overflow' "$RUNNER_TEMP/r/summary")/$ITER"
+          ! grep -q 'RESULT FAILED' "$RUNNER_TEMP/r/summary"
