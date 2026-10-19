@@ -32,6 +32,18 @@ let continueURL: URL = {
     return URL(string: "https://myaccount.google.com/")!
 }()
 let doneHost = continueURL.host!.lowercased()
+/// YouTube needs its own SetSID hop inside WebKit, so it only finishes on its host.
+let doneNeedsExactHost = doneHost == "youtube.com" || doneHost.hasSuffix(".youtube.com")
+
+/// Signed in and off Google's sign-in pages: the continue host, or (unless the continue page is
+/// YouTube) any other Google service Google sent us to instead, e.g. Gmail when the continue page
+/// was www.google.com, or a myaccount/gds interstitial after 2-step.
+func isDoneHost(_ host: String) -> Bool {
+    if host == doneHost { return true }
+    if doneNeedsExactHost { return false }
+    if host == "accounts.google.com" || host.hasPrefix("accounts.") { return false }
+    return host == "google.com" || host.hasSuffix(".google.com")
+}
 let startURL = URL(string: "https://accounts.google.com/ServiceLogin?continue=" +
     (continueURL.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""))!
 
@@ -103,7 +115,10 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
     var webView: WKWebView!
     var fillButton: NSButton!
     var finished = false
+    var checking = false
     var stdinBuffer = Data()
+    var urlObservation: NSKeyValueObservation?
+    var pollTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let configuration = WKWebViewConfiguration()
@@ -127,6 +142,14 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(webView)
         listenToSurffish()
+        // didFinish alone misses landings that never finish loading (Gmail streams its page) and
+        // in-page URL changes, so also check on every URL change and once a second.
+        urlObservation = webView.observe(\.url, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.checkSignedIn() }
+        }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkSignedIn() }
+        }
         webView.load(URLRequest(url: startURL))
     }
 
@@ -291,6 +314,10 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
         checkSignedIn()
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        checkSignedIn()
+    }
+
     // Help links and pop-ups open in the same view.
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
@@ -299,11 +326,16 @@ final class SignInDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, W
     }
 
     func checkSignedIn() {
-        guard !finished, let host = webView.url?.host?.lowercased(), host == doneHost else { return }
+        guard !finished, !checking, let host = webView.url?.host?.lowercased(), isDoneHost(host) else { return }
+        checking = true
         webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { cookies in
+            self.checking = false
+            guard !self.finished else { return }
             let session = cookies.filter { isSessionCookieDomain($0.domain) }
             guard session.contains(where: { $0.name == "SID" || $0.name == "__Secure-1PSID" }) else { return }
             self.finished = true
+            self.pollTimer?.invalidate()
+            FileHandle.standardError.write("[google sign-in] signed in, landed on \(host)\n".data(using: .utf8)!)
             self.emit(session)
         }
     }
