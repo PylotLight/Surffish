@@ -594,7 +594,7 @@ eventBus.on('download', () => { void save(true) })
 $('back').addEventListener('click', () => bridge.backToViewer())
 bridge.onCommand((command: PdfEditorCommand) => {
   if (command === 'save') void save()
-  else if (command === 'undo') void undo()
+  else if (command === 'undo') { if (!signatureManager.handleUndoCommand()) void undo() }
   else void redo()
 })
 
