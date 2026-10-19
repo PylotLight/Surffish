@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
-import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
+import { PDFDocument, PDFName, PDFRawStream, StandardFonts, decodePDFRawStream } from 'pdf-lib'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const electron = createRequire(import.meta.url)('electron')
@@ -246,9 +246,15 @@ try {
   const ink = annots.find((annot) => annot.get(PDFName.of('Subtype'))?.toString() === '/Ink')
   const inkColor = ink?.get(PDFName.of('C'))?.asArray?.().map((part) => Math.round(part.asNumber() * 100) / 100)
   if (!inkColor || inkColor[0] < 0.7 || inkColor[1] > 0.3) throw new Error(`drawing did not use the chosen colour (C=${JSON.stringify(inkColor)})`)
-  // The signature keeps its ink (blue ballpoint #1f3a8a), not pdf.js's default black.
-  const colours = annots.map((annot) => annot.get(PDFName.of('C'))?.asArray?.().map((part) => Math.round(part.asNumber() * 100) / 100)).filter(Boolean)
-  if (!colours.some(([r, g, b]) => Math.abs(r - 0.12) < 0.03 && Math.abs(g - 0.23) < 0.03 && Math.abs(b - 0.54) < 0.03)) throw new Error(`signature did not keep its blue ink (C=${JSON.stringify(colours)})`)
+  // The signature (a /Stamp whose appearance stream fills the outline) keeps its ink, blue
+  // ballpoint #1f3a8a, rather than pdf.js's default black.
+  const fills = annots.filter((annot) => annot.get(PDFName.of('Subtype'))?.toString() === '/Stamp').map((annot) => {
+    const appearance = saved.context.lookup(saved.context.lookup(annot.get(PDFName.of('AP')))?.get(PDFName.of('N')))
+    if (!(appearance instanceof PDFRawStream)) return null
+    const text = Buffer.from(decodePDFRawStream(appearance).decode()).toString('latin1')
+    return text.match(/([\d.]+) ([\d.]+) ([\d.]+) rg/)?.slice(1).map(Number) ?? null
+  })
+  if (!fills.some((fill) => fill && Math.abs(fill[0] - 0.12) < 0.03 && Math.abs(fill[1] - 0.23) < 0.03 && Math.abs(fill[2] - 0.54) < 0.03)) throw new Error(`signature did not keep its blue ink (fills=${JSON.stringify(fills)})`)
   const value = saved.getForm().getTextField('smoke.name').getText()
   if (value !== 'Ada Lovelace') throw new Error(`form value not saved (got ${value})`)
   console.log(`✓ saved ${output}: 2 pages, page 1 rotated 90°, form value kept, annotations ${subtypes.join(', ')}`)
