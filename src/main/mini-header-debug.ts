@@ -19,7 +19,10 @@ import type { BaseWindow, View, WebContents } from 'electron'
  *    window and its views (page views included, so browser.ts paths show too), and the window's own
  *    setBounds / setOpacity / setBackgroundColor / setVibrancy / setBackgroundMaterial / show / hide /
  *    focus / setAlwaysOnTop / setVisibleOnAllWorkspaces, plus its focus / blur / show / hide events;
- *  - header page (re)loads and crashes, and the tab page's loading / title / icon / frame events.
+ *  - header page (re)loads and crashes, and the tab page's loading / title / icon / frame events;
+ *  - (macOS) menu bar icon clicks, and for every panel shown (mini, popout, header panel, edge handle)
+ *    whether it came up on the active Space, its collection behaviour before/after and whether the
+ *    MoveToActiveSpace fallback ran (mac-panel.ts), plus native addon load failures.
  */
 
 const LOG_NAME = 'mini-header-debug.log'

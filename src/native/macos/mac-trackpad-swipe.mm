@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
 
 #include <node_api.h>
 
@@ -468,31 +469,135 @@ napi_value IsSwipeTrackingEnabled(napi_env env, napi_callback_info) {
   return result;
 }
 
-// preventActivation(windowHandle: Buffer): boolean. `windowHandle` is BaseWindow.getNativeWindowHandle()
-// (the content NSView*, packed as the raw pointer). True when the window took the tag; false when the
-// handle is unusable or this macOS has no such method (then nothing changes).
-napi_value PreventActivation(napi_env env, napi_callback_info info) {
+// The NSWindow behind BaseWindow.getNativeWindowHandle() (the content NSView*, packed as the raw
+// pointer; an NSWindow* is taken too). nil when the handle is unusable.
+NSWindow* WindowFromHandle(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1] = {nullptr};
-  bool applied = false;
   void* data = nullptr;
   size_t length = 0;
-  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) == napi_ok && argc >= 1 &&
-      napi_get_buffer_info(env, argv[0], &data, &length) == napi_ok && data != nullptr &&
-      length >= sizeof(void*)) {
-    void* pointer = nullptr;
-    std::memcpy(&pointer, data, sizeof(pointer));
-    id object = (__bridge id)pointer;
-    NSWindow* window = nil;
-    if ([object isKindOfClass:[NSView class]]) window = ((NSView*)object).window;
-    else if ([object isKindOfClass:[NSWindow class]]) window = (NSWindow*)object;
-    if (window != nil && [window respondsToSelector:@selector(_setPreventsActivation:)]) {
-      [window _setPreventsActivation:YES];
-      applied = true;
-    }
+  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok || argc < 1 ||
+      napi_get_buffer_info(env, argv[0], &data, &length) != napi_ok || data == nullptr ||
+      length < sizeof(void*)) {
+    return nil;
   }
+  void* pointer = nullptr;
+  std::memcpy(&pointer, data, sizeof(pointer));
+  if (pointer == nullptr) return nil;
+  id object = (__bridge id)pointer;
+  if ([object isKindOfClass:[NSView class]]) return ((NSView*)object).window;
+  if ([object isKindOfClass:[NSWindow class]]) return (NSWindow*)object;
+  return nil;
+}
+
+bool KeepFromActivating(NSWindow* window) {
+  if (window == nil || ![window respondsToSelector:@selector(_setPreventsActivation:)]) return false;
+  [window _setPreventsActivation:YES];
+  return true;
+}
+
+// preventActivation(windowHandle: Buffer): boolean. True when the window took the tag; false when the
+// handle is unusable or this macOS has no such method (then nothing changes).
+napi_value PreventActivation(napi_env env, napi_callback_info info) {
+  const bool applied = KeepFromActivating(WindowFromHandle(env, info));
   napi_value result = nullptr;
   napi_get_boolean(env, applied, &result);
+  return result;
+}
+
+// Electron's `type: 'panel'` window (ElectronNSPanel) overrides -setCollectionBehavior: to always OR in
+// CanJoinAllSpaces | FullScreenAuxiliary, so MoveToActiveSpace (which AppKit won't combine with
+// CanJoinAllSpaces) can only be set through NSWindow's own implementation.
+void SetBehaviorExactly(NSWindow* window, NSWindowCollectionBehavior behavior) {
+  using Setter = void (*)(id, SEL, NSWindowCollectionBehavior);
+  SEL selector = @selector(setCollectionBehavior:);
+  IMP imp = class_getMethodImplementation([NSWindow class], selector);
+  if (imp != nullptr) reinterpret_cast<Setter>(imp)(window, selector, behavior);
+  else [window setCollectionBehavior:behavior];
+}
+
+constexpr NSWindowCollectionBehavior kAllSpaces =
+    NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
+
+NSWindowCollectionBehavior OnActiveSpaceOnly(NSWindowCollectionBehavior behavior) {
+  return (behavior & ~NSWindowCollectionBehaviorCanJoinAllSpaces) | NSWindowCollectionBehaviorMoveToActiveSpace;
+}
+
+void SetNumber(napi_env env, napi_value object, const char* name, double value) {
+  napi_value number = nullptr;
+  napi_create_double(env, value, &number);
+  napi_set_named_property(env, object, name, number);
+}
+
+void SetBool(napi_env env, napi_value object, const char* name, bool value) {
+  napi_value flag = nullptr;
+  napi_get_boolean(env, value, &flag);
+  napi_set_named_property(env, object, name, flag);
+}
+
+// showOnActiveSpace(windowHandle: Buffer): object | null. Brings a floating panel up on the Space the
+// user is on, without activating Surffish: collection behaviour set to exactly "every Space, over
+// full-screen apps" (MoveToActiveSpace and FullScreenPrimary/None dropped), prevents-activation kept,
+// then ordered front. Still not on the active Space afterwards (the window server kept it on the Space
+// it was last shown on): ordered out, switched to MoveToActiveSpace, ordered front again, then joined
+// to every Space again so it follows Space swipes (left on MoveToActiveSpace if that pulls it away).
+// Returns diagnostics for the mini header debug log; null when the handle is unusable.
+napi_value ShowOnActiveSpace(napi_env env, napi_callback_info info) {
+  NSWindow* window = WindowFromHandle(env, info);
+  napi_value result = nullptr;
+  if (window == nil) {
+    napi_get_null(env, &result);
+    return result;
+  }
+  const NSWindowCollectionBehavior before = window.collectionBehavior;
+  const bool wasVisible = window.isVisible;
+  const bool wasOnActiveSpace = wasVisible && window.isOnActiveSpace;
+  const NSWindowCollectionBehavior wanted =
+      (before & ~(NSWindowCollectionBehaviorMoveToActiveSpace | NSWindowCollectionBehaviorFullScreenPrimary |
+                  NSWindowCollectionBehaviorFullScreenNone)) |
+      kAllSpaces;
+  if (before != wanted) SetBehaviorExactly(window, wanted);
+  const NSWindowCollectionBehavior joined = window.collectionBehavior;
+  const bool preventsActivation = KeepFromActivating(window);
+  [window orderFrontRegardless];
+  const bool onActiveSpace = window.isOnActiveSpace;
+  bool fallback = false;
+  bool fallbackOnActiveSpace = false;
+  bool rejoined = false;
+  if (!onActiveSpace) {
+    fallback = true;
+    [window orderOut:nil];
+    SetBehaviorExactly(window, OnActiveSpaceOnly(joined));
+    KeepFromActivating(window);
+    [window orderFrontRegardless];
+    fallbackOnActiveSpace = window.isOnActiveSpace;
+    if (fallbackOnActiveSpace) {
+      // On this Space now: on every Space again, so it follows a swipe like it always did.
+      SetBehaviorExactly(window, joined);
+      rejoined = window.isOnActiveSpace;
+      if (!rejoined) {
+        SetBehaviorExactly(window, OnActiveSpaceOnly(joined));
+        [window orderFrontRegardless];
+      }
+    }
+  }
+  napi_create_object(env, &result);
+  SetNumber(env, result, "behaviorBefore", static_cast<double>(before));
+  SetNumber(env, result, "behaviorJoined", static_cast<double>(joined));
+  SetNumber(env, result, "behaviorAfter", static_cast<double>(window.collectionBehavior));
+  SetBool(env, result, "wasVisible", wasVisible);
+  SetBool(env, result, "wasOnActiveSpace", wasOnActiveSpace);
+  SetBool(env, result, "onActiveSpace", onActiveSpace);
+  SetBool(env, result, "fallback", fallback);
+  SetBool(env, result, "fallbackOnActiveSpace", fallbackOnActiveSpace);
+  SetBool(env, result, "rejoinedAllSpaces", rejoined);
+  SetBool(env, result, "onActiveSpaceAfter", window.isOnActiveSpace);
+  SetBool(env, result, "preventsActivation", preventsActivation);
+  SetBool(env, result, "appActive", NSApp.isActive);
+  SetBool(env, result, "isKey", window.isKeyWindow);
+  SetNumber(env, result, "level", static_cast<double>(window.level));
+  SetNumber(env, result, "occlusion", static_cast<double>(window.occlusionState));
+  SetNumber(env, result, "windowNumber", static_cast<double>(window.windowNumber));
   return result;
 }
 
@@ -502,6 +607,7 @@ napi_value Initialize(napi_env env, napi_value exports) {
       {"stop", nullptr, Stop, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"isSwipeTrackingEnabled", nullptr, IsSwipeTrackingEnabled, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"preventActivation", nullptr, PreventActivation, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"showOnActiveSpace", nullptr, ShowOnActiveSpace, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
   return exports;

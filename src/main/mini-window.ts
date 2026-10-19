@@ -60,7 +60,7 @@ import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChi
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
 import { readUserJson, writeUserJson } from './user-json'
 import { notifyBrowserWindowsChanged } from './window-scope'
-import { makeFloatingPanel, showFloatingPanel } from './mac-panel'
+import { isSpaceReorderHide, joinActiveSpace, makeFloatingPanel, setPanelDebugLog, showFloatingPanel } from './mac-panel'
 import { headerDebug, miniHeaderDebugEnabled, onMiniHeaderDebugChange, traceHeaderContents, traceMiniWindow, untraceHeaderContents, untraceMiniWindow } from './mini-header-debug'
 
 /**
@@ -266,6 +266,9 @@ function live(contents: WebContents | null | undefined): contents is WebContents
 
 /** The state each mini's header page last got, for the debug log's "which fields changed". */
 const debugPushed = new WeakMap<Mini, object>()
+
+// Panel diagnostics (native addon load failures, which Space a panel came up on) go to the same log.
+setPanelDebugLog((kind, detail) => headerDebug(kind, detail))
 
 function miniLabel(m: Mini): string {
   return `[mini ${m.slot}${m.menuBar ? ' popout' : ''}]`
@@ -486,7 +489,10 @@ function positionPanel(m: Mini): void {
   placeWindow(panel, m.plan.panel)
   if (!panel.isVisible()) {
     panel.showInactive()
-    if (IS_MAC) panel.setAlwaysOnTop(true, 'floating')
+    if (IS_MAC) {
+      joinActiveSpace(panel, `${miniLabel(m)} header panel`)
+      panel.setAlwaysOnTop(true, 'floating')
+    }
   }
 }
 
@@ -1276,6 +1282,11 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   void ensureHeader(m)
   // Hidden (Show/Hide, tucked away): the header goes with it (and a menu bar popout counts as hidden).
   window.on('hide', () => {
+    // A native Space fallback (mac-panel.ts) ordering it out and straight back in: not a hide.
+    if (isSpaceReorderHide(window) && !window.isDestroyed()) {
+      headerDebug('space', `${miniLabel(m)} hide from the active-Space reorder ignored`)
+      return
+    }
     setRevealed(m, false)
     if (m.menuBar?.popout.shown()) {
       m.menuBar.popout.close()
@@ -1401,7 +1412,7 @@ function present(m: Mini, focus: boolean): void {
   if (m.dock.isTucked()) return m.dock.slideOut(focus)
   // On the Space the user is on, without activating Surffish (it re-asserts the level too: some window
   // managers drop it while a window is hidden).
-  showFloatingPanel(m.window, focus)
+  showFloatingPanel(m.window, focus, miniLabel(m))
   if (focus) {
     const page = host().pageContents(m.window)
     if (page) page.focus()
@@ -2212,6 +2223,7 @@ function hidePopout(m: Mini): void {
 /** A left click on the icon: hide what is shown, else drop in the last shown (not the click that just blurred it shut). */
 function trayClick(anchor: MiniRect | null): void {
   const all = menuBarMinis()
+  if (miniHeaderDebugEnabled()) headerDebug('tray', `click: ${all.length} menu bar mini(s), shown=${all.filter((m) => m.menuBar?.popout.shown()).map(miniLabel).join(', ') || 'none'}`)
   const shown = all.find((m) => m.menuBar?.popout.shown())
   if (shown) return hidePopout(shown)
   const pick = pickMenuBarMini(all, lastMenuBar)
@@ -2251,7 +2263,7 @@ function enterMenuBar(m: Mini, show: boolean): void {
         if (window.isDestroyed()) return
         // Clicked on Space 1 with the browser on Space 2: it comes up here, and Surffish is never
         // activated for it (that would switch the user to the browser's Space).
-        showFloatingPanel(window, focus)
+        showFloatingPanel(window, focus, miniLabel(m))
         if (focus) host().pageContents(window)?.focus()
       },
       hide: () => { if (!window.isDestroyed() && window.isVisible()) window.hide() },
@@ -2325,6 +2337,7 @@ function leaveMenuBar(m: Mini, how: 'float' | 'edge'): void {
   if (how === 'edge' && getMiniWindowSettings().tuckToEdge) {
     // Docks to the nearest outer edge and slides in behind its handle (shown first so it slides from there).
     window.showInactive()
+    if (IS_MAC) joinActiveSpace(window, miniLabel(m))
     m.dock.toggle(false)
   } else {
     present(m, true)
