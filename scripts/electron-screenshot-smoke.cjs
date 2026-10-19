@@ -398,13 +398,24 @@ async function run() {
   // Hover hold, without racing the countdown: open the preview with a long timeout so the hover can't
   // lose to it on a busy runner, then shorten it and poke the preview (a keydown re-arms the countdown
   // unless the pointer is over it). Hovered, nothing may start; after the pointer leaves, it dismisses.
+  // The hover is real mouse input, sent once the overlay has shrunk to the popover: the preview is
+  // painted while the view still has the picker's full-page size, so Blink can see the last pointer
+  // position over it (a trusted pointerenter) and then a trusted pointerleave as the view shrinks.
+  // A synthetic pointerenter sent before that leave was overwritten by it and the countdown won.
   process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '600000'
   inner.webContents.focus()
   key(inner, 'S', [primary, 'shift'])
   await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for hover hold')
   await evaluate(overlay, 'document.getElementById("btn-visible").click()')
   await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for hover hold')
-  await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerenter"))')
+  const popover = await waitFor(async () => {
+    const { width, height } = overlay.getBounds()
+    const viewport = await evaluate(overlay, 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done({ width: innerWidth, height: innerHeight }))))')
+    return width > 0 && viewport.width === width && viewport.height === height ? { width, height } : null
+  }, 'the overlay to shrink to the preview popover')
+  const previewHovered = () => evaluate(overlay, 'document.getElementById("preview").matches(":hover")')
+  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(popover.width / 2), y: Math.round(popover.height / 2) })
+  await waitFor(previewHovered, 'the pointer over the preview')
   process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '800'
   // Same renderer, same IPC pipe: the activity ping lands after the hover, so it can't arm a countdown.
   await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new KeyboardEvent("keydown", { key: "Shift" }))')
@@ -414,7 +425,8 @@ async function run() {
     assert.ok(overlay.getVisible(), 'hovering the preview holds it open')
     await delay(100)
   }
-  await evaluate(overlay, 'document.getElementById("preview").dispatchEvent(new PointerEvent("pointerleave"))')
+  assert.equal(await previewHovered(), true, 'the pointer is still over the preview')
+  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: popover.width + 40, y: popover.height + 40 })
   await waitFor(() => !overlay.getVisible(), 'the preview to dismiss after the pointer leaves', 10000)
 
   console.log('Electron screenshot smoke passed.')
