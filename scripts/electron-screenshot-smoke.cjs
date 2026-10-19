@@ -408,13 +408,13 @@ async function run() {
   await waitFor(async () => overlay.getVisible() && (await mode(overlay)) === 'select', 'the picker for hover hold')
   await evaluate(overlay, 'document.getElementById("btn-visible").click()')
   await waitFor(async () => (await mode(overlay)) === 'preview', 'the preview for hover hold')
-  const popover = await waitFor(async () => {
+  const popoverSize = await waitFor(async () => {
     const { width, height } = overlay.getBounds()
     const viewport = await evaluate(overlay, 'new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done({ width: innerWidth, height: innerHeight }))))')
     return width > 0 && viewport.width === width && viewport.height === height ? { width, height } : null
   }, 'the overlay to shrink to the preview popover')
   const previewHovered = () => evaluate(overlay, 'document.getElementById("preview").matches(":hover")')
-  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(popover.width / 2), y: Math.round(popover.height / 2) })
+  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(popoverSize.width / 2), y: Math.round(popoverSize.height / 2) })
   await waitFor(previewHovered, 'the pointer over the preview')
   process.env.SURFFISH_SCREENSHOT_PREVIEW_IDLE_MS = '800'
   // Same renderer, same IPC pipe: the activity ping lands after the hover, so it can't arm a countdown.
@@ -426,7 +426,7 @@ async function run() {
     await delay(100)
   }
   assert.equal(await previewHovered(), true, 'the pointer is still over the preview')
-  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: popover.width + 40, y: popover.height + 40 })
+  overlay.webContents.sendInputEvent({ type: 'mouseMove', x: popoverSize.width + 40, y: popoverSize.height + 40 })
   await waitFor(() => !overlay.getVisible(), 'the preview to dismiss after the pointer leaves', 10000)
 
   console.log('Electron screenshot smoke passed.')
