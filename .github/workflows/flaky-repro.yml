@@ -14,8 +14,7 @@ jobs:
     timeout-minutes: 40
     env:
       SMOKE_WAIT_MS: 90000
-      SURFFISH_SCREENSHOT_DEBUG: '1'
-      ITER: '8'
+      ITER: '10'
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +93,6 @@ jobs:
             (xvfb-run -n $((150 + i)) bun run "$n" >/dev/null 2>&1 || true) &
             wait
           done | tee "$RUNNER_TEMP/r/summary"
-          echo "::group::debug trace (screenshot 1)"; grep -h 'shot-debug' "$RUNNER_TEMP/r/test:electron-screenshot.1.log" | tail -25; echo "::endgroup::"
           echo "screenshot fails: $(grep -c 'RESULT FAILED test:electron-screenshot' "$RUNNER_TEMP/r/summary")/$ITER"
           echo "toolbar-overflow fails: $(grep -c 'RESULT FAILED test:electron-toolbar-overflow' "$RUNNER_TEMP/r/summary")/$ITER"
           ! grep -q 'RESULT FAILED' "$RUNNER_TEMP/r/summary"

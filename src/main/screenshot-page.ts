@@ -280,8 +280,8 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
   $('btn-save').addEventListener('click', () => api.save(null))
   $('btn-annotate').addEventListener('click', () => api.annotate(true))
   // The popover closes itself after a while untouched; hovering it holds it open.
-  $('preview').addEventListener('pointerenter', (e) => { console.log('[shot-debug] pointerenter trusted=' + e.isTrusted + ' ' + e.clientX + ',' + e.clientY); api.previewHover(true) })
-  $('preview').addEventListener('pointerleave', (e) => { console.log('[shot-debug] pointerleave trusted=' + e.isTrusted + ' ' + e.clientX + ',' + e.clientY); api.previewHover(false) })
+  $('preview').addEventListener('pointerenter', () => api.previewHover(true))
+  $('preview').addEventListener('pointerleave', () => api.previewHover(false))
   $('preview').addEventListener('keydown', () => api.previewActivity())
 
   // ---------- annotate ----------
@@ -607,7 +607,6 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
       cancelText()
       $('dims').textContent = image ? image.width + ' × ' + image.height + (payload.truncated ? ' · page cut off at the size limit' : '') : ''
       show('preview')
-      console.log('[shot-debug] show preview :hover=' + $('preview').matches(':hover') + ' size=' + innerWidth + 'x' + innerHeight)
       api.previewHover($('preview').matches(':hover'))
       setStatus(payload.message || '', payload.messageKind || '')
       $('btn-copy').focus()

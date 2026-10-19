@@ -103,8 +103,6 @@ function previewIdleMs(): number {
   return Number.isFinite(override) && override > 0 ? override : PREVIEW_IDLE_MS
 }
 
-const dbg = (...args: unknown[]): void => { if (process.env['SURFFISH_SCREENSHOT_DEBUG'] === '1') console.log('[shot-debug]', Date.now() % 100000, ...args) }
-
 function clearPreviewTimer(): void {
   if (previewTimer) clearTimeout(previewTimer)
   previewTimer = null
@@ -113,12 +111,10 @@ function clearPreviewTimer(): void {
 /** (Re)start the idle countdown while the preview is showing and nobody is using it. */
 function armPreviewTimer(): void {
   clearPreviewTimer()
-  dbg('arm', session?.mode, 'hovered', previewHovered, 'saving', previewSaving, 'ms', previewIdleMs())
   if (session?.mode !== 'preview' || previewHovered || previewSaving) return
   const current = session
   previewTimer = setTimeout(() => {
     previewTimer = null
-    dbg('timer fired', session === current, session?.mode, 'hovered', previewHovered)
     if (session !== current || session.mode !== 'preview' || previewHovered || previewSaving) return
     // Only hand focus back to the page if the popover still had it (don't steal it from wherever the user went).
     endSession(liveView()?.webContents.isFocused() ?? false)
@@ -385,7 +381,6 @@ function ensureView(): WebContentsView | null {
       // Keep Cmd+C/S/Z from the app menu (Copy, Save Edited PDF…, Undo); the page decides.
       event.preventDefault()
       if (!input.isAutoRepeat) created.webContents.send('screenshot:key', action)
-      dbg('overlay key action', action)
       armPreviewTimer()
       return
     }
@@ -428,11 +423,10 @@ function registerIpc(): void {
   ipcMain.on('screenshot:preview-hover', (event, hovered: unknown) => {
     if (!fromOverlay(event)) return
     previewHovered = hovered === true
-    dbg('hover ipc', hovered)
     armPreviewTimer()
   })
   ipcMain.on('screenshot:preview-activity', (event) => {
-    if (fromOverlay(event)) { dbg('activity ipc'); armPreviewTimer() }
+    if (fromOverlay(event)) armPreviewTimer()
   })
   ipcMain.on('screenshot:visible', (event) => {
     if (!fromOverlay(event) || session?.mode !== 'select' || !session.frozen) return
@@ -507,7 +501,6 @@ function showPreview(image: PixelImage, truncated: boolean, message = ''): void 
   session.shot = image
   session.truncated = truncated
   session.mode = 'preview'
-  dbg('showPreview')
   previewHovered = false
   // The frozen frame is no longer needed once something is captured.
   session.frozen = null
@@ -590,7 +583,6 @@ async function saveScreenshot(image: PixelImage): Promise<void> {
 }
 
 function endSession(refocus = true): void {
-  dbg('endSession', session?.mode, new Error().stack?.split('\n').slice(2, 5).join(' | '))
   const ending = session
   session = null
   pendingShow = null
