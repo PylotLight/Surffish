@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createFrameLoop, easeOut, frameClock, frameIntervalFor, lerpRect, motionDuration, type MotionRect } from './mini-window-motion'
+import { createFrameLoop, easeInCubic, easeOut, easeOutQuint, frameClock, frameIntervalFor, lerpRect, motionDuration, type MotionRect } from './mini-window-motion'
 
 /** Fake clock: timeouts fire as time advances (late by `lag` ms when set, like a busy main thread). */
 function fakeTimers() {
@@ -207,6 +207,17 @@ describe('motion maths', () => {
     expect(easeOut(0.5)).toBeGreaterThan(0.8)
     expect(lerpRect(rect(0), rect(100), 0.5).x).toBe(88)
     expect(lerpRect(rect(0), rect(100), 2).x).toBe(100)
+  })
+  test('ease-out quint lands softly, ease-in cubic leaves quickly; both clamp', () => {
+    expect(easeOutQuint(0)).toBe(0)
+    expect(easeOutQuint(1)).toBe(1)
+    expect(easeOutQuint(0.25)).toBeGreaterThan(easeOut(0.25))
+    expect(easeInCubic(0)).toBe(0)
+    expect(easeInCubic(1)).toBe(1)
+    expect(easeInCubic(0.5)).toBe(0.125)
+    expect(easeOutQuint(-1)).toBe(0)
+    expect(easeInCubic(3)).toBe(1)
+    expect(easeOutQuint(Number.NaN)).toBe(0)
   })
   test('shorter moves take proportionally less (never under 40%), none takes 0', () => {
     expect(motionDuration(rect(0), rect(420), 420, 180)).toBe(180)

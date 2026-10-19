@@ -66,10 +66,23 @@ export function frameIntervalFor(hz: number | undefined | null): number {
   return 1000 / rate
 }
 
+function clamp01(t: number): number {
+  return Number.isFinite(t) ? Math.min(1, Math.max(0, t)) : t > 0 ? 1 : 0
+}
+
 /** Ease-out cubic. */
 export function easeOut(t: number): number {
-  const p = Math.min(1, Math.max(0, t))
-  return 1 - (1 - p) ** 3
+  return 1 - (1 - clamp01(t)) ** 3
+}
+
+/** Ease-out quint: most of the move in the first frames, a long soft landing (a popover opening). */
+export function easeOutQuint(t: number): number {
+  return 1 - (1 - clamp01(t)) ** 5
+}
+
+/** Ease-in cubic: starts gently, leaves quickly (a popover going away). */
+export function easeInCubic(t: number): number {
+  return clamp01(t) ** 3
 }
 
 export function sameMotionRect(a: MotionRect, b: MotionRect): boolean {

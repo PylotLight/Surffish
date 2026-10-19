@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { MINI_WINDOW_POPOUT_STRIP_HEIGHT, parseMiniWindowSettings } from './mini-window'
 import {
   MINI_MENU_BAR_BLUR_CLICK_MS,
+  MINI_MENU_BAR_CLOSE_MS,
+  MINI_MENU_BAR_SPACE_BLUR_MS,
+  MINI_MENU_BAR_SPACE_SETTLE_MS,
   MINI_MENU_BAR_DEFAULT_SIZE,
   MINI_MENU_BAR_DROP_MS,
   MINI_MENU_BAR_DROP_PX,
@@ -9,7 +12,10 @@ import {
   MINI_MENU_BAR_MARGIN,
   MINI_MENU_BAR_OPEN_BLUR_GRACE_MS,
   createMenuBarPopout,
+  menuBarCloseFrame,
   menuBarDropFrame,
+  menuBarPopoutFrame,
+  spaceChangeExplainsBlur,
   menuBarPageSize,
   menuBarPopoutBounds,
   menuBarTrayTitle,
@@ -166,6 +172,51 @@ describe('drop-in', () => {
   })
 })
 
+describe('popout frames', () => {
+  const target = { x: 100, y: 41, width: 400, height: 560 }
+  test('one frame function for both ways: whole-px offset toward the icon, fade scaled', () => {
+    expect(menuBarPopoutFrame(target, 'below', 0, 1)).toEqual({ rect: { ...target, y: 41 - MINI_MENU_BAR_DROP_PX }, opacity: 0 })
+    expect(menuBarPopoutFrame(target, 'above', 1, 0.9)).toEqual({ rect: target, opacity: 0.9 })
+    expect(menuBarPopoutFrame(target, 'below', 2, 1).rect).toEqual(target)
+    expect(menuBarPopoutFrame(target, 'below', Number.NaN, 1).opacity).toBe(0)
+    for (let v = 0; v <= 1; v += 0.05) expect(Number.isInteger(menuBarPopoutFrame(target, 'below', v, 1).rect.y)).toBe(true)
+  })
+  test('drop-in eases out (most of the slide early), close eases in toward the icon', () => {
+    // A fifth of the way in time, the slide is mostly done and it is mostly opaque.
+    const early = menuBarDropFrame(target, 'below', 0.2, 1)
+    expect(early.opacity).toBeGreaterThan(0.6)
+    expect(target.y - early.rect.y).toBeLessThanOrEqual(3)
+    // Going away: barely moved at first, gone at the end, back toward the icon (up for 'below').
+    expect(menuBarCloseFrame(target, 'below', 0, 1)).toEqual({ rect: target, opacity: 1 })
+    expect(menuBarCloseFrame(target, 'below', 0.2, 1).opacity).toBeGreaterThan(0.95)
+    expect(menuBarCloseFrame(target, 'below', 1, 1)).toEqual({ rect: { ...target, y: 41 - MINI_MENU_BAR_DROP_PX }, opacity: 0 })
+    expect(menuBarCloseFrame(target, 'above', 1, 1).rect.y).toBe(41 + MINI_MENU_BAR_DROP_PX)
+    // From half way in (an interrupted drop-in): starts there.
+    expect(menuBarCloseFrame(target, 'below', 0, 1, 0.5).opacity).toBe(0.5)
+  })
+  test('durations stay snappy', () => {
+    expect(MINI_MENU_BAR_DROP_MS).toBeGreaterThanOrEqual(180)
+    expect(MINI_MENU_BAR_DROP_MS).toBeLessThanOrEqual(240)
+    expect(MINI_MENU_BAR_CLOSE_MS).toBeGreaterThanOrEqual(140)
+    expect(MINI_MENU_BAR_CLOSE_MS).toBeLessThanOrEqual(180)
+  })
+})
+
+describe('Space change vs click-away', () => {
+  test('a Space change explains a blur within the window either side, never one from the future', () => {
+    expect(spaceChangeExplainsBlur(null, 1000, 1000)).toBe(false)
+    expect(spaceChangeExplainsBlur(Number.NaN, 1000, 1000)).toBe(false)
+    expect(spaceChangeExplainsBlur(1000 - MINI_MENU_BAR_SPACE_BLUR_MS, 1000, 1000)).toBe(true)
+    expect(spaceChangeExplainsBlur(1000 - MINI_MENU_BAR_SPACE_BLUR_MS - 1, 1000, 1000)).toBe(false)
+    // Notified after the blur (the swipe animation): counts once it has happened.
+    expect(spaceChangeExplainsBlur(1300, 1000, 1400)).toBe(true)
+    expect(spaceChangeExplainsBlur(1300, 1000, 1200)).toBe(false)
+    expect(spaceChangeExplainsBlur(1000 + MINI_MENU_BAR_SPACE_BLUR_MS + 1, 1000, 5000)).toBe(false)
+    // A held blur waits less than the window, so a change any time while held explains it.
+    expect(MINI_MENU_BAR_SPACE_SETTLE_MS).toBeLessThanOrEqual(MINI_MENU_BAR_SPACE_BLUR_MS)
+  })
+})
+
 describe('which mini a click shows', () => {
   test('the last shown while it is still there, else the newest', () => {
     expect(pickMenuBarMini([1, 2, 3], 2)).toBe(2)
@@ -233,7 +284,7 @@ describe('popout (fake timers)', () => {
     popout.open(target, 'below', true)
     clock.advance(30)
     expect(popout.click()).toBe('hide')
-    popout.close()
+    popout.close(false)
     expect(log.at(-1)).toBe('hide')
     expect(popout.animating()).toBe(false)
     clock.advance(500)
@@ -245,10 +296,13 @@ describe('popout (fake timers)', () => {
     const { clock, popout, log } = rig()
     popout.open(target, 'below', true)
     clock.advance(300)
-    expect(popout.blur(true)).toBe(false)
+    expect(popout.blur(true)).toBe('ignored')
     expect(popout.shown()).toBe(true)
-    expect(popout.blur(false)).toBe(true)
-    expect(log.at(-1)).toBe('hide')
+    expect(popout.blur(false)).toBe('hide')
+    expect(popout.shown()).toBe(false)
+    expect(popout.closing()).toBe(true)
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + 40)
+    expect(log).toContain('hide')
     // Pressing the icon blurred it: that click closes it for good.
     clock.advance(80)
     expect(popout.click()).toBe('none')
@@ -256,9 +310,9 @@ describe('popout (fake timers)', () => {
     expect(popout.click()).toBe('show')
     popout.open(target, 'below', true)
     clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS)
-    expect(popout.blur(false)).toBe(true)
-    // A click on the icon well after a blur shows it.
-    clock.advance(MINI_MENU_BAR_BLUR_CLICK_MS + 10)
+    expect(popout.blur(false)).toBe('hide')
+    // A click on the icon well after a blur (counted from when the fade-out ended) shows it.
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + MINI_MENU_BAR_BLUR_CLICK_MS + 40)
     expect(popout.click()).toBe('show')
   })
 
@@ -267,13 +321,13 @@ describe('popout (fake timers)', () => {
     // macOS took the key window away for a moment while it came up (a Space change, Surffish activating).
     popout.open(target, 'below', true)
     clock.advance(20)
-    expect(popout.blur(false)).toBe(false)
+    expect(popout.blur(false)).toBe('hold-open')
     expect(popout.shown()).toBe(true)
     expect(popout.blurPendingMs()).toBe(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS - 20)
     popout.focused()
     expect(popout.blurPendingMs()).toBe(0)
     clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS)
-    expect(popout.settle(false)).toBe(false)
+    expect(popout.settle(false)).toBe('none')
     expect(popout.shown()).toBe(true)
     popout.close()
     // Never got the focus back: hides when the grace is up, and that counts as a blur for the icon click.
@@ -281,34 +335,187 @@ describe('popout (fake timers)', () => {
     clock.advance(1000)
     popout.open(target, 'below', true)
     clock.advance(10)
-    expect(popout.blur(false)).toBe(false)
+    expect(popout.blur(false)).toBe('hold-open')
     clock.advance(popout.blurPendingMs())
-    expect(popout.settle(false)).toBe(true)
+    expect(popout.settle(false)).toBe('hide')
     expect(popout.shown()).toBe(false)
-    expect(log.at(-1)).toBe('hide')
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + 40)
+    expect(log).toContain('hide')
     expect(popout.click()).toBe('none')
     expect(popout.click()).toBe('show')
     // Pinned meanwhile, or already closed: settling does nothing.
     popout.open(target, 'below', true)
-    expect(popout.blur(false)).toBe(false)
-    expect(popout.settle(true)).toBe(false)
+    expect(popout.blur(false)).toBe('hold-open')
+    expect(popout.settle(true)).toBe('none')
     expect(popout.shown()).toBe(true)
     expect(popout.blurPendingMs()).toBe(0)
-    expect(popout.blur(false)).toBe(false)
+    expect(popout.blur(false)).toBe('hold-open')
     popout.close()
     expect(popout.blurPendingMs()).toBe(0)
-    expect(popout.settle(false)).toBe(false)
+    expect(popout.settle(false)).toBe('none')
     // Re-anchored without focus while up (open again, unfocused) does not restart the grace.
     clock.advance(1000)
     popout.open(target, 'below', true)
     clock.advance(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS + 5)
     popout.open({ ...target, x: 300 }, 'below', false)
-    expect(popout.blur(false)).toBe(true)
+    expect(popout.blur(false)).toBe('hide')
+  })
+
+  test('macOS: a blur next to a Space change keeps it shown (swiping desktops never hides it)', () => {
+    const { clock, popout, log } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    log.length = 0
+    // The change was notified just before the blur reached us.
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: clock.now() - 40 })).toBe('space')
+    expect(popout.shown()).toBe(true)
+    expect(popout.blurPendingMs()).toBe(0)
+    expect(log).toEqual([])
+    // Even with a button down (a swipe started mid-click), the Space change wins.
+    expect(popout.blur(false, { mouseDown: true, spaceChangedAt: clock.now() - 10 })).toBe('space')
+    expect(popout.shown()).toBe(true)
+  })
+
+  test('macOS: a blur with no click behind it waits for the Space change; one arriving keeps it', () => {
+    const { clock, popout, log } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    log.length = 0
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: null })).toBe('hold-space')
+    expect(popout.blurPendingMs()).toBe(MINI_MENU_BAR_SPACE_SETTLE_MS)
+    clock.advance(200)
+    expect(popout.settle(false, null)).toBe('pending')
+    // The Space change notification lands mid-hold.
+    const changedAt = clock.now() + 100
+    clock.advance(popout.blurPendingMs())
+    expect(popout.settle(false, changedAt)).toBe('space')
+    expect(popout.shown()).toBe(true)
+    expect(log).toEqual([])
+    expect(popout.blurPendingMs()).toBe(0)
+  })
+
+  test('macOS: no Space change while held (⌘Tab): it hides once the hold is up', () => {
+    const { clock, popout, log } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: clock.now() - 5000 })).toBe('hold-space')
+    clock.advance(MINI_MENU_BAR_SPACE_SETTLE_MS)
+    expect(popout.settle(false, clock.now() - 5600)).toBe('hide')
+    expect(popout.shown()).toBe(false)
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + 40)
+    expect(log).toContain('hide')
+    // Focus coming back while held keeps it.
+    clock.advance(1000)
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: null })).toBe('hold-space')
+    popout.focused()
+    clock.advance(MINI_MENU_BAR_SPACE_SETTLE_MS)
+    expect(popout.settle(false, null)).toBe('none')
+    expect(popout.shown()).toBe(true)
+    // Pinned while held: settling does nothing.
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: null })).toBe('hold-space')
+    clock.advance(MINI_MENU_BAR_SPACE_SETTLE_MS)
+    expect(popout.settle(true, null)).toBe('none')
+    expect(popout.shown()).toBe(true)
+  })
+
+  test('macOS: a blur with a mouse button down is a click elsewhere: hides at once; pinned never', () => {
+    const { clock, popout } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    expect(popout.blur(true, { mouseDown: true, spaceChangedAt: null })).toBe('ignored')
+    expect(popout.blur(false, { mouseDown: true, spaceChangedAt: clock.now() - 5000 })).toBe('hide')
+    expect(popout.shown()).toBe(false)
+  })
+
+  test('macOS: right as it opens, a blur is still held only for the open grace (then settled as before)', () => {
+    const { clock, popout } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(20)
+    expect(popout.blur(false, { mouseDown: false, spaceChangedAt: null })).toBe('hold-open')
+    expect(popout.blurPendingMs()).toBe(MINI_MENU_BAR_OPEN_BLUR_GRACE_MS - 20)
+    clock.advance(popout.blurPendingMs())
+    expect(popout.settle(false, null)).toBe('hide')
+  })
+
+  test('close fades + slides toward the icon on the loop, then hides; reopening mid-close turns back from there', () => {
+    const { clock, loop, popout, log, places, opacities } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(MINI_MENU_BAR_DROP_MS + 40)
+    places.length = 0
+    opacities.length = 0
+    log.length = 0
+    popout.close()
+    expect(popout.shown()).toBe(false)
+    expect(popout.closing()).toBe(true)
+    expect(popout.animating()).toBe(true)
+    expect(log).not.toContain('hide')
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + 40)
+    expect(log).toContain('hide')
+    expect(popout.closing()).toBe(false)
+    // Faded all the way, never brighter on the way out; ends back at the target for next time.
+    for (let i = 1; i < opacities.length; i++) expect(opacities[i]!).toBeLessThanOrEqual(opacities[i - 1]!)
+    expect(opacities.at(-1)).toBe(0)
+    expect(places.at(-1)).toEqual(target)
+    // Few window moves: the slide is whole px, so frames repeat the rect (skipped by the frame loop).
+    expect(new Set(places.map((rect) => rect.y)).size).toBeLessThanOrEqual(MINI_MENU_BAR_DROP_PX + 1)
+    expect(loop.running()).toBe(false)
+    // Mid-close, a click shows it again: no jump back to transparent, it turns back from where it was.
+    popout.open(target, 'below', true)
+    clock.advance(MINI_MENU_BAR_DROP_MS + 40)
+    popout.close()
+    clock.advance(MINI_MENU_BAR_CLOSE_MS * 0.6)
+    const before = opacities.at(-1)!
+    expect(before).toBeGreaterThan(0)
+    log.length = 0
+    popout.open(target, 'below', true)
+    expect(popout.shown()).toBe(true)
+    expect(opacities.at(-1)).toBeCloseTo(before, 1)
+    clock.advance(MINI_MENU_BAR_DROP_MS + 40)
+    expect(opacities.at(-1)).toBe(1)
+    expect(places.at(-1)).toEqual(target)
+    expect(log).not.toContain('hide')
+  })
+
+  test('close(false) mid fade-out hides at once; reduced motion and no-opacity platforms hide at once', () => {
+    const fading = rig()
+    fading.popout.open(target, 'below', true)
+    fading.clock.advance(400)
+    fading.popout.close()
+    fading.popout.close(false)
+    expect(fading.log.at(-1)).toBe('hide')
+    expect(fading.popout.closing()).toBe(false)
+    fading.clock.advance(400)
+    expect(fading.log.filter((entry) => entry === 'hide')).toHaveLength(1)
+    const reduced = rig({ reduced: true })
+    reduced.popout.open(target, 'below', true)
+    reduced.popout.close()
+    expect(reduced.log.at(-1)).toBe('hide')
+    const linux = rig({ opacity: false })
+    linux.popout.open(target, 'below', true)
+    linux.clock.advance(400)
+    linux.popout.close()
+    expect(linux.log.at(-1)).toBe('hide')
+  })
+
+  test('an Esc / icon close after an old blur does not swallow the next icon click', () => {
+    const { clock, popout } = rig()
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    expect(popout.blur(false)).toBe('hide')
+    clock.advance(2000)
+    expect(popout.click()).toBe('show')
+    popout.open(target, 'below', true)
+    clock.advance(1000)
+    popout.close()
+    clock.advance(MINI_MENU_BAR_CLOSE_MS + 40)
+    expect(popout.click()).toBe('show')
   })
 
   test('a blur while hidden does nothing', () => {
     const { popout, log } = rig()
-    expect(popout.blur(false)).toBe(false)
+    expect(popout.blur(false)).toBe('ignored')
     expect(log).toEqual([])
   })
 

@@ -205,3 +205,37 @@ describe('debug log lines', () => {
     expect(isSpaceReorderHide(window, 2_010)).toBe(false)
   })
 })
+
+describe('Space changes and panel state (telling a Space swipe from a click elsewhere)', () => {
+  const state = { orderedIn: true, onActiveSpace: true, key: false, appActive: false, mouseDown: false, occlusion: 2, spaceChanges: 3, msSinceSpaceChange: 120 }
+
+  test('reads the native watch and state; quiet key restore passes the handle', () => {
+    const keyed: Buffer[] = []
+    const { guard, window, logs } = spaceRig({ addon: { preventActivation: () => true, activeSpaceChanges: () => ({ spaceChanges: 3, msSinceSpaceChange: 120 }), panelState: () => state, makeKeyQuietly: (handle: Buffer) => { keyed.push(handle); return true } } })
+    expect(guard.spaceChanges()).toEqual({ spaceChanges: 3, msSinceSpaceChange: 120 })
+    expect(guard.panelState(window())).toEqual(state)
+    expect(guard.makeKeyQuietly(window())).toBe(true)
+    expect([...keyed[0]!]).toEqual([8, 7, 6, 5, 4, 3, 2, 1])
+    // Destroyed windows never reach the addon.
+    expect(guard.panelState(window(true))).toBeNull()
+    expect(guard.makeKeyQuietly(window(true))).toBe(false)
+    expect(keyed).toHaveLength(1)
+    expect(logs).toEqual([])
+  })
+
+  test('not macOS, a stale addon without the exports, or a throwing call: null / false (callers assume a click-away)', () => {
+    const linux = spaceRig({ platform: 'linux', addon: { panelState: () => state } })
+    expect(linux.guard.panelState(linux.window())).toBeNull()
+    expect(linux.guard.spaceChanges()).toBeNull()
+    expect(linux.loads()).toBe(0)
+    const stale = spaceRig({ addon: { preventActivation: () => true, showOnActiveSpace: () => null } })
+    expect(stale.guard.spaceChanges()).toBeNull()
+    expect(stale.guard.panelState(stale.window())).toBeNull()
+    expect(stale.guard.makeKeyQuietly(stale.window())).toBe(false)
+    const throwing = spaceRig({ addon: { preventActivation: () => true, activeSpaceChanges: () => { throw new Error('boom') }, panelState: () => { throw new Error('bad handle') }, makeKeyQuietly: () => { throw new Error('nope') } } })
+    expect(throwing.guard.spaceChanges()).toBeNull()
+    expect(throwing.guard.panelState(throwing.window())).toBeNull()
+    expect(throwing.guard.makeKeyQuietly(throwing.window())).toBe(false)
+    expect(throwing.logs.map(([, detail]) => detail).join(' ')).toContain('bad handle')
+  })
+})

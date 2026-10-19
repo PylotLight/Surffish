@@ -22,7 +22,10 @@ import type { BaseWindow, View, WebContents } from 'electron'
  *  - header page (re)loads and crashes, and the tab page's loading / title / icon / frame events;
  *  - (macOS) menu bar icon clicks, and for every panel shown (mini, popout, header panel, edge handle)
  *    whether it came up on the active Space, its collection behaviour before/after and whether the
- *    MoveToActiveSpace fallback ran (mac-panel.ts), plus native addon load failures.
+ *    MoveToActiveSpace fallback ran (mac-panel.ts), plus native addon load failures;
+ *  - (macOS) menu bar popout blurs and hides around Space switches: the verdict (click-away hides,
+ *    Space change keeps it, held for a moment), mouse button state, how long since the last Space
+ *    change, whether it is still ordered in / on the active Space / key, and the quiet key restore.
  */
 
 const LOG_NAME = 'mini-header-debug.log'
