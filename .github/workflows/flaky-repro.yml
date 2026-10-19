@@ -15,7 +15,7 @@ jobs:
     env:
       SMOKE_WAIT_MS: 90000
       SURFFISH_SCREENSHOT_DEBUG: '1'
-      ITER: '5'
+      ITER: '8'
     strategy:
       fail-fast: false
       matrix:
@@ -89,8 +89,12 @@ jobs:
           for i in $(seq 1 "$ITER"); do
             one test:electron-screenshot "$i" $((100 + i * 2)) &
             one test:electron-toolbar-overflow "$i" $((101 + i * 2)) &
+            # a busy neighbour, like lane B's real mix (mini window/motion/multi-window/cast smokes)
+            n=$(echo test:electron-multi-window test:electron-mini-window-motion test:electron-split-view test:electron-cast | cut -d' ' -f$(( (i % 4) + 1 )))
+            (xvfb-run -n $((150 + i)) bun run "$n" >/dev/null 2>&1 || true) &
             wait
           done | tee "$RUNNER_TEMP/r/summary"
+          echo "::group::debug trace (screenshot 1)"; grep -h 'shot-debug' "$RUNNER_TEMP/r/test:electron-screenshot.1.log" | tail -60; echo "::endgroup::"
           echo "screenshot fails: $(grep -c 'RESULT FAILED test:electron-screenshot' "$RUNNER_TEMP/r/summary")/$ITER"
           echo "toolbar-overflow fails: $(grep -c 'RESULT FAILED test:electron-toolbar-overflow' "$RUNNER_TEMP/r/summary")/$ITER"
           ! grep -q 'RESULT FAILED' "$RUNNER_TEMP/r/summary"
