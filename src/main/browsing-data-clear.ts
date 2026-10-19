@@ -28,7 +28,8 @@ import { clearDownloadHistory, clearDownloadHistorySince } from './downloads'
 import { clearBrowserSiteZoom, resetBrowserSiteSettings } from './browser-persistence'
 import { resetSiteVolumes } from './tab-volume'
 import { sendToMainWindowRenderers } from './browser-shell'
-import { getPageBehindSettings } from './browser'
+import { forgetTabNavigationHistory, getPageBehindSettings } from './browser'
+import { hostUrlMatcher, visitedUrlMatcher } from '../shared/tab-history'
 import { forgetArchivedTabsSince } from './tab-archive-store'
 import { clearWakeSnapshotsOnDisk, forgetWakeSnapshotsOnDisk } from './wake-snapshot-disk'
 
@@ -146,8 +147,17 @@ export async function clearBrowsingData(input: unknown): Promise<ClearBrowsingDa
     resetSiteVolumes(origins)
   }
   if (options.history) {
-    result.historyRemoved = removeBrowsingHistory((entry) => entry.visitedAt >= since)
+    const clearedUrls = new Set<string>()
+    result.historyRemoved = removeBrowsingHistory((entry) => {
+      const hit = entry.visitedAt >= since
+      if (hit) clearedUrls.add(entry.url)
+      return hit
+    })
     forgetArchivedTabsSince(since)
+    // Open tabs' back/forward lists (live, sleeping, and the saved session) lose those pages too,
+    // as in Chrome. Entries carry no visit time, so a time range drops the pages visited in it.
+    if (allTime) forgetTabNavigationHistory('all')
+    else if (clearedUrls.size > 0) forgetTabNavigationHistory(visitedUrlMatcher(clearedUrls))
     sendToMainWindowRenderers('browser:history-changed')
   }
   if (options.downloads) {
@@ -225,6 +235,7 @@ export async function forgetSite(originInput: unknown, includeHistory: unknown):
         return false
       }
     })
+    forgetTabNavigationHistory(hostUrlMatcher(host))
     sendToMainWindowRenderers('browser:history-changed')
   }
   return getSiteData(origin)

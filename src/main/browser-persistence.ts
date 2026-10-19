@@ -1,6 +1,6 @@
 import { siteSettingsHaveOverrides } from '../shared/settings-tab'
 import { app } from 'electron'
-import { cancelDeferredWrite, deferWrite } from './deferred-writes'
+import { cancelDeferredWrite, deferWrite, flushDeferredWrite } from './deferred-writes'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { writeFileAtomic } from './atomic-file'
 import { join } from 'node:path'
@@ -14,8 +14,9 @@ import {
   normalizeCachedFaviconDataUrl,
   type BrowserPreferences
 } from '../shared/persistence'
-import { normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, type SavedWindowsSession, type SessionWindowInput } from '../shared/window-session'
+import { forgetSessionHistories, normalizeWindowsSession, parseWindowsSession, serializeWindowsSession, type SavedWindowsSession, type SessionWindowInput } from '../shared/window-session'
 import type { SavedWindowState } from '../shared/window-geometry'
+import type { TabHistoryForget } from '../shared/tab-history'
 import { isDefaultZoom, MAX_SAVED_SITE_ZOOMS, normalizeZoomFactor } from '../shared/zoom'
 import { normalizeTabVolume, withSiteVolume } from '../shared/tab-volume'
 import { getFavouriteSites, saveFavouriteSites } from './bookmarks'
@@ -193,18 +194,51 @@ export function loadBrowserWindowsSession(legacyGeometry: SavedWindowState | nul
   return session
 }
 
-export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number): void {
+/**
+ * `collectHistories` reads each window's back/forward lists (same order as its `urls`). It runs
+ * when the coalesced write does, not per call, so a burst of tab events captures them once.
+ */
+export function saveBrowserWindowsSession(windows: readonly SessionWindowInput[], focusedIndex: number, collectHistories?: () => ReadonlyArray<readonly unknown[] | undefined>): void {
   if (sessionPersistenceDisabled) return
-  const saved = normalizeWindowsSession(windows, focusedIndex)
   // The startup import is stale now; this save writes the current session instead.
   cancelDeferredWrite('session-import')
   deferWrite('session', () => {
     if (sessionPersistenceDisabled) return
+    const histories = collectHistories?.()
+    const saved = normalizeWindowsSession(histories ? windows.map((window, index) => ({ ...window, histories: histories[index] })) : windows, focusedIndex)
     const wroteJson = writeJson(SESSION_FILE, serializeWindowsSession(saved))
     // Only mark the JSON file as matching the database when both writes landed; otherwise the
     // next start sees a changed file and restores from JSON.
     if (saveSessionToDatabase(saved) && wroteJson) markSessionFileOurs()
   }, 600)
+}
+
+/**
+ * After a history clear: write the queued session save now (it already holds the trimmed live
+ * lists), then take the cleared pages out of whatever is still on disk, in both
+ * browser-session.json and session_tab_history (a save that didn't run: no window open, quitting).
+ */
+export function forgetSavedTabHistories(forget: TabHistoryForget): void {
+  flushDeferredWrite('session')
+  flushDeferredWrite('session-import')
+  if (sessionPersistenceDisabled) return
+  const raw = readJson(SESSION_FILE)
+  let wroteJson = false
+  if (raw !== null && raw !== undefined) {
+    const session = parseWindowsSession(raw, null)
+    if (session.windows.some((window) => window.histories)) {
+      const scrubbed = forgetSessionHistories(session, forget)
+      wroteJson = writeJson(SESSION_FILE, serializeWindowsSession(scrubbed))
+    }
+  }
+  const store = sqlSessions()
+  if (!store) return
+  try {
+    store.forgetHistories(forget)
+    if (wroteJson) markSessionFileOurs()
+  } catch (error) {
+    console.error('Could not clear saved back/forward lists in the database:', error)
+  }
 }
 
 /** Clear the on-disk restore list without closing current tabs or re-saving them during this run. */

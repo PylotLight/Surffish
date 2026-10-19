@@ -242,9 +242,25 @@ CREATE INDEX reading_list_url ON reading_list (url) WHERE deleted_at IS NULL;
 ${oplogTriggers('reading_list')}
 `
 
+/**
+ * v3: each open tab's back/forward list (shared/tab-history.ts), one row per session_tabs row that
+ * has one. Device-local like the Reading List snapshot: no sync columns and no oplog triggers (page
+ * states are Chromium-internal, can be large, and change on every navigation), and the row is
+ * hard-deleted when its tab closes or the session is cleared.
+ */
+const V3 = `
+CREATE TABLE session_tab_history (
+  tab_id TEXT PRIMARY KEY,
+  entries TEXT NOT NULL,
+  active_index INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) WITHOUT ROWID;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'initial schema: meta, devices, oplog, settings, history, bookmarks, spaces, session', sql: V1 },
-  { version: 2, name: 'reading list', sql: V2 }
+  { version: 2, name: 'reading list', sql: V2 },
+  { version: 3, name: 'session tab back/forward history', sql: V3 }
 ]
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version

@@ -56,7 +56,7 @@ one-off cost at first history access.
 - Downgrading to a build without the database shows history as of the upgrade (the JSON copy
   isn't written once the database is in use).
 
-## Schema (v2)
+## Schema (v3)
 
 Every synced table has `id` (UUID, v7 for new rows), `device_id`, `created_at`, `updated_at`,
 `hlc` (hybrid logical clock stamp, `src/shared/sync-clock.ts`) and, except history,
@@ -74,6 +74,7 @@ Every synced table has `id` (UUID, v7 for new rows), `device_id`, `created_at`, 
 | `spaces` | Spaces | `separate_storage`, `proxy` JSON |
 | `session_windows` / `session_tabs` / `tab_groups` / `session_splits` | open windows and tabs | rows belong to their `device_id`; another device's rows are its "tabs on other devices" |
 | `reading_list` (v2) | Reading List: pages saved for later | `added_at`, `read_at` (NULL = unread); `snapshot`/`snapshot_at` hold an offline Reader copy that is **device-local** (not in the oplog payload, and saving it doesn't bump `hlc`); remove = tombstone with url/title/excerpt/snapshot blanked; no unique index on `url` (two devices can save the same page before syncing; the app de-duplicates on read). Lazily loaded (`src/main/reading-list.ts`); `SURFFISH_STORE=json` forces `reading-list.json` |
+| `session_tab_history` (v3) | each open tab's back/forward list | keyed by the `session_tabs` row id; `entries` JSON (url, title, Chromium page state) + `active_index`. **Device-local**: no sync columns, no oplog triggers; hard-deleted when the tab closes or the session is cleared; orphans purged at first use |
 
 ## Change log and sync
 
@@ -162,3 +163,18 @@ icon and proxy blanked.
   fallback run, an older build) or the database write failed, the JSON file wins and is imported.
 - browser-session.json keeps being written for now, so downgrading or `SURFFISH_STORE=json` still
   restores the exact session. It can stop once sync ships.
+- **Back/forward history** (shared/tab-history.ts) rides along: each window's `histories` in
+  browser-session.json (same order as `tabs`, null for none; older builds ignore it) and one
+  `session_tab_history` row per tab, rewritten only when that tab's list changed. Live tabs are read
+  from `navigationHistory` when the coalesced write runs (and at before-quit, while pages still
+  exist); sleeping tabs use the list they went to sleep with. Restored tabs wake through
+  `navigationHistory.restore()`, so Back/Forward, the hold-Back menu and scroll/form state come back.
+  Caps: 50 entries around the current one (at most 10 forward), http(s) only with the same secret
+  scrubbing as tab URLs, page states over 64 KB dropped (entry kept), 2 MB for all tabs together
+  (page states go first, then whole lists). Private tabs, Glance and the Settings tab are never saved.
+  A typical tab costs ~1 KB per entry (mostly page state).
+  Clearing history (Clear browsing data → History, History → Clear, Forget This Site with history)
+  takes those pages out of open tabs' lists too, as Chrome does: live tabs via `navigationHistory`
+  (`clear()` for all time, `removeEntryAtIndex` otherwise), sleeping/restored tabs in the list they
+  wake with, and both stores are rewritten at once. The current page always stays. Entries carry no
+  visit time, so a time range drops the URLs visited in that range.

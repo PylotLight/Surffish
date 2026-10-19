@@ -33,7 +33,8 @@ import {
   dismissActiveLoadError,
   activeTabHasLoadError,
   getActiveTabWebContents,
-  openSettingsTab
+  openSettingsTab,
+  forgetTabNavigationHistory
 } from './browser'
 import { windowForContents } from './window-scope'
 import { certificateInfoFor, proceedPastCertificateError, showNativeCertificate } from './certificates'
@@ -539,6 +540,8 @@ export function registerIpc(): void {
     assertMainRenderer(event)
     clearBrowsingHistory()
     forgetArchivedTabsSince(0)
+    // Open tabs' back/forward lists (and the saved session's) go too, as in Chrome.
+    forgetTabNavigationHistory('all')
     sendToMainWindowRenderers('browser:history-changed')
   })
   ipcMain.handle('browser:proxy:get', (event) => {

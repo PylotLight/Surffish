@@ -4,7 +4,7 @@ import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { SurffishDatabase } from './database.ts'
 import { ReadingListTable } from './reading-list-table.ts'
-import { MIGRATIONS } from './schema.ts'
+import { MIGRATIONS, SCHEMA_VERSION } from './schema.ts'
 import { FILE_DB_TEST_TIMEOUT_MS, storeTestDir } from './test-temp-dir.ts'
 import { READING_LIST_TOMBSTONE_TTL_MS, sanitizeReadingListInput } from '../../shared/reading-list.ts'
 
@@ -144,7 +144,7 @@ test('a v1 profile migrates to v2 with its data intact and gains the reading_lis
     raw.exec("INSERT INTO bookmarks (id, parent_id, kind, title, url, position, device_id, created_at, updated_at, hlc) VALUES ('b1', NULL, 'url', 'Kept', 'https://kept.example/', 'a0', 'dev-1', 1, 1, '0000000000001-0000-dev-1')")
     raw.close()
     const db = SurffishDatabase.open({ path })
-    assert.equal(Number(db.get<{ user_version: number }>('PRAGMA user_version')!.user_version), 2)
+    assert.equal(Number(db.get<{ user_version: number }>('PRAGMA user_version')!.user_version), SCHEMA_VERSION)
     assert.equal(db.deviceId, 'dev-1')
     assert.equal(db.get<{ title: string }>("SELECT title FROM bookmarks WHERE id = 'b1'")!.title, 'Kept')
     const table = new ReadingListTable(db)
