@@ -58,7 +58,7 @@ const FONTS: SignatureFont[] = [
   { id: 'snell', label: 'Snell Roundhand', family: '"Snell Roundhand", "Segoe Script", "Brush Script MT", cursive', style: 'italic', probe: ['Snell Roundhand'] },
   { id: 'segoe-script', label: 'Segoe Script', family: '"Segoe Script", cursive', probe: ['Segoe Script'] },
   { id: 'great-vibes', label: 'Great Vibes', family: '"Surffish Great Vibes", cursive' },
-  { id: 'dancing-script', label: 'Dancing Script', family: '"Surffish Dancing Script", cursive' },
+  { id: 'allura', label: 'Allura', family: '"Surffish Allura", cursive' },
   { id: 'savoye', label: 'Savoye', family: '"Savoye LET", cursive', probe: ['Savoye LET'] },
   { id: 'apple-chancery', label: 'Apple Chancery', family: '"Apple Chancery", cursive', probe: ['Apple Chancery'] },
   { id: 'bradley-hand', label: 'Bradley Hand', family: '"Bradley Hand", "Bradley Hand ITC", cursive', probe: ['Bradley Hand', 'Bradley Hand ITC'] },

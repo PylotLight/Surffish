@@ -86,7 +86,7 @@ body.is-busy #viewerContainer { opacity: 0.6; pointer-events: none; }
 }
 /* Bundled OFL signature fonts (docs/third-party-assets.md), so every platform gets a few real script faces. */
 @font-face { font-family: "Surffish Great Vibes"; src: url("./fonts/great-vibes-latin.woff2") format("woff2"); font-display: block; }
-@font-face { font-family: "Surffish Dancing Script"; src: url("./fonts/dancing-script-latin.woff2") format("woff2"); font-weight: 400 700; font-display: block; }
+@font-face { font-family: "Surffish Allura"; src: url("./fonts/allura-latin.woff2") format("woff2"); font-display: block; }
 #signatureDialog .spacer { flex: 1; }
 #signatureDialog .pad-tools { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
 #signatureDialog .pad-tools .link { margin-top: 0; }
