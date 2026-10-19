@@ -81,9 +81,44 @@ body.is-busy #viewerContainer { opacity: 0.6; pointer-events: none; }
 #signaturePad { width: 100%; aspect-ratio: 560 / 180; background: #fff; border-radius: 8px; touch-action: none; cursor: crosshair; }
 #signatureDialog .link { margin-top: 4px; color: var(--muted); }
 #signatureText {
-  width: 100%; height: 72px; padding: 0 14px; border-radius: 8px; border: 0; background: #fff; color: #111;
-  font: italic 34px "Snell Roundhand", "Segoe Script", "Brush Script MT", cursive;
+  flex: 1; min-width: 0; height: 56px; padding: 0 14px; border-radius: 8px; border: 0; background: #fff; color: var(--ink, #1b1b1f);
+  font: italic 30px "Snell Roundhand", "Segoe Script", "Brush Script MT", cursive;
 }
+/* Bundled OFL signature fonts (docs/third-party-assets.md), so every platform gets a few real script faces. */
+@font-face { font-family: "Surffish Great Vibes"; src: url("./fonts/great-vibes-latin.woff2") format("woff2"); font-display: block; }
+@font-face { font-family: "Surffish Dancing Script"; src: url("./fonts/dancing-script-latin.woff2") format("woff2"); font-weight: 400 700; font-display: block; }
+#signatureDialog .spacer { flex: 1; }
+#signatureDialog .pad-tools { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+#signatureDialog .pad-tools .link { margin-top: 0; }
+#signatureDialog .weight { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+#signatureDialog .weight input { width: 120px; }
+#signatureDialog .typed-row { display: flex; gap: 6px; align-items: stretch; }
+#signatureDialog .toggle { height: auto; width: 44px; border: 1px solid var(--line); font-size: 15px; }
+#signatureDialog .toggle[aria-pressed="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
+#signatureDialog .font-choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+#signatureDialog .font-choice {
+  height: 46px; padding: 0 6px; overflow: hidden; border-radius: 7px; background: #fff; color: var(--ink, #1b1b1f);
+  white-space: nowrap; text-overflow: ellipsis; font-size: 21px; border: 2px solid transparent;
+}
+#signatureDialog .font-choice:hover:not(:disabled) { background: #f1f4f2; }
+#signatureDialog .font-choice[aria-checked="true"] { border-color: var(--accent); }
+#signatureDialog .drop {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px; border-radius: 8px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.18); color: var(--muted); text-align: center;
+}
+#signatureDialog.is-dropping .drop { border-color: var(--accent); background: rgba(126, 226, 168, 0.08); }
+#signatureDialog .style-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+#signatureDialog .style-row .tabs { margin: 0; align-items: center; }
+#signatureDialog .style-row .label { color: var(--muted); margin-right: 4px; }
+#signatureDialog .sizes button { width: 30px; padding: 0; }
+#signatureDialog .sizes [aria-checked="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
+#signatureDialog .inks { display: flex; gap: 2px; }
+#signatureDialog .inks button { width: 30px; padding: 0; display: grid; place-items: center; }
+#signatureDialog .inks .swatch { width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); }
+#signatureDialog .inks [data-signature-ink="black"] .swatch { background: #1b1b1f; }
+#signatureDialog .inks [data-signature-ink="blue"] .swatch { background: #1f3a8a; }
+#signatureDialog .inks [data-signature-ink="fountain"] .swatch { background: #2a4fb5; }
+#signatureDialog .inks [aria-checked="true"] .swatch { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
 #signatureDialog .description { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; color: var(--muted); }
 #signatureDialog .description input { height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: #11161c; }
 #signatureDialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
@@ -99,7 +134,7 @@ body.is-busy #viewerContainer { opacity: 0.6; pointer-events: none; }
 #signatureDialog .remember { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--muted); }
 #signatureDialog .hint { margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
 #signatureDialog .error { margin: 8px 0 0; color: #ff9a9a; }
-#signatureImagePreview { display: block; max-width: 100%; max-height: 140px; margin-top: 8px; background: #fff; border-radius: 6px; }
+#signatureImagePreview { display: block; width: 100%; aspect-ratio: 560 / 140; margin-top: 8px; background: #fff; border-radius: 6px; }
 
 /* Forms */
 #toolbar .check { display: flex; align-items: center; gap: 5px; padding: 0 6px; color: var(--muted); white-space: nowrap; }
