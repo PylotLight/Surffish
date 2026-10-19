@@ -230,9 +230,11 @@ async function readBounded(response: Response): Promise<Uint8Array> {
 
 // Own isolated world: the page can't swap out fetch/FileReader under us.
 const BLOB_READ_WORLD_ID = 1984
+// First party with the tab's own cookies (SameSite ones too), UA and HTTP cache: a signed-in or
+// one-shot link (Gmail attachments) loads here when a refetch from the main process gets a 401.
 const BLOB_READ_SCRIPT = `(async () => {
   try {
-    const response = await fetch(location.href)
+    const response = await fetch(location.href, { credentials: 'include', cache: 'force-cache' })
     if (!response.ok) return { error: 'gone' }
     const blob = await response.blob()
     if (blob.size > ${MAX_PDF_EDITOR_BYTES}) return { error: 'too-large' }
@@ -248,7 +250,7 @@ const BLOB_READ_SCRIPT = `(async () => {
   }
 })()`
 
-/** Bytes of a page-made blob:/data: PDF, read from the tab that shows it. */
+/** Bytes of the PDF read from inside the tab that shows it (blob:/data:, or a web PDF kept behind the editor). */
 async function readInMemoryPdf(document: PdfEditorDocument): Promise<Uint8Array> {
   if (/^data:/i.test(document.sourceUrl)) {
     const bytes = decodePdfDataUrl(document.sourceUrl)
@@ -265,7 +267,36 @@ async function readInMemoryPdf(document: PdfEditorDocument): Promise<Uint8Array>
   return bytes
 }
 
-/** Fetch the document the tab was showing: with the tab's session for the web, from disk for file://. */
+/**
+ * A web PDF: first from inside the tab that showed it (first party, so the site's sign-in cookies and the
+ * HTTP cache apply), then a refetch with the tab's session as a fallback.
+ */
+async function loadWebPdf(document: PdfEditorDocument): Promise<Uint8Array> {
+  const contents = document.sourceContents
+  if (contents && !contents.isDestroyed()) {
+    try {
+      const bytes = await readInMemoryPdf(document)
+      if (bytes.byteLength > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
+      if (looksLikePdf(bytes)) return bytes
+    } catch (error) {
+      // Anything else (a view mid-teardown, a page that refuses): fall back to a refetch.
+      if (error instanceof Error && error.message === 'This PDF is too large to edit here.') throw error
+    }
+  }
+  const response = await document.sourceSession.fetch(document.sourceUrl, {
+    redirect: 'follow',
+    credentials: 'include',
+    signal: AbortSignal.timeout(60_000),
+    headers: { Accept: 'application/pdf,*/*;q=0.8' }
+  })
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) throw new Error(`Could not download the PDF (HTTP ${response.status}). The link may have expired: reload the PDF, then Edit again.`)
+    throw new Error(`Could not download the PDF (HTTP ${response.status}).`)
+  }
+  return readBounded(response)
+}
+
+/** Fetch the document the tab was showing: from the tab (or its session) for the web, from disk for file://. */
 export async function loadPdfBytes(document: PdfEditorDocument): Promise<Uint8Array> {
   const inMemory = isInMemoryPdfSource(document.sourceUrl)
   if (!inMemory && !isEditablePdfSource(document.sourceUrl)) throw new Error('This PDF cannot be opened in the editor.')
@@ -280,13 +311,7 @@ export async function loadPdfBytes(document: PdfEditorDocument): Promise<Uint8Ar
     if (info.size > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
     bytes = new Uint8Array(await readFile(path))
   } else {
-    const response = await document.sourceSession.fetch(document.sourceUrl, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(60_000),
-      headers: { Accept: 'application/pdf,*/*;q=0.8' }
-    })
-    if (!response.ok) throw new Error(`Could not download the PDF (HTTP ${response.status}).`)
-    bytes = await readBounded(response)
+    bytes = await loadWebPdf(document)
   }
   if (!looksLikePdf(bytes)) throw new Error('The downloaded file is not a PDF (the site may need you to sign in again).')
   return bytes

@@ -1701,7 +1701,10 @@ export function openPdfEditor(id = getTab()?.id): boolean {
     return true
   }
   if (!isEditablePdfSource(sourceUrl)) return false
-  replaceTabView(tab, { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false }, PDF_EDITOR_URL)
+  // Keep a web PDF's viewer behind the editor: the editor reads the bytes from it (signed-in and
+  // one-shot links like Gmail attachments 401 on a refetch), and Back to viewer is instant.
+  const isWeb = /^https?:/i.test(sourceUrl)
+  replaceTabView(tab, { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false }, PDF_EDITOR_URL, isWeb)
   return true
 }
 

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:http'
 import { PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -243,6 +244,47 @@ try {
   await toolbar.eval('window.api.browser.togglePdfEditor()')
   await until('the viewer again', async () => (await toolbar.eval('window.api.browser.state()')).pdf === 'viewer', 30_000)
   console.log('✓ back to the built-in viewer')
+
+  // Signed-in web PDF (like a Gmail attachment): the PDF needs a SameSite=Strict cookie, so a refetch
+  // from the main process gets a 401 and the editor has to read the bytes from the tab itself.
+  const gated = readFileSync(input)
+  let pdfHits = 0
+  const server = createServer((request, response) => {
+    if (request.url === '/login') {
+      response.writeHead(302, { 'Set-Cookie': 'smoke_auth=1; Path=/; SameSite=Strict; HttpOnly', Location: '/gated.pdf' })
+      return response.end()
+    }
+    if (request.url === '/gated.pdf') {
+      pdfHits += 1
+      if (!/(?:^|;\s*)smoke_auth=1/.test(request.headers.cookie ?? '')) {
+        response.writeHead(401, { 'Content-Type': 'text/plain' })
+        return response.end('signed out')
+      }
+      response.writeHead(200, { 'Content-Type': 'application/pdf', 'Cache-Control': 'private, no-store' })
+      return response.end(gated)
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const origin = `http://127.0.0.1:${server.address().port}`
+    await toolbar.eval(`window.api.browser.navigate(${JSON.stringify(`${origin}/login`)})`)
+    await until('the cookie-gated PDF in the viewer', async () => (await toolbar.eval('window.api.browser.state()')).pdf === 'viewer' && pdfHits > 0, 45_000)
+    if ((await toolbar.eval('window.api.browser.togglePdfEditor()')) !== true) throw new Error('togglePdfEditor() refused the web PDF')
+    const webEditor = await attach((url) => url.startsWith('surffish-pdf://editor/pdf-editor.html'), 'the editor page (web PDF)')
+    await until('the gated PDF to render in the editor', () => webEditor.eval(`document.querySelectorAll('#pageList li').length === 2`), 45_000).catch(async (error) => {
+      const said = await webEditor.eval(`document.body.innerText.slice(-300)`).catch(() => '')
+      throw new Error(`${error.message} (page said: ${said})`)
+    })
+    console.log('✓ cookie-gated web PDF opened in the editor (read from the tab)')
+    await toolbar.eval('window.api.browser.togglePdfEditor()')
+    await until('the viewer again (web PDF)', async () => (await toolbar.eval('window.api.browser.state()')).pdf === 'viewer', 30_000)
+    console.log('✓ back to the web PDF viewer')
+    webEditor.close()
+  } finally {
+    server.close()
+  }
   toolbar.close()
   editor.close()
 } catch (error) {
