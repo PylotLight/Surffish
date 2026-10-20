@@ -80,6 +80,7 @@ import { dropBrowserTabOnMiniWindow, getMiniWindowSettings, noteMiniWindowChange
 import { canPopOutUrl } from '../shared/mini-window'
 import { miniReturnBeforeId, miniTabOrigin, moveTabId, sidebarDropBeforeId, type MiniTabOrigin, type SidebarRowHit } from '../shared/mini-window-tab-drag'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
+import { pinStepBeforeId } from '../shared/pinned-reorder'
 import { setOmniboxPrerenderHost, takeOmniboxPrerender, type PrerenderTabHistory } from './omnibox-prerender'
 import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
 import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
@@ -1106,6 +1107,15 @@ function tabMenuExtras(id: string): MenuItemConstructorOptions[] {
   }
 }
 
+/** Move Pin Left / Right, enabled when there is a pin on that side (the keyboard-free way to reorder pins). */
+function pinnedTabMoveItems(tab: BrowserTab): MenuItemConstructorOptions[] {
+  const pins = spaceTabsOf(tab.win, tab.spaceId).filter((item) => item.pinned).map((item) => item.id)
+  return [
+    { label: 'Move Pin Left', enabled: pinStepBeforeId(pins, tab.id, -1) !== undefined, click: () => { stepPinnedTab(tab.id, -1) } },
+    { label: 'Move Pin Right', enabled: pinStepBeforeId(pins, tab.id, 1) !== undefined, click: () => { stepPinnedTab(tab.id, 1) } }
+  ]
+}
+
 function showBrowserTabContextMenu(id: string): void {
   const tab = getTab(id)
   if (!tab || !isLiveWindow(tab.win)) return
@@ -1119,6 +1129,7 @@ function showBrowserTabContextMenu(id: string): void {
     // Never for private tabs: the Reading List keeps (and will sync) what it saves.
     { label: 'Add to Reading List', ...tabMenuAccelerator('readingList'), enabled: Boolean(origin) && !tab.isPrivate, click: () => addTabToReadingList(id) },
     { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
+    ...(tab.pinned ? pinnedTabMoveItems(tab) : []),
     { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
     { label: 'Pop Out to Mini Window', ...tabMenuAccelerator('miniWindow'), enabled: canPopOutTab(tab), click: () => { void popOutTabToMiniWindow(id) } },
     // Hidden with the menu bar icon set to Never.
@@ -3861,9 +3872,27 @@ export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
     publishState(tab.win)
   }
   tab.pinned = pinned
+  // A new pin goes to the end of the strip (pins keep the order the user gave them, never their old
+  // slot in the tab list): move it right after the window's last other pinned tab.
+  if (pinned) {
+    const { tabs } = tab.win
+    tabs.splice(tabs.indexOf(tab), 1)
+    let last = -1
+    tabs.forEach((item, index) => { if (item.pinned) last = index })
+    tabs.splice(last + 1, 0, tab)
+  }
   persistOpenTabs()
   publishTabs(tab.win)
   return true
+}
+
+/** Move Pin Left / Right (tab menu): one step along the pinned strip of the tab's Space. */
+function stepPinnedTab(id: string, direction: -1 | 1): boolean {
+  const tab = getTab(id)
+  if (!tab?.pinned) return false
+  const pins = spaceTabsOf(tab.win, tab.spaceId).filter((item) => item.pinned).map((item) => item.id)
+  const beforeId = pinStepBeforeId(pins, id, direction)
+  return beforeId === undefined ? false : moveBrowserTab(id, beforeId)
 }
 
 /**

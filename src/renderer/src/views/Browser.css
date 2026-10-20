@@ -1111,6 +1111,26 @@
   outline: 2px solid rgba(180, 243, 202, 0.45);
   outline-offset: 1px;
 }
+/* Pin reordering: only while Cmd (Ctrl off macOS) is held, so a plain drag never moves pins. */
+.sidebar-pinned-list.is-reorder-armed .pinned-tab-icon-button,
+.sidebar-pinned-list.is-reorder-armed .pinned-site-icon-button {
+  border-color: rgba(180, 243, 202, 0.22);
+  border-style: dashed;
+  cursor: grab;
+}
+.sidebar-pinned-list.is-reordering,
+.sidebar-pinned-list.is-reordering .pinned-tab-icon-button,
+.sidebar-pinned-list.is-reordering .pinned-site-icon-button {
+  cursor: grabbing;
+}
+.pinned-tab-icon-button.is-pin-dragging,
+.pinned-site-icon-button.is-pin-dragging {
+  position: relative;
+  border-style: solid;
+  border-color: rgba(180, 243, 202, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
 .pinned-tab-icon-button .tab-favicon {
   width: 23px;
   height: 23px;
