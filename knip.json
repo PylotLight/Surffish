@@ -23,7 +23,8 @@
   "ignoreExportsUsedInFile": true,
   "ignoreDependencies": [
     "node-api-headers",
-    "lightningcss"
+    "lightningcss",
+    "jsqr"
   ],
   "ignoreBinaries": [
     "check"

@@ -18,3 +18,7 @@ The upstream license text is included at [`licenses/GPL-3.0-Bramble-icon.txt`](l
 ## PDF editor signature fonts
 
 `src/renderer/src/pdf-editor/fonts/great-vibes-latin.woff2` and `allura-latin.woff2` are the unmodified Latin WOFF2 files Google Fonts serves for [Great Vibes](https://github.com/googlefonts/great-vibes) (Copyright 2015 The Great Vibes Pro Project Authors) and [Allura](https://github.com/googlefonts/allura) (Copyright 2010 The Allura Project Authors), about 55 KB together. Both are licensed under the SIL Open Font License 1.1 with no Reserved Font Name; the license texts are in [`licenses/OFL-1.1-Great-Vibes.txt`](licenses/OFL-1.1-Great-Vibes.txt) and [`licenses/OFL-1.1-Allura.txt`](licenses/OFL-1.1-Allura.txt). They are only loaded by the built-in PDF editor's signature dialog, so typed signatures have real script faces on systems without Snell Roundhand / Segoe Script and friends (those system fonts are used when installed, never bundled).
+
+## jsQR (Bramble Scan QR fallback)
+
+`out/vendor/jsqr.min.js` is [jsQR](https://github.com/cozmo/jsQR) 1.4.0 (Copyright Cosmo Wolfe), minified at build time from the `jsqr` dev dependency, about 130 KB (47 KB gzipped). Licensed under the Apache License 2.0; the license text is in [`licenses/Apache-2.0-jsQR.txt`](licenses/Apache-2.0-jsQR.txt). It is copied into Surffish's staged copy of Bramble as `surffish-jsqr.js` and only loaded the first time the Join a device **Scan QR** runs on a system without Chromium's `BarcodeDetector` (it is used on macOS only if `BarcodeDetector` can't read QR codes).

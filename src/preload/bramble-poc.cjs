@@ -4,6 +4,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('surffishBramble', Object.freeze({
   openOptionsPage: () => ipcRenderer.invoke('browser:bramble:open-options-from-ui'),
   writeClipboard: (text) => ipcRenderer.invoke('browser:bramble:clipboard-write', text),
+  // Bramble's setup tab, once a vault was created / joined / restored (bramble-setup-close-page.cjs).
+  closeSetupTab: () => ipcRenderer.invoke('browser:bramble:setup-done'),
   // Only honoured from Bramble's hidden offscreen page (see ipc.ts).
   openPopout: (url) => ipcRenderer.invoke('browser:bramble:popout-open', url),
   closePopout: () => ipcRenderer.invoke('browser:bramble:popout-close')

@@ -38,6 +38,10 @@ const SITE_SETTING_PERMISSIONS: ReadonlySet<string> = new Set(['media', 'geoloca
 /** Short toast for a denied permission request, e.g. "Clipboard blocked on github.com · allow in Site settings". */
 export function permissionDeniedMessage(permission: string, origin: string): string {
   const label = PERMISSION_LABELS[permission] ?? permission
+  // Extension pages have no Site settings row; for Bramble's Scan QR the usual cause is macOS camera access.
+  if (origin.startsWith('chrome-extension:')) {
+    return permission === 'media' ? `${label} blocked for this extension · check System Settings → Privacy & Security → Camera` : `${label} blocked for this extension`
+  }
   let host = origin
   try {
     host = new URL(origin).host || origin

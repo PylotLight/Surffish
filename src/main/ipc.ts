@@ -57,7 +57,7 @@ import {
 import { cancelDownload, getDownloadHistory, openDownload, pauseDownload, removeDownload, resumeDownload, revealDownload, clearDownloadHistory, openDownloadsFolder } from './downloads'
 import { getNewTabBackgrounds, refreshNewTabBackgrounds } from './new-tab-backgrounds'
 import { getNewTabWeather, getWeatherKeyStatus, locateWeatherPlace, searchWeatherPlaces, setWeatherApiKey, weatherResult } from './new-tab-weather'
-import { brambleTabsCallerForSender, checkForBrambleUpdates, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
+import { brambleTabsCallerForSender, checkForBrambleUpdates, closeBrambleSetupTab, getBramblePocState, installLatestBramble, closeBramblePopoutFromBackground, isBrambleClipboardSource, isBrambleOffscreenSource, isBrambleUiWindow, openBramblePopoutFromBackground, openBrambleOptionsFromUi, openBramblePoc, openBrambleSetup, setBrambleToolbarAnchor, writeBrambleClipboardText } from './bramble-poc'
 import {
   checkWebStoreExtensionUpdate,
   getWebStoreExtensionsState,
@@ -399,6 +399,9 @@ export function registerIpc(): void {
     await openBrambleOptionsFromUi(sourceWindow, event.sender)
     return true
   })
+  // Bramble's setup tab finished (bramble-setup-close-page.cjs): close it. bramble-poc.ts checks the
+  // sender is that tab and that a vault now exists.
+  ipcMain.handle('browser:bramble:setup-done', (event) => closeBrambleSetupTab(event.sender, event.senderFrame))
   ipcMain.handle('browser:bramble:popout-open', async (event, url: unknown) => {
     const sourceWindow = BrowserWindow.fromWebContents(event.sender)
     if (event.senderFrame !== event.sender.mainFrame || !isBrambleOffscreenSource(sourceWindow, event.sender)) {

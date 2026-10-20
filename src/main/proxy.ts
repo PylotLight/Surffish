@@ -31,6 +31,7 @@ import {
 } from '../shared/proxy-routing'
 import { getDomain } from 'tldts-experimental'
 import { readUserJson, writeSettingsFile } from './user-json'
+import { brambleCameraCheckDecision, brambleCameraRequestDecision, ensureSystemCameraAccess } from './bramble-camera-permission'
 
 export const DEFAULT_PROXY_SETTINGS: BrowserProxySettings = DEFAULT_BROWSER_PROXY_SETTINGS
 
@@ -247,12 +248,32 @@ function installWebRTCPolicyHook(): void {
 }
 
 function applyPermissionPolicy(target: Electron.Session): void {
-  target.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => siteAllowsPermission(requestingOrigin, permission))
+  target.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) => {
+    // Bramble's own pages: camera (video only) for its Join a device "Scan QR".
+    const bramble = brambleCameraCheckDecision(permission, requestingOrigin, details.mediaType)
+    if (bramble !== 'not-bramble') return bramble === 'allow'
+    return siteAllowsPermission(requestingOrigin, permission)
+  })
   target.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const requestingUrl = details.requestingUrl || webContents.getURL()
+    const denied = (): void => { for (const listener of permissionDeniedListeners) listener(webContents, permission, requestingUrl) }
+    const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined
+    const bramble = brambleCameraRequestDecision(permission, requestingUrl, mediaTypes)
+    if (bramble !== 'not-bramble') {
+      if (bramble === 'deny') {
+        callback(false)
+        denied()
+        return
+      }
+      void ensureSystemCameraAccess().then((granted) => {
+        callback(granted)
+        if (!granted) denied()
+      })
+      return
+    }
     const allowed = siteAllowsPermission(requestingUrl, permission)
     callback(allowed)
-    if (!allowed) for (const listener of permissionDeniedListeners) listener(webContents, permission, requestingUrl)
+    if (!allowed) denied()
   })
 }
 

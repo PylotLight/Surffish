@@ -4,15 +4,21 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BrambleExtensionState, BramblePopupAnchor } from '../shared/types'
 import { getBrowserSession } from './browser-session'
-import { closeBrambleExtensionTabs, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
+import { closeBrambleExtensionTabs, closeTabKeepingWindow, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
 import {
   adaptBrambleFirefoxManifest,
   BRAMBLE_BROWSER_ALIAS_FILE,
   BRAMBLE_BROWSER_ALIAS_SOURCE,
   isBrambleExtensionUrl,
+  addBrambleQrJoin,
   isRecord,
   stageBrambleFirefoxBuild
 } from './bramble-poc-adapter'
+import BRAMBLE_QR_JOIN_SOURCE from '../shared/bramble-qr-join-page.cjs?raw'
+import BRAMBLE_SETUP_CLOSE_SOURCE from '../shared/bramble-setup-close-page.cjs?raw'
+import { isBrambleSetupPageUrl } from '../shared/bramble-setup-close'
+import { BRAMBLE_VAULT_PROBE_SCRIPT, classifyBrambleVaultProbe } from '../shared/bramble-quick-unlock'
+import { registerBrambleExtensionIdProvider } from './bramble-camera-permission'
 import {
   compareBrambleVersions,
   downloadVerifiedBrambleFirefoxRelease,
@@ -64,6 +70,8 @@ const state: BrambleExtensionState = {
   iconDataUrl: null
 }
 let loadedExtension: LoadedBrambleExtension | null = null
+// The permission policy allows the camera (video only) on these pages for the Join a device Scan QR.
+registerBrambleExtensionIdProvider(() => loadedExtension?.id ?? null)
 let popupWindow: BrowserWindow | null = null
 /** Set while Surffish's quick unlock shows the Touch ID sheet, which takes focus from the popup. */
 let popupBlurHold = false
@@ -176,7 +184,32 @@ function brambleDirectory(relativePath: string): string {
 }
 
 function stageBrambleBuild(sourceDirectory: string, targetDirectory = brambleDirectory(STAGING_DIRECTORY)): { stagedDirectory: string; version: string } {
-  return stageBrambleFirefoxBuild(sourceDirectory, targetDirectory)
+  const staged = stageBrambleFirefoxBuild(sourceDirectory, targetDirectory)
+  addSurffishQrJoin(staged.stagedDirectory)
+  return staged
+}
+
+/** jsQR, minified into out/vendor by electron.vite.config.ts; null in a dev run without a build. */
+function readBundledJsQr(): string | null {
+  try {
+    return readFileSync(join(mainDirectory, '../vendor/jsqr.min.js'), 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Surffish's "Scan QR" on Bramble's Join a device form (src/shared/bramble-qr-join-page.cjs), plus
+ * closing the setup tab once setup is done (src/shared/bramble-setup-close-page.cjs). Both ride in the
+ * one staged page script.
+ */
+function addSurffishQrJoin(stagedDirectory: string): void {
+  try {
+    addBrambleQrJoin(stagedDirectory, `${BRAMBLE_QR_JOIN_SOURCE}\n${BRAMBLE_SETUP_CLOSE_SOURCE}`, readBundledJsQr())
+  } catch (error) {
+    // Optional convenience: Bramble works without it (the pairing code can still be pasted).
+    console.warn('[bramble] could not add Scan QR to the Join a device form:', error)
+  }
 }
 
 function stringList(value: unknown): string[] {
@@ -467,6 +500,7 @@ async function loadExistingStagedBuild(directory: string): Promise<void> {
   }
   // Refresh Surffish's own compatibility shim so fixes reach builds staged by an older Surffish.
   writeFileSync(join(directory, BRAMBLE_BROWSER_ALIAS_FILE), BRAMBLE_BROWSER_ALIAS_SOURCE)
+  addSurffishQrJoin(directory)
   try {
     const extension = await loadBrambleExtension(directory)
     loadedExtension = { id: extension.id, name: extension.name, version: extension.version, url: extension.url }
@@ -673,6 +707,25 @@ export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | nul
     throw new Error('Only a Bramble UI page can open Bramble Setup / Restore.')
   }
   await openBrambleSetup()
+}
+
+/**
+ * Bramble's setup tab says setup is done (bramble-setup-close-page.cjs saw the done screen and a vault
+ * this page created). Only that tab can ask, only on options.html without ?screen=, and only while
+ * Bramble really has a vault; then the tab closes (the last tab of a window becomes a New Tab).
+ */
+export async function closeBrambleSetupTab(sender: WebContents, senderFrame: Electron.WebFrameMain | null): Promise<boolean> {
+  const extension = loadedExtension
+  if (!extension || !senderFrame || senderFrame !== sender.mainFrame || sender.isDestroyed()) return false
+  if (!isBrambleSetupPageUrl(senderFrame.url, extension.url) || !isBrambleExtensionTab(sender)) return false
+  let vault: ReturnType<typeof classifyBrambleVaultProbe> = 'unknown'
+  try {
+    vault = classifyBrambleVaultProbe(await evaluateInBrambleExtensionPage(BRAMBLE_VAULT_PROBE_SCRIPT))
+  } catch {
+    vault = 'unknown'
+  }
+  if (vault !== 'present' || sender.isDestroyed() || !isBrambleExtensionTab(sender)) return false
+  return closeTabKeepingWindow(sender)
 }
 
 /**
