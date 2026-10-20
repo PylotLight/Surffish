@@ -22,6 +22,8 @@ export const READ_ALOUD_URL = `${READ_ALOUD_ORIGIN}/${READ_ALOUD_PAGE}`
 export const READ_ALOUD_PARTITION = 'surffish-read-aloud'
 /** Folder under userData holding the downloaded runtime and model. Deleting it re-downloads. */
 export const READ_ALOUD_DIRECTORY = 'read-aloud'
+/** Written after the runtime, model and default voice are downloaded and verified. */
+export const READ_ALOUD_READY_FILE = 'ready.json'
 /** Engine-page paths for the downloaded files (served from the profile folder by main). */
 export const READ_ALOUD_RUNTIME_PATH = '/runtime/'
 export const READ_ALOUD_MODEL_PATH = '/model/'
