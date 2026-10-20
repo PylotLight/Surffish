@@ -33,6 +33,7 @@ import { afterFirstWindowPaint, traceStartup } from './startup-defer'
 import { registerPdfEditorScheme } from './pdf-editor'
 import { READER_SCHEME_PRIVILEGES, registerReaderIpc } from './reader-mode'
 import { disposePageWatchersFeature, initializePageWatchersFeature, registerPageWatcherIpc } from './page-watchers-feature'
+import { disposeReadAloudFeature, READ_ALOUD_SCHEME_PRIVILEGES, registerReadAloudIpc } from './read-aloud-feature'
 import { initializeBrowserSafety } from './safety'
 import { initializeCertificateHandling } from './certificates'
 import { disposeUpdates, initializeUpdates, registerUpdateIpc } from './updates'
@@ -71,7 +72,7 @@ if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
 // `Electron/x Surffish/x`; challenges see two different browsers and never pass.
 app.userAgentFallback = chromeUserAgent(app.userAgentFallback)
 // Privileged schemes must be registered before ready.
-registerPdfEditorScheme([READER_SCHEME_PRIVILEGES])
+registerPdfEditorScheme([READER_SCHEME_PRIVILEGES, READ_ALOUD_SCHEME_PRIVILEGES])
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch('disk-cache-size', String(512 * 1024 * 1024))
 // Surffish owns http→https upgrades (HTTPS-only mode, typed-host https-first with Continue to HTTP)
@@ -127,6 +128,8 @@ app.whenReady().then(async () => {
   registerWakeSnapshotIpc()
   registerReaderIpc()
   registerPageWatcherIpc()
+  // Read Aloud settings and player IPC only; the read-aloud module loads on the first reading.
+  registerReadAloudIpc()
   registerFeedIpc()
   registerReadingListIpc()
   registerAdblockStatsIpc()
@@ -218,6 +221,7 @@ app.on('before-quit', () => {
   freezeBrowserSession()
   disposeUpdates()
   disposePageWatchersFeature()
+  disposeReadAloudFeature()
   disposeFeeds()
   disposeMemorySaver()
   disposeBramblePoc()

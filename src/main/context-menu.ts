@@ -29,6 +29,9 @@ export interface BrowserContextMenuOptions {
   readerView?: () => void
   /** Offer "Watch This Page for Changes…" (never for private tabs). */
   watchPage?: (mode: 'page' | 'pick') => void
+  /** Offer Read Aloud entries (on in Settings, a web page); `readingAloud` swaps in Stop. */
+  readAloud?: (target: 'page' | 'selection' | 'stop', selection?: string) => void
+  readingAloud?: boolean
   /** Offer "Add Page/Link to Reading List" (never for private tabs). */
   addToReadingList?: (target: 'page' | { url: string; title?: string }) => void
 }
@@ -117,6 +120,8 @@ export function showBrowserContextMenu(
     hasScreenshot: Boolean(options.takeScreenshot),
     hasReaderView: Boolean(options.readerView),
     canWatchPage: Boolean(options.watchPage),
+    canReadAloud: Boolean(options.readAloud),
+    readingAloud: options.readingAloud === true,
     canAddToReadingList: Boolean(options.addToReadingList),
     canOpenInGlance: Boolean(options.openInGlance),
     canGoBack: contents.navigationHistory.canGoBack(),
@@ -149,6 +154,7 @@ export function showBrowserContextMenu(
     takeScreenshot: options.takeScreenshot,
     readerView: options.readerView,
     watchPage: options.watchPage,
+    readAloud: options.readAloud,
     addToReadingList: options.addToReadingList
   })
   if (items.length === 0) return false

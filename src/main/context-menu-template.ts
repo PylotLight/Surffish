@@ -23,6 +23,10 @@ export interface ContextMenuTemplateOptions {
   hasScreenshot?: boolean
   hasReaderView?: boolean
   canWatchPage?: boolean
+  /** Offer "Read Aloud" / "Read Selection Aloud" (Read Aloud on in Settings, a web page). */
+  canReadAloud?: boolean
+  /** A reading is in progress: offer "Stop Reading Aloud" instead of "Read Aloud". */
+  readingAloud?: boolean
   /** Offer "Add Page/Link to Reading List" (never in private tabs). */
   canAddToReadingList?: boolean
   /** Offer "Open Link in Glance" (a peek over the page, without a new tab). */
@@ -59,6 +63,7 @@ export interface ContextMenuActions {
   takeScreenshot?(): void
   readerView?(): void
   watchPage?(mode: 'page' | 'pick'): void
+  readAloud?(target: 'page' | 'selection' | 'stop', selection?: string): void
   addToReadingList?(target: 'page' | { url: string; title?: string }): void
 }
 
@@ -183,6 +188,10 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
         })
       }
     }
+    if (options.pageActions && options.canReadAloud) {
+      const selection = params.selectionText.trim()
+      items.push({ label: 'Read Selection Aloud', click: () => actions.readAloud?.('selection', selection) })
+    }
   }
 
   const linkUrl = safeHttpUrl(params.linkURL)
@@ -248,6 +257,11 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
     if (options.pdfDocument && options.hasEditPdf) items.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
     if (options.hasScreenshot) items.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
     if (!options.pdfDocument && options.hasReaderView) items.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
+    if (!options.pdfDocument && options.canReadAloud && pageUrl && !params.selectionText.trim()) {
+      items.push(options.readingAloud
+        ? { label: 'Stop Reading Aloud', click: () => actions.readAloud?.('stop') }
+        : { label: 'Read Aloud', toolTip: 'Read the article on this page out loud', click: () => actions.readAloud?.('page') })
+    }
     if (options.canAddToReadingList && pageUrl && !linkUrl) items.push({ label: 'Add Page to Reading List', accelerator: 'CmdOrCtrl+Shift+L', registerAccelerator: false, click: () => actions.addToReadingList?.('page') })
     if (!options.pdfDocument && options.canWatchPage && pageUrl) {
       items.push(

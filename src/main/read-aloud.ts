@@ -448,6 +448,8 @@ function onEngineEvent(value: unknown): void {
     endReading('error', String(event.error || 'Read Aloud failed.'))
     return
   }
+  // First audio of a reading: log the numbers that matter for a latency check (load, TTFB, threads).
+  if (event.stats && typeof event.stats === 'object') console.info('[read aloud]', event.engine ?? state.engine, JSON.stringify(event.stats))
   const index = typeof event.index === 'number' ? Math.max(0, Math.min(reading.sentences.length - 1, event.index)) : state.index
   if (index !== state.index || state.status !== event.status) highlight(reading.page, index, reading.sentences[index] ?? '')
   publish({
