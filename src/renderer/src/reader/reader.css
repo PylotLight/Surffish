@@ -300,3 +300,29 @@ button {
 .reader-content th,
 .reader-content td { border: 1px solid var(--reader-rule); padding: 0.4em 0.6em; text-align: left; }
 .reader-content hr { border: 0; border-top: 1px solid var(--reader-rule); margin: 2em 0; }
+
+/* Read Aloud: the toolbar's Listen button (shown only while Read Aloud is on in Settings) and the
+   sentence being spoken, painted with the CSS Custom Highlight API (no change to the article DOM). */
+.reader-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.reader-listen svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.reader-listen.is-current {
+  color: var(--reader-link, #2f6fde);
+}
+::highlight(read-aloud) {
+  background-color: rgba(255, 205, 64, 0.38);
+}
+html[data-theme="dark"] ::highlight(read-aloud) {
+  background-color: rgba(255, 205, 64, 0.26);
+}

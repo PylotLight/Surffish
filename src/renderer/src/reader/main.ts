@@ -11,10 +11,11 @@ import {
   type ReaderArticle,
   type ReaderSettings
 } from '../../../shared/reader'
+import { locateSentence } from '../../../shared/read-aloud-text'
 import './reader.css'
 
 type LoadResult =
-  | { ok: true; token: string; isPrivate: boolean; settings: ReaderSettings; article: ReaderArticle }
+  | { ok: true; token: string; isPrivate: boolean; settings: ReaderSettings; article: ReaderArticle; readAloud?: boolean }
   | { ok: false; error: string }
 
 interface SurffishReaderBridge {
@@ -22,6 +23,8 @@ interface SurffishReaderBridge {
   setSettings(settings: ReaderSettings): Promise<ReaderSettings>
   back(): void
   onSettings(callback: (settings: ReaderSettings) => void): void
+  readAloud?(): void
+  onReadAloud?(callback: (sentence: { index: number; text: string }) => void): void
 }
 
 const bridge = (window as unknown as { surffishReader?: SurffishReaderBridge }).surffishReader
@@ -152,7 +155,69 @@ function render(result: Extract<LoadResult, { ok: true }>): void {
   }
 }
 
+// ---- Read Aloud: highlight the sentence being spoken (CSS Custom Highlight API, no DOM changes) ----
+const listenButton = $<HTMLButtonElement>('listen')
+const READ_ALOUD_HIGHLIGHT = 'read-aloud'
+let readAloudSearchFrom = 0
+
+interface TextIndex { text: string; nodes: Array<{ node: Text; start: number }> }
+
+function articleTextIndex(): TextIndex {
+  const nodes: TextIndex['nodes'] = []
+  let text = ''
+  const walker = document.createTreeWalker(articleElement, NodeFilter.SHOW_TEXT)
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    nodes.push({ node, start: text.length })
+    text += node.data
+  }
+  return { text, nodes }
+}
+
+function positionAt(index: TextIndex, offset: number): { node: Text; offset: number } | null {
+  for (let i = index.nodes.length - 1; i >= 0; i -= 1) {
+    const entry = index.nodes[i]!
+    if (entry.start <= offset) return { node: entry.node, offset: Math.min(offset - entry.start, entry.node.data.length) }
+  }
+  return null
+}
+
+function setListening(listening: boolean): void {
+  listenButton.setAttribute('aria-pressed', String(listening))
+  listenButton.classList.toggle('is-current', listening)
+  listenButton.title = listening ? 'Stop reading aloud' : 'Read this article aloud'
+  const label = listenButton.querySelector('span')
+  if (label) label.textContent = listening ? 'Stop' : 'Listen'
+}
+
+function highlightSentence(sentence: { index: number; text: string }): void {
+  const highlights = (CSS as unknown as { highlights?: Map<string, unknown> }).highlights
+  const HighlightClass = (window as unknown as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight
+  if (sentence.index < 0 || !sentence.text) {
+    highlights?.delete(READ_ALOUD_HIGHLIGHT)
+    readAloudSearchFrom = 0
+    setListening(false)
+    return
+  }
+  setListening(true)
+  if (!highlights || !HighlightClass) return
+  const index = articleTextIndex()
+  const found = locateSentence(index.text, sentence.text, readAloudSearchFrom) ?? locateSentence(index.text, sentence.text, 0)
+  if (!found) return
+  readAloudSearchFrom = found[0]
+  const start = positionAt(index, found[0])
+  const end = positionAt(index, found[1])
+  if (!start || !end) return
+  const range = document.createRange()
+  range.setStart(start.node, start.offset)
+  range.setEnd(end.node, end.offset)
+  highlights.set(READ_ALOUD_HIGHLIGHT, new HighlightClass(range))
+  const box = range.getBoundingClientRect()
+  const toolbar = document.getElementById('toolbar')?.getBoundingClientRect().bottom ?? 0
+  if (box.top < toolbar + 8 || box.bottom > window.innerHeight - 24) window.scrollBy({ top: box.top - toolbar - window.innerHeight * 0.3, behavior: 'smooth' })
+}
+
 function wireControls(): void {
+  listenButton.addEventListener('click', () => bridge?.readAloud?.())
   $<HTMLButtonElement>('back').addEventListener('click', () => bridge?.back())
   settingsToggle.addEventListener('click', () => setSettingsOpen(settingsPanel.hidden === true))
   $<HTMLButtonElement>('smaller').addEventListener('click', () => updateSettings({ fontSize: settings.fontSize - 1 }))
@@ -194,6 +259,10 @@ async function start(): Promise<void> {
     }
     applySettings(normalizeReaderSettings(result.settings))
     render(result)
+    if (result.readAloud && bridge.readAloud) {
+      listenButton.hidden = false
+      bridge.onReadAloud?.(highlightSentence)
+    }
   } catch {
     showError('Reader view could not load this article.')
   }
