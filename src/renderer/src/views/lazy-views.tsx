@@ -29,6 +29,7 @@ export const PageWatchersToggle = deferred(() => settings().then((m) => m.PageWa
 export const GlanceSettings = deferred(() => settings().then((m) => m.GlanceSettings))
 export const MiniWindowSettings = deferred(() => settings().then((m) => m.MiniWindowSettings))
 export const LocalAISettings = deferred(() => settings().then((m) => m.LocalAISettings))
+export const ReadAloudSettings = deferred(() => settings().then((m) => m.ReadAloudSettings))
 export const CastSettings = deferred(() => settings().then((m) => m.CastSettings))
 export const FeedsSettings = deferred(() => settings().then((m) => m.FeedsSettings))
 export const BrambleQuickUnlockSettings = deferred(() => settings().then((m) => m.BrambleQuickUnlockSettings))

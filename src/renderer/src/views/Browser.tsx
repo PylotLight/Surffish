@@ -82,6 +82,7 @@ import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
 import { ReadingListButton } from './reading-list/ReadingListButton'
+import { ReadAloudControl } from './read-aloud/ReadAloudControl'
 import { AdblockButton } from './adblock/AdblockButton'
 import { CastButton, TabCastBadge, useCastTabId } from './cast/CastButton'
 import { BookmarksBar } from './bookmarks/BookmarksBar'
@@ -96,7 +97,7 @@ import {
   MemorySaverSettings, PreloadPagesSettings, ProxyKillSwitchSetting, SearchKeywordsSettings, SpacesSettings, SpellcheckSettings,
   TabArchiveSettings, UpdateSettings, NewTabSettingsFields, NewTabCustomizePanel, preloadNewTabCustomizePanel, SitesSettings
 } from './lazy-views'
-import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings, CastSettings } from './lazy-views'
+import { PageWatchersToggle, CertificateViewer, GlanceSettings, LocalAISettings, MiniWindowSettings, CastSettings, ReadAloudSettings } from './lazy-views'
 import { siteConnectionSummary, type SiteCertificateInfo } from '../../../shared/certificates'
 import { useNetworkToolEnabled } from './useNetworkToolEnabled'
 import { useTabUsageHints, withTabUsageHint } from './tabUsageHints'
@@ -421,6 +422,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Bookmarks dropdown (next to the address bar) and the optional bookmarks bar (⌘⇧B, off by default).
   const [bookmarksMenuOpen, setBookmarksMenuOpen] = useState(false)
   const [readingListOpen, setReadingListOpen] = useState(false)
+  const [readAloudOpen, setReadAloudOpen] = useState(false)
   const [adblockOpen, setAdblockOpen] = useState(false)
   const [castOpen, setCastOpen] = useState(false)
   const castTabId = useCastTabId()
@@ -1340,7 +1342,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     update()
     return () => observer.disconnect()
   }, [surface])
-  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, surffishMenuOpen, toolbarItemMenuOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, adblockOpen, castOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
+  useToolbarExtent(browserChromeRef, surface === 'toolbar', brandEgg.open, [downloadsPopupOpen, surffishMenuOpen, toolbarItemMenuOpen, suggestionsOpen, addressSuggestions.length, keywordMatch !== null, siteActionsOpen, extensionsMenuOpen, findOpen, paletteOpen, bookmarkPopoverOpen, bookmarksMenuOpen, readingListOpen, readAloudOpen, adblockOpen, castOpen, bookmarksBarMenuOpen, bookmarksMenuLayout, bookmarksBarVisible, surface, navigationError !== '' || showLoadErrorNotice])
   // Right-hand toolbar buttons (shared/toolbar-layout.ts): which want a slot, which a narrow window folds.
   const downloadsAttentionFlags = useDownloadsAttention(downloadsSeenAt)
   useEffect(() => { if (downloadsPopupOpen) setDownloadsSeenAt(Date.now()) }, [downloadsPopupOpen])
@@ -1920,6 +1922,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5A2.5 2.5 0 0 1 13 8v11a2 2 0 0 0-2-2H4Z" /><path d="M20 5.5h-6.5A2.5 2.5 0 0 0 11 8v11a2 2 0 0 1 2-2h7Z" /></svg>
                   <span>Reader</span>
                 </button>}
+                {surface === 'toolbar' && <ReadAloudControl onOpenChange={setReadAloudOpen} />}
                 {browser.pdf && <button
                   className={`omnibox-action-button pdf-edit-button${browser.pdf === 'editor' ? ' is-current' : ''}`}
                   type="button"
@@ -2376,6 +2379,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <LocalAISettings />
                 <CastSettings />
                 <PageWatchersToggle />
+                <ReadAloudSettings />
                 <SpellcheckSettings />
                 </SettingsCategory>
                 <SettingsCategory id="connection" title="Connection">
