@@ -2,22 +2,24 @@ import { describe, expect, test } from 'bun:test'
 import {
   canOfferReadAloud,
   DEFAULT_READ_ALOUD_SETTINGS,
-  firstUseDownloadBytes,
-  formatDownloadSize,
   isCommandHiddenByReadAloud,
   isLoopbackSpeechEndpoint,
-  isPhononRuntimeFile,
   isReadAloudActive,
   isReadAloudControl,
   nearestSpeed,
   parseReadAloudSettings,
+  speechEndpointUrl
+} from './read-aloud'
+import {
+  firstUseDownloadBytes,
+  formatDownloadSize,
+  isPhononRuntimeFile,
   PHONON_MODEL_ASSETS,
   PHONON_RUNTIME,
   READ_ALOUD_VOICES,
   readAloudVoice,
-  speechEndpointUrl,
   speedToDurationDelta
-} from './read-aloud'
+} from './read-aloud-assets'
 
 describe('read aloud settings', () => {
   test('off by default (experimental), Phonon engine, default voice, 1x', () => {
@@ -29,7 +31,7 @@ describe('read aloud settings', () => {
   test('keeps valid fields, falls back on junk', () => {
     const parsed = parseReadAloudSettings({ enabled: true, engine: 'system', voice: 'NbpkqMVS3CJeq2j8', speed: 1.29, endpoint: 'http://localhost:8880/v1/', endpointVoice: '  alloy ' })
     expect(parsed).toEqual({ enabled: true, engine: 'system', voice: 'NbpkqMVS3CJeq2j8', speed: 1.3, endpoint: 'http://localhost:8880/v1', endpointVoice: 'alloy' })
-    const junk = parseReadAloudSettings({ enabled: 'yes', engine: 'cloud', voice: 'nobody', speed: 'fast', endpoint: 'https://api.openai.com/v1' })
+    const junk = parseReadAloudSettings({ enabled: 'yes', engine: 'cloud', voice: '../nobody', speed: 'fast', endpoint: 'https://api.openai.com/v1' })
     expect(junk).toEqual(DEFAULT_READ_ALOUD_SETTINGS)
   })
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
-import { isPhononRuntimeFile } from '../shared/read-aloud'
+import { isPhononRuntimeFile } from '../shared/read-aloud-assets'
 import { matchesIntegrity, readTar, readTarGz, sha256Hex } from './read-aloud-tar'
 
 function header(name: string, size: number, type = '0', prefix = ''): Uint8Array {
