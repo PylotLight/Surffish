@@ -41,9 +41,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+        # git goes through SURFFISH_GH_PROXY (runner .env, e.g. socks5h://127.0.0.1:1080) when it's set:
+        # the Mac's direct route 403s token writes, and HTTP(S)_PROXY isn't always in the runner's env
+        # (a restart without it broke v0.1.29's push). The repo-local setting also covers release.ts's
+        # pushes. Unset: git uses HTTPS_PROXY from the env if there, else direct.
         run: |
+          trap 'echo "::error title=Checkout main::git fetch from GitHub failed (route: $([ -n "${SURFFISH_GH_PROXY:-}" ] && echo SURFFISH_GH_PROXY || { [ -n "${HTTPS_PROXY:-}" ] && echo HTTPS_PROXY || echo direct; })), see the log above"' ERR
           url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
           git init -q .
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then
+            git config http.https://github.com/.proxy "$SURFFISH_GH_PROXY"
+            echo "git -> github.com through SURFFISH_GH_PROXY ($(printf %s "$SURFFISH_GH_PROXY" | sed -E 's#//[^/@]*@#//***@#'))"
+          else
+            git config --unset-all http.https://github.com/.proxy || true
+            if [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]; then echo "git -> github.com via HTTPS_PROXY from the runner env"; else echo "git -> github.com direct (no SURFFISH_GH_PROXY / HTTPS_PROXY)"; fi
+          fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"
           git fetch -q --tags origin main
           # the work dir persists between runs; an old shallow checkout breaks --resume's ancestry check
@@ -57,10 +69,12 @@ jobs:
           if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           "$HOME/.bun/bin/bun" --version
+      - name: Preflight - can this runner push to GitHub? (git push --dry-run, before the build)
+        run: bash scripts/ci/explain.sh "Preflight - GitHub push access" bash scripts/ci/github-preflight.sh
       - name: Bun only, no Node.js (node -> bun shim, runner externals/node* off PATH)
         run: bash scripts/ci/bun-as-node.sh
       - name: bun install (fails if any Node.js process runs)
-        run: bash scripts/ci/bun-install-mac.sh
+        run: bash scripts/ci/explain.sh "bun install" bash scripts/ci/bun-install-mac.sh
       - name: Git identity for the release commit + tag
         run: |
           git config user.name "github-actions[bot]"
@@ -89,7 +103,8 @@ jobs:
           [ "$DRY_RUN" = "true" ] && flags="$flags --dry-run"
           [ "$RESUME" = "true" ] && flags="$flags --resume"
           [ "$FROM_TAG" = "true" ] && flags="$flags --resume --from-tag"
-          bun scripts/release.ts "$VERSION" $flags
+          # failures end with a one-line ::error annotation + step summary line (scripts/ci/failure-reason.ts)
+          bash scripts/ci/explain.sh "bun run release" bun scripts/release.ts "$VERSION" $flags
       - name: Released version (for the npm job)
         id: released
         # After a real release package.json is the released version; a dry run undoes its bump, so
@@ -170,7 +185,7 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             node packages/cli/scripts/prepare-publish.mjs --version "$VERSION" --allow-missing
           else
-            node packages/cli/scripts/prepare-publish.mjs --version "$VERSION" --verify-download
+            bash scripts/ci/explain.sh "npm - stamp packages/cli" node packages/cli/scripts/prepare-publish.mjs --version "$VERSION" --verify-download
           fi
           node packages/cli/bin/surffish.mjs --version
           node packages/cli/bin/surffish.mjs --help >/dev/null
@@ -193,5 +208,5 @@ jobs:
             echo "::notice::${PKG}@${VERSION} is already on npm, nothing to do"
             exit 0
           fi
-          npm publish --provenance --access public --tag "$tag"
+          bash ../../scripts/ci/explain.sh "npm publish" npm publish --provenance --access public --tag "$tag"
           echo "::notice::published ${PKG}@${VERSION} (npx ${PKG}@${VERSION})"

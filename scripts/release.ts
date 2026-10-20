@@ -66,6 +66,11 @@ function run(cmd: string, cmdArgs: string[], opts: { capture?: boolean; allowFai
   return (result.stdout ?? '').trim()
 }
 const git = (...gitArgs: string[]): string => run('git', gitArgs, { capture: true })
+// git's own network calls (fetch, ls-remote, push) go through SURFFISH_GH_PROXY too when it's set, so a
+// runner restarted without HTTP(S)_PROXY in its env still pushes (the Mac's direct route 403s token
+// writes). git/libcurl takes socks5h:// etc. Without it git uses HTTPS_PROXY from the env, or goes direct.
+const ghProxy = process.env.SURFFISH_GH_PROXY?.trim()
+const viaProxy = (gitArgs: string[]): string[] => (ghProxy ? ['-c', `http.https://github.com/.proxy=${ghProxy}`, ...gitArgs] : gitArgs)
 
 let githubApi: GitHubApiConfig | null = null
 try {
@@ -96,8 +101,8 @@ for (const tool of ['git', 'unzip']) {
 }
 if (git('rev-parse', '--abbrev-ref', 'HEAD') !== 'main') fail('switch to main first')
 if (git('status', '--porcelain')) fail('working tree is dirty, commit or stash first')
-log('fetching origin…')
-run('git', ['fetch', '--quiet', '--tags', 'origin'])
+log(`fetching origin${ghProxy ? ` (git through ${ghProxy.replace(/\/\/[^/@\s]*@/, '//***@')})` : ''}…`)
+run('git', viaProxy(['fetch', '--quiet', '--tags', 'origin']))
 if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) fail('main is not in sync with origin/main (pull or push first)')
 if (githubApi) {
   log(`checking the GitHub API through ${githubApi.proxy} (read-only)…`)
@@ -131,7 +136,7 @@ if (fromTag) {
   }
 }
 const tag = `v${version}`
-const tagOnOrigin = Boolean(git('ls-remote', '--tags', 'origin', `refs/tags/${tag}`))
+const tagOnOrigin = Boolean(git(...viaProxy(['ls-remote', '--tags', 'origin', `refs/tags/${tag}`])))
 if (resume) {
   if (!tagOnOrigin) fail(`--resume needs ${tag} on origin already (package.json says ${version})`)
   if (spawnSync('git', ['merge-base', '--is-ancestor', tag, 'HEAD'], { cwd: root }).status !== 0) {
@@ -240,10 +245,10 @@ if (!(await confirm(`smoke test release/mac-arm64/Surffish.app if you want, then
 }
 
 // ---- publish ---------------------------------------------------------------
-if (bumped) run('git', ['push', '--quiet', 'origin', 'main'])
+if (bumped) run('git', viaProxy(['push', '--quiet', 'origin', 'main']))
 if (!resume) {
   run('git', ['tag', '-a', tag, '-m', `Surffish ${tag}`])
-  run('git', ['push', '--quiet', 'origin', tag])
+  run('git', viaProxy(['push', '--quiet', 'origin', tag]))
   log(`pushed ${tag}`)
 }
 
@@ -261,5 +266,5 @@ if (githubApi) {
 
 run('bun', ['scripts/render-cask.ts', '--version', version, '--sha256-arm64', sha256, '--out', 'Casks/surffish.rb'])
 run('git', ['commit', '--quiet', '-m', `chore(tap): update Surffish Cask to ${tag}`, '--', 'Casks/surffish.rb'])
-run('git', ['push', '--quiet', 'origin', 'main'])
+run('git', viaProxy(['push', '--quiet', 'origin', 'main']))
 log(`cask updated. done: https://github.com/${REPO}/releases/tag/${tag}`)
