@@ -312,6 +312,35 @@ export function adaptBramblePopupViewport(html: string): string {
   return `${style}\n${html}`
 }
 
+export const BRAMBLE_QR_JOIN_FILE = 'surffish-bramble-qr-join.js'
+export const BRAMBLE_JSQR_FILE = 'surffish-jsqr.js'
+
+/** Load Surffish's Scan QR helper (bramble-qr-join-page.cjs) on Bramble's options page. */
+export function injectBrambleQrJoinScript(html: string): string {
+  if (html.includes(BRAMBLE_QR_JOIN_FILE)) return html
+  const script = `<script defer src="./${BRAMBLE_QR_JOIN_FILE}"></script>`
+  if (/<\/head\s*>/i.test(html)) return html.replace(/<\/head\s*>/i, `  ${script}\n</head>`)
+  if (/<\/body\s*>/i.test(html)) return html.replace(/<\/body\s*>/i, `  ${script}\n</body>`)
+  return `${html}\n${script}\n`
+}
+
+/**
+ * Add Surffish's "Scan QR" to Bramble's Join a device form in a staged copy: the page script, the jsQR
+ * fallback decoder (when the build ships it) and one <script> tag in options.html. Idempotent, so it
+ * also refreshes builds staged by an older Surffish. Bramble's own files are not otherwise touched.
+ */
+export function addBrambleQrJoin(stagedDirectory: string, pageScript: string, jsqrSource: string | null): void {
+  const optionsPath = join(stagedDirectory, 'options.html')
+  if (!existsSync(optionsPath)) return
+  writeFileSync(join(stagedDirectory, BRAMBLE_QR_JOIN_FILE), pageScript)
+  const jsqrPath = join(stagedDirectory, BRAMBLE_JSQR_FILE)
+  if (jsqrSource) writeFileSync(jsqrPath, jsqrSource)
+  else rmSync(jsqrPath, { force: true })
+  const html = readFileSync(optionsPath, 'utf8')
+  const adapted = injectBrambleQrJoinScript(html)
+  if (adapted !== html) writeFileSync(optionsPath, adapted)
+}
+
 export const BRAMBLE_BACKGROUND_WORKER_SOURCE = `import './${BRAMBLE_BROWSER_ALIAS_FILE}';
 import './background.js';
 `

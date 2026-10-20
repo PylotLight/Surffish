@@ -82,6 +82,14 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/reader.cjs'),
       join(outputDirectory, 'reader.cjs')
     )
+    // jsQR (Apache-2.0): the QR fallback for Bramble's Join a device "Scan QR" where Chromium has no
+    // BarcodeDetector. Staged into Bramble's folder and only loaded on a first scan (bramble-qr-join-page.cjs).
+    const jsqrSource = readFileSync(resolve(projectDirectory, 'node_modules/jsqr/dist/jsQR.js'), 'utf8')
+    const jsqr = minifySync('jsQR.js', jsqrSource)
+    if (jsqr.errors.length > 0) throw new Error(`Could not minify jsQR: ${jsqr.errors.map((error) => error.message).join('; ')}`)
+    const vendorDirectory = resolve(projectDirectory, 'out/vendor')
+    mkdirSync(vendorDirectory, { recursive: true })
+    writeFileSync(join(vendorDirectory, 'jsqr.min.js'), `/*! jsQR 1.4.0 | (c) Cosmo Wolfe | Apache-2.0 | https://github.com/cozmo/jsQR */\n${jsqr.code}`)
   }
 }
 

@@ -20,6 +20,10 @@ describe('permissionDeniedMessage', () => {
     expect(permissionDeniedMessage('usb', 'https://a.test')).toBe('USB devices blocked on a.test')
     expect(permissionDeniedMessage('weird-thing', '')).toBe('weird-thing blocked')
   })
+  test('extension pages point at macOS camera access, not Site settings', () => {
+    expect(permissionDeniedMessage('media', 'chrome-extension://abc')).toBe('Camera/mic blocked for this extension · check System Settings → Privacy & Security → Camera')
+    expect(permissionDeniedMessage('geolocation', 'chrome-extension://abc')).toBe('Location blocked for this extension')
+  })
 })
 
 describe('createPermissionToastThrottle', () => {
