@@ -370,7 +370,22 @@ function systemReading(command: SpeakCommand): Reading {
   }
   synth.cancel()
   mediaSessionPlaying(command.title, true)
-  speak()
+  // Voices load asynchronously; a system with none (common on Linux without speech-dispatcher) never
+  // fires an error for speak(), so say so instead of sitting silent.
+  const begin = (): void => {
+    if (stopped) return
+    if (synth.getVoices().length > 0) {
+      speak()
+      return
+    }
+    stop()
+    emit({ type: 'state', token: command.token, status: 'error', error: 'No system voices are available.' })
+  }
+  if (synth.getVoices().length > 0) speak()
+  else {
+    const timer = setTimeout(begin, 1500)
+    synth.addEventListener('voiceschanged', () => { clearTimeout(timer); begin() }, { once: true })
+  }
   return {
     token: command.token,
     engine: 'system',

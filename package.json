@@ -46,6 +46,7 @@
     "test:electron-watchers-toggle": "electron scripts/electron-watchers-toggle-smoke.cjs",
     "test:electron-feeds": "electron scripts/electron-feeds-smoke.cjs",
     "test:electron-reading-list": "electron scripts/electron-reading-list-smoke.cjs",
+    "test:electron-read-aloud": "electron scripts/electron-read-aloud-smoke.cjs",
     "test:electron-split-view": "electron scripts/electron-split-view-smoke.cjs",
     "test:electron-spaces": "electron scripts/electron-spaces-smoke.cjs",
     "test:electron-tab-groups": "electron scripts/electron-tab-groups-smoke.cjs",
