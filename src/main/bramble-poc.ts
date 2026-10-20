@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BrambleExtensionState, BramblePopupAnchor } from '../shared/types'
 import { getBrowserSession } from './browser-session'
-import { closeBrambleExtensionTabs, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
+import { closeBrambleExtensionTabs, closeTabKeepingWindow, isBrambleExtensionTab, openBrambleExtensionTab } from './browser'
 import {
   adaptBrambleFirefoxManifest,
   BRAMBLE_BROWSER_ALIAS_FILE,
@@ -15,6 +15,9 @@ import {
   stageBrambleFirefoxBuild
 } from './bramble-poc-adapter'
 import BRAMBLE_QR_JOIN_SOURCE from '../shared/bramble-qr-join-page.cjs?raw'
+import BRAMBLE_SETUP_CLOSE_SOURCE from '../shared/bramble-setup-close-page.cjs?raw'
+import { isBrambleSetupPageUrl } from '../shared/bramble-setup-close'
+import { BRAMBLE_VAULT_PROBE_SCRIPT, classifyBrambleVaultProbe } from '../shared/bramble-quick-unlock'
 import { registerBrambleExtensionIdProvider } from './bramble-camera-permission'
 import {
   compareBrambleVersions,
@@ -195,10 +198,14 @@ function readBundledJsQr(): string | null {
   }
 }
 
-/** Surffish's "Scan QR" on Bramble's Join a device form (src/shared/bramble-qr-join-page.cjs). */
+/**
+ * Surffish's "Scan QR" on Bramble's Join a device form (src/shared/bramble-qr-join-page.cjs), plus
+ * closing the setup tab once setup is done (src/shared/bramble-setup-close-page.cjs). Both ride in the
+ * one staged page script.
+ */
 function addSurffishQrJoin(stagedDirectory: string): void {
   try {
-    addBrambleQrJoin(stagedDirectory, BRAMBLE_QR_JOIN_SOURCE, readBundledJsQr())
+    addBrambleQrJoin(stagedDirectory, `${BRAMBLE_QR_JOIN_SOURCE}\n${BRAMBLE_SETUP_CLOSE_SOURCE}`, readBundledJsQr())
   } catch (error) {
     // Optional convenience: Bramble works without it (the pairing code can still be pasted).
     console.warn('[bramble] could not add Scan QR to the Join a device form:', error)
@@ -700,6 +707,25 @@ export async function openBrambleOptionsFromUi(sourceWindow: BrowserWindow | nul
     throw new Error('Only a Bramble UI page can open Bramble Setup / Restore.')
   }
   await openBrambleSetup()
+}
+
+/**
+ * Bramble's setup tab says setup is done (bramble-setup-close-page.cjs saw the done screen and a vault
+ * this page created). Only that tab can ask, only on options.html without ?screen=, and only while
+ * Bramble really has a vault; then the tab closes (the last tab of a window becomes a New Tab).
+ */
+export async function closeBrambleSetupTab(sender: WebContents, senderFrame: Electron.WebFrameMain | null): Promise<boolean> {
+  const extension = loadedExtension
+  if (!extension || !senderFrame || senderFrame !== sender.mainFrame || sender.isDestroyed()) return false
+  if (!isBrambleSetupPageUrl(senderFrame.url, extension.url) || !isBrambleExtensionTab(sender)) return false
+  let vault: ReturnType<typeof classifyBrambleVaultProbe> = 'unknown'
+  try {
+    vault = classifyBrambleVaultProbe(await evaluateInBrambleExtensionPage(BRAMBLE_VAULT_PROBE_SCRIPT))
+  } catch {
+    vault = 'unknown'
+  }
+  if (vault !== 'present' || sender.isDestroyed() || !isBrambleExtensionTab(sender)) return false
+  return closeTabKeepingWindow(sender)
 }
 
 /**

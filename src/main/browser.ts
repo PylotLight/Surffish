@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { planSetupTabClose } from '../shared/bramble-setup-close'
 import { capturePageWithin } from './capture-page'
 import { shouldHandOffSignIn, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
 import { hasGoogleSessionCookie, isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
@@ -3047,6 +3048,21 @@ export function isExtensionPageTab(contents: WebContents, extensionUrl: string, 
 }
 
 /** Close extension-host tabs before replacing or unloading Bramble's extension build. */
+/**
+ * Close the tab showing `contents` (Bramble's finished setup tab). The last tab of a window is swapped
+ * for a New Tab first, so the window stays (see planSetupTabClose). False when it is not a tab.
+ */
+export function closeTabKeepingWindow(contents: WebContents): boolean {
+  const tab = tabForContents(contents)
+  if (!tab) return false
+  const w = tab.win
+  if (planSetupTabClose({ tabCount: w.tabs.length, mini: w.mini }) === 'replace-with-new-tab') {
+    createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
+  }
+  closeBrowserTab(tab.id, false)
+  return true
+}
+
 export function closeBrambleExtensionTabs(): void {
   for (const tab of allTabs()) {
     if (tab.extensionPageOrigin && tab.extensionPageOwner === 'bramble') closeBrowserTab(tab.id)

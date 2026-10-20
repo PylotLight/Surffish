@@ -12,6 +12,12 @@
 //   a chrome-extension:// page asks the session permission handler for video only, and the whole
 //   scan -> fill runs end to end.
 //
+// Phase 3 (another tiny extension, real chrome.storage.local, a mocked surffishBramble bridge): the
+//   setup tab auto-close (src/shared/bramble-setup-close-page.cjs). A page that copies the shapes of
+//   Bramble's SetupShell screens (form, "Connecting…" spinner, recovery code, terminal done screen)
+//   asks to close only on the done screen after a vault this session created, ~1.5 s later; never on
+//   an existing vault, an error, the connecting state, or ?screen=import.
+//
 // `bun run build && bun run test:electron-bramble-qr-join` (Linux: under `xvfb-run -a`).
 // A real-Bramble version of phase 2 (not in CI): scripts/check-bramble-qr-join.cjs.
 const smoke = require('./smoke-harness.cjs')
@@ -27,8 +33,9 @@ const root = join(tmpdir(), `surffish-bramble-qr-smoke-${process.pid}`)
 const fixtureDir = join(root, 'fixture')
 const detectorDir = join(root, 'fixture-detector')
 const extensionDir = join(root, 'extension')
+const setupDir = join(root, 'extension-setup')
 const fakeVideo = join(root, 'qr.y4m')
-for (const dir of [fixtureDir, detectorDir, extensionDir]) mkdirSync(dir, { recursive: true })
+for (const dir of [fixtureDir, detectorDir, extensionDir, setupDir]) mkdirSync(dir, { recursive: true })
 app.setPath('userData', join(root, 'profile'))
 // Chromium's fake camera reads this file when a page opens it (written after ready, below).
 app.commandLine.appendSwitch('use-fake-device-for-media-stream')
@@ -254,12 +261,112 @@ async function phaseExtension() {
   win.destroy()
 }
 
+// Bramble's SetupShell screens (packages/core/src/app/OptionsApp.tsx), reduced to the shapes the
+// auto-close reads: lucide icons render as svg.lucide.lucide-<name>, the spinner has .animate-spin.
+const SETUP_SIM = `(() => {
+  const root = document.getElementById('root')
+  const page = (inner) => { root.innerHTML = '<div class="min-h-screen"><div class="w-full max-w-xl text-center">' + inner + '</div></div>' }
+  window.__sim = {
+    form: (error) => page('<h1>Set up your vault</h1><form><input type="password"><textarea id="pairing-code"></textarea>' + (error ? '<p role="alert">' + error + '</p>' : '') + '<button type="submit">Join vault</button></form>'),
+    connecting: () => page('<svg class="w-16 h-16"></svg><h1>Connecting to your other device…</h1><p>Keep the invite open.</p><svg class="lucide lucide-loader-circle animate-spin"></svg>'),
+    recovery: () => page('<h1>Save your recovery code</h1><code>ABCD-EFGH</code><button>Continue</button>'),
+    done: () => { window.__doneAt = Date.now(); page('<div class="inline-flex rounded-2xl"><svg class="lucide lucide-check w-9 h-9"></svg></div><h1 class="text-2xl mb-2">Vault ready</h1><p class="text-sm">You can close this tab and use the Bramble popup.</p>') },
+    writeVault: (id) => new Promise((resolve) => chrome.storage.local.get('vault.registry', (items) => {
+      const vaults = (items['vault.registry'] && items['vault.registry'].vaults) || []
+      chrome.storage.local.set({ 'vault.registry': { vaults: vaults.concat([{ id, label: '', createdAt: 1 }]) }, ['vault-blob-b64:' + id]: 'ZW5jcnlwdGVk' }, resolve)
+    })),
+    clear: () => new Promise((resolve) => chrome.storage.local.clear(resolve))
+  }
+  window.__sim.form()
+})()`
+const BRIDGE_MOCK = `window.__closeCalls = []
+window.surffishBramble = Object.freeze({ closeSetupTab: () => { window.__closeCalls.push(Date.now()); return Promise.resolve(true) } })`
+const SETUP_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Vault Setup</title>
+<script src="./bridge-mock.js"></script>
+<script defer src="./setup-sim.js"></script>
+<script defer src="./surffish-bramble-qr-join.js"></script>
+</head><body><div id="root"></div></body></html>`
+
+async function phaseSetupClose() {
+  smoke.step('phase 3: setup tab auto-close (real chrome.storage.local, mocked bridge)')
+  // The staged page script is the Scan QR helper followed by the setup-close helper (bramble-poc.ts).
+  writeFileSync(join(setupDir, 'surffish-bramble-qr-join.js'), `${readFileSync(join(repo, 'src/shared/bramble-qr-join-page.cjs'), 'utf8')}\n${readFileSync(join(repo, 'src/shared/bramble-setup-close-page.cjs'), 'utf8')}`)
+  writeFileSync(join(setupDir, 'surffish-jsqr.js'), jsqrSource())
+  writeFileSync(join(setupDir, 'setup-sim.js'), SETUP_SIM)
+  writeFileSync(join(setupDir, 'bridge-mock.js'), BRIDGE_MOCK)
+  writeFileSync(join(setupDir, 'options.html'), SETUP_HTML)
+  writeFileSync(join(setupDir, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Bramble setup close smoke', version: '1.0.0', permissions: ['storage'], options_page: 'options.html' }))
+  const ses = session.fromPartition(`persist:bramble-setup-close-smoke-${process.pid}`)
+  const extension = await ses.extensions.loadExtension(setupDir)
+  const win = new BrowserWindow({ show: false, width: 900, height: 900, webPreferences: { session: ses, sandbox: true, contextIsolation: true } })
+  const run = (code) => smoke.evaluate(win.webContents, code)
+  const open = async (query = '') => {
+    await win.loadURL(`${extension.url}options.html${query}`)
+    await waitFor(() => run(`!!window.__sim && window.__surffishBrambleSetupClose === true`), 'setup page + setup-close script')
+    await delay(300) // the baseline read of chrome.storage.local
+  }
+  const closeCalls = () => run('__closeCalls.length')
+
+  smoke.step('an existing vault and options.html opened normally: nothing closes')
+  await open()
+  await run('__sim.clear().then(() => __sim.writeVault("existing"))')
+  await open()
+  await run('__sim.done()') // even a done-looking screen: no vault was created by this page
+  await delay(2500)
+  assert.equal(await closeCalls(), 0, 'no close without a new vault')
+
+  smoke.step('join: connecting (vault briefly written) then a pairing error keeps the tab')
+  await open()
+  await run('__sim.connecting()')
+  await run('__sim.writeVault("joining")')
+  await delay(2200)
+  assert.equal(await closeCalls(), 0, 'no close on the connecting screen')
+  await run('__sim.form("The other device rejected the pairing.")')
+  await delay(2200)
+  assert.equal(await closeCalls(), 0, 'no close on an error')
+
+  smoke.step('create: recovery code screen stays, the done screen closes after ~1.5 s')
+  await open()
+  await run('__sim.writeVault("created").then(() => __sim.recovery())')
+  await delay(2200)
+  assert.equal(await closeCalls(), 0, 'the recovery code screen never closes (the code must be saved)')
+  await run('__sim.done()')
+  await waitFor(() => run('__closeCalls.length === 1'), 'closeSetupTab after the done screen', 6000)
+  const waited = await run('__closeCalls[0] - __doneAt')
+  assert.ok(waited >= 1400 && waited < 4000, `closed after a visible delay (${waited} ms)`)
+  await delay(2000)
+  assert.equal(await closeCalls(), 1, 'asks once')
+
+  smoke.step('join success (done screen after connecting) closes too')
+  await open()
+  await run('__sim.connecting()')
+  await run('__sim.writeVault("joined").then(() => __sim.done())')
+  await waitFor(() => run('__closeCalls.length === 1'), 'closeSetupTab after a join', 6000)
+
+  smoke.step('done screen gone before the delay ends: stays open')
+  await open()
+  await run('__sim.writeVault("restored").then(() => __sim.done())')
+  await delay(400)
+  await run('__sim.form()')
+  await delay(2200)
+  assert.equal(await closeCalls(), 0, 'no close once the done screen went away')
+
+  smoke.step('?screen=import keeps its tab')
+  await open('?screen=import')
+  assert.equal(await run('window.__surffishBrambleSetupClose'), true)
+  await run('__sim.writeVault("imported").then(() => __sim.done())')
+  await delay(2500)
+  assert.equal(await closeCalls(), 0, 'import/restore screens never auto-close')
+  win.destroy()
+}
+
 // Phases open and close their own windows; closing one must not quit the smoke.
 app.on('window-all-closed', () => {})
 app.whenReady().then(async () => {
   try {
     await phaseFixture()
     await phaseExtension()
+    await phaseSetupClose()
     smoke.step('ok')
     await smoke.removeProfile(root)
     app.exit(0)
