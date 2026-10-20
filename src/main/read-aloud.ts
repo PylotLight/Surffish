@@ -572,7 +572,11 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
 }
 
 export function controlReadAloud(action: ReadAloudControl): void {
-  if (!reading) return
+  if (!reading) {
+    // Dismissing an error ("No article found") from the player.
+    if (action === 'stop' && state.status !== 'idle') publish({ ...IDLE_READ_ALOUD_STATE, speed: settings?.speed ?? 1, voice: settings?.voice ?? 'default' })
+    return
+  }
   if (action === 'stop') {
     downloadAbort?.abort()
     sendToEngine({ type: 'stop' })
