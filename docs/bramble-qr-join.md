@@ -18,5 +18,5 @@ From `flythenimbus/bramble` `packages/core/src/sync/enrollment.ts`: `bramble-pai
 
 - Unit: `src/shared/bramble-qr-join.test.ts` (code extraction, password QR), `src/shared/bramble-camera.test.ts` (permission rule), `src/main/bramble-poc-adapter.test.ts` (staging).
 - Smoke (CI, Linux): `bun run build && xvfb-run -a bun run test:electron-bramble-qr-join`: a fixture copy of the Join form with a React-style value tracker and a mocked camera, then a tiny extension page on Chromium's fake camera fed a QR video.
-- Real Bramble (not in CI): `bun run build && xvfb-run -a electron --no-sandbox scripts/check-bramble-qr-join.cjs <unpacked bramble_firefox_X>`.
+- Real Bramble (not in CI): `bun run build && xvfb-run -a electron --no-sandbox scripts/check-bramble-qr-join.cjs <unpacked bramble_firefox_X>` (Bramble's React form takes the scanned code), and `scripts/check-bramble-qr-join-app.cjs <dir>` (the built app: staging, Surffish's own permission policy gives video and refuses the microphone).
 - Needs a Mac check: the camera permission prompt and a real phone QR.
