@@ -31,6 +31,7 @@ permissions:
 
 jobs:
   mac:
+    name: "Surffish · Release · mac build · ${{ inputs.from_tag && format('v{0} from tag', inputs.version) || (inputs.version && (startsWith(inputs.version, '0') || startsWith(inputs.version, '1') || startsWith(inputs.version, '2')) && format('v{0}', inputs.version)) || inputs.version || 'patch' }}${{ inputs.resume && ' · resume' || '' }}${{ inputs.dry_run && ' · dry run' || '' }}"
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 60
     outputs:
@@ -104,6 +105,7 @@ jobs:
   # skips with a warning until the one-time npm setup is done (packages/cli/DEVELOPING.md#publishing).
   # Dry runs always stamp + `npm publish --dry-run` (no auth needed) so the job gets exercised.
   npm:
+    name: "Surffish · Release · npm publish · ${{ needs.mac.outputs.version && format('v{0}', needs.mac.outputs.version) || inputs.version }}${{ inputs.dry_run && ' · dry run' || '' }}"
     needs: mac
     runs-on: ubuntu-latest
     timeout-minutes: 10

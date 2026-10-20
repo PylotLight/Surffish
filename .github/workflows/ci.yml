@@ -44,7 +44,7 @@ jobs:
   # checkout + bun + install + build once, then runs its smoke suites two at a time on separate
   # Xvfb displays (every smoke uses its own temp profile and port 0, so they don't collide).
   linux:
-    name: linux ${{ matrix.lane }}
+    name: "Surffish · CI · linux ${{ matrix.lane }} · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
     timeout-minutes: 30
@@ -183,7 +183,7 @@ jobs:
   # install, no Electron, just bun test on the package (~1 s) and a smoke of the bin under Bun (and
   # real Node when the runner has it), so it never waits on the lanes.
   cli:
-    name: cli (npx launcher)
+    name: "Surffish · CI · cli npx · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
     timeout-minutes: 10
@@ -226,7 +226,7 @@ jobs:
   # Manual only (Run workflow -> cli_real_download): the launcher downloads, verifies and unpacks the
   # real v0.1.22 release into a temp cache on the Mac, without opening it.
   cli-macos-real:
-    name: cli real download (macos)
+    name: "Surffish · CI · cli real dl macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name == 'workflow_dispatch' && inputs.cli_real_download
     runs-on: [self-hosted, macOS]
     timeout-minutes: 10
@@ -264,7 +264,7 @@ jobs:
   # same pod, runs scripts/perf/bench.cjs on each, interleaved, and compares medians. Its own job,
   # so it runs in parallel with the lanes. On push to main it compares against the previous main.
   perf:
-    name: perf (linux)
+    name: "Surffish · CI · perf linux · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: k3s-runners-surffish
     timeout-minutes: 15
@@ -405,6 +405,7 @@ jobs:
   # Google sign-in helper are fingerprinted (source, flags, toolchain; scripts/native-build-cache.ts),
   # so an unchanged one is reused (~20 s of clang/swiftc per Mac job) and a changed one is rebuilt.
   native-macos:
+    name: "Surffish · CI · native-macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS]
     timeout-minutes: 45
@@ -450,7 +451,7 @@ jobs:
   # xdotool, so it stays Linux-only. Same install path as native-macos. Set the repo variable
   # SURFFISH_MAC_CI=label to run it on PRs only when they carry the `mac` label (main always runs).
   macos-smoke:
-    name: macos smoke
+    name: "Surffish · CI · macos smoke · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || vars.SURFFISH_MAC_CI != 'label' || contains(github.event.pull_request.labels.*.name, 'mac'))
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
@@ -514,7 +515,7 @@ jobs:
   # Results go to the step summary; with SURFFISH_GH_PROXY set in the runner's .env they are also
   # posted to the PR as a sticky comment through that proxy (only those curl calls use it).
   perf-macos:
-    name: perf (macos)
+    name: "Surffish · CI · perf macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     # Opt-in only: a PR with the `perf-mac` label, or a manual workflow_dispatch run.
     if: (github.event_name == 'workflow_dispatch' && inputs.perf_mac) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
     runs-on: [self-hosted, macOS]
