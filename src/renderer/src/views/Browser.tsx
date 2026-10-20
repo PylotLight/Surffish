@@ -42,6 +42,7 @@ import { CommandPalette } from './CommandPalette'
 import { useSearchKeywords } from './useSearchKeywords'
 import { parseKeywordSearch } from '../../../shared/search-keywords'
 import { PinnedTabIcon, PrivateGlyph, TabAudioButton, TabFavicon } from './TabIndicators'
+import { usePinnedDragSort, usePinReorderModifier } from './usePinnedDragSort'
 import { NavHistoryButtons } from './NavHistoryButtons'
 import { SettingsCategory, SettingsGroup, SettingsRow } from './settings/SettingsControls'
 import { SettingsSearchField, SettingsSearchStatus, SettingsToc } from './settings/SettingsSearch'
@@ -270,7 +271,7 @@ function NewTabSiteIcon({ site, faviconUrl, showLabel, iconSize, onOpen }: { sit
   )
 }
 
-function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin }: { site: PinnedSite; cachedFaviconUrl?: string | null; onOpen: () => void; onUnpin: () => void }): React.JSX.Element {
+function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin, dragProps }: { site: PinnedSite; cachedFaviconUrl?: string | null; onOpen: () => void; onUnpin: () => void; dragProps?: React.ButtonHTMLAttributes<HTMLButtonElement> & Record<`data-${string}`, string> }): React.JSX.Element {
   const quickLink = toQuickLinkSite(site)
   const fallbackFaviconUrl = quickLink ? `${quickLink.origin}/favicon.ico` : null
   const preferredFaviconUrl = quickLink ? cachedFaviconUrl ?? site.faviconUrl ?? fallbackFaviconUrl : null
@@ -282,7 +283,7 @@ function PinnedSiteIcon({ site, cachedFaviconUrl, onOpen, onUnpin }: { site: Pin
   }, [preferredFaviconUrl])
   const hostname = quickLink ? new URL(quickLink.origin).hostname.replace(/^www\./i, '') : historyHost(site.url)
   return (
-    <button className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to remove bookmark)`} aria-label={`Open bookmark ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
+    <button {...dragProps} className="pinned-site-icon-button" type="button" title={`${site.title} · ${hostname} (right-click to remove bookmark)`} aria-label={`Open bookmark ${site.title}`} onClick={onOpen} onContextMenu={(event) => {
       event.preventDefault()
       onUnpin()
     }}>
@@ -402,6 +403,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     .filter((node) => node.type === 'bookmark' && node.url)
     .slice(0, MAX_PINNED_SITES)
     .map((node) => ({ title: node.title, url: node.url!, ...(node.faviconUrl ? { faviconUrl: node.faviconUrl } : {}) })), [bookmarks.index])
+  // Pinned strip: Cmd+drag (Ctrl+drag elsewhere) reorders pinned tabs and Favourites, each among their own kind.
+  const pinnedListRef = useRef<HTMLDivElement>(null)
+  const isMacPins = window.api.platform === 'darwin'
+  const pinReorder = usePinReorderModifier(isMacPins)
+  const pinnedTabs = useMemo(() => tabs.filter((tab) => tab.pinned), [tabs])
+  const pinnedTabIds = useMemo(() => pinnedTabs.map((tab) => tab.id), [pinnedTabs])
+  const pinnedTabsById = useMemo(() => new Map(pinnedTabs.map((tab) => [tab.id, tab])), [pinnedTabs])
+  const pinnedSiteUrls = useMemo(() => pinnedSites.map((site) => site.url), [pinnedSites])
+  const pinnedTabDrag = usePinnedDragSort(pinnedListRef, 'tab', pinnedTabIds, isMacPins, useCallback((id: string, beforeId: string | null) => { void window.api.browser.tabs.move(id, beforeId) }, []))
+  const pinnedSiteDrag = usePinnedDragSort(pinnedListRef, 'site', pinnedSiteUrls, isMacPins, useCallback((_url: string, _beforeId: string | null, order: string[]) => {
+    const byUrl = new Map(pinnedSites.map((site) => [site.url, site]))
+    void window.api.browser.pinnedSites.set(order.map((url) => byUrl.get(url)).filter((site): site is PinnedSite => Boolean(site))).catch(() => undefined)
+  }, [pinnedSites]))
   const bookmarkSuggestions = useMemo(() => bookmarks.nodes.flatMap((node) => node.type === 'bookmark' && node.url ? [{ title: node.title, url: node.url }] : []), [bookmarks.nodes])
   const [bookmarkPopoverOpen, setBookmarkPopoverOpen] = useState(false)
   // Bookmarks dropdown (next to the address bar) and the optional bookmarks bar (⌘⇧B, off by default).
@@ -1605,9 +1619,21 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
 
         {sidebarMode === 'tabs' && (
           <section className="sidebar-pinned-sites" aria-label="Pinned tabs and bookmarks">
-            <div className="sidebar-pinned-list">
-              {tabs.filter((tab) => tab.pinned).map((tab) => <PinnedTabIcon key={`tab:${tab.id}`} tab={tab} />)}
-              {pinnedSites.map((site) => <PinnedSiteIcon key={`bookmark:${site.url}`} site={site} cachedFaviconUrl={cachedSiteIcons[httpOrigin(site.url) ?? '']} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} />)}
+            {/* Cmd+drag (Ctrl+drag off macOS) reorders pins; a plain drag does nothing. */}
+            <div
+              ref={pinnedListRef}
+              className={`sidebar-pinned-list${pinReorder.armed ? ' is-reorder-armed' : ''}${pinnedTabDrag.draggingId || pinnedSiteDrag.draggingId ? ' is-reordering' : ''}`}
+              onPointerEnter={pinReorder.track}
+              onPointerMove={pinReorder.track}
+              onPointerDown={pinReorder.track}
+              onPointerLeave={() => { if (!pinnedTabDrag.draggingId && !pinnedSiteDrag.draggingId) pinReorder.disarm() }}
+            >
+              {pinnedTabDrag.orderedIds.map((id) => pinnedTabsById.get(id)).filter((tab): tab is BrowserTabSummary => Boolean(tab)).map((tab) => (
+                <PinnedTabIcon key={`tab:${tab.id}`} tab={tab} dragProps={{ ...pinnedTabDrag.itemProps, 'data-pin-kind': 'tab', 'data-pin-id': tab.id, onPointerDown: (event) => pinnedTabDrag.onPointerDown(event, tab.id) }} />
+              ))}
+              {pinnedSiteDrag.orderedIds.map((url) => pinnedSites.find((site) => site.url === url)).filter((site): site is PinnedSite => Boolean(site)).map((site) => (
+                <PinnedSiteIcon key={`bookmark:${site.url}`} site={site} cachedFaviconUrl={cachedSiteIcons[httpOrigin(site.url) ?? '']} onOpen={() => void openPinnedSite(site)} onUnpin={() => void savePinnedSites(pinnedSites.filter((pinned) => pinned.url !== site.url))} dragProps={{ ...pinnedSiteDrag.itemProps, 'data-pin-kind': 'site', 'data-pin-id': site.url, onPointerDown: (event) => pinnedSiteDrag.onPointerDown(event, site.url) }} />
+              ))}
             </div>
           </section>
         )}

@@ -145,9 +145,10 @@ export function TabAudioButton({ tab, className = '' }: { tab: BrowserTabSummary
   )
 }
 
-export function PinnedTabIcon({ tab }: { tab: BrowserTabSummary }): React.JSX.Element {
+export function PinnedTabIcon({ tab, dragProps }: { tab: BrowserTabSummary; dragProps?: React.ButtonHTMLAttributes<HTMLButtonElement> & Record<`data-${string}`, string> }): React.JSX.Element {
   return (
     <button
+      {...dragProps}
       className={`pinned-tab-icon-button${tab.active ? ' is-active' : ''}`}
       type="button"
       data-browser-tab-id={tab.id}
