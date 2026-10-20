@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   win:
-    name: windows ${{ matrix.arch }}
+    name: "Surffish · Windows build · ${{ matrix.arch }} · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || inputs.ref || github.ref_name }}"
     strategy:
       fail-fast: false
       matrix:

@@ -53,6 +53,7 @@ permissions:
 
 jobs:
   bump:
+    name: "Surffish · Bump check · electron · ${{ inputs.version || inputs.policy || vars.ELECTRON_BUMP_POLICY || 'beta' }} · ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}${{ inputs.dry_run && ' · dry run' || '' }}"
     # GitHub-hosted on purpose: never the self-hosted Mac (corporate laptop) or the k3s runners.
     runs-on: ubuntu-latest
     timeout-minutes: 15

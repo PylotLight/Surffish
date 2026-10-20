@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   mac:
-    name: screenshots (macos)
+    name: "Surffish · Screenshots · macos · ${{ github.ref_name }}${{ inputs.shots && format(' · {0}', inputs.shots) || '' }}"
     runs-on: [self-hosted, macOS]
     timeout-minutes: 20
     env:
