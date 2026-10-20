@@ -38,6 +38,7 @@ import { isShowingPdf } from './pdf-viewer'
 import { extractReaderArticle, readerArticleFor, readerViewFor } from './reader-mode'
 import { readAloudDirectory } from './read-aloud-feature'
 import { matchesIntegrity, readTarGz } from './read-aloud-tar'
+import { browserWindows, onBrowserWindowsChanged } from './window-scope'
 
 /**
  * Read Aloud (loaded on first use; see read-aloud-feature.ts for the gate).
@@ -87,6 +88,12 @@ let downloading: Promise<void> | null = null
 let downloadAbort: AbortController | null = null
 
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
+
+// The hidden engine window counts as a window to Electron: with it open, closing the last browser
+// window wouldn't quit the app on Windows/Linux. Close it with the last browser window.
+onBrowserWindowsChanged(() => {
+  if (browserWindows().length === 0 && engine && !reading) closeEngine()
+})
 
 export function readAloudState(): ReadAloudState {
   return { ...state, download: state.download ? { ...state.download } : null }
