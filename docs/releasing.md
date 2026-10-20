@@ -18,7 +18,7 @@ It works out the next version from the latest `vX.Y.Z` tag and `package.json` (w
 2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
 3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `unzip -tq`, then the SHA-256.
 4. Asks before publishing (`--yes` skips the prompt). If you say no or anything fails, it undoes the bump commit.
-5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip (REST calls via `curl --proxy "$SURFFISH_GH_PROXY"` with `SURFFISH_GH_TOKEN`/`GITHUB_TOKEN` when `SURFFISH_GH_PROXY` is set, which the release workflow uses on the Mac runner; otherwise through your fish `ghp` function, or plain gh with `SURFFISH_GH=gh`), and renders, commits and pushes `Casks/surffish.rb`.
+5. Pushes main, pushes an annotated `vX.Y.Z` tag, creates the GitHub release with only the zip (REST calls via `curl --proxy "$SURFFISH_GH_PROXY"` with `SURFFISH_GH_TOKEN`/`GITHUB_TOKEN` when `SURFFISH_GH_PROXY` is set, which the release workflow uses on the Mac runner; otherwise through your fish `ghp` function, or plain gh with `SURFFISH_GH=gh`), and renders, commits and pushes `Casks/surffish.rb`. Its git fetch/ls-remote/pushes also go through `SURFFISH_GH_PROXY` when it's set (`git -c http.https://github.com/.proxy=…`, socks5h works).
 
 The manual steps below are what it automates.
 
@@ -35,6 +35,45 @@ The release workflow's `npm` job runs after the `mac` job (release + Cask) succe
 - **Sections**, in this order, omitting any that are empty: New, Fixed, Data and storage, Performance, CI, Packaging.
 - **Order**: user-facing changes first; internal, test and CI changes terse and at the bottom.
 - **Bullets**: bold the feature name in New (`**Feeds**: …`), name menu paths in bold (Settings → **General**), quote extension and product names ("I still don't care about cookies"), and end each bullet with its PR numbers in parentheses (#120) or (#119, #122).
+
+## Mac runner: GitHub route and failure reasons
+
+The self-hosted Mac's network refuses GitHub token writes on the direct route (`git push` gets `Permission to PylotLight/Surffish.git denied to github-actions[bot]`, 403), so git has to go through the local SOCKS proxy. Put this in the runner's `.env` (`~/.actions-runner/.env`) and restart the runner:
+
+```
+SURFFISH_GH_PROXY=socks5h://127.0.0.1:1080
+```
+
+With it set, every Mac checkout (release, CI, screenshots) sets `http.https://github.com/.proxy` in the work dir, and `release.ts` passes it to its own git calls and REST calls, so it no longer matters whether the runner was started with `HTTP(S)_PROXY` in its env (v0.1.29's first two runs failed at the push because a restart dropped it). Without `SURFFISH_GH_PROXY`, git uses `HTTPS_PROXY` from the env if there, else goes direct.
+
+The release job checks push access before the build: **Preflight - can this runner push to GitHub?** runs `git push --dry-run` of main (sends nothing, but needs write access) through the same route, so a broken route fails in seconds.
+
+Failure-prone steps run through `scripts/ci/explain.sh`, which on failure adds one `::error` annotation and a line in the run summary with a short reason (`scripts/ci/failure-reason.ts`, tested in `failure-reason.test.ts`), e.g.
+
+```
+::error title=bun run release::push to GitHub 403: runner not behind proxy (route direct (no proxy)), set SURFFISH_GH_PROXY / HTTPS_PROXY in the runner .env and restart it
+```
+
+Known reasons: push/git 403, proxy unreachable, DNS, 401 token, tag already on origin, missing release notes, failed unit test / typecheck, zip/electron-builder, notarization, npm errors, runner offline, timeout. Anything else gets the last error line of the step.
+
+### Seeing the reason in the runner terminal
+
+The runner prints only `Job … completed with result: Failed`. Pipe it through `scripts/runner-watch.ts` (Bun, no dependencies) and it adds the reason under each failed job, looked up from the job's annotations (latest failed job with that name across your repos):
+
+```
+2026-10-21 03:24:01Z: Job Surffish · Release · mac build · patch completed with result: Failed
+  ↳ why: bun run release: push to GitHub 403: runner not behind proxy (…)  https://github.com/PylotLight/Surffish/actions/runs/…/job/…
+```
+
+fish, from the runner dir:
+
+```fish
+cd ~/.actions-runner
+set -x SURFFISH_GH_PROXY socks5h://127.0.0.1:1080   # optional: API calls through the proxy
+./run.sh &| bun ~/path/to/Surffish/scripts/runner-watch.ts
+```
+
+(bash/zsh: `./run.sh 2>&1 | bun …`.) Runner lines pass through unchanged; lookups run in the background, so it never holds up or breaks the runner's output, and Ctrl-C still goes to the runner. Auth comes from `GH_TOKEN` / `GITHUB_TOKEN` or `gh auth token` (unauthenticated is fine for public repos). `RUNNER_WATCH_OWNER` (default `PylotLight`) and `RUNNER_WATCH_REPOS` (comma list) narrow the search.
 
 ## Builds: ARM64 zip only
 

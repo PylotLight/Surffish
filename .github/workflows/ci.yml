@@ -237,6 +237,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           git init -q .
+          # self-hosted Mac: git through SURFFISH_GH_PROXY when the runner .env sets it (see release.yml)
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then git config http.https://github.com/.proxy "$SURFFISH_GH_PROXY"; else git config --unset-all http.https://github.com/.proxy || true; fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
@@ -418,6 +420,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           git init -q .
+          # self-hosted Mac: git through SURFFISH_GH_PROXY when the runner .env sets it (see release.yml)
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then git config http.https://github.com/.proxy "$SURFFISH_GH_PROXY"; else git config --unset-all http.https://github.com/.proxy || true; fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
@@ -468,6 +472,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           git init -q .
+          # self-hosted Mac: git through SURFFISH_GH_PROXY when the runner .env sets it (see release.yml)
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then git config http.https://github.com/.proxy "$SURFFISH_GH_PROXY"; else git config --unset-all http.https://github.com/.proxy || true; fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
@@ -538,6 +544,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || 'main' }}
         run: |
           git init -q .
+          # self-hosted Mac: git through SURFFISH_GH_PROXY when the runner .env sets it (see release.yml)
+          if [ -n "${SURFFISH_GH_PROXY:-}" ]; then git config http.https://github.com/.proxy "$SURFFISH_GH_PROXY"; else git config --unset-all http.https://github.com/.proxy || true; fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
