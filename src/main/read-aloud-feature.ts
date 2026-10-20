@@ -35,7 +35,6 @@ export const READ_ALOUD_SCHEME_PRIVILEGES: CustomScheme = {
 let settings: ReadAloudSettings | null = null
 let module: ReadAloudModule | null = null
 let loading: Promise<ReadAloudModule> | null = null
-const listeners = new Set<(enabled: boolean) => void>()
 
 function current(): ReadAloudSettings {
   settings ??= parseReadAloudSettings(readUserJson(READ_ALOUD_SETTINGS_FILE))
@@ -48,12 +47,6 @@ export function readAloudEnabled(): boolean {
 
 export function getReadAloudSettings(): ReadAloudSettings {
   return { ...current() }
-}
-
-/** App menu and similar main-side entry points rebuild when the setting changes. */
-export function onReadAloudEnabledChange(listener: (enabled: boolean) => void): () => void {
-  listeners.add(listener)
-  return () => listeners.delete(listener)
 }
 
 function loadModule(): Promise<ReadAloudModule> {
@@ -85,11 +78,6 @@ export function setReadAloudSettings(input: unknown): ReadAloudSettings {
     module.applyReadAloudSettings(next)
   }
   try { sendToMainWindowRenderers('browser:read-aloud:settings-changed', { ...next }) } catch { /* window closing */ }
-  if (before.enabled !== next.enabled) {
-    for (const listener of listeners) {
-      try { listener(next.enabled) } catch (error) { console.warn('Read Aloud toggle listener failed:', error) }
-    }
-  }
   return { ...next }
 }
 
