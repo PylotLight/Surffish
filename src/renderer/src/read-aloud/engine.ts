@@ -190,6 +190,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
   let failures = 0
   let firstAudioMs: number | null = null
   let lastIndex = -1
+  let statsSent = false
 
   const stopSources = (): void => {
     for (const source of sources) {
@@ -200,7 +201,9 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
   }
 
   const report = (status: 'playing' | 'paused', index: number): void => {
-    emit({ type: 'state', token: command.token, status, index, engine, fallbackReason: command.fallbackReason ?? '', ...(firstAudioMs !== null && lastIndex === -1 ? { stats: { ...stats, firstAudioMs } } : {}) })
+    const withStats = !statsSent && firstAudioMs !== null
+    if (withStats) statsSent = true
+    emit({ type: 'state', token: command.token, status, index, engine, fallbackReason: command.fallbackReason ?? '', ...(withStats ? { stats: { ...stats, firstAudioMs } } : {}) })
   }
 
   const pump = (): void => {

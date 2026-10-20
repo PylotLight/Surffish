@@ -129,6 +129,30 @@ describe('reader view and page watchers', () => {
   })
 })
 
+describe('Read Aloud items', () => {
+  test('page menu offers Read Aloud, a selection offers Read Selection Aloud, a reading offers Stop', () => {
+    const calls: unknown[][] = []
+    const fns = { ...actions(), readAloud: (...args: unknown[]) => { calls.push(args) } }
+    const page = buildBrowserContextMenuTemplate(params(), { ...PAGE, canReadAloud: true }, fns)
+    expect(labels(page)).toContain('Read Aloud')
+    click(page.find((item) => item.label === 'Read Aloud'))
+    const selected = buildBrowserContextMenuTemplate(params({ selectionText: '  Some words.  ' }), { ...PAGE, canReadAloud: true }, fns)
+    expect(labels(selected)).toContain('Read Selection Aloud')
+    expect(labels(selected)).not.toContain('Read Aloud')
+    click(selected.find((item) => item.label === 'Read Selection Aloud'))
+    const reading = buildBrowserContextMenuTemplate(params(), { ...PAGE, canReadAloud: true, readingAloud: true }, fns)
+    expect(labels(reading)).toContain('Stop Reading Aloud')
+    click(reading.find((item) => item.label === 'Stop Reading Aloud'))
+    expect(calls).toEqual([['page'], ['selection', 'Some words.'], ['stop']])
+  })
+
+  test('nothing while Read Aloud is off, or on PDFs', () => {
+    expect(labels(buildBrowserContextMenuTemplate(params(), PAGE, actions()))).not.toContain('Read Aloud')
+    expect(labels(buildBrowserContextMenuTemplate(params({ selectionText: 'x' }), PAGE, actions()))).not.toContain('Read Selection Aloud')
+    expect(labels(buildBrowserContextMenuTemplate(params(), { ...PAGE, pdfDocument: true, canReadAloud: true }, actions()))).not.toContain('Read Aloud')
+  })
+})
+
 describe('Reading List items', () => {
   test('a link offers Add Link to Reading List (with the link text as the title) only when allowed', () => {
     const calls: unknown[] = []
