@@ -36,6 +36,10 @@ const server = createServer((request, response) => {
     response.end(`<!doctype html><html lang="en"><head><title>Read Aloud Smoke Article</title></head><body><nav><a href="/">Home</a></nav><article><h1>Read Aloud Smoke Article</h1><p class="byline">By Smoke Test</p>${paragraphs.map((text) => `<p>${text} ${'Padding words keep Readability happy about the length of this paragraph. '.repeat(3)}</p>`).join('')}</article></body></html>`)
     return
   }
+  if (url.pathname === '/empty') {
+    response.end('<!doctype html><title></title><body></body>')
+    return
+  }
   response.end('<!doctype html><title>Plain</title><p>hi</p>')
 })
 
@@ -104,9 +108,9 @@ async function run() {
   const engine = PHONON ? 'phonon' : 'system'
   await evaluate(toolbar, `window.api.browser.readAloud.setSettings({ enabled: true, engine: ${JSON.stringify(engine)} })`)
   await waitFor(async () => (await commandIds()).includes('readAloud.page'), 'the Read Aloud command')
-  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}/plain`)})`)
-  await waitFor(() => viewWithUrl(`${origin}/plain`), 'the plain page')
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).loading === false, 'the plain page to load')
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}/empty`)})`)
+  await waitFor(() => viewWithUrl(`${origin}/empty`), 'the empty page')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).loading === false, 'the empty page to load')
   assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("readAloud.page")'), true)
   const failed = await waitFor(async () => { const value = await state(); return value.status === 'error' && value }, 'the no-article error')
   assert.equal(failed.error, 'No article found on this page.')
