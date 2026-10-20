@@ -2,8 +2,8 @@
 cask "surffish" do
   depends_on arch: :arm64
 
-  version "0.1.27"
-  sha256 "79ec8231554ac52df6530ac7fb1c296d6aaf2a089fbd39a8d86ed8f4da3a3b4f"
+  version "0.1.28"
+  sha256 "0b70e2cef2c4375f733791de22970c9f5a1fb10878c343a3e1c3b6173e72b0ec"
 
   url "https://github.com/PylotLight/Surffish/releases/download/v#{version}/Surffish-#{version}-mac-arm64.zip"
   name "Surffish"
