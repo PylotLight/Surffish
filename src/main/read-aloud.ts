@@ -430,7 +430,8 @@ function endReading(status: ReadAloudStatus = 'idle', error = ''): void {
     if (!ended.page.isDestroyed()) highlight(ended.page, -1, '')
   }
   publish({ ...IDLE_READ_ALOUD_STATE, status, error, speed: settings?.speed ?? 1, voice: settings?.voice ?? 'default' })
-  scheduleEngineIdleClose()
+  if (browserWindows().length === 0) closeEngine()
+  else scheduleEngineIdleClose()
 }
 
 function failReading(message: string): void {
