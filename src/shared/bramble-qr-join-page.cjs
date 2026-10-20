@@ -214,7 +214,7 @@
     'button.link:hover { background: transparent; opacity: 1; text-decoration: underline; }',
     'svg { width: 14px; height: 14px; flex: none; }',
     '.panel { margin-top: 8px; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 10px; overflow: hidden; }',
-    '.stage { position: relative; background: #000; aspect-ratio: 16 / 9; max-height: 320px; width: 100%; }',
+    '.stage { position: relative; overflow: hidden; background: #000; aspect-ratio: 16 / 9; max-height: 320px; width: 100%; }',
     'video { width: 100%; height: 100%; object-fit: cover; display: block; transform: scaleX(-1); }',
     '.frame { position: absolute; inset: 0; margin: auto; width: 56%; aspect-ratio: 1; max-height: 86%; border: 2px solid rgba(255,255,255,0.85); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.28); pointer-events: none; }',
     '.bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; }',
@@ -325,6 +325,9 @@
         }
         tick()
       }, function (error) {
+        if (current.stopped) return
+        fail(cameraErrorMessage(error))
+      }).catch(function (error) {
         if (current.stopped) return
         fail(cameraErrorMessage(error))
       })

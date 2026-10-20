@@ -12,7 +12,11 @@ import {
   adaptBrambleAutofillSettleDelay,
   adaptBramblePopupViewport,
   adaptBrambleFirefoxManifest,
+  addBrambleQrJoin,
+  BRAMBLE_JSQR_FILE,
+  BRAMBLE_QR_JOIN_FILE,
   injectBrambleBrowserAlias,
+  injectBrambleQrJoinScript,
   isBrambleExtensionUrl,
   stageBrambleFirefoxBuild
 } from './bramble-poc-adapter.ts'
@@ -105,6 +109,31 @@ test('makes the staged Bramble popup scrollable and responsive without double-in
   assert.match(adapted, /overflow: auto/)
   assert.equal(adaptBramblePopupViewport(adapted), adapted)
   assert.equal(original.includes('data-surffish-bramble-viewport'), false)
+})
+
+test('adds Surffish’s Scan QR to the staged options page only, idempotently', () => {
+  const html = '<!doctype html><html><head><script type="module" src="/options.js"></script></head><body><div id="root"></div></body></html>'
+  const once = injectBrambleQrJoinScript(html)
+  assert.match(once, /<script defer src="\.\/surffish-bramble-qr-join\.js"><\/script>\n<\/head>/)
+  assert.equal(injectBrambleQrJoinScript(once), once)
+
+  const dir = mkdtempSync(join(tmpdir(), 'bramble-qr-'))
+  try {
+    writeFileSync(join(dir, 'options.html'), html)
+    writeFileSync(join(dir, 'popup.html'), html)
+    addBrambleQrJoin(dir, '/* page */', '/* jsqr */')
+    assert.equal(readFileSync(join(dir, BRAMBLE_QR_JOIN_FILE), 'utf8'), '/* page */')
+    assert.equal(readFileSync(join(dir, BRAMBLE_JSQR_FILE), 'utf8'), '/* jsqr */')
+    assert.equal(readFileSync(join(dir, 'options.html'), 'utf8'), once)
+    assert.equal(readFileSync(join(dir, 'popup.html'), 'utf8'), html, 'popup untouched')
+    // Refresh (e.g. a dev run without the bundled jsQR): page script updated, stale decoder removed, tag not doubled.
+    addBrambleQrJoin(dir, '/* page v2 */', null)
+    assert.equal(readFileSync(join(dir, BRAMBLE_QR_JOIN_FILE), 'utf8'), '/* page v2 */')
+    assert.equal(existsSync(join(dir, BRAMBLE_JSQR_FILE)), false)
+    assert.equal(readFileSync(join(dir, 'options.html'), 'utf8'), once)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('stages an adapted private copy and leaves the selected Firefox build unchanged', () => {
