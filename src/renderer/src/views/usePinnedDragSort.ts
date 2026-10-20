@@ -152,7 +152,9 @@ export function usePinnedDragSort(listRef: RefObject<HTMLElement | null>, kind: 
     }
     const clamped = Math.max(state.minDx, Math.min(state.maxDx, dx))
     state.slots[state.from]!.el.style.transform = `translateX(${clamped}px)`
-    const target = pinDropIndex(state.slots, state.from, clamped)
+    // The icon stops at the ends of the row, but the drop slot follows the pointer (dragging past the
+    // last pin lands after it).
+    const target = pinDropIndex(state.slots, state.from, dx)
     if (target === state.target) return
     state.target = target
     state.slots.forEach((slot, index) => {
