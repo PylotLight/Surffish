@@ -555,12 +555,9 @@ async function start(command: SpeakCommand): Promise<void> {
 
 let latestToken = 0
 
-let pdfText: Promise<typeof import('./pdf-text')> | null = null
-
 async function readPdfText(id: number, bytes: Uint8Array): Promise<void> {
   try {
-    pdfText ??= import('./pdf-text')
-    const { extractPdfText } = await pdfText
+    const { extractPdfText } = await import('./pdf-text')
     const text = await extractPdfText(bytes)
     emit({ type: 'pdf-text', id, ok: true, ...text })
   } catch (error) {
