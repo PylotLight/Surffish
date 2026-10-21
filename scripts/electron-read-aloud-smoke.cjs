@@ -232,7 +232,7 @@ async function run() {
     assert.equal(first.status, 'downloading')
     assert.equal(first.total, fixtureBytes, 'progress counts every missing file')
     await waitFor(async () => (await download()).loaded > first.loaded, 'progress to move')
-    assert.ok(await page('document.querySelector(".read-aloud-model-row progress").value > 0'), 'the bar fills')
+    await waitFor(() => page('(document.querySelector(".read-aloud-model-row progress")?.value ?? 0) > 0'), 'the progress bar to fill')
     assert.match(await modelText(), /of .* · \d+%/, 'MB done / total and percent')
     // Cancel
     assert.equal(await clickButton('.read-aloud-model-row', 'Cancel'), true)
