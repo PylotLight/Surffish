@@ -75,9 +75,9 @@ function ModelDownloadRow({ download, enabled }: { download: ReadAloudDownloadSt
   const deleteButton = <button className="settings-action secondary" type="button" aria-label="Delete the downloaded voice model" onClick={remove}>Delete download</button>
   if (!enabled) {
     // Off keeps the files; offer Delete separately.
-    if (download.status !== 'ready' && download.status !== 'partial') return null
+    if (download.status === 'absent') return null
     return (
-      <SettingsRow label="Voice model" hint={download.status === 'ready' ? `Kept in this profile (${size}) for when Read Aloud is turned back on.` : 'A partial download is kept in this profile.'}>
+      <SettingsRow label="Voice model" hint={download.status === 'ready' ? `Kept in this profile (${size}) for when Read Aloud is turned back on.` : 'A partial download is kept in this profile; it resumes when Read Aloud is turned on.'}>
         {deleteButton}
       </SettingsRow>
     )

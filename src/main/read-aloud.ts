@@ -179,7 +179,8 @@ export async function deleteReadAloudDownloads(): Promise<ReadAloudDownloadState
 async function ensurePhononFiles(voiceId: string, showInPlayer: boolean): Promise<void> {
   if (!downloads.isReady()) {
     const current = downloads.state()
-    if (showInPlayer) publish({ status: 'downloading', download: { label: current.label || 'Preparing', loaded: current.loaded, total: current.total || current.bytes } })
+    // On disk already: just the once-per-run hash check, so the player keeps saying "Starting…".
+    if (showInPlayer && current.status !== 'ready') publish({ status: 'downloading', download: { label: current.label || 'Preparing', loaded: current.loaded, total: current.total || current.bytes } })
     await downloads.ensureModel()
   }
   await downloads.ensureVoice(voiceId)
