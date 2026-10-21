@@ -17,6 +17,7 @@ import {
 } from '../shared/mini-window'
 import type { MiniOmniboxSources } from '../shared/mini-window-omnibox'
 import type { QuickLinkSite } from '../shared/quick-links'
+import type { NewTabBackground, NewTabPreferences } from '../shared/types'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeSettingsFile } from './user-json'
 
@@ -70,6 +71,10 @@ export interface MiniWindowHost {
   omniboxSources(win: BaseWindow): MiniOmniboxSources
   /** The mini window's New Tab tiles: favourites, then frequently visited sites (the New Tab page's own lists). */
   newTabSites(win: BaseWindow): QuickLinkSite[]
+  /** The New Tab settings (Settings → New Tab: background dim / blur, clock, icon size, labels). */
+  newTabPreferences(): NewTabPreferences
+  /** The background a New Tab opened now shows (the browser's New Tab's photos and offline fallbacks). */
+  newTabBackground(): NewTabBackground | null
   /** Put one of the mini window's tabs (default: the active one) back into a browser window (its last tab closes the mini window). */
   returnTab(win: BaseWindow, tabId?: string): boolean
   /** Close one of the mini window's tabs (default: the active one); its last tab closes the window. */

@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('miniWindow', {
   addressBlur: () => ipcRenderer.send('mini-window:address-blur'),
   // The mini window's New Tab page (main/mini-window-newtab-page.ts).
   onNewTab: (callback) => ipcRenderer.on('mini-window:newtab-state', (_event, state) => callback(state)),
+  onNewTabClock: (callback) => ipcRenderer.on('mini-window:newtab-clock', (_event, clock) => callback(clock)),
   openSite: (url) => ipcRenderer.send('mini-window:newtab-open', String(url).slice(0, 8192)),
   showAddress: () => ipcRenderer.send('mini-window:newtab-address'),
   // SURFFISH_DEBUG_HEADER (main/mini-header-debug.ts): main turns the header's own trace on/off; it

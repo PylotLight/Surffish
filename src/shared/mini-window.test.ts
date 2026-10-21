@@ -27,6 +27,8 @@ import {
   MINI_WINDOW_TAB_STRIP_HEIGHT,
   MINI_WINDOW_POPOUT_STRIP_HEIGHT,
   miniHeaderHeight,
+  miniPopoutAddressRow,
+  MINI_WINDOW_POPOUT_ADDRESS_HEIGHT,
   miniMergeTarget,
   miniSplitBounds,
   planMiniRegroup,
@@ -371,5 +373,15 @@ describe('throw with momentum setting', () => {
   test('a stored choice is kept', () => {
     expect(parseMiniWindowSettings({ throwMomentum: false }).throwMomentum).toBe(false)
     expect(parseMiniWindowSettings({ throwMomentum: true }).throwMomentum).toBe(true)
+  })
+})
+
+describe('miniPopoutAddressRow', () => {
+  test('the popout field gets its own row under a strip of tabs; one tab or no field: none', () => {
+    expect(miniPopoutAddressRow(true, true, 3, 'tabs')).toBe(MINI_WINDOW_POPOUT_ADDRESS_HEIGHT)
+    expect(miniPopoutAddressRow(true, true, 1, 'tabs')).toBe(0)
+    expect(miniPopoutAddressRow(true, false, 3, 'tabs')).toBe(0)
+    expect(miniPopoutAddressRow(false, true, 3, 'tabs')).toBe(0)
+    expect(miniPopoutAddressRow(true, true, 3, 'stack')).toBe(0)
   })
 })

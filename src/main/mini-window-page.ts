@@ -133,8 +133,12 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   body.popout.tabbed #strip { display: flex; }
   body.popout.loading header { box-shadow: inset 0 -2px 0 -0.5px var(--accent); }
   body.popout #more[aria-expanded=true] { background: var(--hover); }
-  body.popout.addressing #strip { display: none; }
   body.popout #addrInput { height: 20px; font-size: 11.5px; }
+  /* With tabs in the popout's strip the field never takes their place: it gets its own row under the
+     strip (shared/mini-window.ts MINI_WINDOW_POPOUT_ADDRESS_HEIGHT, 32 px), over the page; chips, +
+     and the actions stay where they are. */
+  body.popout.tabbed #addr { position: fixed; left: 0; right: 0; top: 28px; height: 32px; box-sizing: border-box; padding: 0 6px; background: var(--bar); border-bottom: 1px solid var(--line); }
+  body.popout.tabbed #addrInput { height: 24px; font-size: 12px; }
   body.popout #plus { width: 22px; height: 22px; font-size: 15px; }
   @media (prefers-reduced-transparency: reduce) { :root { --bar: rgb(246,246,247); } }
   @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); } }
@@ -606,7 +610,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   function placeDrop() {
     // Under everything the header shows (the row, and the strip unless it sits in the row).
     const underStrip = document.body.classList.contains('tabbed') && !document.body.classList.contains('popout')
-    const bottom = Math.max(bar.getBoundingClientRect().bottom, underStrip ? strip.getBoundingClientRect().bottom : 0)
+    // The popout with tabs: under the field's own row.
+    const underRow = document.body.classList.contains('tabbed') && document.body.classList.contains('popout')
+    const bottom = Math.max(bar.getBoundingClientRect().bottom, underStrip ? strip.getBoundingClientRect().bottom : 0, underRow ? addrForm.getBoundingClientRect().bottom : 0)
     drop.style.top = Math.round(bottom + 2) + 'px'
   }
   function renderDrop(view, height) {

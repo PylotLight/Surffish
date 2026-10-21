@@ -31,7 +31,9 @@ import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../../.
 import {
   getQuickLinkBackgroundIndex,
   nextQuickLinkBackgroundIndex,
-  QUICK_LINK_BACKGROUND_ROTATION_MS
+  OFFLINE_NEW_TAB_BACKGROUNDS,
+  QUICK_LINK_BACKGROUND_ROTATION_MS,
+  withOfflinePhotoFallbacks as withOfflineBackgrounds
 } from '../../../shared/quick-links-backgrounds'
 import { NEW_TAB_PHOTO_REFRESH_INTERVAL_MS } from '../../../shared/new-tab-photo-feed'
 import forestLake from '../assets/quick-links-backgrounds/forest-lake.webp'
@@ -122,32 +124,11 @@ const NEW_TAB_CREDIT_SPACE = 58
 const NEW_TAB_SAVE_COALESCE_MS = 150
 /** Preference broadcasts arriving this soon after a local edit are our own older values: ignored. */
 const NEW_TAB_ECHO_GUARD_MS = 700
-const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = [
-  {
-    id: 'fallback-forest-lake',
-    src: forestLake,
-    title: 'Forest lake',
-    creator: 'Pixel.la Free Stock Photos',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Landscape-nature-forest-lake_(24300004076).jpg',
-    licenseName: 'CC0 1.0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/'
-  },
-  {
-    id: 'fallback-mountain-lake',
-    src: mountainLake,
-    title: 'Tranquil mountain lake',
-    creator: 'Andrew Spencer',
-    sourceUrl: 'https://commons.wikimedia.org/wiki/File:Tranquil_mountain_lake_(Unsplash).jpg',
-    licenseName: 'CC0 1.0',
-    licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/'
-  }
-]
+// The bundled offline photos (shared with a mini window's New Tab, shared/quick-links-backgrounds.ts).
+const OFFLINE_PHOTO_FILES: Record<string, string> = { 'forest-lake.webp': forestLake, 'tranquil-mountain-lake.webp': mountainLake }
+const FALLBACK_NEW_TAB_BACKGROUNDS: NewTabBackground[] = OFFLINE_NEW_TAB_BACKGROUNDS.map(({ file, ...credit }) => ({ ...credit, src: OFFLINE_PHOTO_FILES[file]! }))
 function withOfflinePhotoFallbacks(photos: readonly NewTabBackground[]): NewTabBackground[] {
-  const combined = [
-    ...photos,
-    ...FALLBACK_NEW_TAB_BACKGROUNDS.filter((fallback) => !photos.some((photo) => photo.id === fallback.id))
-  ].slice(0, 2)
-  return combined.length > 0 ? combined : [...FALLBACK_NEW_TAB_BACKGROUNDS]
+  return withOfflineBackgrounds(photos, FALLBACK_NEW_TAB_BACKGROUNDS)
 }
 const EMPTY_BROWSER: BrowserState = {
   url: BONJOURR_START_PAGE,

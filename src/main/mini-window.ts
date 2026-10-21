@@ -19,6 +19,7 @@ import {
   miniHeaderUrl,
   miniMergeTarget,
   miniPageBounds,
+  miniPopoutAddressRow,
   MINI_WINDOW_DEFAULT_SIZE,
   miniSplitBounds,
   parseMiniGeometry,
@@ -56,6 +57,8 @@ import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type Throw
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
 import { MINI_WINDOW_NEW_TAB_HTML } from './mini-window-newtab-page'
+import { formatClockDate, formatClockTime } from '../shared/new-tab-clock'
+import type { NewTabBackground } from '../shared/types'
 import {
   MINI_OMNIBOX_LIMIT,
   MINI_OMNIBOX_PADDING,
@@ -200,8 +203,14 @@ interface Mini {
   address: { tabId: string; auto: boolean; model: MiniOmnibox; sources: MiniOmniboxSources; dropdown: number; blurred: boolean; focus: number; select: boolean } | null
   /** The New Tab whose field Esc put away (it doesn't open by itself again for that tab). */
   addressDismissed: string | null
-  /** The New Tab page view (mini-window-newtab-page.ts), only while a New Tab is the active tab. */
-  newTab: { view: WebContentsView; loaded: boolean; key: string } | null
+  /**
+   * The New Tab page view (mini-window-newtab-page.ts), only while a New Tab is the active tab: the
+   * background it opened with (picked once, like the browser's New Tab), what it was last sent (`key`,
+   * the photo by id), and its clock (Settings → New Tab clock; main formats it, the page only shows it).
+   */
+  newTab: { view: WebContentsView; loaded: boolean; key: string; photo: NewTabBackground | null; clockKey: string; clockTimer: ReturnType<typeof setTimeout> | null } | null
+  /** The popout's address row (miniPopoutAddressRow) as last laid out. */
+  addressRowLaidOut: number
   /** Where the page goes in the window (layout), for the New Tab page view. */
   pageRect: MiniRect
 }
@@ -599,9 +608,12 @@ function layout(m: Mini): void {
   m.pageTop = page.y
   m.pageRect = page
   host().setPageBounds(m.window, page)
-  m.newTab?.view.setBounds(page)
-  // The address field's dropdown hangs under the header, over the page.
-  const dropdown = m.address?.dropdown ?? 0
+  // The popout's address row hangs over the page (it never moves for it); the New Tab page starts under it.
+  const row = addressRow(m)
+  m.addressRowLaidOut = row
+  m.newTab?.view.setBounds(newTabRect(m))
+  // The address field's dropdown hangs under the header (and the popout's address row), over the page.
+  const dropdown = row + (m.address?.dropdown ?? 0)
   if (floats(m.plan)) {
     mountHeader(m, 'panel')
     m.header?.setBounds({ x: 0, y: 0, width, height: tall + dropdown })
@@ -612,6 +624,17 @@ function layout(m: Mini): void {
     hidePanel(m)
   }
   rewirePage(m)
+}
+
+/** The popout's address field row under its strip of tabs, while the field shows (shared/mini-window.ts miniPopoutAddressRow). */
+function addressRow(m: Mini): number {
+  return miniPopoutAddressRow(Boolean(m.menuBar), Boolean(m.address), tabsOf(m).length, grouping())
+}
+
+/** The New Tab page's place: the page area, under the popout's address row while it shows. */
+function newTabRect(m: Mini): MiniRect {
+  const row = Math.min(m.addressRowLaidOut, Math.max(0, m.pageRect.height - 1))
+  return { ...m.pageRect, y: m.pageRect.y + row, height: m.pageRect.height - row }
 }
 
 /** The revealed header: its row, plus the tab strip for a collection of two or more ('tabs'); in the menu bar popout, its one strip (tabs and all). */
@@ -1046,6 +1069,8 @@ function refreshHeaderOf(m: Mini): void {
   rewirePage(m)
   // A tab joined or left while the header is up: the strip comes or goes.
   if (m.revealed && m.header && m.header.getBounds().height !== headerHeight(m)) layout(m)
+  // The popout's address row comes or goes with the strip (a tab joined or left while the field shows).
+  else if (addressRow(m) !== m.addressRowLaidOut) layout(m)
   let state = headerState(m)
   if (!state) return
   // Nothing the header shows changed (a page's replaceState per keystroke): no push, no repaint.
@@ -1109,7 +1134,7 @@ function syncNewTabView(m: Mini, state: { newTab: boolean; private: boolean }): 
     })
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     view.webContents.on('will-navigate', (event) => event.preventDefault())
-    const newTab: NonNullable<Mini['newTab']> = { view, loaded: false, key: '' }
+    const newTab: NonNullable<Mini['newTab']> = { view, loaded: false, key: '', photo: host().newTabBackground(), clockKey: '', clockTimer: null }
     m.newTab = newTab
     // Browser shortcuts (⌘T, ⌘L, ⌘W…) work here like on a page.
     view.webContents.on('before-input-event', (event, input) => {
@@ -1122,29 +1147,68 @@ function syncNewTabView(m: Mini, state: { newTab: boolean; private: boolean }): 
       if (m.newTab !== newTab) return
       newTab.loaded = true
       newTab.key = ''
+      newTab.clockKey = ''
       sendNewTabState(m)
     })
     // Under the header (an overlaid header stays on top of it).
     m.window.contentView.addChildView(view, 0)
-    view.setBounds(m.pageRect)
+    view.setBounds(newTabRect(m))
     void view.webContents.loadURL(newTabDocumentUrl()).catch(() => undefined)
   }
   sendNewTabState(m, state.private)
 }
 
+/**
+ * What the New Tab page shows: its tiles, and the browser's New Tab look (Settings → New Tab: the
+ * background photo with its dim / blur and credit, icon size and labels, clock weight). Sent only
+ * when something changed; the photo (a data: URL) goes by id in the comparison.
+ */
 function sendNewTabState(m: Mini, isPrivate?: boolean): void {
   const newTab = m.newTab
   if (!newTab?.loaded || !live(newTab.view.webContents)) return
-  const state = { private: isPrivate ?? host().header(m.window)?.private ?? false, sites: host().newTabSites(m.window) }
-  const key = JSON.stringify(state)
+  const prefs = host().newTabPreferences()
+  const look = { dim: prefs.backgroundDim, blur: prefs.backgroundBlur, iconSize: prefs.iconSize, labels: prefs.showLinkLabels, clockWeight: prefs.clockWeight, tabular: prefs.clockTabularDigits }
+  const clockSettings = [prefs.showClock, prefs.showDate, prefs.timeFormat, prefs.showAmPm, prefs.showSeconds, prefs.dateFormat, prefs.timeZone].join('|')
+  const { src, ...credit } = newTab.photo ?? { src: null }
+  const state = { private: isPrivate ?? host().header(m.window)?.private ?? false, sites: host().newTabSites(m.window), look, photo: newTab.photo ? credit : null }
+  const key = `${JSON.stringify(state)}|${clockSettings}`
   if (key === newTab.key) return
   newTab.key = key
-  newTab.view.webContents.send('mini-window:newtab-state', state)
+  newTab.view.webContents.send('mini-window:newtab-state', { ...state, photo: newTab.photo ? { ...credit, src } : null })
+  tickNewTabClock(m)
+}
+
+/**
+ * The New Tab page's clock (Settings → New Tab: time, date, 12 / 24 h, seconds, zone), formatted by
+ * the browser New Tab's own functions (shared/new-tab-clock.ts) and sent when the text changes: each
+ * minute, or each second with seconds on while the window shows (hidden: each minute; showing again
+ * ticks at once). Off: nothing runs.
+ */
+function tickNewTabClock(m: Mini): void {
+  const newTab = m.newTab
+  if (!newTab) return
+  if (newTab.clockTimer) clearTimeout(newTab.clockTimer)
+  newTab.clockTimer = null
+  if (!newTab.loaded || !live(newTab.view.webContents) || m.window.isDestroyed()) return
+  const prefs = host().newTabPreferences()
+  const now = new Date()
+  const locale = app.getLocale() || undefined
+  const clock = prefs.showClock ? { time: formatClockTime(now, prefs, locale), date: prefs.showDate ? formatClockDate(now, prefs.timeZone, prefs.dateFormat, locale) : '' } : null
+  const key = JSON.stringify(clock)
+  if (key !== newTab.clockKey) {
+    newTab.clockKey = key
+    newTab.view.webContents.send('mini-window:newtab-clock', clock)
+  }
+  if (!clock) return
+  const step = prefs.showSeconds && m.window.isVisible() ? 1000 : 60_000
+  newTab.clockTimer = setTimeout(() => tickNewTabClock(m), step - (now.getTime() % step) + 20)
 }
 
 function releaseNewTabView(m: Mini): void {
   const newTab = m.newTab
   if (!newTab) return
+  if (newTab.clockTimer) clearTimeout(newTab.clockTimer)
+  newTab.clockTimer = null
   m.newTab = null
   if (!m.window.isDestroyed()) m.window.contentView.removeChildView(newTab.view)
   if (live(newTab.view.webContents)) newTab.view.webContents.close()
@@ -1171,7 +1235,7 @@ function dropdownRoom(m: Mini): number {
     return Math.max(0, Math.min(max, workArea.y + workArea.height - (m.plan.panel.y + m.plan.panel.height) - 4))
   }
   // Above: the panel grows down over the window; inside the window: over the page.
-  const below = m.plan.kind === 'above' ? m.size.height : m.size.height - headerHeight(m)
+  const below = m.plan.kind === 'above' ? m.size.height : m.size.height - headerHeight(m) - addressRow(m)
   return Math.max(0, Math.min(max, below - 4))
 }
 
@@ -1213,6 +1277,8 @@ function openAddress(m: Mini, options: { auto: boolean; focus: boolean; select: 
   if (!m.menuBar) setRevealed(m, true)
   // Released (idle) header: it comes back and gets the field when it has loaded (ensureHeader).
   if (!m.header) void ensureHeader(m)
+  // The popout: the field's row under the strip of tabs.
+  if (addressRow(m) !== m.addressRowLaidOut) layout(m)
   pushAddress(m, { setText: true, caretToEnd: !options.select })
   if (options.focus) focusAddressField(m, true)
 }
@@ -1657,6 +1723,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     address: null,
     addressDismissed: null,
     newTab: null,
+    addressRowLaidOut: 0,
     pageRect: { x: 0, y: 0, width: bounds.width, height: bounds.height }
   }
   self.mini = m
@@ -1672,6 +1739,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
   host().attachWindow(window)
   applyWindowSettings(m, getMiniWindowSettings())
   void ensureHeader(m)
+  // Shown again: a New Tab's clock catches up at once (hidden, it only ticked each minute).
+  window.on('show', () => tickNewTabClock(m))
   // Hidden (Show/Hide, tucked away): the header goes with it (and a menu bar popout counts as hidden).
   window.on('hide', () => {
     // A native Space fallback (mac-panel.ts) ordering it out and straight back in: not a hide.

@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import { Buffer } from 'node:buffer'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { NewTabBackground, NewTabBackgroundRefreshResult } from '../shared/types'
 import {
   MAX_NEW_TAB_PHOTO_BYTES,
@@ -12,6 +13,7 @@ import {
   parseWikimediaPhotoSearchResults,
   type WikimediaPhotoCandidate
 } from '../shared/new-tab-photo-feed'
+import { OFFLINE_NEW_TAB_BACKGROUNDS, newTabBackgroundIndexOnOpen, withOfflinePhotoFallbacks, type NewTabBackgroundCredit } from '../shared/quick-links-backgrounds'
 import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 
@@ -274,4 +276,49 @@ export function refreshNewTabBackgrounds(force = true): Promise<NewTabBackground
   }
   refreshInProgress = refreshFromCommons().finally(() => { refreshInProgress = null })
   return refreshInProgress
+}
+
+// ---------------------------------------------------------------------------
+// A mini window's New Tab (main/mini-window.ts): the same backgrounds as the browser's New Tab.
+
+const mainDirectory = dirname(fileURLToPath(import.meta.url))
+/** The last offline photo read (one at a time; it is only read when no Wikimedia photo is cached). */
+let offlinePhoto: { id: string; src: string } | null = null
+
+/** An offline photo's image as a data: URL: from the renderer build (out/renderer/assets/<name>-<hash>.webp), or the source file in dev. */
+function offlinePhotoSrc(id: string, file: string): string | null {
+  if (offlinePhoto?.id === id) return offlinePhoto.src
+  const name = file.replace(/\.webp$/, '')
+  const assets = resolve(mainDirectory, '../renderer/assets')
+  let path: string | null = null
+  try {
+    const built = readdirSync(assets).find((entry) => entry.startsWith(`${name}-`) && entry.endsWith('.webp'))
+    if (built) path = join(assets, built)
+  } catch {
+    // No renderer build next to main (dev server): the source file below.
+  }
+  path ??= resolve(mainDirectory, '../../src/renderer/src/assets/quick-links-backgrounds', file)
+  try {
+    const src = `data:image/webp;base64,${readFileSync(path).toString('base64')}`
+    offlinePhoto = { id, src }
+    return src
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The background a New Tab opened now shows (the browser's New Tab picks the same way): the newest
+ * cached Wikimedia photo, else the bundled offline photo of this fifteen-minute slot. Null only if
+ * neither can be read (the page keeps its plain dark backdrop).
+ */
+export function newTabBackgroundOnOpen(now = Date.now()): NewTabBackground | null {
+  const offline: Array<NewTabBackgroundCredit & { file?: string }> = OFFLINE_NEW_TAB_BACKGROUNDS.map((photo) => ({ ...photo }))
+  const backgrounds: Array<NewTabBackgroundCredit & { src?: string; file?: string }> = withOfflinePhotoFallbacks<NewTabBackgroundCredit & { src?: string; file?: string }>(getNewTabBackgrounds(), offline)
+  const index = newTabBackgroundIndexOnOpen(now, backgrounds, OFFLINE_NEW_TAB_BACKGROUNDS.map((photo) => photo.id))
+  const chosen = backgrounds[index]
+  if (!chosen) return null
+  const { file, src, ...credit } = chosen
+  const image = src ?? (file ? offlinePhotoSrc(chosen.id, file) : null)
+  return image ? { ...credit, src: image } : null
 }
