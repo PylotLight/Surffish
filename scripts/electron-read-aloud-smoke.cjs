@@ -20,6 +20,10 @@
 //   8. On the live page (no Reader view): the page menu's one "Read Aloud" submenu, "Read from Here"
 //      starts mid-article, the spoken sentence is highlighted with the CSS Custom Highlight API (the
 //      DOM isn't touched), Pause/Stop while reading; a Reading List item's Listen reads its saved copy.
+//  8b. PDFs (pdf.js text in the engine page): Cmd+K Read Aloud on a PDF in the built-in viewer reads
+//      its text without the repeated header, the page numbers or the hyphenation; a paused reading
+//      stops on its own (SURFFISH_READ_ALOUD_PAUSE_STOP_MS shortens the 10 minutes); the menu's
+//      "Read from This Page" starts at the page the viewer shows; a PDF without text (scanned) says so.
 //   9. The Cmd/Ctrl+Shift+U app-menu item exists only while on. Turning the feature off closes the
 //      engine window.
 // READ_ALOUD_SMOKE_PHONON=1 skips the fixtures and downloads the real Phonon runtime + model (~71 MB)
@@ -41,6 +45,8 @@ const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 const PHONON = process.env.READ_ALOUD_SMOKE_PHONON === '1'
 const IDLE_MS = 4000
 process.env.SURFFISH_READ_ALOUD_IDLE_MS = String(IDLE_MS)
+const PAUSE_STOP_MS = 2500
+process.env.SURFFISH_READ_ALOUD_PAUSE_STOP_MS = String(PAUSE_STOP_MS)
 // Context menus are captured instead of shown (the smoke picks items and clicks them).
 let menus = []
 const buildFromTemplate = Menu.buildFromTemplate.bind(Menu)
@@ -88,7 +94,7 @@ export const PhononTTS = {
       sampleRate: 24000, voices: ['default'], threads: 1, threadsReason: 'fixture threads', device: 'cpu', deviceReason: 'fixture device',
       async addVoice(name, source) { record.voices.push(name); const response = await fetch(source); if (!response.ok) throw new Error('voice ' + response.status); this.voices.push(name) },
       stream(text, options = {}) {
-        record.streams.push({ voice: options.voice, temperature: options.temperature, seed: options.seed })
+        record.streams.push({ voice: options.voice, temperature: options.temperature, seed: options.seed, text: String(text) })
         let cancelled = false
         const chunks = Math.max(2, Math.min(8, Math.ceil(String(text).length / 20)))
         return {
@@ -140,6 +146,41 @@ const ENGLISH = CATALOG.filter((voice) => voice.language === 'en')
 fixtures['voices.jsonl'] = Buffer.from(CATALOG.map((voice) => JSON.stringify(voice)).join('\n'))
 CATALOG.forEach((voice, index) => { fixtures[`voices/${voice.voice_id}.safetensors`] = Buffer.alloc(2048, index + 2) })
 const MODEL_FIXTURES = ['runtime.tgz', 'model.q8.gguf', 'tokenizer.json', 'config.json', 'default-voice.safetensors']
+// PDFs for 8b (pdf-lib, made in run()): three pages with a repeated header, "Page N of 3" footers and
+// a word hyphenated across a line break; and a "scanned" one with no text at all.
+const PDF_SENTENCES = [
+  'Read Aloud PDF Smoke',
+  'This PDF is read by Surffish with an extraordinary amount of care.',
+  'Headers and footers are left out.',
+  'Second page begins here.',
+  'It has its own sentences to read.',
+  'The second page ends with a sentence.',
+  'Third page is the last one.',
+  'Reading stops after it.'
+]
+const pdfFixtures = {}
+async function makePdfFixtures() {
+  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib')
+  const document = await PDFDocument.create()
+  document.setTitle('Read Aloud PDF Smoke')
+  const font = await document.embedFont(StandardFonts.Helvetica)
+  const pages = [
+    ['This PDF is read by Surffish with an extra-', 'ordinary amount of care. Headers and footers are left out.'],
+    ['Second page begins here. It has its own sentences to read.', 'The second page ends with a sentence.'],
+    ['Third page is the last one. Reading stops after it.']
+  ]
+  pages.forEach((lines, index) => {
+    const page = document.addPage([612, 792])
+    page.drawText('Surffish PDF Smoke Header', { x: 72, y: 760, size: 9, font })
+    if (index === 0) page.drawText('Read Aloud PDF Smoke', { x: 72, y: 700, size: 20, font })
+    lines.forEach((line, row) => page.drawText(line, { x: 72, y: 660 - row * 14, size: 11, font }))
+    page.drawText(`Page ${index + 1} of ${pages.length}`, { x: 280, y: 30, size: 9, font })
+  })
+  pdfFixtures['/read-aloud.pdf'] = Buffer.from(await document.save())
+  const scanned = await PDFDocument.create()
+  scanned.addPage([612, 792]).drawRectangle({ x: 50, y: 50, width: 500, height: 690, color: rgb(0.8, 0.8, 0.8) })
+  pdfFixtures['/scanned.pdf'] = Buffer.from(await scanned.save())
+}
 const fixtureHits = []
 const fixtureMode = { slow: false, fail: false }
 const server = createServer((request, response) => {
@@ -147,6 +188,11 @@ const server = createServer((request, response) => {
   if (url.pathname === '/2026/read-aloud-article') {
     response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
     response.end(`<!doctype html><html lang="en"><head><title>Read Aloud Smoke Article</title></head><body><nav><a href="/">Home</a></nav><article><h1>Read Aloud Smoke Article</h1><p class="byline">By Smoke Test</p>${paragraphs.map((text) => `<p>${text} ${'Padding words keep Readability happy about the length of this paragraph. '.repeat(3)}</p>`).join('')}</article></body></html>`)
+    return
+  }
+  if (pdfFixtures[url.pathname]) {
+    response.writeHead(200, { 'Content-Type': 'application/pdf', 'Cache-Control': 'private, max-age=60' })
+    response.end(pdfFixtures[url.pathname])
     return
   }
   if (url.pathname.startsWith('/fixture/')) {
@@ -237,6 +283,7 @@ async function run() {
   writeFileSync(join(userData, smoke.ADBLOCK_CACHE_FILE), blocker.serialize(), { mode: 0o600 })
   const now = Date.now()
   writeFileSync(join(userData, 'new-tab-photo-cache.json'), `${JSON.stringify({ version: 1, updatedAt: now, lastAttemptAt: now, backgrounds: [] })}\n`)
+  await makePdfFixtures()
   await new Promise((resolvePromise) => server.listen(0, '127.0.0.1', resolvePromise))
   const origin = `http://127.0.0.1:${server.address().port}`
   const fixtureBytes = PHONON ? 0 : writeTestManifest(origin)
@@ -565,6 +612,63 @@ async function run() {
   assert.equal(listening.title, 'Read Aloud Smoke Article')
   await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
   await waitFor(async () => (await state()).status === 'idle', 'stop')
+
+  // --- 8b. PDFs: pdf.js text from the built-in viewer's document.
+  smoke.step('PDF: read the text, auto-stop while paused, read from this page, scanned PDF')
+  const openPdf = async (path) => {
+    await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}${path}`)})`)
+    await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).pdf === 'viewer', `the PDF viewer for ${path}`)
+    return viewWithUrl(`${origin}${path.split('#')[0]}`)
+  }
+  const spokenSince = async (from) => PHONON ? [] : (await engineWindow().webContents.executeJavaScript('globalThis.__phonon.streams.map((stream) => stream.text)')).slice(from)
+  const streamCount = async () => (PHONON || !engineWindow()) ? 0 : engineWindow().webContents.executeJavaScript('globalThis.__phonon?.streams.length ?? 0')
+  await openPdf('/read-aloud.pdf')
+  const pdfCommandEnabled = (await evaluate(toolbar, 'window.api.browser.commands.list()')).commands.find((command) => command.id === 'readAloud.page')
+  assert.equal(pdfCommandEnabled?.enabled, true, 'Cmd+K Read Aloud is offered on a PDF')
+  let streamsBefore = await streamCount()
+  assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("readAloud.page")'), true)
+  const pdfReading = await waitFor(async () => { const value = await state(); return (value.status === 'playing' || value.status === 'error') && value }, 'the PDF reading to start', smoke.waitMs * 2)
+  console.log(`PDF reading: ${JSON.stringify({ status: pdfReading.status, title: pdfReading.title, total: pdfReading.total, error: pdfReading.error })}`)
+  assert.equal(pdfReading.status, 'playing', `the PDF reading started (${pdfReading.error})`)
+  assert.equal(pdfReading.title, 'Read Aloud PDF Smoke', 'the PDF title from its metadata')
+  assert.equal(pdfReading.total, PDF_SENTENCES.length, 'header, footers and page numbers are not read')
+  if (!PHONON) {
+    const spoken = await waitFor(async () => { const texts = await spokenSince(streamsBefore); return texts.length >= 2 && texts }, 'the first PDF sentences to be generated')
+    console.log(`PDF sentences spoken: ${JSON.stringify(spoken.slice(0, 3))}`)
+    assert.deepEqual(spoken.slice(0, 2), PDF_SENTENCES.slice(0, 2), 'the hyphenated word is joined, the header is skipped')
+  }
+  // The follow-up: a paused reading stops on its own, so the engine can close.
+  await evaluate(toolbar, 'window.api.browser.readAloud.control("pause")')
+  await waitFor(async () => (await state()).status === 'paused', 'pause the PDF reading')
+  const pausedAt = Date.now()
+  await waitFor(async () => (await state()).status === 'idle', 'the paused reading to stop on its own', PAUSE_STOP_MS + smoke.waitMs)
+  console.log(`paused reading stopped by itself after ${Date.now() - pausedAt} ms`)
+  assert.ok(Date.now() - pausedAt >= PAUSE_STOP_MS - 200, 'not before the pause timeout')
+
+  const pdfView = await openPdf('/read-aloud.pdf?again=1#page=2')
+  await delay(800)
+  menus = []
+  pdfView.webContents.emit('context-menu', { preventDefault() {} }, { x: 300, y: 300, pageURL: pdfView.webContents.getURL(), editFlags: { canSelectAll: true } })
+  const pdfMenu = await waitFor(() => menus.find((template) => menuItem(template, 'Read Aloud')), 'the PDF page menu with Read Aloud', 3000)
+  assert.deepEqual(menuLabels(menuItem(pdfMenu, 'Read Aloud').submenu), ['Read from This Page', 'Read Page'])
+  streamsBefore = await streamCount()
+  menuItem(pdfMenu, 'Read Aloud › Read from This Page').click()
+  const fromPage = await waitFor(async () => { const value = await state(); return (value.status === 'playing' || value.status === 'error') && value }, 'Read from This Page to start', smoke.waitMs * 2)
+  assert.equal(fromPage.status, 'playing', `Read from This Page started (${fromPage.error})`)
+  assert.equal(fromPage.index, PDF_SENTENCES.indexOf('Second page begins here.'), 'starts at the first sentence of page 2')
+  if (!PHONON) {
+    const spoken = await waitFor(async () => { const texts = await spokenSince(streamsBefore); return texts.length >= 1 && texts }, 'page 2 to be spoken')
+    assert.equal(spoken[0], 'Second page begins here.')
+  }
+  await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
+  await waitFor(async () => (await state()).status === 'idle', 'stop the PDF reading')
+
+  await openPdf('/scanned.pdf')
+  assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("readAloud.page")'), true)
+  const scanned = await waitFor(async () => { const value = await state(); return value.status === 'error' && value }, 'the no-text error for a scanned PDF', smoke.waitMs * 2)
+  assert.equal(scanned.error, 'This PDF has no readable text (it may be scanned images).')
+  await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
+  await waitFor(async () => (await state()).status === 'idle', 'dismissing the scanned PDF error')
 
   smoke.step('shortcut in the app menu')
   const appMenuItems = (menu) => menu.items.flatMap((item) => [item, ...(item.submenu ? appMenuItems(item.submenu) : [])])
