@@ -281,3 +281,21 @@ describe('partial params (synthetic context-menu events)', () => {
     expect(normalizeContextMenuParams(full)).toEqual(full)
   })
 })
+
+
+describe('translation actions', () => {
+  test('offers selection and page translation with the remembered target', () => {
+    const translatePage = mock(() => undefined)
+    const translateText = mock(() => undefined)
+    const items = buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/article', selectionText: 'Bonjour' }), { ...PAGE, translationTarget: 'fr' }, { ...actions(), translatePage, translateText })
+    click(find(items, 'Translate Selection to French (opens Google Translate)'))
+    click(find(items, 'Page › Translate Page to French (opens Google Translate)'))
+    expect(translateText).toHaveBeenCalledWith('Bonjour', 'fr')
+    expect(translatePage).toHaveBeenCalledWith('fr')
+  })
+  test('keeps local pages and oversized selections out of the provider', () => {
+    const items = buildBrowserContextMenuTemplate(params({ pageURL: 'http://127.0.0.1/private', selectionText: 'x'.repeat(5001) }), { ...PAGE, translationTarget: 'fr' }, { ...actions(), translatePage: mock(() => undefined), translateText: mock(() => undefined) })
+    expect(allLabels(items).some((label) => label.includes('Translate'))).toBe(false)
+    expect(allLabels(items).some((label) => label.startsWith('Search '))).toBe(true)
+  })
+})

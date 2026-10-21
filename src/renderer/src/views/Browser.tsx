@@ -17,6 +17,7 @@ import type {
   TabSleepMinutes
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
+import { buildPageTranslationUrl, DEFAULT_TRANSLATION_LANGUAGE, TRANSLATION_LANGUAGES } from '../../../shared/translation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
 import { omniboxSuggestions } from '../../../shared/autocomplete'
 import { arrowSuggestion, escapeOmnibox, highlightMatches, keywordSuggestionText, omniboxQuery, suggestionUrlParts, type OmniboxPreview } from '../../../shared/omnibox-fill'
@@ -483,6 +484,13 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [searchEngineLoaded, setSearchEngineLoaded] = useState(false)
   const [downloadsPopupOpen, setDownloadsPopupOpen] = useState(false)
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
+  const [translationTarget, setTranslationTarget] = useState<string>(DEFAULT_TRANSLATION_LANGUAGE)
+  const [translationLoaded, setTranslationLoaded] = useState(false)
+  const [translationText, setTranslationText] = useState('')
+  const [translationBusy, setTranslationBusy] = useState(false)
+  const [translationMessage, setTranslationMessage] = useState('')
+  const translationLabel = TRANSLATION_LANGUAGES.find((language) => language.code === translationTarget)?.label ?? 'English'
+  const canTranslatePage = translationLoaded && buildPageTranslationUrl(browser.url, translationTarget) !== null
   /** The site menu's certificate viewer: null = menu, 'loading' / info = viewer open. */
   const [certificateView, setCertificateView] = useState<SiteCertificateInfo | 'loading' | 'missing' | null>(null)
   const [extensionsMenuOpen, setExtensionsMenuOpen] = useState(false)
@@ -1242,6 +1250,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+    const unsubscribe = window.api.browser.translation.onTargetChange(setTranslationTarget)
+    void window.api.browser.translation.getTarget().then((target) => {
+      if (!cancelled) { setTranslationTarget(target); setTranslationLoaded(true) }
+    }).catch(() => { if (!cancelled) setTranslationMessage('Translation preferences could not be loaded. Reopen the app and try again.') })
+    return () => { cancelled = true; unsubscribe() }
+  }, [])
+
+  useEffect(() => {
     if (surface === 'content' && searchEngineLoaded) void window.api.browser.setSearchEngine(searchEngine)
   }, [searchEngine, searchEngineLoaded, surface])
 
@@ -1462,6 +1479,31 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     }
   }
 
+  async function saveTranslationTarget(target: string): Promise<void> {
+    setTranslationBusy(true)
+    setTranslationMessage('')
+    try { setTranslationTarget(await window.api.browser.translation.setTarget(target)) }
+    catch { setTranslationMessage('The translation language could not be saved. Please try again.') }
+    finally { setTranslationBusy(false) }
+  }
+  async function openTranslation(kind: 'page' | 'text'): Promise<void> {
+    setTranslationBusy(true)
+    setTranslationMessage('')
+    try {
+      const opened = kind === 'page'
+        ? await window.api.browser.translation.page(translationTarget)
+        : await window.api.browser.translation.text(translationText, translationTarget)
+      if (!opened) throw new Error(kind === 'page'
+        ? 'Only public HTTP or HTTPS pages can be translated. For private pages, select or paste the text instead.'
+        : 'Enter between 1 and 5,000 characters to translate.')
+      setNavigationError('')
+      setSiteActionsOpen(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Translation could not be opened. Please try again.'
+      setTranslationMessage(message)
+      if (kind === 'page') setNavigationError(message)
+    } finally { setTranslationBusy(false) }
+  }
   function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
     if (event.key === 'Escape') {
       const escape = escapeOmnibox(omniboxPreview)
@@ -1841,6 +1883,10 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       setSiteActionsOpen(false)
                       selectSettingsSection('site', activeOrigin)
                     }} />}
+                    <button type="button" role="menuitem" disabled={!canTranslatePage || translationBusy} title="Sends this page’s URL to Google Translate in a new tab" onClick={() => void openTranslation('page')}>
+                      <span className="site-actions-menu-icon" aria-hidden="true">文</span>
+                      <span>Translate page to {translationLabel}<small className="translation-menu-note">Opens Google Translate in a new tab</small></span>
+                    </button>
                     <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
                       setSiteActionsOpen(false)
                       void openPictureInPicture()
@@ -2315,6 +2361,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
+                <div className="translation-settings-section">
+                <SettingsGroup title="Translation">
+                  <SettingsRow label="Target language" hint="Source language is detected automatically. Your choice is remembered.">
+                    <select className="settings-select" value={translationTarget} disabled={!translationLoaded || translationBusy} onChange={(event) => void saveTranslationTarget(event.target.value)} aria-label="Translation language">
+                      {TRANSLATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+                    </select>
+                  </SettingsRow>
+                  <label className="translation-text-field">Text to translate
+                    <textarea value={translationText} maxLength={5000} aria-describedby="translation-privacy translation-character-count" onChange={(event) => { setTranslationText(event.target.value); setTranslationMessage('') }} />
+                  </label>
+                  <div className="translation-text-actions">
+                    <small id="translation-character-count">{translationText.length.toLocaleString()} / 5,000</small>
+                    <button className="settings-action primary" type="button" disabled={!translationLoaded || translationBusy || !translationText.trim()} onClick={() => void openTranslation('text')}>{translationBusy ? 'Working…' : 'Translate text'}</button>
+                  </div>
+                  <p className="settings-help" id="translation-privacy">Only when you choose Translate, the page URL or text is sent to Google Translate and opened in a new tab; the original stays open. Don’t submit sensitive text. Translation requires internet; private or signed-in pages may not work.</p>
+                  {translationMessage && <p className="settings-message is-error" role="status">{translationMessage}</p>}
+                </SettingsGroup>
+                </div>
                 <SearchKeywordsSettings />
                 <CommandPaletteSettings />
                 <DefaultBrowserSettings />

@@ -27,6 +27,8 @@ import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, getBookmarksSnapshot, getFavouriteSites, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
+import { buildPageTranslationUrl, buildTextTranslationUrl } from '../shared/translation'
+import { getBrowserTranslationTarget } from './browser-persistence'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
 import { trackTabMedia, tabPlayedMedia } from './tab-media'
@@ -1068,6 +1070,9 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     offsetX: origin.x,
     offsetY: origin.y,
     searchEngine: selectedSearchEngine,
+    translationTarget: getBrowserTranslationTarget(),
+    translatePage: (target) => { translateBrowserPage(target, w) },
+    translateText: (text, target) => { translateBrowserText(text, target, w) },
     openInNewTab: (url) => {
       const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
       if (id) persistOpenTabs()
@@ -3030,6 +3035,15 @@ export function openExternalBrowserTab(target: string): string | null {
   return id
 }
 
+export function translateBrowserPage(target: string, w = currentWindowState()): boolean {
+  const tab = activeTabOf(w)
+  const url = tab ? buildPageTranslationUrl(currentUrl(tab), target) : null
+  return url ? newBrowserTab(url, undefined, w) !== null : false
+}
+export function translateBrowserText(text: string, target: string, w = currentWindowState()): boolean {
+  const url = buildTextTranslationUrl(text, target)
+  return url ? newBrowserTab(url, undefined, w) !== null : false
+}
 export function newBrowserTab(input?: string, engine?: SearchEngineId, w = currentWindowState()): string | null {
   const id = createTab(input, engine ?? selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
   if (id && w) {

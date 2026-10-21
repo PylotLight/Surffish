@@ -3,6 +3,7 @@ import { cleanLinkUrl } from '../shared/clean-link'
 import { SEARCH_ENGINES, resolveNavigationTarget } from '../shared/navigation'
 import type { SearchEngineId } from '../shared/types'
 import { READ_ALOUD_SHORTCUT } from '../shared/read-aloud-gate'
+import { buildPageTranslationUrl, buildTextTranslationUrl, TRANSLATION_LANGUAGES } from '../shared/translation'
 
 /**
  * Pure builder for the page right-click menu: takes the context-menu params and a set of
@@ -34,6 +35,7 @@ export interface ContextMenuTemplateOptions {
   canOpenInGlance?: boolean
   canGoBack: boolean
   canGoForward: boolean
+  translationTarget?: string
 }
 
 export interface ContextMenuActions {
@@ -66,6 +68,8 @@ export interface ContextMenuActions {
   watchPage?(mode: 'page' | 'pick'): void
   readAloud?(target: ReadAloudMenuTarget, selection?: string): void
   addToReadingList?(target: 'page' | { url: string; title?: string }): void
+  translatePage?(target: string): void
+  translateText?(text: string, target: string): void
 }
 
 export type ReadAloudMenuState = 'idle' | 'playing' | 'paused'
@@ -205,6 +209,11 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
     )
   } else if (params.selectionText.trim()) {
     items.push({ label: 'Copy', enabled: flags.canCopy, click: () => actions.copy() })
+    const translationTarget = options.translationTarget
+    if (translationTarget && actions.translateText && buildTextTranslationUrl(params.selectionText, translationTarget)) {
+      const language = TRANSLATION_LANGUAGES.find(({ code }) => code === translationTarget)?.label ?? translationTarget
+      items.push({ label: `Translate Selection to ${language} (opens Google Translate)`, click: () => actions.translateText!(params.selectionText, translationTarget) })
+    }
     if (options.pageActions) {
       const engineLabel = SEARCH_ENGINES.find((engine) => engine.id === options.searchEngine)?.label ?? 'Search'
       const query = params.selectionText.trim()
@@ -284,6 +293,7 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
     // The page's own items. A plain right-click shows them; on a link, an image or a selection they
     // fold into one "Page" submenu so the menu stays about what was clicked.
     const page: MenuItemConstructorOptions[] = [
+      ...(options.translationTarget && actions.translatePage && pageUrl && buildPageTranslationUrl(pageUrl, options.translationTarget) ? [{ label: `Translate Page to ${TRANSLATION_LANGUAGES.find(({ code }) => code === options.translationTarget)?.label ?? options.translationTarget} (opens Google Translate)`, click: () => actions.translatePage!(options.translationTarget!) }] : []),
       { label: 'Back', enabled: options.canGoBack, click: () => actions.goBack() },
       { label: 'Forward', enabled: options.canGoForward, click: () => actions.goForward() },
       { label: 'Reload', click: () => actions.reload() },

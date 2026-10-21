@@ -78,6 +78,17 @@ const api = {
   browser: {
     quit: (): Promise<void> => ipcRenderer.invoke('app:quit'),
     windowControl: (action: 'close' | 'minimize' | 'toggle-zoom'): Promise<boolean> => ipcRenderer.invoke('app:window-control', action),
+    translation: {
+      getTarget: (): Promise<string> => ipcRenderer.invoke('browser:translation:get-target'),
+      setTarget: (target: string): Promise<string> => ipcRenderer.invoke('browser:translation:set-target', target),
+      page: (target?: string): Promise<boolean> => ipcRenderer.invoke('browser:translation:page', target),
+      text: (text: string, target?: string): Promise<boolean> => ipcRenderer.invoke('browser:translation:text', text, target),
+      onTargetChange: (callback: (target: string) => void): (() => void) => {
+        const listener = (_event: Electron.IpcRendererEvent, target: string): void => callback(target)
+        ipcRenderer.on('browser:translation-target-changed', listener)
+        return () => ipcRenderer.removeListener('browser:translation-target-changed', listener)
+      }
+    },
     state: (): Promise<BrowserState> => ipcRenderer.invoke('browser:state'),
     preferences: {
       get: (): Promise<BrowserPreferencesSnapshot> => ipcRenderer.invoke('browser:preferences:get'),
