@@ -192,20 +192,25 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers' || mode === 'feeds'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers' || mode === 'feeds' || mode === 'readaloud'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers' | 'feeds'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers' | 'feeds' | 'readaloud'>
 
 /** Settings → Integrations has sub-areas; each is its own sidebar mode so links can land on one directly. */
-const INTEGRATIONS_TABS: ReadonlyArray<{ mode: Extract<SettingsSectionMode, 'integrations' | 'feeds'>; label: string }> = [
+const INTEGRATIONS_TABS: ReadonlyArray<{ mode: Extract<SettingsSectionMode, 'integrations' | 'feeds' | 'readaloud'>; label: string }> = [
   { mode: 'integrations', label: 'Extensions' },
-  { mode: 'feeds', label: 'Feeds' }
+  { mode: 'feeds', label: 'Feeds' },
+  { mode: 'readaloud', label: 'Read Aloud' }
 ]
 
-/** The top-level settings nav entry a mode belongs to (Feeds lives under Integrations). */
+function isIntegrationsMode(mode: SidebarMode): boolean {
+  return mode === 'integrations' || mode === 'feeds' || mode === 'readaloud'
+}
+
+/** The top-level settings nav entry a mode belongs to (Feeds and Read Aloud live under Integrations). */
 function settingsNavMode(mode: SidebarMode): SidebarMode {
-  return mode === 'feeds' ? 'integrations' : mode
+  return isIntegrationsMode(mode) ? 'integrations' : mode
 }
 
 const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: string }> = [
@@ -2136,7 +2141,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           )}
           {surface !== 'sidebar' && brandEgg.open && <BrandEasterEgg onClose={brandEgg.close} />}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'integrations' ? 'Settings content' : pageMode === 'downloads' ? 'Downloads content' : pageMode === 'bookmarks' ? 'Bookmark manager' : pageMode === 'network' ? 'Network inspector' : pageMode === 'diagnostics' ? 'Diagnostics' : pageMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={pageMode === 'settings' || pageMode === 'newtab' || isIntegrationsMode(pageMode) ? 'Settings content' : pageMode === 'downloads' ? 'Downloads content' : pageMode === 'bookmarks' ? 'Bookmark manager' : pageMode === 'network' ? 'Network inspector' : pageMode === 'diagnostics' ? 'Diagnostics' : pageMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === pageMode) && pageMode !== 'downloads' && pageMode !== 'bookmarks' && (
             <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
@@ -2290,7 +2295,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
               matches={settingsSearch.matches}
               mode={pageMode as SettingsSectionMode}
               available={(mode) => (mode !== 'network' || networkToolEnabled) && (mode !== 'watchers' || watchersEnabled !== false)}
-              labelFor={(mode) => mode === 'feeds' ? 'Integrations → Feeds' : SETTINGS_SECTIONS.find((section) => section.mode === mode)?.label ?? mode}
+              labelFor={(mode) => mode === 'feeds' ? 'Integrations → Feeds' : mode === 'readaloud' ? 'Integrations → Read Aloud' : SETTINGS_SECTIONS.find((section) => section.mode === mode)?.label ?? mode}
               onOpen={(mode) => selectSettingsSection(mode as SettingsSectionMode)}
               onClear={() => setSettingsQuery('')}
             />
@@ -2301,14 +2306,14 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {pageMode === 'privacy' && <PrivacySettings />}
           {pageMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
           {pageMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
-          {(pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'integrations' || pageMode === 'feeds') && (
+          {(pageMode === 'settings' || pageMode === 'newtab' || isIntegrationsMode(pageMode)) && (
             <div className={`settings-view settings-view-${pageMode}`}>
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>{pageMode === 'integrations' || pageMode === 'feeds' ? 'Integrations' : pageMode === 'newtab' ? 'New Tab' : 'General'}</h1>
-                  <p>{pageMode === 'integrations' || pageMode === 'feeds' ? 'Extensions and feeds.' : pageMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
+                  <h1>{isIntegrationsMode(pageMode) ? 'Integrations' : pageMode === 'newtab' ? 'New Tab' : 'General'}</h1>
+                  <p>{isIntegrationsMode(pageMode) ? 'Extensions, feeds and Read Aloud.' : pageMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
-                {(pageMode === 'integrations' || pageMode === 'feeds') && (
+                {isIntegrationsMode(pageMode) && (
                   <div className="settings-segmented integrations-tabs" role="tablist" aria-label="Integrations">
                     {INTEGRATIONS_TABS.map((tab) => (
                       <button key={tab.mode} type="button" role="tab" aria-selected={pageMode === tab.mode} className={pageMode === tab.mode ? 'is-selected' : ''} onClick={() => selectSettingsSection(tab.mode)}>
@@ -2379,7 +2384,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 <LocalAISettings />
                 <CastSettings />
                 <PageWatchersToggle />
-                <ReadAloudSettings />
                 <SpellcheckSettings />
                 </SettingsCategory>
                 <SettingsCategory id="connection" title="Connection">
@@ -2457,6 +2461,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </>}
                 {/* Lazy chunk: Integrations opening on Extensions never loads the Feeds view. */}
                 {pageMode === 'feeds' && <FeedsSettings />}
+                {/* Own lazy chunk: the model download and voice tester load only on this tab. */}
+                {pageMode === 'readaloud' && <ReadAloudSettings />}
               </div>
             </div>
           )}

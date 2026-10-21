@@ -47,11 +47,14 @@ test('builds addresses that parse back to the same target', () => {
     { section: 'privacy' as const },
     { section: 'site' as const, host: 'https://example.com' },
     { section: 'settings' as const, focus: 'mini-window' },
-    { section: 'feeds' as const }
+    { section: 'feeds' as const },
+    { section: 'readaloud' as const }
   ]) {
     assert.deepEqual(parseSettingsUrl(settingsUrl(target)), target)
   }
   assert.equal(settingsUrl(), SURFFISH_SETTINGS_URL)
+  assert.equal(settingsUrl({ section: 'readaloud' }), 'surffish://settings?section=read-aloud')
+  assert.deepEqual(parseSettingsUrl('surffish://settings#read-aloud'), { section: 'readaloud' })
   assert.equal(settingsUrl({ section: 'site', host: 'https://example.com' }), 'surffish://settings?section=sites&host=https%3A%2F%2Fexample.com')
 })
 

@@ -6,7 +6,7 @@
  * the settings-search smoke checks every label below still exists on its page.
  */
 
-export type SettingsSearchMode = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+export type SettingsSearchMode = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
 
 /** Words people type for a setting that its label doesn't use. Keys and values are normalized. */
 const SYNONYMS: Readonly<Record<string, readonly string[]>> = {
@@ -162,6 +162,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
   ]),
   ...entries('integrations', [['Bramble password manager', 'passwords'], ['Chrome Web Store extensions', 'extension install']]),
   ...entries('feeds', [['Add a feed', 'rss atom json'], ['Following']]),
+  ...entries('readaloud', [['Read Aloud (experimental)', 'text to speech tts listen voice phonon narrate model download voice tester speed sample realtime']]),
   ...entries('privacy', [['Clear browsing data', 'history cache'], ['HTTPS-only mode', 'secure'], ['Tab volume', 'audio'], ['Sites with cookies', 'site data']]),
   ...entries('watchers', [['Add a page', 'watch changes'], ['Watching']]),
   ...entries('site', [['Block ads and trackers', 'adblock'], ['Open pop-ups in tabs', 'popup'], ['Camera and microphone', 'permissions'], ['Location', 'permissions'], ['Notifications', 'permissions']]),
@@ -178,7 +179,8 @@ export interface SettingsElsewhereHit {
 export function settingsMatchesElsewhere(query: string, current: SettingsSearchMode, index: readonly SettingsIndexEntry[] = SETTINGS_SEARCH_INDEX): SettingsElsewhereHit[] {
   const terms = parseSettingsQuery(query)
   if (terms.length === 0) return []
-  const sameNavEntry = (mode: SettingsSearchMode): boolean => mode === current || ((current === 'integrations' || current === 'feeds') && (mode === 'integrations' || mode === 'feeds'))
+  const integrations = (mode: SettingsSearchMode): boolean => mode === 'integrations' || mode === 'feeds' || mode === 'readaloud'
+  const sameNavEntry = (mode: SettingsSearchMode): boolean => mode === current || (integrations(current) && integrations(mode))
   const byMode = new Map<SettingsSearchMode, SettingsElsewhereHit>()
   for (const entry of index) {
     if (sameNavEntry(entry.mode) || !matchesSettingsQuery(`${entry.label} ${entry.keywords ?? ''}`, terms)) continue

@@ -72,6 +72,10 @@ describe('settingsMatchesElsewhere', () => {
     expect(settingsMatchesElsewhere('bramble', 'feeds')).toEqual([])
     expect(settingsMatchesElsewhere('rss', 'integrations')).toEqual([])
   })
+  test('Read Aloud is its own Integrations tab, found from General', () => {
+    expect(settingsMatchesElsewhere('text to speech', 'settings').map((hit) => hit.mode)).toEqual(['readaloud'])
+    expect(settingsMatchesElsewhere('phonon', 'feeds')).toEqual([])
+  })
   test('caps labels at three and sorts by count', () => {
     const hits = settingsMatchesElsewhere('show', 'settings')
     expect(hits[0]).toMatchObject({ mode: 'newtab' })

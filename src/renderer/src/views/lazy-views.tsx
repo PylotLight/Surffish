@@ -29,7 +29,6 @@ export const PageWatchersToggle = deferred(() => settings().then((m) => m.PageWa
 export const GlanceSettings = deferred(() => settings().then((m) => m.GlanceSettings))
 export const MiniWindowSettings = deferred(() => settings().then((m) => m.MiniWindowSettings))
 export const LocalAISettings = deferred(() => settings().then((m) => m.LocalAISettings))
-export const ReadAloudSettings = deferred(() => settings().then((m) => m.ReadAloudSettings))
 export const CastSettings = deferred(() => settings().then((m) => m.CastSettings))
 export const FeedsSettings = deferred(() => settings().then((m) => m.FeedsSettings))
 export const BrambleQuickUnlockSettings = deferred(() => settings().then((m) => m.BrambleQuickUnlockSettings))
@@ -42,6 +41,9 @@ export const SpacesSettings = deferred(() => settings().then((m) => m.SpacesSett
 export const ExtensionsSettings = deferred(() => settings().then((m) => m.ExtensionsSettings))
 export const BookmarkImportPanel = deferred(() => settings().then((m) => m.BookmarkImportPanel))
 export const SitesSettings = deferred(() => settings().then((m) => m.SitesSettings))
+
+// Settings → Integrations → Read Aloud: its own chunk (download progress, voice tester, voice list).
+export const ReadAloudSettings = deferred(() => import('./settings/ReadAloudSettings').then((m) => m.ReadAloudSettings))
 
 export const DownloadsPanel = deferred(() => import('./DownloadsPanel').then((m) => m.default))
 export const NetworkView = deferred(() => import('./NetworkView').then((m) => m.default))
