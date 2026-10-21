@@ -61,6 +61,14 @@ export function escapeOmnibox(preview: OmniboxPreview | null): { kind: 'restore'
   return preview ? { kind: 'restore', text: preview.typed } : { kind: 'revert' }
 }
 
+/** The keyword row's text ("yt cats" / "cats !yt"): what Enter does, and the chip naming the keyword. Both omniboxes (toolbar, mini window) show it. */
+export function keywordSuggestionText(match: { engine: { name: string; keyword: string }; query: string; via: 'keyword' | 'bang' }): { label: string; chip: string } {
+  return {
+    label: match.query ? `Search ${match.engine.name} for “${match.query}”` : `Open ${match.engine.name}`,
+    chip: match.via === 'bang' ? `!${match.engine.keyword}` : match.engine.keyword
+  }
+}
+
 export type UrlPartRole = 'scheme' | 'www' | 'host' | 'path'
 
 export interface UrlPart {

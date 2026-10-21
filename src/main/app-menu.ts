@@ -15,7 +15,7 @@ import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
 import { getActiveTabWebContents, openSettingsTab, popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
-import { focusMiniWindow, getMiniWindowSettings, listMiniWindows, returnAllMiniWindows, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow } from './mini-window-entry'
+import { focusMiniWindow, focusMiniWindowAddress, focusedMiniWindow, getMiniWindowSettings, openMiniWindowNewTab, listMiniWindows, returnAllMiniWindows, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
 // focus (e.g. right after a tab view is torn down on the New Tab page). Own the menu so Cmd+W is
@@ -83,11 +83,12 @@ export function installAppMenu(): void {
     {
       label: 'File',
       submenu: [
-        { label: 'New Tab', accelerator: APP_SHORTCUTS.newTab, click: () => { newBrowserTab() } },
+        // With a mini window focused, New Tab and Open Location act on it (its own New Tab / address field).
+        { label: 'New Tab', accelerator: APP_SHORTCUTS.newTab, click: () => { const mini = focusedMiniWindow(); if (!mini || !openMiniWindowNewTab(mini)) newBrowserTab() } },
         { label: 'New Private Tab', accelerator: APP_SHORTCUTS.newPrivateTab, click: () => { newPrivateBrowserTab() } },
         ...newWindowMenuItems(),
         { label: 'Reopen Closed Tab', accelerator: APP_SHORTCUTS.reopenClosedTab, click: () => { reopenClosedBrowserTab() } },
-        { label: 'Open Location…', accelerator: APP_SHORTCUTS.openLocation, click: () => { sendFocusAddressToVisibleRenderer() } },
+        { label: 'Open Location…', accelerator: APP_SHORTCUTS.openLocation, click: () => { const mini = focusedMiniWindow(); if (!mini || !focusMiniWindowAddress(mini)) sendFocusAddressToVisibleRenderer() } },
         // F6 (and Alt+D off macOS) also focus the address bar; hidden so the menu shows one entry.
         { label: 'Focus Address Bar', accelerator: 'F6', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } },
         ...(isMac ? [] : [{ label: 'Focus Address Bar', accelerator: 'Alt+D', visible: false, acceleratorWorksWhenHidden: true, click: () => { sendFocusAddressToVisibleRenderer() } } satisfies MenuItemConstructorOptions]),

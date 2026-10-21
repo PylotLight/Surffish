@@ -55,6 +55,24 @@ import { motion, placeWindow } from './mini-window-motion'
 import { createVelocityTracker, planGlide, releaseVelocity, runGlide, type ThrowVelocity, type VelocityTracker } from '../shared/mini-window-throw'
 import { getMiniWindowHost, getMiniWindowSettings, openMiniWindowSettings, setMiniWindowGrouping, updateMiniWindowSettings, type MiniWindowHost, type MiniWindowTab, type MiniWindowTabAudio } from './mini-window-entry'
 import { MINI_WINDOW_PAGE_HTML } from './mini-window-page'
+import { MINI_WINDOW_NEW_TAB_HTML } from './mini-window-newtab-page'
+import {
+  MINI_OMNIBOX_LIMIT,
+  MINI_OMNIBOX_PADDING,
+  MINI_OMNIBOX_ROW_HEIGHT,
+  arrowMiniOmnibox,
+  emptyMiniOmnibox,
+  escapeMiniOmnibox,
+  miniAddressAutoOpens,
+  miniNewTabTarget,
+  miniOmniboxDropdownHeight,
+  miniOmniboxLimit,
+  miniOmniboxRowUrl,
+  miniOmniboxView,
+  typedMiniOmnibox,
+  type MiniOmnibox,
+  type MiniOmniboxSources
+} from '../shared/mini-window-omnibox'
 import { changedHeaderFields, createHeaderStateGate, type HeaderStateGate } from '../shared/mini-window-header-sync'
 import { miniReorderTarget, miniStepTarget, miniStripInsertIndex, resolveMiniChipDrop } from '../shared/mini-window-tab-drag'
 import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
@@ -173,6 +191,19 @@ interface Mini {
    * `menuClosedAt`: its ⋯ menu is up / went away then (the Esc that closes the menu never also hides the popout).
    */
   menuBar: { popout: MenuBarPopout; pinned: boolean; joinedAt: number; menuOpen: boolean; menuClosedAt: number } | null
+  /**
+   * The address field (shared/mini-window-omnibox.ts), while it shows: for which tab, opened by itself
+   * on a New Tab (`auto`) or by ⌘L, what it holds, what it suggests from (read when it opened), how
+   * tall its dropdown is, and the last focus request sent to the header page. While it shows, the
+   * header stays up and is never released.
+   */
+  address: { tabId: string; auto: boolean; model: MiniOmnibox; sources: MiniOmniboxSources; dropdown: number; blurred: boolean; focus: number; select: boolean } | null
+  /** The New Tab whose field Esc put away (it doesn't open by itself again for that tab). */
+  addressDismissed: string | null
+  /** The New Tab page view (mini-window-newtab-page.ts), only while a New Tab is the active tab. */
+  newTab: { view: WebContentsView; loaded: boolean; key: string } | null
+  /** Where the page goes in the window (layout), for the New Tab page view. */
+  pageRect: MiniRect
 }
 
 const IS_MAC = process.platform === 'darwin'
@@ -373,6 +404,10 @@ function fromHeader(event: IpcMainEvent): Mini | null {
   return liveMinis().find((m) => m.header?.webContents === event.sender) ?? null
 }
 
+function fromNewTab(event: IpcMainEvent): Mini | null {
+  return liveMinis().find((m) => m.newTab?.view.webContents === event.sender) ?? null
+}
+
 // ---------------------------------------------------------------------------
 // Geometry: one remembered rect per slot per display (keyed by its work area).
 
@@ -526,8 +561,10 @@ function mountHeader(m: Mini, where: 'window' | 'panel'): void {
 function positionPanel(m: Mini): void {
   if (!floats(m.plan) || !m.revealed || m.mount !== 'panel' || !m.window.isVisible() || m.dock.isTucked()) return hidePanel(m)
   const panel = ensurePanel(m)
-  // In a frame (a slide, a drag): commits in the same tick as the window.
-  placeWindow(panel, m.plan.panel)
+  // In a frame (a slide, a drag): commits in the same tick as the window. The address field's dropdown
+  // hangs below the header: the panel grows down (over the window's top when it floats above).
+  const dropdown = m.address?.dropdown ?? 0
+  placeWindow(panel, dropdown > 0 ? { ...m.plan.panel, height: m.plan.panel.height + dropdown } : m.plan.panel)
   if (!panel.isVisible()) {
     panel.showInactive()
     if (IS_MAC) {
@@ -560,14 +597,18 @@ function layout(m: Mini): void {
   // Revealed while a released header is still loading again: the page stays put until it is there.
   const page = miniPageBounds(m.plan.kind, m.revealed && m.headerLoaded, m.size, tall)
   m.pageTop = page.y
+  m.pageRect = page
   host().setPageBounds(m.window, page)
+  m.newTab?.view.setBounds(page)
+  // The address field's dropdown hangs under the header, over the page.
+  const dropdown = m.address?.dropdown ?? 0
   if (floats(m.plan)) {
     mountHeader(m, 'panel')
-    m.header?.setBounds({ x: 0, y: 0, width, height: tall })
+    m.header?.setBounds({ x: 0, y: 0, width, height: tall + dropdown })
     positionPanel(m)
   } else {
     mountHeader(m, 'window')
-    m.header?.setBounds({ x: 0, y: 0, width, height: m.revealed || m.plan.kind === 'strip' ? tall : 0 })
+    m.header?.setBounds({ x: 0, y: 0, width, height: m.revealed || m.plan.kind === 'strip' ? tall + dropdown : 0 })
     hidePanel(m)
   }
   rewirePage(m)
@@ -602,6 +643,8 @@ function setRevealed(m: Mini, revealed: boolean): void {
     stopPolling(m)
     stopHeaderDrag(m)
     m.hovered = false
+    // Hidden (tucked, Show/Hide, the window hidden): the field goes with the header.
+    if (m.address) closeAddress(m, false)
     if (m.plan.kind === 'push') m.revealBlockedUntil = Date.now() + PUSH_REVEAL_COOLDOWN_MS
     scheduleHeaderRelease(m)
   }
@@ -610,7 +653,7 @@ function setRevealed(m: Mini, revealed: boolean): void {
 
 /** Nothing needs the header right now: hidden, not hovered or dragged, loaded, not the menu bar popout's strip. */
 function headerIdle(m: Mini): boolean {
-  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || m.tabDrag || m.dropTarget || !m.headerLoaded || !m.header) return false
+  if (headerIdleReleaseMs() <= 0 || m.closed || m.menuBar || m.revealed || m.hovered || m.headerDrag || m.tabDrag || m.dropTarget || m.address || !m.headerLoaded || !m.header) return false
   // Still has the keyboard (clicked, then the pointer left): keep it so the keys don't go nowhere.
   return !(live(m.header.webContents) && m.header.webContents.isFocused())
 }
@@ -672,7 +715,8 @@ function ensureHeader(m: Mini): Promise<void> {
   // Keys pressed while the header has focus still run browser shortcuts for the mini tab.
   view.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(window, input)) event.preventDefault()
-    else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
+    // Esc in the address field is the field's (it closes it); the popout hides on the next one.
+    else if (m.menuBar && isEscape(input) && !m.address && !popoutMenuJustClosed(m)) hidePopout(m)
   })
   m.headerLoading = header.ready.then(() => {
     if (m.closed || window.isDestroyed() || m.header !== view) return
@@ -682,16 +726,18 @@ function ensureHeader(m: Mini): Promise<void> {
     if (miniHeaderDebugEnabled()) view.webContents.send('mini-window:debug', true)
     layout(m)
     refreshHeaderOf(m)
+    // Made again (or reloaded) while the field shows: it gets it back, focus and all.
+    if (m.address) pushAddress(m, { setText: true, focus: m.window.isFocused() || (m.panel?.isFocused() ?? false) })
     scheduleHeaderRelease(m)
   })
   return m.headerLoading
 }
 
 function scheduleHide(m: Mini): void {
-  if (!m.revealed || m.hovered || m.hideTimer || m.headerDrag || m.tabDrag || m.dropTarget) return
+  if (!m.revealed || m.hovered || m.hideTimer || m.headerDrag || m.tabDrag || m.dropTarget || m.address) return
   m.hideTimer = setTimeout(() => {
     m.hideTimer = null
-    if (!m.hovered && !m.headerDrag && !m.tabDrag && !m.dropTarget) setRevealed(m, false)
+    if (!m.hovered && !m.headerDrag && !m.tabDrag && !m.dropTarget && !m.address) setRevealed(m, false)
   }, HIDE_DELAY_MS)
 }
 
@@ -710,7 +756,7 @@ function pollPointer(m: Mini): void {
   const onPanel = Boolean(m.panel && !m.panel.isDestroyed() && m.panel.isVisible() && within(point, m.panel.getBounds()))
   // The pointer position says whether it is on the header (its mouseleave can go missing, e.g. from a never-focused panel).
   m.hovered = m.mount === 'panel' ? onPanel : within(point, bounds) && point.y - bounds.y < headerHeight(m)
-  if (onWindow || onPanel || m.headerDrag || m.tabDrag || m.dropTarget) cancelHide(m)
+  if (onWindow || onPanel || m.headerDrag || m.tabDrag || m.dropTarget || m.address) cancelHide(m)
   else scheduleHide(m)
 }
 
@@ -879,6 +925,26 @@ function unwirePage(m: Mini): void {
   m.page = null
 }
 
+/** The pointer over the page (or the New Tab page): near the top it reveals the header. */
+function pageMouse(m: Mini, input: Electron.MouseInputEvent): void {
+  // A press on the page while it glides: caught, it stops there.
+  if (input.type === 'mouseDown' && m.glide) stopThrow(m)
+  if (input.type === 'mouseMove' || input.type === 'mouseEnter') {
+    // The pointer is over the window: a released header loads again before it is asked for.
+    if (!m.header) void ensureHeader(m)
+    // In window coordinates ('push' moves the page under the header).
+    if (inRevealZone(m, input.y + m.pageTop)) {
+      if (m.revealed) cancelHide(m)
+      else if (Date.now() >= m.revealBlockedUntil) setRevealed(m, true)
+    } else {
+      scheduleHide(m)
+    }
+  } else if (input.type === 'mouseLeave') {
+    scheduleHide(m)
+    if (!m.revealed) scheduleHeaderRelease(m)
+  }
+}
+
 /** Listen to the tab's page: the pointer near the top reveals the header; a crash reloads it. */
 function rewirePage(m: Mini): void {
   const contents = host().pageContents(m.window)
@@ -886,24 +952,7 @@ function rewirePage(m: Mini): void {
   unwirePage(m)
   if (!contents) return
   m.page = contents
-  onPage(m, contents, 'before-mouse-event', (_event: Electron.Event, input: Electron.MouseInputEvent) => {
-    // A press on the page while it glides: caught, it stops there.
-    if (input.type === 'mouseDown' && m.glide) stopThrow(m)
-    if (input.type === 'mouseMove' || input.type === 'mouseEnter') {
-      // The pointer is over the window: a released header loads again before it is asked for.
-      if (!m.header) void ensureHeader(m)
-      // In window coordinates ('push' moves the page under the header).
-      if (inRevealZone(m, input.y + m.pageTop)) {
-        if (m.revealed) cancelHide(m)
-        else if (Date.now() >= m.revealBlockedUntil) setRevealed(m, true)
-      } else {
-        scheduleHide(m)
-      }
-    } else if (input.type === 'mouseLeave') {
-      scheduleHide(m)
-      if (!m.revealed) scheduleHeaderRelease(m)
-    }
-  })
+  onPage(m, contents, 'before-mouse-event', (_event: Electron.Event, input: Electron.MouseInputEvent) => pageMouse(m, input))
   // SURFFISH_DEBUG_HEADER: what the page does while the header sits there (cheap no-ops while off).
   const pageDebug = (event: string, detail: () => unknown): void => { if (miniHeaderDebugEnabled()) headerDebug('page', `${miniLabel(m)} ${event} ${String(detail() ?? '')}`) }
   onPage(m, contents, 'did-start-loading', () => pageDebug('did-start-loading', () => `isLoading=${contents.isLoading()} mainFrame=${contents.isLoadingMainFrame()}`))
@@ -930,7 +979,7 @@ function rewirePage(m: Mini): void {
   })
 }
 
-function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { tabId: string; crashed: boolean; floating: boolean; menuBar: { available: boolean; inMenuBar: boolean; pinned: boolean }; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean } & MiniWindowTabAudio> } | null {
+function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { tabId: string; newTab: boolean; canNewTab: boolean; crashed: boolean; floating: boolean; menuBar: { available: boolean; inMenuBar: boolean; pinned: boolean }; tuck: { arrow: string; label: string } | null; tabs: Array<{ tabId: string; title: string; faviconUrl: string | null; active: boolean } & MiniWindowTabAudio> } | null {
   const info = host().header(m.window)
   if (!info) return null
   const tuckEdge = m.dock.tuckEdge()
@@ -939,7 +988,10 @@ function headerState(m: Mini): MiniWindowHeaderState & MiniWindowTabAudio & { ta
     tabs: tabs.length > 1 ? tabs.map((tab) => ({ tabId: tab.tabId, title: tab.title || miniHeaderUrl(tab.url) || 'Tab', faviconUrl: tab.faviconUrl, active: tab.active, audio: tab.audio, muted: tab.muted, volume: tab.volume })) : [],
     tuck: tuckEdge ? { arrow: dockArrow(tuckEdge, false), label: `Tuck to the ${tuckEdge} edge` } : null,
     title: info.title,
-    url: miniHeaderUrl(info.url),
+    // A New Tab has no address to show (its field shows instead).
+    url: miniAddressAutoOpens(info.url) ? '' : miniHeaderUrl(info.url),
+    newTab: miniAddressAutoOpens(info.url),
+    canNewTab: totalTabs() < MINI_WINDOW_MAX,
     faviconUrl: info.faviconUrl,
     loading: info.loading,
     canGoBack: info.canGoBack,
@@ -999,6 +1051,9 @@ function refreshHeaderOf(m: Mini): void {
   // Nothing the header shows changed (a page's replaceState per keystroke): no push, no repaint.
   // A same-document load blip never shows as loading; a title flipping per keystroke ("typing…")
   // lands at most every MINI_HEADER_TITLE_THROTTLE_MS (shared/mini-window-header-sync.ts).
+  // A New Tab: its page in the page area, and the address field open by itself.
+  syncNewTabView(m, state)
+  syncAddress(m, state)
   const extra = headerExtraKey(m)
   const plan = m.headerGate.plan(state, extra)
   if (plan.recheckMs === null) cancelHeaderPush(m)
@@ -1038,6 +1093,227 @@ function refreshHeaderOf(m: Mini): void {
     syncTray()
     scheduleMenuBarSave()
   }
+}
+
+// ---------------------------------------------------------------------------
+// New Tab and the address field (shared/mini-window-omnibox.ts).
+
+/** The New Tab page in the page area while the active tab is a New Tab; released when it isn't. */
+function syncNewTabView(m: Mini, state: { newTab: boolean; private: boolean }): void {
+  if (!state.newTab || m.closed || m.window.isDestroyed()) return releaseNewTabView(m)
+  if (!m.newTab) {
+    const preload = preloadPath()
+    if (!preload) return
+    const view = new WebContentsView({
+      webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, disableWakeLocks: true }
+    })
+    view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    view.webContents.on('will-navigate', (event) => event.preventDefault())
+    const newTab: NonNullable<Mini['newTab']> = { view, loaded: false, key: '' }
+    m.newTab = newTab
+    // Browser shortcuts (⌘T, ⌘L, ⌘W…) work here like on a page.
+    view.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && (input.control || input.meta) && host().handleShortcut(m.window, input)) event.preventDefault()
+      else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m)) hidePopout(m)
+    })
+    // The pointer near the top reveals the header, as over a page.
+    view.webContents.on('before-mouse-event', (_event, input) => pageMouse(m, input))
+    view.webContents.once('did-finish-load', () => {
+      if (m.newTab !== newTab) return
+      newTab.loaded = true
+      newTab.key = ''
+      sendNewTabState(m)
+    })
+    // Under the header (an overlaid header stays on top of it).
+    m.window.contentView.addChildView(view, 0)
+    view.setBounds(m.pageRect)
+    void view.webContents.loadURL(newTabDocumentUrl()).catch(() => undefined)
+  }
+  sendNewTabState(m, state.private)
+}
+
+function sendNewTabState(m: Mini, isPrivate?: boolean): void {
+  const newTab = m.newTab
+  if (!newTab?.loaded || !live(newTab.view.webContents)) return
+  const state = { private: isPrivate ?? host().header(m.window)?.private ?? false, sites: host().newTabSites(m.window) }
+  const key = JSON.stringify(state)
+  if (key === newTab.key) return
+  newTab.key = key
+  newTab.view.webContents.send('mini-window:newtab-state', state)
+}
+
+function releaseNewTabView(m: Mini): void {
+  const newTab = m.newTab
+  if (!newTab) return
+  m.newTab = null
+  if (!m.window.isDestroyed()) m.window.contentView.removeChildView(newTab.view)
+  if (live(newTab.view.webContents)) newTab.view.webContents.close()
+}
+
+/** On a New Tab the field opens by itself (focused, if the window is on screen); off it, a field that opened by itself goes. */
+function syncAddress(m: Mini, state: { tabId: string; newTab: boolean }): void {
+  if (m.closed || m.window.isDestroyed()) return
+  const address = m.address
+  if (address && address.tabId !== state.tabId) closeAddress(m, false)
+  else if (address?.auto && !state.newTab) closeAddress(m, false)
+  if (m.addressDismissed && m.addressDismissed !== state.tabId) m.addressDismissed = null
+  if (!state.newTab || m.address || m.addressDismissed === state.tabId) return
+  if (!m.window.isVisible() || m.dock.isTucked()) return
+  openAddress(m, { auto: true, focus: true, select: false })
+}
+
+/** Room under the header for the dropdown: the window below it, or (floating below) the work area below the panel. */
+function dropdownRoom(m: Mini): number {
+  const max = MINI_OMNIBOX_LIMIT * MINI_OMNIBOX_ROW_HEIGHT + MINI_OMNIBOX_PADDING
+  if (m.window.isDestroyed()) return 0
+  if (m.plan.kind === 'below') {
+    const workArea = screen.getDisplayMatching(m.window.getBounds()).workArea
+    return Math.max(0, Math.min(max, workArea.y + workArea.height - (m.plan.panel.y + m.plan.panel.height) - 4))
+  }
+  // Above: the panel grows down over the window; inside the window: over the page.
+  const below = m.plan.kind === 'above' ? m.size.height : m.size.height - headerHeight(m)
+  return Math.max(0, Math.min(max, below - 4))
+}
+
+function addressLimit(m: Mini): number {
+  const address = m.address
+  return address ? miniOmniboxLimit(address.model, address.sources, dropdownRoom(m)) : MINI_OMNIBOX_LIMIT
+}
+
+/** Send the field's state to the header page (and size the dropdown). `focus`: it takes the keyboard. */
+function pushAddress(m: Mini, options: { setText: boolean; caretToEnd?: boolean; focus?: boolean }): void {
+  const address = m.address
+  if (!address || m.closed || m.window.isDestroyed()) return
+  const view = miniOmniboxView(address.model, address.sources, { caretToEnd: options.caretToEnd, limit: addressLimit(m) })
+  const height = address.blurred ? 0 : miniOmniboxDropdownHeight(view, dropdownRoom(m))
+  if (height !== address.dropdown) {
+    address.dropdown = height
+    layout(m)
+  }
+  if (options.focus) address.focus += 1
+  const contents = m.header?.webContents
+  if (!live(contents)) return
+  contents.send('mini-window:address', { open: true, view, setText: options.setText, focus: options.focus ? address.focus : 0, select: options.focus ? address.select : false, height })
+}
+
+/** Show the field: on a New Tab empty (it opened by itself), otherwise holding the page's address, selected. */
+function openAddress(m: Mini, options: { auto: boolean; focus: boolean; select: boolean }): void {
+  const info = host().header(m.window)
+  if (!info || m.closed || m.window.isDestroyed()) return
+  if (!m.address || m.address.tabId !== info.tabId) {
+    const text = miniAddressAutoOpens(info.url) ? '' : info.url
+    m.address = { tabId: info.tabId, auto: options.auto, model: emptyMiniOmnibox(text), sources: host().omniboxSources(m.window), dropdown: 0, blurred: false, focus: 0, select: options.select }
+  } else {
+    m.address.select = options.select
+    m.address.blurred = false
+  }
+  if (m.addressDismissed === info.tabId) m.addressDismissed = null
+  cancelHide(m)
+  cancelHeaderRelease(m)
+  if (!m.menuBar) setRevealed(m, true)
+  // Released (idle) header: it comes back and gets the field when it has loaded (ensureHeader).
+  if (!m.header) void ensureHeader(m)
+  pushAddress(m, { setText: true, caretToEnd: !options.select })
+  if (options.focus) focusAddressField(m, true)
+}
+
+/**
+ * The header takes the keyboard (macOS: mini windows and the floating header's panel are panels that
+ * never activate Surffish; the panel only becomes focusable while the field wants the keyboard).
+ */
+function focusAddressField(m: Mini, sendFocus: boolean): void {
+  const header = m.header
+  if (!header || !live(header.webContents) || m.closed || m.window.isDestroyed()) return
+  if (m.mount === 'panel' && m.panel && !m.panel.isDestroyed()) {
+    m.panel.setFocusable(true)
+    showFloatingPanel(m.panel, true, `${miniLabel(m)} header panel`)
+  } else if (!m.window.isFocused()) {
+    showFloatingPanel(m.window, true, miniLabel(m))
+  }
+  header.webContents.focus()
+  if (sendFocus) pushAddress(m, { setText: false, focus: true })
+}
+
+/** Put the field away. `refocus`: the page (or New Tab page) gets the keyboard back. */
+function closeAddress(m: Mini, refocus: boolean): void {
+  if (!m.address) return
+  m.address = null
+  const panelHadFocus = Boolean(m.panel && !m.panel.isDestroyed() && m.panel.isFocused())
+  if (m.panel && !m.panel.isDestroyed()) m.panel.setFocusable(false)
+  const header = m.header?.webContents
+  if (live(header)) header.send('mini-window:address', { open: false })
+  if (m.closed || m.window.isDestroyed()) return
+  layout(m)
+  if (refocus || panelHadFocus) {
+    if (m.window.isVisible()) showFloatingPanel(m.window, true, miniLabel(m))
+    const page = host().pageContents(m.window) ?? m.newTab?.view.webContents
+    if (page && !page.isDestroyed()) page.focus()
+  }
+  // The pointer may be long gone: the header hides (and later releases) as usual.
+  scheduleHide(m)
+  scheduleHeaderRelease(m)
+}
+
+/** Enter (or a row, or a New Tab tile): load it in the mini window's active tab, through the toolbar omnibox's resolver. */
+function navigateFromAddress(m: Mini, text: string): void {
+  if (!text.trim()) return
+  closeAddress(m, false)
+  void host().navigate(m.window, text).then((result) => {
+    if (m.closed || m.window.isDestroyed()) return
+    refreshHeaderOf(m)
+    if (!result.ok) return
+    if (m.window.isVisible()) showFloatingPanel(m.window, true, miniLabel(m))
+    host().pageContents(m.window)?.focus()
+  })
+}
+
+/** The focused mini window (app menu New Tab / Open Location act on it). */
+export function focusedMiniWindow(): BaseWindow | null {
+  return liveMinis().find((m) => m.window.isFocused() || Boolean(m.panel && !m.panel.isDestroyed() && m.panel.isFocused()))?.window ?? null
+}
+
+/**
+ * + / ⌘T in mini window `window`: a New Tab, address field focused. Grouping 'tabs': in this
+ * collection (after its last tab); 'stack' / 'separate' (one tab per window): in a new mini window
+ * of its own, cascaded off the others and focused. At the cap it says so instead.
+ */
+export function newTabIn(window: BaseWindow): boolean {
+  const m = miniOf(window)
+  if (!m || m.closed) return false
+  if (atCap()) return true
+  if (miniNewTabTarget(grouping()) === 'collection') {
+    lastActive = m
+    m.addressDismissed = null
+    if (!host().newTab(m.window)) return true
+    if (m.menuBar && !m.menuBar.popout.shown()) present(m, true)
+    else if (m.dock.isTucked()) m.dock.slideOut(true)
+    refreshHeaderOf(m)
+    if (m.address) focusAddressField(m, true)
+    return true
+  }
+  const next = createMini()
+  if (!next) return true
+  if (!host().newTab(next.window, m.window)) {
+    if (!next.window.isDestroyed()) next.window.close()
+    return true
+  }
+  void finishOpen(next, true).then(() => {
+    if (next.closed) return
+    refreshHeaderOf(next)
+    if (next.address) focusAddressField(next, true)
+  })
+  return true
+}
+
+/** ⌘L / Open Location in mini window `window`: show the field (sliding a tucked window out first) and focus it. */
+export function focusAddress(window: BaseWindow): boolean {
+  const m = miniOf(window)
+  if (!m || m.closed || !host().header(m.window)) return false
+  if (m.menuBar && !m.menuBar.popout.shown()) present(m, true)
+  else if (m.dock.isTucked()) m.dock.slideOut(true)
+  const info = host().header(m.window)
+  openAddress(m, { auto: miniAddressAutoOpens(info?.url), focus: true, select: true })
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1154,6 +1430,73 @@ function registerIpc(): void {
     const m = fromHeader(event)
     if (m) showMiniMenu(m, event.sender)
   })
+  // + in the header: a New Tab in this mini window.
+  ipcMain.on('mini-window:new-tab', (event) => {
+    const m = fromHeader(event)
+    if (m) newTabIn(m.window)
+  })
+  // The address field (shared/mini-window-omnibox.ts).
+  ipcMain.on('mini-window:address-input', (event, text: unknown) => {
+    const m = fromHeader(event)
+    if (!m?.address || typeof text !== 'string') return
+    m.address.model = typedMiniOmnibox(text.slice(0, 8192))
+    m.address.blurred = false
+    pushAddress(m, { setText: false })
+  })
+  ipcMain.on('mini-window:address-key', (event, key: unknown) => {
+    const m = fromHeader(event)
+    if (!m?.address) return
+    if (key === 'up' || key === 'down') {
+      m.address.model = arrowMiniOmnibox(m.address.model, m.address.sources, key, addressLimit(m))
+      return pushAddress(m, { setText: true, caretToEnd: true })
+    }
+    if (key !== 'escape') return
+    const escape = escapeMiniOmnibox(m.address.model)
+    if (escape.kind === 'restore') {
+      m.address.model = escape.model
+      return pushAddress(m, { setText: true, caretToEnd: true })
+    }
+    // Put away (reverting): on a New Tab it stays away until ⌘L or a click on the page.
+    if (m.address.auto) m.addressDismissed = m.address.tabId
+    closeAddress(m, true)
+  })
+  ipcMain.on('mini-window:address-submit', (event, text: unknown) => {
+    const m = fromHeader(event)
+    if (m?.address && typeof text === 'string') navigateFromAddress(m, text)
+  })
+  ipcMain.on('mini-window:address-pick', (event, index: unknown) => {
+    const m = fromHeader(event)
+    if (!m?.address || typeof index !== 'number' || !Number.isInteger(index)) return
+    const url = miniOmniboxRowUrl(m.address.model, m.address.sources, index, addressLimit(m))
+    if (url) navigateFromAddress(m, url)
+  })
+  ipcMain.on('mini-window:address-focus', (event) => {
+    const m = fromHeader(event)
+    if (!m?.address) return
+    m.address.blurred = false
+    focusAddressField(m, false)
+  })
+  // The field lost the keyboard (a click on the page, another app): on a New Tab it stays (its
+  // dropdown closes); a field ⌘L showed on a web page goes away.
+  ipcMain.on('mini-window:address-blur', (event) => {
+    const m = fromHeader(event)
+    if (!m?.address) return
+    if (m.address.auto) {
+      m.address.blurred = true
+      pushAddress(m, { setText: false })
+    } else {
+      closeAddress(m, false)
+    }
+  })
+  // The New Tab page: a site tile, or a click on the empty page (the address field).
+  ipcMain.on('mini-window:newtab-open', (event, url: unknown) => {
+    const m = fromNewTab(event)
+    if (m && typeof url === 'string' && /^https?:\/\//i.test(url)) navigateFromAddress(m, url)
+  })
+  ipcMain.on('mini-window:newtab-address', (event) => {
+    const m = fromNewTab(event)
+    if (m) focusAddress(m.window)
+  })
   ipcMain.on('mini-window:hover', (event, inside: unknown) => {
     const m = fromHeader(event)
     if (!m) return
@@ -1185,6 +1528,10 @@ function createHeaderView(): { view: WebContentsView; ready: Promise<void> } | n
 
 function headerDocumentUrl(): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(MINI_WINDOW_PAGE_HTML)}`
+}
+
+function newTabDocumentUrl(): string {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(MINI_WINDOW_NEW_TAB_HTML)}`
 }
 
 function applyWindowSettings(m: Mini, settings: MiniWindowSettings): void {
@@ -1266,7 +1613,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     peekRects: () => (m.panel && !m.panel.isDestroyed() && m.panel.isVisible() ? [m.panel.getBounds()] : []),
     peekContents: () => {
       const page = window.isDestroyed() ? null : host().pageContents(window)
-      return [page, m.header?.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
+      return [page, m.header?.webContents, m.newTab?.view.webContents].filter((contents): contents is WebContents => Boolean(contents && !contents.isDestroyed()))
     },
     busy: () => liveMinis().some((other) => other.headerDrag !== null || other.glide !== null),
     menu: () => showMiniMenu(m, null)
@@ -1306,7 +1653,11 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
     dropTarget: false,
     glide: null,
     moveSamples: createVelocityTracker(),
-    menuBar: null
+    menuBar: null,
+    address: null,
+    addressDismissed: null,
+    newTab: null,
+    pageRect: { x: 0, y: 0, width: bounds.width, height: bounds.height }
   }
   self.mini = m
   minis.push(m)
@@ -1338,6 +1689,7 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       }
     }
     setRevealed(m, false)
+    if (m.address) closeAddress(m, false)
     if (m.menuBar?.popout.shown() || m.menuBar?.popout.closing()) {
       // Hidden underneath us (⌘H, the window server): no fade, it is gone already.
       m.menuBar.popout.close(false)
@@ -1432,6 +1784,8 @@ function createMini(place: { bounds: MiniRect; dock: { dock: MiniDock; display: 
       m.blurTimer = null
     }
     unwirePage(m)
+    releaseNewTabView(m)
+    m.address = null
     m.dock.dispose()
     const wasInMenuBar = m.menuBar !== null
     m.menuBar?.popout.dispose()

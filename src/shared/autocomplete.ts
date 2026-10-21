@@ -22,7 +22,7 @@ function normalizedUrl(value: string): string | null {
 export function buildAddressSuggestions(
   input: string,
   pinnedSites: readonly PinnedSite[],
-  tabs: readonly BrowserTabSummary[],
+  tabs: ReadonlyArray<Pick<BrowserTabSummary, 'title' | 'url'>>,
   history: readonly BrowsingHistoryEntry[],
   limit = 7,
   bookmarks: ReadonlyArray<{ title: string; url: string }> = []
@@ -50,4 +50,19 @@ export function buildAddressSuggestions(
     if (matches.length >= limit) break
   }
   return matches
+}
+
+/** Where an address bar's suggestions come from: the window's open tabs, local history and bookmarks. */
+export interface OmniboxSuggestionSources {
+  tabs: ReadonlyArray<{ title: string; url: string }>
+  history: readonly BrowsingHistoryEntry[]
+  bookmarks: ReadonlyArray<{ title: string; url: string }>
+}
+
+/**
+ * An address bar's dropdown rows for `query`: the toolbar omnibox and the mini window's address field
+ * both ask this (favourites rank first through bookmarks, in tree order, so no separate pinned list).
+ */
+export function omniboxSuggestions(query: string, sources: OmniboxSuggestionSources, limit = 7): AddressSuggestion[] {
+  return buildAddressSuggestions(query, [], sources.tabs, sources.history, limit, sources.bookmarks)
 }

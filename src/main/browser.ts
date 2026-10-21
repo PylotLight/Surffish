@@ -15,16 +15,16 @@ import { normalizeSettingsTarget, parseSettingsUrl, SETTINGS_TAB_TITLE, settings
 import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { zoomActionForWheel, type PageZoomAction } from '../shared/zoom'
-import { recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
+import { getBrowsingHistory, recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
 import { BROWSER_SESSION_PARTITION, PRIVATE_SESSION_PARTITION as PRIVATE_PARTITION, clearPageSessionData, clearPrivateSession, getBrowserSession, getPageSession, getPrivateSession, whenPageSessionReady } from './browser-session'
 import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, spacesEnabled } from './spaces-store'
 import { forgetSessionCookieSnapshot } from './session-cookies'
 import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
 import { forgetPrivateDownloads } from './downloads'
-import { forgetSavedTabHistories, getBrowserNewTabPage, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { forgetSavedTabHistories, getBrowserNewTabPage, getBrowserSiteFaviconCache, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
-import { bookmarkPage, bookmarkPagesInNewFolder, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
+import { bookmarkPage, bookmarkPagesInNewFolder, getBookmarksSnapshot, getFavouriteSites, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
@@ -45,7 +45,8 @@ import { attachPagePopups, type PagePopupHost, userPopupResponse } from './page-
 import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, lastFocusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
 import { guardPageDragRegions } from './page-drag-guard'
 import { handleCommandPaletteShortcut } from './command-palette'
-import { resolveAddressInput } from './search-keywords'
+import { getCustomSearchEngines, resolveAddressInput } from './search-keywords'
+import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../shared/quick-links'
 import { noteLinkHover } from './preconnect'
 import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
 import { forgetTabHistoryEntries, forgottenEntryIndexes, type SavedTabHistory, type TabHistoryForget } from '../shared/tab-history'
@@ -78,7 +79,7 @@ import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } f
 import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
 import { emitGlanceLinkHover, glanceShiftClickEnabled, isGlanceOpenIn, noteGlanceWindowState, openGlance, setGlanceHost, zoomOpenGlance, type GlanceSource } from './glance-entry'
 import { applySavedPageZoom, enablePagePinchZoom, forgetPrivatePageZoom, stepPageZoom } from './page-zoom'
-import { dropBrowserTabOnMiniWindow, getMiniWindowSettings, noteMiniWindowChanged, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
+import { dropBrowserTabOnMiniWindow, focusMiniWindowAddress, getMiniWindowSettings, noteMiniWindowChanged, openMiniWindowNewTab, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
 import { canPopOutUrl } from '../shared/mini-window'
 import { miniReturnBeforeId, miniTabOrigin, moveTabId, sidebarDropBeforeId, type MiniTabOrigin, type SidebarRowHit } from '../shared/mini-window-tab-drag'
 import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
@@ -2246,6 +2247,52 @@ setMiniWindowHost({
       creatingMiniTab = false
     }
   },
+  newTab: (win, like = null) => {
+    const mini = miniStateFor(win)
+    if (!isLiveWindow(mini)) return null
+    if (mini.tabs.length === 0) {
+      // A window of its own (grouping 'stack' / 'separate'): private, home and Space like the one + was pressed in.
+      const source = like ? miniStateFor(like) : undefined
+      mini.isPrivate = source?.isPrivate ?? false
+      mini.miniHome = source?.miniHome ?? windowStateFor(lastFocusedBrowserWindow()) ?? null
+      mini.activeSpaceId = source?.activeSpaceId ?? DEFAULT_SPACE_ID
+    }
+    creatingMiniTab = true
+    try {
+      // The New Tab is the browser's own (no page view): returned to a browser window it is a New Tab there.
+      const id = createTab(SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, mini.isPrivate, false, mini, mini.activeSpaceId)
+      const tab = findTab(id ?? undefined)
+      if (tab && mini.miniHome) miniTabHomes.set(tab, mini.miniHome)
+      if (id) {
+        persistOpenTabs()
+        publishState(mini)
+      }
+      return id
+    } finally {
+      creatingMiniTab = false
+    }
+  },
+  navigate: async (win, input) => {
+    const tab = activeTabOf(miniStateFor(win))
+    if (!tab) return { ok: false }
+    const result = await navigateTabTo(tab, input, selectedSearchEngine)
+    return { ok: result.ok }
+  },
+  omniboxSources: (win) => {
+    const mini = miniStateFor(win)
+    const home = mini?.miniHome && isLiveWindow(mini.miniHome) ? mini.miniHome : windowStateFor(lastFocusedBrowserWindow())
+    // Like the toolbar of the window it belongs to: that window's tabs (a normal mini window never lists private ones).
+    const tabs = (home && !home.mini ? home.tabs : []).filter((tab) => mini?.isPrivate || !tab.isPrivate).map((tab) => ({ title: pageTitle(tab), url: currentUrl(tab) }))
+    const bookmarks = getBookmarksSnapshot().nodes.flatMap((node) => node.type === 'bookmark' && node.url ? [{ title: node.title, url: node.url }] : [])
+    return { tabs, history: getBrowsingHistory(), bookmarks, engines: getCustomSearchEngines() }
+  },
+  newTabSites: () => {
+    // The New Tab page's lists (Browser.tsx): favourites in order, then frequently visited.
+    const favourites = getFavouriteSites()
+    const sites: QuickLinkSite[] = [...favourites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), ...buildFrequentSites(getBrowsingHistory(), favourites)]
+    const icons = getBrowserSiteFaviconCache(sites.map((site) => site.origin))
+    return sites.map((site) => ({ ...site, faviconUrl: icons[site.origin] ?? site.faviconUrl }))
+  },
   returnTab: (win, tabId) => {
     const mini = miniStateFor(win)
     const tab = miniTabOf(mini, tabId)
@@ -3430,6 +3477,12 @@ export function handleBrowserShortcut(key: string, shift: boolean, tabId: string
   if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
     return runInWindow(owner, () => handleBrowserShortcut(key, shift, tabId, alt, primary))
   }
+  // In a mini window: ⌘/Ctrl+T opens a New Tab in that mini window, ⌘/Ctrl+L shows its address field
+  // (links clicked in it still open in a browser window).
+  if (ownerTab?.win.mini && primary && !alt && !shift) {
+    if (key === 't' && openMiniWindowNewTab(ownerTab.win.window)) return true
+    if (key === 'l' && focusMiniWindowAddress(ownerTab.win.window)) return true
+  }
   // Cmd/Ctrl+G groups the sidebar's multi-selection when 2+ tabs are selected; otherwise it's Find Next.
   if (key === 'g' && !shift && !alt && primary && tabSelectionHooks?.groupShortcut()) return true
   for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, CommandShortcut][]) {
@@ -4000,12 +4053,17 @@ function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'oth
 }
 
 export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<NavigateResult> {
-  // surffish://settings typed in the address bar: the window's Settings tab (focused, or opened).
+  return navigateTabTo(getTab(), input, engine)
+}
+
+/** Address-bar input for `tab`: the toolbar omnibox's (current window's tab) and a mini window's address field. */
+async function navigateTabTo(tab: BrowserTab | undefined, input: string, engine: SearchEngineId): Promise<NavigateResult> {
+  // surffish://settings typed in the address bar: the window's Settings tab (focused, or opened). From
+  // a mini window it opens in a browser window, like ⌘, there.
   const settingsTarget = parseSettingsUrl(input)
-  if (settingsTarget) return openSettingsTab(settingsTarget) ? { ok: true } : { ok: false, reason: 'cancelled' }
+  if (settingsTarget) return openSettingsTab(settingsTarget, tab?.win.mini ? tab.win.window : undefined) ? { ok: true } : { ok: false, reason: 'cancelled' }
   const url = resolveAddressInput(input, engine)
   if (!url) return { ok: false, reason: 'invalid' }
-  const tab = getTab()
   if (!tab) return { ok: false, reason: 'cancelled' }
   if (tab.pdfEditor) {
     // Leaving the editor: ask about unsaved edits, then load the address in a normal page view.
