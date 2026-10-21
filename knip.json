@@ -13,6 +13,7 @@
     "src/renderer/src/main.tsx",
     "src/renderer/src/pdf-editor/main.ts",
     "src/renderer/src/reader/main.ts",
+    "src/renderer/src/read-aloud/engine.ts",
     "scripts/**/*.{ts,cjs,mjs,js}",
     "src/**/*.test.{ts,cjs}"
   ],
@@ -49,6 +50,12 @@
       "exports"
     ],
     "src/main/reading-list.ts": [
+      "exports"
+    ],
+    "src/main/read-aloud.ts": [
+      "exports"
+    ],
+    "src/main/read-aloud-settings.ts": [
       "exports"
     ]
   }

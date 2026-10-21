@@ -14,9 +14,9 @@
 export const SURFFISH_SETTINGS_URL = 'surffish://settings'
 
 /** The settings pages (they match the renderer's settings modes). */
-export type SettingsSection = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+export type SettingsSection = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
 
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['settings', 'newtab', 'integrations', 'feeds', 'privacy', 'watchers', 'site', 'network', 'diagnostics']
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['settings', 'newtab', 'integrations', 'feeds', 'readaloud', 'privacy', 'watchers', 'site', 'network', 'diagnostics']
 
 /** Names a deep link may use for a section (the friendly ones first; the mode names work too). */
 const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
@@ -27,6 +27,8 @@ const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
   integrations: 'integrations',
   extensions: 'integrations',
   feeds: 'feeds',
+  readaloud: 'readaloud',
+  'read-aloud': 'readaloud',
   privacy: 'privacy',
   watchers: 'watchers',
   sites: 'site',
@@ -41,6 +43,7 @@ const SECTION_SLUGS: Readonly<Record<SettingsSection, string>> = {
   newtab: 'newtab',
   integrations: 'integrations',
   feeds: 'feeds',
+  readaloud: 'read-aloud',
   privacy: 'privacy',
   watchers: 'watchers',
   site: 'sites',

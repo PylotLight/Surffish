@@ -30,6 +30,8 @@ import { backgroundNetworkBlockedReason } from './background-network'
 import { deferWrite } from './deferred-writes'
 import { isShowingPdf } from './pdf-viewer'
 import { readUserJson, writeUserJson } from './user-json'
+import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage, readAloudMenuState } from './read-aloud-feature'
+import { readAloudSubmenu } from './context-menu-template'
 
 /**
  * Reader view. After each load a tab runs Readability's cheap isProbablyReaderable in an isolated
@@ -348,6 +350,12 @@ export function readerViewFor(page: WebContents | null | undefined): WebContents
   return document && !document.view.webContents.isDestroyed() ? document.view : null
 }
 
+/** The article shown in Reader view over `page` (Read Aloud reads exactly what's on screen). */
+export function readerArticleFor(page: WebContents | null | undefined): ReaderArticle | null {
+  const document = page && !page.isDestroyed() ? stateFor(page)?.document : null
+  return document?.article ?? null
+}
+
 function disposeDocument(state: PageState): void {
   const document = state.document
   if (!document) return
@@ -377,11 +385,15 @@ function showReaderContextMenu(document: ReaderDocument, params: Electron.Contex
     )
   }
   if (params.selectionText.trim()) items.push({ label: 'Copy', click: () => contents.copy() })
-  items.push(
-    { label: 'Select All', click: () => contents.selectAll() },
-    { type: 'separator' },
-    { label: 'Back to Page', click: () => { closeReaderMode(document.page) } }
-  )
+  items.push({ label: 'Select All', click: () => contents.selectAll() }, { type: 'separator' })
+  if (readAloudEnabled()) {
+    items.push(readAloudSubmenu({ state: readAloudMenuState(), selection: params.selectionText.trim(), page: true }, (target, selection) => {
+      if (target === 'stop' || target === 'toggle') controlReadAloud(target)
+      else void readAloudFromPage(document.page, target, selection, { x: params.x, y: params.y })
+    }))
+    items.push({ type: 'separator' })
+  }
+  items.push({ label: 'Back to Page', click: () => { closeReaderMode(document.page) } })
   if (!app.isPackaged) items.push({ label: 'Inspect', click: () => contents.inspectElement(params.x, params.y) })
   const bounds = document.view.getBounds()
   Menu.buildFromTemplate(items).popup({ window, x: Math.round(bounds.x + params.x), y: Math.round(bounds.y + params.y) })
@@ -553,11 +565,18 @@ export function registerReaderIpc(): void {
     const document = senderDocument(event)
     if (!document) return { ok: false, error: 'This article is no longer available.' }
     const { article } = document
-    return { ok: true, token: document.token, isPrivate: document.isPrivate, settings: getReaderSettings(), article }
+    return { ok: true, token: document.token, isPrivate: document.isPrivate, settings: getReaderSettings(), article, readAloud: readAloudEnabled() }
   })
   ipcMain.handle('reader:settings:set', (event, value: unknown) => {
     if (!senderDocument(event)) throw new Error('Only Reader view can change its settings.')
     return setReaderSettings(value)
+  })
+  // The reader toolbar's Listen button: read this article aloud (or stop the reading).
+  ipcMain.on('reader:read-aloud', (event) => {
+    const document = senderDocument(event)
+    if (!document || !readAloudEnabled()) return
+    if (isReadAloudActiveNow()) controlReadAloud('stop')
+    else void readAloudFromPage(document.page, 'page')
   })
   ipcMain.on('reader:back', (event) => {
     const document = senderDocument(event)

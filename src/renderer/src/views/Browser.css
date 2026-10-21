@@ -4147,3 +4147,11 @@
   background: rgba(9, 13, 17, 0.78);
   color: #fff;
 }
+
+/* Read Aloud omnibox button (only while a reading is on; the popover's CSS loads with its chunk). */
+.read-aloud-control {
+  position: relative;
+  display: inline-flex;
+}
+.omnibox-action-button.read-aloud-button.is-playing { color: #a4edbd; }
+.omnibox-action-button.read-aloud-button.is-error { color: #ffb4a8; }

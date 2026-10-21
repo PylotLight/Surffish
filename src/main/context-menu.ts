@@ -1,5 +1,5 @@
 import { clipboard, dialog, Menu, type BaseWindow, type ContextMenuParams, type WebContents } from 'electron'
-import { buildBrowserContextMenuTemplate, normalizeContextMenuParams, safeFilename, safeHttpUrl } from './context-menu-template'
+import { buildBrowserContextMenuTemplate, normalizeContextMenuParams, safeFilename, safeHttpUrl, type ReadAloudMenuState, type ReadAloudMenuTarget } from './context-menu-template'
 import type { SearchEngineId } from '../shared/types'
 
 interface ContextMenuEvent {
@@ -29,6 +29,9 @@ export interface BrowserContextMenuOptions {
   readerView?: () => void
   /** Offer "Watch This Page for Changes…" (never for private tabs). */
   watchPage?: (mode: 'page' | 'pick') => void
+  /** Offer the Read Aloud submenu (on in Settings, a web page); `readAloudState` adds Pause/Resume and Stop. */
+  readAloud?: (target: ReadAloudMenuTarget, selection?: string) => void
+  readAloudState?: ReadAloudMenuState
   /** Offer "Add Page/Link to Reading List" (never for private tabs). */
   addToReadingList?: (target: 'page' | { url: string; title?: string }) => void
 }
@@ -117,6 +120,8 @@ export function showBrowserContextMenu(
     hasScreenshot: Boolean(options.takeScreenshot),
     hasReaderView: Boolean(options.readerView),
     canWatchPage: Boolean(options.watchPage),
+    canReadAloud: Boolean(options.readAloud),
+    readAloudState: options.readAloudState ?? 'idle',
     canAddToReadingList: Boolean(options.addToReadingList),
     canOpenInGlance: Boolean(options.openInGlance),
     canGoBack: contents.navigationHistory.canGoBack(),
@@ -149,6 +154,7 @@ export function showBrowserContextMenu(
     takeScreenshot: options.takeScreenshot,
     readerView: options.readerView,
     watchPage: options.watchPage,
+    readAloud: options.readAloud,
     addToReadingList: options.addToReadingList
   })
   if (items.length === 0) return false

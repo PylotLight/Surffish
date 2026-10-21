@@ -48,6 +48,8 @@ import { groupSelectedBrowserTabs, getSelectedBrowserTabIds } from './tab-select
 import { DEFAULT_SPACE_ID } from '../shared/spaces'
 import { isCommandHiddenByWatchers } from '../shared/page-watchers-feature'
 import { pageWatchersEnabled } from './page-watchers-feature'
+import { isCommandHiddenByReadAloud, READ_ALOUD_SHORTCUT } from '../shared/read-aloud-gate'
+import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage, readAloudStatus } from './read-aloud-feature'
 import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
@@ -133,6 +135,20 @@ const COMMANDS: BrowserCommand[] = [
     keywords: ['read later', 'save for later', 'look at later', 'todo', 'queue', 'pocket', 'instapaper'], refocusPage: true,
     enabled: () => activeIsWebPage() && !activeTab()?.private, run: () => addTabToReadingList(activeTab()?.id)
   },
+  // Read Aloud (experimental; hidden while off in Settings).
+  {
+    id: 'readAloud.page', title: 'Read Aloud', accelerator: READ_ALOUD_SHORTCUT, section: 'Tab', keywords: ['speak', 'listen', 'text to speech', 'tts', 'narrate', 'voice', 'audio article', 'read page'], refocusPage: true,
+    enabled: () => readAloudEnabled() && activeIsWebPage() && !isReadAloudActiveNow(), run: () => readAloudFromPage(getActiveTabWebContents(), 'page')
+  },
+  {
+    id: 'readAloud.selection', title: 'Read Selection Aloud', section: 'Tab', keywords: ['speak selection', 'listen', 'text to speech', 'tts'], refocusPage: true,
+    enabled: () => readAloudEnabled() && activeIsWebPage(), run: () => readAloudFromPage(getActiveTabWebContents(), 'selection')
+  },
+  {
+    id: 'readAloud.pause', title: () => (readAloudStatus() === 'paused' ? 'Resume Reading Aloud' : 'Pause Reading Aloud'), accelerator: READ_ALOUD_SHORTCUT, section: 'Tab', keywords: ['read aloud', 'speech', 'tts', 'play'], refocusPage: true,
+    enabled: () => readAloudEnabled() && isReadAloudActiveNow(), run: () => controlReadAloud('toggle')
+  },
+  { id: 'readAloud.stop', title: 'Stop Reading Aloud', section: 'Tab', keywords: ['read aloud', 'speech', 'tts', 'silence'], refocusPage: true, enabled: () => readAloudEnabled() && isReadAloudActiveNow(), run: () => controlReadAloud('stop') },
   { id: 'readingList.show', title: 'Open Reading List', section: 'View', keywords: ['read later', 'saved for later', 'unread', 'reading list', 'queue'], run: () => showReadingList() },
   tabCommand('view.bookmarksBar', 'bookmarksBar', () => (isBookmarksBarVisible() ? 'Hide Bookmarks Bar' : 'Show Bookmarks Bar'), { section: 'View', keywords: ['favourites', 'favorites', 'toolbar'], refocusPage: false }),
   tabCommand('tab.copyLink', 'copyLink', 'Copy Link', { keywords: ['url', 'address'], enabled: activeIsWebPage }),
@@ -433,7 +449,8 @@ function moveToMiniCommands(): BrowserCommand[] {
 
 function allCommands(): BrowserCommand[] {
   const watchersEnabled = pageWatchersEnabled()
-  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled)), ...tabGroupCommands(), ...spaceCommands(), ...miniWindowCommands(), ...moveToMiniCommands()]
+  const readAloudOn = readAloudEnabled()
+  return [...COMMANDS.filter((command) => !isCommandHiddenByWatchers(command.id, watchersEnabled) && !isCommandHiddenByReadAloud(command.id, readAloudOn)), ...tabGroupCommands(), ...spaceCommands(), ...miniWindowCommands(), ...moveToMiniCommands()]
 }
 
 function isEnabled(command: BrowserCommand): boolean {

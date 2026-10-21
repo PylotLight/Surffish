@@ -14,6 +14,7 @@ import { MAX_READER_CONTENT_CHARS, type ReaderArticle } from '../shared/reader'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { getBrowserTabPageInfo, getBrowserTabWebContents, navigateBrowser, newBrowserTab, flashBrowserStatus } from './browser'
 import { extractReaderArticle, openReaderMode, openReaderWithArticle, readerStateFor } from './reader-mode'
+import { readAloudEnabled, readAloudFromPage } from './read-aloud-feature'
 import { getProfileDatabase, reportStoreWriteError } from './store'
 import { ReadingListFullError, ReadingListTable, type ReadingListBackend } from './store/reading-list-table'
 import { readUserJson, writeUserJson } from './user-json'
@@ -302,16 +303,21 @@ const READERABLE_WAIT_MS = 2_000
  * page is only used when Reader detection says it is an article (an offline / error / paywall page
  * would otherwise "parse"); otherwise the saved copy is shown.
  */
-function openInReaderWhenLoaded(contents: WebContents, saved: ReaderArticle | null): void {
+function openInReaderWhenLoaded(contents: WebContents, saved: ReaderArticle | null, options: { preferSaved?: boolean; onShown?: () => void } = {}): void {
   let done = false
   const cleanup = (): void => {
     done = true
     clearTimeout(timer)
     contents.removeListener('did-stop-loading', loaded)
   }
-  const showSaved = (): void => { if (saved && !contents.isDestroyed()) openReaderWithArticle(contents, saved) }
+  const showSaved = (): void => {
+    if (saved && !contents.isDestroyed() && openReaderWithArticle(contents, saved)) options.onShown?.()
+  }
   const live = (): void => {
-    void openReaderMode(contents, { quiet: saved !== null }).then((opened) => { if (!opened) showSaved() }).catch(showSaved)
+    void openReaderMode(contents, { quiet: saved !== null }).then((opened) => {
+      if (!opened) showSaved()
+      else options.onShown?.()
+    }).catch(showSaved)
   }
   const loaded = (): void => {
     if (done) return
@@ -319,6 +325,10 @@ function openInReaderWhenLoaded(contents: WebContents, saved: ReaderArticle | nu
     if (contents.isDestroyed()) return
     if (!saved) {
       live()
+      return
+    }
+    if (options.preferSaved) {
+      showSaved()
       return
     }
     const deadline = Date.now() + READERABLE_WAIT_MS
@@ -335,14 +345,19 @@ function openInReaderWhenLoaded(contents: WebContents, saved: ReaderArticle | nu
   contents.once('destroyed', cleanup)
 }
 
-/** Open an item (marks it read). `reader`: show it in Reader view, from the saved copy if the live page has no article. */
+/**
+ * Open an item (marks it read). `reader`: show it in Reader view, from the saved copy if the live
+ * page has no article. `listen`: Reader view from the saved offline copy when there is one (the live
+ * page otherwise), then Read Aloud reads it.
+ */
 export async function openReadingListItem(id: unknown, options: unknown): Promise<Result<{ tabId: string | null }>> {
   if (typeof id !== 'string') return failure('Bad request.')
   const item = readingListSnapshot().items.find((candidate) => candidate.id === id)
   if (!item) return failure('That item is no longer in your Reading List.')
   const record = typeof options === 'object' && options !== null ? options as Record<string, unknown> : {}
   const target: ReadingListOpenTarget = record.target === 'new-tab' ? 'new-tab' : 'current'
-  const reader = record.reader === true
+  const listen = record.listen === true && readAloudEnabled()
+  const reader = record.reader === true || listen
   let tabId: string | null = null
   if (target === 'new-tab') {
     tabId = newBrowserTab(item.url)
@@ -354,7 +369,8 @@ export async function openReadingListItem(id: unknown, options: unknown): Promis
   setReadingListItemRead(item.id, true)
   if (reader && tabId) {
     const contents = getBrowserTabWebContents(tabId)
-    if (contents) openInReaderWhenLoaded(contents, item.hasSnapshot ? parseSavedArticle(store().getSnapshot(item.id)) : null)
+    const saved = item.hasSnapshot ? parseSavedArticle(store().getSnapshot(item.id)) : null
+    if (contents) openInReaderWhenLoaded(contents, saved, listen ? { preferSaved: true, onShown: () => { void readAloudFromPage(contents, 'page') } } : {})
   }
   return { ok: true, tabId }
 }

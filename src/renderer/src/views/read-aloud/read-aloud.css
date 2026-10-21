@@ -1,0 +1,134 @@
+/* Read Aloud player popover (lazy chunk, loads with the panel). Opaque like the Reading List and
+   bookmarks popovers: no backdrop-filter (native vibrancy only, per the perf rules). The omnibox
+   button itself is styled in Browser.css so launch doesn't need this file. */
+.read-aloud-popover {
+  position: absolute;
+  z-index: 14;
+  top: calc(100% + 10px);
+  right: -6px;
+  display: flex;
+  width: 300px;
+  max-height: min(420px, var(--popover-room, 420px));
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(42, 50, 59, 0.985), rgba(17, 21, 26, 0.99));
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.07);
+  color: #f2f4f6;
+  font-size: 13px;
+  text-align: left;
+  -webkit-app-region: no-drag;
+  animation: read-aloud-in 120ms ease-out;
+}
+@keyframes read-aloud-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.read-aloud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.read-aloud-header strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.read-aloud-close,
+.read-aloud-text-button {
+  border: 0;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.7);
+  cursor: pointer;
+  font: inherit;
+}
+.read-aloud-close { font-size: 18px; line-height: 1; }
+.read-aloud-text-button { text-decoration: underline; }
+.read-aloud-message {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgba(245, 247, 250, 0.75);
+  font-size: 12px;
+}
+.read-aloud-message.is-error { color: #ffb4a8; }
+.read-aloud-download {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: rgba(245, 247, 250, 0.75);
+  font-size: 11.5px;
+}
+.read-aloud-download progress {
+  width: 100%;
+  height: 4px;
+  accent-color: #7ee2a8;
+}
+.read-aloud-transport {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.read-aloud-transport button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f4f6;
+  cursor: pointer;
+}
+.read-aloud-transport button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
+.read-aloud-transport button:disabled { opacity: 0.4; cursor: default; }
+.read-aloud-transport .read-aloud-play { background: rgba(126, 226, 168, 0.16); color: #a4edbd; }
+.read-aloud-transport svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.read-aloud-progress {
+  margin-left: auto;
+  color: rgba(245, 247, 250, 0.6);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.read-aloud-options {
+  display: flex;
+  gap: 8px;
+}
+.read-aloud-options label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  color: rgba(245, 247, 250, 0.6);
+  font-size: 11.5px;
+}
+.read-aloud-options select {
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #f2f4f6;
+  font: inherit;
+  font-size: 12.5px;
+}
+.read-aloud-engine {
+  margin: 0;
+  color: rgba(245, 247, 250, 0.5);
+  font-size: 11.5px;
+}

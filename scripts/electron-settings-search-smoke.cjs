@@ -71,7 +71,7 @@ async function run() {
   smoke.step('Index drift: every indexed label is on its page')
   const index = readIndex()
   assert.ok(Object.keys(index).length >= 6 && index.settings?.length > 20, `index parsed (${Object.keys(index).join(', ')})`)
-  for (const page of ['settings', 'newtab', 'integrations', 'feeds', 'privacy', 'watchers']) {
+  for (const page of ['settings', 'newtab', 'integrations', 'feeds', 'readaloud', 'privacy', 'watchers']) {
     await smoke.evaluate(toolbar, `window.api.browser.chrome.set({ sidebarMode: ${JSON.stringify(page)} })`)
     const missing = await waitFor(async () => {
       const gone = await ev(`${JSON.stringify(index[page])}.filter((label) => !(document.querySelector('.settings-view')?.textContent ?? '').includes(label))`)

@@ -35,6 +35,23 @@ function labels(items: MenuItemConstructorOptions[]): string[] {
   return items.map((item) => item.type === 'separator' ? '—' : String(item.label))
 }
 
+/** Every label, submenus included, as "Parent › Child". */
+function allLabels(items: MenuItemConstructorOptions[], prefix = ''): string[] {
+  return items.flatMap((item) => {
+    if (item.type === 'separator') return []
+    const label = `${prefix}${String(item.label)}`
+    return Array.isArray(item.submenu) ? [label, ...allLabels(item.submenu, `${label} › `)] : [label]
+  })
+}
+
+/** The item at a "Parent › Child" path. */
+function find(items: MenuItemConstructorOptions[], path: string): MenuItemConstructorOptions | undefined {
+  const [head, ...rest] = path.split(' › ')
+  const item = items.find((candidate) => candidate.label === head)
+  if (!item || rest.length === 0) return item
+  return Array.isArray(item.submenu) ? find(item.submenu, rest.join(' › ')) : undefined
+}
+
 function click(item: MenuItemConstructorOptions | undefined): void {
   ;(item?.click as unknown as (() => void) | undefined)?.()
 }
@@ -84,8 +101,25 @@ describe('rest of the menu', () => {
     const items = buildBrowserContextMenuTemplate(params({ linkURL: 'https://example.com/?utm_source=x&id=1' }), PAGE, fns)
     expect(labels(items)).toContain('Open Link in New Tab')
     expect(items.at(-1)?.type).not.toBe('separator')
-    click(items.find((item) => item.label === 'Copy Clean Link'))
+    click(find(items, 'Copy Link As › Clean Link'))
     expect(fns.writeClipboard).toHaveBeenCalledWith('https://example.com/?id=1')
+  })
+
+  test('a link menu stays about the link: page items fold into one Page submenu, Inspect stays', () => {
+    const items = buildBrowserContextMenuTemplate(params({ linkURL: 'https://example.com/a', linkText: 'A [b]' }), { ...PAGE, canAddToReadingList: true, hasReaderView: true }, actions())
+    expect(labels(items)).toEqual(['Open Link in New Tab', 'Open Link in Background Tab', 'Copy Link Address', 'Copy Link As', 'Save Link', '—', 'Page', '—', 'Inspect'])
+    expect(allLabels(items)).toContain('Page › Reload')
+    expect(allLabels(items)).toContain('Save Link › Save Link As…')
+    expect(allLabels(items)).toContain('Copy Link As › Link Text')
+    const fns = actions()
+    click(find(buildBrowserContextMenuTemplate(params({ linkURL: 'https://example.com/a', linkText: 'A [b]' }), PAGE, fns), 'Copy Link As › Markdown Link'))
+    expect(fns.writeClipboard).toHaveBeenCalledWith('[A \\[b\\]](https://example.com/a)')
+  })
+
+  test('a plain page right-click shows the page items flat, rarer tools under More Tools', () => {
+    const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, hasReaderView: true, hasScreenshot: true, canAddToReadingList: true }, actions())
+    expect(labels(items)).toEqual(['Back', 'Forward', 'Reload', '—', 'Reader View', 'Add Page to Reading List', '—', 'Save Page As…', 'Print…', 'Take Screenshot…', 'More Tools', '—', 'Inspect'])
+    expect(allLabels(items)).toContain('More Tools › Copy Clean Link')
   })
 
   test('non-page surfaces only get Select All for plain right-clicks', () => {
@@ -101,7 +135,7 @@ describe('rest of the menu', () => {
     const takeScreenshot = mock(() => undefined)
     const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, hasScreenshot: true }, { ...actions(), takeScreenshot })
     const names = labels(items)
-    expect(names.indexOf('Take Screenshot…')).toBe(names.indexOf('Save Page As…') + 1)
+    expect(names.indexOf('Take Screenshot…')).toBe(names.indexOf('Print…') + 1)
     click(items.find((item) => item.label === 'Take Screenshot…'))
     expect(takeScreenshot).toHaveBeenCalledTimes(1)
   })
@@ -111,21 +145,56 @@ describe('reader view and page watchers', () => {
   test('page menu offers Reader View and both watch items when the host allows them', () => {
     const fns = { ...actions(), readerView: mock(() => undefined), watchPage: mock((_mode: 'page' | 'pick') => undefined) }
     const items = buildBrowserContextMenuTemplate(params(), { ...PAGE, hasReaderView: true, canWatchPage: true }, fns)
-    const all = labels(items)
+    const all = allLabels(items)
     expect(all).toContain('Reader View')
-    expect(all).toContain('Watch This Page for Changes…')
-    expect(all).toContain('Watch Part of This Page…')
-    click(items.find((item) => item.label === 'Watch Part of This Page…'))
+    expect(all).toContain('More Tools › Watch This Page for Changes…')
+    expect(all).toContain('More Tools › Watch Part of This Page…')
+    click(find(items, 'More Tools › Watch Part of This Page…'))
     expect(fns.watchPage).toHaveBeenCalledWith('pick')
     click(items.find((item) => item.label === 'Reader View'))
     expect(fns.readerView).toHaveBeenCalled()
   })
 
   test('no watch items without permission (private tabs) or on PDFs', () => {
-    expect(labels(buildBrowserContextMenuTemplate(params(), PAGE, actions()))).not.toContain('Watch This Page for Changes…')
-    const pdf = labels(buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf' }), { ...PAGE, pdfDocument: true, canWatchPage: true, hasReaderView: true }, actions()))
-    expect(pdf).not.toContain('Watch This Page for Changes…')
+    expect(allLabels(buildBrowserContextMenuTemplate(params(), PAGE, actions()))).not.toContain('More Tools › Watch This Page for Changes…')
+    const pdf = allLabels(buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf' }), { ...PAGE, pdfDocument: true, canWatchPage: true, hasReaderView: true }, actions()))
+    expect(pdf).not.toContain('More Tools › Watch This Page for Changes…')
     expect(pdf).not.toContain('Reader View')
+  })
+})
+
+describe('Read Aloud items', () => {
+  test('one Read Aloud submenu: Read from Here / Read Page on a page, Read Selection first with a selection', () => {
+    const calls: unknown[][] = []
+    const fns = { ...actions(), readAloud: (...args: unknown[]) => { calls.push(args) } }
+    const page = buildBrowserContextMenuTemplate(params(), { ...PAGE, canReadAloud: true }, fns)
+    expect(allLabels(page).filter((label) => label.startsWith('Read Aloud'))).toEqual(['Read Aloud', 'Read Aloud › Read from Here', 'Read Aloud › Read Page'])
+    expect(find(page, 'Read Aloud › Read Page')?.accelerator).toBe('CmdOrCtrl+Shift+U')
+    click(find(page, 'Read Aloud › Read Page'))
+    click(find(page, 'Read Aloud › Read from Here'))
+    const selected = buildBrowserContextMenuTemplate(params({ selectionText: '  Some words.  ' }), { ...PAGE, canReadAloud: true }, fns)
+    expect(labels(selected).slice(0, 3)).toEqual(['Copy', 'Search DuckDuckGo for “Some words.”', 'Read Aloud'])
+    expect(allLabels(selected).filter((label) => label.startsWith('Read Aloud ›'))).toEqual(['Read Aloud › Read Selection', 'Read Aloud › Read from Here', 'Read Aloud › Read Page'])
+    expect(allLabels(selected)).not.toContain('Page › Read Aloud')
+    click(find(selected, 'Read Aloud › Read Selection'))
+    expect(calls).toEqual([['page', undefined], ['here', undefined], ['selection', 'Some words.']])
+  })
+
+  test('while reading: Pause (or Resume) and Stop come first', () => {
+    const calls: unknown[][] = []
+    const fns = { ...actions(), readAloud: (...args: unknown[]) => { calls.push(args) } }
+    const playing = buildBrowserContextMenuTemplate(params(), { ...PAGE, canReadAloud: true, readAloudState: 'playing' }, fns)
+    expect(allLabels(playing).filter((label) => label.startsWith('Read Aloud ›'))).toEqual(['Read Aloud › Pause', 'Read Aloud › Stop', 'Read Aloud › Read from Here', 'Read Aloud › Read Page'])
+    const paused = buildBrowserContextMenuTemplate(params(), { ...PAGE, canReadAloud: true, readAloudState: 'paused' }, fns)
+    click(find(paused, 'Read Aloud › Resume'))
+    click(find(paused, 'Read Aloud › Stop'))
+    expect(calls).toEqual([['toggle', undefined], ['stop', undefined]])
+  })
+
+  test('nothing while Read Aloud is off, or on PDFs', () => {
+    expect(allLabels(buildBrowserContextMenuTemplate(params(), PAGE, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
+    expect(allLabels(buildBrowserContextMenuTemplate(params({ selectionText: 'x' }), PAGE, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
+    expect(allLabels(buildBrowserContextMenuTemplate(params(), { ...PAGE, pdfDocument: true, canReadAloud: true }, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
   })
 })
 
@@ -134,9 +203,11 @@ describe('Reading List items', () => {
     const calls: unknown[] = []
     const withReadingList = { ...actions(), addToReadingList: (target: unknown) => { calls.push(target) } }
     const link = params({ linkURL: 'https://example.com/story#top', linkText: '  A story  ' })
-    expect(labels(buildBrowserContextMenuTemplate(link, PAGE, withReadingList))).not.toContain('Add Link to Reading List')
+    const without = buildBrowserContextMenuTemplate(link, PAGE, withReadingList)
+    expect(allLabels(without).some((label) => label.includes('Add Link to Reading List'))).toBe(false)
+    expect(labels(without)).toContain('Save Link As…')
     const items = buildBrowserContextMenuTemplate(link, { ...PAGE, canAddToReadingList: true }, withReadingList)
-    click(items.find((item) => item.label === 'Add Link to Reading List'))
+    click(find(items, 'Save Link › Add Link to Reading List'))
     expect(calls).toEqual([{ url: 'https://example.com/story#top', title: 'A story' }])
     expect(labels(items)).not.toContain('Add Page to Reading List')
   })

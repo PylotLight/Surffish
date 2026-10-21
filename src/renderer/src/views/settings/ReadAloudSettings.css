@@ -1,0 +1,171 @@
+/* Settings → Integrations → Read Aloud (lazy chunk with ReadAloudSettings.tsx). */
+.read-aloud-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.read-aloud-model-row .settings-row-copy {
+  flex: 1 1 auto;
+}
+.read-aloud-model-status {
+  font-variant-numeric: tabular-nums;
+}
+.read-aloud-model-status.is-error,
+.read-aloud-test-result .is-error {
+  color: #ff9b9b;
+}
+.read-aloud-model-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 360px;
+}
+.read-aloud-model-progress progress,
+.read-aloud-voice-progress {
+  width: 100%;
+  height: 4px;
+  accent-color: #7ee2a8;
+}
+
+.read-aloud-voice-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.read-aloud-voice-progress {
+  width: 240px;
+}
+
+.read-aloud-test-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.settings-view .read-aloud-test-text textarea {
+  width: 100%;
+  min-height: 64px;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  color: #f5f7fa;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+.settings-view .read-aloud-test-text textarea:focus-visible {
+  border-color: rgba(126, 226, 168, 0.6);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(126, 226, 168, 0.16);
+}
+.read-aloud-test-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.read-aloud-test-play {
+  min-width: 84px;
+}
+
+.read-aloud-test-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 2px;
+  color: rgba(235, 240, 245, 0.7);
+  font-size: 12.5px;
+}
+.read-aloud-test-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.read-aloud-test-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.read-aloud-test-stats dt {
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 11.5px;
+}
+.read-aloud-test-stats dd {
+  margin: 0;
+  color: rgba(248, 250, 252, 0.94);
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+.read-aloud-test-note {
+  color: rgba(235, 240, 245, 0.55);
+}
+
+/* Voice section: picker, speed presets, Advanced. */
+.read-aloud-voice-picker {
+  align-items: stretch;
+}
+.read-aloud-voice-search {
+  width: 240px;
+}
+.read-aloud-voice-description {
+  max-width: 420px;
+}
+.read-aloud-speed-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.read-aloud-speed-presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.read-aloud-speed-presets button {
+  min-width: 46px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(235, 240, 245, 0.8);
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.read-aloud-speed-presets button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.read-aloud-speed-presets button.is-selected {
+  border-color: rgba(126, 226, 168, 0.55);
+  background: rgba(126, 226, 168, 0.16);
+  color: #f5f7fa;
+}
+.read-aloud-speed-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+}
+.read-aloud-speed-slider .settings-range {
+  flex: 1 1 auto;
+}
+.read-aloud-fixed-value {
+  color: rgba(235, 240, 245, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.read-aloud-advanced-note {
+  margin: 6px 0 2px;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 12px;
+}

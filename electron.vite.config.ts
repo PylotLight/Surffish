@@ -82,6 +82,11 @@ const bramblePreloadPlugin = {
       resolve(projectDirectory, 'src/preload/reader.cjs'),
       join(outputDirectory, 'reader.cjs')
     )
+    // Read Aloud's hidden engine page bridge.
+    copyFileSync(
+      resolve(projectDirectory, 'src/preload/read-aloud-engine.cjs'),
+      join(outputDirectory, 'read-aloud-engine.cjs')
+    )
     // jsQR (Apache-2.0): the QR fallback for Bramble's Join a device "Scan QR" where Chromium has no
     // BarcodeDetector. Staged into Bramble's folder and only loaded on a first scan (bramble-qr-join-page.cjs).
     const jsqrSource = readFileSync(resolve(projectDirectory, 'node_modules/jsqr/dist/jsQR.js'), 'utf8')
@@ -173,7 +178,9 @@ export default defineConfig({
           // Built-in PDF editor (pdf.js + pdf-lib), served from surffish-pdf://editor/ only.
           'pdf-editor': resolve(projectDirectory, 'src/renderer/pdf-editor.html'),
           // Reader view (Readability article + DOMPurify), served from surffish-reader://reader/ only.
-          reader: resolve(projectDirectory, 'src/renderer/reader.html')
+          reader: resolve(projectDirectory, 'src/renderer/reader.html'),
+          // Read Aloud's hidden engine page, served from surffish-tts://engine/ only (loads on first use).
+          'read-aloud': resolve(projectDirectory, 'src/renderer/read-aloud.html')
         }
       },
       // Three renderer surfaces each parse this bundle at launch; ship it minified.

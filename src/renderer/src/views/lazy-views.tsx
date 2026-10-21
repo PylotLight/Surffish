@@ -42,6 +42,9 @@ export const ExtensionsSettings = deferred(() => settings().then((m) => m.Extens
 export const BookmarkImportPanel = deferred(() => settings().then((m) => m.BookmarkImportPanel))
 export const SitesSettings = deferred(() => settings().then((m) => m.SitesSettings))
 
+// Settings → Integrations → Read Aloud: its own chunk (download progress, voice tester, voice list).
+export const ReadAloudSettings = deferred(() => import('./settings/ReadAloudSettings').then((m) => m.ReadAloudSettings))
+
 export const DownloadsPanel = deferred(() => import('./DownloadsPanel').then((m) => m.default))
 export const NetworkView = deferred(() => import('./NetworkView').then((m) => m.default))
 export const DiagnosticsView = deferred(() => import('./DiagnosticsView').then((m) => m.default))

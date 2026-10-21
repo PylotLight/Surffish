@@ -12,7 +12,7 @@ import { SidebarRevealGuard } from './sidebar-reveal-guard'
 const REVEAL_WIDTH = 14
 const REVEAL_DELAY_MS = 180
 const PAGE_EXIT_DELAY_MS = 160
-const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics', 'bookmarks', 'watchers', 'feeds'])
+const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['tabs', 'history', 'settings', 'newtab', 'integrations', 'network', 'site', 'downloads', 'privacy', 'diagnostics', 'bookmarks', 'watchers', 'feeds', 'readaloud'])
 
 const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: 'tabs',
@@ -396,7 +396,7 @@ export function getBrowserChromeState(window?: BaseWindow | null): BrowserChrome
  * mode: a request for one (old callers, the palette, a renderer) is handed to browser.ts, which
  * focuses or opens that tab. The sidebar mode then stays whatever it was (tabs).
  */
-const SETTINGS_TAB_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['settings', 'newtab', 'integrations', 'network', 'site', 'privacy', 'diagnostics', 'watchers', 'feeds'])
+const SETTINGS_TAB_MODES: ReadonlySet<BrowserSidebarMode> = new Set(['settings', 'newtab', 'integrations', 'network', 'site', 'privacy', 'diagnostics', 'watchers', 'feeds', 'readaloud'])
 let settingsSectionOpener: ((section: BrowserSidebarMode, window: BaseWindow) => void) | null = null
 
 export function setSettingsSectionOpener(open: (section: BrowserSidebarMode, window: BaseWindow) => void): void {
