@@ -663,6 +663,18 @@ async function run() {
   await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
   await waitFor(async () => (await state()).status === 'idle', 'stop the PDF reading')
 
+  // The same PDF open in the PDF editor reads too.
+  assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("pdf.toggleEditor")'), true)
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).pdf === 'editor', 'the PDF editor')
+  assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("readAloud.page")'), true)
+  const fromEditor = await waitFor(async () => { const value = await state(); return (value.status === 'playing' || value.status === 'error') && value }, 'reading from the PDF editor', smoke.waitMs * 2)
+  assert.equal(fromEditor.status, 'playing', `reading from the PDF editor started (${fromEditor.error})`)
+  assert.equal(fromEditor.total, PDF_SENTENCES.length)
+  await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
+  await waitFor(async () => (await state()).status === 'idle', 'stop the PDF editor reading')
+  await evaluate(toolbar, 'window.api.browser.commands.run("pdf.toggleEditor")')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).pdf === 'viewer', 'back to the PDF viewer')
+
   await openPdf('/scanned.pdf')
   assert.equal(await evaluate(toolbar, 'window.api.browser.commands.run("readAloud.page")'), true)
   const scanned = await waitFor(async () => { const value = await state(); return value.status === 'error' && value }, 'the no-text error for a scanned PDF', smoke.waitMs * 2)
