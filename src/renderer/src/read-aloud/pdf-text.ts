@@ -21,7 +21,6 @@ export interface PdfText extends PdfReadingText {
 export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
   const task = pdfjsLib.getDocument({
     data: bytes,
-    isEvalSupported: false,
     disableFontFace: true,
     useSystemFonts: false,
     enableXfa: false,
@@ -57,6 +56,6 @@ export async function extractPdfText(bytes: Uint8Array): Promise<PdfText> {
     }
     return { ...pdfReadingText(pages), title, pages: document.numPages }
   } finally {
-    await document.destroy().catch(() => undefined)
+    await task.destroy().catch(() => undefined)
   }
 }
