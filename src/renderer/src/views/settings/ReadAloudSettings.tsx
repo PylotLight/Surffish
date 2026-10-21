@@ -1,19 +1,15 @@
 import { useEffect, useState } from 'react'
 import {
-  downloadPercent,
   IDLE_READ_ALOUD_DOWNLOAD,
   IDLE_READ_ALOUD_TEST,
-  isReadAloudDownloadBusy,
-  READ_ALOUD_SAMPLE_TEXT,
   READ_ALOUD_SPEEDS,
-  READ_ALOUD_TEST_MAX_CHARS,
-  realtimeFactor,
   type ReadAloudDownloadState,
   type ReadAloudEngineId,
   type ReadAloudSettings as Settings,
   type ReadAloudTestState
 } from '../../../../shared/read-aloud'
 import { firstUseDownloadBytes, formatDownloadSize, READ_ALOUD_VOICES } from '../../../../shared/read-aloud-assets'
+import { downloadPercent, isReadAloudDownloadBusy, READ_ALOUD_SAMPLE_TEXT, READ_ALOUD_TEST_MAX_CHARS, realtimeFactor } from '../../../../shared/read-aloud-tester'
 import { SettingsGroup, SettingsRow } from './SettingsControls'
 import './ReadAloudSettings.css'
 

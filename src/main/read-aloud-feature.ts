@@ -8,7 +8,6 @@ import {
   IDLE_READ_ALOUD_TEST,
   isReadAloudControl,
   parseReadAloudSettings,
-  parseReadAloudTestRequest,
   READ_ALOUD_DIRECTORY,
   READ_ALOUD_DISABLED_ERROR,
   READ_ALOUD_READY_FILE,
@@ -188,12 +187,9 @@ export function registerReadAloudIpc(): void {
   ipcMain.handle('browser:read-aloud:test', async (event, input: unknown) => {
     if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
     if (!readAloudEnabled()) return { ok: false, error: READ_ALOUD_DISABLED_ERROR }
-    const request = parseReadAloudTestRequest(input, current())
-    if (!request) return { ok: false, error: 'bad request' }
     const loaded = await loadModule()
     if (!readAloudEnabled()) return { ok: false, error: READ_ALOUD_DISABLED_ERROR }
-    void loaded.testReadAloud(request, current())
-    return { ok: true }
+    return loaded.testReadAloud(input, current())
   })
   ipcMain.handle('browser:read-aloud:test-stop', (event) => {
     if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')

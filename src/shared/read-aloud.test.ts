@@ -6,17 +6,11 @@ import {
   isLoopbackSpeechEndpoint,
   isReadAloudActive,
   isReadAloudControl,
-  downloadPercent,
-  isReadAloudDownloadBusy,
-  mergeTestStats,
   nearestSpeed,
   parseReadAloudSettings,
-  parseReadAloudTestRequest,
-  READ_ALOUD_SAMPLE_TEXT,
-  READ_ALOUD_TEST_MAX_CHARS,
-  realtimeFactor,
   speechEndpointUrl
 } from './read-aloud'
+import { downloadPercent, isReadAloudDownloadBusy, mergeTestStats, parseReadAloudTestRequest, READ_ALOUD_SAMPLE_TEXT, READ_ALOUD_TEST_MAX_CHARS, realtimeFactor } from './read-aloud-tester'
 import {
   firstUseDownloadBytes,
   formatDownloadSize,

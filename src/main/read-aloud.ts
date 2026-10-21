@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url'
 import {
   IDLE_READ_ALOUD_STATE,
   IDLE_READ_ALOUD_TEST,
-  mergeTestStats,
   READ_ALOUD_MODEL_PATH,
   READ_ALOUD_PARTITION,
   READ_ALOUD_RUNTIME_PATH,
@@ -30,6 +29,7 @@ import {
   type ReadAloudManifest
 } from '../shared/read-aloud-assets'
 import { articleTextFromHtml, splitSentences } from '../shared/read-aloud-text'
+import { mergeTestStats, parseReadAloudTestRequest } from '../shared/read-aloud-tester'
 import { backgroundNetworkBlockedReason } from './background-network'
 import { getBrowserTabPageInfo, getBrowserTabRefByWebContentsId } from './browser'
 import { getBrowserSession } from './browser-session'
@@ -624,10 +624,17 @@ function onTestEvent(event: Extract<EngineEvent, { type: 'state' }>): void {
 }
 
 /**
- * Speak `request.text` with its engine, voice and speed (the tester's Play). Stops a reading or an
+ * The tester's Play: speak the sample with its engine, voice and speed. Stops a reading or an
  * earlier test first. Phonon fetches the model / voice if needed (progress in Settings).
  */
-export async function testReadAloud(request: ReadAloudTestRequest, current: ReadAloudSettings): Promise<boolean> {
+export function testReadAloud(input: unknown, current: ReadAloudSettings): { ok: boolean; error?: string } {
+  const request = parseReadAloudTestRequest(input, current)
+  if (!request) return { ok: false, error: 'bad request' }
+  void runTest(request, current)
+  return { ok: true }
+}
+
+async function runTest(request: ReadAloudTestRequest, current: ReadAloudSettings): Promise<boolean> {
   settings = current
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
