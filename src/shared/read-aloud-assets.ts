@@ -1,7 +1,7 @@
 /**
  * Read Aloud downloads: the pinned Phonon runtime (official `phonon-tts` npm package), the Phonon 31M
  * English model and its voices, each checked against the hash below before use. Only the read-aloud
- * module and the Settings chunk import this, so none of it is parsed at launch.
+ * module and the Read Aloud settings chunk import this, so none of it is parsed at launch.
  */
 import { nearestSpeed } from './read-aloud'
 
@@ -88,19 +88,16 @@ export const PHONON_MODEL_ASSETS: readonly ReadAloudAsset[] = [
   { label: 'Default voice', url: READ_ALOUD_VOICES[0]!.url, file: `model/${READ_ALOUD_VOICES[0]!.file}`, bytes: 256136, sha256: READ_ALOUD_VOICES[0]!.sha256 }
 ]
 
-export function voiceAsset(voice: ReadAloudVoice): ReadAloudAsset {
-  return { label: `Voice: ${voice.name}`, url: voice.url, file: `model/${voice.file}`, bytes: voice.bytes, sha256: voice.sha256 }
-}
-
 /** Bytes the first Read Aloud downloads (runtime + model + default voice). */
 export function firstUseDownloadBytes(): number {
   return PHONON_RUNTIME.bytes + PHONON_MODEL_ASSETS.reduce((sum, asset) => sum + asset.bytes, 0)
 }
 
+/** Decimal units, like Finder: the model download is "71 MB". */
 export function formatDownloadSize(bytes: number): string {
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`
-  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${bytes} B`
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(bytes >= 10_000_000 ? 0 : 1)} MB`
+  if (bytes >= 1000) return `${Math.round(bytes / 1000)} KB`
+  return `${Math.max(0, Math.round(bytes))} B`
 }
 
 /**
@@ -110,4 +107,55 @@ export function formatDownloadSize(bytes: number): string {
 export function speedToDurationDelta(speed: number): number {
   const delta = (1 - nearestSpeed(speed)) * 0.6
   return Math.round(Math.min(0.3, Math.max(-0.4, delta)) * 1000) / 1000
+}
+
+/** Everything the model download fetches, in one place (main can swap it for a smoke-test manifest). */
+export interface ReadAloudManifest {
+  runtimeVersion: string
+  runtime: ReadAloudAsset
+  model: readonly ReadAloudAsset[]
+  voices: readonly ReadAloudVoice[]
+  /** Folder under the read-aloud folder the model files (and voices/) live in. */
+  modelFolder: string
+}
+
+export const PHONON_MANIFEST: ReadAloudManifest = {
+  runtimeVersion: PHONON_RUNTIME_VERSION,
+  runtime: PHONON_RUNTIME,
+  model: PHONON_MODEL_ASSETS,
+  voices: READ_ALOUD_VOICES,
+  modelFolder: 'model'
+}
+
+function testAsset(value: unknown, file: string): ReadAloudAsset | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as Record<string, unknown>
+  if (typeof raw.url !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+\//.test(raw.url)) return null
+  if (typeof raw.bytes !== 'number' || !(raw.bytes > 0)) return null
+  const asset: ReadAloudAsset = { label: typeof raw.label === 'string' ? raw.label : file, url: raw.url, file, bytes: raw.bytes }
+  if (typeof raw.integrity === 'string') asset.integrity = raw.integrity
+  else if (typeof raw.sha256 === 'string' && /^[0-9a-f]{64}$/.test(raw.sha256)) asset.sha256 = raw.sha256
+  else return null
+  return asset
+}
+
+/**
+ * Smoke tests only (main honors it in unpackaged runs): the same files, served by the smoke's own
+ * 127.0.0.1 server with their own hashes, so CI exercises progress, cancel, retry and the cache
+ * without the 71 MB download. Anything malformed or pointing elsewhere is refused (null).
+ */
+export function parseReadAloudTestManifest(value: unknown): ReadAloudManifest | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as Record<string, unknown>
+  const runtime = testAsset(raw.runtime, `phonon-tts-test.tgz`)
+  if (!runtime || !runtime.integrity) return null
+  const names = ['model.q8.gguf', 'tokenizer.json', 'config.json', 'default-voice.safetensors'] as const
+  const files = typeof raw.model === 'object' && raw.model !== null ? raw.model as Record<string, unknown> : {}
+  const model: ReadAloudAsset[] = []
+  for (const name of names) {
+    const asset = testAsset(files[name], `model/${name}`)
+    if (!asset || !asset.sha256) return null
+    model.push(asset)
+  }
+  return { runtimeVersion: 'test', runtime, model, voices: [{ ...READ_ALOUD_VOICES[0]!, sha256: model[3]!.sha256!, url: model[3]!.url, bytes: model[3]!.bytes }], modelFolder: 'model' }
 }

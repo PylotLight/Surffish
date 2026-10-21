@@ -1,28 +1,35 @@
 import { app, ipcMain, type IpcMainInvokeEvent, type WebContents, type CustomScheme } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  IDLE_READ_ALOUD_DOWNLOAD,
   IDLE_READ_ALOUD_STATE,
+  IDLE_READ_ALOUD_TEST,
   isReadAloudControl,
   parseReadAloudSettings,
+  parseReadAloudTestRequest,
   READ_ALOUD_DIRECTORY,
   READ_ALOUD_DISABLED_ERROR,
   READ_ALOUD_READY_FILE,
   READ_ALOUD_SCHEME,
   READ_ALOUD_SETTINGS_FILE,
   type ReadAloudControl,
+  type ReadAloudDownloadState,
   type ReadAloudSettings,
-  type ReadAloudState
+  type ReadAloudState,
+  type ReadAloudTestState
 } from '../shared/read-aloud'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeSettingsFile } from './user-json'
 
 /**
- * "Enable Read Aloud" gate (Settings → Features, experimental, off by default). This file is all main
- * loads for Read Aloud at launch: read-aloud.ts (downloads, the hidden engine page, playback) is
- * imported on the first "Read Aloud" and never while the feature is off. Turning it off stops any
- * reading and closes the engine page; downloaded files stay in the profile for next time.
+ * "Enable Read Aloud" gate (Settings → Integrations → Read Aloud, experimental, off by default). This
+ * file is all main loads for Read Aloud at launch: read-aloud.ts (downloads, the hidden engine page,
+ * playback, the voice tester) is imported when the feature is turned on (which starts the model
+ * download), on the first "Read Aloud" or test, and never while the feature is off. Turning it off
+ * stops any reading or download and closes the engine page; downloaded files stay in the profile
+ * until Delete download.
  */
 type ReadAloudModule = typeof import('./read-aloud')
 
@@ -74,8 +81,12 @@ export function setReadAloudSettings(input: unknown): ReadAloudSettings {
   writeSettingsFile(READ_ALOUD_SETTINGS_FILE, next)
   if (before.enabled && !next.enabled) {
     module?.disposeReadAloud()
-  } else if (next.enabled && module) {
-    module.applyReadAloudSettings(next)
+  } else if (next.enabled) {
+    // On (or switched to Phonon): download the model now, so the first reading starts right away.
+    const wantsModel = next.engine === 'phonon' && (!before.enabled || before.engine !== 'phonon')
+    if (wantsModel) void loadModule().then((loaded) => { if (readAloudEnabled()) loaded.prepareReadAloud() })
+    else if (next.engine === 'phonon' && next.voice !== before.voice) void loadModule().then((loaded) => { if (readAloudEnabled()) loaded.prefetchReadAloudVoice(next.voice) })
+    module?.applyReadAloudSettings(next)
   }
   try { sendToMainWindowRenderers('browser:read-aloud:settings-changed', { ...next }) } catch { /* window closing */ }
   return { ...next }
@@ -106,9 +117,32 @@ export function readAloudDirectory(): string {
   return join(app.getPath('userData'), READ_ALOUD_DIRECTORY)
 }
 
-/** The runtime and model were downloaded and checked (read-aloud.ts writes the marker last). */
-export function readAloudDownloaded(): boolean {
-  return existsSync(join(readAloudDirectory(), READ_ALOUD_READY_FILE))
+/**
+ * The download as the folder shows it, without loading read-aloud.ts (Settings while the feature is
+ * off, or before anything ran this session). ready.json is written last, after every hash matched.
+ */
+function diskDownloadState(): ReadAloudDownloadState {
+  const directory = readAloudDirectory()
+  let bytes = 0
+  let ready = false
+  try {
+    const marker = JSON.parse(readFileSync(join(directory, READ_ALOUD_READY_FILE), 'utf8')) as { bytes?: unknown }
+    ready = true
+    bytes = typeof marker.bytes === 'number' ? marker.bytes : 0
+  } catch { /* not downloaded */ }
+  let voices: string[] = []
+  try {
+    voices = readdirSync(join(directory, 'model', 'voices')).filter((name) => name.endsWith('.safetensors')).map((name) => name.slice(0, -'.safetensors'.length))
+  } catch { /* none */ }
+  return { ...IDLE_READ_ALOUD_DOWNLOAD, status: ready ? 'ready' : existsSync(directory) ? 'partial' : 'absent', bytes, voices: ready ? ['default', ...voices] : voices }
+}
+
+export function getReadAloudDownloadState(): ReadAloudDownloadState {
+  return module?.readAloudDownloadState() ?? diskDownloadState()
+}
+
+export function getReadAloudTestState(): ReadAloudTestState {
+  return module?.readAloudTestState() ?? { ...IDLE_READ_ALOUD_TEST }
 }
 
 function fromAppWindow(event: IpcMainInvokeEvent): boolean {
@@ -129,11 +163,41 @@ export function registerReadAloudIpc(): void {
     controlReadAloud(action)
     return { ok: true }
   })
-  ipcMain.handle('browser:read-aloud:download-info', () => ({ downloaded: readAloudDownloaded() }))
+  ipcMain.handle('browser:read-aloud:download-info', () => getReadAloudDownloadState())
+  ipcMain.handle('browser:read-aloud:download-start', async (event) => {
+    if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
+    if (!readAloudEnabled()) return getReadAloudDownloadState()
+    const loaded = await loadModule()
+    if (readAloudEnabled()) loaded.prepareReadAloud()
+    return getReadAloudDownloadState()
+  })
+  ipcMain.handle('browser:read-aloud:download-cancel', (event) => {
+    if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
+    module?.cancelReadAloudDownload()
+    return getReadAloudDownloadState()
+  })
   ipcMain.handle('browser:read-aloud:delete-downloads', async (event) => {
     if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
-    module?.disposeReadAloud()
+    if (module) return module.deleteReadAloudDownloads()
     await rm(readAloudDirectory(), { recursive: true, force: true }).catch(() => undefined)
-    return { downloaded: readAloudDownloaded() }
+    const state = diskDownloadState()
+    try { sendToMainWindowRenderers('browser:read-aloud:download', state) } catch { /* window closing */ }
+    return state
+  })
+  ipcMain.handle('browser:read-aloud:test-state', () => getReadAloudTestState())
+  ipcMain.handle('browser:read-aloud:test', async (event, input: unknown) => {
+    if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
+    if (!readAloudEnabled()) return { ok: false, error: READ_ALOUD_DISABLED_ERROR }
+    const request = parseReadAloudTestRequest(input, current())
+    if (!request) return { ok: false, error: 'bad request' }
+    const loaded = await loadModule()
+    if (!readAloudEnabled()) return { ok: false, error: READ_ALOUD_DISABLED_ERROR }
+    void loaded.testReadAloud(request, current())
+    return { ok: true }
+  })
+  ipcMain.handle('browser:read-aloud:test-stop', (event) => {
+    if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
+    module?.stopReadAloudTest()
+    return { ok: true }
   })
 }

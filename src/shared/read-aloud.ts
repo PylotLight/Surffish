@@ -1,5 +1,5 @@
 /**
- * Read Aloud (experimental, Settings → Features, off by default): Surffish reads the article (Reader
+ * Read Aloud (experimental, Settings → Integrations → Read Aloud, off by default): Surffish reads the article (Reader
  * view's Readability extraction) or the selection out loud with Phonon, an on-device TTS model
  * (gradium/phonon-31m-en, Apache-2.0) running as WebAssembly in a hidden engine page. Nothing is
  * bundled: the first use downloads the official `phonon-tts` npm package and the model weights into
@@ -147,4 +147,113 @@ export function isReadAloudControl(value: unknown): value is ReadAloudControl {
 /** A reading in progress (anything but idle/error) keeps the toolbar control on screen. */
 export function isReadAloudActive(state: Pick<ReadAloudState, 'status'>): boolean {
   return state.status === 'downloading' || state.status === 'loading' || state.status === 'playing' || state.status === 'paused'
+}
+
+// ---------------------------------------------------------------------------
+// Model download (Settings → Integrations → Read Aloud). Turning Read Aloud on starts it; the files
+// stay in the profile across restarts (re-checked against their hashes once per session, never
+// re-downloaded when they match) and when the feature is turned off, until Delete download.
+
+export type ReadAloudDownloadStatus = 'absent' | 'partial' | 'checking' | 'downloading' | 'ready' | 'error' | 'cancelled'
+
+export interface ReadAloudDownloadState {
+  status: ReadAloudDownloadStatus
+  /** The file being fetched ('Model weights', …) while downloading. */
+  label: string
+  /** Bytes fetched / to fetch in this download (only the files that were missing). */
+  loaded: number
+  total: number
+  /** The whole model download's size (runtime + weights + tokenizer + config + default voice). */
+  bytes: number
+  error: string
+  /** Phonon voices already in the profile (ids; 'default' comes with the model). */
+  voices: string[]
+  /** A voice being fetched on its own (~250 KB), picked in the tester or the player. */
+  voice: { id: string; loaded: number; total: number } | null
+}
+
+export const IDLE_READ_ALOUD_DOWNLOAD: ReadAloudDownloadState = {
+  status: 'absent', label: '', loaded: 0, total: 0, bytes: 0, error: '', voices: [], voice: null
+}
+
+/** Whole percent, 0–100 (0 while the total is unknown). */
+export function downloadPercent(loaded: number, total: number): number {
+  if (!(total > 0) || !(loaded > 0)) return 0
+  return Math.max(0, Math.min(100, Math.floor((loaded / total) * 100)))
+}
+
+export function isReadAloudDownloadBusy(state: Pick<ReadAloudDownloadState, 'status'>): boolean {
+  return state.status === 'checking' || state.status === 'downloading'
+}
+
+// ---------------------------------------------------------------------------
+// Voice tester (Settings → Integrations → Read Aloud): speak a sample with an engine, voice and
+// speed, and show how long it took, so voices and speeds can be compared on this Mac.
+
+export const READ_ALOUD_SAMPLE_TEXT = 'Surffish can read articles out loud, right here on this Mac. This is how the voice sounds at this speed.'
+export const READ_ALOUD_TEST_MAX_CHARS = 600
+
+export interface ReadAloudTestRequest {
+  text: string
+  engine: ReadAloudEngineId
+  voice: string
+  speed: number
+}
+
+/** A tester request from a renderer, or null. Empty text speaks the default sample. */
+export function parseReadAloudTestRequest(value: unknown, fallback: ReadAloudSettings = DEFAULT_READ_ALOUD_SETTINGS): ReadAloudTestRequest | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as Record<string, unknown>
+  const text = (typeof raw.text === 'string' ? raw.text : '').replace(/\s+/g, ' ').trim().slice(0, READ_ALOUD_TEST_MAX_CHARS) || READ_ALOUD_SAMPLE_TEXT
+  const engine = READ_ALOUD_ENGINES.includes(raw.engine as ReadAloudEngineId) ? (raw.engine as ReadAloudEngineId) : fallback.engine
+  const voice = typeof raw.voice === 'string' && /^[\w-]{1,40}$/.test(raw.voice) ? raw.voice : fallback.voice
+  return { text, engine, voice, speed: raw.speed === undefined ? fallback.speed : nearestSpeed(raw.speed, fallback.speed) }
+}
+
+export type ReadAloudTestStatus = 'idle' | 'preparing' | 'loading' | 'playing' | 'finished' | 'error'
+
+export interface ReadAloudTestStats {
+  /** Engine start: Phonon model load (0-ish when already loaded: `cold` false), system voice list. */
+  loadMs: number | null
+  cold: boolean
+  /** From Play to the first sound. */
+  firstAudioMs: number | null
+  /** Audio produced and the time spent producing it (Phonon / local server). */
+  audioSeconds: number | null
+  generateMs: number | null
+  threads: number | null
+}
+
+export interface ReadAloudTestState {
+  status: ReadAloudTestStatus
+  engine: ReadAloudEngineId | null
+  voice: string
+  speed: number
+  stats: ReadAloudTestStats | null
+  error: string
+  fallbackReason: string
+}
+
+export const IDLE_READ_ALOUD_TEST: ReadAloudTestState = { status: 'idle', engine: null, voice: 'default', speed: 1, stats: null, error: '', fallbackReason: '' }
+
+/** Seconds of compute per second of audio (below 1 is faster than real time), or null. */
+export function realtimeFactor(stats: Pick<ReadAloudTestStats, 'generateMs' | 'audioSeconds'> | null): number | null {
+  if (!stats || stats.generateMs === null || stats.audioSeconds === null || !(stats.audioSeconds > 0) || !(stats.generateMs >= 0)) return null
+  return Math.round((stats.generateMs / 1000 / stats.audioSeconds) * 100) / 100
+}
+
+/** Merge a partial stats report from the engine into what the tester already has. */
+export function mergeTestStats(previous: ReadAloudTestStats | null, value: unknown): ReadAloudTestStats | null {
+  if (typeof value !== 'object' || value === null) return previous
+  const raw = value as Record<string, unknown>
+  const number = (key: string, fallback: number | null): number | null => typeof raw[key] === 'number' && Number.isFinite(raw[key]) && (raw[key] as number) >= 0 ? Math.round((raw[key] as number) * 1000) / 1000 : fallback
+  const base: ReadAloudTestStats = previous ?? { loadMs: null, cold: false, firstAudioMs: null, audioSeconds: null, generateMs: null, threads: null }
+  return {
+    loadMs: number('loadMs', base.loadMs),
+    cold: typeof raw.cold === 'boolean' ? raw.cold : base.cold,
+    firstAudioMs: number('firstAudioMs', base.firstAudioMs),
+    audioSeconds: number('audioSeconds', base.audioSeconds),
+    generateMs: number('generateMs', base.generateMs),
+    threads: number('threads', base.threads)
+  }
 }

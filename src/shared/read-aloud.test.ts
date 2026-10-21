@@ -6,14 +6,23 @@ import {
   isLoopbackSpeechEndpoint,
   isReadAloudActive,
   isReadAloudControl,
+  downloadPercent,
+  isReadAloudDownloadBusy,
+  mergeTestStats,
   nearestSpeed,
   parseReadAloudSettings,
+  parseReadAloudTestRequest,
+  READ_ALOUD_SAMPLE_TEXT,
+  READ_ALOUD_TEST_MAX_CHARS,
+  realtimeFactor,
   speechEndpointUrl
 } from './read-aloud'
 import {
   firstUseDownloadBytes,
   formatDownloadSize,
   isPhononRuntimeFile,
+  parseReadAloudTestManifest,
+  PHONON_MANIFEST,
   PHONON_MODEL_ASSETS,
   PHONON_RUNTIME,
   READ_ALOUD_VOICES,
@@ -87,10 +96,30 @@ describe('download manifest', () => {
     expect(PHONON_RUNTIME.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+=*$/)
   })
 
-  test('first use downloads 71 MB (68 MiB)', () => {
-    expect(formatDownloadSize(firstUseDownloadBytes())).toBe('68 MB')
-    expect(formatDownloadSize(256136)).toBe('250 KB')
-    expect(formatDownloadSize(5927575)).toBe('5.7 MB')
+  test('the model download is 71 MB (decimal units, like Finder)', () => {
+    expect(firstUseDownloadBytes()).toBe(70976881)
+    expect(formatDownloadSize(firstUseDownloadBytes())).toBe('71 MB')
+    expect(formatDownloadSize(256136)).toBe('256 KB')
+    expect(formatDownloadSize(5927575)).toBe('5.9 MB')
+    expect(formatDownloadSize(0)).toBe('0 B')
+  })
+
+  test('the manifest bundles the pinned files', () => {
+    expect(PHONON_MANIFEST.runtime).toBe(PHONON_RUNTIME)
+    expect(PHONON_MANIFEST.model).toBe(PHONON_MODEL_ASSETS)
+    expect(PHONON_MANIFEST.modelFolder).toBe('model')
+  })
+
+  test('smoke manifest: loopback fixtures with their own hashes only', () => {
+    const sha = 'a'.repeat(64)
+    const file = (name: string) => ({ url: `http://127.0.0.1:4000/${name}`, bytes: 10, sha256: sha })
+    const valid = { runtime: { url: 'http://127.0.0.1:4000/rt.tgz', bytes: 100, integrity: 'sha512-abc=' }, model: { 'model.q8.gguf': file('m'), 'tokenizer.json': file('t'), 'config.json': file('c'), 'default-voice.safetensors': file('v') } }
+    const parsed = parseReadAloudTestManifest(valid)
+    expect(parsed?.model.map((asset) => asset.file)).toEqual(['model/model.q8.gguf', 'model/tokenizer.json', 'model/config.json', 'model/default-voice.safetensors'])
+    expect(parsed?.voices.map((voice) => voice.id)).toEqual(['default'])
+    expect(parseReadAloudTestManifest({ ...valid, runtime: { ...valid.runtime, url: 'https://evil.example/rt.tgz' } })).toBeNull()
+    expect(parseReadAloudTestManifest({ ...valid, model: { ...valid.model, 'config.json': { ...file('c'), sha256: 'nope' } } })).toBeNull()
+    expect(parseReadAloudTestManifest(null)).toBeNull()
   })
 
   test('unpacks only the JS and the Relaxed SIMD wasm builds, never paths outside the folder', () => {
@@ -105,6 +134,43 @@ describe('download manifest', () => {
   test('voices: unknown ids fall back to the model voice', () => {
     expect(readAloudVoice('nope').id).toBe('default')
     expect(readAloudVoice('GgfEkEJtxZR7gnpy').name).toBe('Freya')
+  })
+})
+
+describe('download state', () => {
+  test('percent is whole, clamped and 0 while the total is unknown', () => {
+    expect(downloadPercent(0, 0)).toBe(0)
+    expect(downloadPercent(50, 0)).toBe(0)
+    expect(downloadPercent(35_488_440, 70_976_881)).toBe(49)
+    expect(downloadPercent(80, 70)).toBe(100)
+  })
+  test('checking and downloading are busy (Cancel shows)', () => {
+    expect(isReadAloudDownloadBusy({ status: 'downloading' })).toBe(true)
+    expect(isReadAloudDownloadBusy({ status: 'checking' })).toBe(true)
+    expect(isReadAloudDownloadBusy({ status: 'ready' })).toBe(false)
+    expect(isReadAloudDownloadBusy({ status: 'error' })).toBe(false)
+  })
+})
+
+describe('voice tester', () => {
+  test('requests: empty text speaks the sample, long text is capped, bad fields fall back', () => {
+    expect(parseReadAloudTestRequest({ text: '   ' })).toEqual({ text: READ_ALOUD_SAMPLE_TEXT, engine: 'phonon', voice: 'default', speed: 1 })
+    expect(parseReadAloudTestRequest({ text: 'x'.repeat(5000), engine: 'system', voice: 'GgfEkEJtxZR7gnpy', speed: 1.45 })).toEqual({ text: 'x'.repeat(READ_ALOUD_TEST_MAX_CHARS), engine: 'system', voice: 'GgfEkEJtxZR7gnpy', speed: 1.5 })
+    expect(parseReadAloudTestRequest({ engine: 'shell', voice: '../x' })).toMatchObject({ engine: 'phonon', voice: 'default' })
+    expect(parseReadAloudTestRequest('nope')).toBeNull()
+  })
+  test('real-time factor: compute seconds per audio second', () => {
+    expect(realtimeFactor({ generateMs: 853, audioSeconds: 4.08 })).toBe(0.21)
+    expect(realtimeFactor({ generateMs: null, audioSeconds: 4 })).toBeNull()
+    expect(realtimeFactor({ generateMs: 100, audioSeconds: 0 })).toBeNull()
+    expect(realtimeFactor(null)).toBeNull()
+  })
+  test('stats merge first-audio and final reports, ignoring junk', () => {
+    const first = mergeTestStats(null, { loadMs: 987, cold: true, firstAudioMs: 100, threads: 2, device: 'wasm' })
+    expect(first).toEqual({ loadMs: 987, cold: true, firstAudioMs: 100, audioSeconds: null, generateMs: null, threads: 2 })
+    const final = mergeTestStats(first, { generateMs: 853, audioSeconds: 4.08, loadMs: -5, firstAudioMs: 'x' })
+    expect(final).toEqual({ loadMs: 987, cold: true, firstAudioMs: 100, audioSeconds: 4.08, generateMs: 853, threads: 2 })
+    expect(mergeTestStats(first, null)).toBe(first)
   })
 })
 

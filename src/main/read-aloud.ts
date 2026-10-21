@@ -1,33 +1,33 @@
 import { app, BrowserWindow, net, session, type Session, type WebContents } from 'electron'
-import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   IDLE_READ_ALOUD_STATE,
+  IDLE_READ_ALOUD_TEST,
+  mergeTestStats,
   READ_ALOUD_MODEL_PATH,
   READ_ALOUD_PARTITION,
-  READ_ALOUD_READY_FILE,
   READ_ALOUD_RUNTIME_PATH,
   READ_ALOUD_SCHEME,
   READ_ALOUD_URL,
   speechEndpointUrl,
   type ReadAloudControl,
+  type ReadAloudDownloadState,
   type ReadAloudEngineId,
   type ReadAloudSettings,
   type ReadAloudState,
-  type ReadAloudStatus
+  type ReadAloudStatus,
+  type ReadAloudTestRequest,
+  type ReadAloudTestState
 } from '../shared/read-aloud'
 import {
-  isPhononRuntimeFile,
-  PHONON_MODEL_ASSETS,
-  PHONON_RUNTIME,
-  PHONON_RUNTIME_VERSION,
+  parseReadAloudTestManifest,
+  PHONON_MANIFEST,
   readAloudVoice,
   speedToDurationDelta,
-  voiceAsset,
-  type ReadAloudAsset
+  type ReadAloudManifest
 } from '../shared/read-aloud-assets'
 import { articleTextFromHtml, splitSentences } from '../shared/read-aloud-text'
 import { backgroundNetworkBlockedReason } from './background-network'
@@ -37,7 +37,7 @@ import { sendToMainWindowRenderers } from './browser-shell'
 import { isShowingPdf } from './pdf-viewer'
 import { extractReaderArticle, readerArticleFor, readerViewFor } from './reader-mode'
 import { readAloudDirectory } from './read-aloud-feature'
-import { matchesIntegrity, readTarGz } from './read-aloud-tar'
+import { createReadAloudDownloads, ReadAloudDownloadCancelled } from './read-aloud-downloads'
 import { browserWindows, onBrowserWindowsChanged } from './window-scope'
 
 /**
@@ -47,11 +47,13 @@ import { browserWindows, onBrowserWindowsChanged } from './window-scope'
  * sentences here. Speech: a hidden, never-shown window on its own in-memory session runs the engine
  * page (src/renderer/src/read-aloud/engine.ts) on surffish-tts://engine/. Its session serves only
  * its own files: the page, the official `phonon-tts` runtime and the Phonon 31M model, both
- * downloaded once into <userData>/read-aloud and checked against pinned hashes, never bundled. The
+ * downloaded once into <userData>/read-aloud (read-aloud-downloads.ts: started when Read Aloud is
+ * turned on, re-checked against the pinned hashes once per run), never bundled. The
  * page is cross-origin isolated (COOP/COEP), so Phonon's WebAssembly runs multi-threaded; audio plays
  * there through Web Audio, with a Media Session so hardware media keys and Now Playing work.
  *
- * One reading at a time, app-wide. It stops when its tab navigates or closes, or Read Aloud is
+ * Settings' voice tester speaks a sample through the same engine page and reports load time,
+ * time to first audio and the real-time factor. One reading (or test) at a time, app-wide. It stops when its tab navigates or closes, or Read Aloud is
  * turned off. The engine window closes a while after the last reading, freeing the model's memory.
  * Nothing about the text is stored.
  */
@@ -84,15 +86,18 @@ let engineReady: Promise<BrowserWindow> | null = null
 let markEngineReady: (() => void) | null = null
 let engineSession: Session | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
-let downloading: Promise<void> | null = null
-let downloadAbort: AbortController | null = null
+let test: { token: number; request: ReadAloudTestRequest } | null = null
+let testState: ReadAloudTestState = { ...IDLE_READ_ALOUD_TEST }
 
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
 
 // The hidden engine window counts as a window to Electron: with it open, closing the last browser
 // window wouldn't quit the app on Windows/Linux. Close it with the last browser window.
 onBrowserWindowsChanged(() => {
-  if (browserWindows().length === 0 && engine && !reading) closeEngine()
+  if (browserWindows().length === 0 && engine && !reading) {
+    stopTest()
+    closeEngine()
+  }
 })
 
 export function readAloudState(): ReadAloudState {
@@ -104,125 +109,80 @@ function publish(patch: Partial<ReadAloudState>): void {
   try { sendToMainWindowRenderers('browser:read-aloud:state', readAloudState()) } catch { /* window closing */ }
 }
 
-function runtimeDirectory(): string {
-  return join(readAloudDirectory(), 'runtime', `phonon-tts-${PHONON_RUNTIME_VERSION}`)
-}
-
-// ---------------------------------------------------------------------------
-// Downloads
-
-async function fileHasSize(path: string, bytes: number): Promise<boolean> {
-  try {
-    return (await stat(path)).size === bytes
-  } catch {
-    return false
-  }
-}
-
-/** Stream `asset` to disk with progress, checking its sha256 before it replaces anything. */
-async function downloadAsset(asset: ReadAloudAsset, onBytes: (count: number) => void, signal: AbortSignal): Promise<Uint8Array | null> {
-  const blocked = backgroundNetworkBlockedReason()
-  if (blocked) throw new Error(blocked)
-  const response = await getBrowserSession().fetch(asset.url, { redirect: 'follow', credentials: 'omit', signal } as RequestInit)
-  if (!response.ok || !response.body) throw new Error(`${asset.label}: download failed (HTTP ${response.status})`)
-  const hash = createHash(asset.integrity ? 'sha512' : 'sha256')
-  const keepInMemory = Boolean(asset.integrity)
-  const chunks: Uint8Array[] = []
-  const target = join(readAloudDirectory(), asset.file)
-  const partial = `${target}.partial`
-  await mkdir(dirname(target), { recursive: true })
-  const handle = keepInMemory ? null : await open(partial, 'w')
-  let received = 0
-  try {
-    const reader = response.body.getReader()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      received += value.byteLength
-      if (received > asset.bytes * 1.1 + 1024) throw new Error(`${asset.label}: larger than expected`)
-      hash.update(value)
-      if (handle) await handle.write(value)
-      else chunks.push(value)
-      onBytes(value.byteLength)
+/**
+ * The download manifest: the pinned Phonon files, or in an unpackaged smoke run, the smoke's own
+ * small fixture files on 127.0.0.1 (SURFFISH_READ_ALOUD_TEST_MANIFEST, a JSON file path).
+ */
+let manifest: ReadAloudManifest | null = null
+function readAloudManifest(): ReadAloudManifest {
+  if (manifest) return manifest
+  const testPath = !app.isPackaged ? process.env['SURFFISH_READ_ALOUD_TEST_MANIFEST'] : undefined
+  if (testPath) {
+    try {
+      manifest = parseReadAloudTestManifest(JSON.parse(readFileSync(testPath, 'utf8')))
+    } catch (error) {
+      console.warn('[read aloud] test manifest ignored:', error)
     }
-  } finally {
-    await handle?.close()
   }
-  if (asset.integrity) {
-    const bytes = Buffer.concat(chunks)
-    if (!matchesIntegrity(bytes, asset.integrity)) throw new Error(`${asset.label}: checksum mismatch`)
-    return bytes
-  }
-  if (hash.digest('hex') !== asset.sha256) {
-    await rm(partial, { force: true })
-    throw new Error(`${asset.label}: checksum mismatch`)
-  }
-  await rename(partial, target)
-  return null
+  manifest ??= PHONON_MANIFEST
+  return manifest
 }
 
-/** What the first reading (or a new voice) still needs. */
-async function missingAssets(voiceId: string): Promise<{ runtime: boolean; files: ReadAloudAsset[] }> {
-  const runtime = !existsSync(join(runtimeDirectory(), '.complete'))
-  const wanted = [...PHONON_MODEL_ASSETS]
-  const voice = readAloudVoice(voiceId)
-  if (voice.id !== 'default') wanted.push(voiceAsset(voice))
-  const files: ReadAloudAsset[] = []
-  for (const asset of wanted) if (!(await fileHasSize(join(readAloudDirectory(), asset.file), asset.bytes))) files.push(asset)
-  return { runtime, files }
-}
+const downloads = createReadAloudDownloads({
+  directory: readAloudDirectory,
+  fetch: (url, init) => getBrowserSession().fetch(url, init),
+  manifest: readAloudManifest,
+  blockedReason: backgroundNetworkBlockedReason,
+  timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  onState: onDownloadState
+})
 
-async function ensureDownloads(voiceId: string): Promise<void> {
-  const missing = await missingAssets(voiceId)
-  if (!missing.runtime && missing.files.length === 0) return
-  const total = (missing.runtime ? PHONON_RUNTIME.bytes : 0) + missing.files.reduce((sum, asset) => sum + asset.bytes, 0)
-  let loaded = 0
-  let lastPublish = 0
-  const abort = new AbortController()
-  downloadAbort = abort
-  const timeout = setTimeout(() => abort.abort(), DOWNLOAD_TIMEOUT_MS)
-  const progress = (label: string) => (count: number): void => {
-    loaded += count
-    const now = Date.now()
-    if (now - lastPublish < 150 && loaded < total) return
-    lastPublish = now
-    publish({ status: 'downloading', download: { label, loaded: Math.min(loaded, total), total } })
-  }
-  try {
-    publish({ status: 'downloading', download: { label: 'Preparing', loaded: 0, total } })
-    if (missing.runtime) {
-      const tarball = await downloadAsset(PHONON_RUNTIME, progress(PHONON_RUNTIME.label), abort.signal)
-      if (!tarball) throw new Error('Phonon runtime: empty download')
-      const files = readTarGz(tarball, isPhononRuntimeFile)
-      if (!files.some((file) => file.path === 'index.js') || !files.some((file) => file.path === 'worker.js')) throw new Error('Phonon runtime: unexpected package layout')
-      const root = runtimeDirectory()
-      await rm(root, { recursive: true, force: true })
-      for (const file of files) {
-        const target = resolve(root, file.path)
-        if (!target.startsWith(root + sep)) continue
-        await mkdir(dirname(target), { recursive: true })
-        await writeFile(target, file.data)
-      }
-      await writeFile(join(root, '.complete'), PHONON_RUNTIME.integrity ?? '')
-    }
-    for (const asset of missing.files) await downloadAsset(asset, progress(asset.label), abort.signal)
-    await writeFile(join(readAloudDirectory(), READ_ALOUD_READY_FILE), JSON.stringify({ runtime: PHONON_RUNTIME_VERSION, model: 'gradium/phonon-31m-en@8c64b55e', at: new Date().toISOString() }))
-  } finally {
-    clearTimeout(timeout)
-    if (downloadAbort === abort) downloadAbort = null
+function onDownloadState(next: ReadAloudDownloadState): void {
+  try { sendToMainWindowRenderers('browser:read-aloud:download', next) } catch { /* window closing */ }
+  // A reading waiting for the model shows the same progress in the player.
+  if (reading && state.status === 'downloading' && next.status === 'downloading') {
+    publish({ download: { label: next.label, loaded: next.loaded, total: next.total } })
   }
 }
 
-/** Downloads are shared: a second reading or a voice change waits for the one running. */
-async function ensureDownloadsOnce(voiceId: string): Promise<void> {
-  while (downloading) await downloading.catch(() => undefined)
-  const run = ensureDownloads(voiceId)
-  downloading = run
-  try {
-    await run
-  } finally {
-    if (downloading === run) downloading = null
+export function readAloudDownloadState(): ReadAloudDownloadState {
+  return downloads.state()
+}
+
+/** Turning Read Aloud on (or Retry / Resume in Settings): fetch what is missing now. Errors show in Settings. */
+export function prepareReadAloud(): void {
+  void downloads.ensureModel().catch(() => undefined)
+}
+
+/** The voice picked in Settings or the player: fetch it now (~250 KB) once the model is there. */
+export function prefetchReadAloudVoice(voiceId: string): void {
+  if (downloads.state().status !== 'ready') return
+  void downloads.ensureVoice(voiceId).catch(() => undefined)
+}
+
+export function cancelReadAloudDownload(): void {
+  downloads.cancel()
+}
+
+export async function deleteReadAloudDownloads(): Promise<ReadAloudDownloadState> {
+  if (reading) {
+    sendToEngine({ type: 'stop' })
+    endReading()
   }
+  stopTest()
+  closeEngine()
+  await downloads.deleteAll()
+  return downloads.state()
+}
+
+/** Model + voice for a reading or a test; a reading meanwhile shows the progress in the player. */
+async function ensurePhononFiles(voiceId: string, showInPlayer: boolean): Promise<void> {
+  if (!downloads.isReady()) {
+    const current = downloads.state()
+    if (showInPlayer) publish({ status: 'downloading', download: { label: current.label || 'Preparing', loaded: current.loaded, total: current.total || current.bytes } })
+    await downloads.ensureModel()
+  }
+  await downloads.ensureVoice(voiceId)
 }
 
 // ---------------------------------------------------------------------------
@@ -280,8 +240,8 @@ async function serveFile(root: string, relative: string, html: boolean): Promise
 async function handleEngineRequest(request: Request): Promise<Response> {
   const url = new URL(request.url)
   const path = decodeURIComponent(url.pathname)
-  if (path.startsWith(READ_ALOUD_RUNTIME_PATH)) return serveFile(runtimeDirectory(), path.slice(READ_ALOUD_RUNTIME_PATH.length), false)
-  if (path.startsWith(READ_ALOUD_MODEL_PATH)) return serveFile(join(readAloudDirectory(), 'model'), path.slice(READ_ALOUD_MODEL_PATH.length), false)
+  if (path.startsWith(READ_ALOUD_RUNTIME_PATH)) return serveFile(downloads.runtimeDirectory(), path.slice(READ_ALOUD_RUNTIME_PATH.length), false)
+  if (path.startsWith(READ_ALOUD_MODEL_PATH)) return serveFile(join(readAloudDirectory(), readAloudManifest().modelFolder), path.slice(READ_ALOUD_MODEL_PATH.length), false)
   const devServer = devServerUrl()
   if (devServer) {
     const response = await net.fetch(new URL(`${url.pathname}${url.search}`, devServer).toString())
@@ -355,6 +315,7 @@ function ensureEngine(): Promise<BrowserWindow> {
     engine = null
     engineReady = null
     if (reading) failReading('The Read Aloud engine stopped unexpectedly.')
+    if (test) finishTest({ status: 'error', error: 'The Read Aloud engine stopped unexpectedly.' })
   })
   window.on('closed', () => {
     if (engine === window) {
@@ -390,7 +351,7 @@ function scheduleEngineIdleClose(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = setTimeout(() => {
     idleTimer = null
-    if (!reading) closeEngine()
+    if (!reading && !test) closeEngine()
   }, ENGINE_IDLE_CLOSE_MS)
   idleTimer.unref?.()
 }
@@ -447,7 +408,12 @@ function onEngineEvent(value: unknown): void {
     markEngineReady = null
     return
   }
-  if (event.type !== 'state' || !reading || event.token !== reading.token) return
+  if (event.type !== 'state') return
+  if (test && event.token === test.token) {
+    onTestEvent(event)
+    return
+  }
+  if (!reading || event.token !== reading.token) return
   if (event.status === 'finished') {
     endReading()
     return
@@ -536,6 +502,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
   settings = current
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
+  stopTest()
   if (reading) {
     sendToEngine({ type: 'stop' })
     endReading()
@@ -555,9 +522,13 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
   try {
     if (current.engine === 'phonon') {
       try {
-        await ensureDownloadsOnce(current.voice)
+        await ensurePhononFiles(current.voice, true)
       } catch (error) {
         if (reading?.token !== token) return false
+        if (error instanceof ReadAloudDownloadCancelled) {
+          endReading('error', error.message)
+          return false
+        }
         // Can't fetch the model (offline, blocked): speak with the system voices instead.
         console.warn('[read aloud] Phonon download failed, using system voices:', error)
         publish({ status: 'loading', download: null, fallbackReason: `Phonon unavailable: ${error instanceof Error ? error.message : String(error)}` })
@@ -586,7 +557,7 @@ export function controlReadAloud(action: ReadAloudControl): void {
     return
   }
   if (action === 'stop') {
-    downloadAbort?.abort()
+    // A model download keeps going (Settings shows it and can cancel it); only the reading stops.
     sendToEngine({ type: 'stop' })
     endReading()
     return
@@ -600,13 +571,14 @@ export function applyReadAloudSettings(next: ReadAloudSettings): void {
   const previous = settings
   settings = next
   publish({ speed: next.speed, voice: next.voice })
+  if (next.engine === 'phonon' && previous?.voice !== next.voice) prefetchReadAloudVoice(next.voice)
   const active = reading
   if (!active || !previous) return
   if (previous.voice === next.voice && previous.speed === next.speed && previous.engine === next.engine && previous.endpoint === next.endpoint && previous.endpointVoice === next.endpointVoice) return
   const token = active.token
   void (async () => {
     try {
-      if (next.engine === 'phonon') await ensureDownloadsOnce(next.voice)
+      if (next.engine === 'phonon') await ensurePhononFiles(next.voice, false)
       if (reading?.token !== token) return
       sendToEngine({ ...speakCommand(token, active.sentences, state.index, next, active.title), type: 'respeak' })
     } catch (error) {
@@ -615,8 +587,79 @@ export function applyReadAloudSettings(next: ReadAloudSettings): void {
   })()
 }
 
+// ---------------------------------------------------------------------------
+// Voice tester (Settings → Integrations → Read Aloud)
+
+function publishTest(patch: Partial<ReadAloudTestState>): void {
+  testState = { ...testState, ...patch }
+  try { sendToMainWindowRenderers('browser:read-aloud:test', readAloudTestState()) } catch { /* window closing */ }
+}
+
+export function readAloudTestState(): ReadAloudTestState {
+  return { ...testState, stats: testState.stats ? { ...testState.stats } : null }
+}
+
+function finishTest(patch: Partial<ReadAloudTestState>): void {
+  test = null
+  publishTest(patch)
+  if (!reading) {
+    if (browserWindows().length === 0) closeEngine()
+    else scheduleEngineIdleClose()
+  }
+}
+
+function stopTest(): void {
+  if (!test) return
+  sendToEngine({ type: 'stop' })
+  finishTest({ status: 'idle' })
+}
+
+function onTestEvent(event: Extract<EngineEvent, { type: 'state' }>): void {
+  const stats = mergeTestStats(testState.stats, event.stats)
+  const fallbackReason = typeof event.fallbackReason === 'string' && event.fallbackReason ? event.fallbackReason : testState.fallbackReason
+  if (event.status === 'finished') finishTest({ status: 'finished', stats, fallbackReason })
+  else if (event.status === 'error') finishTest({ status: 'error', stats, error: String(event.error || 'The test failed.') })
+  else publishTest({ status: event.status === 'paused' ? 'playing' : event.status, engine: event.engine ?? testState.engine, stats, fallbackReason })
+}
+
+/**
+ * Speak `request.text` with its engine, voice and speed (the tester's Play). Stops a reading or an
+ * earlier test first. Phonon fetches the model / voice if needed (progress in Settings).
+ */
+export async function testReadAloud(request: ReadAloudTestRequest, current: ReadAloudSettings): Promise<boolean> {
+  settings = current
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+  if (reading) {
+    sendToEngine({ type: 'stop' })
+    endReading()
+  }
+  stopTest()
+  const token = nextToken++
+  test = { token, request }
+  publishTest({ ...IDLE_READ_ALOUD_TEST, status: 'preparing', engine: request.engine, voice: request.voice, speed: request.speed })
+  const sentences = splitSentences(request.text)
+  try {
+    if (request.engine === 'phonon') await ensurePhononFiles(request.voice, false)
+    if (test?.token !== token) return false
+    publishTest({ status: 'loading' })
+    await ensureEngine()
+    if (test?.token !== token) return false
+    sendToEngine({ ...speakCommand(token, sentences, 0, { ...current, engine: request.engine, voice: request.voice, speed: request.speed }, 'Voice test'), test: true })
+    return true
+  } catch (error) {
+    if (test?.token === token) finishTest({ status: 'error', error: error instanceof Error ? error.message : String(error) })
+    return false
+  }
+}
+
+export function stopReadAloudTest(): void {
+  stopTest()
+}
+
 export function disposeReadAloud(): void {
-  downloadAbort?.abort()
+  downloads.cancel()
+  stopTest()
   if (reading) {
     sendToEngine({ type: 'stop' })
     endReading()
