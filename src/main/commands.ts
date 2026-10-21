@@ -138,7 +138,7 @@ const COMMANDS: BrowserCommand[] = [
   // Read Aloud (experimental; hidden while off in Settings).
   {
     id: 'readAloud.page', title: 'Read Aloud', accelerator: READ_ALOUD_SHORTCUT, section: 'Tab', keywords: ['speak', 'listen', 'text to speech', 'tts', 'narrate', 'voice', 'audio article', 'read page'], refocusPage: true,
-    enabled: () => readAloudEnabled() && activeIsWebPage() && !isReadAloudActiveNow(), run: () => readAloudFromPage(getActiveTabWebContents(), 'page')
+    enabled: () => readAloudEnabled() && (activeIsWebPage() || getBrowserState().pdf !== null) && !isReadAloudActiveNow(), run: () => readAloudFromPage(getActiveTabWebContents(), 'page')
   },
   {
     id: 'readAloud.selection', title: 'Read Selection Aloud', section: 'Tab', keywords: ['speak selection', 'listen', 'text to speech', 'tts'], refocusPage: true,

@@ -1090,7 +1090,7 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       ? (mode) => { void watchPageFromTab(contents, mode, pageTitle(tab)) }
       : undefined,
     // Always a user action, so private tabs read too (nothing about the text is kept).
-    readAloud: isBrowserPage && editorTab === undefined && canOfferReadAloud({ enabled: readAloudEnabled(), url: contents.getURL(), pdf: isShowingPdf(contents) })
+    readAloud: isBrowserPage && canOfferReadAloud({ enabled: readAloudEnabled(), url: contents.getURL(), pdf: editorTab !== undefined || isShowingPdf(contents) })
       ? (target, selection) => {
           if (target === 'stop' || target === 'toggle') controlReadAloud(target)
           else void readAloudFromPage(contents, target, selection, { x: params.x, y: params.y })

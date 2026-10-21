@@ -42,3 +42,38 @@ export async function printPdf(contents: WebContents): Promise<void> {
   }
   if (!contents.isDestroyed()) contents.print()
 }
+
+/**
+ * The page the built-in viewer is on (1-based), from its toolbar's page box (inside nested shadow
+ * roots), else a #page=N in the URL. Null when neither is there.
+ */
+export async function pdfViewerPage(contents: WebContents): Promise<number | null> {
+  const frame = pdfViewerFrame(contents)
+  if (frame) {
+    const value: unknown = await frame.executeJavaScript(`(() => {
+      const find = (root, selector, depth = 0) => {
+        if (!root || depth > 6) return null
+        const hit = root.querySelector(selector)
+        if (hit) return hit
+        for (const element of root.querySelectorAll('*')) {
+          if (element.shadowRoot) {
+            const inner = find(element.shadowRoot, selector, depth + 1)
+            if (inner) return inner
+          }
+        }
+        return null
+      }
+      const selector = find(document, 'viewer-page-selector')
+      const input = selector?.shadowRoot?.querySelector('input') ?? null
+      const page = Number(input?.value)
+      return Number.isInteger(page) && page > 0 ? page : null
+    })()`, true).catch(() => null)
+    if (typeof value === 'number') return value
+  }
+  try {
+    const match = /[#&]page=(\d+)/i.exec(new URL(contents.getURL()).hash)
+    return match ? Number(match[1]) : null
+  } catch {
+    return null
+  }
+}

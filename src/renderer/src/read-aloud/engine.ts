@@ -42,6 +42,8 @@ type Command =
   | SpeakCommand
   | { type: 'control'; token: number; action: 'pause' | 'resume' | 'next' | 'previous' }
   | { type: 'stop' }
+  /** A PDF's text for a reading (pdf.js, loaded on the first one): answered with a `pdf-text` event. */
+  | { type: 'pdf-text'; id: number; bytes: Uint8Array }
 
 interface EngineBridge {
   onCommand(callback: (command: Command) => void): void
@@ -553,7 +555,24 @@ async function start(command: SpeakCommand): Promise<void> {
 
 let latestToken = 0
 
+let pdfText: Promise<typeof import('./pdf-text')> | null = null
+
+async function readPdfText(id: number, bytes: Uint8Array): Promise<void> {
+  try {
+    pdfText ??= import('./pdf-text')
+    const { extractPdfText } = await pdfText
+    const text = await extractPdfText(bytes)
+    emit({ type: 'pdf-text', id, ok: true, ...text })
+  } catch (error) {
+    emit({ type: 'pdf-text', id, ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
 bridge?.onCommand((command) => {
+  if (command.type === 'pdf-text') {
+    void readPdfText(command.id, command.bytes)
+    return
+  }
   if (command.type === 'stop') {
     latestToken = 0
     reading?.stop()

@@ -30,7 +30,7 @@ export function isCommandHiddenByReadAloud(id: string, enabled: boolean): boolea
   return !enabled && READ_ALOUD_COMMAND_IDS.includes(id)
 }
 
-/** Page context menu entries: feature on, a web page (http/https), not a PDF. */
+/** Page context menu entries: feature on, a web page (http/https) or a PDF (any source the viewer or editor shows). */
 export function canOfferReadAloud(options: { enabled: boolean; url: string; pdf: boolean }): boolean {
-  return options.enabled && !options.pdf && /^https?:\/\//i.test(options.url)
+  return options.enabled && (options.pdf || /^https?:\/\//i.test(options.url))
 }

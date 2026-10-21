@@ -388,10 +388,12 @@ describe('gating', () => {
     expect(isCommandHiddenByReadAloud('tab.new', false)).toBe(false)
   })
 
-  test('menu entries: on, a web page, not a PDF', () => {
+  test('menu entries: on, a web page or a PDF', () => {
     expect(canOfferReadAloud({ enabled: true, url: 'https://example.com/a', pdf: false })).toBe(true)
     expect(canOfferReadAloud({ enabled: false, url: 'https://example.com/a', pdf: false })).toBe(false)
-    expect(canOfferReadAloud({ enabled: true, url: 'https://example.com/a.pdf', pdf: true })).toBe(false)
+    expect(canOfferReadAloud({ enabled: true, url: 'https://example.com/a.pdf', pdf: true })).toBe(true)
+    expect(canOfferReadAloud({ enabled: true, url: 'file:///tmp/a.pdf', pdf: true })).toBe(true)
+    expect(canOfferReadAloud({ enabled: false, url: 'file:///tmp/a.pdf', pdf: true })).toBe(false)
     expect(canOfferReadAloud({ enabled: true, url: 'surffish://newtab', pdf: false })).toBe(false)
   })
 

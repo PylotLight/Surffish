@@ -191,10 +191,25 @@ describe('Read Aloud items', () => {
     expect(calls).toEqual([['toggle', undefined], ['stop', undefined]])
   })
 
-  test('nothing while Read Aloud is off, or on PDFs', () => {
+  test('nothing while Read Aloud is off', () => {
     expect(allLabels(buildBrowserContextMenuTemplate(params(), PAGE, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
     expect(allLabels(buildBrowserContextMenuTemplate(params({ selectionText: 'x' }), PAGE, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
-    expect(allLabels(buildBrowserContextMenuTemplate(params(), { ...PAGE, pdfDocument: true, canReadAloud: true }, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
+    expect(allLabels(buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf' }), { ...PAGE, pdfDocument: true }, actions())).some((label) => label.includes('Read Aloud'))).toBe(false)
+  })
+
+  test('PDFs: Read from This Page / Read Page, in the viewer (file:// too) and the PDF editor', () => {
+    const calls: unknown[][] = []
+    const fns = { ...actions(), readAloud: (...args: unknown[]) => { calls.push(args) } }
+    const viewer = buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf' }), { ...PAGE, pdfDocument: true, canReadAloud: true }, fns)
+    expect(allLabels(viewer).filter((label) => label.startsWith('Read Aloud ›'))).toEqual(['Read Aloud › Read from This Page', 'Read Aloud › Read Page'])
+    const local = buildBrowserContextMenuTemplate(params({ pageURL: 'file:///tmp/a.pdf' }), { ...PAGE, pdfDocument: true, canReadAloud: true }, fns)
+    expect(allLabels(local)).toContain('Read Aloud › Read Page')
+    const selected = buildBrowserContextMenuTemplate(params({ pageURL: 'https://example.com/a.pdf', selectionText: 'Some words.' }), { ...PAGE, pdfDocument: true, canReadAloud: true }, fns)
+    click(find(selected, 'Read Aloud › Read Selection'))
+    const editor = buildBrowserContextMenuTemplate(params({ pageURL: 'surffish-pdf://editor/' }), { ...PAGE, pdfEditor: true, canReadAloud: true }, fns)
+    expect(labels(editor)).toEqual(['Save PDF…', 'Back to Viewer', 'Read Aloud', '—', 'Inspect'])
+    click(find(editor, 'Read Aloud › Read from This Page'))
+    expect(calls).toEqual([['selection', 'Some words.'], ['here', undefined]])
   })
 })
 

@@ -39,7 +39,8 @@ import { backgroundNetworkBlockedReason } from './background-network'
 import { getBrowserTabPageInfo, getBrowserTabRefByWebContentsId } from './browser'
 import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
-import { isShowingPdf } from './pdf-viewer'
+import { loadPdfBytes, pdfEditorDocumentFor, type PdfEditorDocument } from './pdf-editor'
+import { isShowingPdf, pdfViewerPage } from './pdf-viewer'
 import { extractReaderArticle, readerArticleFor, readerViewFor } from './reader-mode'
 import { noteReadAloudStatus, type ReadAloudPoint } from './read-aloud-feature'
 import { readAloudDirectory } from './read-aloud-settings'
@@ -69,6 +70,11 @@ import { browserWindows, onBrowserWindowsChanged } from './window-scope'
 const ENGINE_IDLE_CLOSE_MS = !app.isPackaged && Number(process.env['SURFFISH_READ_ALOUD_IDLE_MS']) > 0 ? Number(process.env['SURFFISH_READ_ALOUD_IDLE_MS']) : 3 * 60_000
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
 const SPEECH_TIMEOUT_MS = 60_000
+/** A paused reading stops after this long, so the engine can close and free its memory. */
+const PAUSED_STOP_MS = !app.isPackaged && Number(process.env['SURFFISH_READ_ALOUD_PAUSE_STOP_MS']) > 0 ? Number(process.env['SURFFISH_READ_ALOUD_PAUSE_STOP_MS']) : 10 * 60_000
+/** pdf.js reading a PDF's text in the engine page. */
+const PDF_TEXT_TIMEOUT_MS = 90_000
+const NO_PDF_TEXT = 'This PDF has no readable text (it may be scanned images).'
 /** Isolated world for the selection read, the live-page highlight and "Read from Here". */
 const PAGE_WORLD_ID = 1311
 const LOG_STATS = !app.isPackaged || process.env['SURFFISH_DEBUG_READ_ALOUD'] === '1'
@@ -93,16 +99,21 @@ interface Reading {
 type EngineEvent =
   | { type: 'ready' }
   | { type: 'state'; token: number; status: 'loading' | 'playing' | 'paused' | 'finished' | 'error'; index?: number; engine?: ReadAloudEngineId; fallbackReason?: string; error?: string; stats?: unknown }
+  | { type: 'pdf-text'; id: number; ok: boolean; sentences?: unknown; pageStarts?: unknown; title?: unknown; error?: unknown }
 
 let state: ReadAloudState = { ...IDLE_READ_ALOUD_STATE }
 let settings: ReadAloudSettings | null = null
 let reading: Reading | null = null
 let nextToken = 1
+let startAttempts = 0
 let engine: BrowserWindow | null = null
 let engineReady: Promise<BrowserWindow> | null = null
 let markEngineReady: (() => void) | null = null
 let engineSession: Session | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
+let pausedTimer: ReturnType<typeof setTimeout> | null = null
+let nextPdfRequest = 1
+const pdfRequests = new Map<number, (event: Extract<EngineEvent, { type: 'pdf-text' }>) => void>()
 let test: { token: number; request: ReadAloudTestRequest; seed: number } | null = null
 let testState: ReadAloudTestState = { ...IDLE_READ_ALOUD_TEST }
 
@@ -360,6 +371,7 @@ function ensureEngine(): Promise<BrowserWindow> {
     if (engine !== window) return
     engine = null
     engineReady = null
+    failPdfRequests('The Read Aloud engine stopped unexpectedly.')
     if (reading) failReading('The Read Aloud engine stopped unexpectedly.')
     if (test) finishTest({ status: 'error', error: 'The Read Aloud engine stopped unexpectedly.' })
   })
@@ -384,9 +396,15 @@ function ensureEngine(): Promise<BrowserWindow> {
   return engineReady
 }
 
+function failPdfRequests(error: string): void {
+  for (const [id, resolveRequest] of [...pdfRequests]) resolveRequest({ type: 'pdf-text', id, ok: false, error })
+  pdfRequests.clear()
+}
+
 function closeEngine(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
+  failPdfRequests('The Read Aloud engine closed.')
   const window = engine
   engine = null
   engineReady = null
@@ -397,7 +415,7 @@ function scheduleEngineIdleClose(): void {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = setTimeout(() => {
     idleTimer = null
-    if (!reading && !test) closeEngine()
+    if (!reading && !test && pdfRequests.size === 0) closeEngine()
   }, ENGINE_IDLE_CLOSE_MS)
   idleTimer.unref?.()
 }
@@ -467,7 +485,30 @@ function stopLiveHighlight(ended: Reading): void {
   if (live.cssKey) void ended.page.removeInsertedCSS(live.cssKey).catch(() => undefined)
 }
 
+function clearPausedTimer(): void {
+  if (pausedTimer) clearTimeout(pausedTimer)
+  pausedTimer = null
+}
+
+/** A reading left paused stops on its own after PAUSED_STOP_MS, and the idle engine closes after that. */
+function notePaused(paused: boolean): void {
+  if (!paused) {
+    clearPausedTimer()
+    return
+  }
+  if (pausedTimer || !reading) return
+  const token = reading.token
+  pausedTimer = setTimeout(() => {
+    pausedTimer = null
+    if (reading?.token !== token || state.status !== 'paused') return
+    sendToEngine({ type: 'stop' })
+    endReading()
+  }, PAUSED_STOP_MS)
+  pausedTimer.unref?.()
+}
+
 function endReading(status: ReadAloudStatus = 'idle', error = ''): void {
+  clearPausedTimer()
   const ended = reading
   reading = null
   if (ended) {
@@ -494,6 +535,12 @@ function onEngineEvent(value: unknown): void {
     markEngineReady = null
     return
   }
+  if (event.type === 'pdf-text') {
+    const resolveRequest = pdfRequests.get(event.id)
+    pdfRequests.delete(event.id)
+    resolveRequest?.(event)
+    return
+  }
   if (event.type !== 'state') return
   if (test && event.token === test.token) {
     onTestEvent(event)
@@ -513,6 +560,7 @@ function onEngineEvent(value: unknown): void {
   if (LOG_STATS && event.stats && typeof event.stats === 'object') console.info('[read aloud]', event.engine ?? state.engine, JSON.stringify(event.stats))
   const index = typeof event.index === 'number' ? Math.max(0, Math.min(reading.sentences.length - 1, event.index)) : state.index
   if (index !== state.index || state.status !== event.status) highlight(reading.page, index, reading.sentences[index] ?? '')
+  notePaused(event.status === 'paused')
   publish({
     status: event.status,
     index,
@@ -559,8 +607,80 @@ async function textFromPoint(page: WebContents, point: ReadAloudPoint | undefine
   }
 }
 
+/** The PDF a tab shows: the built-in viewer's document, or the one open in the PDF editor. */
+function pdfDocumentFor(page: WebContents): PdfEditorDocument | null {
+  const editor = pdfEditorDocumentFor(page)
+  if (editor) return editor
+  if (!isShowingPdf(page)) return null
+  return { sourceUrl: page.getURL(), name: page.getTitle(), isPrivate: false, sourceSession: page.session, sourceContents: page }
+}
+
+/** The page the PDF is at (1-based): the built-in viewer's page box, or the editor's current page. */
+async function currentPdfPage(page: WebContents): Promise<number | null> {
+  if (isShowingPdf(page)) return pdfViewerPage(page)
+  try {
+    const value: unknown = await page.executeJavaScript('Number(document.querySelector(".is-current[data-index]")?.dataset.index ?? -1) + 1')
+    return typeof value === 'number' && value >= 1 ? value : null
+  } catch {
+    return null
+  }
+}
+
+function pdfTextRequest(bytes: Uint8Array): Promise<Extract<EngineEvent, { type: 'pdf-text' }>> {
+  const id = nextPdfRequest++
+  return new Promise((resolveRequest) => {
+    const timer = setTimeout(() => {
+      pdfRequests.delete(id)
+      resolveRequest({ type: 'pdf-text', id, ok: false, error: 'it took too long' })
+    }, PDF_TEXT_TIMEOUT_MS)
+    pdfRequests.set(id, (event) => {
+      clearTimeout(timer)
+      resolveRequest(event)
+    })
+    sendToEngine({ type: 'pdf-text', id, bytes })
+  })
+}
+
+/**
+ * A PDF's text: its bytes the way the PDF editor gets them (from inside the tab first, so the site's
+ * cookies and the HTTP cache apply; the tab's session; or the local file), read by pdf.js in the
+ * engine page and cleaned up there (shared/read-aloud-pdf.ts). Read from Here starts at the page
+ * the viewer is on.
+ */
+async function pdfSentences(page: WebContents, document: PdfEditorDocument, fromCurrentPage: boolean): Promise<ReadingText | { error: string }> {
+  let bytes: Uint8Array
+  try {
+    bytes = await loadPdfBytes(document)
+  } catch (error) {
+    return { error: (error instanceof Error ? error.message : String(error)).replace('to edit here', 'to read aloud') }
+  }
+  if (page.isDestroyed()) return { error: 'The tab closed.' }
+  const startPage = fromCurrentPage ? await currentPdfPage(page) : null
+  try {
+    await ensureEngine()
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+  const result = await pdfTextRequest(bytes)
+  if (!result.ok) {
+    const reason = String(result.error ?? '')
+    return { error: /password/i.test(reason) ? 'This PDF is password protected.' : `Could not read this PDF (${reason || 'unknown error'}).` }
+  }
+  const sentences = Array.isArray(result.sentences) ? result.sentences.filter((value): value is string => typeof value === 'string' && value.trim() !== '') : []
+  if (sentences.length === 0) return { error: NO_PDF_TEXT }
+  const pageStarts = Array.isArray(result.pageStarts) ? result.pageStarts.filter((value): value is number => typeof value === 'number') : []
+  let start = 0
+  if (startPage !== null && startPage > 1) {
+    start = pageStarts[startPage - 1] ?? sentences.length
+    if (start >= sentences.length) return { error: 'No readable text from this page on.' }
+  }
+  const title = (typeof result.title === 'string' && result.title.trim()) || document.name.trim() || 'PDF'
+  return { title, sentences, start }
+}
+
 async function articleSentences(page: WebContents): Promise<ReadingText | { error: string }> {
-  if (isShowingPdf(page)) return { error: 'Read Aloud does not read PDFs yet.' }
+  const pdf = pdfDocumentFor(page)
+  if (pdf) return pdfSentences(page, pdf, false)
   const article = readerArticleFor(page) ?? await extractReaderArticle(page)
   if (!article) return { error: 'No article found on this page.' }
   const body = splitSentences(articleTextFromHtml(article.content))
@@ -571,7 +691,8 @@ async function articleSentences(page: WebContents): Promise<ReadingText | { erro
 
 async function textFor(page: WebContents, target: 'page' | 'selection' | 'here', selection: string, point?: ReadAloudPoint): Promise<ReadingText | { error: string }> {
   if (target === 'here') {
-    if (isShowingPdf(page)) return { error: 'Read Aloud does not read PDFs yet.' }
+    const pdf = pdfDocumentFor(page)
+    if (pdf) return pdfSentences(page, pdf, true)
     const from = await textFromPoint(page, point)
     if (!from) return articleSentences(page)
     // Into the article when the point is in it (its own sentences, so skipping and Reader view's
@@ -646,9 +767,19 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
     sendToEngine({ type: 'stop' })
     endReading()
   }
+  const attempt = ++startAttempts
+  const isPdf = target !== 'selection' && pdfDocumentFor(page) !== null
+  // Reading a PDF's text takes a moment (download, pdf.js): show the player as getting ready.
+  if (isPdf) publish({ ...IDLE_READ_ALOUD_STATE, status: 'loading', title: page.getTitle() || 'PDF', speed: current.speed, voice: current.voice, engine: current.engine })
   const text = await textFor(page, target, selection, point)
-  if (page.isDestroyed()) return false
+  if (page.isDestroyed() || attempt !== startAttempts) return false
+  // Stopped from the player while the PDF was being read.
+  if (isPdf && state.status !== 'loading') {
+    scheduleEngineIdleClose()
+    return false
+  }
   if ('error' in text) {
+    if (isPdf) scheduleEngineIdleClose()
     publish({ ...IDLE_READ_ALOUD_STATE, status: 'error', error: text.error })
     return false
   }
@@ -658,7 +789,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
   reading = { token, page, tabId: ref?.tabId ?? null, title: text.title, sentences: text.sentences, isPrivate: info?.private ?? false, seed: newSeed(current), detach: () => undefined, live: null }
   reading.detach = watchPage(page, token)
   publish({ ...IDLE_READ_ALOUD_STATE, status: 'loading', tabId: reading.tabId, title: text.title, index: text.start, total: text.sentences.length, speed: current.speed, voice: current.voice, engine: current.engine })
-  void startLiveHighlight(page, token)
+  if (!isPdf) void startLiveHighlight(page, token)
   try {
     let voice = 'default'
     if (current.engine === 'phonon') {
