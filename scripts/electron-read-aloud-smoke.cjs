@@ -6,8 +6,11 @@
 //      files on a local server, with their own hashes and a fake `phonon-tts` runtime): turning the
 //      switch on starts it with a progress bar; Cancel, a failure + Retry, then "Ready · …". Turning it
 //      off keeps the files (Delete offered), on again re-checks them and downloads nothing.
-//   4. Voice tester: Play with the system voice (Linux runners usually have none: "No system voices
-//      are available." is accepted) and with the (fake) Phonon runtime, which reports the timings.
+//   4. One "Voice" section (engine, voice, speed, levers, sample, Play, stats; no separate tester
+//      engine): the voice list comes from a mocked voices.jsonl (English only, grouped, searchable),
+//      speed presets go to 3x, Play with the system voice (Linux runners usually have none: "No system
+//      voices are available." is accepted) and with the (fake) Phonon runtime, which reports the
+//      timings and records the options it was given (duration_delta, rewrites, temperature, seed).
 //   5. A page without an article reports "No article found" in the player.
 //   6. Delete download, then read an article from Reader view's Listen button: the player shows the
 //      download progress and the reading starts once it's done. The hidden engine window runs on
@@ -42,13 +45,17 @@ const paragraphs = [
 // --- Download fixtures (CI): a fake phonon-tts runtime that "speaks" silence, and model files.
 const FAKE_RUNTIME = `
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// What the engine page asked for, for the smoke to read back (engine window: globalThis.__phonon).
+const record = (globalThis.__phonon ??= { loads: [], streams: [], voices: [] })
 export const PhononTTS = {
-  async load() {
+  async load(options) {
+    record.loads.push({ rewrites: options.rewrites, device: options.device, threads: options.threads, conditions: options.conditions })
     await sleep(30)
     return {
-      sampleRate: 24000, voices: ['default'], threads: 1, threadsReason: 'fixture', device: 'fixture',
-      async addVoice(name) { this.voices.push(name) },
+      sampleRate: 24000, voices: ['default'], threads: 1, threadsReason: 'fixture threads', device: 'cpu', deviceReason: 'fixture device',
+      async addVoice(name, source) { record.voices.push(name); const response = await fetch(source); if (!response.ok) throw new Error('voice ' + response.status); this.voices.push(name) },
       stream(text, options = {}) {
+        record.streams.push({ voice: options.voice, temperature: options.temperature, seed: options.seed })
         let cancelled = false
         const chunks = Math.max(2, Math.min(8, Math.ceil(String(text).length / 20)))
         return {
@@ -80,9 +87,26 @@ const fixtures = {
   'runtime.tgz': gzipSync(Buffer.concat([...tarEntry('index.js', FAKE_RUNTIME), ...tarEntry('worker.js', '// fixture'), Buffer.alloc(1024)])),
   'model.q8.gguf': Buffer.alloc(3 * 1024 * 1024, 7),
   'tokenizer.json': Buffer.from('{"fixture":true}'),
-  'config.json': Buffer.from('{"fixture":true}'),
+  'config.json': Buffer.from(JSON.stringify({ fixture: true, conditioners: [
+    { type: 'lut', lut: { n_bins: 31, dim: 16, tokenizer: 'noop', possible_values: ['0', '1', '2'] }, name: 'num_speakers' },
+    { type: 'continuous', continuous: { scale_factor: 1000, dim: 128, max_period: 10000 }, name: 'duration_delta' }
+  ] })),
   'default-voice.safetensors': Buffer.alloc(4096, 1)
 }
+// A mocked phonon-voices catalog: English (US, UK, a character) plus a German voice that must not show.
+const CATALOG = [
+  { voice_id: 'usZoey00000000a1', name: 'Zoey', language: 'en', locale: 'en-us', gender: 'female', age: 'Adult', description: 'Playful and upbeat American voice.' },
+  { voice_id: 'usMiles0000000a2', name: 'Miles', language: 'en', locale: 'en-us', gender: 'male', age: 'Adult', description: 'Calm and low.' },
+  { voice_id: 'usHarper000000a3', name: 'Harper', language: 'en', locale: 'en-us', gender: 'female', age: 'Young Adult', description: 'Bright narrator.' },
+  { voice_id: 'ukFreya0000000b1', name: 'Freya', language: 'en', locale: 'en-gb', gender: 'female', age: 'Adult', description: 'Crisp British English.' },
+  { voice_id: 'ukHugh00000000b2', name: 'Hugh', language: 'en', locale: 'en-gb', gender: 'male', age: 'Middle-age', description: 'Warm British storyteller.' },
+  { voice_id: 'chCaptain00000c1', name: 'Captain Silas', language: 'en', locale: 'characters', gender: null, age: null, description: 'An old pirate captain.' },
+  { voice_id: 'deNele00000000d1', name: 'Nele', language: 'de', locale: 'de-de', gender: 'female', age: 'Adult', description: 'German.' }
+].map((voice) => ({ ...voice, filename: `voices/${voice.voice_id}.safetensors` }))
+const ENGLISH = CATALOG.filter((voice) => voice.language === 'en')
+fixtures['voices.jsonl'] = Buffer.from(CATALOG.map((voice) => JSON.stringify(voice)).join('\n'))
+CATALOG.forEach((voice, index) => { fixtures[`voices/${voice.voice_id}.safetensors`] = Buffer.alloc(2048, index + 2) })
+const MODEL_FIXTURES = ['runtime.tgz', 'model.q8.gguf', 'tokenizer.json', 'config.json', 'default-voice.safetensors']
 const fixtureHits = []
 const fixtureMode = { slow: false, fail: false }
 const server = createServer((request, response) => {
@@ -157,12 +181,20 @@ function writeTestManifest(origin) {
   const file = (name) => ({ url: `${origin}/fixture/${name}`, bytes: fixtures[name].length, sha256: sha256(fixtures[name]) })
   const manifest = {
     runtime: { label: 'Phonon runtime', url: `${origin}/fixture/runtime.tgz`, bytes: fixtures['runtime.tgz'].length, integrity: `sha512-${createHash('sha512').update(fixtures['runtime.tgz']).digest('base64')}` },
-    model: { 'model.q8.gguf': { ...file('model.q8.gguf'), label: 'Model weights' }, 'tokenizer.json': file('tokenizer.json'), 'config.json': file('config.json'), 'default-voice.safetensors': file('default-voice.safetensors') }
+    model: { 'model.q8.gguf': { ...file('model.q8.gguf'), label: 'Model weights' }, 'tokenizer.json': file('tokenizer.json'), 'config.json': file('config.json'), 'default-voice.safetensors': file('default-voice.safetensors') },
+    catalog: {
+      url: `${origin}/fixture/voices.jsonl`,
+      sha256: sha256(fixtures['voices.jsonl']),
+      bytes: fixtures['voices.jsonl'].length,
+      base: `${origin}/fixture`,
+      voiceBytes: 2048,
+      hashes: Object.fromEntries(CATALOG.map((voice) => [voice.voice_id, sha256(fixtures[`voices/${voice.voice_id}.safetensors`])]))
+    }
   }
   const path = join(root, 'read-aloud-manifest.json')
   writeFileSync(path, JSON.stringify(manifest))
   process.env.SURFFISH_READ_ALOUD_TEST_MANIFEST = path
-  return Object.values(fixtures).reduce((sum, body) => sum + body.length, 0)
+  return MODEL_FIXTURES.reduce((sum, name) => sum + fixtures[name].length, 0)
 }
 
 async function run() {
@@ -251,28 +283,80 @@ async function run() {
     assert.equal(existsSync(join(downloadDir, 'ready.json')), true)
     // Off keeps the files; on again re-checks them and fetches nothing.
     smoke.step('cache across off/on')
-    const hits = fixtureHits.length
+    // Model files only: the Voice section may fetch voices.jsonl once the model is ready.
+    const modelHits = () => fixtureHits.filter((name) => MODEL_FIXTURES.includes(name)).length
+    const hits = modelHits()
     await page('document.querySelector(".read-aloud-settings [aria-label=\\"Enable Read Aloud\\"]").click(); true')
     await waitFor(async () => !(await evaluate(toolbar, 'window.api.browser.readAloud.getSettings()')).enabled, 'Read Aloud to turn off')
     await waitFor(() => page('Boolean(document.querySelector("[aria-label=\\"Delete the downloaded voice model\\"]"))'), 'Delete download offered while off')
     assert.equal(existsSync(join(downloadDir, 'ready.json')), true, 'turning off keeps the download')
     await page('document.querySelector(".read-aloud-settings [aria-label=\\"Enable Read Aloud\\"]").click(); true')
     await waitFor(async () => (await download()).status === 'ready' && (await modelRow()) === 'ready', 'the cached model to be ready again')
-    assert.equal(fixtureHits.length, hits, 'nothing downloaded again')
+    assert.equal(modelHits(), hits, 'nothing downloaded again')
   } else {
     await waitFor(async () => (await download()).status === 'ready', 'the real model download', 8 * 60_000)
   }
 
-  // --- 4. Voice tester
-  smoke.step('voice tester: system voice')
-  await waitFor(() => page('Boolean(document.querySelector(".read-aloud-tester"))'), 'the voice tester')
+  // --- 4. The one Voice section: engine, voice (catalog), speed, levers, sample, Play, stats
+  smoke.step('voice section: unified, no separate tester engine')
+  const settingsNow = () => evaluate(toolbar, 'window.api.browser.readAloud.getSettings()')
+  const options = (label) => page(`[...document.querySelectorAll('select[aria-label=${JSON.stringify(label)}] option')].map((o) => o.value)`)
+  const testState = () => evaluate(toolbar, 'window.api.browser.readAloud.getTestState()')
+  const playTest = async (description, timeout = smoke.waitMs * 2) => {
+    assert.equal(await clickButton('.read-aloud-voice-section', 'Play'), true)
+    return waitFor(async () => { const value = await testState(); return (value.status === 'finished' || value.status === 'error') && value }, description, timeout)
+  }
+  await waitFor(() => page('Boolean(document.querySelector(".read-aloud-voice-section"))'), 'the Voice section')
+  assert.equal(await page('document.querySelectorAll("select[aria-label=\\"Read Aloud voice engine\\"]").length'), 1, 'one engine select')
+  assert.equal(await page('Boolean(document.querySelector("select[aria-label=\\"Voice tester engine\\"]"))'), false, 'no separate tester engine row')
+  assert.equal(await page('Boolean(document.querySelector(".read-aloud-tester"))'), false, 'the old tester group is gone')
   assert.equal(await page('document.querySelector(".read-aloud-test-text textarea").value.length > 20'), true, 'a default sample sentence')
-  assert.equal(await page('document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] option").length >= 11'), true, 'Phonon voices listed')
-  assert.equal(await setSelect('Voice tester engine', 'system'), true)
+
+  smoke.step('voice catalog from voices.jsonl')
+  if (!PHONON) {
+    await waitFor(async () => (await options('Read Aloud voice')).length === ENGLISH.length + 1, `the catalog voices (${ENGLISH.length} English + the model voice)`)
+    const listed = await options('Read Aloud voice')
+    assert.equal(listed[0], 'default')
+    assert.deepEqual([...listed.slice(1)].sort(), ENGLISH.map((voice) => voice.voice_id).sort(), 'English only (no German voice)')
+    assert.deepEqual(await page('[...document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] optgroup")].map((g) => g.label)'), ['Model voice', 'American English', 'British English', 'Characters'])
+    assert.equal(await page('[...document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] option")].some((o) => o.textContent.includes("✓"))'), false, 'no downloaded ticks')
+    assert.equal(fixtureHits.includes('voices.jsonl'), true, 'voices.jsonl fetched')
+    assert.equal(fixtureHits.some((name) => name.startsWith('voices/')), false, 'no voice file fetched until one is picked')
+    // Search narrows the list (the current voice stays so the select can show it).
+    await page(`(() => { const input = document.querySelector('input[aria-label="Search voices"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'british'); input.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+    await waitFor(async () => (await options('Read Aloud voice')).length === 3, 'the search to narrow to the British voices (+ the current one)')
+    assert.deepEqual((await options('Read Aloud voice')).slice(1).sort(), ['ukFreya0000000b1', 'ukHugh00000000b2'])
+    await page(`(() => { const input = document.querySelector('input[aria-label="Search voices"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); return true })()`)
+  } else {
+    await waitFor(async () => (await options('Read Aloud voice')).length >= 30, 'the real catalog (37 English voices)', 60_000)
+  }
+
+  smoke.step('speed presets up to 3x')
+  assert.deepEqual(await page('[...document.querySelectorAll(".read-aloud-speed-presets button")].map((b) => b.textContent)'), ['0.75×', '1×', '1.25×', '1.5×', '1.75×', '2×', '2.5×', '3×'])
+  assert.equal(await clickButton('.read-aloud-speed-presets', '2.5×'), true)
+  await waitFor(async () => (await settingsNow()).speed === 2.5, 'the 2.5x preset to save')
+  assert.equal(await page('document.querySelector(".read-aloud-speed-presets [aria-pressed=\\"true\\"]").textContent'), '2.5×')
+  assert.equal(await page('document.querySelector("input[aria-label=\\"Reading speed\\"]").max'), '3')
+
+  smoke.step('Phonon levers and Advanced')
+  assert.equal(await page('Boolean(document.querySelector("input[aria-label=\\"Expressiveness\\"]"))'), true)
+  assert.equal(await page('Boolean(document.querySelector("input[aria-label=\\"Vary each read\\"]"))'), true)
+  assert.deepEqual(await options('Text normalization'), ['all', 'default', 'none'])
+  assert.equal(await setSelect('Text normalization', 'all'), true)
+  await waitFor(async () => (await settingsNow()).rewrites === 'all', 'rewrites to save')
+  assert.equal(await page('document.querySelector("[data-disclosure=\\"read-aloud-advanced\\"]")?.open'), false, 'Advanced starts collapsed')
+  await page('document.querySelector("[data-disclosure=\\"read-aloud-advanced\\"] summary").click(); true')
+  await waitFor(() => page('Boolean(document.querySelector("[aria-label=\\"Phonon device\\"]")) && Boolean(document.querySelector("select[aria-label=\\"Phonon threads\\"]"))'), 'device and threads in Advanced')
+  if (!PHONON) await waitFor(() => page('Boolean(document.querySelector("select[aria-label=\\"Conditioner num_speakers\\"]"))'), 'the checkpoint’s other conditioner (num_speakers), read from config.json')
+  assert.equal(await page('Boolean(document.querySelector("[aria-label=\\"Conditioner duration_delta\\"]"))'), false, 'duration_delta is the speed setting, not a raw lever')
+
+  smoke.step('Play: system voice')
+  assert.equal(await setSelect('Read Aloud voice engine', 'system'), true)
+  await waitFor(async () => (await settingsNow()).engine === 'system', 'the engine to switch (it is the real setting)')
   await waitFor(() => page('!document.querySelector("select[aria-label=\\"Read Aloud voice\\"]")'), 'the voice picker to hide for the system engine')
-  assert.equal(await clickButton('.read-aloud-tester', 'Play'), true)
-  const systemTest = await waitFor(async () => { const value = await evaluate(toolbar, 'window.api.browser.readAloud.getTestState()'); return (value.status === 'finished' || value.status === 'error') && value }, 'the system-voice test to finish (or fail)', smoke.waitMs * 2)
+  const systemTest = await playTest('the system-voice test to finish (or fail)')
   console.log(`system voice test: ${JSON.stringify(systemTest)}`)
+  assert.equal(systemTest.engine, 'system')
   if (systemTest.status === 'error') assert.equal(systemTest.error, 'No system voices are available.', 'no voices on this runner, said plainly')
   else assert.ok(systemTest.stats && systemTest.stats.firstAudioMs !== null, 'first-audio time measured')
   await waitFor(() => page('Boolean(document.querySelector(".read-aloud-test-result"))'), 'the result line')
@@ -280,21 +364,43 @@ async function run() {
   assert.ok(engineWin0 && !engineWin0.isVisible(), 'the tester runs in the hidden engine window')
   assert.equal(await engineWin0.webContents.executeJavaScript('self.crossOriginIsolated === true'), true, 'the engine page is cross-origin isolated (wasm threads)')
 
-  smoke.step('voice tester: Phonon')
-  assert.equal(await setSelect('Voice tester engine', 'phonon'), true)
+  smoke.step('Play: Phonon at 2.5x with a catalog voice')
+  assert.equal(await setSelect('Read Aloud voice engine', 'phonon'), true)
   await waitFor(() => page('Boolean(document.querySelector("select[aria-label=\\"Read Aloud voice\\"]"))'), 'the voice picker')
-  assert.equal(await clickButton('.read-aloud-tester', 'Play'), true)
-  const phononTest = await waitFor(async () => { const value = await evaluate(toolbar, 'window.api.browser.readAloud.getTestState()'); return (value.status === 'finished' || value.status === 'error') && value }, 'the Phonon test to finish', PHONON ? 3 * 60_000 : smoke.waitMs * 2)
+  const pickedVoice = PHONON ? 'GgfEkEJtxZR7gnpy' : 'ukFreya0000000b1'
+  await waitFor(async () => (await options('Read Aloud voice')).includes(pickedVoice), 'the voice to be listed')
+  assert.equal(await setSelect('Read Aloud voice', pickedVoice), true)
+  await waitFor(async () => (await settingsNow()).voice === pickedVoice, 'the picked voice to become Read Aloud’s voice')
+  const phononTest = await playTest('the Phonon test to finish', PHONON ? 3 * 60_000 : smoke.waitMs * 2)
   console.log(`phonon test: ${JSON.stringify(phononTest)}`)
   assert.equal(phononTest.status, 'finished', `the Phonon test finished (${phononTest.error})`)
   assert.equal(phononTest.engine, 'phonon')
+  assert.equal(phononTest.speed, 2.5)
+  assert.equal(phononTest.voice, pickedVoice)
   assert.equal(phononTest.fallbackReason, '', 'no fallback to the system voice')
   assert.ok(phononTest.stats.loadMs !== null && phononTest.stats.firstAudioMs !== null && phononTest.stats.audioSeconds > 0 && phononTest.stats.generateMs !== null, 'load, first audio and real-time factor measured')
-  await waitFor(() => page('/\\d/.test(document.querySelector("[data-stat=\\"rtf\\"]")?.textContent ?? "") && /ms|s/.test(document.querySelector("[data-stat=\\"first-audio\\"]")?.textContent ?? "")'), 'the timings on screen')
-  // Picking a voice there sets Read Aloud's default voice.
-  assert.equal(await setSelect('Read Aloud voice', 'GgfEkEJtxZR7gnpy'), true)
-  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.readAloud.getSettings()')).voice === 'GgfEkEJtxZR7gnpy', 'the picked voice to become the default')
-  await evaluate(toolbar, 'window.api.browser.readAloud.setSettings({ voice: "default" })')
+  assert.equal(phononTest.stats.device, 'cpu')
+  await waitFor(() => page('/\\d/.test(document.querySelector("[data-stat=\\"rtf\\"]")?.textContent ?? "") && /ms|s/.test(document.querySelector("[data-stat=\\"first-audio\\"]")?.textContent ?? "") && document.querySelector("[data-stat=\\"device\\"]")?.textContent === "CPU" && /\\d/.test(document.querySelector("[data-stat=\\"threads\\"]")?.textContent ?? "")'), 'the timings, device and threads on screen')
+  if (!PHONON) {
+    assert.equal(fixtureHits.includes(`voices/${pickedVoice}.safetensors`), true, 'the picked voice was fetched once')
+    const recorded = await engineWindow().webContents.executeJavaScript('JSON.parse(JSON.stringify(globalThis.__phonon))')
+    const load = recorded.loads.at(-1)
+    // 2.5x = Phonon at 1.25x (duration_delta -0.4) × a 2x pitch-preserving stretch.
+    assert.equal(load.conditions.duration_delta, -0.4, 'model-native part of the speed')
+    assert.equal(load.rewrites, 'all', 'the rewrites setting reaches PhononTTS.load')
+    assert.equal(load.device, 'cpu')
+    assert.equal(load.threads, 'auto')
+    const stream = recorded.streams.at(-1)
+    assert.equal(stream.voice, pickedVoice)
+    assert.equal(stream.temperature, 0.3, 'expressiveness → temperature')
+    assert.equal(stream.seed, 4242424242424242, 'fixed seed while "vary each read" is off')
+    assert.ok(recorded.voices.includes(pickedVoice), 'the catalog voice was added to the engine')
+    // Phonon's fixture audio at 2x stretch: about half of what it generated.
+    const generated = recorded.streams.length
+    assert.ok(generated > 0)
+  }
+  // Back to the defaults for the reading below.
+  await evaluate(toolbar, 'window.api.browser.readAloud.setSettings({ voice: "default", speed: 1, rewrites: "default" })')
 
   // --- 5. A page without an article
   smoke.step('no article')
@@ -345,6 +451,12 @@ async function run() {
   await waitFor(async () => (await state()).status === 'paused', 'pause')
   await evaluate(toolbar, 'window.api.browser.readAloud.control("resume")')
   await waitFor(async () => (await state()).status === 'playing', 'resume')
+  // The player popover: the same speeds (to 3x) and the catalog voices, grouped.
+  await evaluate(toolbar, 'document.querySelector(".read-aloud-button").click(); true')
+  await waitFor(() => evaluate(toolbar, 'Boolean(document.querySelector("#read-aloud-popover select[aria-label=\\"Reading speed\\"]"))'), 'the player popover')
+  assert.deepEqual(await evaluate(toolbar, '[...document.querySelectorAll("#read-aloud-popover select[aria-label=\\"Reading speed\\"] option")].map((o) => o.textContent)'), ['0.75×', '1×', '1.25×', '1.5×', '1.75×', '2×', '2.5×', '3×'])
+  if (!PHONON) await waitFor(async () => (await evaluate(toolbar, 'document.querySelectorAll("#read-aloud-popover select[aria-label=\\"Voice\\"] option").length')) === ENGLISH.length + 1, 'the catalog voices in the player')
+  await evaluate(toolbar, 'document.querySelector(".read-aloud-button").click(); true')
   const before = (await state()).index
   await evaluate(toolbar, 'window.api.browser.readAloud.control("next")')
   await waitFor(async () => { const value = await state(); return value.index > before || value.status === 'idle' }, 'skip to the next sentence')

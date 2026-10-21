@@ -1,31 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  formatSpeed,
   IDLE_READ_ALOUD_DOWNLOAD,
   IDLE_READ_ALOUD_TEST,
-  READ_ALOUD_SPEEDS,
+  normalizeSpeed,
+  READ_ALOUD_DEFAULT_TEMPERATURE,
+  READ_ALOUD_MAX_SPEED,
+  READ_ALOUD_MAX_TEMPERATURE,
+  READ_ALOUD_MIN_SPEED,
+  READ_ALOUD_SPEED_PRESETS,
+  type ReadAloudCatalogInfo,
+  type ReadAloudDevice,
   type ReadAloudDownloadState,
   type ReadAloudEngineId,
+  type ReadAloudRewrites,
   type ReadAloudSettings as Settings,
   type ReadAloudTestState
 } from '../../../../shared/read-aloud'
-import { firstUseDownloadBytes, formatDownloadSize, READ_ALOUD_VOICES } from '../../../../shared/read-aloud-assets'
+import { firstUseDownloadBytes, formatDownloadSize, type ModelConditioner } from '../../../../shared/read-aloud-assets'
 import { downloadPercent, isReadAloudDownloadBusy, READ_ALOUD_SAMPLE_TEXT, READ_ALOUD_TEST_MAX_CHARS, realtimeFactor } from '../../../../shared/read-aloud-tester'
-import { SettingsGroup, SettingsRow } from './SettingsControls'
+import { filterVoices, groupVoices, voiceSummary } from '../../../../shared/read-aloud-voices'
+import { useVoiceCatalog } from '../read-aloud/useVoiceCatalog'
+import { SettingsDisclosure, SettingsGroup, SettingsRow, SettingsSegmented } from './SettingsControls'
 import './ReadAloudSettings.css'
 
 /**
  * Settings → Integrations → Read Aloud (experimental, off by default; its own lazy chunk). Turning
  * it on downloads the Phonon model right away (progress, Cancel, Retry, then "Ready · 71 MB"); the
- * files stay in the profile when it's turned off, until Delete download. The voice tester speaks a
- * sample with any engine, voice and speed and shows load time, time to first audio and the real-time
- * factor. Off keeps the read-aloud module unloaded in main and every entry point hidden.
+ * files stay in the profile when it's turned off, until Delete download. One "Voice" section holds
+ * the real Read Aloud settings (engine, voice from the English catalog, speed 0.75–3×, Phonon's
+ * levers, Advanced) and tests them: Play speaks the sample with exactly those and shows load time,
+ * time to first audio, the real-time factor, device and threads. Off keeps the read-aloud module
+ * unloaded in main and every entry point hidden.
  */
 
 const ENGINE_LABELS: Record<ReadAloudEngineId, string> = { phonon: 'Phonon (on-device)', system: 'System voice', openai: 'Local speech server' }
 
-function voiceLabel(voice: (typeof READ_ALOUD_VOICES)[number]): string {
-  return `${voice.name}${voice.locale === 'model' ? '' : ` (${voice.locale === 'en-gb' ? 'UK' : 'US'})`}`
-}
+const REWRITE_OPTIONS: ReadonlyArray<{ value: ReadAloudRewrites; label: string }> = [
+  { value: 'all', label: 'Numbers, dates, times & phone numbers' },
+  { value: 'default', label: 'Numbers, money & links (default)' },
+  { value: 'none', label: 'Off: read as written' }
+]
+const DEVICE_OPTIONS: ReadonlyArray<{ value: ReadAloudDevice; label: string }> = [{ value: 'cpu', label: 'CPU' }, { value: 'webgpu', label: 'WebGPU' }, { value: 'auto', label: 'Auto' }]
+const THREAD_OPTIONS = ['auto', 1, 2, 3, 4, 6, 8] as const
 
 function ms(value: number | null): string {
   if (value === null) return '–'
@@ -122,53 +139,196 @@ function TestResult({ test }: { test: ReadAloudTestState }): React.JSX.Element |
         <dl className="read-aloud-test-stats">
           <div><dt>Load</dt><dd data-stat="load">{ms(stats.loadMs)}{test.engine === 'phonon' && stats.loadMs !== null ? (stats.cold ? ' (cold)' : ' (already loaded)') : ''}</dd></div>
           <div><dt title="From the engine being ready to the first sound">First audio</dt><dd data-stat="first-audio">{ms(stats.firstAudioMs)}</dd></div>
-          <div><dt title="Seconds of compute per second of speech; below 1 is faster than real time">Real-time factor</dt><dd data-stat="rtf">{rtf === null ? (test.engine === 'system' ? 'n/a' : '–') : `${rtf.toFixed(2)}×${rtf > 0 ? ` (${(1 / rtf).toFixed(1)}× faster)` : ''}`}</dd></div>
-          {stats.threads !== null && <div><dt>Threads</dt><dd data-stat="threads">{stats.threads}</dd></div>}
+          <div><dt title="Seconds of compute per second of speech at this speed; below 1 is faster than real time">Real-time factor</dt><dd data-stat="rtf">{rtf === null ? (test.engine === 'system' ? 'n/a' : '–') : `${rtf.toFixed(2)}×${rtf > 0 ? ` (${(1 / rtf).toFixed(1)}× faster)` : ''}`}</dd></div>
+          {stats.device !== null && <div><dt>Device</dt><dd data-stat="device" title={stats.deviceReason}>{stats.device === 'webgpu' ? 'WebGPU' : stats.device === 'cpu' ? 'CPU' : stats.device}</dd></div>}
+          {stats.threads !== null && <div><dt>Threads</dt><dd data-stat="threads" title={stats.threadsReason}>{stats.threads}</dd></div>}
         </dl>
       )}
+      {stats && (stats.deviceReason || stats.threadsReason) && <span className="read-aloud-test-note" data-stat="reasons">{[stats.deviceReason, stats.threadsReason].filter(Boolean).join(' · ')}</span>}
       {test.fallbackReason && <span className="read-aloud-test-note" title={test.fallbackReason}>Phonon couldn’t start; the system voice was used.</span>}
     </div>
   )
 }
 
-/** Voice tester: engine, voice (Phonon), speed, sample text, Play/Stop and the timing numbers. */
-function VoiceTester({ settings, download, test, save }: { settings: Settings; download: ReadAloudDownloadState; test: ReadAloudTestState; save: (patch: Partial<Settings>) => void }): React.JSX.Element {
-  const api = window.api.browser.readAloud
-  const [engine, setEngine] = useState<ReadAloudEngineId>(settings.engine)
-  const [speedIndex, setSpeedIndex] = useState(() => Math.max(0, READ_ALOUD_SPEEDS.indexOf(settings.speed as (typeof READ_ALOUD_SPEEDS)[number])))
-  const [text, setText] = useState(READ_ALOUD_SAMPLE_TEXT)
-  const speed = READ_ALOUD_SPEEDS[speedIndex] ?? 1
-  const running = test.status === 'preparing' || test.status === 'loading' || test.status === 'playing'
+/** A slider that shows its value while dragging and saves once it settles (no respeak per pixel). */
+function useSettled(value: number, save: (value: number) => void, delay = 300): [number, (value: number) => void] {
+  const [local, setLocal] = useState(value)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => { if (!timer.current) setLocal(value) }, [value])
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  const change = (next: number): void => {
+    setLocal(next)
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      save(next)
+    }, delay)
+  }
+  return [local, change]
+}
+
+/** Speed: one-click presets (0.75–3×) and a fine slider in 0.05 steps. */
+function SpeedControl({ speed, save }: { speed: number; save: (speed: number) => void }): React.JSX.Element {
+  const [value, setValue] = useSettled(speed, save)
+  const percent = ((value - READ_ALOUD_MIN_SPEED) / (READ_ALOUD_MAX_SPEED - READ_ALOUD_MIN_SPEED)) * 100
+  return (
+    <div className="settings-row read-aloud-speed-row">
+      <div className="settings-row-copy">
+        <span className="settings-row-label">Speed</span>
+        <span className="settings-row-hint">Above 1.25× Phonon’s audio is time-stretched, keeping its pitch.</span>
+      </div>
+      <div className="settings-row-control read-aloud-speed-control">
+        <div className="read-aloud-speed-presets" role="group" aria-label="Speed presets">
+          {READ_ALOUD_SPEED_PRESETS.map((preset) => (
+            <button key={preset} type="button" className={Math.abs(preset - value) < 0.001 ? 'is-selected' : ''} aria-pressed={Math.abs(preset - value) < 0.001} onClick={() => setValue(preset)}>{formatSpeed(preset)}</button>
+          ))}
+        </div>
+        <div className="read-aloud-speed-slider">
+          <input className="settings-range" type="range" min={READ_ALOUD_MIN_SPEED} max={READ_ALOUD_MAX_SPEED} step={0.05} value={value} style={{ '--range-fill': `${percent}%` } as React.CSSProperties} aria-label="Reading speed" aria-valuetext={formatSpeed(value)} onChange={(event) => setValue(normalizeSpeed(Number(event.target.value)))} />
+          <output className="settings-slider-value" data-speed>{formatSpeed(value)}</output>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Voice: search + a grouped list (model voice, American, British, other, characters). */
+function VoicePicker({ settings, catalog, download, save }: { settings: Settings; catalog: ReadAloudCatalogInfo; download: ReadAloudDownloadState; save: (patch: Partial<Settings>) => void }): React.JSX.Element {
+  const [query, setQuery] = useState('')
+  const matches = filterVoices(catalog.voices, query)
+  const selected = catalog.voices.find((voice) => voice.id === settings.voice)
+  // Keep the current voice listed while a search hides it, so the select still shows it.
+  const listed = selected && !matches.includes(selected) ? [selected, ...matches] : matches
   const voiceFetch = download.voice
+  const english = catalog.voices.length - 1
+  const hint = catalog.status === 'needs-model' ? 'More voices appear once the model is downloaded.'
+    : catalog.status === 'error' ? `Couldn’t load the voice list: ${catalog.error}`
+    : `${english} English voices (Apache-2.0). Each downloads once (~256 KB) when picked.`
+  return (
+    <div className="settings-row read-aloud-voice-row">
+      <div className="settings-row-copy">
+        <span className="settings-row-label">Voice</span>
+        <span className="settings-row-hint" data-voice-count={english}>{hint}</span>
+        {selected?.description && <span className="settings-row-info read-aloud-voice-description">{selected.description}</span>}
+      </div>
+      <div className="settings-row-control read-aloud-voice-picker">
+        {catalog.voices.length > 1 && <input className="settings-input read-aloud-voice-search" type="search" value={query} placeholder="Search voices (e.g. british, calm, male)" spellCheck={false} aria-label="Search voices" onChange={(event) => setQuery(event.target.value)} />}
+        <select className="settings-select" value={selected ? settings.voice : 'default'} aria-label="Read Aloud voice" onChange={(event) => save({ voice: event.target.value })}>
+          {groupVoices(listed).map((group) => (
+            <optgroup key={group.accent} label={group.label}>
+              {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice)}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        {query && <span className="settings-row-hint" data-voice-matches={matches.length}>{matches.length === 0 ? 'No voices match.' : `${matches.length} match${matches.length === 1 ? '' : 'es'}`}</span>}
+        {voiceFetch && <progress className="read-aloud-voice-progress" max={100} value={downloadPercent(voiceFetch.loaded, voiceFetch.total)} aria-label="Voice download progress" />}
+      </div>
+    </div>
+  )
+}
+
+function ConditionerRow({ conditioner, value, save }: { conditioner: ModelConditioner; value: string | number | undefined; save: (value: string | number | undefined) => void }): React.JSX.Element {
+  const label = conditioner.name.replace(/_/g, ' ')
+  return (
+    <SettingsRow label={label.charAt(0).toUpperCase() + label.slice(1)} hint={`Model conditioner “${conditioner.name}” from the checkpoint’s config. Leave on the model default unless experimenting.`}>
+      {conditioner.type === 'lut'
+        ? (
+          <select className="settings-select" value={value === undefined ? '' : String(value)} aria-label={`Conditioner ${conditioner.name}`} onChange={(event) => save(event.target.value === '' ? undefined : event.target.value)}>
+            <option value="">Model default</option>
+            {conditioner.values.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+          )
+        : <input className="settings-input" type="number" step={0.05} value={value === undefined ? '' : String(value)} placeholder="default" aria-label={`Conditioner ${conditioner.name}`} onChange={(event) => save(event.target.value === '' ? undefined : Number(event.target.value))} />}
+    </SettingsRow>
+  )
+}
+
+/** Advanced (collapsed): where Phonon runs, threads, quantization, the checkpoint's other conditioners. */
+function PhononAdvanced({ settings, catalog, save }: { settings: Settings; catalog: ReadAloudCatalogInfo; save: (patch: Partial<Settings>) => void }): React.JSX.Element {
+  const summary = `${settings.device === 'webgpu' ? 'WebGPU' : settings.device === 'auto' ? 'Auto' : 'CPU'} · ${settings.threads === 'auto' ? 'auto threads' : `${settings.threads} threads`} · q8`
+  const setCondition = (name: string, value: string | number | undefined): void => {
+    const conditions = { ...settings.conditions }
+    if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) delete conditions[name]
+    else conditions[name] = value
+    save({ conditions })
+  }
+  return (
+    <SettingsDisclosure id="read-aloud-advanced" title="Advanced" summary={summary}>
+      <SettingsRow label="Device" hint="CPU is the default. WebGPU isn’t faster on every Mac; Auto uses the GPU when one is offered.">
+        <SettingsSegmented value={settings.device} options={DEVICE_OPTIONS} ariaLabel="Phonon device" onChange={(device) => save({ device })} />
+      </SettingsRow>
+      <SettingsRow label="Threads" hint="CPU threads Phonon generates on. Auto is 3: past a few, splitting the work costs more than it saves.">
+        <select className="settings-select" value={String(settings.threads)} aria-label="Phonon threads" onChange={(event) => save({ threads: event.target.value === 'auto' ? 'auto' : Number(event.target.value) })}>
+          {THREAD_OPTIONS.map((option) => <option key={option} value={String(option)}>{option === 'auto' ? 'Auto (3)' : option}</option>)}
+        </select>
+      </SettingsRow>
+      <SettingsRow label="Quantization" hint="8-bit weights: smaller and faster than f32 on the CPU.">
+        <span className="read-aloud-fixed-value">q8</span>
+      </SettingsRow>
+      {catalog.conditioners.map((conditioner) => (
+        <ConditionerRow key={conditioner.name} conditioner={conditioner} value={settings.conditions[conditioner.name]} save={(value) => setCondition(conditioner.name, value)} />
+      ))}
+      <p className="read-aloud-advanced-note">Phonon has no pitch control; voices differ in pitch instead.</p>
+    </SettingsDisclosure>
+  )
+}
+
+/**
+ * The one "Voice" section: Read Aloud's engine, voice, speed and Phonon levers, and a tester that
+ * speaks the sample with exactly those (so what you hear here is what Read Aloud sounds like).
+ */
+function VoiceSection({ settings, download, test, save }: { settings: Settings; download: ReadAloudDownloadState; test: ReadAloudTestState; save: (patch: Partial<Settings>) => void }): React.JSX.Element {
+  const api = window.api.browser.readAloud
+  const catalog = useVoiceCatalog(download.status === 'ready')
+  const [text, setText] = useState(READ_ALOUD_SAMPLE_TEXT)
+  const [endpoint, setEndpoint] = useState(settings.endpoint)
+  const [endpointVoice, setEndpointVoice] = useState(settings.endpointVoice)
+  const [temperature, setTemperature] = useSettled(settings.temperature, (value) => save({ temperature: value }))
+  useEffect(() => {
+    setEndpoint(settings.endpoint)
+    setEndpointVoice(settings.endpointVoice)
+  }, [settings.endpoint, settings.endpointVoice])
+  const running = test.status === 'preparing' || test.status === 'loading' || test.status === 'playing'
+  const phonon = settings.engine === 'phonon'
   const play = (): void => {
     if (running) {
       void api.stopTest().catch(() => undefined)
       return
     }
-    void api.test({ text, engine, voice: settings.voice, speed }).catch(() => undefined)
+    void api.test({ text }).catch(() => undefined)
   }
   return (
-    <SettingsGroup title="Voice tester" className="read-aloud-tester">
-      <SettingsRow label="Engine" hint="Try the fallbacks too. The engine Read Aloud uses is set above.">
-        <select className="settings-select" value={engine} aria-label="Voice tester engine" onChange={(event) => setEngine(event.target.value as ReadAloudEngineId)}>
+    <SettingsGroup title="Voice" className="read-aloud-voice-section">
+      <SettingsRow label="Engine" hint={phonon ? 'Phonon runs inside Surffish. Falls back to the system voice if it can’t start.' : settings.engine === 'system' ? 'The voices built into the system.' : 'An OpenAI-compatible /v1/audio/speech server on this machine (e.g. ptts-openai-server). Loopback addresses only.'}>
+        <select className="settings-select" value={settings.engine} aria-label="Read Aloud voice engine" onChange={(event) => save({ engine: event.target.value as ReadAloudEngineId })}>
           {(Object.keys(ENGINE_LABELS) as ReadAloudEngineId[]).map((id) => <option key={id} value={id}>{ENGINE_LABELS[id]}</option>)}
         </select>
       </SettingsRow>
-      {engine === 'phonon' && (
-        <SettingsRow label="Voice" hint="Also the voice Read Aloud uses. Each extra voice downloads once (~256 KB).">
-          <div className="read-aloud-voice-picker">
-            <select className="settings-select" value={settings.voice} aria-label="Read Aloud voice" onChange={(event) => save({ voice: event.target.value })}>
-              {READ_ALOUD_VOICES.map((voice) => <option key={voice.id} value={voice.id}>{voiceLabel(voice)}{download.voices.includes(voice.id) ? ' ✓' : ''}</option>)}
-            </select>
-            {voiceFetch && <progress className="read-aloud-voice-progress" max={100} value={downloadPercent(voiceFetch.loaded, voiceFetch.total)} aria-label="Voice download progress" />}
-          </div>
+      {settings.engine === 'openai' && (
+        <SettingsRow label="Server" hint="Base URL and voice (empty voice: the server’s default).">
+          <input className="settings-input" type="url" value={endpoint} spellCheck={false} aria-label="Speech server base URL" onChange={(event) => setEndpoint(event.target.value)} onBlur={() => save({ endpoint })} />
+          <input className="settings-input" type="text" value={endpointVoice} spellCheck={false} placeholder="voice" aria-label="Speech server voice" onChange={(event) => setEndpointVoice(event.target.value)} onBlur={() => save({ endpointVoice })} />
         </SettingsRow>
       )}
-      <label className="settings-row settings-slider-row read-aloud-speed-row">
-        <span className="settings-row-label">Speed</span>
-        <input className="settings-range" type="range" min={0} max={READ_ALOUD_SPEEDS.length - 1} step={1} value={speedIndex} style={{ '--range-fill': `${(speedIndex / (READ_ALOUD_SPEEDS.length - 1)) * 100}%` } as React.CSSProperties} aria-label="Voice tester speed" aria-valuetext={`${speed}×`} onChange={(event) => setSpeedIndex(Number(event.target.value))} />
-        <output className="settings-slider-value">{speed}×</output>
-      </label>
+      {phonon && <VoicePicker settings={settings} catalog={catalog} download={download} save={save} />}
+      <SpeedControl speed={settings.speed} save={(speed) => save({ speed })} />
+      {phonon && (
+        <>
+          <label className="settings-row settings-slider-row read-aloud-expressiveness-row">
+            <span className="settings-row-label" title={`Phonon’s sampling temperature (default ${READ_ALOUD_DEFAULT_TEMPERATURE}). Higher varies the delivery more; very high can slur.`}>Expressiveness</span>
+            <input className="settings-range" type="range" min={0} max={READ_ALOUD_MAX_TEMPERATURE} step={0.05} value={temperature} style={{ '--range-fill': `${(temperature / READ_ALOUD_MAX_TEMPERATURE) * 100}%` } as React.CSSProperties} aria-label="Expressiveness" aria-valuetext={temperature.toFixed(2)} onChange={(event) => setTemperature(Math.round(Number(event.target.value) * 100) / 100)} />
+            <output className="settings-slider-value">{temperature.toFixed(2)}</output>
+          </label>
+          <SettingsRow label="Vary each read" hint="Off: the same text always sounds the same. On: a new take every time you press play.">
+            <input type="checkbox" className="settings-switch" checked={settings.varySeed} aria-label="Vary each read" onChange={(event) => save({ varySeed: event.target.checked })} />
+          </SettingsRow>
+          <SettingsRow label="Read numbers, dates & times naturally" hint="How Phonon spells out text before speaking. Changing it restarts the model.">
+            <select className="settings-select" value={settings.rewrites} aria-label="Text normalization" onChange={(event) => save({ rewrites: event.target.value as ReadAloudRewrites })}>
+              {REWRITE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </SettingsRow>
+        </>
+      )}
       <div className="read-aloud-test-text">
         <textarea className="settings-input" rows={3} maxLength={READ_ALOUD_TEST_MAX_CHARS} value={text} spellCheck={false} aria-label="Sample text" onChange={(event) => setText(event.target.value)} />
         <div className="read-aloud-test-actions">
@@ -177,19 +337,13 @@ function VoiceTester({ settings, download, test, save }: { settings: Settings; d
         </div>
       </div>
       <TestResult test={test} />
+      {phonon && <PhononAdvanced settings={settings} catalog={catalog} save={save} />}
     </SettingsGroup>
   )
 }
 
 export function ReadAloudSettings(): React.JSX.Element {
   const { settings, download, test, save } = useReadAloud()
-  const [endpoint, setEndpoint] = useState('')
-  const [endpointVoice, setEndpointVoice] = useState('')
-  useEffect(() => {
-    if (!settings) return
-    setEndpoint(settings.endpoint)
-    setEndpointVoice(settings.endpointVoice)
-  }, [settings?.endpoint, settings?.endpointVoice])
   const on = settings?.enabled === true
   return (
     <div className="read-aloud-settings">
@@ -202,21 +356,8 @@ export function ReadAloudSettings(): React.JSX.Element {
           <input type="checkbox" className="settings-switch" checked={on} disabled={settings === null} onChange={(event) => save({ enabled: event.target.checked })} aria-label="Enable Read Aloud" />
         </SettingsRow>
         {settings && <ModelDownloadRow download={download} enabled={on} />}
-        {on && settings && (
-          <SettingsRow label="Voice engine" hint={settings.engine === 'phonon' ? 'Phonon runs inside Surffish. Falls back to the system voice if it can’t start.' : settings.engine === 'system' ? 'The voices built into the system.' : 'An OpenAI-compatible /v1/audio/speech server on this machine (e.g. ptts-openai-server). Loopback addresses only.'}>
-            <select className="settings-select" value={settings.engine} aria-label="Read Aloud voice engine" onChange={(event) => save({ engine: event.target.value as Settings['engine'] })}>
-              {(Object.keys(ENGINE_LABELS) as ReadAloudEngineId[]).map((id) => <option key={id} value={id}>{ENGINE_LABELS[id]}</option>)}
-            </select>
-          </SettingsRow>
-        )}
-        {on && settings?.engine === 'openai' && (
-          <SettingsRow label="Server" hint="Base URL and voice (empty voice: the server’s default).">
-            <input className="settings-input" type="url" value={endpoint} spellCheck={false} aria-label="Speech server base URL" onChange={(event) => setEndpoint(event.target.value)} onBlur={() => save({ endpoint })} />
-            <input className="settings-input" type="text" value={endpointVoice} spellCheck={false} placeholder="voice" aria-label="Speech server voice" onChange={(event) => setEndpointVoice(event.target.value)} onBlur={() => save({ endpointVoice })} />
-          </SettingsRow>
-        )}
       </SettingsGroup>
-      {on && settings && <VoiceTester settings={settings} download={download} test={test} save={save} />}
+      {on && settings && <VoiceSection settings={settings} download={download} test={test} save={save} />}
     </div>
   )
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { READ_ALOUD_SPEEDS, type ReadAloudSettings, type ReadAloudState } from '../../../../shared/read-aloud'
-import { formatDownloadSize, READ_ALOUD_VOICES } from '../../../../shared/read-aloud-assets'
+import { formatSpeed, READ_ALOUD_SPEED_PRESETS, type ReadAloudSettings, type ReadAloudState } from '../../../../shared/read-aloud'
+import { formatDownloadSize } from '../../../../shared/read-aloud-assets'
+import { groupVoices, voiceSummary } from '../../../../shared/read-aloud-voices'
+import { useVoiceCatalog } from './useVoiceCatalog'
 import './read-aloud.css'
 
 const ENGINE_LABELS: Record<string, string> = { phonon: 'Phonon (on-device)', system: 'System voice', openai: 'Local speech server' }
@@ -33,6 +35,12 @@ export function ReadAloudPanel({ state, onClose }: { state: ReadAloudState; onCl
   const download = state.download
   const percent = download && download.total > 0 ? Math.round((download.loaded / download.total) * 100) : 0
   const engine = state.engine ?? settings?.engine ?? 'phonon'
+  const catalog = useVoiceCatalog(ready)
+  const voices = catalog.voices
+  // The presets, plus the current speed when it was set off-preset with Settings' fine slider.
+  const speeds = settings && !READ_ALOUD_SPEED_PRESETS.some((speed) => Math.abs(speed - settings.speed) < 0.001)
+    ? [...READ_ALOUD_SPEED_PRESETS, settings.speed].sort((a, b) => a - b)
+    : [...READ_ALOUD_SPEED_PRESETS]
   return (
     <div id="read-aloud-popover" className="read-aloud-popover" role="dialog" aria-label="Read Aloud">
       <div className="read-aloud-header">
@@ -76,15 +84,17 @@ export function ReadAloudPanel({ state, onClose }: { state: ReadAloudState; onCl
               <label>
                 <span>Speed</span>
                 <select value={settings.speed} aria-label="Reading speed" onChange={(event) => save({ speed: Number(event.target.value) })}>
-                  {READ_ALOUD_SPEEDS.map((speed) => <option key={speed} value={speed}>{speed}×</option>)}
+                  {speeds.map((speed) => <option key={speed} value={speed}>{formatSpeed(speed)}</option>)}
                 </select>
               </label>
               {engine === 'phonon' && (
                 <label>
                   <span>Voice</span>
-                  <select value={settings.voice} aria-label="Voice" onChange={(event) => save({ voice: event.target.value })}>
-                    {READ_ALOUD_VOICES.map((voice) => (
-                      <option key={voice.id} value={voice.id}>{voice.name}{voice.locale === 'model' ? '' : ` (${voice.locale === 'en-gb' ? 'UK' : 'US'})`}</option>
+                  <select value={voices.some((voice) => voice.id === settings.voice) ? settings.voice : 'default'} aria-label="Voice" onChange={(event) => save({ voice: event.target.value })}>
+                    {groupVoices(voices).map((group) => (
+                      <optgroup key={group.accent} label={group.label}>
+                        {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice)}</option>)}
+                      </optgroup>
                     ))}
                   </select>
                 </label>

@@ -107,3 +107,65 @@
 .read-aloud-test-note {
   color: rgba(235, 240, 245, 0.55);
 }
+
+/* Voice section: picker, speed presets, Advanced. */
+.read-aloud-voice-picker {
+  align-items: stretch;
+}
+.read-aloud-voice-search {
+  width: 240px;
+}
+.read-aloud-voice-description {
+  max-width: 420px;
+}
+.read-aloud-speed-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.read-aloud-speed-presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.read-aloud-speed-presets button {
+  min-width: 46px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(235, 240, 245, 0.8);
+  font: inherit;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.read-aloud-speed-presets button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.read-aloud-speed-presets button.is-selected {
+  border-color: rgba(126, 226, 168, 0.55);
+  background: rgba(126, 226, 168, 0.16);
+  color: #f5f7fa;
+}
+.read-aloud-speed-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+}
+.read-aloud-speed-slider .settings-range {
+  flex: 1 1 auto;
+}
+.read-aloud-fixed-value {
+  color: rgba(235, 240, 245, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.read-aloud-advanced-note {
+  margin: 6px 0 2px;
+  color: rgba(235, 240, 245, 0.5);
+  font-size: 12px;
+}

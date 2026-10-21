@@ -162,7 +162,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
   ]),
   ...entries('integrations', [['Bramble password manager', 'passwords'], ['Chrome Web Store extensions', 'extension install']]),
   ...entries('feeds', [['Add a feed', 'rss atom json'], ['Following']]),
-  ...entries('readaloud', [['Read Aloud (experimental)', 'text to speech tts listen voice phonon narrate model download voice tester speed sample realtime']]),
+  ...entries('readaloud', [['Read Aloud (experimental)', 'text to speech tts listen voice voices accent british american phonon narrate model download voice tester speed 2x 3x sample realtime expressiveness temperature numbers dates times webgpu threads']]),
   ...entries('privacy', [['Clear browsing data', 'history cache'], ['HTTPS-only mode', 'secure'], ['Tab volume', 'audio'], ['Sites with cookies', 'site data']]),
   ...entries('watchers', [['Add a page', 'watch changes'], ['Watching']]),
   ...entries('site', [['Block ads and trackers', 'adblock'], ['Open pop-ups in tabs', 'popup'], ['Camera and microphone', 'permissions'], ['Location', 'permissions'], ['Notifications', 'permissions']]),
