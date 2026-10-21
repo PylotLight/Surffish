@@ -21,7 +21,8 @@ import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, s
 import { forgetSessionCookieSnapshot } from './session-cookies'
 import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
 import { forgetPrivateDownloads } from './downloads'
-import { forgetSavedTabHistories, getBrowserNewTabPage, getBrowserSiteFaviconCache, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
+import { newTabBackgroundOnOpen } from './new-tab-backgrounds'
+import { forgetSavedTabHistories, getBrowserNewTabPage, getBrowserNewTabPreferences, getBrowserSiteFaviconCache, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
 import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, getBookmarksSnapshot, getFavouriteSites, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
@@ -2293,6 +2294,8 @@ setMiniWindowHost({
     const icons = getBrowserSiteFaviconCache(sites.map((site) => site.origin))
     return sites.map((site) => ({ ...site, faviconUrl: icons[site.origin] ?? site.faviconUrl }))
   },
+  newTabPreferences: () => getBrowserNewTabPreferences(),
+  newTabBackground: () => newTabBackgroundOnOpen(),
   returnTab: (win, tabId) => {
     const mini = miniStateFor(win)
     const tab = miniTabOf(mini, tabId)

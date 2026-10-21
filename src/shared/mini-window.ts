@@ -255,6 +255,18 @@ export const MINI_WINDOW_TAB_STRIP_HEIGHT = 28
  */
 export const MINI_WINDOW_POPOUT_STRIP_HEIGHT = 28
 
+/**
+ * The menu bar popout's address field row: with tabs in the strip, the field gets a row of its own
+ * under it (the chips and + stay put) instead of taking the strip's place. It hangs over the page
+ * like the field's dropdown (the page never moves for it). Header page CSS: #addr in body.popout.tabbed.
+ */
+export const MINI_WINDOW_POPOUT_ADDRESS_HEIGHT = 32
+
+/** The popout's address row while its field shows: only with tabs in the strip (one tab: the field takes the title's place). */
+export function miniPopoutAddressRow(inMenuBar: boolean, addressOpen: boolean, tabCount: number, grouping: MiniWindowGrouping): number {
+  return inMenuBar && addressOpen && grouping === 'tabs' && tabCount > 1 ? MINI_WINDOW_POPOUT_ADDRESS_HEIGHT : 0
+}
+
 /** Height of the revealed header: the header row, plus the tab strip when the window holds several tabs. */
 export function miniHeaderHeight(tabCount: number, grouping: MiniWindowGrouping): number {
   return MINI_WINDOW_HEADER_HEIGHT + (grouping === 'tabs' && tabCount > 1 ? MINI_WINDOW_TAB_STRIP_HEIGHT : 0)
