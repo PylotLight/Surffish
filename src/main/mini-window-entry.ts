@@ -15,6 +15,8 @@ import {
   type MiniWindowHeaderPlacement,
   type MiniWindowSettings
 } from '../shared/mini-window'
+import type { MiniOmniboxSources } from '../shared/mini-window-omnibox'
+import type { QuickLinkSite } from '../shared/quick-links'
 import { isMainWindowRenderer, sendToMainWindowRenderers } from './browser-shell'
 import { readUserJson, writeSettingsFile } from './user-json'
 
@@ -57,6 +59,17 @@ export interface MiniWindowHost {
   activateTab(win: BaseWindow, tabId: string): boolean
   /** Open `url` as the mini window's tab, in the normal profile session. */
   openUrl(url: string, win: BaseWindow): string | null
+  /**
+   * Open a New Tab (the browser's surffish://quick-links tab) as mini window `win`'s active tab, after
+   * its last one. An empty window takes its privacy, home window and Space from mini window `like`.
+   */
+  newTab(win: BaseWindow, like?: BaseWindow | null): string | null
+  /** Load what was typed in the mini window's active tab, through the toolbar omnibox's resolver (surffish://settings opens Settings in a browser window). */
+  navigate(win: BaseWindow, input: string): Promise<{ ok: boolean }>
+  /** What the mini window's address field suggests from: the tabs of its home browser window, history, bookmarks, search keywords. */
+  omniboxSources(win: BaseWindow): MiniOmniboxSources
+  /** The mini window's New Tab tiles: favourites, then frequently visited sites (the New Tab page's own lists). */
+  newTabSites(win: BaseWindow): QuickLinkSite[]
   /** Put one of the mini window's tabs (default: the active one) back into a browser window (its last tab closes the mini window). */
   returnTab(win: BaseWindow, tabId?: string): boolean
   /** Close one of the mini window's tabs (default: the active one); its last tab closes the window. */
@@ -326,6 +339,25 @@ export function isMiniWindowTucked(tabId?: string): boolean {
 }
 
 /** browser.ts: the mini window's tab changed (title, URL, loading); refresh its header. */
+/**
+ * + in a mini window's header, or ⌘/Ctrl+T pressed in one: a New Tab in that mini window (grouping
+ * 'tabs': its collection; otherwise a mini window of its own), address field focused. False when
+ * `window` isn't a mini window.
+ */
+export function openMiniWindowNewTab(window: BaseWindow): boolean {
+  return miniModule?.newTabIn(window) ?? false
+}
+
+/** ⌘/Ctrl+L (or File → Open Location) in a mini window: show and focus its address field. */
+export function focusMiniWindowAddress(window: BaseWindow): boolean {
+  return miniModule?.focusAddress(window) ?? false
+}
+
+/** The mini window that has the keyboard (app menu New Tab / Open Location act on it), or null. */
+export function focusedMiniWindow(): BaseWindow | null {
+  return miniModule?.focusedMiniWindow() ?? null
+}
+
 export function noteMiniWindowChanged(window: BaseWindow): void {
   miniModule?.refreshHeader(window)
 }

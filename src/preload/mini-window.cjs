@@ -1,8 +1,8 @@
 'use strict'
 
-// Sandboxed preload for the mini window's header strip (main/mini-window-page.ts) and its dock
-// handle (main/mini-window-handle-page.ts). Only the handful of messages they need; the page in the
-// mini window never gets this bridge.
+// Sandboxed preload for the mini window's header strip (main/mini-window-page.ts), its dock
+// handle (main/mini-window-handle-page.ts) and its New Tab page (main/mini-window-newtab-page.ts).
+// Only the handful of messages they need; the page in the mini window never gets this bridge.
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('miniWindow', {
@@ -43,6 +43,21 @@ contextBridge.exposeInMainWorld('miniWindow', {
   // The menu bar popout's strip: its ⋯ menu at (x, y) in the window, and word that it closed.
   more: (x, y) => ipcRenderer.send('mini-window:more', Number(x), Number(y)),
   onMenuClosed: (callback) => ipcRenderer.on('mini-window:menu-closed', () => callback()),
+  // + (header row or after the last strip chip): a New Tab in this mini window.
+  newTab: () => ipcRenderer.send('mini-window:new-tab'),
+  // The address field (main runs the toolbar omnibox's model for it, shared/mini-window-omnibox.ts):
+  // main says what it shows; the page reports typing, the keys that move through the rows, Enter.
+  onAddress: (callback) => ipcRenderer.on('mini-window:address', (_event, state) => callback(state)),
+  addressInput: (text) => ipcRenderer.send('mini-window:address-input', String(text).slice(0, 8192)),
+  addressKey: (key) => ipcRenderer.send('mini-window:address-key', String(key)),
+  addressSubmit: (text) => ipcRenderer.send('mini-window:address-submit', String(text).slice(0, 8192)),
+  addressPick: (index) => ipcRenderer.send('mini-window:address-pick', Math.round(Number(index))),
+  addressFocus: () => ipcRenderer.send('mini-window:address-focus'),
+  addressBlur: () => ipcRenderer.send('mini-window:address-blur'),
+  // The mini window's New Tab page (main/mini-window-newtab-page.ts).
+  onNewTab: (callback) => ipcRenderer.on('mini-window:newtab-state', (_event, state) => callback(state)),
+  openSite: (url) => ipcRenderer.send('mini-window:newtab-open', String(url).slice(0, 8192)),
+  showAddress: () => ipcRenderer.send('mini-window:newtab-address'),
   // SURFFISH_DEBUG_HEADER (main/mini-header-debug.ts): main turns the header's own trace on/off; it
   // sends batches of lines (DOM writes, class toggles, focus, hover, theme) to the debug log.
   onDebug: (callback) => ipcRenderer.on('mini-window:debug', (_event, on) => callback(Boolean(on))),
