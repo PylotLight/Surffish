@@ -2,6 +2,7 @@ import type { ContextMenuParams, MenuItemConstructorOptions } from 'electron'
 import { cleanLinkUrl } from '../shared/clean-link'
 import { SEARCH_ENGINES, resolveNavigationTarget } from '../shared/navigation'
 import type { SearchEngineId } from '../shared/types'
+import { READ_ALOUD_SHORTCUT } from '../shared/read-aloud-gate'
 
 /**
  * Pure builder for the page right-click menu: takes the context-menu params and a set of
@@ -23,10 +24,10 @@ export interface ContextMenuTemplateOptions {
   hasScreenshot?: boolean
   hasReaderView?: boolean
   canWatchPage?: boolean
-  /** Offer "Read Aloud" / "Read Selection Aloud" (Read Aloud on in Settings, a web page). */
+  /** Offer the Read Aloud submenu (Read Aloud on in Settings, a web page). */
   canReadAloud?: boolean
-  /** A reading is in progress: offer "Stop Reading Aloud" instead of "Read Aloud". */
-  readingAloud?: boolean
+  /** The reading in progress, if any: the submenu then offers Pause / Resume and Stop. */
+  readAloudState?: ReadAloudMenuState
   /** Offer "Add Page/Link to Reading List" (never in private tabs). */
   canAddToReadingList?: boolean
   /** Offer "Open Link in Glance" (a peek over the page, without a new tab). */
@@ -63,8 +64,34 @@ export interface ContextMenuActions {
   takeScreenshot?(): void
   readerView?(): void
   watchPage?(mode: 'page' | 'pick'): void
-  readAloud?(target: 'page' | 'selection' | 'stop', selection?: string): void
+  readAloud?(target: ReadAloudMenuTarget, selection?: string): void
   addToReadingList?(target: 'page' | { url: string; title?: string }): void
+}
+
+export type ReadAloudMenuState = 'idle' | 'playing' | 'paused'
+/** 'here': from the right-click point (or the selection's start) to the end of the article / page. */
+export type ReadAloudMenuTarget = 'page' | 'here' | 'selection' | 'toggle' | 'stop'
+
+/**
+ * The one "Read Aloud" submenu (page, selection and Reader view menus): Read Page / Read from Here /
+ * Read Selection, plus Pause or Resume and Stop while a reading runs.
+ */
+export function readAloudSubmenu(options: { state: ReadAloudMenuState; selection: string; page: boolean }, run: (target: ReadAloudMenuTarget, selection?: string) => void): MenuItemConstructorOptions {
+  const submenu: MenuItemConstructorOptions[] = []
+  if (options.state !== 'idle') {
+    submenu.push(
+      { label: options.state === 'paused' ? 'Resume' : 'Pause', accelerator: READ_ALOUD_SHORTCUT, registerAccelerator: false, click: () => run('toggle') },
+      { label: 'Stop', click: () => run('stop') },
+      { type: 'separator' }
+    )
+  }
+  if (options.selection) submenu.push({ label: 'Read Selection', click: () => run('selection', options.selection) })
+  if (options.page) {
+    submenu.push({ label: 'Read from Here', toolTip: 'From this point to the end of the article', click: () => run('here') })
+    submenu.push({ label: 'Read Page', ...(options.state === 'idle' ? { accelerator: READ_ALOUD_SHORTCUT, registerAccelerator: false } : {}), click: () => run('page') })
+  }
+  while (submenu.at(-1)?.type === 'separator') submenu.pop()
+  return { label: 'Read Aloud', submenu }
 }
 
 /** Chrome shows a handful of guesses; more than this is noise in a context menu. */
@@ -188,40 +215,54 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
         })
       }
     }
-    if (options.pageActions && options.canReadAloud) {
-      const selection = params.selectionText.trim()
-      items.push({ label: 'Read Selection Aloud', click: () => actions.readAloud?.('selection', selection) })
-    }
   }
 
   const linkUrl = safeHttpUrl(params.linkURL)
   const mediaUrl = safeHttpUrl(params.srcURL)
+  const pageUrl = safeHttpUrl(params.pageURL)
+  const selection = params.isEditable ? '' : params.selectionText.trim()
+  const offerReadAloud = Boolean(options.pageActions && options.canReadAloud && !options.pdfDocument && !options.pdfEditor)
+  const readAloud = (): MenuItemConstructorOptions =>
+    readAloudSubmenu({ state: options.readAloudState ?? 'idle', selection, page: pageUrl !== null }, (target, text) => actions.readAloud?.(target, text))
+  // A selection: Read Aloud sits with Copy / Search (Read Selection in it).
+  if (selection && offerReadAloud) items.push(readAloud())
+
   if (linkUrl) {
     addSeparator(items)
+    const linkText = params.linkText?.trim() ?? ''
+    const copyAs: MenuItemConstructorOptions[] = [
+      { label: 'Clean Link', toolTip: 'Without tracking parameters (utm_*, fbclid, gclid…)', click: () => actions.writeClipboard(cleanLinkUrl(linkUrl)) },
+      ...(linkText ? [{ label: 'Link Text', click: () => actions.writeClipboard(linkText) }] : []),
+      { label: 'Markdown Link', click: () => actions.writeClipboard(`[${(linkText || linkUrl).replace(/[[\]]/g, '\\$&')}](${linkUrl})`) }
+    ]
+    const save: MenuItemConstructorOptions[] = [
+      { label: 'Save Link As…', click: () => actions.saveUrl(linkUrl, params.suggestedFilename || 'download') },
+      ...(options.pageActions && options.canAddToReadingList
+        ? [{ label: 'Add Link to Reading List', toolTip: 'Save the link to read later, without opening it', click: () => actions.addToReadingList?.({ url: linkUrl, ...(linkText ? { title: linkText } : {}) }) }]
+        : [])
+    ]
     items.push(
       { label: 'Open Link in New Tab', click: () => actions.openInNewTab(linkUrl) },
       { label: 'Open Link in Background Tab', click: () => actions.openInBackgroundTab(linkUrl) },
       ...(options.pageActions && options.canOpenInGlance ? [{ label: 'Open Link in Glance', toolTip: 'Peek at the link over this page without opening a tab (Shift+click)', click: () => actions.openInGlance?.(linkUrl) }] : []),
-      { label: 'Save Link As…', click: () => actions.saveUrl(linkUrl, params.suggestedFilename || 'download') },
       { label: 'Copy Link Address', click: () => actions.writeClipboard(linkUrl) },
-      { label: 'Copy Clean Link', toolTip: 'Copy without tracking parameters (utm_*, fbclid, gclid…)', click: () => actions.writeClipboard(cleanLinkUrl(linkUrl)) }
+      { label: 'Copy Link As', submenu: copyAs },
+      save.length > 1 ? { label: 'Save Link', submenu: save } : save[0]!
     )
-    if (options.pageActions && options.canAddToReadingList) {
-      const linkTitle = params.linkText?.trim() || undefined
-      items.push({ label: 'Add Link to Reading List', toolTip: 'Save the link to read later, without opening it', click: () => actions.addToReadingList?.({ url: linkUrl, ...(linkTitle ? { title: linkTitle } : {}) }) })
-    }
   }
-  if (params.mediaType === 'image' && params.hasImageContents) {
+  const image = params.mediaType === 'image' && params.hasImageContents
+  if (image) {
     // Works for blob:/data: images too, so it doesn't need an http src like the items below.
     addSeparator(items)
     items.push({ label: 'Copy Image', toolTip: 'Shortcut: ⌥/Alt+click an image', click: () => actions.copyImageAt(params.x, params.y) })
   }
-  if (mediaUrl && params.mediaType !== 'none') {
-    if (params.mediaType !== 'image' || !params.hasImageContents) addSeparator(items)
+  const media = mediaUrl !== null && params.mediaType !== 'none'
+  if (mediaUrl && media) {
+    if (!image) addSeparator(items)
     const kind = params.mediaType === 'image' ? 'Image' : params.mediaType === 'video' || params.mediaType === 'audio' ? 'Media' : 'File'
     items.push(
-      { label: `Open ${kind} in New Tab`, click: () => actions.openInNewTab(mediaUrl) },
       { label: `Save ${kind} As…`, click: () => actions.saveUrl(mediaUrl, params.suggestedFilename || 'download') },
+      { label: `Open ${kind} in New Tab`, click: () => actions.openInNewTab(mediaUrl) },
       { label: `Copy ${kind} Address`, click: () => actions.writeClipboard(mediaUrl) }
     )
   }
@@ -235,44 +276,42 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
       { label: 'Inspect', click: () => actions.inspect(params.x, params.y) }
     )
   } else if (options.pageActions) {
-    addSeparator(items)
-    items.push(
+    // The page's own items. A plain right-click shows them; on a link, an image or a selection they
+    // fold into one "Page" submenu so the menu stays about what was clicked.
+    const page: MenuItemConstructorOptions[] = [
       { label: 'Back', enabled: options.canGoBack, click: () => actions.goBack() },
       { label: 'Forward', enabled: options.canGoForward, click: () => actions.goForward() },
-      { label: 'Reload', click: () => actions.reload() }
-    )
-    const pageUrl = safeHttpUrl(params.pageURL)
-    if (pageUrl && !linkUrl) {
-      addSeparator(items)
-      items.push({ label: 'Copy Clean Link', toolTip: 'Copy this page’s address without tracking parameters', click: () => actions.writeClipboard(cleanLinkUrl(pageUrl)) })
-    }
-    addSeparator(items)
-    const pdfUrl = options.pdfDocument ? safeHttpUrl(params.pageURL) : null
+      { label: 'Reload', click: () => actions.reload() },
+      { type: 'separator' }
+    ]
+    if (!options.pdfDocument && options.hasReaderView) page.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
+    if (offerReadAloud && pageUrl && !selection) page.push(readAloud())
+    if (options.canAddToReadingList && pageUrl) page.push({ label: 'Add Page to Reading List', accelerator: 'CmdOrCtrl+Shift+L', registerAccelerator: false, click: () => actions.addToReadingList?.('page') })
+    addSeparator(page)
+    const pdfUrl = options.pdfDocument ? pageUrl : null
     if (pdfUrl) {
       // Goes through will-download, so it lands in the downloads list like any other file.
-      items.push({ label: 'Save PDF As…', click: () => actions.saveUrl(pdfUrl, pdfFilename(pdfUrl)) })
+      page.push({ label: 'Save PDF As…', click: () => actions.saveUrl(pdfUrl, pdfFilename(pdfUrl)) })
     } else if (!options.pdfDocument) {
-      items.push({ label: 'Save Page As…', click: () => actions.savePage() })
+      page.push({ label: 'Save Page As…', click: () => actions.savePage() })
     }
-    if (options.pdfDocument && options.hasEditPdf) items.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
-    if (options.hasScreenshot) items.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
-    if (!options.pdfDocument && options.hasReaderView) items.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
-    if (!options.pdfDocument && options.canReadAloud && pageUrl && !params.selectionText.trim()) {
-      items.push(options.readingAloud
-        ? { label: 'Stop Reading Aloud', click: () => actions.readAloud?.('stop') }
-        : { label: 'Read Aloud', toolTip: 'Read the article on this page out loud', click: () => actions.readAloud?.('page') })
-    }
-    if (options.canAddToReadingList && pageUrl && !linkUrl) items.push({ label: 'Add Page to Reading List', accelerator: 'CmdOrCtrl+Shift+L', registerAccelerator: false, click: () => actions.addToReadingList?.('page') })
+    if (options.pdfDocument && options.hasEditPdf) page.push({ label: 'Edit PDF', click: () => actions.editPdf?.() })
+    page.push({ label: 'Print…', click: () => actions.print() })
+    if (options.hasScreenshot) page.push({ label: 'Take Screenshot…', accelerator: 'CmdOrCtrl+Shift+S', registerAccelerator: false, click: () => actions.takeScreenshot?.() })
+    const tools: MenuItemConstructorOptions[] = []
+    if (pageUrl) tools.push({ label: 'Copy Clean Link', toolTip: 'Copy this page’s address without tracking parameters', click: () => actions.writeClipboard(cleanLinkUrl(pageUrl)) })
     if (!options.pdfDocument && options.canWatchPage && pageUrl) {
-      items.push(
+      tools.push(
         { label: 'Watch This Page for Changes…', click: () => actions.watchPage?.('page') },
         { label: 'Watch Part of This Page…', toolTip: 'Click the element to watch', click: () => actions.watchPage?.('pick') }
       )
     }
-    items.push(
-      { label: 'Print…', click: () => actions.print() },
-      { label: 'Inspect', click: () => actions.inspect(params.x, params.y) }
-    )
+    if (tools.length > 0) page.push({ label: 'More Tools', submenu: tools })
+    addSeparator(items)
+    if (linkUrl || media || image || selection) items.push({ label: 'Page', submenu: page })
+    else items.push(...page)
+    addSeparator(items)
+    items.push({ label: 'Inspect', click: () => actions.inspect(params.x, params.y) })
   } else if (!params.isEditable && !params.selectionText.trim() && flags.canSelectAll) {
     items.push({ label: 'Select All', click: () => actions.selectAll() })
   }

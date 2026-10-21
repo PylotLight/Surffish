@@ -74,3 +74,22 @@ test('pcm16ToFloat32 decodes little-endian samples', () => {
   expect(samples[1]).toBeCloseTo(1, 3)
   expect(samples[2]).toBe(0)
 })
+
+describe('ReadAloudPlan idling', () => {
+  test('generation idles while enough audio is scheduled ahead', () => {
+    const plan = new ReadAloudPlan(5, 0, 3)
+    plan.beginGenerating(0, 0)
+    plan.finishGenerating(0, 10)
+    // 10 s scheduled, 8 s allowed: sentence 1 waits…
+    expect(plan.nextToGenerate(0, 8)).toBeNull()
+    // …until playback catches up.
+    expect(plan.nextToGenerate(3, 8)).toBe(1)
+    // Without a cap, only the lookahead limits it.
+    expect(plan.nextToGenerate()).toBe(1)
+  })
+
+  test('the sentence being heard is generated whatever is scheduled', () => {
+    const plan = new ReadAloudPlan(3, 0, 1)
+    expect(plan.nextToGenerate(0, 0)).toBe(0)
+  })
+})

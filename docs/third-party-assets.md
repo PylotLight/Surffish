@@ -22,3 +22,7 @@ The upstream license text is included at [`licenses/GPL-3.0-Bramble-icon.txt`](l
 ## jsQR (Bramble Scan QR fallback)
 
 `out/vendor/jsqr.min.js` is [jsQR](https://github.com/cozmo/jsQR) 1.4.0 (Copyright Cosmo Wolfe), minified at build time from the `jsqr` dev dependency, about 130 KB (47 KB gzipped). Licensed under the Apache License 2.0; the license text is in [`licenses/Apache-2.0-jsQR.txt`](licenses/Apache-2.0-jsQR.txt). It is copied into Surffish's staged copy of Bramble as `surffish-jsqr.js` and only loaded the first time the Join a device **Scan QR** runs on a system without Chromium's `BarcodeDetector` (it is used on macOS only if `BarcodeDetector` can't read QR codes).
+
+## Read Aloud voice model (downloaded, not bundled)
+
+Read Aloud downloads, when it is turned on, the official [`phonon-tts`](https://www.npmjs.com/package/phonon-tts) npm package (WebAssembly runtime), the [gradium/phonon-31m-en](https://huggingface.co/gradium/phonon-31m-en) q8 model files and, when picked, voices from [gradium/phonon-voices](https://huggingface.co/gradium/phonon-voices), all Apache License 2.0, each pinned to a version or commit and checked against its hash (`src/shared/read-aloud-assets.ts`, `src/shared/read-aloud-voices.ts`). They are stored in the profile's `read-aloud` folder and never shipped with the app. See [Read Aloud](read-aloud.md).

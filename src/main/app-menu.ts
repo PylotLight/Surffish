@@ -8,11 +8,13 @@ import { APP_SHORTCUTS } from './app-shortcuts'
 import { openCommandPalette } from './command-palette'
 import { toggleTaskManager } from './diagnostics'
 import { toggleReaderMode } from './reader-mode'
+import { onReadAloudEnabledChange, readAloudEnabled, toggleReadAloud } from './read-aloud-feature'
+import { READ_ALOUD_SHORTCUT } from '../shared/read-aloud-gate'
 import { onPageWatchersEnabledChange, pageWatchersEnabled, revealPageWatchers } from './page-watchers-feature'
 import { revealFeeds } from './feeds-ipc'
 import { showReadingList } from './reading-list-ipc'
 import { keepWindowMenuCurrent, newWindowMenuItems, windowListMenuItems } from './window-menu'
-import { openSettingsTab, popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
+import { getActiveTabWebContents, openSettingsTab, popOutBrowserSplitPane, swapBrowserSplitPanes, unsplitBrowserTab } from './browser'
 import { focusMiniWindow, getMiniWindowSettings, listMiniWindows, returnAllMiniWindows, setMiniWindowGrouping, setMiniWindowHeaderPlacement, toggleMiniWindow } from './mini-window-entry'
 
 // Electron's default menu maps Cmd+W to Close Window, which fires whenever no web contents has
@@ -183,6 +185,8 @@ export function installAppMenu(): void {
         { type: 'separator' },
         // No-op unless the page looks like an article (or Reader view is open).
         { label: 'Reader View', accelerator: APP_SHORTCUTS.readerView, click: () => { void toggleReaderMode() } },
+        // Only while Read Aloud is on, so pages keep the keys otherwise (the menu rebuilds on the switch).
+        ...(readAloudEnabled() ? [{ label: 'Read Aloud / Pause', accelerator: READ_ALOUD_SHORTCUT, click: () => { toggleReadAloud(getActiveTabWebContents()) } }] : []),
         { type: 'separator' },
         // Cmd/Ctrl+Shift+= (which types "+") is Split View now, so there is no hidden Cmd+Plus zoom item.
         tabItem('Zoom In', 'zoomIn'),
@@ -235,6 +239,7 @@ export function installAppMenu(): void {
     windowMenuWatched = true
     keepWindowMenuCurrent(installAppMenu)
     onPageWatchersEnabledChange(() => installAppMenu())
+    onReadAloudEnabledChange(() => installAppMenu())
   }
 }
 

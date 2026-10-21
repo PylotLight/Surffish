@@ -1,9 +1,13 @@
 // Surffish Read Aloud engine page (surffish-tts://engine/read-aloud.html, a hidden window main opens
-// on the first reading; see src/main/read-aloud.ts). Speaks the sentences main sends with Phonon
+// on the first reading and closes 3 minutes after the last one or the last voice test; see
+// src/main/read-aloud.ts). Speaks the sentences main sends with Phonon
 // (the official `phonon-tts` WebAssembly build, downloaded into the profile and served by main under
 // /runtime/ and /model/), falling back to the system voices (speechSynthesis) when Phonon can't
 // start, or through a local OpenAI-compatible server (main fetches it). Audio is streamed in 80 ms
-// chunks onto a Web Audio timeline, one sentence ahead. The page is cross-origin isolated, so the
+// chunks onto a Web Audio timeline, 1–3 sentences ahead (more at high speed) and at most MAX_AHEAD_S
+// of audio, so generation idles between sentences. Nothing ticks while paused, and when a reading
+// ends the AudioContext is closed and the silent Media Session element dropped, so an idle engine
+// page holds no audio device, timer or media session. The page is cross-origin isolated, so the
 // threaded wasm build runs. A Media Session makes hardware media keys and Now Playing work.
 import { ReadAloudPlan, pcm16ToFloat32 } from '../../../shared/read-aloud-queue'
 import { WsolaStretcher } from '../../../shared/read-aloud-stretch'
@@ -70,6 +74,12 @@ const ORIGIN = location.origin
 /** Silence between sentences, on top of what the model leaves. */
 const SENTENCE_GAP_S = 0.06
 const TICK_MS = 100
+/**
+ * Audio scheduled ahead before generation pauses (seconds of playback). With the 1–3 sentence
+ * lookahead, this keeps the CPU idle between sentences once a comfortable buffer is there, at any
+ * speed, instead of generating as far ahead as the lookahead allows.
+ */
+const MAX_AHEAD_S = 12
 const MAX_FAILURES_IN_A_ROW = 3
 
 function emit(event: Record<string, unknown>): void {
@@ -171,8 +181,17 @@ function mediaSessionPlaying(title: string, playing: boolean): void {
   else silentAudio.pause()
 }
 
+/** A reading ended: drop the silent element (and its blob) so nothing holds the Media Session. */
 function mediaSessionEnd(): void {
-  silentAudio?.pause()
+  const audio = silentAudio
+  silentAudio = null
+  if (audio) {
+    audio.pause()
+    const url = audio.src
+    audio.removeAttribute('src')
+    audio.load()
+    if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+  }
   if (navigator.mediaSession) {
     navigator.mediaSession.metadata = null
     navigator.mediaSession.playbackState = 'none'
@@ -198,6 +217,13 @@ let audioContext: AudioContext | null = null
 function context(): AudioContext {
   if (!audioContext || audioContext.state === 'closed') audioContext = new AudioContext({ latencyHint: 'playback' })
   return audioContext
+}
+
+/** Nothing playing: close the AudioContext so the output device and its audio thread are released. */
+function releaseAudio(): void {
+  const ctx = audioContext
+  audioContext = null
+  if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => undefined)
 }
 
 /** A stream of mono float PCM chunks for sentence `index`. */
@@ -239,7 +265,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
 
   const pump = (): void => {
     if (stopped) return
-    const index = plan.nextToGenerate()
+    const index = plan.nextToGenerate(ctx.currentTime, MAX_AHEAD_S)
     if (index === null) return
     const generation = plan.generation
     const controller = new AbortController()
@@ -282,6 +308,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
         failures += 1
         if (failures >= MAX_FAILURES_IN_A_ROW) {
           stop()
+          releaseAudio()
           emit({ type: 'state', token: command.token, status: 'error', error: error instanceof Error ? error.message : String(error) })
           return
         }
@@ -297,6 +324,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     const result = plan.tick(ctx.currentTime)
     if (result.finished) {
       stop()
+      releaseAudio()
       emit({ type: 'state', token: command.token, status: 'finished', stats: finalStats() })
       return
     }
@@ -308,12 +336,18 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     pump()
   }
 
-  const timer = setInterval(tick, TICK_MS)
+  // The clock only runs while audio plays: paused, nothing ticks.
+  let timer: ReturnType<typeof setInterval> | null = setInterval(tick, TICK_MS)
+  const startTicking = (): void => { timer ??= setInterval(tick, TICK_MS) }
+  const stopTicking = (): void => {
+    if (timer) clearInterval(timer)
+    timer = null
+  }
 
   function stop(): void {
     if (stopped) return
     stopped = true
-    clearInterval(timer)
+    stopTicking()
     abort?.abort()
     stopSources()
     output.disconnect()
@@ -330,6 +364,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     pause() {
       if (paused || stopped) return
       paused = true
+      stopTicking()
       void ctx.suspend()
       mediaSessionPlaying(command.title, false)
       report('paused', plan.current)
@@ -337,6 +372,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     resume() {
       if (!paused || stopped) return
       paused = false
+      startTicking()
       void ctx.resume()
       mediaSessionPlaying(command.title, true)
       report('playing', plan.current)
@@ -350,6 +386,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
       firstAudioMs = firstAudioMs ?? 0
       if (paused) {
         paused = false
+        startTicking()
         void ctx.resume()
         mediaSessionPlaying(command.title, true)
       }
@@ -521,6 +558,7 @@ bridge?.onCommand((command) => {
     latestToken = 0
     reading?.stop()
     reading = null
+    releaseAudio()
     return
   }
   if (command.type === 'speak' || command.type === 'respeak') {
@@ -548,6 +586,7 @@ if (navigator.mediaSession) {
     const token = tokenNow()
     reading?.stop()
     reading = null
+    releaseAudio()
     if (token) emit({ type: 'state', token, status: 'finished' })
   })
 }

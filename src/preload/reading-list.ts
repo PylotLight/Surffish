@@ -18,7 +18,7 @@ export const readingListApi = {
   setRead: (id: string, read: boolean): Promise<Result> => invoke('browser:reading-list:set-read', id, read),
   remove: (id: string): Promise<Result> => invoke('browser:reading-list:remove', id),
   clearRead: (): Promise<Result<{ removed: number; snapshot: ReadingListSnapshot }>> => invoke('browser:reading-list:clear-read'),
-  open: (id: string, options?: { target?: 'current' | 'new-tab'; reader?: boolean }): Promise<Result<{ tabId: string | null }>> => invoke('browser:reading-list:open', id, options ?? {}),
+  open: (id: string, options?: { target?: 'current' | 'new-tab'; reader?: boolean; listen?: boolean }): Promise<Result<{ tabId: string | null }>> => invoke('browser:reading-list:open', id, options ?? {}),
   contextMenu: (id: string): Promise<string | null> => invoke('browser:reading-list:context-menu', id),
   onChange: (callback: (snapshot: ReadingListSnapshot) => void): (() => void) => subscribe('browser:reading-list:changed', callback),
   /** The menu, palette or a shortcut asked to show the Reading List popover. */

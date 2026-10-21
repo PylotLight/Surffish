@@ -60,12 +60,17 @@ export class ReadAloudPlan {
 
   /**
    * The next sentence to generate: nothing is being generated, it is not on the timeline yet, and it
-   * is at most `lookahead` sentences past the one being heard. Null when there is nothing to do now.
+   * is at most `lookahead` sentences past the one being heard. With `now` and `maxAheadSeconds`, a
+   * sentence after the current one also waits while more than that much audio is already scheduled,
+   * so generation idles between sentences instead of racing to the end. Null when there is nothing
+   * to do now.
    */
-  nextToGenerate(): number | null {
+  nextToGenerate(now?: number, maxAheadSeconds = Number.POSITIVE_INFINITY): number | null {
     if (this.generating !== null || this.total === 0) return null
     for (let index = this.current; index < this.total && index <= this.current + this.lookahead; index += 1) {
-      if (!this.timeline.has(index) && !this.failed.has(index)) return index
+      if (this.timeline.has(index) || this.failed.has(index)) continue
+      if (index > this.current && now !== undefined && this.scheduledUntil() - now > maxAheadSeconds) return null
+      return index
     }
     return null
   }

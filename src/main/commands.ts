@@ -48,8 +48,8 @@ import { groupSelectedBrowserTabs, getSelectedBrowserTabIds } from './tab-select
 import { DEFAULT_SPACE_ID } from '../shared/spaces'
 import { isCommandHiddenByWatchers } from '../shared/page-watchers-feature'
 import { pageWatchersEnabled } from './page-watchers-feature'
-import { isCommandHiddenByReadAloud } from '../shared/read-aloud'
-import { controlReadAloud, getReadAloudState, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage } from './read-aloud-feature'
+import { isCommandHiddenByReadAloud, READ_ALOUD_SHORTCUT } from '../shared/read-aloud-gate'
+import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage, readAloudStatus } from './read-aloud-feature'
 import { revealFeeds } from './feeds-ipc'
 import { addTabToReadingList, showReadingList } from './reading-list-ipc'
 import { glanceShiftClickEnabled, openGlance, setGlanceShiftClick } from './glance-entry'
@@ -137,15 +137,15 @@ const COMMANDS: BrowserCommand[] = [
   },
   // Read Aloud (experimental; hidden while off in Settings).
   {
-    id: 'readAloud.page', title: 'Read Aloud', section: 'Tab', keywords: ['speak', 'listen', 'text to speech', 'tts', 'narrate', 'voice', 'audio article'], refocusPage: true,
-    enabled: () => readAloudEnabled() && activeIsWebPage(), run: () => readAloudFromPage(getActiveTabWebContents(), 'page')
+    id: 'readAloud.page', title: 'Read Aloud', accelerator: READ_ALOUD_SHORTCUT, section: 'Tab', keywords: ['speak', 'listen', 'text to speech', 'tts', 'narrate', 'voice', 'audio article', 'read page'], refocusPage: true,
+    enabled: () => readAloudEnabled() && activeIsWebPage() && !isReadAloudActiveNow(), run: () => readAloudFromPage(getActiveTabWebContents(), 'page')
   },
   {
     id: 'readAloud.selection', title: 'Read Selection Aloud', section: 'Tab', keywords: ['speak selection', 'listen', 'text to speech', 'tts'], refocusPage: true,
     enabled: () => readAloudEnabled() && activeIsWebPage(), run: () => readAloudFromPage(getActiveTabWebContents(), 'selection')
   },
   {
-    id: 'readAloud.pause', title: () => (getReadAloudState().status === 'paused' ? 'Resume Reading Aloud' : 'Pause Reading Aloud'), section: 'Tab', keywords: ['read aloud', 'speech', 'tts'], refocusPage: true,
+    id: 'readAloud.pause', title: () => (readAloudStatus() === 'paused' ? 'Resume Reading Aloud' : 'Pause Reading Aloud'), accelerator: READ_ALOUD_SHORTCUT, section: 'Tab', keywords: ['read aloud', 'speech', 'tts', 'play'], refocusPage: true,
     enabled: () => readAloudEnabled() && isReadAloudActiveNow(), run: () => controlReadAloud('toggle')
   },
   { id: 'readAloud.stop', title: 'Stop Reading Aloud', section: 'Tab', keywords: ['read aloud', 'speech', 'tts', 'silence'], refocusPage: true, enabled: () => readAloudEnabled() && isReadAloudActiveNow(), run: () => controlReadAloud('stop') },

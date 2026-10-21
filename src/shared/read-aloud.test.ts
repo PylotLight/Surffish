@@ -26,7 +26,7 @@ import {
 } from './read-aloud-assets'
 import { lookaheadFor, MODEL_MAX_RATE, MODEL_MIN_RATE, rateToDurationDelta, splitSpeed } from './read-aloud-speed'
 import { stretchAll, WsolaStretcher } from './read-aloud-stretch'
-import { ENGLISH_VOICE_SHA256, filterVoices, groupVoices, MODEL_VOICE, parseVoiceCatalog, VOICE_CATALOG_URL, voiceSummary } from './read-aloud-voices'
+import { ENGLISH_VOICE_SHA256, filterVoices, groupVoices, MODEL_VOICE, parseVoiceCatalog, RECOMMENDED_VOICE_IDS, VOICE_CATALOG_URL, voiceSummary } from './read-aloud-voices'
 
 describe('read aloud settings', () => {
   test('off by default (experimental), Phonon engine, default voice, 1x', () => {
@@ -35,8 +35,8 @@ describe('read aloud settings', () => {
     expect(DEFAULT_READ_ALOUD_SETTINGS.engine).toBe('phonon')
   })
 
-  test('Phonon levers default to phonon-tts\'s own defaults', () => {
-    expect(DEFAULT_READ_ALOUD_SETTINGS).toMatchObject({ temperature: 0.3, varySeed: false, rewrites: 'default', device: 'cpu', threads: 'auto', conditions: {} })
+  test('Phonon levers default to phonon-tts\'s own defaults, on the CPU with 2 threads', () => {
+    expect(DEFAULT_READ_ALOUD_SETTINGS).toMatchObject({ temperature: 0.3, varySeed: false, rewrites: 'default', device: 'cpu', threads: 2, conditions: {} })
   })
 
   test('keeps valid fields, falls back on junk', () => {
@@ -47,7 +47,7 @@ describe('read aloud settings', () => {
     expect(parseReadAloudSettings({ temperature: 7 }).temperature).toBe(1)
     expect(parseReadAloudSettings({ temperature: -1 }).temperature).toBe(0)
     expect(parseReadAloudSettings({ threads: 'auto' }).threads).toBe('auto')
-    expect(parseReadAloudSettings({ threads: 2.5 }).threads).toBe('auto')
+    expect(parseReadAloudSettings({ threads: 2.5 }).threads).toBe(2)
   })
 
   test('conditions: only conditioner-shaped names and simple values; duration_delta belongs to speed', () => {
@@ -235,6 +235,21 @@ describe('voice catalog', () => {
     expect(voices[0]).toMatchObject({ file: 'voices/b2.safetensors', url: 'https://example.test/repo/voices/b2.safetensors', sha256: 'b'.repeat(64), bytes: 256136, gender: 'female', age: 'Adult' })
     expect(voices[3]).toMatchObject({ gender: '', age: '' })
     expect(groupVoices([MODEL_VOICE, ...voices]).map((group) => [group.label, group.voices.length])).toEqual([['Model voice', 1], ['American English', 1], ['British English', 1], ['Other English', 1], ['Characters', 1]])
+  })
+
+  test('a Recommended group comes first when asked for, each voice listed once', () => {
+    const harper = { id: RECOMMENDED_VOICE_IDS[0]!, name: 'Harper', accent: 'us' as const, gender: 'female', age: 'Adult', description: '' }
+    const zoey = { id: 'z1', name: 'Zoey', accent: 'us' as const, gender: 'female', age: 'Adult', description: '' }
+    const groups = groupVoices([MODEL_VOICE, harper, zoey], { recommended: true })
+    expect(groups.map((group) => [group.key, group.voices.map((voice) => voice.name)])).toEqual([['recommended', ['Harper']], ['model', ['Default']], ['us', ['Zoey']]])
+    expect(groupVoices([MODEL_VOICE, harper, zoey]).map((group) => group.key)).toEqual(['model', 'us'])
+    expect(voiceSummary(harper, { accent: true })).toBe('Harper · American, female')
+    expect(voiceSummary(harper)).toBe('Harper · female, Adult')
+  })
+
+  test('every recommended voice is an English catalog voice with a pinned hash', () => {
+    expect(RECOMMENDED_VOICE_IDS.length).toBeGreaterThanOrEqual(4)
+    for (const id of RECOMMENDED_VOICE_IDS) expect(ENGLISH_VOICE_SHA256[id]).toMatch(/^[0-9a-f]{64}$/)
   })
 
   test('search matches name, accent, gender and description words', () => {

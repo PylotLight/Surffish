@@ -15,7 +15,13 @@
 //   6. Delete download, then read an article from Reader view's Listen button: the player shows the
 //      download progress and the reading starts once it's done. The hidden engine window runs on
 //      surffish-tts://engine/ and is cross-origin isolated (wasm threads).
-//   7. Navigating the tab stops the reading. Turning the feature off closes the engine window.
+//   7. Navigating the tab stops the reading; the idle engine window closes (SURFFISH_READ_ALOUD_IDLE_MS
+//      shortens the 3 minutes) and the next reading opens it again.
+//   8. On the live page (no Reader view): the page menu's one "Read Aloud" submenu, "Read from Here"
+//      starts mid-article, the spoken sentence is highlighted with the CSS Custom Highlight API (the
+//      DOM isn't touched), Pause/Stop while reading; a Reading List item's Listen reads its saved copy.
+//   9. The Cmd/Ctrl+Shift+U app-menu item exists only while on. Turning the feature off closes the
+//      engine window.
 // READ_ALOUD_SMOKE_PHONON=1 skips the fixtures and downloads the real Phonon runtime + model (~71 MB)
 // into the temp profile, and checks real speech: playing, pause/resume, next, the Reader highlight.
 // Runs the production build: `bun run build && bun run test:electron-read-aloud`
@@ -29,10 +35,37 @@ const { gzipSync } = require('node:zlib')
 const { tmpdir } = require('node:os')
 const { join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { app, BaseWindow, BrowserWindow } = require('electron')
+const { app, BaseWindow, BrowserWindow, Menu } = require('electron')
 const { ElectronBlocker } = require('@ghostery/adblocker-electron')
 
 const PHONON = process.env.READ_ALOUD_SMOKE_PHONON === '1'
+const IDLE_MS = 4000
+process.env.SURFFISH_READ_ALOUD_IDLE_MS = String(IDLE_MS)
+// Context menus are captured instead of shown (the smoke picks items and clicks them).
+let menus = []
+const buildFromTemplate = Menu.buildFromTemplate.bind(Menu)
+Menu.buildFromTemplate = (template) => {
+  const menu = buildFromTemplate(template)
+  menus.push(template)
+  menu.popup = () => undefined
+  return menu
+}
+/** The item at a "Parent › Child" label path in a captured template. */
+function menuItem(template, path) {
+  const [head, ...rest] = path.split(' › ')
+  const item = (template || []).find((candidate) => candidate.label === head)
+  if (!item || rest.length === 0) return item
+  return Array.isArray(item.submenu) ? menuItem(item.submenu, rest.join(' › ')) : undefined
+}
+/** Resident memory (MB) of the app's processes, and of the engine window's renderer when it's open. */
+function memoryMb() {
+  const metrics = app.getAppMetrics()
+  const engine = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed() && win.webContents.getURL().startsWith('surffish-tts://'))
+  const pid = engine ? engine.webContents.getOSProcessId() : -1
+  const mb = (kb) => Math.round(kb / 1024)
+  return { total: mb(metrics.reduce((sum, metric) => sum + (metric.memory.workingSetSize || 0), 0)), engine: mb(metrics.find((metric) => metric.pid === pid)?.memory.workingSetSize ?? 0) }
+}
+const menuLabels = (template) => (template || []).map((item) => item.type === 'separator' ? '—' : item.label)
 const root = join(tmpdir(), `surffish-read-aloud-smoke-${process.pid}`)
 const userData = process.env.READ_ALOUD_SMOKE_PROFILE || join(root, 'user-data')
 const paragraphs = [
@@ -97,7 +130,7 @@ const fixtures = {
 const CATALOG = [
   { voice_id: 'usZoey00000000a1', name: 'Zoey', language: 'en', locale: 'en-us', gender: 'female', age: 'Adult', description: 'Playful and upbeat American voice.' },
   { voice_id: 'usMiles0000000a2', name: 'Miles', language: 'en', locale: 'en-us', gender: 'male', age: 'Adult', description: 'Calm and low.' },
-  { voice_id: 'usHarper000000a3', name: 'Harper', language: 'en', locale: 'en-us', gender: 'female', age: 'Young Adult', description: 'Bright narrator.' },
+  { voice_id: '4SZHfMpw-p46Ywgs', name: 'Harper', language: 'en', locale: 'en-us', gender: 'female', age: 'Young Adult', description: 'Bright narrator.' },
   { voice_id: 'ukFreya0000000b1', name: 'Freya', language: 'en', locale: 'en-gb', gender: 'female', age: 'Adult', description: 'Crisp British English.' },
   { voice_id: 'ukHugh00000000b2', name: 'Hugh', language: 'en', locale: 'en-gb', gender: 'male', age: 'Middle-age', description: 'Warm British storyteller.' },
   { voice_id: 'chCaptain00000c1', name: 'Captain Silas', language: 'en', locale: 'characters', gender: null, age: null, description: 'An old pirate captain.' },
@@ -316,9 +349,11 @@ async function run() {
   if (!PHONON) {
     await waitFor(async () => (await options('Read Aloud voice')).length === ENGLISH.length + 1, `the catalog voices (${ENGLISH.length} English + the model voice)`)
     const listed = await options('Read Aloud voice')
-    assert.equal(listed[0], 'default')
-    assert.deepEqual([...listed.slice(1)].sort(), ENGLISH.map((voice) => voice.voice_id).sort(), 'English only (no German voice)')
-    assert.deepEqual(await page('[...document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] optgroup")].map((g) => g.label)'), ['Model voice', 'American English', 'British English', 'Characters'])
+    assert.ok(listed.includes('default'), 'the model voice')
+    assert.deepEqual(listed.filter((id) => id !== 'default').sort(), ENGLISH.map((voice) => voice.voice_id).sort(), 'English only (no German voice), each once')
+    // A few recommended picks first (Harper here), each voice listed once.
+    assert.deepEqual(await page('[...document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] optgroup")].map((g) => g.label)'), ['Recommended', 'Model voice', 'American English', 'British English', 'Characters'])
+    assert.equal(await page('document.querySelector("select[aria-label=\\"Read Aloud voice\\"] optgroup[label=\\"Recommended\\"] option").textContent'), 'Harper · American, female')
     assert.equal(await page('[...document.querySelectorAll("select[aria-label=\\"Read Aloud voice\\"] option")].some((o) => o.textContent.includes("✓"))'), false, 'no downloaded ticks')
     assert.equal(fixtureHits.includes('voices.jsonl'), true, 'voices.jsonl fetched')
     assert.equal(fixtureHits.some((name) => name.startsWith('voices/')), false, 'no voice file fetched until one is picked')
@@ -389,7 +424,7 @@ async function run() {
     assert.equal(load.conditions.duration_delta, -0.4, 'model-native part of the speed')
     assert.equal(load.rewrites, 'all', 'the rewrites setting reaches PhononTTS.load')
     assert.equal(load.device, 'cpu')
-    assert.equal(load.threads, 'auto')
+    assert.equal(load.threads, 2, '2 threads by default')
     const stream = recorded.streams.at(-1)
     assert.equal(stream.voice, pickedVoice)
     assert.equal(stream.temperature, 0.3, 'expressiveness → temperature')
@@ -444,6 +479,9 @@ async function run() {
   assert.ok(started.total >= paragraphs.length, `the article was split into sentences (${started.total})`)
   const engineWin = engineWindow()
   assert.ok(engineWin, 'the hidden engine window is open')
+  await delay(PHONON ? 3000 : 300)
+  const readingMemory = memoryMb()
+  console.log(`memory while reading (MB): ${JSON.stringify(readingMemory)}`)
   assert.equal(engineWin.isVisible(), false, 'the engine window is never shown')
   assert.equal(await engineWin.webContents.executeJavaScript('self.crossOriginIsolated === true'), true)
   await waitFor(() => evaluate(reader, 'CSS.highlights.has("read-aloud")'), 'the spoken sentence highlight in Reader view')
@@ -469,12 +507,77 @@ async function run() {
     await waitFor(async () => (await state()).status === 'idle', 'navigation to stop the reading')
   }
 
+  // --- 7b. The idle engine closes (memory freed), the next reading opens it again.
+  smoke.step('idle engine closes')
+  await waitFor(() => engineWindow() === undefined, 'the idle engine window to close', IDLE_MS + smoke.waitMs)
+  await delay(1000)
+  const idleMemory = memoryMb()
+  console.log(`memory after the idle engine closed (MB): ${JSON.stringify(idleMemory)}; freed ≈ ${readingMemory.total - idleMemory.total} MB (engine renderer was ${readingMemory.engine} MB)`)
+
+  // --- 8. The live page: Read Aloud submenu, Read from Here, highlight without DOM changes.
+  smoke.step('live page: read from here + highlight')
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}/2026/read-aloud-article`)})`)
+  const live = await waitFor(() => viewWithUrl(`${origin}/2026/read-aloud-article`), 'the article page again')
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).loading === false, 'the article to load')
+  const elementCount = await evaluate(live, 'document.querySelectorAll("*").length')
+  const rightClick = async (expression) => {
+    const point = await evaluate(live, `(() => { const r = ${expression}.getBoundingClientRect(); return { x: Math.round(r.x + 8), y: Math.round(r.y + r.height / 2) } })()`)
+    menus = []
+    live.webContents.emit('context-menu', { preventDefault() {} }, { ...point, pageURL: live.webContents.getURL(), editFlags: { canSelectAll: true } })
+    return waitFor(() => menus.find((template) => menuItem(template, 'Read Aloud')), 'the page menu with Read Aloud', 3000)
+  }
+  let pageMenu = await rightClick('document.querySelectorAll("article p")[3]')
+  console.log(`page menu: ${JSON.stringify(menuLabels(pageMenu))}`)
+  assert.deepEqual(menuLabels(menuItem(pageMenu, 'Read Aloud').submenu), ['Read from Here', 'Read Page'], 'one Read Aloud submenu (no selection: no Read Selection)')
+  for (const old of ['Read Selection Aloud', 'Stop Reading Aloud', 'Watch This Page for Changes…', 'Copy Clean Link']) assert.equal(menuLabels(pageMenu).includes(old), false, `${old} is not top-level any more`)
+  menuItem(pageMenu, 'Read Aloud › Read from Here').click()
+  const fromHere = await waitFor(async () => { const value = await state(); return (value.status === 'playing' || value.status === 'error') && value }, 'Read from Here to start (the engine opens again)', smoke.waitMs * 2)
+  assert.equal(fromHere.status, 'playing', `Read from Here started (${fromHere.error})`)
+  assert.ok(engineWindow(), 'the engine window opened again')
+  assert.ok(fromHere.index > 2, `started mid-article (sentence ${fromHere.index} of ${fromHere.total})`)
+  const highlighted = () => evaluate(live, 'CSS.highlights.has("surffish-read-aloud")')
+  await waitFor(highlighted, 'the spoken sentence highlighted on the live page')
+  const highlightText = await evaluate(live, '[...CSS.highlights.get("surffish-read-aloud")][0]?.toString() ?? ""')
+  console.log(`live highlight: ${JSON.stringify(highlightText.slice(0, 80))}`)
+  assert.ok(highlightText.length > 3, 'the highlight covers a sentence')
+  assert.equal(await evaluate(live, 'document.querySelectorAll("*").length'), elementCount, 'the page DOM is untouched')
+  pageMenu = await rightClick('document.querySelector("article h1")')
+  assert.deepEqual(menuLabels(menuItem(pageMenu, 'Read Aloud').submenu), ['Pause', 'Stop', '—', 'Read from Here', 'Read Page'], 'Pause and Stop while reading')
+  menuItem(pageMenu, 'Read Aloud › Stop').click()
+  await waitFor(async () => (await state()).status === 'idle', 'Stop from the menu')
+  await waitFor(async () => !(await highlighted()), 'the live highlight cleared')
+
+  smoke.step('reading list: Listen reads the saved copy')
+  const added = await evaluate(toolbar, 'window.api.browser.readingList.addTab()')
+  assert.equal(added.ok, true, `saved to the Reading List (${added.error})`)
+  const savedItem = async () => (await evaluate(toolbar, 'window.api.browser.readingList.get()')).items.find((entry) => entry.url.includes('read-aloud-article'))
+  // The offline Reader copy is saved in the background (and only with the SQLite store); without it Listen opens the live page in Reader view.
+  await waitFor(async () => (await savedItem())?.hasSnapshot, 'the offline Reader copy', 3000).catch(() => undefined)
+  const saved = await savedItem()
+  assert.ok(saved, 'the article is in the Reading List')
+  console.log(`reading list item: hasSnapshot ${saved.hasSnapshot}`)
+  await evaluate(toolbar, `window.api.browser.navigate(${JSON.stringify(`${origin}/plain`)})`)
+  await waitFor(async () => (await evaluate(toolbar, 'window.api.browser.state()')).loading === false, 'another page')
+  assert.equal((await evaluate(toolbar, `window.api.browser.readingList.open(${JSON.stringify(saved.id)}, { listen: true })`)).ok, true)
+  await waitFor(() => viewWithUrl('surffish-reader://reader/'), 'Reader view with the saved copy')
+  const listening = await waitFor(async () => { const value = await state(); return (value.status === 'playing' || value.status === 'error') && value }, 'Listen to start reading', smoke.waitMs * 2)
+  assert.equal(listening.status, 'playing', `Listen started (${listening.error})`)
+  assert.equal(listening.title, 'Read Aloud Smoke Article')
+  await evaluate(toolbar, 'window.api.browser.readAloud.control("stop")')
+  await waitFor(async () => (await state()).status === 'idle', 'stop')
+
+  smoke.step('shortcut in the app menu')
+  const appMenuItems = (menu) => menu.items.flatMap((item) => [item, ...(item.submenu ? appMenuItems(item.submenu) : [])])
+  const shortcutItem = () => appMenuItems(Menu.getApplicationMenu()).find((item) => item.accelerator === 'CmdOrCtrl+Shift+U')
+  assert.ok(shortcutItem(), 'Read Aloud / Pause (Cmd/Ctrl+Shift+U) in the View menu while on')
+
   // --- Off again: the engine window closes, entries hide, the download stays.
   smoke.step('turn off')
   await evaluate(toolbar, 'window.api.browser.readAloud.setSettings({ enabled: false })')
   await waitFor(() => engineWindow() === undefined, 'the engine window to close')
   assert.equal((await commandIds()).some((id) => id.startsWith('readAloud.')), false)
   assert.equal((await download()).status, 'ready', 'turning off keeps the download')
+  await waitFor(() => !shortcutItem(), 'the shortcut to leave the app menu (pages keep the keys)')
   console.log('Electron Read Aloud smoke passed.')
 }
 

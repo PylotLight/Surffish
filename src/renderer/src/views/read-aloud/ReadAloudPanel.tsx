@@ -91,9 +91,9 @@ export function ReadAloudPanel({ state, onClose }: { state: ReadAloudState; onCl
                 <label>
                   <span>Voice</span>
                   <select value={voices.some((voice) => voice.id === settings.voice) ? settings.voice : 'default'} aria-label="Voice" onChange={(event) => save({ voice: event.target.value })}>
-                    {groupVoices(voices).map((group) => (
-                      <optgroup key={group.accent} label={group.label}>
-                        {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice)}</option>)}
+                    {groupVoices(voices, { recommended: true }).map((group) => (
+                      <optgroup key={group.key} label={group.label}>
+                        {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice, { accent: group.key === 'recommended' })}</option>)}
                       </optgroup>
                     ))}
                   </select>

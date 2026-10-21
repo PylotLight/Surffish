@@ -83,6 +83,7 @@ Surffish isn't signed or notarized yet, so the first launch needs one extra step
 | **Private tabs & windows** | An in-memory session that never writes history or the saved session. | ⌥⌘N tab · ⇧⌘N window |
 | **Reader view** | The article on its own, with font, size and theme controls. | ⌥⌘R |
 | **Reading list** | Save pages for later, separate from bookmarks, with an unread count. | ⇧⌘L |
+| **Read Aloud** (experimental) | Articles, selections or a page from any point read out loud by an on-device voice model (Phonon, 37 English voices, 0.75–3×), with the spoken sentence highlighted. Off by default. | ⇧⌘U · right-click → Read Aloud · [docs](docs/read-aloud.md) |
 | **Bookmarks** | Bookmark manager, optional bookmarks bar, and import from Chrome, Brave, Edge, Arc, Firefox, Safari or an HTML export. | ⌘D · ⌥⌘B manager · ⇧⌘B bar |
 | **History** | Local history with search, plus a Back/Forward menu for jumping several pages. | ⌘Y · hold or right-click Back/Forward |
 | **Chrome Web Store extensions** | Paste a store link, or click **Add to Surffish** on the store page. Extensions with an action get a toolbar button. | Settings → Integrations → Extensions |
@@ -136,7 +137,7 @@ Same platform limits as above: Apple silicon Macs only. On other systems the lau
 
 - **Your data stays on your Mac.** History, the open-tabs session, bookmarks, the reading list and preferences live in one SQLite database (`surffish.db`) in your profile folder. There's no account and no sync service.
 - **Address bar suggestions are local.** They come from your own tabs, bookmarks and history, not from a remote suggestion service. Typed searches go to the search engine you pick.
-- **Network calls Surffish makes on its own:** filter list updates (from uBlock Origin's asset server and the list publishers, at startup when stale and then every 8 hours), New Tab photos, the GitHub releases feed for update checks, and any feeds or page watchers you add. Preloading (on by default, Settings → General → Tabs) opens a connection to a site while you type its address or hover a link to it, never in private tabs.
+- **Network calls Surffish makes on its own:** filter list updates (from uBlock Origin's asset server and the list publishers, at startup when stale and then every 8 hours), New Tab photos, the GitHub releases feed for update checks, and any feeds or page watchers you add. Turning on Read Aloud downloads its voice model once (pinned, hash-checked); the text it reads never leaves your Mac. Preloading (on by default, Settings → General → Tabs) opens a connection to a site while you type its address or hover a link to it, never in private tabs.
 - **The proxy is a tunnel, not anonymity.** SOCKS5 support routes traffic through an endpoint you control. It's not an audited anonymity tool. WebRTC is kept from leaking your real IP while the proxy is on.
 
 ## FAQ
@@ -207,6 +208,7 @@ Electron gives a current Chromium engine with a small, readable codebase on top,
 - [Profile storage](docs/storage.md): the `surffish.db` schema and JSON fallbacks
 - [Bramble quick unlock](docs/bramble-quick-unlock.md): how the PIN and Touch ID unlock works
 - [Performance checks](docs/perf.md): what the per-PR perf job measures
+- [Read Aloud](docs/read-aloud.md): the on-device voice, its downloads and memory
 - [Troubleshooting](docs/troubleshooting.md)
 - [Releasing](docs/releasing.md) and [release notes](docs/releases/)
 - [Third-party assets](docs/third-party-assets.md)

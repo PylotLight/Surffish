@@ -54,6 +54,9 @@
     ],
     "src/main/read-aloud.ts": [
       "exports"
+    ],
+    "src/main/read-aloud-settings.ts": [
+      "exports"
     ]
   }
 }

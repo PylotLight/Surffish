@@ -67,6 +67,22 @@ export const VOICE_ACCENT_LABELS: Record<VoiceAccent, string> = {
 
 const ACCENT_ORDER: readonly VoiceAccent[] = ['model', 'us', 'uk', 'other', 'characters']
 
+/**
+ * A few catalog voices suited to long reading, shown first in the pickers to help choosing (picked
+ * from the catalog's own descriptions: even, clear, relaxed delivery): Harper, Everly, Preston
+ * (American), Bryony, Edwin, Hugh (British).
+ */
+export const RECOMMENDED_VOICE_IDS: readonly string[] = [
+  '4SZHfMpw-p46Ywgs', // Harper · en-us, female: modern, confident and friendly
+  'vjFyp2BcCyTlUmYb', // Everly · en-us, female: rounded, relaxed delivery
+  'qIxlZ7Ei8KvWlyQH', // Preston · en-us, male: trim, focused, steady low core
+  'gfP44RlHwr2kEwk7', // Bryony · en-gb, female: full, rich, softly relaxed
+  'zUCxzrOrugTSis03', // Edwin · en-gb, male: efficient, tidy articulation
+  'YyKcxPG7iIgS3jsK' // Hugh · en-gb, male: soft and close, sincere
+]
+
+const SHORT_ACCENT: Partial<Record<VoiceAccent, string>> = { us: 'American', uk: 'British', other: 'English' }
+
 /** A voice the picker can offer (no hashes: those stay in main). */
 export interface CatalogVoice {
   id: string
@@ -157,13 +173,30 @@ export function filterVoices<T extends CatalogVoice>(voices: readonly T[], query
   })
 }
 
-/** Voices grouped for <optgroup>s, in accent order, empty groups dropped. */
-export function groupVoices<T extends CatalogVoice>(voices: readonly T[]): Array<{ accent: VoiceAccent; label: string; voices: T[] }> {
-  return ACCENT_ORDER.map((accent) => ({ accent, label: VOICE_ACCENT_LABELS[accent], voices: voices.filter((voice) => voice.accent === accent) })).filter((group) => group.voices.length > 0)
+export interface VoiceGroup<T extends CatalogVoice> {
+  key: VoiceAccent | 'recommended'
+  label: string
+  voices: T[]
 }
 
-/** "Zoey · female, Adult". */
-export function voiceSummary(voice: CatalogVoice): string {
-  const detail = [voice.gender, voice.age].filter(Boolean).join(', ')
+/**
+ * Voices grouped for <optgroup>s, in accent order, empty groups dropped. With `recommended`, the
+ * RECOMMENDED_VOICE_IDS present come first in their own group (and leave their accent group, so each
+ * voice is listed once).
+ */
+export function groupVoices<T extends CatalogVoice>(voices: readonly T[], options: { recommended?: boolean } = {}): Array<VoiceGroup<T>> {
+  const picks = options.recommended ? RECOMMENDED_VOICE_IDS.map((id) => voices.find((voice) => voice.id === id)).filter((voice): voice is T => voice !== undefined) : []
+  const rest = voices.filter((voice) => !picks.includes(voice))
+  const groups: Array<VoiceGroup<T>> = picks.length > 0 ? [{ key: 'recommended', label: 'Recommended', voices: picks }] : []
+  for (const accent of ACCENT_ORDER) {
+    const members = rest.filter((voice) => voice.accent === accent)
+    if (members.length > 0) groups.push({ key: accent, label: VOICE_ACCENT_LABELS[accent], voices: members })
+  }
+  return groups
+}
+
+/** "Zoey · female, Adult"; in the Recommended group the accent too ("Harper · American, female"). */
+export function voiceSummary(voice: CatalogVoice, options: { accent?: boolean } = {}): string {
+  const detail = [options.accent ? SHORT_ACCENT[voice.accent] : '', voice.gender, options.accent ? '' : voice.age].filter(Boolean).join(', ')
   return detail ? `${voice.name} · ${detail}` : voice.name
 }

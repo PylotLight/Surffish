@@ -1,31 +1,32 @@
 import { ipcRenderer } from 'electron'
 import type { ReadAloudCatalogInfo, ReadAloudControl, ReadAloudDownloadState, ReadAloudSettings, ReadAloudState, ReadAloudTestRequest, ReadAloudTestState } from '../shared/read-aloud'
 
-function subscribe<T>(channel: string, callback: (value: T) => void): () => void {
+const invoke = <A extends unknown[], R>(name: string) => (...args: A): Promise<R> => ipcRenderer.invoke(`browser:read-aloud:${name}`, ...args)
+const listen = <T>(name: string) => (callback: (value: T) => void): (() => void) => {
   const listener = (_event: Electron.IpcRendererEvent, value: T): void => callback(value)
-  ipcRenderer.on(channel, listener)
-  return () => ipcRenderer.removeListener(channel, listener)
+  ipcRenderer.on(`browser:read-aloud:${name}`, listener)
+  return () => ipcRenderer.removeListener(`browser:read-aloud:${name}`, listener)
 }
 
-/** window.api.browser.readAloud: Settings → Integrations → Read Aloud (experimental) and the toolbar player. */
+/**
+ * window.api.browser.readAloud: Settings → Integrations → Read Aloud (experimental), its model
+ * download and voice tester, and the toolbar player.
+ */
 export const readAloudApi = {
-  getSettings: (): Promise<ReadAloudSettings> => ipcRenderer.invoke('browser:read-aloud:get-settings'),
-  setSettings: (settings: Partial<ReadAloudSettings>): Promise<ReadAloudSettings> => ipcRenderer.invoke('browser:read-aloud:set-settings', settings),
-  onSettingsChange: (callback: (settings: ReadAloudSettings) => void): (() => void) => subscribe('browser:read-aloud:settings-changed', callback),
-  getState: (): Promise<ReadAloudState> => ipcRenderer.invoke('browser:read-aloud:get-state'),
-  onState: (callback: (state: ReadAloudState) => void): (() => void) => subscribe('browser:read-aloud:state', callback),
-  control: (action: ReadAloudControl): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('browser:read-aloud:control', action),
-  /** The model download (Settings shows progress, Cancel, Retry, "Ready · 71 MB" and Delete download). */
-  downloadInfo: (): Promise<ReadAloudDownloadState> => ipcRenderer.invoke('browser:read-aloud:download-info'),
-  onDownload: (callback: (state: ReadAloudDownloadState) => void): (() => void) => subscribe('browser:read-aloud:download', callback),
-  startDownload: (): Promise<ReadAloudDownloadState> => ipcRenderer.invoke('browser:read-aloud:download-start'),
-  cancelDownload: (): Promise<ReadAloudDownloadState> => ipcRenderer.invoke('browser:read-aloud:download-cancel'),
-  deleteDownloads: (): Promise<ReadAloudDownloadState> => ipcRenderer.invoke('browser:read-aloud:delete-downloads'),
-  /** The voice tester. */
-  test: (request: Partial<ReadAloudTestRequest>): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('browser:read-aloud:test', request),
-  stopTest: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('browser:read-aloud:test-stop'),
-  getTestState: (): Promise<ReadAloudTestState> => ipcRenderer.invoke('browser:read-aloud:test-state'),
-  /** Voices for the pickers (model voice + English catalog) and the checkpoint's other conditioners. */
-  catalog: (): Promise<ReadAloudCatalogInfo> => ipcRenderer.invoke('browser:read-aloud:catalog'),
-  onTest: (callback: (state: ReadAloudTestState) => void): (() => void) => subscribe('browser:read-aloud:test', callback)
+  getSettings: invoke<[], ReadAloudSettings>('get-settings'),
+  setSettings: invoke<[Partial<ReadAloudSettings>], ReadAloudSettings>('set-settings'),
+  onSettingsChange: listen<ReadAloudSettings>('settings-changed'),
+  getState: invoke<[], ReadAloudState>('get-state'),
+  onState: listen<ReadAloudState>('state'),
+  control: invoke<[ReadAloudControl], { ok: boolean; error?: string }>('control'),
+  downloadInfo: invoke<[], ReadAloudDownloadState>('download-info'),
+  onDownload: listen<ReadAloudDownloadState>('download'),
+  startDownload: invoke<[], ReadAloudDownloadState>('download-start'),
+  cancelDownload: invoke<[], ReadAloudDownloadState>('download-cancel'),
+  deleteDownloads: invoke<[], ReadAloudDownloadState>('delete-downloads'),
+  test: invoke<[Partial<ReadAloudTestRequest>], { ok: boolean; error?: string }>('test'),
+  stopTest: invoke<[], { ok: boolean }>('test-stop'),
+  getTestState: invoke<[], ReadAloudTestState>('test-state'),
+  onTest: listen<ReadAloudTestState>('test'),
+  catalog: invoke<[], ReadAloudCatalogInfo>('catalog')
 }

@@ -1,6 +1,7 @@
 import { clipboard, ipcMain, Menu, type IpcMainInvokeEvent, type MenuItemConstructorOptions } from 'electron'
 import { isMainWindowRenderer, sendToVisibleToolbarSurface } from './browser-shell'
 import { getMainWindow } from './window'
+import { readAloudEnabled } from './read-aloud-feature'
 
 /**
  * The always-loaded half of the Reading List: IPC handlers and the entry points menus, the palette
@@ -44,7 +45,7 @@ function failure(error: unknown): { ok: false; error: string } {
   return { ok: false, error: error instanceof Error ? error.message : String(error) }
 }
 
-type ItemMenuAction = 'open' | 'open-new-tab' | 'open-reader' | 'toggle-read' | 'copy-link' | 'remove'
+type ItemMenuAction = 'open' | 'open-new-tab' | 'open-reader' | 'listen' | 'toggle-read' | 'copy-link' | 'remove'
 
 /** Native right-click menu for a Reading List row. Main carries the action out itself. */
 function popupItemMenu(module: ReadingListModule, id: unknown): Promise<ItemMenuAction | null> {
@@ -58,6 +59,8 @@ function popupItemMenu(module: ReadingListModule, id: unknown): Promise<ItemMenu
       { label: 'Open', click: pick('open') },
       { label: 'Open in New Tab', click: pick('open-new-tab') },
       { label: item.hasSnapshot ? 'Open in Reader View (saved copy offline)' : 'Open in Reader View', click: pick('open-reader') },
+      // Read Aloud on: open the saved Reader copy (works offline) and read it out loud.
+      ...(readAloudEnabled() ? [{ label: 'Listen', toolTip: item.hasSnapshot ? 'Read the saved copy aloud' : 'Open in Reader View and read it aloud', click: pick('listen') }] : []),
       { type: 'separator' },
       { label: item.readAt === null ? 'Mark as Read' : 'Mark as Unread', click: pick('toggle-read') },
       { label: 'Copy Link', click: pick('copy-link') },
@@ -69,8 +72,8 @@ function popupItemMenu(module: ReadingListModule, id: unknown): Promise<ItemMenu
       callback: () => setTimeout(() => {
         resolve(chosen)
         if (!chosen) return
-        if (chosen === 'open' || chosen === 'open-new-tab' || chosen === 'open-reader') {
-          void module.openReadingListItem(item.id, { target: chosen === 'open-new-tab' ? 'new-tab' : 'current', reader: chosen === 'open-reader' }).catch(warn)
+        if (chosen === 'open' || chosen === 'open-new-tab' || chosen === 'open-reader' || chosen === 'listen') {
+          void module.openReadingListItem(item.id, { target: chosen === 'open-new-tab' ? 'new-tab' : 'current', reader: chosen === 'open-reader', listen: chosen === 'listen' }).catch(warn)
         } else if (chosen === 'toggle-read') {
           module.setReadingListItemRead(item.id, item.readAt === null)
         } else if (chosen === 'copy-link') {

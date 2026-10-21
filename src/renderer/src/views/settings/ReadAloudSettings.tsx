@@ -192,7 +192,7 @@ function SpeedControl({ speed, save }: { speed: number; save: (speed: number) =>
   )
 }
 
-/** Voice: search + a grouped list (model voice, American, British, other, characters). */
+/** Voice: search + a grouped list (a few recommended picks, then model voice, American, British, other, characters). */
 function VoicePicker({ settings, catalog, download, save }: { settings: Settings; catalog: ReadAloudCatalogInfo; download: ReadAloudDownloadState; save: (patch: Partial<Settings>) => void }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const matches = filterVoices(catalog.voices, query)
@@ -214,9 +214,9 @@ function VoicePicker({ settings, catalog, download, save }: { settings: Settings
       <div className="settings-row-control read-aloud-voice-picker">
         {catalog.voices.length > 1 && <input className="settings-input read-aloud-voice-search" type="search" value={query} placeholder="Search voices (e.g. british, calm, male)" spellCheck={false} aria-label="Search voices" onChange={(event) => setQuery(event.target.value)} />}
         <select className="settings-select" value={selected ? settings.voice : 'default'} aria-label="Read Aloud voice" onChange={(event) => save({ voice: event.target.value })}>
-          {groupVoices(listed).map((group) => (
-            <optgroup key={group.accent} label={group.label}>
-              {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice)}</option>)}
+          {groupVoices(listed, { recommended: !query }).map((group) => (
+            <optgroup key={group.key} label={group.label}>
+              {group.voices.map((voice) => <option key={voice.id} value={voice.id}>{voiceSummary(voice, { accent: group.key === 'recommended' })}</option>)}
             </optgroup>
           ))}
         </select>
@@ -254,12 +254,12 @@ function PhononAdvanced({ settings, catalog, save }: { settings: Settings; catal
   }
   return (
     <SettingsDisclosure id="read-aloud-advanced" title="Advanced" summary={summary}>
-      <SettingsRow label="Device" hint="CPU is the default. WebGPU isn’t faster on every Mac; Auto uses the GPU when one is offered.">
+      <SettingsRow label="Device" hint="CPU is the default: for a model this small it is often faster than WebGPU on Apple silicon. Auto uses the GPU when one is offered.">
         <SettingsSegmented value={settings.device} options={DEVICE_OPTIONS} ariaLabel="Phonon device" onChange={(device) => save({ device })} />
       </SettingsRow>
-      <SettingsRow label="Threads" hint="CPU threads Phonon generates on. Auto is 3: past a few, splitting the work costs more than it saves.">
+      <SettingsRow label="Threads" hint="CPU threads Phonon generates on. 2 (the default) keeps up at 3×; past a few, splitting the work costs more than it saves.">
         <select className="settings-select" value={String(settings.threads)} aria-label="Phonon threads" onChange={(event) => save({ threads: event.target.value === 'auto' ? 'auto' : Number(event.target.value) })}>
-          {THREAD_OPTIONS.map((option) => <option key={option} value={String(option)}>{option === 'auto' ? 'Auto (3)' : option}</option>)}
+          {THREAD_OPTIONS.map((option) => <option key={option} value={String(option)}>{option === 'auto' ? 'Auto (3)' : option === 2 ? '2 (default)' : option}</option>)}
         </select>
       </SettingsRow>
       <SettingsRow label="Quantization" hint="8-bit weights: smaller and faster than f32 on the CPU.">
@@ -351,7 +351,7 @@ export function ReadAloudSettings(): React.JSX.Element {
         <SettingsRow
           label="Enable Read Aloud"
           hint="Listen to articles and selected text, spoken on this Mac."
-          info={`Right-click a page → Read Aloud, or ⌘K → Read Aloud. Uses Phonon (an on-device voice model, Apache-2.0); turning this on downloads it once (${formatDownloadSize(firstUseDownloadBytes())}) into this profile. Text never leaves this computer. Off: nothing is loaded, and the download is kept until you delete it.`}
+          info={`Right-click a page → Read Aloud (Read Page, Read from Here, Read Selection), ⇧⌘U to play/pause, or Listen on a Reading List item. Uses Phonon (an on-device voice model, Apache-2.0); turning this on downloads it once (${formatDownloadSize(firstUseDownloadBytes())}) into this profile. Text never leaves this computer. Off: nothing is loaded, and the download is kept until you delete it.`}
         >
           <input type="checkbox" className="settings-switch" checked={on} disabled={settings === null} onChange={(event) => save({ enabled: event.target.checked })} aria-label="Enable Read Aloud" />
         </SettingsRow>

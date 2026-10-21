@@ -30,7 +30,8 @@ import { backgroundNetworkBlockedReason } from './background-network'
 import { deferWrite } from './deferred-writes'
 import { isShowingPdf } from './pdf-viewer'
 import { readUserJson, writeUserJson } from './user-json'
-import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage } from './read-aloud-feature'
+import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage, readAloudMenuState } from './read-aloud-feature'
+import { readAloudSubmenu } from './context-menu-template'
 
 /**
  * Reader view. After each load a tab runs Readability's cheap isProbablyReaderable in an isolated
@@ -386,11 +387,10 @@ function showReaderContextMenu(document: ReaderDocument, params: Electron.Contex
   if (params.selectionText.trim()) items.push({ label: 'Copy', click: () => contents.copy() })
   items.push({ label: 'Select All', click: () => contents.selectAll() }, { type: 'separator' })
   if (readAloudEnabled()) {
-    const selection = params.selectionText.trim()
-    if (selection) items.push({ label: 'Read Selection Aloud', click: () => { void readAloudFromPage(document.page, 'selection', selection) } })
-    items.push(isReadAloudActiveNow()
-      ? { label: 'Stop Reading Aloud', click: () => controlReadAloud('stop') }
-      : { label: 'Read Aloud', click: () => { void readAloudFromPage(document.page, 'page') } })
+    items.push(readAloudSubmenu({ state: readAloudMenuState(), selection: params.selectionText.trim(), page: true }, (target, selection) => {
+      if (target === 'stop' || target === 'toggle') controlReadAloud(target)
+      else void readAloudFromPage(document.page, target, selection, { x: params.x, y: params.y })
+    }))
     items.push({ type: 'separator' })
   }
   items.push({ label: 'Back to Page', click: () => { closeReaderMode(document.page) } })

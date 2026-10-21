@@ -14,10 +14,9 @@
 
 import type { ModelConditioner } from './read-aloud-assets'
 import type { CatalogVoice } from './read-aloud-voices'
+import { READ_ALOUD_SCHEME, type ReadAloudStatus } from './read-aloud-gate'
 
-export const READ_ALOUD_SETTINGS_FILE = 'browser-read-aloud.json'
-/** The hidden engine page's origin. Its own in-memory session; no network but its own files. */
-export const READ_ALOUD_SCHEME = 'surffish-tts'
+export { READ_ALOUD_SETTINGS_FILE, READ_ALOUD_SCHEME, READ_ALOUD_SHORTCUT, READ_ALOUD_COMMAND_IDS, isCommandHiddenByReadAloud, canOfferReadAloud, isReadAloudActive, type ReadAloudStatus } from './read-aloud-gate'
 export const READ_ALOUD_HOST = 'engine'
 export const READ_ALOUD_ORIGIN = `${READ_ALOUD_SCHEME}://${READ_ALOUD_HOST}`
 export const READ_ALOUD_PAGE = 'read-aloud.html'
@@ -72,7 +71,7 @@ export interface ReadAloudSettings {
   varySeed: boolean
   /** Phonon text normalization ("Read numbers, dates & times naturally"); a change reloads the model. */
   rewrites: ReadAloudRewrites
-  /** Advanced: where Phonon generates, and on how many CPU threads ('auto' is 3). */
+  /** Advanced: where Phonon generates (CPU by default: on Apple silicon it often beats WebGPU for a model this small), and on how many CPU threads (2 by default; 'auto' lets phonon-tts pick, usually 3). */
   device: ReadAloudDevice
   threads: 'auto' | number
   /** Advanced: values for other conditioners the checkpoint's config.json lists (not duration_delta). */
@@ -90,7 +89,7 @@ export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
   varySeed: false,
   rewrites: 'default',
   device: 'cpu',
-  threads: 'auto',
+  threads: 2,
   conditions: {}
 }
 
@@ -175,19 +174,6 @@ export function parseReadAloudSettings(value: unknown, fallback: ReadAloudSettin
   }
 }
 
-/** Command palette entries that only exist while Read Aloud is on. */
-export const READ_ALOUD_COMMAND_IDS: readonly string[] = ['readAloud.page', 'readAloud.selection', 'readAloud.pause', 'readAloud.stop']
-
-export function isCommandHiddenByReadAloud(id: string, enabled: boolean): boolean {
-  return !enabled && READ_ALOUD_COMMAND_IDS.includes(id)
-}
-
-/** Page context menu entries: feature on, a web page (http/https) or the built-in Reader view. */
-export function canOfferReadAloud(options: { enabled: boolean; url: string; pdf: boolean }): boolean {
-  return options.enabled && !options.pdf && /^https?:\/\//i.test(options.url)
-}
-
-export type ReadAloudStatus = 'idle' | 'downloading' | 'loading' | 'playing' | 'paused' | 'error'
 
 /** What the toolbar control and the Reader view show. One reading at a time, app-wide. */
 export interface ReadAloudState {
@@ -217,11 +203,6 @@ export type ReadAloudControl = 'toggle' | 'pause' | 'resume' | 'stop' | 'next' |
 
 export function isReadAloudControl(value: unknown): value is ReadAloudControl {
   return value === 'toggle' || value === 'pause' || value === 'resume' || value === 'stop' || value === 'next' || value === 'previous'
-}
-
-/** A reading in progress (anything but idle/error) keeps the toolbar control on screen. */
-export function isReadAloudActive(state: Pick<ReadAloudState, 'status'>): boolean {
-  return state.status === 'downloading' || state.status === 'loading' || state.status === 'playing' || state.status === 'paused'
 }
 
 // ---------------------------------------------------------------------------

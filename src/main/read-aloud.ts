@@ -41,7 +41,9 @@ import { getBrowserSession } from './browser-session'
 import { sendToMainWindowRenderers } from './browser-shell'
 import { isShowingPdf } from './pdf-viewer'
 import { extractReaderArticle, readerArticleFor, readerViewFor } from './reader-mode'
-import { readAloudDirectory } from './read-aloud-feature'
+import { noteReadAloudStatus, type ReadAloudPoint } from './read-aloud-feature'
+import { readAloudDirectory } from './read-aloud-settings'
+import { pageScriptSource, READ_ALOUD_HIGHLIGHT_CSS, sentenceIndexForProbe } from '../shared/read-aloud-page'
 import { createReadAloudDownloads, ReadAloudDownloadCancelled } from './read-aloud-downloads'
 import { browserWindows, onBrowserWindowsChanged } from './window-scope'
 
@@ -63,10 +65,13 @@ import { browserWindows, onBrowserWindowsChanged } from './window-scope'
  * Nothing about the text is stored.
  */
 
-const ENGINE_IDLE_CLOSE_MS = 3 * 60_000
+/** The engine page (model, wasm threads, audio) closes this long after the last reading or test. */
+const ENGINE_IDLE_CLOSE_MS = !app.isPackaged && Number(process.env['SURFFISH_READ_ALOUD_IDLE_MS']) > 0 ? Number(process.env['SURFFISH_READ_ALOUD_IDLE_MS']) : 3 * 60_000
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000
 const SPEECH_TIMEOUT_MS = 60_000
-const SELECTION_WORLD_ID = 1311
+/** Isolated world for the selection read, the live-page highlight and "Read from Here". */
+const PAGE_WORLD_ID = 1311
+const LOG_STATS = !app.isPackaged || process.env['SURFFISH_DEBUG_READ_ALOUD'] === '1'
 
 interface Reading {
   token: number
@@ -78,6 +83,11 @@ interface Reading {
   /** Phonon noise seed for this reading (the fixed default, or a new one with "vary each read"). */
   seed: number
   detach: () => void
+  /**
+   * Highlighting on the live page (no Reader view over it; Reader view highlights on its own): the
+   * inserted ::highlight style's key once the page script is in.
+   */
+  live: { cssKey: string | null } | null
 }
 
 type EngineEvent =
@@ -113,6 +123,7 @@ export function readAloudState(): ReadAloudState {
 
 function publish(patch: Partial<ReadAloudState>): void {
   state = { ...state, ...patch }
+  noteReadAloudStatus(state.status)
   try { sendToMainWindowRenderers('browser:read-aloud:state', readAloudState()) } catch { /* window closing */ }
 }
 
@@ -415,7 +426,45 @@ async function openAiSpeech(text: unknown): Promise<{ ok: true; pcm: Uint8Array;
 
 function highlight(page: WebContents, index: number, text: string): void {
   const view = readerViewFor(page)
-  if (view && !view.webContents.isDestroyed()) view.webContents.send('reader:read-aloud', { index, text })
+  if (view && !view.webContents.isDestroyed()) {
+    view.webContents.send('reader:read-aloud', { index, text })
+    return
+  }
+  if (reading?.page !== page || !reading.live || page.isDestroyed()) return
+  const code = index < 0 ? 'window.__surffishReadAloud?.clear()' : `window.__surffishReadAloud?.mark(${JSON.stringify(text)})`
+  void page.executeJavaScriptInIsolatedWorld(PAGE_WORLD_ID, [{ code }]).catch(() => undefined)
+}
+
+/** The page script (highlight + "Read from Here"), installed once per page load in its own world. */
+async function installPageScript(page: WebContents): Promise<boolean> {
+  try {
+    return (await page.executeJavaScriptInIsolatedWorld(PAGE_WORLD_ID, [{ code: pageScriptSource() }])) === true
+  } catch {
+    return false
+  }
+}
+
+/** Live-page highlighting for a reading: the script plus the ::highlight style (best effort). */
+async function startLiveHighlight(page: WebContents, token: number): Promise<void> {
+  if (readerViewFor(page) || page.isDestroyed()) return
+  if (!(await installPageScript(page)) || reading?.token !== token || page.isDestroyed()) return
+  let cssKey: string | null = null
+  try { cssKey = await page.insertCSS(READ_ALOUD_HIGHLIGHT_CSS, { cssOrigin: 'user' }) } catch { /* page navigating */ }
+  if (reading?.token !== token) {
+    if (cssKey && !page.isDestroyed()) void page.removeInsertedCSS(cssKey).catch(() => undefined)
+    return
+  }
+  reading.live = { cssKey }
+  // The sentence already playing when the script got in.
+  if (state.status === 'playing' || state.status === 'paused') highlight(page, state.index, reading.sentences[state.index] ?? '')
+}
+
+function stopLiveHighlight(ended: Reading): void {
+  const live = ended.live
+  ended.live = null
+  if (!live || ended.page.isDestroyed()) return
+  void ended.page.executeJavaScriptInIsolatedWorld(PAGE_WORLD_ID, [{ code: 'window.__surffishReadAloud?.clear()' }]).catch(() => undefined)
+  if (live.cssKey) void ended.page.removeInsertedCSS(live.cssKey).catch(() => undefined)
 }
 
 function endReading(status: ReadAloudStatus = 'idle', error = ''): void {
@@ -423,7 +472,9 @@ function endReading(status: ReadAloudStatus = 'idle', error = ''): void {
   reading = null
   if (ended) {
     ended.detach()
-    if (!ended.page.isDestroyed()) highlight(ended.page, -1, '')
+    const view = readerViewFor(ended.page)
+    if (view && !view.webContents.isDestroyed()) view.webContents.send('reader:read-aloud', { index: -1, text: '' })
+    stopLiveHighlight(ended)
   }
   publish({ ...IDLE_READ_ALOUD_STATE, status, error, speed: settings?.speed ?? 1, voice: settings?.voice ?? 'default' })
   if (browserWindows().length === 0) closeEngine()
@@ -457,8 +508,9 @@ function onEngineEvent(value: unknown): void {
     endReading('error', String(event.error || 'Read Aloud failed.'))
     return
   }
-  // First audio of a reading: log the numbers that matter for a latency check (load, TTFB, threads).
-  if (event.stats && typeof event.stats === 'object') console.info('[read aloud]', event.engine ?? state.engine, JSON.stringify(event.stats))
+  // First audio of a reading: the numbers that matter for a latency check (load, TTFB, threads), in
+  // dev builds or with SURFFISH_DEBUG_READ_ALOUD=1 only.
+  if (LOG_STATS && event.stats && typeof event.stats === 'object') console.info('[read aloud]', event.engine ?? state.engine, JSON.stringify(event.stats))
   const index = typeof event.index === 'number' ? Math.max(0, Math.min(reading.sentences.length - 1, event.index)) : state.index
   if (index !== state.index || state.status !== event.status) highlight(reading.page, index, reading.sentences[index] ?? '')
   publish({
@@ -474,7 +526,7 @@ async function selectionOf(page: WebContents): Promise<string> {
   const target = readerViewFor(page)?.webContents ?? page
   try {
     const value: unknown = target === page
-      ? await page.executeJavaScriptInIsolatedWorld(SELECTION_WORLD_ID, [{ code: 'String(window.getSelection() || "")' }])
+      ? await page.executeJavaScriptInIsolatedWorld(PAGE_WORLD_ID, [{ code: 'String(window.getSelection() || "")' }])
       : await target.executeJavaScript('String(window.getSelection() || "")')
     return typeof value === 'string' ? value : ''
   } catch {
@@ -482,19 +534,62 @@ async function selectionOf(page: WebContents): Promise<string> {
   }
 }
 
-async function textFor(page: WebContents, target: 'page' | 'selection', selection: string): Promise<{ title: string; sentences: string[] } | { error: string }> {
-  if (target === 'selection') {
-    const text = selection.trim() || (await selectionOf(page)).trim()
-    const sentences = splitSentences(text)
-    return sentences.length > 0 ? { title: 'Selection', sentences } : { error: 'Select some text to read aloud.' }
+interface ReadingText {
+  title: string
+  sentences: string[]
+  /** First sentence to speak ("Read from Here" into the article). */
+  start: number
+}
+
+/** Text from the right-click point to the end of the page (in Reader view when it's open). */
+async function textFromPoint(page: WebContents, point: ReadAloudPoint | undefined): Promise<{ probe: string; rest: string } | null> {
+  const view = readerViewFor(page)
+  const target = view && !view.webContents.isDestroyed() ? view.webContents : page
+  try {
+    if (!(await installPageScript(target))) return null
+    const zoom = target.getZoomFactor() || 1
+    const x = Math.round((point?.x ?? 0) / zoom)
+    const y = Math.round((point?.y ?? 0) / zoom)
+    const value: unknown = await target.executeJavaScriptInIsolatedWorld(PAGE_WORLD_ID, [{ code: `window.__surffishReadAloud?.fromPoint(${x}, ${y}) ?? null` }])
+    if (!value || typeof value !== 'object') return null
+    const { probe, rest } = value as { probe?: unknown; rest?: unknown }
+    return typeof probe === 'string' && typeof rest === 'string' ? { probe, rest } : null
+  } catch {
+    return null
   }
+}
+
+async function articleSentences(page: WebContents): Promise<ReadingText | { error: string }> {
   if (isShowingPdf(page)) return { error: 'Read Aloud does not read PDFs yet.' }
   const article = readerArticleFor(page) ?? await extractReaderArticle(page)
   if (!article) return { error: 'No article found on this page.' }
   const body = splitSentences(articleTextFromHtml(article.content))
   const title = article.title.trim()
   const sentences = title && body[0] !== title ? [title, ...body] : body
-  return sentences.length > 0 ? { title: title || 'Article', sentences } : { error: 'No readable text on this page.' }
+  return sentences.length > 0 ? { title: title || 'Article', sentences, start: 0 } : { error: 'No readable text on this page.' }
+}
+
+async function textFor(page: WebContents, target: 'page' | 'selection' | 'here', selection: string, point?: ReadAloudPoint): Promise<ReadingText | { error: string }> {
+  if (target === 'here') {
+    if (isShowingPdf(page)) return { error: 'Read Aloud does not read PDFs yet.' }
+    const from = await textFromPoint(page, point)
+    if (!from) return articleSentences(page)
+    // Into the article when the point is in it (its own sentences, so skipping and Reader view's
+    // highlight stay right); otherwise the page's text from there on.
+    const article = await articleSentences(page)
+    if (!('error' in article)) {
+      const index = sentenceIndexForProbe(article.sentences, from.probe)
+      if (index !== null) return { ...article, start: index }
+    }
+    const sentences = splitSentences(from.rest)
+    return sentences.length > 0 ? { title: 'error' in article ? 'From here' : article.title, sentences, start: 0 } : { error: 'No readable text after that point.' }
+  }
+  if (target === 'selection') {
+    const text = selection.trim() || (await selectionOf(page)).trim()
+    const sentences = splitSentences(text)
+    return sentences.length > 0 ? { title: 'Selection', sentences, start: 0 } : { error: 'Select some text to read aloud.' }
+  }
+  return articleSentences(page)
 }
 
 function watchPage(page: WebContents, token: number): () => void {
@@ -542,7 +637,7 @@ function speakCommand(token: number, sentences: string[], start: number, current
   }
 }
 
-export async function startReadAloud(page: WebContents, target: 'page' | 'selection', selection: string, current: ReadAloudSettings): Promise<boolean> {
+export async function startReadAloud(page: WebContents, target: 'page' | 'selection' | 'here', selection: string, current: ReadAloudSettings, point?: ReadAloudPoint): Promise<boolean> {
   settings = current
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
@@ -551,7 +646,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
     sendToEngine({ type: 'stop' })
     endReading()
   }
-  const text = await textFor(page, target, selection)
+  const text = await textFor(page, target, selection, point)
   if (page.isDestroyed()) return false
   if ('error' in text) {
     publish({ ...IDLE_READ_ALOUD_STATE, status: 'error', error: text.error })
@@ -560,9 +655,10 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
   const ref = getBrowserTabRefByWebContentsId(page.id)
   const info = ref ? getBrowserTabPageInfo(ref.tabId) : null
   const token = nextToken++
-  reading = { token, page, tabId: ref?.tabId ?? null, title: text.title, sentences: text.sentences, isPrivate: info?.private ?? false, seed: newSeed(current), detach: () => undefined }
+  reading = { token, page, tabId: ref?.tabId ?? null, title: text.title, sentences: text.sentences, isPrivate: info?.private ?? false, seed: newSeed(current), detach: () => undefined, live: null }
   reading.detach = watchPage(page, token)
-  publish({ ...IDLE_READ_ALOUD_STATE, status: 'loading', tabId: reading.tabId, title: text.title, total: text.sentences.length, speed: current.speed, voice: current.voice, engine: current.engine })
+  publish({ ...IDLE_READ_ALOUD_STATE, status: 'loading', tabId: reading.tabId, title: text.title, index: text.start, total: text.sentences.length, speed: current.speed, voice: current.voice, engine: current.engine })
+  void startLiveHighlight(page, token)
   try {
     let voice = 'default'
     if (current.engine === 'phonon') {
@@ -579,7 +675,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
         publish({ status: 'loading', download: null, fallbackReason: `Phonon unavailable: ${error instanceof Error ? error.message : String(error)}` })
         await ensureEngine()
         if (reading?.token !== token) return false
-        sendToEngine({ ...speakCommand(token, text.sentences, 0, { ...current, engine: 'system' }, text.title, 'default', reading.seed), fallbackReason: state.fallbackReason })
+        sendToEngine({ ...speakCommand(token, text.sentences, text.start, { ...current, engine: 'system' }, text.title, 'default', reading.seed), fallbackReason: state.fallbackReason })
         return true
       }
     }
@@ -587,7 +683,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
     publish({ status: 'loading', download: null })
     await ensureEngine()
     if (reading?.token !== token) return false
-    sendToEngine(speakCommand(token, text.sentences, 0, current, text.title, voice, reading.seed))
+    sendToEngine(speakCommand(token, text.sentences, text.start, current, text.title, voice, reading.seed))
     return true
   } catch (error) {
     if (reading?.token === token) failReading(error instanceof Error ? error.message : String(error))

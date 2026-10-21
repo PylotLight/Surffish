@@ -70,8 +70,8 @@ import { restoredTabInactiveSince } from './tab-archive-store'
 import type { TabArchiveCandidate } from '../shared/tab-archive'
 import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
 import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
-import { controlReadAloud, isReadAloudActiveNow, readAloudEnabled, readAloudFromPage } from './read-aloud-feature'
-import { canOfferReadAloud } from '../shared/read-aloud'
+import { controlReadAloud, readAloudEnabled, readAloudFromPage, readAloudMenuState } from './read-aloud-feature'
+import { canOfferReadAloud } from '../shared/read-aloud-gate'
 import { canWatchPage, watchPageFromTab } from './page-watchers-feature'
 import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitMoveFocusId, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
 import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
@@ -1091,9 +1091,12 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
       : undefined,
     // Always a user action, so private tabs read too (nothing about the text is kept).
     readAloud: isBrowserPage && editorTab === undefined && canOfferReadAloud({ enabled: readAloudEnabled(), url: contents.getURL(), pdf: isShowingPdf(contents) })
-      ? (target, selection) => { if (target === 'stop') controlReadAloud('stop'); else void readAloudFromPage(contents, target, selection) }
+      ? (target, selection) => {
+          if (target === 'stop' || target === 'toggle') controlReadAloud(target)
+          else void readAloudFromPage(contents, target, selection, { x: params.x, y: params.y })
+        }
       : undefined,
-    readingAloud: isReadAloudActiveNow()
+    readAloudState: readAloudMenuState()
   })
 }
 

@@ -82,7 +82,7 @@ import { useBookmarks, bookmarkOrigin } from './bookmarks/useBookmarks'
 import { BookmarkStarControl } from './bookmarks/BookmarkStarControl'
 import { BookmarksMenuButton } from './bookmarks/BookmarksMenu'
 import { ReadingListButton } from './reading-list/ReadingListButton'
-import { ReadAloudControl } from './read-aloud/ReadAloudControl'
+import { ReadAloudSlot } from './read-aloud/ReadAloudSlot'
 import { AdblockButton } from './adblock/AdblockButton'
 import { CastButton, TabCastBadge, useCastTabId } from './cast/CastButton'
 import { BookmarksBar } from './bookmarks/BookmarksBar'
@@ -1927,7 +1927,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h6.5A2.5 2.5 0 0 1 13 8v11a2 2 0 0 0-2-2H4Z" /><path d="M20 5.5h-6.5A2.5 2.5 0 0 0 11 8v11a2 2 0 0 1 2-2h7Z" /></svg>
                   <span>Reader</span>
                 </button>}
-                {surface === 'toolbar' && <ReadAloudControl onOpenChange={setReadAloudOpen} />}
+                {surface === 'toolbar' && <ReadAloudSlot onOpenChange={setReadAloudOpen} />}
                 {browser.pdf && <button
                   className={`omnibox-action-button pdf-edit-button${browser.pdf === 'editor' ? ' is-current' : ''}`}
                   type="button"
