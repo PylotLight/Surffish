@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildPageTranslationUrl, buildTextTranslationUrl, DEFAULT_TRANSLATION_LANGUAGE, isTranslationLanguage, TRANSLATION_LANGUAGES } from './translation'
+import { buildPageTranslationUrl, buildTextTranslationUrl, DEFAULT_TRANSLATION_LANGUAGE, isTranslationLanguage, parseTranslationResponse, TRANSLATION_LANGUAGES } from './translation'
 
 describe('translation helpers', () => {
   test('offers common languages and validates exact supported codes', () => {
@@ -40,5 +40,12 @@ describe('translation helpers', () => {
     expect(buildTextTranslationUrl(' '.repeat(2), 'en')).toBeNull()
     expect(buildTextTranslationUrl('a'.repeat(5001), 'en')).toBeNull()
     expect(buildTextTranslationUrl('a'.repeat(5000), 'en')).not.toBeNull()
+  })
+  test('parses provider translation segments as plain text and rejects malformed payloads', () => {
+    expect(parseTranslationResponse([[['Bonjour ', 'Hello '], ['monde', 'world']]])).toBe('Bonjour monde')
+    expect(parseTranslationResponse([[['<b>safe text</b>', 'source']]])).toBe('<b>safe text</b>')
+    for (const response of [null, {}, [], [[]], [[[]]], [[[1, 'source']]], [[['  ', 'source']]], [[['x'.repeat(50001), 'source']]]]) {
+      expect(() => parseTranslationResponse(response)).toThrow()
+    }
   })
 })

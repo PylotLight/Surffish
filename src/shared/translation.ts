@@ -14,7 +14,7 @@ export function isTranslationLanguage(value: unknown): value is string {
   return typeof value === 'string' && languageCodes.has(value)
 }
 
-function isPublicWebUrl(value: unknown): value is string {
+export function isPublicWebUrl(value: unknown): value is string {
   if (typeof value !== 'string' || !value.trim()) return false
   try {
     const url = new URL(value)
@@ -43,4 +43,17 @@ export function buildTextTranslationUrl(value: unknown, target: unknown): string
   if (typeof value !== 'string' || !value.trim() || value.trim().length > 5000 || !isTranslationLanguage(target)) return null
   const params = new URLSearchParams({ sl: 'auto', tl: target, text: value.trim(), op: 'translate' })
   return `https://translate.google.com/?${params.toString()}`
+}
+
+/** Never interpret provider text as markup. */
+export function parseTranslationResponse(value: unknown): string {
+  if (!Array.isArray(value) || !Array.isArray(value[0]) || value[0].length === 0) throw new Error('Invalid translation response')
+  const parts: string[] = []
+  for (const segment of value[0]) {
+    if (!Array.isArray(segment) || typeof segment[0] !== 'string') throw new Error('Invalid translation segment')
+    parts.push(segment[0])
+  }
+  const text = parts.join('')
+  if (!text.trim() || text.length > 50000) throw new Error('Invalid translated text')
+  return text
 }

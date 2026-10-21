@@ -14,9 +14,9 @@
 export const SURFFISH_SETTINGS_URL = 'surffish://settings'
 
 /** The settings pages (they match the renderer's settings modes). */
-export type SettingsSection = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+export type SettingsSection = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics' | 'languages'
 
-export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['settings', 'newtab', 'integrations', 'feeds', 'readaloud', 'privacy', 'watchers', 'site', 'network', 'diagnostics']
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = ['settings', 'newtab', 'integrations', 'feeds', 'readaloud', 'privacy', 'watchers', 'site', 'network', 'diagnostics', 'languages']
 
 /** Names a deep link may use for a section (the friendly ones first; the mode names work too). */
 const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
@@ -34,7 +34,9 @@ const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
   sites: 'site',
   site: 'site',
   network: 'network',
-  diagnostics: 'diagnostics'
+  diagnostics: 'diagnostics',
+  languages: 'languages',
+  translation: 'languages'
 }
 
 /** What the URL calls a section (the inverse of SECTION_ALIASES' friendly names). */
@@ -48,7 +50,8 @@ const SECTION_SLUGS: Readonly<Record<SettingsSection, string>> = {
   watchers: 'watchers',
   site: 'sites',
   network: 'network',
-  diagnostics: 'diagnostics'
+  diagnostics: 'diagnostics',
+  languages: 'languages'
 }
 
 /** Where a Settings tab should land. */

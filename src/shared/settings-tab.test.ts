@@ -48,6 +48,7 @@ test('builds addresses that parse back to the same target', () => {
     { section: 'site' as const, host: 'https://example.com' },
     { section: 'settings' as const, focus: 'mini-window' },
     { section: 'feeds' as const },
+    { section: 'languages' as const },
     { section: 'readaloud' as const }
   ]) {
     assert.deepEqual(parseSettingsUrl(settingsUrl(target)), target)
@@ -84,4 +85,9 @@ test('a site counts as overridden only when a switch differs from its default', 
   assert.equal(siteSettingsHaveOverrides({ blockAds: false }), true)
   assert.equal(siteSettingsHaveOverrides({ allowClipboardRead: true }), true)
   assert.equal(siteSettingsHaveOverrides({}), false)
+})
+
+test('translation deep links open Languages, not General', () => {
+  assert.deepEqual(parseSettingsUrl('surffish://settings?section=translation'), { section: 'languages' })
+  assert.deepEqual(normalizeSettingsTarget({ section: 'languages' }), { section: 'languages' })
 })

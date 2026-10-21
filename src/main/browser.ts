@@ -27,7 +27,7 @@ import type { SavedWindowState } from '../shared/window-geometry'
 import { toggleBookmarksBar } from './bookmarks-bar'
 import { bookmarkPage, bookmarkPagesInNewFolder, getBookmarksSnapshot, getFavouriteSites, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
 import { showBrowserContextMenu } from './context-menu'
-import { buildPageTranslationUrl, buildTextTranslationUrl } from '../shared/translation'
+import { translateInPlace } from './translation-service'
 import { getBrowserTranslationTarget } from './browser-persistence'
 import { isShowingPdf, printPdf } from './pdf-viewer'
 import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
@@ -3035,14 +3035,13 @@ export function openExternalBrowserTab(target: string): string | null {
   return id
 }
 
-export function translateBrowserPage(target: string, w = currentWindowState()): boolean {
-  const tab = activeTabOf(w)
-  const url = tab ? buildPageTranslationUrl(currentUrl(tab), target) : null
-  return url ? newBrowserTab(url, undefined, w) !== null : false
+export async function translateBrowserPage(target: string, w = currentWindowState()): Promise<boolean> {
+  const contents = activeTabOf(w)?.view?.webContents
+  return contents ? translateInPlace(contents, target) : false
 }
-export function translateBrowserText(text: string, target: string, w = currentWindowState()): boolean {
-  const url = buildTextTranslationUrl(text, target)
-  return url ? newBrowserTab(url, undefined, w) !== null : false
+export async function translateBrowserText(text: string, target: string, w = currentWindowState()): Promise<boolean> {
+  const contents = activeTabOf(w)?.view?.webContents
+  return contents ? translateInPlace(contents, target, text) : false
 }
 export function newBrowserTab(input?: string, engine?: SearchEngineId, w = currentWindowState()): string | null {
   const id = createTab(input, engine ?? selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)

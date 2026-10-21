@@ -6,7 +6,7 @@
  * the settings-search smoke checks every label below still exists on its page.
  */
 
-export type SettingsSearchMode = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+export type SettingsSearchMode = 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics' | 'languages'
 
 /** Words people type for a setting that its label doesn't use. Keys and values are normalized. */
 const SYNONYMS: Readonly<Record<string, readonly string[]>> = {

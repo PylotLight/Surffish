@@ -175,10 +175,10 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 }
 
 function isSettingsSection(mode: SidebarMode): boolean {
-  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers' || mode === 'feeds' || mode === 'readaloud'
+  return mode === 'settings' || mode === 'newtab' || mode === 'integrations' || mode === 'site' || mode === 'network' || mode === 'privacy' || mode === 'diagnostics' || mode === 'watchers' || mode === 'feeds' || mode === 'readaloud' || mode === 'languages'
 }
 
-type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers' | 'feeds' | 'readaloud'>
+type SettingsSectionMode = Extract<SidebarMode, 'settings' | 'newtab' | 'integrations' | 'site' | 'network' | 'privacy' | 'diagnostics' | 'watchers' | 'feeds' | 'readaloud' | 'languages'>
 
 /** Settings → Integrations has sub-areas; each is its own sidebar mode so links can land on one directly. */
 const INTEGRATIONS_TABS: ReadonlyArray<{ mode: Extract<SettingsSectionMode, 'integrations' | 'feeds' | 'readaloud'>; label: string }> = [
@@ -200,6 +200,7 @@ const SETTINGS_SECTIONS: ReadonlyArray<{ mode: SettingsSectionMode; label: strin
   { mode: 'settings', label: 'General' },
   { mode: 'newtab', label: 'New Tab' },
   { mode: 'integrations', label: 'Integrations' },
+  { mode: 'languages', label: 'Languages' },
   { mode: 'privacy', label: 'Privacy' },
   { mode: 'watchers', label: 'Watchers' },
   { mode: 'site', label: 'Sites' },
@@ -490,7 +491,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const [siteActionsOpen, setSiteActionsOpen] = useState(false)
   const [translationTarget, setTranslationTarget] = useState<string>(DEFAULT_TRANSLATION_LANGUAGE)
   const [translationLoaded, setTranslationLoaded] = useState(false)
-  const [translationText, setTranslationText] = useState('')
   const [translationBusy, setTranslationBusy] = useState(false)
   const [translationMessage, setTranslationMessage] = useState('')
   const translationLabel = TRANSLATION_LANGUAGES.find((language) => language.code === translationTarget)?.label ?? 'English'
@@ -1509,22 +1509,19 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     catch { setTranslationMessage('The translation language could not be saved. Please try again.') }
     finally { setTranslationBusy(false) }
   }
-  async function openTranslation(kind: 'page' | 'text'): Promise<void> {
+  async function openTranslation(): Promise<void> {
+    setSiteActionsOpen(false)
     setTranslationBusy(true)
     setTranslationMessage('')
     try {
-      const opened = kind === 'page'
-        ? await window.api.browser.translation.page(translationTarget)
-        : await window.api.browser.translation.text(translationText, translationTarget)
-      if (!opened) throw new Error(kind === 'page'
-        ? 'Only public HTTP or HTTPS pages can be translated. For private pages, select or paste the text instead.'
-        : 'Enter between 1 and 5,000 characters to translate.')
+      const translated = await window.api.browser.translation.page(translationTarget)
+      if (!translated) throw new Error('This page could not be translated. Try a public web page, or use Open in Google Translate as a fallback.')
       setNavigationError('')
       setSiteActionsOpen(false)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Translation could not be opened. Please try again.'
+      const message = error instanceof Error ? error.message : 'Translation could not be started. Please try again.'
       setTranslationMessage(message)
-      if (kind === 'page') setNavigationError(message)
+      setNavigationError(message)
     } finally { setTranslationBusy(false) }
   }
   function handleAddressKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
@@ -1906,9 +1903,17 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       setSiteActionsOpen(false)
                       selectSettingsSection('site', activeOrigin)
                     }} />}
-                    <button type="button" role="menuitem" disabled={!canTranslatePage || translationBusy} title="Sends this page’s URL to Google Translate in a new tab" onClick={() => void openTranslation('page')}>
+                    <button type="button" role="menuitem" disabled={!canTranslatePage || translationBusy} title="Translate this page in place" onClick={() => void openTranslation()}>
                       <span className="site-actions-menu-icon" aria-hidden="true">文</span>
-                      <span>Translate page to {translationLabel}<small className="translation-menu-note">Opens Google Translate in a new tab</small></span>
+                      <span>Translate page to {translationLabel}<small className="translation-menu-note">Translates this page in place</small></span>
+                    </button>
+                    <button type="button" role="menuitem" disabled={!buildPageTranslationUrl(browser.url, translationTarget)} onClick={() => {
+                      const url = buildPageTranslationUrl(browser.url, translationTarget)
+                      if (url) void window.api.browser.tabs.create(url)
+                      setSiteActionsOpen(false)
+                    }}>
+                      <span className="site-actions-menu-icon" aria-hidden="true">文</span>
+                      <span>Open in Google Translate</span>
                     </button>
                     <button type="button" role="menuitem" disabled={!activeOrigin} onClick={() => {
                       setSiteActionsOpen(false)
@@ -2191,7 +2196,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           )}
           {surface !== 'sidebar' && brandEgg.open && <BrandEasterEgg onClose={brandEgg.close} />}
         </header>
-        <div className="browser-viewport" ref={viewportRef} aria-label={pageMode === 'settings' || pageMode === 'newtab' || isIntegrationsMode(pageMode) ? 'Settings content' : pageMode === 'downloads' ? 'Downloads content' : pageMode === 'bookmarks' ? 'Bookmark manager' : pageMode === 'network' ? 'Network inspector' : pageMode === 'diagnostics' ? 'Diagnostics' : pageMode === 'site' ? 'Site settings' : 'Web page area'}>
+        <div className="browser-viewport" ref={viewportRef} aria-label={pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'languages' || isIntegrationsMode(pageMode) ? 'Settings content' : pageMode === 'downloads' ? 'Downloads content' : pageMode === 'bookmarks' ? 'Bookmark manager' : pageMode === 'network' ? 'Network inspector' : pageMode === 'diagnostics' ? 'Diagnostics' : pageMode === 'site' ? 'Site settings' : 'Web page area'}>
           {sidebarMode === 'tabs' && !sidebarVisible && <div className="sidebar-reveal-edge" aria-hidden="true" onMouseEnter={revealSidebar} onMouseMove={revealSidebar} onMouseLeave={scheduleSidebarHide} />}
           {isLocalNewTab && !SETTINGS_SECTIONS.some((section) => section.mode === pageMode) && pageMode !== 'downloads' && pageMode !== 'bookmarks' && (
             <section className={`new-tab-page${browser.private ? ' is-private' : ''}`} aria-label={browser.private ? 'New private tab' : 'New Tab'} style={{
@@ -2356,12 +2361,12 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
           {pageMode === 'privacy' && <PrivacySettings />}
           {pageMode === 'watchers' && watchersEnabled !== false && <PageWatchersSettings />}
           {pageMode === 'bookmarks' && surface === 'content' && <BookmarksManager bookmarks={bookmarks} cachedIcons={cachedSiteIcons} onClose={() => setSidebarMode('tabs')} onOpened={() => setSidebarMode('tabs')} />}
-          {(pageMode === 'settings' || pageMode === 'newtab' || isIntegrationsMode(pageMode)) && (
+          {(pageMode === 'settings' || pageMode === 'newtab' || pageMode === 'languages' || isIntegrationsMode(pageMode)) && (
             <div className={`settings-view settings-view-${pageMode}`}>
               <header className="settings-page-header">
                 <div className="settings-page-heading-copy">
-                  <h1>{isIntegrationsMode(pageMode) ? 'Integrations' : pageMode === 'newtab' ? 'New Tab' : 'General'}</h1>
-                  <p>{isIntegrationsMode(pageMode) ? 'Extensions, feeds and Read Aloud.' : pageMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : 'Search, default browser, tabs, privacy and connection.'}</p>
+                  <h1>{isIntegrationsMode(pageMode) ? 'Integrations' : pageMode === 'newtab' ? 'New Tab' : pageMode === 'languages' ? 'Languages' : 'General'}</h1>
+                  <p>{isIntegrationsMode(pageMode) ? 'Extensions, feeds and Read Aloud.' : pageMode === 'newtab' ? 'Layout, clocks, weather and background for new tabs.' : pageMode === 'languages' ? 'Choose the language for on-demand in-page translation.' : 'Search, default browser, tabs, privacy and connection.'}</p>
                 </div>
                 {isIntegrationsMode(pageMode) && (
                   <div className="settings-segmented integrations-tabs" role="tablist" aria-label="Integrations">
@@ -2384,7 +2389,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                     </select>
                   </SettingsRow>
                 </SettingsGroup>
-                <div className="translation-settings-section">
                 <SettingsGroup title="Appearance">
                   <SettingsRow label="Interface font" hint="Applies to Surffish’s toolbar, sidebar, and built-in pages, not websites. Maple Mono is bundled for offline use.">
                     <select className="settings-select" value={uiFont} disabled={!searchEngineLoaded || uiFontSaving} onChange={(event) => void saveUiFont(event.target.value as BrowserUiFont)} aria-label="Interface font">
@@ -2395,23 +2399,6 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   <p className="settings-help" aria-label="Font preview">Preview · Surffish Aa Bb 0123456789 → @</p>
                   {uiFontMessage && <p className="settings-message is-error" role="status">{uiFontMessage}</p>}
                 </SettingsGroup>
-                <SettingsGroup title="Translation">
-                  <SettingsRow label="Target language" hint="Source language is detected automatically. Your choice is remembered.">
-                    <select className="settings-select" value={translationTarget} disabled={!translationLoaded || translationBusy} onChange={(event) => void saveTranslationTarget(event.target.value)} aria-label="Translation language">
-                      {TRANSLATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
-                    </select>
-                  </SettingsRow>
-                  <label className="translation-text-field">Text to translate
-                    <textarea value={translationText} maxLength={5000} aria-describedby="translation-privacy translation-character-count" onChange={(event) => { setTranslationText(event.target.value); setTranslationMessage('') }} />
-                  </label>
-                  <div className="translation-text-actions">
-                    <small id="translation-character-count">{translationText.length.toLocaleString()} / 5,000</small>
-                    <button className="settings-action primary" type="button" disabled={!translationLoaded || translationBusy || !translationText.trim()} onClick={() => void openTranslation('text')}>{translationBusy ? 'Working…' : 'Translate text'}</button>
-                  </div>
-                  <p className="settings-help" id="translation-privacy">Only when you choose Translate, the page URL or text is sent to Google Translate and opened in a new tab; the original stays open. Don’t submit sensitive text. Translation requires internet; private or signed-in pages may not work.</p>
-                  {translationMessage && <p className="settings-message is-error" role="status">{translationMessage}</p>}
-                </SettingsGroup>
-                </div>
                 <SearchKeywordsSettings />
                 <CommandPaletteSettings />
                 <DefaultBrowserSettings />
@@ -2505,6 +2492,15 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                 </SettingsCategory>
                 <p className="settings-footnote">Browser data stays in this profile. Session-only sign-in cookies are saved with OS-backed encryption when available.</p>
                 </div>}
+                {pageMode === 'languages' && <SettingsGroup title="Translation">
+                  <SettingsRow label="Target language" hint="Source language is detected automatically. Your choice is remembered.">
+                    <select className="settings-select" value={translationTarget} disabled={!translationLoaded || translationBusy} onChange={(event) => void saveTranslationTarget(event.target.value)} aria-label="Translation language">
+                      {TRANSLATION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+                    </select>
+                  </SettingsRow>
+                  <p className="settings-help">Translation is online and only happens when requested. The visible page text is sent to Google for translation; no automatic translation occurs. Use the in-page translation toolbar to restore the original. The keyless Google translation endpoint is best-effort and may fail or change without notice. Local and private-network addresses are excluded. For supported web pages, “Open in Google Translate” remains an optional fallback.</p>
+                  {translationMessage && <p className="settings-message is-error" role="status">{translationMessage}</p>}
+                </SettingsGroup>}
                 {pageMode === 'newtab' && <NewTabSettingsFields {...newTabFieldsProps} variant="page" onCustomizeOnNewTab={customizeOnNewTab} />}
                 {pageMode === 'integrations' && <>
                 <SettingsGroup

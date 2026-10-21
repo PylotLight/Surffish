@@ -4156,47 +4156,10 @@
 .omnibox-action-button.read-aloud-button.is-playing { color: #a4edbd; }
 .omnibox-action-button.read-aloud-button.is-error { color: #ffb4a8; }
 
-/* Translation is opt-in: Google Translate opens in its own tab. */
+/* Translation menu note describes the in-place page action. */
 .translation-menu-note {
   display: block;
   margin-top: 3px;
   color: rgba(245, 247, 250, 0.55);
   font-size: 10px;
-}
-.translation-text-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 18px;
-  color: rgba(245, 247, 250, 0.8);
-  font-size: 12px;
-}
-.translation-text-field textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 100px;
-  max-height: 300px;
-  padding: 10px 12px;
-  resize: vertical;
-  border: 1px solid rgba(255, 255, 255, 0.13);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  color: #f5f7fa;
-  font: inherit;
-  line-height: 1.5;
-}
-.translation-text-field textarea:focus-visible {
-  outline: 2px solid #a4edbd;
-  outline-offset: 2px;
-}
-.translation-text-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 10px;
-}
-.translation-text-actions small {
-  color: rgba(245, 247, 250, 0.55);
-  font-size: 11px;
 }

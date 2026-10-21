@@ -223,7 +223,7 @@ export interface BrowserSettingsTarget {
 }
 
 export interface BrowserSettingsTabState {
-  section: 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics'
+  section: 'settings' | 'newtab' | 'integrations' | 'feeds' | 'readaloud' | 'privacy' | 'watchers' | 'site' | 'network' | 'diagnostics' | 'languages'
   host?: string
   focus?: string
   revision: number
@@ -299,7 +299,7 @@ export interface BrowserBounds {
   height: number
 }
 
-export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics' | 'bookmarks' | 'watchers' | 'feeds' | 'readaloud'
+export type BrowserSidebarMode = 'tabs' | 'history' | 'settings' | 'newtab' | 'integrations' | 'network' | 'site' | 'downloads' | 'privacy' | 'diagnostics' | 'bookmarks' | 'watchers' | 'feeds' | 'readaloud' | 'languages'
 
 /** UI state shared by the independent local renderer surfaces in the native browser window. */
 export interface BrowserChromeState {
