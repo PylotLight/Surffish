@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import type { ReadAloudDownloadState } from '../shared/read-aloud'
-import type { ReadAloudManifest, ReadAloudVoice } from '../shared/read-aloud-assets'
+import type { ReadAloudManifest } from '../shared/read-aloud-assets'
 import { createReadAloudDownloads, ReadAloudDownloadCancelled, readAloudDiskState, sumAssetBytes } from './read-aloud-downloads'
 
 function tarEntry(name: string, body: string): Uint8Array[] {
@@ -39,13 +39,13 @@ const files: Record<string, Uint8Array> = {
   'https://fixture.test/model.gguf': new Uint8Array(200_000).fill(7),
   'https://fixture.test/tokenizer.json': new TextEncoder().encode('{"tokenizer":true}'),
   'https://fixture.test/voice-default': new Uint8Array(3000).fill(1),
-  'https://fixture.test/voice-freya': new Uint8Array(4000).fill(2)
+  'https://fixture.test/voices/voices/freya.safetensors': new Uint8Array(4000).fill(2),
+  'https://fixture.test/voices/voices.jsonl': new TextEncoder().encode([
+    { voice_id: 'freya', name: 'Freya', language: 'en', locale: 'en-gb', gender: 'female', age: 'Adult', description: 'Bright.', filename: 'voices/freya.safetensors' },
+    { voice_id: 'nele', name: 'Nele', language: 'de', locale: 'de-de', gender: 'female', age: 'Adult', description: 'German.', filename: 'voices/nele.safetensors' }
+  ].map((line) => JSON.stringify(line)).join('\n'))
 }
-
-const voices: ReadAloudVoice[] = [
-  { id: 'default', name: 'Default', locale: 'model', file: 'default-voice.safetensors', bytes: 3000, sha256: sha256(files['https://fixture.test/voice-default']!), url: 'https://fixture.test/voice-default' },
-  { id: 'freya', name: 'Freya', locale: 'en-gb', file: 'voices/freya.safetensors', bytes: 4000, sha256: sha256(files['https://fixture.test/voice-freya']!), url: 'https://fixture.test/voice-freya' }
-]
+const catalogBytes = files['https://fixture.test/voices/voices.jsonl']!
 
 const manifest: ReadAloudManifest = {
   runtimeVersion: 'test',
@@ -53,9 +53,16 @@ const manifest: ReadAloudManifest = {
   model: [
     { label: 'Model weights', url: 'https://fixture.test/model.gguf', file: 'model/model.q8.gguf', bytes: 200_000, sha256: sha256(files['https://fixture.test/model.gguf']!) },
     { label: 'Tokenizer', url: 'https://fixture.test/tokenizer.json', file: 'model/tokenizer.json', bytes: files['https://fixture.test/tokenizer.json']!.length, sha256: sha256(files['https://fixture.test/tokenizer.json']!) },
-    { label: 'Default voice', url: 'https://fixture.test/voice-default', file: 'model/default-voice.safetensors', bytes: 3000, sha256: voices[0]!.sha256 }
+    { label: 'Default voice', url: 'https://fixture.test/voice-default', file: 'model/default-voice.safetensors', bytes: 3000, sha256: sha256(files['https://fixture.test/voice-default']!) }
   ],
-  voices,
+  catalog: {
+    url: 'https://fixture.test/voices/voices.jsonl',
+    sha256: sha256(catalogBytes),
+    bytes: catalogBytes.length,
+    base: 'https://fixture.test/voices',
+    hashes: { freya: sha256(files['https://fixture.test/voices/voices/freya.safetensors']!), nele: 'b'.repeat(64) },
+    voiceBytes: 4000
+  },
   modelFolder: 'model'
 }
 
@@ -228,14 +235,38 @@ describe('voices and deleting', () => {
     const downloads = manager()
     await downloads.ensureModel()
     states = []
-    await downloads.ensureVoice('freya')
+    requests = []
+    expect(await downloads.ensureVoice('freya')).toBe('freya')
+    expect(requests).toEqual(['https://fixture.test/voices/voices.jsonl', 'https://fixture.test/voices/voices/freya.safetensors'])
     expect(states.some((state) => state.voice?.id === 'freya' && state.voice.total === 4000)).toBe(true)
     expect(downloads.state()).toMatchObject({ voice: null, voices: ['default', 'freya'], status: 'ready' })
     requests = []
-    await downloads.ensureVoice('freya')
-    await downloads.ensureVoice('default')
-    await downloads.ensureVoice('unknown')
+    expect(await downloads.ensureVoice('freya')).toBe('freya')
+    expect(await downloads.ensureVoice('default')).toBe('default')
+    // Not in the catalog (or not English): the model voice, nothing fetched.
+    expect(await downloads.ensureVoice('unknown')).toBe('default')
+    expect(await downloads.ensureVoice('nele')).toBe('default')
     expect(requests).toEqual([])
+  })
+
+  test('the voice catalog: English only, fetched once, then read from the profile', async () => {
+    const downloads = manager()
+    await downloads.ensureModel()
+    requests = []
+    const [first, second] = await Promise.all([downloads.ensureCatalog(), downloads.ensureCatalog()])
+    expect(first!.map((voice) => [voice.id, voice.accent, voice.url])).toEqual([['freya', 'uk', 'https://fixture.test/voices/voices/freya.safetensors']])
+    expect(second).toBe(first)
+    expect(requests).toEqual(['https://fixture.test/voices/voices.jsonl'])
+    requests = []
+    expect((await manager().ensureCatalog()).map((voice) => voice.id)).toEqual(['freya'])
+    expect(requests).toEqual([])
+  })
+
+  test('a catalog that fails its hash is refused', async () => {
+    const downloads = manager({ corrupt: new Set(['https://fixture.test/voices/voices.jsonl']) })
+    await downloads.ensureModel()
+    await expect(downloads.ensureCatalog()).rejects.toThrow('Voice list: checksum mismatch')
+    await expect(downloads.ensureVoice('freya')).rejects.toThrow('Voice list: checksum mismatch')
   })
 
   test('Delete download removes the folder; the disk state follows', async () => {

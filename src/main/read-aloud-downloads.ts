@@ -7,7 +7,8 @@ import {
   READ_ALOUD_READY_FILE,
   type ReadAloudDownloadState
 } from '../shared/read-aloud'
-import { isPhononRuntimeFile, type ReadAloudAsset, type ReadAloudManifest, type ReadAloudVoice } from '../shared/read-aloud-assets'
+import { isPhononRuntimeFile, type ReadAloudAsset, type ReadAloudManifest } from '../shared/read-aloud-assets'
+import { parseVoiceCatalog, type CatalogVoiceFile } from '../shared/read-aloud-voices'
 import { matchesIntegrity, readTarGz } from './read-aloud-tar'
 
 /**
@@ -16,8 +17,9 @@ import { matchesIntegrity, readTarGz } from './read-aloud-tar'
  * One manager per app run. `ensureModel()` makes sure the Phonon runtime (the `phonon-tts` npm
  * tarball, unpacked) and the model files are in `<userData>/read-aloud`, checking what is already
  * there against the pinned hashes once per run (a match is kept, a mismatch is fetched again) and
- * downloading only what is missing, with progress. Concurrent callers share one download. A voice
- * (~250 KB) is fetched on its own by `ensureVoice()`. `cancel()` aborts; completed files stay.
+ * downloading only what is missing, with progress. Concurrent callers share one download. The voice
+ * catalog (voices.jsonl, ~33 KB, hash-checked and kept beside the model) is fetched by
+ * `ensureCatalog()` once the model is there; a voice (~256 KB) by `ensureVoice()` when first used. `cancel()` aborts; completed files stay.
  * Nothing here deletes the folder except `deleteAll()` (Settings → Delete download).
  */
 
@@ -71,18 +73,17 @@ async function sizeOf(path: string): Promise<number | null> {
 }
 
 /** What the folder says without hashing (Settings before the module loads; the first state). */
-export function readAloudDiskState(directory: string, manifest: Pick<ReadAloudManifest, 'voices' | 'modelFolder'> | null, bytes: number): ReadAloudDownloadState {
+export function readAloudDiskState(directory: string, manifest: Pick<ReadAloudManifest, 'modelFolder'> | null, bytes: number): ReadAloudDownloadState {
   const ready = existsSync(join(directory, READ_ALOUD_READY_FILE))
   const voices = cachedVoices(directory, manifest)
   const status = ready ? 'ready' : existsSync(directory) ? 'partial' : 'absent'
   return { ...IDLE_READ_ALOUD_DOWNLOAD, status, bytes, voices: ready ? ['default', ...voices] : voices }
 }
 
-function cachedVoices(directory: string, manifest: Pick<ReadAloudManifest, 'voices' | 'modelFolder'> | null): string[] {
+function cachedVoices(directory: string, manifest: Pick<ReadAloudManifest, 'modelFolder'> | null): string[] {
   try {
     const folder = join(directory, manifest?.modelFolder ?? 'model', 'voices')
-    const ids = readdirSync(folder).filter((name) => name.endsWith('.safetensors')).map((name) => name.slice(0, -'.safetensors'.length))
-    return manifest ? ids.filter((id) => manifest.voices.some((voice) => voice.id === id)) : ids
+    return readdirSync(folder).filter((name) => /^[\w-]{1,40}\.safetensors$/.test(name)).map((name) => name.slice(0, -'.safetensors'.length))
   } catch {
     return []
   }
@@ -94,6 +95,8 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
   let modelRun: Promise<void> | null = null
   let modelAbort: AbortController | null = null
   const voiceRuns = new Map<string, Promise<void>>()
+  let catalog: CatalogVoiceFile[] | null = null
+  let catalogRun: Promise<CatalogVoiceFile[]> | null = null
   const voiceAborts = new Set<AbortController>()
   /** Checked against the hashes this run: never hashed again until deleted. */
   let modelVerified = false
@@ -300,7 +303,39 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
     return run
   }
 
-  async function runVoice(voice: ReadAloudVoice): Promise<void> {
+  async function runCatalog(): Promise<CatalogVoiceFile[]> {
+    const manifest = deps.manifest()
+    const source = manifest.catalog
+    if (!source) return []
+    const asset: ReadAloudAsset = { label: 'Voice list', url: source.url, file: join(manifest.modelFolder, 'voices.jsonl'), bytes: source.bytes, sha256: source.sha256 }
+    if (!(await assetIsIntact(asset, true))) {
+      const abort = new AbortController()
+      voiceAborts.add(abort)
+      const timeout = deps.timeoutMs ? setTimeout(() => abort.abort(), deps.timeoutMs) : null
+      try {
+        await fetchAsset(asset, () => undefined, abort.signal)
+      } finally {
+        if (timeout) clearTimeout(timeout)
+        voiceAborts.delete(abort)
+      }
+    }
+    const parsed = parseVoiceCatalog(await readFile(assetPath(asset), 'utf8'), { base: source.base, hashes: source.hashes, bytes: source.voiceBytes })
+    catalog = parsed
+    return parsed
+  }
+
+  /** The English voices (fetched once, then read from the profile). Shared by concurrent callers. */
+  function ensureCatalog(): Promise<CatalogVoiceFile[]> {
+    if (catalog) return Promise.resolve(catalog)
+    if (catalogRun) return catalogRun
+    const run = runCatalog()
+    catalogRun = run
+    const clear = (): void => { if (catalogRun === run) catalogRun = null }
+    run.then(clear, clear)
+    return run
+  }
+
+  async function runVoice(voice: CatalogVoiceFile): Promise<void> {
     const manifest = deps.manifest()
     const asset: ReadAloudAsset = { label: `Voice: ${voice.name}`, url: voice.url, file: join(manifest.modelFolder, voice.file), bytes: voice.bytes, sha256: voice.sha256 }
     if (await assetIsIntact(asset, !verifiedVoices.has(voice.id))) {
@@ -327,17 +362,24 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
     }
   }
 
-  /** A voice other than the model's own: fetched (~250 KB) the first time it's used. */
-  function ensureVoice(id: string): Promise<void> {
-    const voice = deps.manifest().voices.find((candidate) => candidate.id === id)
-    if (!voice || voice.id === 'default') return Promise.resolve()
-    const running = voiceRuns.get(id)
-    if (running) return running
-    const run = runVoice(voice)
-    voiceRuns.set(id, run)
-    const clear = (): void => { if (voiceRuns.get(id) === run) voiceRuns.delete(id) }
-    run.then(clear, clear)
-    return run
+  /**
+   * A catalog voice: fetched (~256 KB) the first time it's used. Resolves to the id to speak with:
+   * the voice, or 'default' for the model's own voice or an id the catalog doesn't have.
+   */
+  async function ensureVoice(id: string): Promise<string> {
+    if (id === 'default') return 'default'
+    const voice = (await ensureCatalog()).find((candidate) => candidate.id === id)
+    if (!voice) return 'default'
+    let run = voiceRuns.get(id)
+    if (!run) {
+      run = runVoice(voice)
+      voiceRuns.set(id, run)
+      const created = run
+      const clear = (): void => { if (voiceRuns.get(id) === created) voiceRuns.delete(id) }
+      created.then(clear, clear)
+    }
+    await run
+    return id
   }
 
   function cancel(): void {
@@ -351,6 +393,7 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
     await rm(root(), { recursive: true, force: true })
     modelVerified = false
     verifiedVoices.clear()
+    catalog = null
     publish({ ...IDLE_READ_ALOUD_DOWNLOAD, bytes: sumAssetBytes(deps.manifest()) })
   }
 
@@ -358,6 +401,7 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
     state: snapshot,
     ensureModel,
     ensureVoice,
+    ensureCatalog,
     cancel,
     deleteAll,
     isReady: (): boolean => state.status === 'ready' && modelVerified,

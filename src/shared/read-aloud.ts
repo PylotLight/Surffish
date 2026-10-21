@@ -12,6 +12,9 @@
  * the download manifest and voices are in read-aloud-assets.ts (loaded only with the feature).
  */
 
+import type { ModelConditioner } from './read-aloud-assets'
+import type { CatalogVoice } from './read-aloud-voices'
+
 export const READ_ALOUD_SETTINGS_FILE = 'browser-read-aloud.json'
 /** The hidden engine page's origin. Its own in-memory session; no network but its own files. */
 export const READ_ALOUD_SCHEME = 'surffish-tts'
@@ -32,19 +35,48 @@ export const READ_ALOUD_DISABLED_ERROR = 'read aloud disabled'
 export const READ_ALOUD_ENGINES = ['phonon', 'system', 'openai'] as const
 export type ReadAloudEngineId = (typeof READ_ALOUD_ENGINES)[number]
 
-/** Speech rates offered in the player. Phonon gets them as its `duration_delta` conditioner. */
-export const READ_ALOUD_SPEEDS = [0.8, 1, 1.15, 1.3, 1.5] as const
+/**
+ * Speech rate, 0.75–3×, in 0.05 steps. Phonon's own `duration_delta` conditioner covers about
+ * 0.87–1.25× (measured, see read-aloud-speed.ts); the rest is a pitch-preserving time stretch of
+ * its audio in the engine page, so 2–3× doesn't chipmunk.
+ */
+export const READ_ALOUD_MIN_SPEED = 0.75
+export const READ_ALOUD_MAX_SPEED = 3
+/** One-click rates in Settings and the player. */
+export const READ_ALOUD_SPEED_PRESETS = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3] as const
+
+/** Phonon's text rewrites: 'default' (numbers, currency, urls…), 'all' (+ phones, times, dates), 'none'. */
+export const READ_ALOUD_REWRITES = ['default', 'all', 'none'] as const
+export type ReadAloudRewrites = (typeof READ_ALOUD_REWRITES)[number]
+export const READ_ALOUD_DEVICES = ['cpu', 'webgpu', 'auto'] as const
+export type ReadAloudDevice = (typeof READ_ALOUD_DEVICES)[number]
+/** phonon-tts's own defaults (temperature 0.3, seed 4242424242424242: the same text gives the same audio). */
+export const READ_ALOUD_DEFAULT_TEMPERATURE = 0.3
+export const READ_ALOUD_MAX_TEMPERATURE = 1
+export const READ_ALOUD_DEFAULT_SEED = 4242424242424242
+export const READ_ALOUD_MAX_THREADS = 8
 
 export interface ReadAloudSettings {
   enabled: boolean
   engine: ReadAloudEngineId
-  /** A Phonon voice id from READ_ALOUD_VOICES (read-aloud-assets.ts) ('default' is the checkpoint's own voice). */
+  /** A Phonon voice id ('default' is the checkpoint's own voice; others come from the voice catalog). */
   voice: string
   speed: number
   /** openai engine only: loopback base URL, e.g. http://127.0.0.1:8880/v1 (ptts-openai-server). */
   endpoint: string
   /** openai engine only: the server's voice name ('' lets it pick). */
   endpointVoice: string
+  /** Phonon sampling temperature ("Expressiveness"), 0–1. */
+  temperature: number
+  /** A new noise seed for every reading instead of the fixed one (same text, slightly different read). */
+  varySeed: boolean
+  /** Phonon text normalization ("Read numbers, dates & times naturally"); a change reloads the model. */
+  rewrites: ReadAloudRewrites
+  /** Advanced: where Phonon generates, and on how many CPU threads ('auto' is 3). */
+  device: ReadAloudDevice
+  threads: 'auto' | number
+  /** Advanced: values for other conditioners the checkpoint's config.json lists (not duration_delta). */
+  conditions: Record<string, string | number>
 }
 
 export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
@@ -53,7 +85,13 @@ export const DEFAULT_READ_ALOUD_SETTINGS: ReadAloudSettings = {
   voice: 'default',
   speed: 1,
   endpoint: 'http://127.0.0.1:8880/v1',
-  endpointVoice: ''
+  endpointVoice: '',
+  temperature: READ_ALOUD_DEFAULT_TEMPERATURE,
+  varySeed: false,
+  rewrites: 'default',
+  device: 'cpu',
+  threads: 'auto',
+  conditions: {}
 }
 
 /** Loopback http(s) only: the text being read never leaves the machine through this setting. */
@@ -75,14 +113,44 @@ export function speechEndpointUrl(endpoint: string): string | null {
   return /\/v1$/.test(base) ? `${base}/audio/speech` : `${base}/v1/audio/speech`
 }
 
-export function nearestSpeed(value: unknown, fallback = 1): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
-  let best: number = READ_ALOUD_SPEEDS[0]
-  for (const speed of READ_ALOUD_SPEEDS) if (Math.abs(speed - value) < Math.abs(best - value)) best = speed
-  return best
+/**
+ * A speed in range, on the 0.05 grid. Accepts "1.5x"/"2×" strings (hand-edited files). Older
+ * builds offered 0.8/1/1.15/1.3/1.5; those are kept as they are (all on the grid, all in range).
+ */
+export function normalizeSpeed(value: unknown, fallback = 1): number {
+  const number = typeof value === 'string' ? Number.parseFloat(value.replace(/[x×]\s*$/i, '')) : value
+  if (typeof number !== 'number' || !Number.isFinite(number) || number <= 0) return fallback
+  const clamped = Math.min(READ_ALOUD_MAX_SPEED, Math.max(READ_ALOUD_MIN_SPEED, number))
+  return Math.round(clamped * 20) / 20
 }
 
-/** Invalid fields fall back to `fallback` (the defaults, or the current settings when saving a change). */
+/** "1.25×", "2×". */
+export function formatSpeed(speed: number): string {
+  return `${Number(speed.toFixed(2))}×`
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number, step: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return Math.round(Math.min(max, Math.max(min, value)) / step) * step
+}
+
+function parseConditions(value: unknown, fallback: Record<string, string | number>): Record<string, string | number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { ...fallback }
+  const out: Record<string, string | number> = {}
+  for (const [name, raw] of Object.entries(value as Record<string, unknown>).slice(0, 12)) {
+    // duration_delta belongs to the speed setting; anything else the checkpoint's config lists.
+    if (!/^[a-z][a-z0-9_]{0,40}$/.test(name) || name === 'duration_delta') continue
+    if (typeof raw === 'number' && Number.isFinite(raw)) out[name] = Math.round(raw * 1000) / 1000
+    else if (typeof raw === 'string' && /^[\w.-]{1,24}$/.test(raw)) out[name] = raw
+  }
+  return out
+}
+
+/**
+ * Invalid fields fall back to `fallback` (the defaults, or the current settings when saving a change).
+ * Files from older builds (speed on the old 0.8–1.5 list, no Phonon levers, a stray tester engine
+ * key) read as the same choices plus the new defaults.
+ */
 export function parseReadAloudSettings(value: unknown, fallback: ReadAloudSettings = DEFAULT_READ_ALOUD_SETTINGS): ReadAloudSettings {
   const raw = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
   const engine = READ_ALOUD_ENGINES.includes(raw.engine as ReadAloudEngineId) ? (raw.engine as ReadAloudEngineId) : fallback.engine
@@ -90,13 +158,20 @@ export function parseReadAloudSettings(value: unknown, fallback: ReadAloudSettin
   const voice = typeof raw.voice === 'string' && /^[\w-]{1,40}$/.test(raw.voice) ? raw.voice : fallback.voice
   const endpoint = typeof raw.endpoint === 'string' && isLoopbackSpeechEndpoint(raw.endpoint.trim()) ? raw.endpoint.trim().replace(/\/+$/, '') : fallback.endpoint
   const endpointVoice = typeof raw.endpointVoice === 'string' ? raw.endpointVoice.trim().slice(0, 80) : fallback.endpointVoice
+  const threads = raw.threads === 'auto' ? 'auto' : typeof raw.threads === 'number' && Number.isInteger(raw.threads) && raw.threads >= 1 && raw.threads <= READ_ALOUD_MAX_THREADS ? raw.threads : fallback.threads
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : fallback.enabled,
     engine,
     voice,
-    speed: raw.speed === undefined ? fallback.speed : nearestSpeed(raw.speed, fallback.speed),
+    speed: raw.speed === undefined ? fallback.speed : normalizeSpeed(raw.speed, fallback.speed),
     endpoint,
-    endpointVoice
+    endpointVoice,
+    temperature: Math.round(clampNumber(raw.temperature, 0, READ_ALOUD_MAX_TEMPERATURE, fallback.temperature, 0.05) * 100) / 100,
+    varySeed: typeof raw.varySeed === 'boolean' ? raw.varySeed : fallback.varySeed,
+    rewrites: READ_ALOUD_REWRITES.includes(raw.rewrites as ReadAloudRewrites) ? (raw.rewrites as ReadAloudRewrites) : fallback.rewrites,
+    device: READ_ALOUD_DEVICES.includes(raw.device as ReadAloudDevice) ? (raw.device as ReadAloudDevice) : fallback.device,
+    threads,
+    conditions: raw.conditions === undefined ? { ...fallback.conditions } : parseConditions(raw.conditions, fallback.conditions)
   }
 }
 
@@ -177,15 +252,13 @@ export const IDLE_READ_ALOUD_DOWNLOAD: ReadAloudDownloadState = {
 }
 
 // ---------------------------------------------------------------------------
-// Voice tester (Settings → Integrations → Read Aloud): speak a sample with an engine, voice and
-// speed, and show how long it took, so voices and speeds can be compared on this Mac. Its helpers
+// Voice tester (Settings → Integrations → Read Aloud → Voice): speak a sample with the current
+// engine, voice, speed and levers, and show how long it took, so they can be compared on this Mac. Its helpers
 // live in read-aloud-tester.ts, which isn't parsed at launch.
 
+/** The sample to speak; engine, voice, speed and the Phonon levers are Read Aloud's own settings. */
 export interface ReadAloudTestRequest {
   text: string
-  engine: ReadAloudEngineId
-  voice: string
-  speed: number
 }
 
 export type ReadAloudTestStatus = 'idle' | 'preparing' | 'loading' | 'playing' | 'finished' | 'error'
@@ -200,6 +273,10 @@ export interface ReadAloudTestStats {
   audioSeconds: number | null
   generateMs: number | null
   threads: number | null
+  /** Phonon: 'cpu' or 'webgpu', and why (phonon-tts's deviceReason / threadsReason). */
+  device: string | null
+  deviceReason: string
+  threadsReason: string
 }
 
 export interface ReadAloudTestState {
@@ -213,3 +290,12 @@ export interface ReadAloudTestState {
 }
 
 export const IDLE_READ_ALOUD_TEST: ReadAloudTestState = { status: 'idle', engine: null, voice: 'default', speed: 1, stats: null, error: '', fallbackReason: '' }
+
+/** The voice pickers' list and Advanced's model conditioners (fetched on demand, see read-aloud-voices.ts). */
+export interface ReadAloudCatalogInfo {
+  /** 'needs-model': the voice list is fetched once the model is downloaded. */
+  status: 'ready' | 'needs-model' | 'error'
+  voices: CatalogVoice[]
+  conditioners: ModelConditioner[]
+  error: string
+}
