@@ -8,7 +8,7 @@
 //   2. ⌘K "Send Mini Window to Menu Bar" on a floating mini: it drops in under the icon (anchored and
 //      clamped to the work area), not movable; its header is the popout strip: always shown (28 px,
 //      no panel), the page always under it and never moved by hovering it or the page's top; one tab
-//      shows its favicon and title, ⋯ / Pin / Close (Tab order) and the ⋯ menu (Esc while it is up
+//      shows its favicon and title, + / ⋯ / Pin / Close (Tab order) and the ⋯ menu (Esc while it is up
 //      never hides the popout); the page never reloads; a click on the icon hides it, again shows it;
 //      hidden keeps the page and audio running (♪ in the title). Typing into the page (a chat app that
 //      rewrites its URL or flips a "typing…" title per key) never moves focus to or from the strip or
@@ -220,7 +220,7 @@ async function run() {
   assert.deepEqual(shown.ids.filter((id) => ['more', 'pin', 'close'].includes(id)), ['more', 'pin', 'close'], `⋯, Pin and Close shown (${shown.ids})`)
   for (const id of ['back', 'reload', 'tuck', 'menubar', 'return', 'returnAll', 'url', 'strip']) assert.ok(!shown.ids.includes(id), `${id} folded away (${shown.ids})`)
   assert.ok(shown.ids.includes('where') && shown.title === 'Bar 1', `one tab: its title (${JSON.stringify(shown)})`)
-  assert.deepEqual(shown.order, ['more', 'pin', 'close'], `Tab order (${shown.order})`)
+  assert.deepEqual(shown.order, ['plus', 'more', 'pin', 'close'], `Tab order (${shown.order})`)
   // Hovering the page's top and the strip itself never moves the page (or the strip).
   const headerBounds1 = headerViewOf(w1).getBounds()
   for (const y of [2, 10, 30, 44, 60]) p1.contents.sendInputEvent({ type: 'mouseMove', x: 120, y })
@@ -366,7 +366,7 @@ async function run() {
   assert.equal(shown.height, STRIP, 'still one 28 px strip')
   assert.equal(headerViewOf(w1).getBounds().height, STRIP, 'the header view stays 28 px')
   assert.equal(viewOf(w1, p2.contents).getBounds().y, STRIP, 'the page stays under it')
-  assert.deepEqual(shown.order.filter((id) => !['tab', 'tab-close'].includes(id)), ['more', 'pin', 'close'], `tabs first, then ⋯ / Pin / Close (${shown.order})`)
+  assert.deepEqual(shown.order.filter((id) => !['tab', 'tab-close'].includes(id)), ['stripPlus', 'more', 'pin', 'close'], `tabs first, then + / ⋯ / Pin / Close (${shown.order})`)
   assert.equal(shown.order[0], 'tab', `Tab starts on the tabs (${shown.order})`)
   await smoke.evaluate(header1, 'document.getElementById("more").click()')
   await waitFor(() => popoutMenu()?.open(), 'the ⋯ menu opens for the collection')

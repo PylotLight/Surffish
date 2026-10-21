@@ -18,8 +18,8 @@ import type {
 } from '../../../shared/types'
 import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, SEARCH_ENGINES, SURFFISH_QUICK_LINKS_URL } from '../../../shared/navigation'
 import { DEFAULT_NEW_TAB_PREFERENCES, DEFAULT_SIDEBAR_WIDTH, MAX_PINNED_SITES, MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, normalizeSidebarWidth } from '../../../shared/persistence'
-import { buildAddressSuggestions } from '../../../shared/autocomplete'
-import { arrowSuggestion, escapeOmnibox, highlightMatches, omniboxQuery, suggestionUrlParts, type OmniboxPreview } from '../../../shared/omnibox-fill'
+import { omniboxSuggestions } from '../../../shared/autocomplete'
+import { arrowSuggestion, escapeOmnibox, highlightMatches, keywordSuggestionText, omniboxQuery, suggestionUrlParts, type OmniboxPreview } from '../../../shared/omnibox-fill'
 import { Debouncer, HOVER_DWELL_MS, TYPING_DEBOUNCE_MS, typedInputQualifies } from '../../../shared/preconnect'
 import { addressDisplayValue } from '../../../shared/address-bar-sync'
 import { describeTabSleep, isRestoredSleep } from '../../../shared/tab-sleep'
@@ -633,7 +633,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const addressQuery = omniboxQuery(address, omniboxPreview)
   const addressSuggestions = useMemo(
     // Favourites come first in tree order, so the old pinned-site ranking holds without a separate list.
-    () => suggestionsActive ? buildAddressSuggestions(addressQuery, [], tabs, history, 7, bookmarkSuggestions) : [],
+    () => suggestionsActive ? omniboxSuggestions(addressQuery, { tabs, history, bookmarks: bookmarkSuggestions }) : [],
     [suggestionsActive, addressQuery, tabs, history, bookmarkSuggestions]
   )
   // "yt cats" / "cats !yt": show which engine the address bar will use.
@@ -1962,8 +1962,8 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                       onClick={() => void navigateTo(address)}
                     >
                       <span className="suggestion-mark" aria-hidden="true">⌕</span>
-                      <span className="suggestion-main"><strong>{keywordMatch.query ? `Search ${keywordMatch.engine.name} for “${keywordMatch.query}”` : `Open ${keywordMatch.engine.name}`}</strong><small>Press Enter</small></span>
-                      <span className="keyword-suggestion-chip">{keywordMatch.via === 'bang' ? `!${keywordMatch.engine.keyword}` : keywordMatch.engine.keyword}</span>
+                      <span className="suggestion-main"><strong>{keywordSuggestionText(keywordMatch).label}</strong><small>Press Enter</small></span>
+                      <span className="keyword-suggestion-chip">{keywordSuggestionText(keywordMatch).chip}</span>
                     </button>
                   )}
                   {addressSuggestions.map((suggestion, index) => (

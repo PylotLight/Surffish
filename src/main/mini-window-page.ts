@@ -19,6 +19,10 @@
  * Grouping, Settings; arrow keys move through it and Esc closes it, not the popout), Pin (pinned:
  * clicking elsewhere keeps it open) and Close. Right-click on the header opens the mini window's menu
  * (the ⋯ menu in the popout).
+ * New Tab (+ in the header row, or after the last strip chip; ⌘/Ctrl+T) and the address field: on a
+ * New Tab it shows in the title's place by itself, focused; ⌘/Ctrl+L shows it on any page, Esc hides it.
+ * Main runs the toolbar omnibox's model for it (shared/mini-window-omnibox.ts) and says what it shows,
+ * its suggestions included; the dropdown hangs under the header (main makes the view taller for it).
  * Loaded from a data: URL with the narrow preload in preload/mini-window.cjs; never remote content.
  */
 export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
@@ -27,8 +31,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
 <title>Mini Window</title>
 <style>
   /* The bar is opaque on purpose: the window is transparent, so any see-through bar shows whatever macOS composites behind it, which flips between the desktop and black while the page view below repaints (a visible flash). */
-  :root { color-scheme: light dark; --bar: rgb(246,246,247); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; }
-  @media (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; } }
+  :root { color-scheme: light dark; --bar: rgb(246,246,247); --text: #1d1d1f; --muted: #6e6e73; --line: rgba(0,0,0,.1); --hover: rgba(0,0,0,.08); --accent: #2f6fed; --field: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); --text: #f2f2f4; --muted: #a1a1a6; --line: rgba(255,255,255,.1); --hover: rgba(255,255,255,.1); --accent: #6d9bff; --field: rgb(28,28,30); } }
   html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font: 12px/1.25 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); user-select: none; }
   header { position: fixed; left: 0; right: 0; top: 0; height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 6px; box-sizing: border-box; background: var(--bar); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
   #where { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 4px; }
@@ -92,6 +96,29 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   .vol input::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3.5px; border-radius: 50%; background: var(--text); border: 0; }
   .vol input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 3px; }
   @media (prefers-reduced-motion: reduce) { .vol input { transition: none; } }
+  /* New Tab: + in the header row (no strip) or right after the last chip (strip). */
+  #plus { font-size: 17px; }
+  body.tabbed #plus { display: none; }
+  .strip-plus { -webkit-app-region: no-drag; flex: none; align-self: center; width: 22px; height: 22px; font-size: 15px; border-radius: 6px; color: var(--muted); }
+  .strip-plus:hover { color: var(--text); }
+  /* The address field (in the title's place) and its suggestions under the header. */
+  #addr { display: none; flex: 1; min-width: 0; align-items: center; padding: 0 2px; margin: 0; }
+  body.addressing #addr { display: flex; }
+  body.addressing #where { display: none; }
+  #addrInput { -webkit-app-region: no-drag; flex: 1; min-width: 0; height: 24px; box-sizing: border-box; margin: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--text); font: 12px system-ui, -apple-system, "Segoe UI", sans-serif; outline: none; user-select: text; }
+  #addrInput:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  #addrInput::placeholder { color: var(--muted); }
+  #drop { position: fixed; left: 4px; right: 4px; top: 36px; display: none; box-sizing: border-box; padding: 4px 0; background: var(--bar); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.18); overflow: hidden; z-index: 6; }
+  body.addressing #drop.on { display: block; }
+  .row { height: 40px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 10px; cursor: default; }
+  .row:hover, .row.sel { background: var(--hover); }
+  .row .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .row .t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .u { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .u .host { color: var(--text); }
+  .row .m { color: var(--accent); }
+  .row .src, .row .chip { flex: none; font-size: 10.5px; color: var(--muted); }
+  .row .chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
   /* Menu bar popout: one slim strip, always there (no reveal, no motion), tabs and actions in one row. */
   #more { display: none; }
   body.popout header { height: 28px; gap: 1px; padding: 0 3px 0 4px; -webkit-app-region: no-drag; }
@@ -106,6 +133,9 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   body.popout.tabbed #strip { display: flex; }
   body.popout.loading header { box-shadow: inset 0 -2px 0 -0.5px var(--accent); }
   body.popout #more[aria-expanded=true] { background: var(--hover); }
+  body.popout.addressing #strip { display: none; }
+  body.popout #addrInput { height: 20px; font-size: 11.5px; }
+  body.popout #plus { width: 22px; height: 22px; font-size: 15px; }
   @media (prefers-reduced-transparency: reduce) { :root { --bar: rgb(246,246,247); } }
   @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --bar: rgb(38,38,41); } }
 </style></head>
@@ -114,6 +144,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   <button id="back" data-hint="Back" aria-label="Back" disabled>&#8249;</button>
   <button id="reload" data-hint="Reload" aria-label="Reload">&#8635;</button>
   <div id="where"><img id="icon" alt="" hidden><div id="text"><div id="title"></div><div id="url"></div></div><div id="hint" aria-hidden="true"></div></div>
+  <form id="addr" autocomplete="off"><input id="addrInput" type="text" role="combobox" aria-label="Search or enter address" aria-autocomplete="list" aria-controls="drop" aria-expanded="false" placeholder="Search or enter address" spellcheck="false" autocapitalize="none"></form>
+  <button id="plus" data-hint="New Tab" aria-label="New Tab">+</button>
   <span id="vol" class="vol"></span>
   <span id="badge">Private</span>
   <button id="tuck" data-hint="Tuck to Edge" aria-label="Tuck to Edge" data-dir="right" hidden><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -126,6 +158,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   <div id="progress"></div>
 </header>
 <nav id="strip" aria-label="Mini window tabs"></nav>
+<div id="drop" role="listbox" aria-label="Address suggestions"></div>
 <script>
   const icon = document.getElementById('icon')
   icon.addEventListener('error', () => { icon.hidden = true })
@@ -164,6 +197,10 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     setAttr(pin, 'aria-pressed', menuBar.pinned ? 'true' : 'false')
     setHint(pin, menuBar.pinned ? 'Pinned (stays open when clicking elsewhere)' : 'Pin (stay open when clicking elsewhere)')
     if (hinted === pin || hinted === menuButton) showHint(hinted)
+    const plus = document.getElementById('plus')
+    const canNewTab = state.canNewTab !== false
+    if (plus.disabled !== !canNewTab) plus.disabled = !canNewTab
+    if (stripPlus.disabled !== !canNewTab) stripPlus.disabled = !canNewTab
     const tabs = Array.isArray(state.tabs) ? state.tabs : []
     headerVolume.update({ tabId: state.tabId, audio: tabs.length < 2 ? state.audio : 'none', muted: Boolean(state.muted), volume: state.volume })
     renderTabs(tabs)
@@ -279,6 +316,17 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   }
   // The tab strip (grouping 'tabs', two or more tabs).
   const strip = document.getElementById('strip')
+  // + right after the last chip (it stays the strip's last child; chips are the .tab children).
+  const stripPlus = document.createElement('button')
+  stripPlus.id = 'stripPlus'
+  stripPlus.className = 'strip-plus'
+  stripPlus.type = 'button'
+  stripPlus.innerHTML = '+'
+  stripPlus.title = 'New Tab'
+  stripPlus.setAttribute('aria-label', 'New Tab')
+  stripPlus.addEventListener('pointerdown', (event) => event.stopPropagation())
+  stripPlus.addEventListener('click', (event) => { event.stopPropagation(); window.miniWindow.newTab() })
+  strip.append(stripPlus)
   let dragTab = null
   let draggedTabs = null
   // Where the chips are (header coordinates), for main's drop slots; reported when it changes.
@@ -459,7 +507,8 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     // Mid-drag the strip stays as it is; the latest tabs render when it is let go.
     if (dragTab) { draggedTabs = tabs; return }
     const ids = tabs.map((tab) => tab.tabId)
-    const same = ids.length === strip.children.length && ids.every((id, index) => strip.children[index].dataset.tabId === id)
+    const current = [...strip.querySelectorAll('.tab')]
+    const same = ids.length === current.length && ids.every((id, index) => current[index].dataset.tabId === id)
     // Never take a chip away or move it under a slider being dragged.
     if (!same && volumeBusy > 0) { deferredTabs = tabs; return }
     for (const tab of tabs) {
@@ -476,7 +525,7 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
     if (same) return
     const keep = new Set(ids)
     for (const id of [...chips.keys()]) if (!keep.has(id)) chips.delete(id)
-    strip.replaceChildren(...ids.map((id) => chips.get(id).item))
+    strip.replaceChildren(...ids.map((id) => chips.get(id).item), stripPlus)
     requestAnimationFrame(reportStripLayout)
   }
   // Button hints: shown in the title's place (a native tooltip would drop over the tab strip).
@@ -535,6 +584,125 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   document.getElementById('close').addEventListener('click', () => window.miniWindow.close())
   document.getElementById('menubar').addEventListener('click', () => window.miniWindow.menuBar())
   document.getElementById('pin').addEventListener('click', () => window.miniWindow.pin())
+  document.getElementById('plus').addEventListener('click', () => window.miniWindow.newTab())
+  // The address field: main owns what it shows (text, rows, which row is filled in); this page sends
+  // what is typed and the keys, and draws main's answer. A typed reply never rewrites the input (the
+  // user may have typed on since); only a key's reply (a filled-in row, Esc putting text back) does.
+  const addrForm = document.getElementById('addr')
+  const addrInput = document.getElementById('addrInput')
+  const drop = document.getElementById('drop')
+  let address = { open: false, view: null }
+  let addressFocusSeen = 0
+  let dropKey = ''
+  function appendParts(parent, parts, url) {
+    for (const part of parts) {
+      const span = document.createElement('span')
+      span.textContent = part.text
+      if (url && part.role === 'host') span.className = 'host'
+      if (part.match) span.classList.add('m')
+      parent.append(span)
+    }
+  }
+  function placeDrop() {
+    // Under everything the header shows (the row, and the strip unless it sits in the row).
+    const underStrip = document.body.classList.contains('tabbed') && !document.body.classList.contains('popout')
+    const bottom = Math.max(bar.getBoundingClientRect().bottom, underStrip ? strip.getBoundingClientRect().bottom : 0)
+    drop.style.top = Math.round(bottom + 2) + 'px'
+  }
+  function renderDrop(view, height) {
+    const rows = view ? view.rows : []
+    const shown = height > 0 && Boolean(view) && (rows.length > 0 || Boolean(view.keyword)) && document.activeElement === addrInput
+    drop.classList.toggle('on', shown)
+    setAttr(addrInput, 'aria-expanded', shown ? 'true' : 'false')
+    if (!shown) return
+    placeDrop()
+    drop.style.height = height + 'px'
+    const key = JSON.stringify([view.rows, view.keyword, view.selected])
+    if (key === dropKey) return
+    dropKey = key
+    const items = []
+    if (view.keyword) {
+      const row = document.createElement('div')
+      row.className = 'row' + (view.selected < 0 ? ' sel' : '')
+      row.setAttribute('role', 'option')
+      const main = document.createElement('div')
+      main.className = 'main'
+      const title = document.createElement('div')
+      title.className = 't'
+      title.textContent = view.keyword.label
+      const hintLine = document.createElement('div')
+      hintLine.className = 'u'
+      hintLine.textContent = 'Press Enter'
+      main.append(title, hintLine)
+      const chip = document.createElement('span')
+      chip.className = 'chip'
+      chip.textContent = view.keyword.chip
+      row.append(main, chip)
+      row.addEventListener('mousedown', (event) => event.preventDefault())
+      row.addEventListener('click', () => window.miniWindow.addressSubmit(addrInput.value))
+      items.push(row)
+    }
+    view.rows.forEach((suggestion, index) => {
+      const row = document.createElement('div')
+      row.className = 'row' + (index === view.selected ? ' sel' : '')
+      row.setAttribute('role', 'option')
+      row.setAttribute('aria-selected', index === view.selected ? 'true' : 'false')
+      row.dataset.url = suggestion.url
+      const main = document.createElement('div')
+      main.className = 'main'
+      const title = document.createElement('div')
+      title.className = 't'
+      appendParts(title, suggestion.title, false)
+      const url = document.createElement('div')
+      url.className = 'u'
+      appendParts(url, suggestion.urlParts, true)
+      main.append(title, url)
+      const source = document.createElement('span')
+      source.className = 'src'
+      source.textContent = suggestion.source
+      row.append(main, source)
+      // Never takes the focus from the field (it would close the dropdown before the click lands).
+      row.addEventListener('mousedown', (event) => event.preventDefault())
+      row.addEventListener('click', () => window.miniWindow.addressPick(index))
+      items.push(row)
+    })
+    drop.replaceChildren(...items)
+  }
+  window.miniWindow.onAddress((state) => {
+    address = state || { open: false, view: null }
+    document.body.classList.toggle('addressing', Boolean(address.open))
+    if (!address.open) {
+      drop.classList.remove('on')
+      dropKey = ''
+      if (document.activeElement === addrInput) addrInput.blur()
+      return
+    }
+    const view = address.view
+    if (view && address.setText && addrInput.value !== view.text) addrInput.value = view.text
+    if (address.focus && address.focus !== addressFocusSeen) {
+      addressFocusSeen = address.focus
+      addrInput.focus()
+      if (address.select) addrInput.select()
+    }
+    if (view && address.setText && view.caretToEnd) { const end = addrInput.value.length; addrInput.setSelectionRange(end, end) }
+    renderDrop(view, address.height || 0)
+  })
+  addrForm.addEventListener('submit', (event) => { event.preventDefault(); window.miniWindow.addressSubmit(addrInput.value) })
+  addrInput.addEventListener('input', () => window.miniWindow.addressInput(addrInput.value))
+  // Pressed (the floating header's panel never takes the keyboard by itself): main lets it have it first.
+  addrInput.addEventListener('pointerdown', (event) => { event.stopPropagation(); if (document.activeElement !== addrInput) window.miniWindow.addressFocus() })
+  addrInput.addEventListener('focus', () => renderDrop(address.view, address.height || 0))
+  addrInput.addEventListener('blur', () => { drop.classList.remove('on'); if (address.open) window.miniWindow.addressBlur() })
+  addrInput.addEventListener('keydown', (event) => {
+    if (event.isComposing) return
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); window.miniWindow.addressKey('escape'); return }
+    if (event.altKey || event.ctrlKey || event.metaKey) return
+    const rows = address.view ? address.view.rows.length : 0
+    const direction = event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey) ? 'down' : event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey) ? 'up' : null
+    if (!direction || (event.key !== 'Tab' && event.shiftKey) || rows === 0) return
+    event.preventDefault()
+    window.miniWindow.addressKey(direction)
+  })
   // ⋯ (popout): a native menu under the button. Enter/Space/click or ArrowDown open it.
   const more = document.getElementById('more')
   function openMore() {
