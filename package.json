@@ -24,6 +24,7 @@
     "test:electron-downloads": "electron scripts/electron-download-manager-smoke.cjs",
     "test:electron-pdf-editor": "bun scripts/electron-pdf-editor-smoke.mjs",
     "test:electron-pdf-forms": "bun scripts/electron-pdf-forms-smoke.mjs",
+    "test:electron-ui-font": "electron scripts/electron-ui-font-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
     "test:electron-sidebar-backdrop": "electron scripts/electron-sidebar-backdrop-smoke.cjs",
     "test:electron-table-stakes": "electron scripts/electron-table-stakes-smoke.cjs",

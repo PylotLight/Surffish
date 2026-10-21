@@ -4,7 +4,7 @@ import { parseSiteVolumes } from './tab-volume.ts'
 import { isOpenMeteoModelId, isWeatherProviderId, normalizeWeatherPlace } from './weather.ts'
 import { clampWeatherScale, DEFAULT_WEATHER_FORECAST, DEFAULT_WEATHER_SCALE, isWeatherForecastView } from './weather-forecast.ts'
 import { CLOCK_SCALE_STEP, clockScaleFromLegacySize, isClockDateFormat, isClockTimeFormat, isClockWeight, isWeatherPosition, MAX_CLOCK_POSITION, MAX_CLOCK_SCALE, MIN_CLOCK_POSITION, MIN_CLOCK_SCALE } from './new-tab-clock.ts'
-import type { BrowserProxySettings, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
+import type { BrowserProxySettings, BrowserSiteSettings, BrowserUiFont, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes, WorldClockPreference } from './types'
 
 export const MAX_RESTORED_TABS = 50
 export const MAX_PINNED_SITES = 12
@@ -12,6 +12,7 @@ export const MAX_SAVED_SITE_SETTINGS = 200
 export const MAX_CACHED_FAVICON_BYTES = 48 * 1024
 export const DEFAULT_TAB_SLEEP_MINUTES: TabSleepMinutes = 30
 export const DEFAULT_NEW_TAB_PAGE: NewTabPageId = 'quick-links'
+export const DEFAULT_BROWSER_UI_FONT: BrowserUiFont = 'system'
 export const DEFAULT_SIDEBAR_WIDTH = 320
 export const MIN_SIDEBAR_WIDTH = 220
 export const MAX_SIDEBAR_WIDTH = 520
@@ -76,6 +77,7 @@ export interface SavedBrowserSession {
 }
 
 export interface BrowserPreferences {
+  uiFont: BrowserUiFont
   searchEngine: SearchEngineId
   tabSleepMinutes: TabSleepMinutes
   newTabPage: NewTabPageId
@@ -87,6 +89,10 @@ export interface BrowserPreferences {
   siteZoom: Record<string, number>
   /** Per-origin tab volume (0..1); only non-100% values are kept. */
   siteVolume: Record<string, number>
+}
+
+export function isBrowserUiFont(value: unknown): value is BrowserUiFont {
+  return value === 'system' || value === 'maple-mono'
 }
 
 export function isTabSleepMinutes(value: unknown): value is TabSleepMinutes {
@@ -315,6 +321,7 @@ export function parseBrowserSession(value: unknown): SavedBrowserSession {
 
 export function parseBrowserPreferences(value: unknown): BrowserPreferences {
   const defaults: BrowserPreferences = {
+    uiFont: DEFAULT_BROWSER_UI_FONT,
     searchEngine: DEFAULT_SEARCH_ENGINE,
     tabSleepMinutes: DEFAULT_TAB_SLEEP_MINUTES,
     newTabPage: DEFAULT_NEW_TAB_PAGE,
@@ -336,6 +343,7 @@ export function parseBrowserPreferences(value: unknown): BrowserPreferences {
   }
 
   return {
+    uiFont: isBrowserUiFont(value.uiFont) ? value.uiFont : defaults.uiFont,
     searchEngine: isSearchEngineId(value.searchEngine) ? value.searchEngine : defaults.searchEngine,
     tabSleepMinutes: isTabSleepMinutes(value.tabSleepMinutes) ? value.tabSleepMinutes : defaults.tabSleepMinutes,
     newTabPage: value.newTabPage === 'search' || value.newTabPage === 'bonjourr' || value.newTabPage === 'quick-links' ? value.newTabPage : defaults.newTabPage,

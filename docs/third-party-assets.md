@@ -26,3 +26,8 @@ The upstream license text is included at [`licenses/GPL-3.0-Bramble-icon.txt`](l
 ## Read Aloud voice model (downloaded, not bundled)
 
 Read Aloud downloads, when it is turned on, the official [`phonon-tts`](https://www.npmjs.com/package/phonon-tts) npm package (WebAssembly runtime), the [gradium/phonon-31m-en](https://huggingface.co/gradium/phonon-31m-en) q8 model files and, when picked, voices from [gradium/phonon-voices](https://huggingface.co/gradium/phonon-voices), all Apache License 2.0, each pinned to a version or commit and checked against its hash (`src/shared/read-aloud-assets.ts`, `src/shared/read-aloud-voices.ts`). They are stored in the profile's `read-aloud` folder and never shipped with the app. See [Read Aloud](read-aloud.md).
+
+## Maple Mono optional testing font
+
+`src/renderer/src/assets/fonts/maple-mono/` contains the unchanged Maple Mono v7.9 normal and italic variable WOFF2 fonts, sourced from the [subframe7536/maple-font](https://github.com/subframe7536/maple-font) repository at tag `v7.9` (`woff2/var/MapleMono[wght]-VF.woff2` and `woff2/var/MapleMono-Italic[wght]-VF.woff2`). The fonts are licensed under the SIL Open Font License, Version 1.1; the full upstream license is included as [`src/renderer/src/assets/fonts/maple-mono/OFL.txt`](../src/renderer/src/assets/fonts/maple-mono/OFL.txt). These assets are optional testing fonts and are not a release change.
+A copy of the Maple Mono license is also kept at `src/renderer/public/licenses/MapleMono-OFL.txt`, which Vite includes in production output as `out/renderer/licenses/MapleMono-OFL.txt` so distributed applications retain the upstream license notice.

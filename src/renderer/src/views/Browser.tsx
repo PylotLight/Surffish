@@ -7,6 +7,7 @@ import type {
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
+  BrowserUiFont,
   BrowsingHistoryEntry,
   NewTabBackground,
   NewTabPreferences,
@@ -457,6 +458,9 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   const activeSuggestionIndex = omniboxPreview ? omniboxPreview.index : -1
   const omniboxCaretToEndRef = useRef(false)
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(DEFAULT_SEARCH_ENGINE)
+  const [uiFont, setUiFont] = useState<BrowserUiFont>('system')
+  const [uiFontSaving, setUiFontSaving] = useState(false)
+  const [uiFontMessage, setUiFontMessage] = useState('')
   const [newTabPage, setNewTabPage] = useState<NewTabPageId>('quick-links')
   const [newTabPreferences, setNewTabPreferences] = useState<NewTabPreferences>(() => ({ ...DEFAULT_NEW_TAB_PREFERENCES, worldClocks: [] }))
   const [newTabBackgrounds, setNewTabBackgrounds] = useState<NewTabBackground[]>(FALLBACK_NEW_TAB_BACKGROUNDS)
@@ -520,6 +524,24 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
   // Load-error notices the user closed, per tab + error (a new failure shows again).
   const [dismissedLoadErrors, setDismissedLoadErrors] = useState<string[]>([])
   const [proxyMessageIsError, setProxyMessageIsError] = useState(false)
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.uiFont = uiFont
+  }, [uiFont])
+
+  async function saveUiFont(font: BrowserUiFont): Promise<void> {
+    setUiFontSaving(true)
+    setUiFontMessage('')
+    try {
+      const saved = await window.api.browser.uiFont.set(font)
+      if (saved === null) throw new Error('Font preference was not saved.')
+      setUiFont(saved)
+    } catch {
+      setUiFontMessage('Could not save the font preference. Please try again.')
+    } finally {
+      setUiFontSaving(false)
+    }
+  }
   function updateChromeState(patch: Partial<BrowserChromeState>): void {
     setChromeState((current) => ({ ...current, ...patch }))
     void window.api.browser.chrome.set(patch).catch(() => undefined)
@@ -1198,6 +1220,7 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
     })
     const applyPreferences = (preferences: BrowserPreferencesSnapshot): void => {
       setSearchEngine(preferences.searchEngine)
+      setUiFont(preferences.uiFont)
       setSearchEngineLoaded(true)
       setNewTabPage(preferences.newTabPage)
       // Skip echoes of our own edits (a broadcast per save) while a drag or typing is in flight.
@@ -2362,6 +2385,16 @@ export default function Browser({ surface }: { surface: BrowserSurface }): React
                   </SettingsRow>
                 </SettingsGroup>
                 <div className="translation-settings-section">
+                <SettingsGroup title="Appearance">
+                  <SettingsRow label="Interface font" hint="Applies to Surffish’s toolbar, sidebar, and built-in pages, not websites. Maple Mono is bundled for offline use.">
+                    <select className="settings-select" value={uiFont} disabled={!searchEngineLoaded || uiFontSaving} onChange={(event) => void saveUiFont(event.target.value as BrowserUiFont)} aria-label="Interface font">
+                      <option value="system">System (default)</option>
+                      <option value="maple-mono">Maple Mono (experimental)</option>
+                    </select>
+                  </SettingsRow>
+                  <p className="settings-help" aria-label="Font preview">Preview · Surffish Aa Bb 0123456789 → @</p>
+                  {uiFontMessage && <p className="settings-message is-error" role="status">{uiFontMessage}</p>}
+                </SettingsGroup>
                 <SettingsGroup title="Translation">
                   <SettingsRow label="Target language" hint="Source language is detected automatically. Your choice is remembered.">
                     <select className="settings-select" value={translationTarget} disabled={!translationLoaded || translationBusy} onChange={(event) => void saveTranslationTarget(event.target.value)} aria-label="Translation language">

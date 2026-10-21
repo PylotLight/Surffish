@@ -12,6 +12,7 @@ import type {
   BrowserProxySettings,
   BrowserProxyTestResult,
   BrowserState,
+  BrowserUiFont,
   BrowserTabSummary,
   BrowsingHistoryEntry,
   DefaultBrowserStatus,
@@ -105,6 +106,9 @@ const api = {
         ipcRenderer.on('browser:site-icon:changed', listener)
         return () => ipcRenderer.removeListener('browser:site-icon:changed', listener)
       }
+    },
+    uiFont: {
+      set: (font: BrowserUiFont): Promise<BrowserUiFont | null> => ipcRenderer.invoke('browser:ui-font:set', font)
     },
     sidebarWidth: {
       set: (width: number): Promise<number> => ipcRenderer.invoke('browser:sidebar-width:set', width)

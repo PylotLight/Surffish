@@ -86,6 +86,7 @@ import { getMainWindow } from './window'
 import { registerSafetyIpc } from './safety'
 import {
   clearSavedBrowserSession,
+  saveBrowserUiFont,
   getBrowserSiteFaviconCache,
   getBrowserPinnedSites,
   getBrowserSiteSettings,
@@ -143,6 +144,12 @@ export function registerIpc(): void {
     if (process.platform === 'darwin' && event.senderFrame === event.sender.mainFrame) {
       updateBrowserPageScale(event.sender, scale)
     }
+  })
+  ipcMain.handle('browser:ui-font:set', (event, font: unknown) => {
+    assertMainRenderer(event)
+    const saved = saveBrowserUiFont(font)
+    if (saved) sendToMainWindowRenderers('browser:preferences-changed', getBrowserPreferencesSnapshot())
+    return saved
   })
   ipcMain.handle('browser:preferences:get', (event) => {
     assertMainRenderer(event)

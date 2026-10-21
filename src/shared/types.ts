@@ -15,6 +15,7 @@ export interface BrowserTabSleep {
   minutes?: number
 }
 export type NewTabPageId = 'quick-links' | 'bonjourr' | 'search'
+export type BrowserUiFont = 'system' | 'maple-mono'
 
 export interface NewTabBackground {
   id: string
@@ -320,6 +321,7 @@ export interface BrowserChromeMetrics {
 }
 
 export interface BrowserPreferencesSnapshot {
+  uiFont: BrowserUiFont
   searchEngine: SearchEngineId
   tabSleepMinutes: TabSleepMinutes
   newTabPage: NewTabPageId

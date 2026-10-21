@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DEFAULT_NEW_TAB_PAGE,
+  DEFAULT_BROWSER_UI_FONT,
+  isBrowserUiFont,
   DEFAULT_BROWSER_PROXY_SETTINGS,
   MAX_PINNED_SITES,
   MAX_RESTORED_TABS,
@@ -80,6 +82,22 @@ test('rejects invalid session data and bounds restored tab count', () => {
   assert.equal(parsed.urls.length, MAX_RESTORED_TABS)
   assert.equal(parsed.activeIndex, 0)
   assert.deepEqual(parseBrowserSession({ version: 2, tabs: ['https://ignored.test/'] }), { urls: [], activeIndex: 0, pinnedIndexes: [] })
+})
+
+test('defaults UI font for new and older preference files and round-trips Maple Mono', () => {
+  assert.equal(DEFAULT_BROWSER_UI_FONT, 'system')
+  assert.equal(parseBrowserPreferences(null).uiFont, 'system')
+  assert.equal(parseBrowserPreferences({ version: 1, searchEngine: 'google' }).uiFont, 'system')
+  assert.equal(parseBrowserPreferences({ version: 1, uiFont: 'maple-mono' }).uiFont, 'maple-mono')
+  assert.equal(isBrowserUiFont('system'), true)
+  assert.equal(isBrowserUiFont('maple-mono'), true)
+})
+
+test('defaults invalid UI font preference values to system', () => {
+  for (const uiFont of ['maple', 'Comic Sans', '', null, 5, {}, undefined]) {
+    assert.equal(parseBrowserPreferences({ version: 1, uiFont }).uiFont, 'system')
+    assert.equal(isBrowserUiFont(uiFont), false)
+  }
 })
 
 test('falls back to the default search engine for invalid preferences', () => {

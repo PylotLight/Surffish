@@ -6,6 +6,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { writeFileAtomic } from './atomic-file'
 import { join } from 'node:path'
 import {
+  isBrowserUiFont,
   normalizeHttpOrigin,
   normalizeSidebarWidth,
   normalizePinnedSites,
@@ -26,7 +27,7 @@ import { getProfileDatabase, reportStoreWriteError } from './store'
 import { SessionStore } from './store/session-store'
 import { legacyFileNeedsImport, markLegacyFileImported } from './store/legacy-json'
 import { loadPreferencesSource, savePreferencesCopies } from './preferences-persistence'
-import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
+import type { BrowserPreferencesSnapshot, BrowserSiteSettings, BrowserUiFont, NewTabPageId, NewTabPreferences, PinnedSite, SearchEngineId, TabSleepMinutes } from '../shared/types'
 
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
@@ -263,6 +264,19 @@ export function clearSavedBrowserSession(): boolean {
   return cleared
 }
 
+export function getBrowserUiFont(): BrowserUiFont {
+  loadPreferencesIfNeeded()
+  return preferences.uiFont
+}
+
+export function saveBrowserUiFont(value: unknown): BrowserUiFont | null {
+  if (!isBrowserUiFont(value)) return null
+  loadPreferencesIfNeeded()
+  preferences = { ...preferences, uiFont: value }
+  savePreferences()
+  return preferences.uiFont
+}
+
 export function getBrowserSearchEngine(): SearchEngineId {
   loadPreferencesIfNeeded()
   return preferences.searchEngine
@@ -330,6 +344,7 @@ export function saveBrowserSidebarWidth(value: unknown): number {
 
 export function getBrowserPreferencesSnapshot(): BrowserPreferencesSnapshot {
   return {
+    uiFont: getBrowserUiFont(),
     searchEngine: getBrowserSearchEngine(),
     tabSleepMinutes: getBrowserTabSleepMinutes(),
     newTabPage: getBrowserNewTabPage(),

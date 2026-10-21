@@ -1,3 +1,17 @@
+@font-face {
+  font-family: 'Maple Mono';
+  src: url('./assets/fonts/maple-mono/MapleMono-Variable.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Maple Mono';
+  src: url('./assets/fonts/maple-mono/MapleMono-Italic-Variable.woff2') format('woff2');
+  font-style: italic;
+  font-weight: 100 800;
+  font-display: swap;
+}
 :root {
   color-scheme: dark;
   font-family: ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', sans-serif;
@@ -5,6 +19,9 @@
   background: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+:root[data-ui-font='maple-mono'] {
+  font-family: 'Maple Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * {
   box-sizing: border-box;
@@ -22,7 +39,9 @@ body {
   color: #f2f4f6;
 }
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 .app-shell {
