@@ -42,7 +42,10 @@ export const MINI_WINDOW_NEW_TAB_HTML = `<!doctype html>
   body.proportional #time { font-variant-numeric: normal; }
   #date { font-size: 11.5px; color: rgba(250,252,253,.9); }
   #date:empty { display: none; }
-  #sites { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--icon) + 30px), 1fr)); gap: 10px 4px; width: 100%; max-width: 400px; padding: 0; margin: 0; list-style: none; }
+  /* Centred rows (a short last row stays in the middle), at most six across; narrower without labels. */
+  #sites { --cell: calc(var(--icon) + 34px); display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 4px; width: 100%; max-width: calc(var(--cell) * 6 + 20px); padding: 0; margin: 0; list-style: none; }
+  #sites li { width: var(--cell); min-width: 0; }
+  body.nolabels #sites { --cell: calc(var(--icon) + 18px); gap: 10px 8px; }
   .site { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 6px 2px; border-radius: 10px; cursor: default; min-width: 0; width: 100%; transition: transform 130ms ease, filter 130ms ease; }
   .site:hover { transform: translateY(-2px) scale(1.06); filter: drop-shadow(0 3px 8px rgba(0,0,0,.65)); }
   .site:focus-visible { outline: 2px solid rgba(255,255,255,.75); outline-offset: 0; }
@@ -51,7 +54,6 @@ export const MINI_WINDOW_NEW_TAB_HTML = `<!doctype html>
   .icon img { display: block; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,.54)); }
   .label { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: rgba(250,252,253,.94); text-shadow: 0 1px 6px rgba(0,0,0,.78); }
   body.nolabels .label { display: none; }
-  body.nolabels #sites { gap: 12px 4px; }
   #credit { position: fixed; z-index: 2; left: 12px; right: 12px; bottom: 9px; margin: 0; display: none; color: rgba(248,250,252,.72); font-size: 10px; line-height: 1.4; text-shadow: 0 1px 5px rgba(0,0,0,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   body.photo #credit { display: block; }
   #credit a { color: rgba(248,250,252,.92); text-decoration: underline; text-decoration-color: rgba(248,250,252,.4); text-underline-offset: 2px; cursor: default; }

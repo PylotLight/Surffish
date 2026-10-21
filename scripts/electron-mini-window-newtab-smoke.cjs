@@ -9,7 +9,12 @@
 //      back what was typed, a second Esc hides the field and leaves the page where it was.
 //   4. + after the last strip chip and ⌘/Ctrl+T in the mini window open more New Tabs there; Esc on a
 //      New Tab puts the field away and it stays away; a click on the New Tab page brings it back.
-//   5. Return All: the New Tab goes back to the browser as a New Tab; nothing else is left behind.
+//   5. The New Tab page has the browser New Tab's look: its background photo (no Wikimedia photo cached
+//      here: a bundled offline one, read from the renderer build) with its credit, and its clock.
+//   6. Menu bar popout with several tabs: the address field gets its own row under the strip; the
+//      chips and + stay, the New Tab page starts under the row, the dropdown hangs under it, and Esc
+//      takes the row away again.
+//   7. Return All: the New Tabs go back to the browser as New Tabs; nothing else is left behind.
 // `bun run build && bun run test:electron-mini-window-newtab`
 // (headless Linux: `xvfb-run -a electron --no-sandbox scripts/electron-mini-window-newtab-smoke.cjs`).
 const smoke = require('./smoke-harness.cjs')
@@ -139,6 +144,15 @@ async function run() {
   assert.equal(miniWindows().length, 1, 'no new mini window (grouping tabs)')
   const newTabContents = newTabViewOf(mini).webContents
   await waitFor(() => smoke.evaluate(newTabContents, 'document.readyState === "complete" && document.querySelector("main") !== null'), 'the New Tab page loaded')
+  // The browser New Tab's look: the photo (offline: no Wikimedia photo is cached here) and its credit,
+  // the clock (on by default), no "type an address above" hint; the strip stays with the field open.
+  const look = () => smoke.evaluate(newTabContents, `({ photo: document.body.classList.contains('photo'), image: getComputedStyle(document.getElementById('photo')).backgroundImage.slice(0, 40), credit: document.getElementById('credit').textContent, clock: document.body.classList.contains('clock'), time: document.getElementById('time').textContent, hint: Boolean(document.getElementById('hint')), tiles: document.querySelectorAll('#sites .site').length })`)
+  const shown = await waitFor(async () => { const state = await look(); return state.photo && state.image.startsWith('url("data:image/webp') && state.clock && state.time ? state : null }, 'the New Tab photo and clock')
+  assert.ok(/Forest lake|Tranquil mountain lake/.test(shown.credit), `the offline photo's credit (${shown.credit})`)
+  assert.match(shown.time, /^\d{1,2}:\d{2}/, 'the clock shows the time')
+  assert.equal(shown.hint, false, 'no "type an address above" hint')
+  assert.ok(shown.tiles >= 1, 'the frequently visited tiles')
+  assert.equal(await smoke.evaluate(header(), 'getComputedStyle(document.getElementById("strip")).display'), 'flex', 'the strip stays with the field open')
   // The header stays up while the field is open, even with the pointer gone.
   cursor = { x: 10, y: 10 }
   await delay(1200)
@@ -197,7 +211,38 @@ async function run() {
   await waitFor(async () => { const state = await addressState(); return state.open && state.focused && state.value === '' }, 'the field focused after ⌘/Ctrl+T')
   assert.equal((await tabs()).length, browserTabCount, 'none of them opened in the browser window')
 
-  // --- 5. Cleanup.
+  // --- 6. The menu bar popout: the field's own row under the strip.
+  smoke.step('menu bar popout with tabs: the field gets a row under the strip; chips and + stay')
+  mini.focus()
+  await runCommand('miniWindow.menuBar')
+  await waitFor(() => smoke.evaluate(header(), 'document.body.classList.contains("popout")') && mini.isVisible(), 'the popout strip')
+  await clickInHeader('#pin')
+  await waitFor(() => smoke.evaluate(header(), 'document.getElementById("pin").classList.contains("on")'), 'pinned (a blur never hides it here)')
+  const popoutNewTab = await waitFor(() => newTabViewOf(mini), 'the New Tab page in the popout')
+  if (!(await addressState()).open) {
+    for (const type of ['mouseDown', 'mouseUp']) popoutNewTab.webContents.sendInputEvent({ type, x: 150, y: 300, button: 'left', clickCount: 1 })
+  }
+  await waitFor(async () => (await addressState()).open, 'the field open in the popout')
+  const row = () => smoke.evaluate(header(), `(() => { const box = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), width: Math.round(r.width) } }; return { strip: box('strip'), addr: box('addr'), plus: box('stripPlus'), chips: [...document.querySelectorAll('#strip .tab')].filter((el) => el.getBoundingClientRect().width > 0).length, stripInRow: document.getElementById('strip').parentElement.id === 'bar' } })()`)
+  const laid = await waitFor(async () => { const r = await row(); return r.addr.top === 28 && r.addr.bottom === 60 ? r : null }, 'the field in its own 32 px row under the 28 px strip')
+  assert.equal(laid.chips, 4, 'all four chips stay shown')
+  assert.ok(laid.stripInRow && laid.strip.bottom <= 28 && laid.plus.width > 0, 'the strip and its + stay in the popout row')
+  await waitFor(() => headerViewOf(mini).getBounds().height === 60, 'the header view covers the strip and the row')
+  await waitFor(() => newTabViewOf(mini).getBounds().y === 60, 'the New Tab page starts under the row')
+  assert.equal(pageViewOf(mini, `${origin}/p2`)?.getBounds().y ?? 28, 28, 'the page itself never moves')
+  header().focus()
+  await clickInHeader('#addrInput')
+  header().insertText('p1')
+  await waitFor(async () => (await addressState()).drop, 'the dropdown in the popout')
+  const dropTop = await smoke.evaluate(header(), 'Math.round(document.getElementById("drop").getBoundingClientRect().top)')
+  assert.ok(dropTop >= 60, `the dropdown hangs under the row (${dropTop})`)
+  assert.equal((await row()).chips, 4, 'the chips stay while typing')
+  key(header(), 'Escape')
+  key(header(), 'Escape')
+  await waitFor(async () => !(await addressState()).open, 'Esc put the field away')
+  await waitFor(() => headerViewOf(mini).getBounds().height === 28 && newTabViewOf(mini).getBounds().y === 28, 'the row gone: the strip alone, the New Tab page under it')
+
+  // --- 7. Cleanup.
   smoke.step('Return All puts the New Tabs back as New Tabs; nothing left behind')
   await runCommand('miniWindow.return')
   await waitFor(() => miniWindows().length === 0 && liveContents().filter(isMiniHeader).length === 0 && liveContents().filter(isMiniNewTab).length === 0, 'mini windows, headers and New Tab pages gone')
