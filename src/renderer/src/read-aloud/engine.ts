@@ -20,6 +20,8 @@ interface SpeakCommand {
   durationDelta: number
   title: string
   fallbackReason?: string
+  /** Settings' voice tester: the same path, with the timing numbers reported at the end too. */
+  test?: boolean
 }
 
 type Command =
@@ -191,6 +193,10 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
   let firstAudioMs: number | null = null
   let lastIndex = -1
   let statsSent = false
+  // Real-time factor: time spent generating vs seconds of audio generated.
+  let generateMs = 0
+  let audioSeconds = 0
+  const finalStats = (): Record<string, unknown> => ({ ...stats, firstAudioMs, generateMs: Math.round(generateMs), audioSeconds: Math.round(audioSeconds * 1000) / 1000 })
 
   const stopSources = (): void => {
     for (const source of sources) {
@@ -216,6 +222,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     let at = plan.startTimeFor(index, ctx.currentTime + 0.05, SENTENCE_GAP_S)
     plan.beginGenerating(index, at)
     let scheduled = false
+    const generationStarted = performance.now()
     void (async () => {
       try {
         for await (const pcm of generate(index, controller.signal)) {
@@ -229,12 +236,14 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
           at = Math.max(at, ctx.currentTime + 0.01)
           source.start(at)
           at += buffer.duration
+          audioSeconds += buffer.duration
           sources.add(source)
           source.onended = () => { sources.delete(source); source.disconnect() }
           if (firstAudioMs === null) firstAudioMs = Math.round(performance.now() - started)
           scheduled = true
         }
         if (stopped || generation !== plan.generation) return
+        generateMs += performance.now() - generationStarted
         if (scheduled) {
           failures = 0
           plan.finishGenerating(index, at)
@@ -263,7 +272,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
     const result = plan.tick(ctx.currentTime)
     if (result.finished) {
       stop()
-      emit({ type: 'state', token: command.token, status: 'finished' })
+      emit({ type: 'state', token: command.token, status: 'finished', stats: finalStats() })
       return
     }
     // Report a sentence once its audio has started (not while the first one is still generating).
@@ -333,6 +342,10 @@ function systemReading(command: SpeakCommand): Reading {
   let generation = 0
   let stopped = false
   let paused = false
+  const started = performance.now()
+  let voicesReadyMs: number | null = null
+  let firstAudioMs: number | null = null
+  const stats = (): Record<string, unknown> => ({ loadMs: voicesReadyMs, cold: false, firstAudioMs })
   const voice = (): SpeechSynthesisVoice | null => {
     const voices = synth.getVoices()
     return voices.find((candidate) => candidate.default && candidate.lang.startsWith('en')) ?? voices.find((candidate) => candidate.lang.startsWith('en')) ?? voices[0] ?? null
@@ -341,7 +354,7 @@ function systemReading(command: SpeakCommand): Reading {
     if (stopped) return
     if (index >= command.sentences.length) {
       stop()
-      emit({ type: 'state', token: command.token, status: 'finished' })
+      emit({ type: 'state', token: command.token, status: 'finished', stats: stats() })
       return
     }
     const mine = ++generation
@@ -350,7 +363,10 @@ function systemReading(command: SpeakCommand): Reading {
     const chosen = voice()
     if (chosen) utterance.voice = chosen
     utterance.onstart = () => {
-      if (mine === generation) emit({ type: 'state', token: command.token, status: 'playing', index, engine: 'system', fallbackReason: command.fallbackReason ?? '' })
+      if (mine !== generation) return
+      const first = firstAudioMs === null
+      if (first) firstAudioMs = Math.round(performance.now() - started)
+      emit({ type: 'state', token: command.token, status: 'playing', index, engine: 'system', fallbackReason: command.fallbackReason ?? '', ...(first ? { stats: stats() } : {}) })
     }
     utterance.onend = () => {
       if (mine !== generation || stopped) return
@@ -378,14 +394,17 @@ function systemReading(command: SpeakCommand): Reading {
   const begin = (): void => {
     if (stopped) return
     if (synth.getVoices().length > 0) {
+      voicesReadyMs = Math.round(performance.now() - started)
       speak()
       return
     }
     stop()
     emit({ type: 'state', token: command.token, status: 'error', error: 'No system voices are available.' })
   }
-  if (synth.getVoices().length > 0) speak()
-  else {
+  if (synth.getVoices().length > 0) {
+    voicesReadyMs = Math.round(performance.now() - started)
+    speak()
+  } else {
     const timer = setTimeout(begin, 1500)
     synth.addEventListener('voiceschanged', () => { clearTimeout(timer); begin() }, { once: true })
   }
@@ -436,6 +455,7 @@ async function start(command: SpeakCommand): Promise<void> {
   }
   if (command.engine === 'phonon') {
     const loadStarted = performance.now()
+    const cold = !(phonon && phonon.delta === command.durationDelta)
     try {
       const tts = await loadPhonon(command.durationDelta)
       const voice = await phononVoice(tts, command.voice)
@@ -448,7 +468,7 @@ async function start(command: SpeakCommand): Promise<void> {
           if (signal.aborted) speech.cancel()
         }
       }
-      const stats = { loadMs: Math.round(performance.now() - loadStarted), threads: tts.threads, threadsReason: tts.threadsReason, device: tts.device, isolated: self.crossOriginIsolated === true }
+      const stats = { loadMs: Math.round(performance.now() - loadStarted), cold, threads: tts.threads, threadsReason: tts.threadsReason, device: tts.device, isolated: self.crossOriginIsolated === true }
       reading = streamedReading(command, 'phonon', generate, tts.sampleRate, stats)
       return
     } catch (error) {
