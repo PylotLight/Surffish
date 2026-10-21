@@ -1,5 +1,5 @@
 import { ipcRenderer } from 'electron'
-import type { ReadAloudControl, ReadAloudDownloadState, ReadAloudSettings, ReadAloudState, ReadAloudTestRequest, ReadAloudTestState } from '../shared/read-aloud'
+import type { ReadAloudCatalogInfo, ReadAloudControl, ReadAloudDownloadState, ReadAloudSettings, ReadAloudState, ReadAloudTestRequest, ReadAloudTestState } from '../shared/read-aloud'
 
 function subscribe<T>(channel: string, callback: (value: T) => void): () => void {
   const listener = (_event: Electron.IpcRendererEvent, value: T): void => callback(value)
@@ -25,5 +25,7 @@ export const readAloudApi = {
   test: (request: Partial<ReadAloudTestRequest>): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('browser:read-aloud:test', request),
   stopTest: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('browser:read-aloud:test-stop'),
   getTestState: (): Promise<ReadAloudTestState> => ipcRenderer.invoke('browser:read-aloud:test-state'),
+  /** Voices for the pickers (model voice + English catalog) and the checkpoint's other conditioners. */
+  catalog: (): Promise<ReadAloudCatalogInfo> => ipcRenderer.invoke('browser:read-aloud:catalog'),
   onTest: (callback: (state: ReadAloudTestState) => void): (() => void) => subscribe('browser:read-aloud:test', callback)
 }

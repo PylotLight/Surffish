@@ -6,6 +6,7 @@
 // chunks onto a Web Audio timeline, one sentence ahead. The page is cross-origin isolated, so the
 // threaded wasm build runs. A Media Session makes hardware media keys and Now Playing work.
 import { ReadAloudPlan, pcm16ToFloat32 } from '../../../shared/read-aloud-queue'
+import { WsolaStretcher } from '../../../shared/read-aloud-stretch'
 
 type EngineId = 'phonon' | 'system' | 'openai'
 
@@ -17,7 +18,16 @@ interface SpeakCommand {
   engine: EngineId
   voice: { id: string; file: string }
   speed: number
+  /** Phonon: the model-native part of the speed (`duration_delta`)… */
   durationDelta: number
+  /** …and the rest, as a pitch-preserving time stretch of its audio (1 = none). */
+  stretch?: number
+  /** Sentences generated ahead of the one playing. */
+  lookahead?: number
+  temperature?: number
+  seed?: number
+  /** Phonon load options; a change reloads the model (from disk). */
+  load?: { rewrites?: string; device?: string; threads?: number | 'auto'; conditions?: Record<string, string | number> }
   title: string
   fallbackReason?: string
   /** Settings' voice tester: the same path, with the timing numbers reported at the end too. */
@@ -46,8 +56,9 @@ interface PhononInstance {
   readonly threads: number
   readonly threadsReason: string
   readonly device: string
+  readonly deviceReason: string
   addVoice(name: string, source: string): Promise<void>
-  stream(text: string, options?: { voice?: string; signal?: AbortSignal }): PhononSpeech
+  stream(text: string, options?: { voice?: string; temperature?: number; seed?: number; signal?: AbortSignal }): PhononSpeech
   dispose(): void
 }
 interface PhononModule {
@@ -68,14 +79,28 @@ function emit(event: Record<string, unknown>): void {
 // ---------------------------------------------------------------------------
 // Phonon
 
-let phonon: { tts: PhononInstance; delta: number } | null = null
+let phonon: { tts: PhononInstance; key: string } | null = null
 let phononLoading: Promise<PhononInstance> | null = null
 
-async function loadPhonon(delta: number): Promise<PhononInstance> {
-  if (phonon && phonon.delta === delta) return phonon.tts
-  // Speed is a load-time conditioner, so a new speed means a fresh instance (files come from disk).
+/** Everything `PhononTTS.load` takes from the settings; a different key means a fresh instance. */
+function loadOptions(command: SpeakCommand): { key: string; options: Record<string, unknown> } {
+  const load = command.load ?? {}
+  const options = {
+    rewrites: load.rewrites ?? 'default',
+    device: load.device ?? 'cpu',
+    threads: load.threads ?? 'auto',
+    conditions: { ...(load.conditions ?? {}), duration_delta: command.durationDelta }
+  }
+  return { key: JSON.stringify(options), options }
+}
+
+async function loadPhonon(command: SpeakCommand): Promise<PhononInstance> {
+  const { key, options } = loadOptions(command)
+  if (phonon && phonon.key === key) return phonon.tts
+  // Speed, rewrites, device and threads are load-time options, so a change means a fresh instance
+  // (the files come from disk).
   while (phononLoading) await phononLoading.catch(() => undefined)
-  if (phonon && phonon.delta === delta) return phonon.tts
+  if (phonon && phonon.key === key) return phonon.tts
   phonon?.tts.dispose()
   phonon = null
   const run = (async () => {
@@ -93,11 +118,11 @@ async function loadPhonon(delta: number): Promise<PhononInstance> {
         voices: { default: `${model}default-voice.safetensors` },
         defaultVoice: 'default'
       },
-      conditions: { duration_delta: delta },
+      ...options,
       wasmUrl: `${ORIGIN}/runtime/wasm/phonon_tts_bg.wasm`,
       threadsWasmUrl: `${ORIGIN}/runtime/wasm-threads/phonon_tts_bg.wasm`
     })
-    phonon = { tts, delta }
+    phonon = { tts, key }
     return tts
   })()
   phononLoading = run
@@ -183,7 +208,7 @@ function streamedReading(command: SpeakCommand, engine: EngineId, generate: Gene
   const ctx = context()
   const output = ctx.createGain()
   output.connect(ctx.destination)
-  const plan = new ReadAloudPlan(command.sentences.length, command.start, 1)
+  const plan = new ReadAloudPlan(command.sentences.length, command.start, Math.max(1, Math.min(4, command.lookahead ?? 1)))
   const sources = new Set<AudioBufferSourceNode>()
   const started = performance.now()
   let abort: AbortController | null = null
@@ -455,20 +480,29 @@ async function start(command: SpeakCommand): Promise<void> {
   }
   if (command.engine === 'phonon') {
     const loadStarted = performance.now()
-    const cold = !(phonon && phonon.delta === command.durationDelta)
+    const cold = !(phonon && phonon.key === loadOptions(command).key)
     try {
-      const tts = await loadPhonon(command.durationDelta)
+      const tts = await loadPhonon(command)
       const voice = await phononVoice(tts, command.voice)
       if (!stillCurrent()) return
+      const stretch = typeof command.stretch === 'number' && command.stretch > 0 ? command.stretch : 1
+      const speechOptions = {
+        voice,
+        ...(typeof command.temperature === 'number' ? { temperature: command.temperature } : {}),
+        ...(typeof command.seed === 'number' ? { seed: command.seed } : {})
+      }
       const generate: Generate = async function* (index, signal) {
-        const speech = tts.stream(command.sentences[index] ?? '', { voice, signal })
+        const speech = tts.stream(command.sentences[index] ?? '', { ...speechOptions, signal })
+        // Past what duration_delta reaches: WSOLA keeps the pitch (no chipmunk), per sentence.
+        const stretcher = new WsolaStretcher(stretch, tts.sampleRate)
         try {
-          for await (const pcm of speech) yield pcm
+          for await (const pcm of speech) yield stretcher.push(pcm)
+          yield stretcher.flush()
         } finally {
           if (signal.aborted) speech.cancel()
         }
       }
-      const stats = { loadMs: Math.round(performance.now() - loadStarted), cold, threads: tts.threads, threadsReason: tts.threadsReason, device: tts.device, isolated: self.crossOriginIsolated === true }
+      const stats = { loadMs: Math.round(performance.now() - loadStarted), cold, threads: tts.threads, threadsReason: tts.threadsReason, device: tts.device, deviceReason: tts.deviceReason ?? '', isolated: self.crossOriginIsolated === true }
       reading = streamedReading(command, 'phonon', generate, tts.sampleRate, stats)
       return
     } catch (error) {

@@ -184,6 +184,11 @@ export function registerReadAloudIpc(): void {
     return state
   })
   ipcMain.handle('browser:read-aloud:test-state', () => getReadAloudTestState())
+  // The voice pickers' list (the English catalog, fetched once the model is there) and Advanced's model conditioners.
+  ipcMain.handle('browser:read-aloud:catalog', async () => {
+    if (!readAloudEnabled()) return { status: 'needs-model', voices: [], conditioners: [], error: READ_ALOUD_DISABLED_ERROR }
+    return (await loadModule()).readAloudCatalog()
+  })
   ipcMain.handle('browser:read-aloud:test', async (event, input: unknown) => {
     if (!fromAppWindow(event)) throw new Error('This browser operation is available only to the app window.')
     if (!readAloudEnabled()) return { ok: false, error: READ_ALOUD_DISABLED_ERROR }

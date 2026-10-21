@@ -6,12 +6,14 @@ import { fileURLToPath } from 'node:url'
 import {
   IDLE_READ_ALOUD_STATE,
   IDLE_READ_ALOUD_TEST,
+  READ_ALOUD_DEFAULT_SEED,
   READ_ALOUD_MODEL_PATH,
   READ_ALOUD_PARTITION,
   READ_ALOUD_RUNTIME_PATH,
   READ_ALOUD_SCHEME,
   READ_ALOUD_URL,
   speechEndpointUrl,
+  type ReadAloudCatalogInfo,
   type ReadAloudControl,
   type ReadAloudDownloadState,
   type ReadAloudEngineId,
@@ -22,12 +24,15 @@ import {
   type ReadAloudTestState
 } from '../shared/read-aloud'
 import {
+  DEFAULT_VOICE_FILE,
+  parseModelConditioners,
   parseReadAloudTestManifest,
   PHONON_MANIFEST,
-  readAloudVoice,
-  speedToDurationDelta,
+  type ModelConditioner,
   type ReadAloudManifest
 } from '../shared/read-aloud-assets'
+import { lookaheadFor, splitSpeed } from '../shared/read-aloud-speed'
+import { MODEL_VOICE, publicVoice } from '../shared/read-aloud-voices'
 import { articleTextFromHtml, splitSentences } from '../shared/read-aloud-text'
 import { mergeTestStats, parseReadAloudTestRequest } from '../shared/read-aloud-tester'
 import { backgroundNetworkBlockedReason } from './background-network'
@@ -70,6 +75,8 @@ interface Reading {
   title: string
   sentences: string[]
   isPrivate: boolean
+  /** Phonon noise seed for this reading (the fixed default, or a new one with "vary each read"). */
+  seed: number
   detach: () => void
 }
 
@@ -86,7 +93,7 @@ let engineReady: Promise<BrowserWindow> | null = null
 let markEngineReady: (() => void) | null = null
 let engineSession: Session | null = null
 let idleTimer: ReturnType<typeof setTimeout> | null = null
-let test: { token: number; request: ReadAloudTestRequest } | null = null
+let test: { token: number; request: ReadAloudTestRequest; seed: number } | null = null
 let testState: ReadAloudTestState = { ...IDLE_READ_ALOUD_TEST }
 
 const mainDirectory = dirname(fileURLToPath(import.meta.url))
@@ -154,7 +161,7 @@ export function prepareReadAloud(): void {
   void downloads.ensureModel().catch(() => undefined)
 }
 
-/** The voice picked in Settings or the player: fetch it now (~250 KB) once the model is there. */
+/** The voice picked in Settings or the player: fetch it now (~256 KB) once the model is there. */
 export function prefetchReadAloudVoice(voiceId: string): void {
   if (downloads.state().status !== 'ready') return
   void downloads.ensureVoice(voiceId).catch(() => undefined)
@@ -175,15 +182,42 @@ export async function deleteReadAloudDownloads(): Promise<ReadAloudDownloadState
   return downloads.state()
 }
 
-/** Model + voice for a reading or a test; a reading meanwhile shows the progress in the player. */
-async function ensurePhononFiles(voiceId: string, showInPlayer: boolean): Promise<void> {
+/**
+ * Model + voice for a reading or a test; a reading meanwhile shows the progress in the player.
+ * Resolves to the voice to speak with ('default' for an id the catalog doesn't have).
+ */
+async function ensurePhononFiles(voiceId: string, showInPlayer: boolean): Promise<string> {
   if (!downloads.isReady()) {
     const current = downloads.state()
     // On disk already: just the once-per-run hash check, so the player keeps saying "Starting…".
     if (showInPlayer && current.status !== 'ready') publish({ status: 'downloading', download: { label: current.label || 'Preparing', loaded: current.loaded, total: current.total || current.bytes } })
     await downloads.ensureModel()
   }
-  await downloads.ensureVoice(voiceId)
+  return downloads.ensureVoice(voiceId)
+}
+
+async function modelConditioners(): Promise<ModelConditioner[]> {
+  try {
+    return parseModelConditioners(JSON.parse(await readFile(join(readAloudDirectory(), readAloudManifest().modelFolder, 'config.json'), 'utf8')))
+  } catch {
+    return []
+  }
+}
+
+/** The voice pickers (Settings, the player): the model voice plus the English catalog voices. */
+export async function readAloudCatalog(): Promise<ReadAloudCatalogInfo> {
+  if (downloads.state().status !== 'ready') return { status: 'needs-model', voices: [MODEL_VOICE], conditioners: [], error: '' }
+  const conditioners = await modelConditioners()
+  try {
+    const voices = await downloads.ensureCatalog()
+    return { status: 'ready', voices: [MODEL_VOICE, ...voices.map(publicVoice)], conditioners, error: '' }
+  } catch (error) {
+    return { status: 'error', voices: [MODEL_VOICE], conditioners, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function newSeed(current: ReadAloudSettings): number {
+  return current.varySeed ? Math.floor(Math.random() * 2 ** 48) : READ_ALOUD_DEFAULT_SEED
 }
 
 // ---------------------------------------------------------------------------
@@ -484,17 +518,26 @@ function watchPage(page: WebContents, token: number): () => void {
   }
 }
 
-function speakCommand(token: number, sentences: string[], start: number, current: ReadAloudSettings, title: string): Record<string, unknown> {
-  const voice = readAloudVoice(current.voice)
+/**
+ * What the engine page needs for one reading: the sentences, the engine, and for Phonon the voice,
+ * the speed split (duration_delta + time stretch), sampling and load options.
+ */
+function speakCommand(token: number, sentences: string[], start: number, current: ReadAloudSettings, title: string, voiceId: string, seed: number): Record<string, unknown> {
+  const split = splitSpeed(current.speed)
   return {
     type: 'speak',
     token,
     sentences,
     start,
     engine: current.engine,
-    voice: { id: voice.id, file: voice.file },
-    speed: current.speed,
-    durationDelta: speedToDurationDelta(current.speed),
+    voice: voiceId === 'default' ? { id: 'default', file: DEFAULT_VOICE_FILE } : { id: voiceId, file: `voices/${voiceId}.safetensors` },
+    speed: split.speed,
+    durationDelta: split.durationDelta,
+    stretch: split.stretch,
+    lookahead: lookaheadFor(split.speed),
+    temperature: current.temperature,
+    seed,
+    load: { rewrites: current.rewrites, device: current.device, threads: current.threads, conditions: { ...current.conditions } },
     title
   }
 }
@@ -517,13 +560,14 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
   const ref = getBrowserTabRefByWebContentsId(page.id)
   const info = ref ? getBrowserTabPageInfo(ref.tabId) : null
   const token = nextToken++
-  reading = { token, page, tabId: ref?.tabId ?? null, title: text.title, sentences: text.sentences, isPrivate: info?.private ?? false, detach: () => undefined }
+  reading = { token, page, tabId: ref?.tabId ?? null, title: text.title, sentences: text.sentences, isPrivate: info?.private ?? false, seed: newSeed(current), detach: () => undefined }
   reading.detach = watchPage(page, token)
   publish({ ...IDLE_READ_ALOUD_STATE, status: 'loading', tabId: reading.tabId, title: text.title, total: text.sentences.length, speed: current.speed, voice: current.voice, engine: current.engine })
   try {
+    let voice = 'default'
     if (current.engine === 'phonon') {
       try {
-        await ensurePhononFiles(current.voice, true)
+        voice = await ensurePhononFiles(current.voice, true)
       } catch (error) {
         if (reading?.token !== token) return false
         if (error instanceof ReadAloudDownloadCancelled) {
@@ -535,7 +579,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
         publish({ status: 'loading', download: null, fallbackReason: `Phonon unavailable: ${error instanceof Error ? error.message : String(error)}` })
         await ensureEngine()
         if (reading?.token !== token) return false
-        sendToEngine({ ...speakCommand(token, text.sentences, 0, { ...current, engine: 'system' }, text.title), fallbackReason: state.fallbackReason })
+        sendToEngine({ ...speakCommand(token, text.sentences, 0, { ...current, engine: 'system' }, text.title, 'default', reading.seed), fallbackReason: state.fallbackReason })
         return true
       }
     }
@@ -543,7 +587,7 @@ export async function startReadAloud(page: WebContents, target: 'page' | 'select
     publish({ status: 'loading', download: null })
     await ensureEngine()
     if (reading?.token !== token) return false
-    sendToEngine(speakCommand(token, text.sentences, 0, current, text.title))
+    sendToEngine(speakCommand(token, text.sentences, 0, current, text.title, voice, reading.seed))
     return true
   } catch (error) {
     if (reading?.token === token) failReading(error instanceof Error ? error.message : String(error))
@@ -567,7 +611,14 @@ export function controlReadAloud(action: ReadAloudControl): void {
   sendToEngine({ type: 'control', token: reading.token, action: resolved })
 }
 
-/** Voice, speed or engine changed in the player or Settings: the engine restarts the current sentence. */
+/** Anything that changes how the reading sounds (not `enabled`). */
+function speechChanged(previous: ReadAloudSettings, next: ReadAloudSettings): boolean {
+  const { enabled: _a, ...before } = previous
+  const { enabled: _b, ...after } = next
+  return JSON.stringify(before) !== JSON.stringify(after)
+}
+
+/** Voice, speed, engine or a Phonon lever changed in the player or Settings: the engine restarts the current sentence. */
 export function applyReadAloudSettings(next: ReadAloudSettings): void {
   const previous = settings
   settings = next
@@ -575,13 +626,14 @@ export function applyReadAloudSettings(next: ReadAloudSettings): void {
   if (next.engine === 'phonon' && previous?.voice !== next.voice) prefetchReadAloudVoice(next.voice)
   const active = reading
   if (!active || !previous) return
-  if (previous.voice === next.voice && previous.speed === next.speed && previous.engine === next.engine && previous.endpoint === next.endpoint && previous.endpointVoice === next.endpointVoice) return
+  if (!speechChanged(previous, next)) return
   const token = active.token
+  if (previous.varySeed !== next.varySeed) active.seed = newSeed(next)
   void (async () => {
     try {
-      if (next.engine === 'phonon') await ensurePhononFiles(next.voice, false)
+      const voice = next.engine === 'phonon' ? await ensurePhononFiles(next.voice, false) : 'default'
       if (reading?.token !== token) return
-      sendToEngine({ ...speakCommand(token, active.sentences, state.index, next, active.title), type: 'respeak' })
+      sendToEngine({ ...speakCommand(token, active.sentences, state.index, next, active.title, voice, active.seed), type: 'respeak' })
     } catch (error) {
       if (reading?.token === token) failReading(error instanceof Error ? error.message : String(error))
     }
@@ -624,11 +676,11 @@ function onTestEvent(event: Extract<EngineEvent, { type: 'state' }>): void {
 }
 
 /**
- * The tester's Play: speak the sample with its engine, voice and speed. Stops a reading or an
- * earlier test first. Phonon fetches the model / voice if needed (progress in Settings).
+ * The tester's Play: speak the sample with Read Aloud's own engine, voice, speed and levers. Stops a
+ * reading or an earlier test first. Phonon fetches the model / voice if needed (progress in Settings).
  */
 export function testReadAloud(input: unknown, current: ReadAloudSettings): { ok: boolean; error?: string } {
-  const request = parseReadAloudTestRequest(input, current)
+  const request = parseReadAloudTestRequest(input)
   if (!request) return { ok: false, error: 'bad request' }
   void runTest(request, current)
   return { ok: true }
@@ -644,16 +696,17 @@ async function runTest(request: ReadAloudTestRequest, current: ReadAloudSettings
   }
   stopTest()
   const token = nextToken++
-  test = { token, request }
-  publishTest({ ...IDLE_READ_ALOUD_TEST, status: 'preparing', engine: request.engine, voice: request.voice, speed: request.speed })
+  const seed = newSeed(current)
+  test = { token, request, seed }
+  publishTest({ ...IDLE_READ_ALOUD_TEST, status: 'preparing', engine: current.engine, voice: current.voice, speed: current.speed })
   const sentences = splitSentences(request.text)
   try {
-    if (request.engine === 'phonon') await ensurePhononFiles(request.voice, false)
+    const voice = current.engine === 'phonon' ? await ensurePhononFiles(current.voice, false) : 'default'
     if (test?.token !== token) return false
     publishTest({ status: 'loading' })
     await ensureEngine()
     if (test?.token !== token) return false
-    sendToEngine({ ...speakCommand(token, sentences, 0, { ...current, engine: request.engine, voice: request.voice, speed: request.speed }, 'Voice test'), test: true })
+    sendToEngine({ ...speakCommand(token, sentences, 0, current, 'Voice test', voice, seed), test: true })
     return true
   } catch (error) {
     if (test?.token === token) finishTest({ status: 'error', error: error instanceof Error ? error.message : String(error) })
