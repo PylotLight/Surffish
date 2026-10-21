@@ -1,8 +1,8 @@
 # Read Aloud
 
 Experimental, off by default: **Settings → Integrations → Read Aloud → Enable Read Aloud**. Surffish
-reads the article on a page (Reader view's Readability extraction), a selection, or the page from a
-point, out loud with [Phonon 31M](https://huggingface.co/gradium/phonon-31m-en) (Apache-2.0), an
+reads the article on a page (Reader view's Readability extraction), a PDF, a selection, or the page
+from a point, out loud with [Phonon 31M](https://huggingface.co/gradium/phonon-31m-en) (Apache-2.0), an
 on-device text-to-speech model running as WebAssembly inside Surffish. Text never leaves the
 computer.
 
@@ -11,6 +11,7 @@ computer.
 | Where | What |
 |---|---|
 | Page right-click → **Read Aloud** | **Read Page**, **Read from Here** (from the clicked point, or the selection's start, to the end of the article), **Read Selection**; **Pause/Resume** and **Stop** while reading |
+| PDF right-click → **Read Aloud** | In the built-in viewer (web, `file://`, `blob:` PDFs) and the PDF editor: **Read Page** (the whole document), **Read from This Page** (from the page the viewer shows), **Read Selection** |
 | Reader view | **Listen** button in its toolbar, the same submenu on right-click |
 | Reading List row right-click → **Listen** | Opens the saved offline Reader copy (the live page when there is none) and reads it |
 | ⇧⌘U (Ctrl+Shift+U) | Play / pause; reads the page when nothing is playing (View menu, only while Read Aloud is on) |
@@ -22,7 +23,34 @@ highlight uses the CSS Custom Highlight API from an isolated world: the page's D
 and a sentence that can't be matched to the page's text is simply not highlighted. The page scrolls
 to an off-screen sentence unless it was scrolled by hand in the last few seconds.
 
-Not yet: PDFs (the built-in viewer's text isn't reachable from the page), see follow-ups in the PR.
+## PDFs
+
+Chromium's built-in viewer doesn't expose the document's text to the page, so Read Aloud reads the
+PDF itself: the bytes come the same way the PDF editor gets them (from inside the tab first, so the
+site's sign-in cookies and the HTTP cache apply, then the tab's session; `file://` from disk), and
+pdf.js (the copy the PDF editor already ships) extracts the text in the hidden engine page. pdf.js is
+a lazy chunk of that page: nothing loads until the first PDF reading, and launch cost is unchanged.
+
+The text is cleaned up before it's spoken (`src/shared/read-aloud-pdf.ts`):
+
+- lines are rebuilt from the text's positions, not pdf.js's item order; rotated margin stamps are
+  dropped;
+- two-column pages read the left column, then the right (full-width titles above them first);
+- a word hyphenated across a line break is joined (`extra-` / `ordinary` → `extraordinary`; a hyphen
+  before a capital stays);
+- lines repeated near the top or bottom edge of at least 40% of the pages (digits ignored, so
+  "Page 3 of 9" matches "Page 4 of 9") and bare page numbers there are dropped, as are
+  table-of-contents dot leaders;
+- paragraphs break on vertical gaps, font size changes (headings) and short last lines; a sentence cut
+  by a page break is joined back up.
+
+The title is the PDF's own (its metadata), else the tab's. A PDF without a text layer (scanned pages)
+reports **This PDF has no readable text (it may be scanned images).** in the player; password-protected
+PDFs say so too. Nothing is highlighted in the built-in viewer (PDFium draws it; there's no DOM to
+mark) or in the PDF editor.
+
+Not done: OCR for scanned PDFs, a "Read from page N" prompt (Read from This Page covers it: scroll
+there, then right-click), highlighting.
 
 ## Settings (one Voice section, doubling as a tester)
 
@@ -53,7 +81,8 @@ opens on the first reading or voice test and **closes 3 minutes after the last o
 the model (about 400 MB resident for the engine's renderer process in the Linux smoke with the real
 model); the next reading reopens it transparently (about 1 s to load). While it runs, generation
 stays at most 1–3 sentences and 12 s of audio ahead, nothing ticks while paused, and when a reading
-ends the AudioContext is closed and the Media Session released.
+ends the AudioContext is closed and the Media Session released. A reading left **paused for 10
+minutes stops** on its own, so the engine can close 3 minutes later.
 
 Launch cost: with the feature off, main only parses a small gate (`read-aloud-feature.ts`,
 `shared/read-aloud-gate.ts`); settings/IPC (`read-aloud-settings.ts`), playback and downloads
@@ -64,5 +93,9 @@ Launch cost: with the feature off, main only parses a small gate (`read-aloud-fe
 `SURFFISH_DEBUG_READ_ALOUD=1` (or a dev build) logs one `[read aloud] phonon {…}` line per reading
 with load time, first audio, threads and device.
 
-Smoke: `bun run build && bun run test:electron-read-aloud` (fixtures);
+`SURFFISH_READ_ALOUD_PAUSE_STOP_MS` (unpackaged builds) shortens the paused-reading stop, like
+`SURFFISH_READ_ALOUD_IDLE_MS` does the engine's idle close.
+
+Smoke: `bun run build && bun run test:electron-read-aloud` (fixtures, including generated PDFs: header,
+footers, page numbers, hyphenation, Read from This Page, the PDF editor, a scanned PDF);
 `READ_ALOUD_SMOKE_PHONON=1` downloads the real model and checks real speech.

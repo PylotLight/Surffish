@@ -76,7 +76,7 @@ export type ReadAloudMenuTarget = 'page' | 'here' | 'selection' | 'toggle' | 'st
  * The one "Read Aloud" submenu (page, selection and Reader view menus): Read Page / Read from Here /
  * Read Selection, plus Pause or Resume and Stop while a reading runs.
  */
-export function readAloudSubmenu(options: { state: ReadAloudMenuState; selection: string; page: boolean }, run: (target: ReadAloudMenuTarget, selection?: string) => void): MenuItemConstructorOptions {
+export function readAloudSubmenu(options: { state: ReadAloudMenuState; selection: string; page: boolean; pdf?: boolean }, run: (target: ReadAloudMenuTarget, selection?: string) => void): MenuItemConstructorOptions {
   const submenu: MenuItemConstructorOptions[] = []
   if (options.state !== 'idle') {
     submenu.push(
@@ -87,7 +87,9 @@ export function readAloudSubmenu(options: { state: ReadAloudMenuState; selection
   }
   if (options.selection) submenu.push({ label: 'Read Selection', click: () => run('selection', options.selection) })
   if (options.page) {
-    submenu.push({ label: 'Read from Here', toolTip: 'From this point to the end of the article', click: () => run('here') })
+    submenu.push(options.pdf
+      ? { label: 'Read from This Page', toolTip: 'From the page the PDF is showing to the end', click: () => run('here') }
+      : { label: 'Read from Here', toolTip: 'From this point to the end of the article', click: () => run('here') })
     submenu.push({ label: 'Read Page', ...(options.state === 'idle' ? { accelerator: READ_ALOUD_SHORTCUT, registerAccelerator: false } : {}), click: () => run('page') })
   }
   while (submenu.at(-1)?.type === 'separator') submenu.pop()
@@ -221,9 +223,11 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
   const mediaUrl = safeHttpUrl(params.srcURL)
   const pageUrl = safeHttpUrl(params.pageURL)
   const selection = params.isEditable ? '' : params.selectionText.trim()
-  const offerReadAloud = Boolean(options.pageActions && options.canReadAloud && !options.pdfDocument && !options.pdfEditor)
+  const offerReadAloud = Boolean(options.pageActions && options.canReadAloud)
+  // PDFs (the built-in viewer, the PDF editor) read through pdf.js; file:// ones too.
+  const pdfReadAloud = Boolean(options.pdfDocument || options.pdfEditor)
   const readAloud = (): MenuItemConstructorOptions =>
-    readAloudSubmenu({ state: options.readAloudState ?? 'idle', selection, page: pageUrl !== null }, (target, text) => actions.readAloud?.(target, text))
+    readAloudSubmenu({ state: options.readAloudState ?? 'idle', selection, page: pageUrl !== null || pdfReadAloud, pdf: pdfReadAloud }, (target, text) => actions.readAloud?.(target, text))
   // A selection: Read Aloud sits with Copy / Search (Read Selection in it).
   if (selection && offerReadAloud) items.push(readAloud())
 
@@ -272,6 +276,7 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
     items.push(
       { label: 'Save PDF…', accelerator: 'CmdOrCtrl+S', registerAccelerator: false, click: () => actions.savePdfEditor?.() },
       { label: 'Back to Viewer', click: () => actions.backToViewer?.() },
+      ...(offerReadAloud && !selection ? [readAloud()] : []),
       { type: 'separator' },
       { label: 'Inspect', click: () => actions.inspect(params.x, params.y) }
     )
@@ -285,7 +290,7 @@ export function buildBrowserContextMenuTemplate(rawParams: ContextMenuParamsInpu
       { type: 'separator' }
     ]
     if (!options.pdfDocument && options.hasReaderView) page.push({ label: 'Reader View', accelerator: 'CmdOrCtrl+Alt+R', registerAccelerator: false, click: () => actions.readerView?.() })
-    if (offerReadAloud && pageUrl && !selection) page.push(readAloud())
+    if (offerReadAloud && (pageUrl || pdfReadAloud) && !selection) page.push(readAloud())
     if (options.canAddToReadingList && pageUrl) page.push({ label: 'Add Page to Reading List', accelerator: 'CmdOrCtrl+Shift+L', registerAccelerator: false, click: () => actions.addToReadingList?.('page') })
     addSeparator(page)
     const pdfUrl = options.pdfDocument ? pageUrl : null

@@ -9,7 +9,8 @@ import type { WebContents, WebFrameMain } from 'electron'
 export const PDF_VIEWER_EXTENSION_ID = 'mhjfbmdgcfjbbpaeojofohoefgiehjai'
 const PDF_VIEWER_ORIGIN = `chrome-extension://${PDF_VIEWER_EXTENSION_ID}/`
 
-function pdfViewerFrame(contents: WebContents): WebFrameMain | null {
+/** The viewer's own frame inside a PDF tab (also used by Read Aloud to find the page it's on). */
+export function pdfViewerFrame(contents: WebContents): WebFrameMain | null {
   if (contents.isDestroyed()) return null
   try {
     return contents.mainFrame.frames.find((frame) => !frame.detached && frame.url.startsWith(PDF_VIEWER_ORIGIN)) ?? null
@@ -42,3 +43,4 @@ export async function printPdf(contents: WebContents): Promise<void> {
   }
   if (!contents.isDestroyed()) contents.print()
 }
+

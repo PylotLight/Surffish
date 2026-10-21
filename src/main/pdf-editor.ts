@@ -401,6 +401,11 @@ function toBytes(value: unknown): Uint8Array | null {
   return null
 }
 
+/** The document a PDF editor tab has open (Read Aloud reads its text), or null for any other contents. */
+export function pdfEditorDocumentFor(contents: WebContents): PdfEditorDocument | null {
+  return host?.documentFor(contents) ?? null
+}
+
 export function attachPdfEditor(editorHost: PdfEditorHost): void {
   host = editorHost
   if (ipcRegistered) return
