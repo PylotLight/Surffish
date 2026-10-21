@@ -75,3 +75,7 @@ Each feature has a `test:electron-<feature>` script in `package.json` (feeds, re
 - [macOS builds and releases](releasing.md)
 - [Troubleshooting](troubleshooting.md)
 - [Third-party assets and licenses](third-party-assets.md)
+
+## Translation integration check
+
+After `bun run build`, run `xvfb-run -a bun run test:electron-translation` on headless Linux (omit `xvfb-run -a` on macOS). The isolated-profile check covers language persistence and cross-surface updates, input validation, toolbar popover bounds, page/text translation tabs, original-tab preservation, and right-click actions. HTTPS responses are synthetic fixtures; no text is sent to a live translation service.

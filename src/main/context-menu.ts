@@ -34,6 +34,9 @@ export interface BrowserContextMenuOptions {
   readAloudState?: ReadAloudMenuState
   /** Offer "Add Page/Link to Reading List" (never for private tabs). */
   addToReadingList?: (target: 'page' | { url: string; title?: string }) => void
+  translationTarget?: string
+  translatePage?: (target: string) => void
+  translateText?: (text: string, target: string) => void
 }
 
 function runMenuTask(task: Promise<void>): void {
@@ -125,7 +128,8 @@ export function showBrowserContextMenu(
     canAddToReadingList: Boolean(options.addToReadingList),
     canOpenInGlance: Boolean(options.openInGlance),
     canGoBack: contents.navigationHistory.canGoBack(),
-    canGoForward: contents.navigationHistory.canGoForward()
+    canGoForward: contents.navigationHistory.canGoForward(),
+    translationTarget: options.translationTarget
   }, {
     undo: () => contents.undo(),
     redo: () => contents.redo(),
@@ -155,7 +159,9 @@ export function showBrowserContextMenu(
     readerView: options.readerView,
     watchPage: options.watchPage,
     readAloud: options.readAloud,
-    addToReadingList: options.addToReadingList
+    addToReadingList: options.addToReadingList,
+    translatePage: options.translatePage,
+    translateText: options.translateText
   })
   if (items.length === 0) return false
 

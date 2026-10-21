@@ -140,6 +140,8 @@ Same platform limits as above: Apple silicon Macs only. On other systems the lau
 - **Network calls Surffish makes on its own:** filter list updates (from uBlock Origin's asset server and the list publishers, at startup when stale and then every 8 hours), New Tab photos, the GitHub releases feed for update checks, and any feeds or page watchers you add. Turning on Read Aloud downloads its voice model once (pinned, hash-checked); the text it reads never leaves your Mac. Preloading (on by default, Settings → General → Tabs) opens a connection to a site while you type its address or hover a link to it, never in private tabs.
 - **The proxy is a tunnel, not anonymity.** SOCKS5 support routes traffic through an endpoint you control. It's not an audited anonymity tool. WebRTC is kept from leaking your real IP while the proxy is on.
 
+Translation is optional and online. Choosing a translation action sends the page URL or selected/pasted text to Google Translate, where it may appear in the address and browsing history. Source language is detected automatically. Local/private addresses are excluded from page translation, and signed-in pages may not work.
+
 ## FAQ
 
 <details>

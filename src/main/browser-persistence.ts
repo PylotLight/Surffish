@@ -1,4 +1,5 @@
 import { siteSettingsHaveOverrides } from '../shared/settings-tab'
+import { DEFAULT_TRANSLATION_LANGUAGE, isTranslationLanguage } from '../shared/translation'
 import { app } from 'electron'
 import { cancelDeferredWrite, deferWrite, flushDeferredWrite } from './deferred-writes'
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -30,6 +31,7 @@ import type { BrowserPreferencesSnapshot, BrowserSiteSettings, NewTabPageId, New
 const SESSION_FILE = 'browser-session.json'
 const PREFERENCES_FILE = 'browser-preferences.json'
 const SITE_ICON_CACHE_FILE = 'browser-site-icons.json'
+const TRANSLATION_FILE = 'browser-translation.json'
 const MAX_CACHED_SITE_ICONS = 128
 let preferencesLoaded = false
 let preferences: BrowserPreferences = parseBrowserPreferences(null)
@@ -466,4 +468,15 @@ export function clearBrowserSiteZoom(origins: readonly string[] | null): number 
   preferences = { ...preferences, siteZoom: next }
   savePreferences(true)
   return drop.length
+}
+
+export function getBrowserTranslationTarget(): string {
+  const value = readJson(TRANSLATION_FILE)
+  return typeof value === 'object' && value !== null && isTranslationLanguage((value as Record<string, unknown>).target)
+    ? (value as { target: string }).target : DEFAULT_TRANSLATION_LANGUAGE
+}
+export function saveBrowserTranslationTarget(value: unknown): string | null {
+  if (!isTranslationLanguage(value)) return null
+  writeJson(TRANSLATION_FILE, { version: 1, target: value })
+  return value
 }

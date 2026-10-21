@@ -79,6 +79,7 @@ import { registerSidebarBackdropIpc } from './sidebar-backdrop'
 import { registerBookmarksBarIpc } from './bookmarks-bar'
 import { registerTabGroupsIpc } from './tab-groups-ipc'
 import { registerTabSelectionIpc } from './tab-selection'
+import { registerTranslationIpc } from './translation-ipc'
 import { clearNetworkRequests, getNetworkRequestDetails, getNetworkRequests, getNetworkResponseBody, watchNetworkRequests, disableNetworkCapture } from './network-inspector'
 import type { BramblePopupAnchor } from '../shared/types'
 import { getMainWindow } from './window'
@@ -129,6 +130,7 @@ export function registerIpc(): void {
   registerBookmarksBarIpc()
   registerTabGroupsIpc()
   registerTabSelectionIpc()
+  registerTranslationIpc()
   ipcMain.on('browser:background-youtube-autoplay:policy', (event) => {
     event.returnValue = event.senderFrame === event.sender.mainFrame && shouldPauseBackgroundYouTubeAutoplay(event.sender)
   })
