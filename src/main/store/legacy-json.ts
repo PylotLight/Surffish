@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { writeFileAtomic } from '../atomic-file'
-import type { SurffishDatabase } from './database'
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { writeFileAtomic } from "../atomic-file";
+import type { SurffishDatabase } from "./database";
 
 /**
  * Bookkeeping for moving a JSON store into SQLite without ever losing data.
@@ -12,62 +12,74 @@ import type { SurffishDatabase } from './database'
  */
 
 export interface LegacyFileStamp {
-  size: number
-  mtimeMs: number
+  size: number;
+  mtimeMs: number;
 }
 
 function metaKey(filename: string): string {
-  return `legacy:${filename}`
+  return `legacy:${filename}`;
 }
 
 export function legacyFileStamp(path: string): LegacyFileStamp | null {
   try {
-    const stats = statSync(path)
-    return { size: stats.size, mtimeMs: Math.floor(stats.mtimeMs) }
+    const stats = statSync(path);
+    return { size: stats.size, mtimeMs: Math.floor(stats.mtimeMs) };
   } catch {
-    return null
+    return null;
   }
 }
 
 /** True when `path` exists and differs from what was last imported (or was never imported). */
-export function legacyFileNeedsImport(db: SurffishDatabase, filename: string, path: string): boolean {
-  const stamp = legacyFileStamp(path)
-  if (!stamp) return false
-  const saved = db.getMeta(metaKey(filename))
-  if (!saved) return true
+export function legacyFileNeedsImport(
+  db: SurffishDatabase,
+  filename: string,
+  path: string,
+): boolean {
+  const stamp = legacyFileStamp(path);
+  if (!stamp) return false;
+  const saved = db.getMeta(metaKey(filename));
+  if (!saved) return true;
   try {
-    const parsed = JSON.parse(saved) as Partial<LegacyFileStamp>
-    return parsed.size !== stamp.size || parsed.mtimeMs !== stamp.mtimeMs
+    const parsed = JSON.parse(saved) as Partial<LegacyFileStamp>;
+    return parsed.size !== stamp.size || parsed.mtimeMs !== stamp.mtimeMs;
   } catch {
-    return true
+    return true;
   }
 }
 
 /** Remember the file as imported in its current state. */
-export function markLegacyFileImported(db: SurffishDatabase, filename: string, path: string, extra: Record<string, unknown> = {}): void {
-  const stamp = legacyFileStamp(path)
-  if (!stamp) return
-  db.setMeta(metaKey(filename), JSON.stringify({ ...stamp, importedAt: Date.now(), ...extra }))
+export function markLegacyFileImported(
+  db: SurffishDatabase,
+  filename: string,
+  path: string,
+  extra: Record<string, unknown> = {},
+): void {
+  const stamp = legacyFileStamp(path);
+  if (!stamp) return;
+  db.setMeta(
+    metaKey(filename),
+    JSON.stringify({ ...stamp, importedAt: Date.now(), ...extra }),
+  );
 }
 
 export function readLegacyJson(path: string): unknown {
-  if (!existsSync(path)) return null
+  if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as unknown
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch (error) {
-    console.warn(`Could not read ${path}:`, error)
-    return null
+    console.warn(`Could not read ${path}:`, error);
+    return null;
   }
 }
 
 /** Atomic owner-only rewrite (used to apply a privacy delete to the legacy copy too). */
 export function writeLegacyJson(path: string, value: unknown): boolean {
   try {
-    writeFileAtomic(path, JSON.stringify(value))
-    return true
+    writeFileAtomic(path, JSON.stringify(value));
+    return true;
   } catch (error) {
-    console.error(`Could not rewrite ${path}:`, error)
-    return false
+    console.error(`Could not rewrite ${path}:`, error);
+    return false;
   }
 }
 
@@ -79,14 +91,20 @@ export function writeLegacyJson(path: string, value: unknown): boolean {
  * - only the JSON write failed: keep the old stamp. The file still matches it, so the next start
  *   reads the database, which has the newer data.
  */
-export function settleDualWrite(db: SurffishDatabase | null, filename: string, path: string, databaseSaved: boolean, jsonSaved: boolean): void {
+export function settleDualWrite(
+  db: SurffishDatabase | null,
+  filename: string,
+  path: string,
+  databaseSaved: boolean,
+  jsonSaved: boolean,
+): void {
   // Closed at quit: the JSON file was just written, so it no longer matches the stamp and wins anyway.
-  if (!db || !db.isOpen) return
+  if (!db || !db.isOpen) return;
   try {
-    if (databaseSaved && jsonSaved) markLegacyFileImported(db, filename, path)
-    else if (!databaseSaved) db.deleteMeta(metaKey(filename))
+    if (databaseSaved && jsonSaved) markLegacyFileImported(db, filename, path);
+    else if (!databaseSaved) db.deleteMeta(metaKey(filename));
   } catch (error) {
-    console.warn(`Could not update the ${filename} import stamp:`, error)
+    console.warn(`Could not update the ${filename} import stamp:`, error);
   }
 }
 
@@ -95,7 +113,12 @@ export function settleDualWrite(db: SurffishDatabase | null, filename: string, p
  * and the JSON file is gone or unchanged since Surffish last wrote/imported it. A JSON file changed
  * by anything else (a `SURFFISH_STORE=json` run, an older build) wins and is imported instead.
  */
-export function databaseCopyIsCurrent(db: SurffishDatabase, filename: string, path: string, hasSavedCopy: boolean): boolean {
-  if (!hasSavedCopy) return false
-  return !existsSync(path) || !legacyFileNeedsImport(db, filename, path)
+export function databaseCopyIsCurrent(
+  db: SurffishDatabase,
+  filename: string,
+  path: string,
+  hasSavedCopy: boolean,
+): boolean {
+  if (!hasSavedCopy) return false;
+  return !existsSync(path) || !legacyFileNeedsImport(db, filename, path);
 }

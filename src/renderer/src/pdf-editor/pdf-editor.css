@@ -6,194 +6,764 @@
   --line: rgba(255, 255, 255, 0.08);
   --text: #e8edf3;
   --muted: #8a96a6;
-  font: 500 12.5px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font:
+    500 12.5px/1.3 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI",
+    sans-serif;
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 /* pdf.js sizes .page (with its 9px border) and its layers for content-box; border-box there shrinks the
    canvas but not the text / annotation layers, so form fields drift off the page. Zero specificity, so
    pdf.js's own box-sizing rules still win. */
-:where(.pdfViewer, .pdfViewer *) { box-sizing: content-box; }
-.pdfViewer :is(.fieldEditLayer, .fieldBox, .signatureFieldOverlay, .surffish-combo-edit) { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #0f1317; color: var(--text); }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-button, select, input { font: inherit; color: inherit; }
-button, select {
-  height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; cursor: default;
+:where(.pdfViewer, .pdfViewer *) {
+  box-sizing: content-box;
 }
-button:hover:not(:disabled), select:hover { background: rgba(255, 255, 255, 0.08); }
-button:disabled { opacity: 0.4; }
-button.is-active { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
-button.primary { background: #2b7a4b; color: #fff; font-weight: 600; }
-button.primary:hover:not(:disabled) { background: #33905a; }
-select { background: rgba(255, 255, 255, 0.05); }
+.pdfViewer
+  :is(
+    .fieldEditLayer,
+    .fieldBox,
+    .signatureFieldOverlay,
+    .surffish-combo-edit
+  ) {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0f1317;
+  color: var(--text);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+button,
+select,
+input {
+  font: inherit;
+  color: inherit;
+}
+button,
+select {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  cursor: default;
+}
+button:hover:not(:disabled),
+select:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+button:disabled {
+  opacity: 0.4;
+}
+button.is-active {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a4edbd;
+}
+button.primary {
+  background: #2b7a4b;
+  color: #fff;
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: #33905a;
+}
+select {
+  background: rgba(255, 255, 255, 0.05);
+}
 
-#app { display: flex; flex-direction: column; height: 100%; }
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 #toolbar {
-  display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; overflow-x: auto; padding: 6px 10px; scrollbar-width: none;
-  background: var(--bar); border-bottom: 1px solid var(--line); user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 6px 10px;
+  scrollbar-width: none;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
 }
-#toolbar .group { display: flex; flex: none; align-items: center; gap: 1px; padding-right: 4px; border-right: 1px solid var(--line); }
-#toolbar > button, #toolbar > span { flex: none; }
-#toolbar button { padding: 0 8px; }
-#toolbar .spacer { flex: 1; }
-.tool-options label { display: flex; align-items: center; gap: 6px; color: var(--muted); padding: 0 4px; }
-.tool-options input[type="color"] { width: 26px; height: 22px; padding: 0; border: 0; background: none; }
-.tool-options input[type="range"] { width: 72px; }
-.dirty-note { color: #f0c674; font-size: 11.5px; }
+#toolbar .group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  padding-right: 4px;
+  border-right: 1px solid var(--line);
+}
+#toolbar > button,
+#toolbar > span {
+  flex: none;
+}
+#toolbar button {
+  padding: 0 8px;
+}
+#toolbar .spacer {
+  flex: 1;
+}
+.tool-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.tool-options input[type="color"] {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.tool-options input[type="range"] {
+  width: 72px;
+}
+.dirty-note {
+  color: #f0c674;
+  font-size: 11.5px;
+}
 
-#workspace { position: relative; flex: 1; min-height: 0; display: flex; }
-#pages {
-  width: 168px; flex: none; overflow-y: auto; background: var(--panel); border-right: 1px solid var(--line);
+#workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
-body.pages-hidden #pages { display: none; }
-#pageList { list-style: none; margin: 0; padding: 10px 8px; display: flex; flex-direction: column; gap: 12px; }
-#pageList li { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border-radius: 8px; }
-#pageList li.is-current { background: rgba(126, 226, 168, 0.1); }
-#pageList li.is-drop-target { outline: 2px dashed var(--accent); }
-#pageList .thumb { min-height: 60px; display: grid; place-items: center; }
-#pageList canvas { display: block; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4); }
-#pageList .page-number { color: var(--muted); font-size: 11px; }
-#pageList .page-actions { display: flex; gap: 1px; opacity: 0.25; transition: opacity 120ms ease; }
-#pageList li:hover .page-actions, #pageList li:focus-within .page-actions, #pageList li.is-current .page-actions { opacity: 1; }
-#pageList .page-actions button { height: 22px; padding: 0 5px; font-size: 12px; }
+#pages {
+  width: 168px;
+  flex: none;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+body.pages-hidden #pages {
+  display: none;
+}
+#pageList {
+  list-style: none;
+  margin: 0;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+#pageList li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+}
+#pageList li.is-current {
+  background: rgba(126, 226, 168, 0.1);
+}
+#pageList li.is-drop-target {
+  outline: 2px dashed var(--accent);
+}
+#pageList .thumb {
+  min-height: 60px;
+  display: grid;
+  place-items: center;
+}
+#pageList canvas {
+  display: block;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+}
+#pageList .page-number {
+  color: var(--muted);
+  font-size: 11px;
+}
+#pageList .page-actions {
+  display: flex;
+  gap: 1px;
+  opacity: 0.25;
+  transition: opacity 120ms ease;
+}
+#pageList li:hover .page-actions,
+#pageList li:focus-within .page-actions,
+#pageList li.is-current .page-actions {
+  opacity: 1;
+}
+#pageList .page-actions button {
+  height: 22px;
+  padding: 0 5px;
+  font-size: 12px;
+}
 
 /* pdf.js requires an absolutely positioned scroll container. */
-#viewerContainer { position: absolute; inset: 0 0 0 168px; overflow: auto; outline: none; background: #2a2f36; }
-body.pages-hidden #viewerContainer { left: 0; }
-.pdfViewer .page { margin: 12px auto; box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45); }
-body.is-busy #viewerContainer { opacity: 0.6; pointer-events: none; }
+#viewerContainer {
+  position: absolute;
+  inset: 0 0 0 168px;
+  overflow: auto;
+  outline: none;
+  background: #2a2f36;
+}
+body.pages-hidden #viewerContainer {
+  left: 0;
+}
+.pdfViewer .page {
+  margin: 12px auto;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+body.is-busy #viewerContainer {
+  opacity: 0.6;
+  pointer-events: none;
+}
 
 .message {
-  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); max-width: 70%; padding: 8px 14px;
-  border-radius: 9px; background: #222a33; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); z-index: 100;
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 8px 14px;
+  border-radius: 9px;
+  background: #222a33;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  z-index: 100;
 }
-.message[data-kind="error"] { background: #5a1f24; }
+.message[data-kind="error"] {
+  background: #5a1f24;
+}
 
 #signatureDialog {
-  width: 620px; max-width: 92vw; border: 1px solid var(--line); border-radius: 14px; padding: 18px;
-  background: var(--panel); color: var(--text);
+  width: 620px;
+  max-width: 92vw;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--panel);
+  color: var(--text);
 }
-#signatureDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-#signatureDialog h2 { margin: 0 0 12px; font-size: 15px; }
-#signatureDialog .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
-#signatureDialog .tabs [aria-selected="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
-#signaturePad { width: 100%; aspect-ratio: 560 / 180; background: #fff; border-radius: 8px; touch-action: none; cursor: crosshair; }
-#signatureDialog .link { margin-top: 4px; color: var(--muted); }
+#signatureDialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+#signatureDialog h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+#signatureDialog .tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+#signatureDialog .tabs [aria-selected="true"] {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a4edbd;
+}
+#signaturePad {
+  width: 100%;
+  aspect-ratio: 560 / 180;
+  background: #fff;
+  border-radius: 8px;
+  touch-action: none;
+  cursor: crosshair;
+}
+#signatureDialog .link {
+  margin-top: 4px;
+  color: var(--muted);
+}
 #signatureText {
-  flex: 1; min-width: 0; height: 56px; padding: 0 14px; border-radius: 8px; border: 0; background: #fff; color: var(--ink, #1b1b1f);
-  font: italic 30px "Snell Roundhand", "Segoe Script", "Brush Script MT", cursive;
+  flex: 1;
+  min-width: 0;
+  height: 56px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 0;
+  background: #fff;
+  color: var(--ink, #1b1b1f);
+  font:
+    italic 30px "Snell Roundhand",
+    "Segoe Script",
+    "Brush Script MT",
+    cursive;
 }
 /* Bundled OFL signature fonts (docs/third-party-assets.md), so every platform gets a few real script faces. */
-@font-face { font-family: "Surffish Great Vibes"; src: url("./fonts/great-vibes-latin.woff2") format("woff2"); font-display: block; }
-@font-face { font-family: "Surffish Allura"; src: url("./fonts/allura-latin.woff2") format("woff2"); font-display: block; }
-#signatureDialog .spacer { flex: 1; }
-#signatureDialog .pad-tools { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
-#signatureDialog .pad-tools .link { margin-top: 0; }
-#signatureDialog .weight { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-#signatureDialog .weight input { width: 120px; }
-#signatureDialog .typed-row { display: flex; gap: 6px; align-items: stretch; }
-#signatureDialog .toggle { height: auto; width: 44px; border: 1px solid var(--line); font-size: 15px; }
-#signatureDialog .toggle[aria-pressed="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
-#signatureDialog .font-choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+@font-face {
+  font-family: "Surffish Great Vibes";
+  src: url("./fonts/great-vibes-latin.woff2") format("woff2");
+  font-display: block;
+}
+@font-face {
+  font-family: "Surffish Allura";
+  src: url("./fonts/allura-latin.woff2") format("woff2");
+  font-display: block;
+}
+#signatureDialog .spacer {
+  flex: 1;
+}
+#signatureDialog .pad-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+#signatureDialog .pad-tools .link {
+  margin-top: 0;
+}
+#signatureDialog .weight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+#signatureDialog .weight input {
+  width: 120px;
+}
+#signatureDialog .typed-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+#signatureDialog .toggle {
+  height: auto;
+  width: 44px;
+  border: 1px solid var(--line);
+  font-size: 15px;
+}
+#signatureDialog .toggle[aria-pressed="true"] {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a4edbd;
+}
+#signatureDialog .font-choices {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
 #signatureDialog .font-choice {
-  height: 46px; padding: 0 6px; overflow: hidden; border-radius: 7px; background: #fff; color: var(--ink, #1b1b1f);
-  white-space: nowrap; text-overflow: ellipsis; font-size: 21px; border: 2px solid transparent;
+  height: 46px;
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink, #1b1b1f);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 21px;
+  border: 2px solid transparent;
 }
-#signatureDialog .font-choice:hover:not(:disabled) { background: #f1f4f2; }
-#signatureDialog .font-choice[aria-checked="true"] { border-color: var(--accent); }
+#signatureDialog .font-choice:hover:not(:disabled) {
+  background: #f1f4f2;
+}
+#signatureDialog .font-choice[aria-checked="true"] {
+  border-color: var(--accent);
+}
 #signatureDialog .drop {
-  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px; border-radius: 8px;
-  border: 1.5px dashed rgba(255, 255, 255, 0.18); color: var(--muted); text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.18);
+  color: var(--muted);
+  text-align: center;
 }
-#signatureDialog.is-dropping .drop { border-color: var(--accent); background: rgba(126, 226, 168, 0.08); }
-#signatureDialog .style-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-#signatureDialog .style-row .tabs { margin: 0; align-items: center; }
-#signatureDialog .style-row .label { color: var(--muted); margin-right: 4px; }
-#signatureDialog .sizes button { width: 30px; padding: 0; }
-#signatureDialog .sizes [aria-checked="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
-#signatureDialog .inks { display: flex; gap: 2px; }
-#signatureDialog .inks button { width: 30px; padding: 0; display: grid; place-items: center; }
-#signatureDialog .inks .swatch { width: 16px; height: 16px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35); }
-#signatureDialog .inks [data-signature-ink="black"] .swatch { background: #1b1b1f; }
-#signatureDialog .inks [data-signature-ink="blue"] .swatch { background: #1f3a8a; }
-#signatureDialog .inks [data-signature-ink="fountain"] .swatch { background: #2a4fb5; }
-#signatureDialog .inks [aria-checked="true"] .swatch { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
-#signatureDialog .description { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; color: var(--muted); }
-#signatureDialog .description input { height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: #11161c; }
-#signatureDialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-#signatureDialog .kinds { margin-bottom: 12px; }
-#signatureDialog .kinds [aria-checked="true"] { background: rgba(126, 226, 168, 0.14); color: #a4edbd; }
-#signatureDialog .saved { margin-bottom: 12px; }
-#signatureDialog .saved ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow-y: auto; }
-#signatureDialog .saved li { position: relative; }
-#signatureDialog .saved-signature { height: auto; padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 2px; border: 1px solid var(--line); }
-#signatureDialog .saved-signature canvas { width: 150px; height: 48px; border-radius: 5px; display: block; }
-#signatureDialog .saved-signature span { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
-#signatureDialog .saved .delete { position: absolute; top: 2px; right: 2px; height: 20px; padding: 0 5px; font-size: 11px; background: rgba(0, 0, 0, 0.55); }
-#signatureDialog .remember { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--muted); }
-#signatureDialog .hint { margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
-#signatureDialog .error { margin: 8px 0 0; color: #ff9a9a; }
-#signatureImagePreview { display: block; width: 100%; aspect-ratio: 560 / 140; margin-top: 8px; background: #fff; border-radius: 6px; }
+#signatureDialog.is-dropping .drop {
+  border-color: var(--accent);
+  background: rgba(126, 226, 168, 0.08);
+}
+#signatureDialog .style-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+#signatureDialog .style-row .tabs {
+  margin: 0;
+  align-items: center;
+}
+#signatureDialog .style-row .label {
+  color: var(--muted);
+  margin-right: 4px;
+}
+#signatureDialog .sizes button {
+  width: 30px;
+  padding: 0;
+}
+#signatureDialog .sizes [aria-checked="true"] {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a4edbd;
+}
+#signatureDialog .inks {
+  display: flex;
+  gap: 2px;
+}
+#signatureDialog .inks button {
+  width: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+#signatureDialog .inks .swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+#signatureDialog .inks [data-signature-ink="black"] .swatch {
+  background: #1b1b1f;
+}
+#signatureDialog .inks [data-signature-ink="blue"] .swatch {
+  background: #1f3a8a;
+}
+#signatureDialog .inks [data-signature-ink="fountain"] .swatch {
+  background: #2a4fb5;
+}
+#signatureDialog .inks [aria-checked="true"] .swatch {
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 0 0 4px var(--accent);
+}
+#signatureDialog .description {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+  color: var(--muted);
+}
+#signatureDialog .description input {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #11161c;
+}
+#signatureDialog .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+#signatureDialog .kinds {
+  margin-bottom: 12px;
+}
+#signatureDialog .kinds [aria-checked="true"] {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a4edbd;
+}
+#signatureDialog .saved {
+  margin-bottom: 12px;
+}
+#signatureDialog .saved ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+#signatureDialog .saved li {
+  position: relative;
+}
+#signatureDialog .saved-signature {
+  height: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--line);
+}
+#signatureDialog .saved-signature canvas {
+  width: 150px;
+  height: 48px;
+  border-radius: 5px;
+  display: block;
+}
+#signatureDialog .saved-signature span {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+#signatureDialog .saved .delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.55);
+}
+#signatureDialog .remember {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+}
+#signatureDialog .hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+#signatureDialog .error {
+  margin: 8px 0 0;
+  color: #ff9a9a;
+}
+#signatureImagePreview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 560 / 140;
+  margin-top: 8px;
+  background: #fff;
+  border-radius: 6px;
+}
 
 /* Forms */
-#toolbar .check { display: flex; align-items: center; gap: 5px; padding: 0 6px; color: var(--muted); white-space: nowrap; }
-.annotationLayer :is(input, textarea, select)[aria-required="true"] { box-shadow: inset 0 0 0 1px rgba(214, 45, 32, 0.55); }
-body.show-required .annotationLayer .is-empty-required { box-shadow: inset 0 0 0 2px #d62d20 !important; background-color: rgba(214, 45, 32, 0.12) !important; }
+#toolbar .check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.annotationLayer :is(input, textarea, select)[aria-required="true"] {
+  box-shadow: inset 0 0 0 1px rgba(214, 45, 32, 0.55);
+}
+body.show-required .annotationLayer .is-empty-required {
+  box-shadow: inset 0 0 0 2px #d62d20 !important;
+  background-color: rgba(214, 45, 32, 0.12) !important;
+}
 .annotationLayer .surffish-combo-edit {
-  position: absolute; top: 0; left: 0; width: calc(100% - 18px); height: 100%; border: 0; padding: 0 2px; background: transparent; color: #000;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% - 18px);
+  height: 100%;
+  border: 0;
+  padding: 0 2px;
+  background: transparent;
+  color: #000;
   font-size: calc(9px * var(--total-scale-factor, 1));
 }
 .signatureFieldOverlay {
-  position: absolute; z-index: 6; display: flex; align-items: center; justify-content: center; height: auto; padding: 0;
-  border: 1.5px dashed rgba(43, 122, 75, 0.9); border-radius: 3px; background: rgba(126, 226, 168, 0.16); color: #1f5c38;
-  font-size: calc(10px * var(--total-scale-factor, 1)); font-weight: 600; cursor: pointer;
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  padding: 0;
+  border: 1.5px dashed rgba(43, 122, 75, 0.9);
+  border-radius: 3px;
+  background: rgba(126, 226, 168, 0.16);
+  color: #1f5c38;
+  font-size: calc(10px * var(--total-scale-factor, 1));
+  font-weight: 600;
+  cursor: pointer;
 }
-.signatureFieldOverlay:hover, .signatureFieldOverlay:focus-visible { background: rgba(126, 226, 168, 0.32) !important; outline: none; }
-.signatureFieldOverlay.is-signed { display: none; }
-body:not([data-tool="none"]) .signatureFieldOverlay { pointer-events: none; opacity: 0.4; }
+.signatureFieldOverlay:hover,
+.signatureFieldOverlay:focus-visible {
+  background: rgba(126, 226, 168, 0.32) !important;
+  outline: none;
+}
+.signatureFieldOverlay.is-signed {
+  display: none;
+}
+body:not([data-tool="none"]) .signatureFieldOverlay {
+  pointer-events: none;
+  opacity: 0.4;
+}
 .form-notice {
-  position: fixed; top: 52px; left: 50%; transform: translateX(-50%); max-width: 70%; padding: 8px 14px; z-index: 90;
-  border-radius: 9px; background: #3a3220; color: #f6e2b3; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 8px 14px;
+  z-index: 90;
+  border-radius: 9px;
+  background: #3a3220;
+  color: #f6e2b3;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* Fields mode: draw / move / resize / edit form fields */
-body.fields-mode .annotationLayer, body.fields-mode .signatureFieldOverlay { pointer-events: none; }
-.fieldEditLayer { position: absolute; inset: 0; z-index: 20; cursor: default; touch-action: none; }
-body.fields-mode:not([data-field-kind=""]) .fieldEditLayer { cursor: crosshair; }
-.fieldBox {
-  position: absolute; box-sizing: border-box; border: 1.5px solid rgba(43, 108, 196, 0.85); border-radius: 2px;
-  background: rgba(66, 133, 244, 0.14); cursor: move;
+body.fields-mode .annotationLayer,
+body.fields-mode .signatureFieldOverlay {
+  pointer-events: none;
 }
-.fieldBox:hover { background: rgba(66, 133, 244, 0.24); }
-.fieldBox.is-selected { border-color: #1a56c4; box-shadow: 0 0 0 2px rgba(26, 86, 196, 0.35); }
-.fieldBox.is-draft { border-style: dashed; background: rgba(43, 122, 75, 0.16); border-color: rgba(43, 122, 75, 0.9); cursor: crosshair; }
+.fieldEditLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  cursor: default;
+  touch-action: none;
+}
+body.fields-mode:not([data-field-kind=""]) .fieldEditLayer {
+  cursor: crosshair;
+}
+.fieldBox {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid rgba(43, 108, 196, 0.85);
+  border-radius: 2px;
+  background: rgba(66, 133, 244, 0.14);
+  cursor: move;
+}
+.fieldBox:hover {
+  background: rgba(66, 133, 244, 0.24);
+}
+.fieldBox.is-selected {
+  border-color: #1a56c4;
+  box-shadow: 0 0 0 2px rgba(26, 86, 196, 0.35);
+}
+.fieldBox.is-draft {
+  border-style: dashed;
+  background: rgba(43, 122, 75, 0.16);
+  border-color: rgba(43, 122, 75, 0.9);
+  cursor: crosshair;
+}
 .fieldLabel {
-  position: absolute; left: 0; bottom: 100%; max-width: 220px; padding: 0 4px; border-radius: 3px 3px 0 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; background: rgba(26, 86, 196, 0.85); color: #fff; font-size: 10px; line-height: 14px; pointer-events: none;
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  max-width: 220px;
+  padding: 0 4px;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: rgba(26, 86, 196, 0.85);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  pointer-events: none;
   opacity: 0;
 }
-.fieldBox:hover .fieldLabel, .fieldBox.is-selected .fieldLabel { opacity: 1; }
-.fieldHandle { position: absolute; width: 8px; height: 8px; border: 1px solid #1a56c4; background: #fff; display: none; }
-.fieldBox.is-selected .fieldHandle { display: block; }
-.fieldHandle.nw { left: -5px; top: -5px; cursor: nwse-resize; }
-.fieldHandle.ne { right: -5px; top: -5px; cursor: nesw-resize; }
-.fieldHandle.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
-.fieldHandle.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.fieldBox:hover .fieldLabel,
+.fieldBox.is-selected .fieldLabel {
+  opacity: 1;
+}
+.fieldHandle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #1a56c4;
+  background: #fff;
+  display: none;
+}
+.fieldBox.is-selected .fieldHandle {
+  display: block;
+}
+.fieldHandle.nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.fieldHandle.ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.fieldHandle.sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.fieldHandle.se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
 .field-popover {
-  position: fixed; z-index: 95; width: 270px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
-  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+  position: fixed;
+  z-index: 95;
+  width: 270px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
 }
-.field-popover h2 { margin: 0; font-size: 13px; }
-.field-popover .row { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
-.field-popover input[type="text"], .field-popover input[type="number"], .field-popover textarea, .field-popover select {
-  height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: #11161c; color: var(--text);
+.field-popover h2 {
+  margin: 0;
+  font-size: 13px;
 }
-.field-popover textarea { height: auto; padding: 6px 8px; resize: vertical; font: inherit; }
-.field-popover .check { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-.field-popover .checks { display: flex; gap: 14px; }
-.field-popover .hint { margin: 0; color: var(--muted); font-size: 11px; }
-.field-popover .error { margin: 0; color: #ff9a9a; }
-.field-popover .actions { display: flex; align-items: center; gap: 6px; }
-.field-popover .actions .spacer { flex: 1; }
-.field-popover button.danger { color: #ff9a9a; }
+.field-popover .row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+}
+.field-popover input[type="text"],
+.field-popover input[type="number"],
+.field-popover textarea,
+.field-popover select {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #11161c;
+  color: var(--text);
+}
+.field-popover textarea {
+  height: auto;
+  padding: 6px 8px;
+  resize: vertical;
+  font: inherit;
+}
+.field-popover .check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.field-popover .checks {
+  display: flex;
+  gap: 14px;
+}
+.field-popover .hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.field-popover .error {
+  margin: 0;
+  color: #ff9a9a;
+}
+.field-popover .actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-popover .actions .spacer {
+  flex: 1;
+}
+.field-popover button.danger {
+  color: #ff9a9a;
+}

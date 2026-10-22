@@ -14,6 +14,7 @@ bun run release --dry-run  # build + verify only, publishes nothing (still check
 ```
 
 It works out the next version from the latest `vX.Y.Z` tag and `package.json` (whichever is newer), then:
+
 1. Needs `docs/releases/vX.Y.Z.md`. If that file is missing, it drafts one from the commits since the last tag and stops so you can rewrite it to the [release notes rules](#release-notes) and push it.
 2. Bumps `package.json` and commits `chore: release vX.Y.Z` locally.
 3. Runs `bun install`, typecheck and tests (`--skip-checks` skips those two), then `dist:mac`, then `unzip -tq`, then the SHA-256.
@@ -128,4 +129,3 @@ xattr -cr /Applications/Surffish.app
 ```
 
 Then open the app again (or Control-click it and choose **Open** on first launch). This removes the quarantine attribute; it does not sign or notarize the app. Homebrew's former `--no-quarantine` option is not available, so the manual `xattr` step may be needed after installation.
-

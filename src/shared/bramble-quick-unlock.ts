@@ -8,54 +8,56 @@
  * tells it apart from vault setup / change password (they have a confirm field).
  */
 
-export const QUICK_UNLOCK_PIN_PATTERN = /^[0-9]{4,8}$/
+export const QUICK_UNLOCK_PIN_PATTERN = /^[0-9]{4,8}$/;
 
 /** What Settings shows. Never carries secrets. */
 export interface BrambleQuickUnlockState {
   /** The user turned quick unlock on (a PIN exists or existed this session). */
-  enabled: boolean
+  enabled: boolean;
   /** A wrapped secret is available right now (false after a restart in memory-only mode). */
-  armed: boolean
+  armed: boolean;
   /** Not armed, but unlocking once with the master password in Bramble's own form re-arms it. */
-  canRearm: boolean
+  canRearm: boolean;
   /** That re-arm also moves an older memory-only setup to "PIN keeps working after restarts". */
-  migratesOnRearm: boolean
-  touchIdEnabled: boolean
+  migratesOnRearm: boolean;
+  touchIdEnabled: boolean;
   /** Running on a Mac that can prompt for Touch ID. */
-  touchIdAvailable: boolean
+  touchIdAvailable: boolean;
   /** "Require master password after Surffish restarts" (memory-only). */
-  requireMasterAfterRestart: boolean
+  requireMasterAfterRestart: boolean;
   /** safeStorage can protect the device key (needed to persist across restarts). */
-  persistAvailable: boolean
-  failedAttempts: number
-  maxAttempts: number
+  persistAvailable: boolean;
+  failedAttempts: number;
+  maxAttempts: number;
   /** Last thing that happened worth telling the user (reset after lockout, master changed, …). */
-  notice: string | null
+  notice: string | null;
   /**
    * Whether Bramble has a vault to unlock (read from its extension storage). Setup is only offered
    * when 'present'; 'unknown' means Bramble is not loaded or its storage could not be read.
    */
-  vault: BrambleVaultStatus
+  vault: BrambleVaultStatus;
 }
 
 export interface BrambleQuickUnlockEnrolInput {
-  masterPassword: string
-  pin: string
-  confirmPin: string
-  touchId: boolean
+  masterPassword: string;
+  pin: string;
+  confirmPin: string;
+  touchId: boolean;
   /** Omitted: persisted (PIN survives restarts) when secure key storage exists, memory-only otherwise. */
-  requireMasterAfterRestart?: boolean
+  requireMasterAfterRestart?: boolean;
 }
 
 /** Settings toggle after setup. Turning memory-only on needs the current PIN. */
 export interface BrambleQuickUnlockRequireMasterInput {
-  require: boolean
-  pin?: string
+  require: boolean;
+  pin?: string;
 }
 
-export type QuickUnlockResult = { ok: true; state: BrambleQuickUnlockState } | { ok: false; error: string; state: BrambleQuickUnlockState }
+export type QuickUnlockResult =
+  | { ok: true; state: BrambleQuickUnlockState }
+  | { ok: false; error: string; state: BrambleQuickUnlockState };
 
-export const QUICK_UNLOCK_NEEDS_VAULT = 'Create your Bramble vault first.'
+export const QUICK_UNLOCK_NEEDS_VAULT = "Create your Bramble vault first.";
 
 // ---------------------------------------------------------------------------
 // Does Bramble have a vault?
@@ -67,15 +69,15 @@ export const QUICK_UNLOCK_NEEDS_VAULT = 'Create your Bramble vault first.'
 // writes the blob, and prunes ids that never got one. So a vault exists when one registered id (or
 // the legacy key) has a non-empty blob, the same thing Bramble's own unlock screen needs.
 
-export type BrambleVaultStatus = 'present' | 'absent' | 'unknown'
+export type BrambleVaultStatus = "present" | "absent" | "unknown";
 
-export const BRAMBLE_VAULT_REGISTRY_KEY = 'vault.registry'
-export const BRAMBLE_VAULT_BLOB_KEY = 'vault-blob-b64'
+export const BRAMBLE_VAULT_REGISTRY_KEY = "vault.registry";
+export const BRAMBLE_VAULT_BLOB_KEY = "vault-blob-b64";
 
 /** What the probe script returns: registered vault ids and which blob keys hold data. Never blob contents. */
 export interface BrambleVaultProbe {
-  vaultIds: string[]
-  blobs: Record<string, boolean>
+  vaultIds: string[];
+  blobs: Record<string, boolean>;
 }
 
 /**
@@ -106,101 +108,150 @@ export const BRAMBLE_VAULT_PROBE_SCRIPT = `(() => {
       return { vaultIds, blobs: present };
     });
   });
-})()`
+})()`;
 
 /** Pure decision on a probe result. Anything malformed is 'unknown', never 'present'. */
 export function classifyBrambleVaultProbe(probe: unknown): BrambleVaultStatus {
-  if (typeof probe !== 'object' || probe === null) return 'unknown'
-  const { vaultIds, blobs } = probe as Partial<BrambleVaultProbe>
-  if (!Array.isArray(vaultIds) || typeof blobs !== 'object' || blobs === null) return 'unknown'
-  if (blobs[BRAMBLE_VAULT_BLOB_KEY] === true) return 'present'
+  if (typeof probe !== "object" || probe === null) return "unknown";
+  const { vaultIds, blobs } = probe as Partial<BrambleVaultProbe>;
+  if (!Array.isArray(vaultIds) || typeof blobs !== "object" || blobs === null)
+    return "unknown";
+  if (blobs[BRAMBLE_VAULT_BLOB_KEY] === true) return "present";
   for (const id of vaultIds) {
-    if (typeof id === 'string' && id && blobs[`${BRAMBLE_VAULT_BLOB_KEY}:${id}`] === true) return 'present'
+    if (
+      typeof id === "string" &&
+      id &&
+      blobs[`${BRAMBLE_VAULT_BLOB_KEY}:${id}`] === true
+    )
+      return "present";
   }
-  return 'absent'
+  return "absent";
 }
 
-export const QUICK_UNLOCK_VAULT_UNKNOWN = 'Surffish could not check Bramble’s vault. Make sure Bramble is loaded, then try again.'
+export const QUICK_UNLOCK_VAULT_UNKNOWN =
+  "Surffish could not check Bramble’s vault. Make sure Bramble is loaded, then try again.";
 
 /** Why PIN setup is not allowed right now (null when Bramble has a vault). Shared by Settings and the enrol IPC. */
 export function quickUnlockSetupBlocker(vault: unknown): string | null {
-  if (vault === 'present') return null
-  return vault === 'absent' ? QUICK_UNLOCK_NEEDS_VAULT : QUICK_UNLOCK_VAULT_UNKNOWN
+  if (vault === "present") return null;
+  return vault === "absent"
+    ? QUICK_UNLOCK_NEEDS_VAULT
+    : QUICK_UNLOCK_VAULT_UNKNOWN;
 }
 
-export function quickUnlockPinError(pin: string, confirmPin: string): string | null {
-  if (!QUICK_UNLOCK_PIN_PATTERN.test(pin)) return 'Use a PIN of 4 to 8 digits.'
-  if (pin !== confirmPin) return 'The PINs do not match.'
-  return null
+export function quickUnlockPinError(
+  pin: string,
+  confirmPin: string,
+): string | null {
+  if (!QUICK_UNLOCK_PIN_PATTERN.test(pin)) return "Use a PIN of 4 to 8 digits.";
+  if (pin !== confirmPin) return "The PINs do not match.";
+  return null;
 }
 
 // ---------------------------------------------------------------------------
 // Unlock screen detection
 
 export interface UnlockFieldSnapshot {
-  name: string
-  type: string
-  visible: boolean
-  disabled: boolean
-  readOnly: boolean
-  inForm: boolean
+  name: string;
+  type: string;
+  visible: boolean;
+  disabled: boolean;
+  readOnly: boolean;
+  inForm: boolean;
   /** Password-like inputs inside the same form. */
-  formPasswordInputs: number
-  hasSubmit: boolean
+  formPasswordInputs: number;
+  hasSubmit: boolean;
   /** aria-invalid="true": Bramble shows an error under the field (e.g. wrong password). */
-  invalid: boolean
+  invalid: boolean;
   /** Submit button disabled: Bramble is busy unlocking. */
-  busy: boolean
+  busy: boolean;
 }
 
 export interface UnlockPageSnapshot {
-  href: string
+  href: string;
   /** Password-like inputs (type=password or name=masterPassword) anywhere on the page. */
-  passwordInputs: number
-  field: UnlockFieldSnapshot | null
+  passwordInputs: number;
+  field: UnlockFieldSnapshot | null;
 }
 
-export type UnlockScreenKind = 'unlock' | 'other'
+export type UnlockScreenKind = "unlock" | "other";
 
-const BRAMBLE_UI_PAGES = new Set(['/popup.html', '/options.html'])
+const BRAMBLE_UI_PAGES = new Set(["/popup.html", "/options.html"]);
 
 /** True for Bramble's own popup / options page on its loaded extension origin. */
-export function isBrambleUnlockPageUrl(href: string, extensionUrl: string): boolean {
+export function isBrambleUnlockPageUrl(
+  href: string,
+  extensionUrl: string,
+): boolean {
   try {
-    const page = new URL(href)
-    const extension = new URL(extensionUrl)
-    return page.protocol === 'chrome-extension:' && extension.protocol === 'chrome-extension:' &&
-      page.host === extension.host && !page.username && !page.password && !page.port && BRAMBLE_UI_PAGES.has(page.pathname)
+    const page = new URL(href);
+    const extension = new URL(extensionUrl);
+    return (
+      page.protocol === "chrome-extension:" &&
+      extension.protocol === "chrome-extension:" &&
+      page.host === extension.host &&
+      !page.username &&
+      !page.password &&
+      !page.port &&
+      BRAMBLE_UI_PAGES.has(page.pathname)
+    );
   } catch {
-    return false
+    return false;
   }
 }
 
 /** Pure decision on a page snapshot: is this Bramble's master-password unlock screen, fillable now? */
-export function classifyBrambleUnlockScreen(snapshot: unknown, extensionUrl: string): UnlockScreenKind {
-  if (typeof snapshot !== 'object' || snapshot === null) return 'other'
-  const page = snapshot as Partial<UnlockPageSnapshot>
-  if (typeof page.href !== 'string' || !isBrambleUnlockPageUrl(page.href, extensionUrl)) return 'other'
-  const field = page.field
-  if (!field || typeof field !== 'object') return 'other'
-  if (field.name !== 'masterPassword' || (field.type !== 'password' && field.type !== 'text')) return 'other'
-  if (!field.visible || field.disabled || field.readOnly || !field.inForm || !field.hasSubmit) return 'other'
+export function classifyBrambleUnlockScreen(
+  snapshot: unknown,
+  extensionUrl: string,
+): UnlockScreenKind {
+  if (typeof snapshot !== "object" || snapshot === null) return "other";
+  const page = snapshot as Partial<UnlockPageSnapshot>;
+  if (
+    typeof page.href !== "string" ||
+    !isBrambleUnlockPageUrl(page.href, extensionUrl)
+  )
+    return "other";
+  const field = page.field;
+  if (!field || typeof field !== "object") return "other";
+  if (
+    field.name !== "masterPassword" ||
+    (field.type !== "password" && field.type !== "text")
+  )
+    return "other";
+  if (
+    !field.visible ||
+    field.disabled ||
+    field.readOnly ||
+    !field.inForm ||
+    !field.hasSubmit
+  )
+    return "other";
   // Setup and change-password screens carry a confirm field; only the unlock form has exactly one.
-  if (field.formPasswordInputs !== 1 || page.passwordInputs !== 1) return 'other'
-  return 'unlock'
+  if (field.formPasswordInputs !== 1 || page.passwordInputs !== 1)
+    return "other";
+  return "unlock";
 }
 
-export type FillOutcome = 'unlocked' | 'rejected' | 'pending'
+export type FillOutcome = "unlocked" | "rejected" | "pending";
 
 /** After a fill: the form went away (unlocked), Bramble flagged the field (rejected), or still working. */
-export function classifyFillOutcome(snapshot: unknown, extensionUrl: string): FillOutcome {
-  if (typeof snapshot !== 'object' || snapshot === null) return 'pending'
-  const page = snapshot as Partial<UnlockPageSnapshot>
-  if (typeof page.href !== 'string' || !isBrambleUnlockPageUrl(page.href, extensionUrl)) return 'pending'
-  const field = page.field
-  if (!field || field.name !== 'masterPassword' || page.passwordInputs === 0) return 'unlocked'
-  if (field.invalid && !field.busy) return 'rejected'
-  return 'pending'
+export function classifyFillOutcome(
+  snapshot: unknown,
+  extensionUrl: string,
+): FillOutcome {
+  if (typeof snapshot !== "object" || snapshot === null) return "pending";
+  const page = snapshot as Partial<UnlockPageSnapshot>;
+  if (
+    typeof page.href !== "string" ||
+    !isBrambleUnlockPageUrl(page.href, extensionUrl)
+  )
+    return "pending";
+  const field = page.field;
+  if (!field || field.name !== "masterPassword" || page.passwordInputs === 0)
+    return "unlocked";
+  if (field.invalid && !field.busy) return "rejected";
+  return "pending";
 }
 
 /**
@@ -237,7 +288,7 @@ export const UNLOCK_SNAPSHOT_SCRIPT = `(() => {
     };
   }
   return { href: location.href, passwordInputs: all.length, field };
-})()`
+})()`;
 
 /**
  * Fill Bramble's master password field and submit its form, from an isolated world. Setting the
@@ -261,7 +312,7 @@ export function buildUnlockFillScript(secret: string): string {
   else if (submit) submit.click();
   else return false;
   return true;
-})()`
+})()`;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +325,7 @@ export function buildUnlockFillScript(secret: string): string {
 // form, never setup or change-password. Main takes (and clears) it, waits for Bramble to unlock
 // with it, and the vault re-arms only if it opens the PIN-under-master slot.
 
-const CAPTURE_STATE = '__surffishQuickUnlockCapture'
+const CAPTURE_STATE = "__surffishQuickUnlockCapture";
 
 export const MASTER_CAPTURE_INSTALL_SCRIPT = `(() => {
   const state = globalThis.${CAPTURE_STATE} || (globalThis.${CAPTURE_STATE} = { value: null, active: false, installed: false });
@@ -292,7 +343,7 @@ export const MASTER_CAPTURE_INSTALL_SCRIPT = `(() => {
     }, true);
   }
   return true;
-})()`
+})()`;
 
 /** Returns the last submitted value (or null) and forgets it. */
 export const MASTER_CAPTURE_TAKE_SCRIPT = `(() => {
@@ -301,11 +352,11 @@ export const MASTER_CAPTURE_TAKE_SCRIPT = `(() => {
   const value = state.value;
   state.value = null;
   return value;
-})()`
+})()`;
 
 /** Stop collecting and forget anything collected (quick unlock armed again, or our own fill). */
 export const MASTER_CAPTURE_STOP_SCRIPT = `(() => {
   const state = globalThis.${CAPTURE_STATE};
   if (state) { state.active = false; state.value = null; }
   return true;
-})()`
+})()`;

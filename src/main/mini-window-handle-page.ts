@@ -110,4 +110,4 @@ export const MINI_WINDOW_HANDLE_HTML = `<!doctype html>
   // Right-click: the mini window's menu (Send to Menu Bar, Return to Browser, Close).
   tab.addEventListener('contextmenu', (event) => { event.preventDefault(); window.miniWindow.handleMenu() })
 </script>
-</body></html>`
+</body></html>`;

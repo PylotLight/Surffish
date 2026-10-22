@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'branch, tag or SHA to build'
+        description: "branch, tag or SHA to build"
         required: true
         default: main
       arch:
-        description: 'x64, arm64 or both'
+        description: "x64, arm64 or both"
         type: choice
         options: [x64, arm64, both]
         default: x64
@@ -61,7 +61,7 @@ jobs:
           echo "Electron $(cat node_modules/electron/dist/version) ($(cat node_modules/electron/path.txt))"
       - name: Build + package (zip, unsigned)
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           bun run build
           bun x electron-builder --win zip --${{ matrix.arch }} --publish never

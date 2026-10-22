@@ -8,96 +8,106 @@
 // pending stdin bytes before returning the terminal to the shell.
 //
 // Run with: bun scripts/dev.ts [-- ...electron-vite args]
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { ensureDependencies } from './ensure-dependencies.ts'
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ensureDependencies } from "./ensure-dependencies.ts";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-if (!ensureDependencies(root)) process.exit(1)
-const nativeBuild = spawnSync(process.execPath, [join(root, 'scripts/build-mac-trackpad-swipe.ts'), '--dev'], {
-  cwd: root,
-  stdio: 'inherit',
-  env: process.env
-})
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+if (!ensureDependencies(root)) process.exit(1);
+const nativeBuild = spawnSync(
+  process.execPath,
+  [join(root, "scripts/build-mac-trackpad-swipe.ts"), "--dev"],
+  {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env,
+  },
+);
 if (nativeBuild.error || nativeBuild.status !== 0) {
-  console.error(`[dev] failed to prepare the macOS gesture module: ${nativeBuild.error?.message ?? nativeBuild.status}`)
-  process.exit(1)
+  console.error(
+    `[dev] failed to prepare the macOS gesture module: ${nativeBuild.error?.message ?? nativeBuild.status}`,
+  );
+  process.exit(1);
 }
 // Non-fatal: without the helper, Google sign-in just stays inside Electron.
-spawnSync(process.execPath, [join(root, 'scripts/build-google-sign-in.ts')], { cwd: root, stdio: 'inherit', env: process.env })
+spawnSync(process.execPath, [join(root, "scripts/build-google-sign-in.ts")], {
+  cwd: root,
+  stdio: "inherit",
+  env: process.env,
+});
 
 const bin =
-  process.platform === 'win32'
-    ? join(root, 'node_modules', '.bin', 'electron-vite.cmd')
-    : join(root, 'node_modules', '.bin', 'electron-vite')
+  process.platform === "win32"
+    ? join(root, "node_modules", ".bin", "electron-vite.cmd")
+    : join(root, "node_modules", ".bin", "electron-vite");
 
-const child: ChildProcess = spawn(bin, ['dev', ...process.argv.slice(2)], {
-  stdio: 'inherit',
+const child: ChildProcess = spawn(bin, ["dev", ...process.argv.slice(2)], {
+  stdio: "inherit",
   env: process.env,
-  shell: process.platform === 'win32'
-})
+  shell: process.platform === "win32",
+});
 
-child.on('error', (err) => {
-  console.error(`[dev] failed to start electron-vite: ${err.message}`)
-  process.exit(1)
-})
+child.on("error", (err) => {
+  console.error(`[dev] failed to start electron-vite: ${err.message}`);
+  process.exit(1);
+});
 
-let shuttingDown = false
+let shuttingDown = false;
 function forward(signal: NodeJS.Signals): void {
-  if (shuttingDown) return
-  shuttingDown = true
+  if (shuttingDown) return;
+  shuttingDown = true;
   // The child likely received the signal from the terminal too; kill() is a no-op then.
   try {
-    child.kill(signal)
+    child.kill(signal);
   } catch {
     // ignore — child already gone
   }
 }
-process.on('SIGINT', () => forward('SIGINT'))
-process.on('SIGTERM', () => forward('SIGTERM'))
+process.on("SIGINT", () => forward("SIGINT"));
+process.on("SIGTERM", () => forward("SIGTERM"));
 
 /** Discard leftover terminal-reply bytes queued in stdin. No-op without a TTY. */
 async function drainStdin(): Promise<void> {
-  const { stdin } = process
-  if (!stdin.isTTY) return
+  const { stdin } = process;
+  if (!stdin.isTTY) return;
   await new Promise<void>((resolve) => {
-    let done = false
-    let timer: ReturnType<typeof setTimeout>
+    let done = false;
+    let timer: ReturnType<typeof setTimeout>;
     const finish = (): void => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      stdin.removeListener('data', swallow)
-      stdin.pause()
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      stdin.removeListener("data", swallow);
+      stdin.pause();
       try {
-        stdin.setRawMode(false)
+        stdin.setRawMode(false);
       } catch {
         // ignore — already restored
       }
-      resolve()
-    }
+      resolve();
+    };
     const swallow = (): void => {
       // More bytes arrived — give stragglers a short grace window, then stop.
-      clearTimeout(timer)
-      timer = setTimeout(finish, 80)
-    }
-    timer = setTimeout(finish, 250)
+      clearTimeout(timer);
+      timer = setTimeout(finish, 80);
+    };
+    timer = setTimeout(finish, 250);
     try {
       // Raw mode so escape bytes can't trigger signals while we discard them.
-      stdin.setRawMode(true)
+      stdin.setRawMode(true);
     } catch {
       // ignore — drain in cooked mode instead
     }
-    stdin.resume()
-    stdin.on('data', swallow)
-  })
+    stdin.resume();
+    stdin.on("data", swallow);
+  });
 }
 
-child.on('exit', (code) => {
+child.on("exit", (code) => {
   void drainStdin().then(() => {
     // Leave the cursor visible and attributes reset for the next prompt.
-    process.stdout.write('\x1b[?25h\x1b[0m')
-    process.exit(code ?? 0)
-  })
-})
+    process.stdout.write("\x1b[?25h\x1b[0m");
+    process.exit(code ?? 0);
+  });
+});

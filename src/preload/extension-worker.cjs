@@ -9,47 +9,55 @@
 // and ignores workers of extensions it does not manage (e.g. Bramble), so exposing it is harmless.
 // Chromium only applies service-worker preloads when the renderer sandbox is on; with --no-sandbox
 // this file never runs and Surffish falls back to the bridge page.
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer } = require("electron");
 
-const UP = 'surffish:extension-worker:up'
-const CALL = 'surffish:extension-worker:call'
-const DOWN = 'surffish:extension-worker:down'
-const MAX_EARLY = 200
+const UP = "surffish:extension-worker:up";
+const CALL = "surffish:extension-worker:call";
+const DOWN = "surffish:extension-worker:down";
+const MAX_EARLY = 200;
 
-let href = ''
+let href = "";
 try {
-  href = String(contextBridge.executeInMainWorld({ func: () => String((globalThis.location && globalThis.location.href) || '') }) || '')
+  href = String(
+    contextBridge.executeInMainWorld({
+      func: () =>
+        String((globalThis.location && globalThis.location.href) || ""),
+    }) || "",
+  );
 } catch {
-  href = ''
+  href = "";
 }
 
-if (href.startsWith('chrome-extension://')) {
-  let listener = null
-  const early = []
+if (href.startsWith("chrome-extension://")) {
+  let listener = null;
+  const early = [];
   ipcRenderer.on(DOWN, (_event, message) => {
     if (!listener) {
-      if (early.length < MAX_EARLY) early.push(message)
-      return
+      if (early.length < MAX_EARLY) early.push(message);
+      return;
     }
     try {
-      listener(message)
+      listener(message);
     } catch {
       // The worker's handler threw; nothing to do here.
     }
-  })
-  contextBridge.exposeInMainWorld('surffishExtensionWorker', Object.freeze({
-    send: (message) => ipcRenderer.send(UP, message),
-    call: (method, args) => ipcRenderer.invoke(CALL, method, args),
-    onMessage: (fn) => {
-      if (typeof fn !== 'function' || listener) return
-      listener = fn
-      for (const message of early.splice(0)) {
-        try {
-          fn(message)
-        } catch {
-          // ignore
+  });
+  contextBridge.exposeInMainWorld(
+    "surffishExtensionWorker",
+    Object.freeze({
+      send: (message) => ipcRenderer.send(UP, message),
+      call: (method, args) => ipcRenderer.invoke(CALL, method, args),
+      onMessage: (fn) => {
+        if (typeof fn !== "function" || listener) return;
+        listener = fn;
+        for (const message of early.splice(0)) {
+          try {
+            fn(message);
+          } catch {
+            // ignore
+          }
         }
-      }
-    }
-  }))
+      },
+    }),
+  );
 }

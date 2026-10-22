@@ -7,22 +7,22 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'Casks/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "Casks/**"
+      - "LICENSE"
   pull_request:
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'Casks/**'
-      - 'LICENSE'
+      - "**.md"
+      - "docs/**"
+      - "Casks/**"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       pr:
         description: PR number for the perf comments (the electron bump workflow sets it)
         type: string
-        default: ''
+        default: ""
       perf_mac:
         description: Also run perf (macos)
         type: boolean
@@ -55,18 +55,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        # Longest suite first in each lane so it overlaps the short ones. Balanced from measured times
-        # (Oct 2026: spinner-popover and the perf probe ~19 s each, the rest 1-10 s), ~55 suite-seconds
-        # per lane, so each lane's smokes finish in ~30 s at two at a time.
-        - lane: A
-          unit: false
-          tests: "test:electron-translation test:electron-watchers-toggle test:electron-settings test:electron-glance test:electron-mini-window test:electron-mini-window-dock test:electron-mini-window-grouping test:electron-mini-window-menubar test:electron-mini-window-popout-flash test:electron-mini-window-popout-idle test:electron-mini-window-throw test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-omnibox-fill test:electron-omnibox-prerender test:electron-certificates test:electron-perceived-perf"
-        - lane: B
-          unit: false
-          tests: "test:electron-spaces test:electron-settings-search test:electron-newtab-customize test:electron-mini-window-header test:electron-mini-window-peek test:electron-mini-window-motion test:electron-mini-window-tab-drag test:electron-toolbar-popovers test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-read-aloud test:electron-network-tools test:electron-tab-archive test:electron-media-session test:electron-sqlite-store test:electron-sqlite-session test:electron-tab-history-restore test:electron-feeds test:electron-adblock-toolbar test:electron-user-agent test:electron-stability test:electron-cast test:electron-toolbar-overflow"
-        - lane: C
-          unit: true
-          tests: "test:electron-perf test:electron-local-ai test:electron-pdf-editor test:electron-pdf-forms test:electron-tab-groups test:electron-tab-volume test:electron-extensions test:electron-tab-selection test:electron-pinned-reorder test:electron-nav-errors test:electron-host-bridge test:electron-adblock test:electron-extension-dnr test:electron-extension-sw-preload test:electron-extension-sw-preload-page test:electron-reading-list test:electron-blob-links test:electron-page-popups test:electron-nav-history-menu test:electron-mini-window-newtab test:electron-newtab-clock test:electron-newtab-weather test:electron-settings-tab test:electron-bramble-qr-join"
+          # Longest suite first in each lane so it overlaps the short ones. Balanced from measured times
+          # (Oct 2026: spinner-popover and the perf probe ~19 s each, the rest 1-10 s), ~55 suite-seconds
+          # per lane, so each lane's smokes finish in ~30 s at two at a time.
+          - lane: A
+            unit: false
+            tests: "test:electron-translation test:electron-watchers-toggle test:electron-settings test:electron-glance test:electron-mini-window test:electron-mini-window-dock test:electron-mini-window-grouping test:electron-mini-window-menubar test:electron-mini-window-popout-flash test:electron-mini-window-popout-idle test:electron-mini-window-throw test:electron-spinner-popover test:electron-downloads test:electron-safety test:electron-security test:electron-updates test:electron-table-stakes test:electron-command-palette test:electron-bookmarks test:electron-address-bar-sync test:electron-omnibox-fill test:electron-omnibox-prerender test:electron-certificates test:electron-perceived-perf"
+          - lane: B
+            unit: false
+            tests: "test:electron-spaces test:electron-settings-search test:electron-newtab-customize test:electron-mini-window-header test:electron-mini-window-peek test:electron-mini-window-motion test:electron-mini-window-tab-drag test:electron-toolbar-popovers test:electron-multi-window test:electron-screenshot test:electron-split-view test:electron-sidebar-overlay test:electron-reader-watchers test:electron-read-aloud test:electron-network-tools test:electron-tab-archive test:electron-media-session test:electron-sqlite-store test:electron-sqlite-session test:electron-tab-history-restore test:electron-feeds test:electron-adblock-toolbar test:electron-user-agent test:electron-stability test:electron-cast test:electron-toolbar-overflow"
+          - lane: C
+            unit: true
+            tests: "test:electron-perf test:electron-local-ai test:electron-pdf-editor test:electron-pdf-forms test:electron-tab-groups test:electron-tab-volume test:electron-extensions test:electron-tab-selection test:electron-pinned-reorder test:electron-nav-errors test:electron-host-bridge test:electron-adblock test:electron-extension-dnr test:electron-extension-sw-preload test:electron-extension-sw-preload-page test:electron-reading-list test:electron-blob-links test:electron-page-popups test:electron-nav-history-menu test:electron-mini-window-newtab test:electron-newtab-clock test:electron-newtab-weather test:electron-settings-tab test:electron-bramble-qr-join"
     steps:
       - name: Checkout (plain git, no third-party actions needed)
         env:
@@ -121,6 +121,9 @@ jobs:
           for tool in xvfb-run xdotool dbus-daemon flock; do command -v "$tool" >/dev/null || missing="$missing $tool"; done
           for soname in libnspr4.so libnss3.so libatk-1.0.so.0 libatk-bridge-2.0.so.0 libcups.so.2 libdrm.so.2 libxkbcommon.so.0 libXcomposite.so.1 libXdamage.so.1 libXfixes.so.3 libXrandr.so.2 libgbm.so.1 libpango-1.0.so.0 libcairo.so.2 libasound.so.2 libgtk-3.so.0 libXss.so.1 libXtst.so.6 libatspi.so.0; do ldconfig -p | grep -q "$soname" || missing="$missing $soname"; done
           [ -z "$missing" ] || { echo "::error::runner image is missing:$missing (rebuild arc-runner)"; exit 1; }
+      - name: Format check
+        if: matrix.unit
+        run: bun run format:check
       - name: Typecheck
         if: matrix.unit
         run: bun run typecheck

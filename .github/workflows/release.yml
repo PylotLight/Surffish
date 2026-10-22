@@ -6,19 +6,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'patch | minor | major | current | X.Y.Z'
+        description: "patch | minor | major | current | X.Y.Z"
         required: true
         default: patch
       dry_run:
-        description: 'build + verify only, publish nothing'
+        description: "build + verify only, publish nothing"
         type: boolean
         default: true
       resume:
-        description: 'finish a release whose tag is already on origin (bun run release --resume)'
+        description: "finish a release whose tag is already on origin (bun run release --resume)"
         type: boolean
         default: false
       from_tag:
-        description: 'build + publish the existing tag vVERSION (version = X.Y.Z) instead of main; implies resume'
+        description: "build + publish the existing tag vVERSION (version = X.Y.Z) instead of main; implies resume"
         type: boolean
         default: false
 
@@ -131,7 +131,7 @@ jobs:
       VERSION: ${{ needs.mac.outputs.version }}
       DRY_RUN: ${{ inputs.dry_run }}
       NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
-      PKG: '@pylotlight/surffish'
+      PKG: "@pylotlight/surffish"
     steps:
       - name: Publish or skip?
         id: gate

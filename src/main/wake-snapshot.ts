@@ -1,4 +1,9 @@
-import { ipcMain, type BaseWindow, type NativeImage, type WebContents } from 'electron'
+import {
+  ipcMain,
+  type BaseWindow,
+  type NativeImage,
+  type WebContents,
+} from "electron";
 import {
   nextWakeSnapshotPhase,
   parseWakeSnapshotInput,
@@ -18,10 +23,18 @@ import {
   type WakeSnapshotEvent,
   type WakeSnapshotInput,
   type WakeSnapshotPhase,
-  type WakeSnapshotShowMessage
-} from '../shared/wake-snapshot'
-import { getOverlayToolbarContents, setPageCoverLostListener, setToolbarPageCover } from './browser-shell'
-import { hasWakeSnapshotOnDisk, readWakeSnapshotFromDisk, saveWakeSnapshotToDisk } from './wake-snapshot-disk'
+  type WakeSnapshotShowMessage,
+} from "../shared/wake-snapshot";
+import {
+  getOverlayToolbarContents,
+  setPageCoverLostListener,
+  setToolbarPageCover,
+} from "./browser-shell";
+import {
+  hasWakeSnapshotOnDisk,
+  readWakeSnapshotFromDisk,
+  saveWakeSnapshotToDisk,
+} from "./wake-snapshot-disk";
 
 /**
  * Wake snapshots (rules in shared/wake-snapshot.ts): the last on-screen picture of a tab, shown by
@@ -32,34 +45,34 @@ import { hasWakeSnapshotOnDisk, readWakeSnapshotFromDisk, saveWakeSnapshotToDisk
  */
 
 interface StoredSnapshot {
-  jpeg: Buffer
+  jpeg: Buffer;
   /** Page area (DIP) when it was taken. */
-  width: number
-  height: number
-  url: string
-  isPrivate: boolean
-  bytes: number
+  width: number;
+  height: number;
+  url: string;
+  isPrivate: boolean;
+  bytes: number;
 }
 
 interface Presentation {
-  token: number
-  window: BaseWindow
-  tabId: string
-  page: WebContents
-  toolbar: WebContents
-  rect: { x: number; y: number; width: number; height: number }
-  phase: WakeSnapshotPhase
+  token: number;
+  window: BaseWindow;
+  tabId: string;
+  page: WebContents;
+  toolbar: WebContents;
+  rect: { x: number; y: number; width: number; height: number };
+  phase: WakeSnapshotPhase;
   /** A press went to the page through the toolbar: keep covering until its release, so the drag/click stays whole. */
-  pointerHeld: boolean
-  timers: Set<ReturnType<typeof setTimeout>>
-  cleanup: () => void
+  pointerHeld: boolean;
+  timers: Set<ReturnType<typeof setTimeout>>;
+  cleanup: () => void;
 }
 
-const store = new WakeSnapshotStore<StoredSnapshot>()
-const presentations = new Map<BaseWindow, Presentation>()
-let nextToken = 1
-let registered = false
-const DEBUG = process.env.SURFFISH_WAKE_SNAPSHOT_DEBUG === '1'
+const store = new WakeSnapshotStore<StoredSnapshot>();
+const presentations = new Map<BaseWindow, Presentation>();
+let nextToken = 1;
+let registered = false;
+const DEBUG = process.env.SURFFISH_WAKE_SNAPSHOT_DEBUG === "1";
 
 // Paint timing from an isolated world (pages can't fake or break it). Resolves true on the first
 // contentful paint, false when none comes before the cap.
@@ -74,13 +87,15 @@ const FIRST_PAINT_SCRIPT = `new Promise((resolve) => {
     observer.observe({ type: 'paint', buffered: true })
   } catch { return resolve(false) }
   setTimeout(() => done(false), ${WAKE_SNAPSHOT_MAX_SHOW_MS})
-})`
-const PAINT_WORLD_ID = 1907
+})`;
+const PAINT_WORLD_ID = 1907;
 /** A capture at the width snapshots are stored at: device pixels, only scaled down past WAKE_SNAPSHOT_MAX_WIDTH. */
 function scaleForWakeSnapshot(image: NativeImage): NativeImage {
-  const size = image.getSize()
-  const width = wakeSnapshotWidth(size.width)
-  return width > 0 && width < size.width ? image.resize({ width, quality: 'good' }) : image
+  const size = image.getSize();
+  const width = wakeSnapshotWidth(size.width);
+  return width > 0 && width < size.width
+    ? image.resize({ width, quality: "good" })
+    : image;
 }
 
 /**
@@ -88,133 +103,192 @@ function scaleForWakeSnapshot(image: NativeImage): NativeImage {
  * thumbnail is made from (no extra capture), kept at its device pixels. The caller defers this past
  * the switch so the tab coming on screen gets its frames first (browser.ts, encodeTabPicture).
  */
-export function keepWakeSnapshot(tabId: string, capture: NativeImage, pageSize: { width: number; height: number }, url: string, isPrivate: boolean, partition: string): void {
+export function keepWakeSnapshot(
+  tabId: string,
+  capture: NativeImage,
+  pageSize: { width: number; height: number },
+  url: string,
+  isPrivate: boolean,
+  partition: string,
+): void {
   try {
-    if (capture.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0)) return
-    const started = DEBUG ? performance.now() : 0
-    const scaled = scaleForWakeSnapshot(capture)
-    const jpeg = scaled.toJPEG(WAKE_SNAPSHOT_JPEG_QUALITY)
-    const kept = store.set(tabId, { jpeg, width: pageSize.width, height: pageSize.height, url, isPrivate, bytes: jpeg.length })
+    if (capture.isEmpty() || !(pageSize.width > 0 && pageSize.height > 0))
+      return;
+    const started = DEBUG ? performance.now() : 0;
+    const scaled = scaleForWakeSnapshot(capture);
+    const jpeg = scaled.toJPEG(WAKE_SNAPSHOT_JPEG_QUALITY);
+    const kept = store.set(tabId, {
+      jpeg,
+      width: pageSize.width,
+      height: pageSize.height,
+      url,
+      isPrivate,
+      bytes: jpeg.length,
+    });
     // The same bytes go to disk a moment later (one write per burst of switches); never a private page.
-    if (kept && !isPrivate) saveWakeSnapshotToDisk(url, partition, jpeg, pageSize)
-    if (DEBUG) console.info(`[wake-snapshot] ${kept ? 'kept' : 'dropped'} ${tabId} ${scaled.getSize().width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`)
+    if (kept && !isPrivate)
+      saveWakeSnapshotToDisk(url, partition, jpeg, pageSize);
+    if (DEBUG)
+      console.info(
+        `[wake-snapshot] ${kept ? "kept" : "dropped"} ${tabId} ${scaled.getSize().width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`,
+      );
   } catch (error) {
-    console.warn('[wake-snapshot] could not keep a snapshot:', error)
+    console.warn("[wake-snapshot] could not keep a snapshot:", error);
   }
 }
 
 /** Whether the tab has a stored snapshot of `url` that would still fit `pageArea`. */
-export function hasWakeSnapshot(tabId: string, url: string, pageArea: { width: number; height: number }): boolean {
-  const entry = store.get(tabId)
-  return entry !== undefined && wakeSnapshotMatchesUrl(entry.url, url) && wakeSnapshotFits({ width: entry.width, height: entry.height }, pageArea)
+export function hasWakeSnapshot(
+  tabId: string,
+  url: string,
+  pageArea: { width: number; height: number },
+): boolean {
+  const entry = store.get(tabId);
+  return (
+    entry !== undefined &&
+    wakeSnapshotMatchesUrl(entry.url, url) &&
+    wakeSnapshotFits({ width: entry.width, height: entry.height }, pageArea)
+  );
 }
 
 export function dropWakeSnapshot(tabId: string): void {
-  store.delete(tabId)
+  store.delete(tabId);
 }
 
 /** Private browsing ended: nothing from it may outlive it. */
 export function dropPrivateWakeSnapshots(): void {
-  store.deleteWhere((entry) => entry.isPrivate)
+  store.deleteWhere((entry) => entry.isPrivate);
 }
 
 function clearTimers(presentation: Presentation): void {
-  for (const timer of presentation.timers) clearTimeout(timer)
-  presentation.timers.clear()
+  for (const timer of presentation.timers) clearTimeout(timer);
+  presentation.timers.clear();
 }
 
 function later(presentation: Presentation, ms: number, run: () => void): void {
   const timer = setTimeout(() => {
-    presentation.timers.delete(timer)
-    run()
-  }, ms)
-  presentation.timers.add(timer)
+    presentation.timers.delete(timer);
+    run();
+  }, ms);
+  presentation.timers.add(timer);
 }
 
 function finish(presentation: Presentation): void {
-  if (presentations.get(presentation.window) !== presentation) return
-  presentations.delete(presentation.window)
-  clearTimers(presentation)
-  presentation.cleanup()
-  presentation.phase = 'gone'
-  if (!presentation.toolbar.isDestroyed()) presentation.toolbar.send(WAKE_SNAPSHOT_HIDE_CHANNEL, presentation.token)
-  if (!presentation.window.isDestroyed()) setToolbarPageCover(presentation.window, false)
+  if (presentations.get(presentation.window) !== presentation) return;
+  presentations.delete(presentation.window);
+  clearTimers(presentation);
+  presentation.cleanup();
+  presentation.phase = "gone";
+  if (!presentation.toolbar.isDestroyed())
+    presentation.toolbar.send(WAKE_SNAPSHOT_HIDE_CHANNEL, presentation.token);
+  if (!presentation.window.isDestroyed())
+    setToolbarPageCover(presentation.window, false);
 }
 
 function advance(presentation: Presentation, event: WakeSnapshotEvent): void {
-  if (presentations.get(presentation.window) !== presentation) return
-  const next = nextWakeSnapshotPhase(presentation.phase, event)
-  if (next === presentation.phase) return
-  if (next === 'gone') {
+  if (presentations.get(presentation.window) !== presentation) return;
+  const next = nextWakeSnapshotPhase(presentation.phase, event);
+  if (next === presentation.phase) return;
+  if (next === "gone") {
     // A press on its way to the page keeps the cover (not the picture) until its release.
-    if (presentation.pointerHeld && event === 'input') {
-      presentation.phase = 'fading'
-      if (!presentation.toolbar.isDestroyed()) presentation.toolbar.send(WAKE_SNAPSHOT_HIDE_CHANNEL, presentation.token)
-      return
+    if (presentation.pointerHeld && event === "input") {
+      presentation.phase = "fading";
+      if (!presentation.toolbar.isDestroyed())
+        presentation.toolbar.send(
+          WAKE_SNAPSHOT_HIDE_CHANNEL,
+          presentation.token,
+        );
+      return;
     }
-    finish(presentation)
-    return
+    finish(presentation);
+    return;
   }
-  presentation.phase = next
-  if (!presentation.toolbar.isDestroyed()) presentation.toolbar.send(WAKE_SNAPSHOT_FADE_CHANNEL, presentation.token)
+  presentation.phase = next;
+  if (!presentation.toolbar.isDestroyed())
+    presentation.toolbar.send(WAKE_SNAPSHOT_FADE_CHANNEL, presentation.token);
   // The renderer reports the end of the fade; never rely on it alone.
-  later(presentation, WAKE_SNAPSHOT_FADE_MS + 400, () => { if (!presentation.pointerHeld) finish(presentation) })
+  later(presentation, WAKE_SNAPSHOT_FADE_MS + 400, () => {
+    if (!presentation.pointerHeld) finish(presentation);
+  });
 }
 
 /** Tab switched away, closed, or the page area changed: take the picture down at once. */
-export function endWakeSnapshot(window: BaseWindow, unlessTabId?: string): void {
-  const presentation = presentations.get(window)
-  if (!presentation || presentation.tabId === unlessTabId) return
-  presentation.pointerHeld = false
-  finish(presentation)
+export function endWakeSnapshot(
+  window: BaseWindow,
+  unlessTabId?: string,
+): void {
+  const presentation = presentations.get(window);
+  if (!presentation || presentation.tabId === unlessTabId) return;
+  presentation.pointerHeld = false;
+  finish(presentation);
 }
 
 export function endWakeSnapshotForTab(tabId: string): void {
   for (const presentation of [...presentations.values()]) {
     if (presentation.tabId === tabId) {
-      presentation.pointerHeld = false
-      finish(presentation)
+      presentation.pointerHeld = false;
+      finish(presentation);
     }
   }
 }
 
 function watchFirstPaint(presentation: Presentation): () => void {
-  const { page } = presentation
-  let probing = false
+  const { page } = presentation;
+  let probing = false;
   const probe = (): void => {
-    if (probing || page.isDestroyed() || presentations.get(presentation.window) !== presentation) return
-    probing = true
-    void page.executeJavaScriptInIsolatedWorld(PAINT_WORLD_ID, [{ code: FIRST_PAINT_SCRIPT }])
-      .then((painted: unknown) => {
-        probing = false
-        if (painted === true) advance(presentation, 'painted')
-      }, () => {
-        // The document went away under the probe (redirect, replaced load): the next commit asks again.
-        probing = false
-      })
-  }
-  const onNavigate = (): void => probe()
-  const onDomReady = (): void => probe()
-  const onFinish = (): void => later(presentation, WAKE_SNAPSHOT_LOAD_GRACE_MS, () => advance(presentation, 'loaded'))
-  const onFail = (_event: Electron.Event, errorCode: number, _description: string, _url: string, isMainFrame: boolean): void => {
-    if (isMainFrame && errorCode !== -3) advance(presentation, 'failed')
-  }
-  const onGone = (): void => advance(presentation, 'failed')
-  page.on('did-navigate', onNavigate)
-  page.on('dom-ready', onDomReady)
-  page.on('did-finish-load', onFinish)
-  page.on('did-fail-load', onFail)
-  page.on('render-process-gone', onGone)
-  page.on('destroyed', onGone)
+    if (
+      probing ||
+      page.isDestroyed() ||
+      presentations.get(presentation.window) !== presentation
+    )
+      return;
+    probing = true;
+    void page
+      .executeJavaScriptInIsolatedWorld(PAINT_WORLD_ID, [
+        { code: FIRST_PAINT_SCRIPT },
+      ])
+      .then(
+        (painted: unknown) => {
+          probing = false;
+          if (painted === true) advance(presentation, "painted");
+        },
+        () => {
+          // The document went away under the probe (redirect, replaced load): the next commit asks again.
+          probing = false;
+        },
+      );
+  };
+  const onNavigate = (): void => probe();
+  const onDomReady = (): void => probe();
+  const onFinish = (): void =>
+    later(presentation, WAKE_SNAPSHOT_LOAD_GRACE_MS, () =>
+      advance(presentation, "loaded"),
+    );
+  const onFail = (
+    _event: Electron.Event,
+    errorCode: number,
+    _description: string,
+    _url: string,
+    isMainFrame: boolean,
+  ): void => {
+    if (isMainFrame && errorCode !== -3) advance(presentation, "failed");
+  };
+  const onGone = (): void => advance(presentation, "failed");
+  page.on("did-navigate", onNavigate);
+  page.on("dom-ready", onDomReady);
+  page.on("did-finish-load", onFinish);
+  page.on("did-fail-load", onFail);
+  page.on("render-process-gone", onGone);
+  page.on("destroyed", onGone);
   return () => {
-    if (page.isDestroyed()) return
-    page.off('did-navigate', onNavigate)
-    page.off('dom-ready', onDomReady)
-    page.off('did-finish-load', onFinish)
-    page.off('did-fail-load', onFail)
-    page.off('render-process-gone', onGone)
-    page.off('destroyed', onGone)
-  }
+    if (page.isDestroyed()) return;
+    page.off("did-navigate", onNavigate);
+    page.off("dom-ready", onDomReady);
+    page.off("did-finish-load", onFinish);
+    page.off("did-fail-load", onFail);
+    page.off("render-process-gone", onGone);
+    page.off("destroyed", onGone);
+  };
 }
 
 /**
@@ -222,21 +296,42 @@ function watchFirstPaint(presentation: Presentation): () => void {
  * show its snapshot over the page area until the page paints. False when there is nothing fit to
  * show (no snapshot, another page, a different page-area size, New Tab/a panel on screen).
  */
-export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: WebContents, rect: { x: number; y: number; width: number; height: number }, targetUrl: string, diskPartition: string | null = null): boolean {
-  endWakeSnapshot(window)
+export function presentWakeSnapshot(
+  window: BaseWindow,
+  tabId: string,
+  page: WebContents,
+  rect: { x: number; y: number; width: number; height: number },
+  targetUrl: string,
+  diskPartition: string | null = null,
+): boolean {
+  endWakeSnapshot(window);
   // Nothing in memory (a restored tab's first wake, or evicted): the picture saved on disk, if any.
-  const snapshot = store.take(tabId) ?? (diskPartition !== null ? readWakeSnapshotFromDisk(targetUrl, diskPartition, rect) : null)
+  const snapshot =
+    store.take(tabId) ??
+    (diskPartition !== null
+      ? readWakeSnapshotFromDisk(targetUrl, diskPartition, rect)
+      : null);
   const skip = (reason: string): false => {
-    if (DEBUG) console.info(`[wake-snapshot] not shown for ${tabId}: ${reason}`)
-    return false
-  }
-  if (!snapshot) return skip('no snapshot')
-  if (page.isDestroyed() || window.isDestroyed()) return skip('page or window gone')
-  if (!wakeSnapshotMatchesUrl(snapshot.url, targetUrl)) return skip(`another page (${snapshot.url} vs ${targetUrl})`)
-  if (!wakeSnapshotFits({ width: snapshot.width, height: snapshot.height }, rect)) return skip(`page area changed (${snapshot.width}x${snapshot.height} vs ${rect.width}x${rect.height})`)
-  const toolbar = getOverlayToolbarContents(window)
-  if (!toolbar) return skip('no overlay toolbar (New Tab or a panel on screen)')
-  if (!setToolbarPageCover(window, true)) return skip('could not cover the page area')
+    if (DEBUG)
+      console.info(`[wake-snapshot] not shown for ${tabId}: ${reason}`);
+    return false;
+  };
+  if (!snapshot) return skip("no snapshot");
+  if (page.isDestroyed() || window.isDestroyed())
+    return skip("page or window gone");
+  if (!wakeSnapshotMatchesUrl(snapshot.url, targetUrl))
+    return skip(`another page (${snapshot.url} vs ${targetUrl})`);
+  if (
+    !wakeSnapshotFits({ width: snapshot.width, height: snapshot.height }, rect)
+  )
+    return skip(
+      `page area changed (${snapshot.width}x${snapshot.height} vs ${rect.width}x${rect.height})`,
+    );
+  const toolbar = getOverlayToolbarContents(window);
+  if (!toolbar)
+    return skip("no overlay toolbar (New Tab or a panel on screen)");
+  if (!setToolbarPageCover(window, true))
+    return skip("could not cover the page area");
   const presentation: Presentation = {
     token: nextToken++,
     window,
@@ -244,25 +339,27 @@ export function presentWakeSnapshot(window: BaseWindow, tabId: string, page: Web
     page,
     toolbar,
     rect: { ...rect },
-    phase: 'showing',
+    phase: "showing",
     pointerHeld: false,
     timers: new Set(),
-    cleanup: () => {}
-  }
-  presentations.set(window, presentation)
-  presentation.cleanup = watchFirstPaint(presentation)
-  later(presentation, WAKE_SNAPSHOT_MAX_SHOW_MS, () => advance(presentation, 'timeout'))
+    cleanup: () => {},
+  };
+  presentations.set(window, presentation);
+  presentation.cleanup = watchFirstPaint(presentation);
+  later(presentation, WAKE_SNAPSHOT_MAX_SHOW_MS, () =>
+    advance(presentation, "timeout"),
+  );
   const message: WakeSnapshotShowMessage = {
     token: presentation.token,
-    src: `data:image/jpeg;base64,${snapshot.jpeg.toString('base64')}`,
-    rect: presentation.rect
-  }
-  toolbar.send(WAKE_SNAPSHOT_SHOW_CHANNEL, message)
-  return true
+    src: `data:image/jpeg;base64,${snapshot.jpeg.toString("base64")}`,
+    rect: presentation.rect,
+  };
+  toolbar.send(WAKE_SNAPSHOT_SHOW_CHANNEL, message);
+  return true;
 }
 
-const STARTUP_RETRY_MS = 16
-const STARTUP_MAX_TRIES = 150
+const STARTUP_RETRY_MS = 16;
+const STARTUP_MAX_TRIES = 150;
 
 /**
  * Start-up: a restored window's active tab is loading while the window comes up. When a picture of
@@ -270,85 +367,155 @@ const STARTUP_MAX_TRIES = 150
  * the page got there first (its DOM is ready) or the tab is no longer the one on screen.
  * Nothing at all (no listener, no timer) when no picture is saved.
  */
-export function presentWakeSnapshotAtStartup(window: BaseWindow, tabId: string, page: WebContents, rect: () => { x: number; y: number; width: number; height: number }, targetUrl: string, partition: string, stillOnScreen: () => boolean): void {
-  if (page.isDestroyed() || !hasWakeSnapshotOnDisk(targetUrl, partition)) return
-  let pageReady = false
-  const onPageReady = (): void => { pageReady = true }
-  page.once('dom-ready', onPageReady)
+export function presentWakeSnapshotAtStartup(
+  window: BaseWindow,
+  tabId: string,
+  page: WebContents,
+  rect: () => { x: number; y: number; width: number; height: number },
+  targetUrl: string,
+  partition: string,
+  stillOnScreen: () => boolean,
+): void {
+  if (page.isDestroyed() || !hasWakeSnapshotOnDisk(targetUrl, partition))
+    return;
+  let pageReady = false;
+  const onPageReady = (): void => {
+    pageReady = true;
+  };
+  page.once("dom-ready", onPageReady);
   const attempt = (tries: number): void => {
-    if (window.isDestroyed() || page.isDestroyed() || pageReady || !stillOnScreen() || presentations.has(window)) {
-      if (DEBUG) console.info(`[wake-snapshot] start-up picture skipped: ready=${pageReady} onScreen=${stillOnScreen()} try ${tries}`)
-      if (!page.isDestroyed()) page.off('dom-ready', onPageReady)
-      return
+    if (
+      window.isDestroyed() ||
+      page.isDestroyed() ||
+      pageReady ||
+      !stillOnScreen() ||
+      presentations.has(window)
+    ) {
+      if (DEBUG)
+        console.info(
+          `[wake-snapshot] start-up picture skipped: ready=${pageReady} onScreen=${stillOnScreen()} try ${tries}`,
+        );
+      if (!page.isDestroyed()) page.off("dom-ready", onPageReady);
+      return;
     }
-    const toolbar = getOverlayToolbarContents(window)
-    const area = rect()
-    if (!toolbar || toolbar.isLoadingMainFrame() || !(area.width > 0 && area.height > 0)) {
+    const toolbar = getOverlayToolbarContents(window);
+    const area = rect();
+    if (
+      !toolbar ||
+      toolbar.isLoadingMainFrame() ||
+      !(area.width > 0 && area.height > 0)
+    ) {
       if (tries >= STARTUP_MAX_TRIES) {
-        if (DEBUG) console.info(`[wake-snapshot] start-up picture gave up: toolbar=${Boolean(toolbar)} loading=${toolbar?.isLoadingMainFrame()} area=${area.width}x${area.height}`)
-        page.off('dom-ready', onPageReady)
-        return
+        if (DEBUG)
+          console.info(
+            `[wake-snapshot] start-up picture gave up: toolbar=${Boolean(toolbar)} loading=${toolbar?.isLoadingMainFrame()} area=${area.width}x${area.height}`,
+          );
+        page.off("dom-ready", onPageReady);
+        return;
       }
       // The toolbar's own load is one event; the page area and overlay settle a frame or two after.
       // The toolbar's page and the page area (reported by the shell's first layout) settle within a few frames.
-      setTimeout(() => attempt(tries + 1), STARTUP_RETRY_MS)
-      return
+      setTimeout(() => attempt(tries + 1), STARTUP_RETRY_MS);
+      return;
     }
-    page.off('dom-ready', onPageReady)
-    const shown = presentWakeSnapshot(window, tabId, page, area, targetUrl, partition)
-    if (DEBUG) console.info(`[wake-snapshot] start-up picture for ${tabId}: ${shown ? 'shown' : 'not shown'} (try ${tries})`)
-  }
-  attempt(0)
+    page.off("dom-ready", onPageReady);
+    const shown = presentWakeSnapshot(
+      window,
+      tabId,
+      page,
+      area,
+      targetUrl,
+      partition,
+    );
+    if (DEBUG)
+      console.info(
+        `[wake-snapshot] start-up picture for ${tabId}: ${shown ? "shown" : "not shown"} (try ${tries})`,
+      );
+  };
+  attempt(0);
 }
 
-function forwardToPage(presentation: Presentation, input: WakeSnapshotInput): void {
-  const { page, rect } = presentation
-  if (page.isDestroyed()) return
-  if (input.kind === 'key') {
-    page.focus()
-    return
+function forwardToPage(
+  presentation: Presentation,
+  input: WakeSnapshotInput,
+): void {
+  const { page, rect } = presentation;
+  if (page.isDestroyed()) return;
+  if (input.kind === "key") {
+    page.focus();
+    return;
   }
-  const x = Math.round(input.x - rect.x)
-  const y = Math.round(input.y - rect.y)
-  const modifiers = input.modifiers as Electron.MouseInputEvent['modifiers']
-  if (input.kind === 'mouseWheel') {
-    page.sendInputEvent({ type: 'mouseWheel', x, y, deltaX: -input.deltaX, deltaY: -input.deltaY, canScroll: true, modifiers })
-    return
+  const x = Math.round(input.x - rect.x);
+  const y = Math.round(input.y - rect.y);
+  const modifiers = input.modifiers as Electron.MouseInputEvent["modifiers"];
+  if (input.kind === "mouseWheel") {
+    page.sendInputEvent({
+      type: "mouseWheel",
+      x,
+      y,
+      deltaX: -input.deltaX,
+      deltaY: -input.deltaY,
+      canScroll: true,
+      modifiers,
+    });
+    return;
   }
-  if (input.kind === 'mouseDown') page.focus()
-  page.sendInputEvent({ type: input.kind, x, y, button: input.button, clickCount: input.clickCount, modifiers })
+  if (input.kind === "mouseDown") page.focus();
+  page.sendInputEvent({
+    type: input.kind,
+    x,
+    y,
+    button: input.button,
+    clickCount: input.clickCount,
+    modifiers,
+  });
 }
 
 export function registerWakeSnapshotIpc(): void {
-  if (registered) return
-  registered = true
+  if (registered) return;
+  registered = true;
   setPageCoverLostListener((window) => {
-    const presentation = presentations.get(window)
-    if (!presentation) return
-    presentation.pointerHeld = false
-    finish(presentation)
-  })
+    const presentation = presentations.get(window);
+    if (!presentation) return;
+    presentation.pointerHeld = false;
+    finish(presentation);
+  });
   ipcMain.on(WAKE_SNAPSHOT_FADED_CHANNEL, (event, token: unknown) => {
     for (const presentation of presentations.values()) {
-      if (presentation.token === token && presentation.toolbar === event.sender && !presentation.pointerHeld && presentation.phase === 'fading') {
-        advance(presentation, 'faded')
+      if (
+        presentation.token === token &&
+        presentation.toolbar === event.sender &&
+        !presentation.pointerHeld &&
+        presentation.phase === "fading"
+      ) {
+        advance(presentation, "faded");
       }
     }
-  })
-  ipcMain.on(WAKE_SNAPSHOT_INPUT_CHANNEL, (event, token: unknown, raw: unknown) => {
-    const presentation = [...presentations.values()].find((candidate) => candidate.token === token && candidate.toolbar === event.sender)
-    const input = parseWakeSnapshotInput(raw)
-    if (!presentation || !input) return
-    if (input.kind === 'mouseDown') presentation.pointerHeld = true
-    forwardToPage(presentation, input)
-    if (input.kind === 'mouseUp') {
-      presentation.pointerHeld = false
-      finish(presentation)
-      return
-    }
-    if (input.kind === 'mouseMove') return
-    advance(presentation, 'input')
-    // A press whose release never reaches us (pointer capture lost) must not keep the cover up.
-    if (presentation.pointerHeld) later(presentation, 3000, () => { presentation.pointerHeld = false; finish(presentation) })
-  })
+  });
+  ipcMain.on(
+    WAKE_SNAPSHOT_INPUT_CHANNEL,
+    (event, token: unknown, raw: unknown) => {
+      const presentation = [...presentations.values()].find(
+        (candidate) =>
+          candidate.token === token && candidate.toolbar === event.sender,
+      );
+      const input = parseWakeSnapshotInput(raw);
+      if (!presentation || !input) return;
+      if (input.kind === "mouseDown") presentation.pointerHeld = true;
+      forwardToPage(presentation, input);
+      if (input.kind === "mouseUp") {
+        presentation.pointerHeld = false;
+        finish(presentation);
+        return;
+      }
+      if (input.kind === "mouseMove") return;
+      advance(presentation, "input");
+      // A press whose release never reaches us (pointer capture lost) must not keep the cover up.
+      if (presentation.pointerHeld)
+        later(presentation, 3000, () => {
+          presentation.pointerHeld = false;
+          finish(presentation);
+        });
+    },
+  );
 }

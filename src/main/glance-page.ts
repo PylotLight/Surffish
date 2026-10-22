@@ -70,4 +70,4 @@ export const GLANCE_PAGE_HTML = `<!doctype html>
   document.getElementById('split').addEventListener('click', () => window.glance.split())
   document.getElementById('back').addEventListener('click', () => window.glance.back())
 </script>
-</body></html>`
+</body></html>`;

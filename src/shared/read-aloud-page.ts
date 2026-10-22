@@ -10,18 +10,18 @@
  */
 
 /** The ::highlight() name; main inserts its style as a user stylesheet while a reading runs. */
-export const READ_ALOUD_HIGHLIGHT_NAME = 'surffish-read-aloud'
-export const READ_ALOUD_HIGHLIGHT_CSS = `::highlight(${READ_ALOUD_HIGHLIGHT_NAME}) { background-color: rgba(255, 200, 61, 0.42); color: inherit; }`
+export const READ_ALOUD_HIGHLIGHT_NAME = "surffish-read-aloud";
+export const READ_ALOUD_HIGHLIGHT_CSS = `::highlight(${READ_ALOUD_HIGHLIGHT_NAME}) { background-color: rgba(255, 200, 61, 0.42); color: inherit; }`;
 
 /** Letters and digits of `text`, lower-cased. */
 export function foldText(text: string): string {
-  let out = ''
+  let out = "";
   for (const char of text) {
-    if (!/[\p{L}\p{N}]/u.test(char)) continue
-    const lower = char.toLowerCase()
-    out += lower.length === char.length ? lower : char
+    if (!/[\p{L}\p{N}]/u.test(char)) continue;
+    const lower = char.toLowerCase();
+    out += lower.length === char.length ? lower : char;
   }
-  return out
+  return out;
 }
 
 /**
@@ -30,40 +30,48 @@ export function foldText(text: string): string {
  * extended by the needle's length. [start, end) in folded offsets, or null. Self-contained: it is
  * inlined into the page script.
  */
-export function locateFolded(folded: string, needle: string, from = 0): [number, number] | null {
-  let wanted = ''
+export function locateFolded(
+  folded: string,
+  needle: string,
+  from = 0,
+): [number, number] | null {
+  let wanted = "";
   for (const char of needle) {
-    if (!/[\p{L}\p{N}]/u.test(char)) continue
-    const lower = char.toLowerCase()
-    wanted += lower.length === char.length ? lower : char
+    if (!/[\p{L}\p{N}]/u.test(char)) continue;
+    const lower = char.toLowerCase();
+    wanted += lower.length === char.length ? lower : char;
   }
-  if (wanted.length < 2) return null
-  const start = Math.max(0, from)
-  let at = folded.indexOf(wanted, start)
-  if (at >= 0) return [at, at + wanted.length]
-  if (wanted.length <= 32) return null
-  at = folded.indexOf(wanted.slice(0, 32), start)
-  return at >= 0 ? [at, Math.min(folded.length, at + wanted.length)] : null
+  if (wanted.length < 2) return null;
+  const start = Math.max(0, from);
+  let at = folded.indexOf(wanted, start);
+  if (at >= 0) return [at, at + wanted.length];
+  if (wanted.length <= 32) return null;
+  at = folded.indexOf(wanted.slice(0, 32), start);
+  return at >= 0 ? [at, Math.min(folded.length, at + wanted.length)] : null;
 }
 
 /**
  * The sentence `probe` (text from a point in the page onwards) starts in, or null when it isn't in
  * them: the probe's first ~60 letters/digits are looked up in the sentences joined together.
  */
-export function sentenceIndexForProbe(sentences: readonly string[], probe: string): number | null {
-  const starts: number[] = []
-  let joined = ''
+export function sentenceIndexForProbe(
+  sentences: readonly string[],
+  probe: string,
+): number | null {
+  const starts: number[] = [];
+  let joined = "";
   for (const sentence of sentences) {
-    starts.push(joined.length)
-    joined += foldText(sentence)
+    starts.push(joined.length);
+    joined += foldText(sentence);
   }
-  const head = foldText(probe).slice(0, 60)
-  if (head.length < 4) return null
-  const found = locateFolded(joined, head)
-  if (!found) return null
-  let index = 0
-  while (index + 1 < starts.length && starts[index + 1]! <= found[0]) index += 1
-  return index
+  const head = foldText(probe).slice(0, 60);
+  if (head.length < 4) return null;
+  const found = locateFolded(joined, head);
+  if (!found) return null;
+  let index = 0;
+  while (index + 1 < starts.length && starts[index + 1]! <= found[0])
+    index += 1;
+  return index;
 }
 
 /**
@@ -183,5 +191,5 @@ export function pageScriptSource(): string {
   }
   window.__surffishReadAloud = { mark, clear, fromPoint }
   return true
-})()`
+})()`;
 }

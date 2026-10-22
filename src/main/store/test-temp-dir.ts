@@ -1,9 +1,9 @@
-import { accessSync, constants, mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { accessSync, constants, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** How long (ms) a file-backed SQLite test may take before bun fails it (bun defaults to 5 s). */
-export const FILE_DB_TEST_TIMEOUT_MS = 30_000
+export const FILE_DB_TEST_TIMEOUT_MS = 30_000;
 
 /**
  * A fresh directory for unit tests that open real surffish.db files. On Linux it lives in /dev/shm
@@ -13,15 +13,17 @@ export const FILE_DB_TEST_TIMEOUT_MS = 30_000
  * to the OS temp dir everywhere else.
  */
 export function storeTestDir(prefix: string): string {
-  return mkdtempSync(join(fastTempRoot(), prefix))
+  return mkdtempSync(join(fastTempRoot(), prefix));
 }
 
 function fastTempRoot(): string {
-  if (process.platform === 'linux') {
+  if (process.platform === "linux") {
     try {
-      accessSync('/dev/shm', constants.W_OK)
-      return '/dev/shm'
-    } catch { /* no writable tmpfs */ }
+      accessSync("/dev/shm", constants.W_OK);
+      return "/dev/shm";
+    } catch {
+      /* no writable tmpfs */
+    }
   }
-  return tmpdir()
+  return tmpdir();
 }

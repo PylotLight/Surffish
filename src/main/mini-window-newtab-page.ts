@@ -155,4 +155,4 @@ export const MINI_WINDOW_NEW_TAB_HTML = `<!doctype html>
   // A click on the empty page: the address field (shown and focused again if it was put away).
   document.body.addEventListener('mousedown', (event) => { if (!event.target.closest('.site, #credit a')) { event.preventDefault(); window.miniWindow.showAddress() } })
 </script>
-</body></html>`
+</body></html>`;

@@ -29,13 +29,14 @@
   margin-left: 4px;
 }
 
-.browser-toolbar-trailing :is(
-  .omnibox-action-button,
-  .bramble-toolbar-button,
-  .extension-toolbar-button,
-  .extension-overflow-button,
-  .downloads-toolbar-button
-) {
+.browser-toolbar-trailing
+  :is(
+    .omnibox-action-button,
+    .bramble-toolbar-button,
+    .extension-toolbar-button,
+    .extension-overflow-button,
+    .downloads-toolbar-button
+  ) {
   flex: 0 0 var(--toolbar-icon-hit);
   width: var(--toolbar-icon-hit);
   height: var(--toolbar-icon-hit);
@@ -46,26 +47,28 @@
   color: var(--toolbar-icon-color);
 }
 
-.browser-toolbar-trailing :is(
-  .omnibox-action-button,
-  .bramble-toolbar-button,
-  .extension-toolbar-button,
-  .extension-overflow-button,
-  .downloads-toolbar-button
-):is(:hover:not(:disabled), :focus-visible) {
+.browser-toolbar-trailing
+  :is(
+    .omnibox-action-button,
+    .bramble-toolbar-button,
+    .extension-toolbar-button,
+    .extension-overflow-button,
+    .downloads-toolbar-button
+  ):is(:hover:not(:disabled), :focus-visible) {
   background: var(--toolbar-icon-hover-bg);
   color: #fff;
   outline: 0;
 }
 
 /* Popup/menu open: one neutral pill for every button that opens one. */
-.browser-toolbar-trailing :is(
-  .bramble-toolbar-button[aria-expanded='true'],
-  .extension-toolbar-button.is-open,
-  .extension-overflow-button.is-open,
-  .downloads-toolbar-button.is-open,
-  .downloads-toolbar-button[aria-expanded='true']
-) {
+.browser-toolbar-trailing
+  :is(
+    .bramble-toolbar-button[aria-expanded="true"],
+    .extension-toolbar-button.is-open,
+    .extension-overflow-button.is-open,
+    .downloads-toolbar-button.is-open,
+    .downloads-toolbar-button[aria-expanded="true"]
+  ) {
   background: var(--toolbar-icon-open-bg);
   color: #fff;
 }
@@ -76,11 +79,13 @@
   color: #a4edbd;
 }
 
-.browser-toolbar-trailing :is(
-  .omnibox-action-button,
-  .extension-overflow-button,
-  .downloads-toolbar-button
-) > svg {
+.browser-toolbar-trailing
+  :is(
+    .omnibox-action-button,
+    .extension-overflow-button,
+    .downloads-toolbar-button
+  )
+  > svg {
   display: block;
   width: var(--toolbar-icon-size);
   height: var(--toolbar-icon-size);
@@ -92,14 +97,20 @@
   stroke-linejoin: round;
 }
 
-.browser-toolbar-trailing :is(.bramble-toolbar-icon, .extension-toolbar-button .extension-toolbar-icon) {
+.browser-toolbar-trailing
+  :is(
+    .bramble-toolbar-icon,
+    .extension-toolbar-button .extension-toolbar-icon
+  ) {
   display: block;
   width: var(--toolbar-ext-icon-size);
   height: var(--toolbar-ext-icon-size);
   object-fit: contain;
 }
 
-.browser-toolbar-trailing .extension-toolbar-button .extension-toolbar-fallback {
+.browser-toolbar-trailing
+  .extension-toolbar-button
+  .extension-toolbar-fallback {
   width: var(--toolbar-ext-icon-size);
   height: var(--toolbar-ext-icon-size);
   font-size: 12px;

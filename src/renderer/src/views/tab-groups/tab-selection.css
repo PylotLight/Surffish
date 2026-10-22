@@ -2,7 +2,11 @@
 .tab-item.is-multi-selected,
 .tab-item.is-multi-selected:hover {
   border-color: rgba(96, 165, 250, 0.55);
-  background: linear-gradient(120deg, rgba(59, 130, 246, 0.26), rgba(59, 130, 246, 0.12));
+  background: linear-gradient(
+    120deg,
+    rgba(59, 130, 246, 0.26),
+    rgba(59, 130, 246, 0.12)
+  );
   box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.22);
   color: #fff;
 }

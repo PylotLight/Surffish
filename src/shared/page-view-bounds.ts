@@ -11,19 +11,30 @@
  * before the view is attached.
  */
 export interface ViewRect {
-  x: number
-  y: number
-  width: number
-  height: number
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** On screen: its rect (the page area, or its split pane). Off screen: null = leave it alone. */
-export function pageViewBounds(onScreen: boolean, rect: ViewRect): ViewRect | null {
-  return onScreen ? { ...rect } : null
+export function pageViewBounds(
+  onScreen: boolean,
+  rect: ViewRect,
+): ViewRect | null {
+  return onScreen ? { ...rect } : null;
 }
 
 /** A brand-new page view: the page area when it is known, else 0x0 (it gets sized before it's attached). */
-export function initialPageViewBounds(pageArea: ViewRect | null | undefined): ViewRect {
-  if (!pageArea || !(pageArea.width > 0) || !(pageArea.height > 0)) return { x: 0, y: 0, width: 0, height: 0 }
-  return { x: pageArea.x, y: pageArea.y, width: pageArea.width, height: pageArea.height }
+export function initialPageViewBounds(
+  pageArea: ViewRect | null | undefined,
+): ViewRect {
+  if (!pageArea || !(pageArea.width > 0) || !(pageArea.height > 0))
+    return { x: 0, y: 0, width: 0, height: 0 };
+  return {
+    x: pageArea.x,
+    y: pageArea.y,
+    width: pageArea.width,
+    height: pageArea.height,
+  };
 }

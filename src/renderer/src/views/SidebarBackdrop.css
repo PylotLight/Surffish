@@ -2,26 +2,47 @@
  * No CSS backdrop-filter here: in the sidebar surface it can only sample its own transparent view
  * (it blurred nothing and cost a full-sidebar blur per repaint, see #68), and on top of the native
  * blur it would double-blur. Each path gets a background that reads on its own. */
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-solid,
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-snapshot {
-  background: linear-gradient(160deg, rgba(31, 35, 41, 0.95), rgba(18, 21, 25, 0.96) 45%, rgba(12, 14, 17, 0.97));
+.app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-solid,
+.app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-snapshot {
+  background: linear-gradient(
+    160deg,
+    rgba(31, 35, 41, 0.95),
+    rgba(18, 21, 25, 0.96) 45%,
+    rgba(12, 14, 17, 0.97)
+  );
 }
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-solid.is-private-window,
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-snapshot.is-private-window {
-  background: linear-gradient(160deg, rgba(38, 31, 54, 0.95), rgba(21, 18, 30, 0.96) 45%, rgba(13, 12, 18, 0.97));
+.app-shell[data-surface="sidebar"]
+  .browser-sidebar.has-backdrop-solid.is-private-window,
+.app-shell[data-surface="sidebar"]
+  .browser-sidebar.has-backdrop-snapshot.is-private-window {
+  background: linear-gradient(
+    160deg,
+    rgba(38, 31, 54, 0.95),
+    rgba(21, 18, 30, 0.96) 45%,
+    rgba(13, 12, 18, 0.97)
+  );
 }
 /* Native compositor blur: the view itself is the tinted, blurred, rounded card (main sets it up
  * and insets it by the same --sidebar-card-inset), so the card fills the view instead of insetting
  * itself again, and only adds a faint sheen and its border. */
-.app-shell[data-surface='sidebar'] .browser-sidebar.is-view-framed {
+.app-shell[data-surface="sidebar"] .browser-sidebar.is-view-framed {
   top: 0;
   bottom: 0;
 }
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-native {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 40%);
+.app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-native {
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0) 40%
+  );
 }
-.app-shell[data-surface='sidebar'] .browser-sidebar.has-backdrop-native.is-private-window {
-  background: linear-gradient(160deg, rgba(150, 110, 255, 0.16), rgba(150, 110, 255, 0.04) 45%);
+.app-shell[data-surface="sidebar"]
+  .browser-sidebar.has-backdrop-native.is-private-window {
+  background: linear-gradient(
+    160deg,
+    rgba(150, 110, 255, 0.16),
+    rgba(150, 110, 255, 0.04) 45%
+  );
 }
 
 /* Snapshot: a static, pre-blurred canvas under a darkening tint, behind the sidebar's content. */
@@ -44,11 +65,23 @@
 .sidebar-backdrop-tint {
   position: absolute;
   inset: 0;
-  background: linear-gradient(160deg, rgba(24, 27, 33, 0.7), rgba(14, 16, 20, 0.76) 45%, rgba(10, 12, 15, 0.82));
+  background: linear-gradient(
+    160deg,
+    rgba(24, 27, 33, 0.7),
+    rgba(14, 16, 20, 0.76) 45%,
+    rgba(10, 12, 15, 0.82)
+  );
 }
 .is-private-window > .sidebar-backdrop .sidebar-backdrop-tint {
-  background: linear-gradient(160deg, rgba(40, 30, 62, 0.72), rgba(20, 16, 32, 0.78) 45%, rgba(12, 10, 18, 0.84));
+  background: linear-gradient(
+    160deg,
+    rgba(40, 30, 62, 0.72),
+    rgba(20, 16, 32, 0.78) 45%,
+    rgba(12, 10, 18, 0.84)
+  );
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-backdrop { transition: none; }
+  .sidebar-backdrop {
+    transition: none;
+  }
 }

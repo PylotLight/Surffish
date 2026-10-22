@@ -14,27 +14,30 @@
 
 export type AddressSyncReason =
   /** The active tab's URL (or New Tab state) changed. */
-  | 'url'
+  | "url"
   /** The input lost focus (to the page, another view, another window, or a toolbar button). */
-  | 'blur'
+  | "blur"
   /** Another tab became active: whatever was typed belonged to the old one. */
-  | 'tab'
+  | "tab";
 
 export interface AddressSyncInput {
   /** What the input shows now. */
-  value: string
+  value: string;
   /** The tab URL the input was last set to (what "unedited" means). */
-  synced: string
+  synced: string;
   /** What the tab wants shown now ('' on the local New Tab page). */
-  next: string
+  next: string;
   /** The input is the active element *and* its document has focus. */
-  typing: boolean
-  reason: AddressSyncReason
+  typing: boolean;
+  reason: AddressSyncReason;
 }
 
 /** What the address bar shows on a tab: nothing on the local New Tab page, otherwise its URL. */
-export function addressDisplayValue(url: string, isLocalNewTab: boolean): string {
-  return isLocalNewTab ? '' : url
+export function addressDisplayValue(
+  url: string,
+  isLocalNewTab: boolean,
+): string {
+  return isLocalNewTab ? "" : url;
 }
 
 /**
@@ -46,26 +49,43 @@ export function addressDisplayValue(url: string, isLocalNewTab: boolean): string
  * (stale, unedited) value made it look like the user had typed nothing, so the fresh URL replaced
  * the text they had just typed. Reading the input itself never sees an "unedited" bar mid-typing.
  */
-export function liveAddressValue(input: { value: string } | null | undefined, rendered: string): string {
-  return input ? input.value : rendered
+export function liveAddressValue(
+  input: { value: string } | null | undefined,
+  rendered: string,
+): string {
+  return input ? input.value : rendered;
 }
 
 /** The user changed the text since it was last synced from the tab. */
 export function isAddressEdited(value: string, synced: string): boolean {
-  return value !== synced
+  return value !== synced;
 }
 
 /** True only while the user can actually be typing into `input` (not just "it was the last focus"). */
-export function isTypingIn(input: unknown, doc: { activeElement: unknown; hasFocus(): boolean }): boolean {
-  return input !== null && input !== undefined && doc.activeElement === input && doc.hasFocus()
+export function isTypingIn(
+  input: unknown,
+  doc: { activeElement: unknown; hasFocus(): boolean },
+): boolean {
+  return (
+    input !== null &&
+    input !== undefined &&
+    doc.activeElement === input &&
+    doc.hasFocus()
+  );
 }
 
 /** The value the address bar should switch to, or null to keep what it shows. */
-export function nextAddressValue({ value, synced, next, typing, reason }: AddressSyncInput): string | null {
-  const edited = isAddressEdited(value, synced)
-  if (reason === 'tab') return value === next ? null : next
+export function nextAddressValue({
+  value,
+  synced,
+  next,
+  typing,
+  reason,
+}: AddressSyncInput): string | null {
+  const edited = isAddressEdited(value, synced);
+  if (reason === "tab") return value === next ? null : next;
   // Keep half-typed text while the user is typing, and (like Chrome) when they click away from it;
   // a navigation that happens after they left the bar replaces it.
-  if (edited && (typing || reason === 'blur')) return null
-  return value === next ? null : next
+  if (edited && (typing || reason === "blur")) return null;
+  return value === next ? null : next;
 }

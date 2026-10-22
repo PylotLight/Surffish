@@ -1,4 +1,4 @@
-import { app, webContents as allWebContents, type WebContents } from 'electron'
+import { app, webContents as allWebContents, type WebContents } from "electron";
 import {
   countStabilityEvent,
   emptyStabilityCounters,
@@ -6,8 +6,8 @@ import {
   LogThrottle,
   RecoveryBudget,
   stabilityFailureTotal,
-  type StabilityCounters
-} from '../shared/stability'
+  type StabilityCounters,
+} from "../shared/stability";
 
 /**
  * Main-process crash guard (installed first thing in index.ts):
@@ -26,54 +26,60 @@ import {
  * Counters are on `globalThis.__surffishStability` for smokes and the perf bench.
  */
 
-const counters: StabilityCounters = emptyStabilityCounters()
-const throttle = new LogThrottle()
-const shellSurfaces = new WeakSet<WebContents>()
-const tabContents = new WeakSet<WebContents>()
-let installed = false
+const counters: StabilityCounters = emptyStabilityCounters();
+const throttle = new LogThrottle();
+const shellSurfaces = new WeakSet<WebContents>();
+const tabContents = new WeakSet<WebContents>();
+let installed = false;
 
 /** A shell surface still hung after this long is restarted (a hung toolbar locks the whole window). */
-const SHELL_HANG_RECOVERY_MS = 15_000
-const SHELL_RELOAD_DELAY_MS = 250
-const GPU_REPAINT_DELAY_MS = 750
+const SHELL_HANG_RECOVERY_MS = 15_000;
+const SHELL_RELOAD_DELAY_MS = 250;
+const GPU_REPAINT_DELAY_MS = 750;
 
 function logThrottled(kind: string, error: unknown): void {
-  const signature = `${kind} ${errorSignature(error)}`
-  const occurrence = throttle.shouldLog(signature)
-  if (!occurrence) return
-  const suffix = occurrence > 1 ? ` (seen ${occurrence}×)` : ''
+  const signature = `${kind} ${errorSignature(error)}`;
+  const occurrence = throttle.shouldLog(signature);
+  if (!occurrence) return;
+  const suffix = occurrence > 1 ? ` (seen ${occurrence}×)` : "";
   try {
-    console.error(`[crash guard] ${kind}${suffix}:`, error)
+    console.error(`[crash guard] ${kind}${suffix}:`, error);
   } catch {
     // stdout/stderr closed (the parent terminal went away): nothing more to do.
   }
 }
 
 /** Count and log a main-process failure that was caught somewhere (e.g. an ipcMain.on listener). */
-export function reportMainError(kind: 'ipcListenerErrors', error: unknown, context: string): void {
-  countStabilityEvent(counters, kind, `${context}: ${errorSignature(error)}`)
-  logThrottled(context, error)
+export function reportMainError(
+  kind: "ipcListenerErrors",
+  error: unknown,
+  context: string,
+): void {
+  countStabilityEvent(counters, kind, `${context}: ${errorSignature(error)}`);
+  logThrottled(context, error);
 }
 
 /** Site tab webContents (tab-health.ts): their deaths count as tab crashes. */
 export function markTabContents(contents: WebContents): void {
-  tabContents.add(contents)
+  tabContents.add(contents);
 }
 
 function describe(contents: WebContents): string {
   try {
-    if (contents.isDestroyed()) return 'destroyed'
-    const url = contents.getURL()
-    const surface = /[?&]surface=([a-z-]+)/.exec(url)?.[1]
-    if (surface) return `shell:${surface}`
+    if (contents.isDestroyed()) return "destroyed";
+    const url = contents.getURL();
+    const surface = /[?&]surface=([a-z-]+)/.exec(url)?.[1];
+    if (surface) return `shell:${surface}`;
     try {
-      const parsed = new URL(url)
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.host : `${parsed.protocol}${parsed.host}`
+      const parsed = new URL(url);
+      return parsed.protocol === "http:" || parsed.protocol === "https:"
+        ? parsed.host
+        : `${parsed.protocol}${parsed.host}`;
     } catch {
-      return url.slice(0, 40) || contents.getType()
+      return url.slice(0, 40) || contents.getType();
     }
   } catch {
-    return 'webContents'
+    return "webContents";
   }
 }
 
@@ -81,56 +87,80 @@ function describe(contents: WebContents): string {
  * Keep an app surface alive: reload it when its renderer dies, and restart it when it hangs.
  * `reload` loads the surface's document again; `isLive` says whether its window is still open.
  */
-export function watchShellSurface(contents: WebContents, reload: () => Promise<void>, isLive: () => boolean): void {
-  shellSurfaces.add(contents)
-  const budget = new RecoveryBudget(3, 60_000)
-  let hangTimer: ReturnType<typeof setTimeout> | null = null
+export function watchShellSurface(
+  contents: WebContents,
+  reload: () => Promise<void>,
+  isLive: () => boolean,
+): void {
+  shellSurfaces.add(contents);
+  const budget = new RecoveryBudget(3, 60_000);
+  let hangTimer: ReturnType<typeof setTimeout> | null = null;
   const clearHang = (): void => {
-    if (hangTimer) clearTimeout(hangTimer)
-    hangTimer = null
-  }
+    if (hangTimer) clearTimeout(hangTimer);
+    hangTimer = null;
+  };
   const recover = (why: string): void => {
-    if (!isLive() || contents.isDestroyed()) return
+    if (!isLive() || contents.isDestroyed()) return;
     if (!budget.tryTake()) {
-      console.error(`[crash guard] ${describe(contents)} ${why} again; not reloading it (more than 3 times in a minute).`)
-      return
+      console.error(
+        `[crash guard] ${describe(contents)} ${why} again; not reloading it (more than 3 times in a minute).`,
+      );
+      return;
     }
     setTimeout(() => {
-      if (!isLive() || contents.isDestroyed()) return
-      countStabilityEvent(counters, 'shellReloads', `${describe(contents)} after ${why}`)
-      reload().catch((error: unknown) => console.error(`[crash guard] could not reload ${describe(contents)}:`, error))
-    }, SHELL_RELOAD_DELAY_MS)
-  }
-  contents.on('render-process-gone', (_event, details) => {
-    clearHang()
-    if (details.reason === 'clean-exit') return
-    console.warn(`[crash guard] app surface ${describe(contents)} renderer gone (${details.reason}, exit ${details.exitCode}); reloading it`)
-    recover(details.reason)
-  })
-  contents.on('unresponsive', () => {
-    if (hangTimer) return
+      if (!isLive() || contents.isDestroyed()) return;
+      countStabilityEvent(
+        counters,
+        "shellReloads",
+        `${describe(contents)} after ${why}`,
+      );
+      reload().catch((error: unknown) =>
+        console.error(
+          `[crash guard] could not reload ${describe(contents)}:`,
+          error,
+        ),
+      );
+    }, SHELL_RELOAD_DELAY_MS);
+  };
+  contents.on("render-process-gone", (_event, details) => {
+    clearHang();
+    if (details.reason === "clean-exit") return;
+    console.warn(
+      `[crash guard] app surface ${describe(contents)} renderer gone (${details.reason}, exit ${details.exitCode}); reloading it`,
+    );
+    recover(details.reason);
+  });
+  contents.on("unresponsive", () => {
+    if (hangTimer) return;
     hangTimer = setTimeout(() => {
-      hangTimer = null
+      hangTimer = null;
       // Paused in a debugger is not a hang.
-      if (!isLive() || contents.isDestroyed() || contents.isDevToolsOpened()) return
-      console.warn(`[crash guard] app surface ${describe(contents)} unresponsive for ${SHELL_HANG_RECOVERY_MS / 1000}s; restarting it`)
+      if (!isLive() || contents.isDestroyed() || contents.isDevToolsOpened())
+        return;
+      console.warn(
+        `[crash guard] app surface ${describe(contents)} unresponsive for ${SHELL_HANG_RECOVERY_MS / 1000}s; restarting it`,
+      );
       // render-process-gone ('killed') follows and reloads it through the budget above.
       try {
-        contents.forcefullyCrashRenderer()
+        contents.forcefullyCrashRenderer();
       } catch (error) {
-        console.error('[crash guard] could not restart the hung surface:', error)
+        console.error(
+          "[crash guard] could not restart the hung surface:",
+          error,
+        );
       }
-    }, SHELL_HANG_RECOVERY_MS)
-    hangTimer.unref?.()
-  })
-  contents.on('responsive', clearHang)
-  contents.once('destroyed', clearHang)
+    }, SHELL_HANG_RECOVERY_MS);
+    hangTimer.unref?.();
+  });
+  contents.on("responsive", clearHang);
+  contents.once("destroyed", clearHang);
 }
 
 function repaintEverything(): void {
   for (const contents of allWebContents.getAllWebContents()) {
     try {
-      if (!contents.isDestroyed() && !contents.isOffscreen()) contents.invalidate()
+      if (!contents.isDestroyed() && !contents.isOffscreen())
+        contents.invalidate();
     } catch {
       // Being torn down.
     }
@@ -138,44 +168,60 @@ function repaintEverything(): void {
 }
 
 export function installCrashGuard(): void {
-  if (installed) return
-  installed = true
-  ;(globalThis as { __surffishStability?: StabilityCounters }).__surffishStability = counters
+  if (installed) return;
+  installed = true;
+  (
+    globalThis as { __surffishStability?: StabilityCounters }
+  ).__surffishStability = counters;
 
-  process.on('uncaughtException', (error) => {
-    countStabilityEvent(counters, 'uncaughtExceptions', errorSignature(error))
-    logThrottled('uncaught exception in the main process', error)
-  })
-  process.on('unhandledRejection', (reason) => {
-    countStabilityEvent(counters, 'unhandledRejections', errorSignature(reason))
-    logThrottled('unhandled promise rejection in the main process', reason)
-  })
+  process.on("uncaughtException", (error) => {
+    countStabilityEvent(counters, "uncaughtExceptions", errorSignature(error));
+    logThrottled("uncaught exception in the main process", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    countStabilityEvent(
+      counters,
+      "unhandledRejections",
+      errorSignature(reason),
+    );
+    logThrottled("unhandled promise rejection in the main process", reason);
+  });
 
   try {
-    app.on('render-process-gone', (_event, contents, details) => {
-      if (details.reason === 'clean-exit') return
-      const key = shellSurfaces.has(contents) ? 'shellRendererGone' : tabContents.has(contents) ? 'tabRendererGone' : 'otherRendererGone'
-      countStabilityEvent(counters, key, `${describe(contents)} ${details.reason} (exit ${details.exitCode})`)
-    })
-    app.on('child-process-gone', (_event, details) => {
-      if (details.reason === 'clean-exit') return
-      const summary = `${details.type}${details.name ? ` ${details.name}` : ''}${details.serviceName ? ` (${details.serviceName})` : ''} ${details.reason} (exit ${details.exitCode})`
-      console.warn(`[crash guard] child process gone: ${summary}`)
-      if (details.type === 'GPU') {
-        countStabilityEvent(counters, 'gpuGone', summary)
-        setTimeout(repaintEverything, GPU_REPAINT_DELAY_MS)
+    app.on("render-process-gone", (_event, contents, details) => {
+      if (details.reason === "clean-exit") return;
+      const key = shellSurfaces.has(contents)
+        ? "shellRendererGone"
+        : tabContents.has(contents)
+          ? "tabRendererGone"
+          : "otherRendererGone";
+      countStabilityEvent(
+        counters,
+        key,
+        `${describe(contents)} ${details.reason} (exit ${details.exitCode})`,
+      );
+    });
+    app.on("child-process-gone", (_event, details) => {
+      if (details.reason === "clean-exit") return;
+      const summary = `${details.type}${details.name ? ` ${details.name}` : ""}${details.serviceName ? ` (${details.serviceName})` : ""} ${details.reason} (exit ${details.exitCode})`;
+      console.warn(`[crash guard] child process gone: ${summary}`);
+      if (details.type === "GPU") {
+        countStabilityEvent(counters, "gpuGone", summary);
+        setTimeout(repaintEverything, GPU_REPAINT_DELAY_MS);
       } else {
-        countStabilityEvent(counters, 'childGone', summary)
+        countStabilityEvent(counters, "childGone", summary);
       }
-    })
-    app.on('web-contents-created', (_event, contents) => {
-      contents.on('unresponsive', () => countStabilityEvent(counters, 'unresponsive', describe(contents)))
-    })
-    app.on('will-quit', () => {
-      if (stabilityFailureTotal(counters) === 0) return
-      const { recent: _recent, ...totals } = counters
-      console.warn('[crash guard] this session:', JSON.stringify(totals))
-    })
+    });
+    app.on("web-contents-created", (_event, contents) => {
+      contents.on("unresponsive", () =>
+        countStabilityEvent(counters, "unresponsive", describe(contents)),
+      );
+    });
+    app.on("will-quit", () => {
+      if (stabilityFailureTotal(counters) === 0) return;
+      const { recent: _recent, ...totals } = counters;
+      console.warn("[crash guard] this session:", JSON.stringify(totals));
+    });
   } catch {
     // Unit tests import modules without a live Electron app.
   }
@@ -183,4 +229,4 @@ export function installCrashGuard(): void {
 
 // Installed on import: index.ts imports this module first, so even errors thrown while other
 // modules load are caught and logged.
-installCrashGuard()
+installCrashGuard();

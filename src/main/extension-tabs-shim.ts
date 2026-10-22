@@ -49,4 +49,4 @@ export const EXTENSION_PAGE_TABS_SHIM = `function installSurffishExtensionTabs(a
   });
   define(tabs, 'remove', (tabIds, callback) => run('remove', { tabIds: Array.isArray(tabIds) ? tabIds : [tabIds] }, callback));
   return true;
-}`
+}`;

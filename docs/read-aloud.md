@@ -8,15 +8,15 @@ computer.
 
 ## Using it
 
-| Where | What |
-|---|---|
-| Page right-click → **Read Aloud** | **Read Page**, **Read from Here** (from the clicked point, or the selection's start, to the end of the article), **Read Selection**; **Pause/Resume** and **Stop** while reading |
-| PDF right-click → **Read Aloud** | In the built-in viewer (web, `file://`, `blob:` PDFs) and the PDF editor: **Read Page** (the whole document), **Read from This Page** (from the page the viewer shows), **Read Selection** |
-| Reader view | **Listen** button in its toolbar, the same submenu on right-click |
-| Reading List row right-click → **Listen** | Opens the saved offline Reader copy (the live page when there is none) and reads it |
-| ⇧⌘U (Ctrl+Shift+U) | Play / pause; reads the page when nothing is playing (View menu, only while Read Aloud is on) |
-| ⌘K | Read Aloud, Read Selection Aloud, Pause/Resume, Stop |
-| Toolbar | A player button appears while reading: play/pause, skip, stop, speed, voice |
+| Where                                     | What                                                                                                                                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Page right-click → **Read Aloud**         | **Read Page**, **Read from Here** (from the clicked point, or the selection's start, to the end of the article), **Read Selection**; **Pause/Resume** and **Stop** while reading           |
+| PDF right-click → **Read Aloud**          | In the built-in viewer (web, `file://`, `blob:` PDFs) and the PDF editor: **Read Page** (the whole document), **Read from This Page** (from the page the viewer shows), **Read Selection** |
+| Reader view                               | **Listen** button in its toolbar, the same submenu on right-click                                                                                                                          |
+| Reading List row right-click → **Listen** | Opens the saved offline Reader copy (the live page when there is none) and reads it                                                                                                        |
+| ⇧⌘U (Ctrl+Shift+U)                        | Play / pause; reads the page when nothing is playing (View menu, only while Read Aloud is on)                                                                                              |
+| ⌘K                                        | Read Aloud, Read Selection Aloud, Pause/Resume, Stop                                                                                                                                       |
+| Toolbar                                   | A player button appears while reading: play/pause, skip, stop, speed, voice                                                                                                                |
 
 The sentence being spoken is highlighted, in Reader view and on the live page. On the live page the
 highlight uses the CSS Custom Highlight API from an isolated world: the page's DOM is never changed,

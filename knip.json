@@ -17,46 +17,19 @@
     "scripts/**/*.{ts,cjs,mjs,js}",
     "src/**/*.test.{ts,cjs}"
   ],
-  "project": [
-    "src/**/*.{ts,tsx,cjs,mjs,js}",
-    "scripts/**/*.{ts,cjs,mjs,js}"
-  ],
+  "project": ["src/**/*.{ts,tsx,cjs,mjs,js}", "scripts/**/*.{ts,cjs,mjs,js}"],
   "ignoreExportsUsedInFile": true,
-  "ignoreDependencies": [
-    "node-api-headers",
-    "lightningcss",
-    "jsqr"
-  ],
-  "ignoreBinaries": [
-    "check"
-  ],
+  "ignoreDependencies": ["node-api-headers", "lightningcss", "jsqr"],
+  "ignoreBinaries": ["check"],
   "ignoreIssues": {
-    "src/main/certificate-inspect.ts": [
-      "exports"
-    ],
-    "src/main/extension-runtime-support.ts": [
-      "exports"
-    ],
-    "src/main/feeds.ts": [
-      "exports"
-    ],
-    "src/main/glance.ts": [
-      "exports"
-    ],
-    "src/main/mini-window.ts": [
-      "exports"
-    ],
-    "src/main/page-watchers.ts": [
-      "exports"
-    ],
-    "src/main/reading-list.ts": [
-      "exports"
-    ],
-    "src/main/read-aloud.ts": [
-      "exports"
-    ],
-    "src/main/read-aloud-settings.ts": [
-      "exports"
-    ]
+    "src/main/certificate-inspect.ts": ["exports"],
+    "src/main/extension-runtime-support.ts": ["exports"],
+    "src/main/feeds.ts": ["exports"],
+    "src/main/glance.ts": ["exports"],
+    "src/main/mini-window.ts": ["exports"],
+    "src/main/page-watchers.ts": ["exports"],
+    "src/main/reading-list.ts": ["exports"],
+    "src/main/read-aloud.ts": ["exports"],
+    "src/main/read-aloud-settings.ts": ["exports"]
   }
 }

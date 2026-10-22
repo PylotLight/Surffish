@@ -1,36 +1,40 @@
-import { app, shell } from 'electron'
-import { existsSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { externalOpenTarget, externalOpenTargetsFromArgv, isLocalDocumentUrl } from '../shared/external-links'
-import type { DefaultBrowserStatus } from '../shared/types'
-import { openExternalBrowserTab } from './browser'
-import { getMainWindow, showWindow } from './window'
+import { app, shell } from "electron";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  externalOpenTarget,
+  externalOpenTargetsFromArgv,
+  isLocalDocumentUrl,
+} from "../shared/external-links";
+import type { DefaultBrowserStatus } from "../shared/types";
+import { openExternalBrowserTab } from "./browser";
+import { getMainWindow, showWindow } from "./window";
 
 /** Links and files the OS hands over before the window and restored tabs exist; opened in order once ready. */
-const pending: string[] = []
-let ready = false
+const pending: string[] = [];
+let ready = false;
 
 function exists(target: string): boolean {
-  if (!isLocalDocumentUrl(target)) return true
+  if (!isLocalDocumentUrl(target)) return true;
   try {
-    return existsSync(fileURLToPath(target))
+    return existsSync(fileURLToPath(target));
   } catch {
-    return false
+    return false;
   }
 }
 
 function open(target: string, focus = true): void {
-  const hadWindow = getMainWindow() !== null
+  const hadWindow = getMainWindow() !== null;
   // A new window restores its tabs synchronously and shows itself once its surfaces load.
-  if (!hadWindow) showWindow()
-  if (openExternalBrowserTab(target) && hadWindow && focus) showWindow()
+  if (!hadWindow) showWindow();
+  if (openExternalBrowserTab(target) && hadWindow && focus) showWindow();
 }
 
 function enqueue(value: string): void {
-  const target = externalOpenTarget(value)
-  if (!target || !exists(target)) return
-  if (ready) open(target)
-  else pending.push(target)
+  const target = externalOpenTarget(value);
+  if (!target || !exists(target)) return;
+  if (ready) open(target);
+  else pending.push(target);
 }
 
 /**
@@ -38,42 +42,45 @@ function enqueue(value: string): void {
  * files (`open-file`) during launch, and Windows/Linux pass them on the command line.
  */
 export function registerExternalOpenHandlers(): void {
-  app.on('will-finish-launching', () => {
-    app.on('open-url', (event, url) => {
-      event.preventDefault()
-      enqueue(url)
-    })
-    app.on('open-file', (event, path) => {
-      event.preventDefault()
-      enqueue(path)
-    })
-  })
-  app.on('second-instance', (_event, argv) => {
-    const targets = externalOpenTargetsFromArgv(argv)
+  app.on("will-finish-launching", () => {
+    app.on("open-url", (event, url) => {
+      event.preventDefault();
+      enqueue(url);
+    });
+    app.on("open-file", (event, path) => {
+      event.preventDefault();
+      enqueue(path);
+    });
+  });
+  app.on("second-instance", (_event, argv) => {
+    const targets = externalOpenTargetsFromArgv(argv);
     if (targets.length === 0) {
-      showWindow()
-      return
+      showWindow();
+      return;
     }
-    for (const target of targets) enqueue(target)
-  })
-  if (process.platform !== 'darwin') {
-    for (const target of externalOpenTargetsFromArgv(process.argv)) enqueue(target)
+    for (const target of targets) enqueue(target);
+  });
+  if (process.platform !== "darwin") {
+    for (const target of externalOpenTargetsFromArgv(process.argv))
+      enqueue(target);
   }
 }
 
 /** Call once the main window and its restored tabs exist. */
 export function flushExternalOpens(): void {
-  ready = true
+  ready = true;
   // The window was just created and shows itself when ready; don't force it up early.
-  for (const target of pending.splice(0)) open(target, false)
+  for (const target of pending.splice(0)) open(target, false);
 }
 
-const WEB_SCHEMES = ['http', 'https'] as const
+const WEB_SCHEMES = ["http", "https"] as const;
 
 export function getDefaultBrowserStatus(): DefaultBrowserStatus {
-  const isDefault = WEB_SCHEMES.every((scheme) => app.isDefaultProtocolClient(scheme))
+  const isDefault = WEB_SCHEMES.every((scheme) =>
+    app.isDefaultProtocolClient(scheme),
+  );
   // An unpackaged build would register the bare Electron binary as the system browser.
-  return { isDefault, canSet: app.isPackaged, platform: process.platform }
+  return { isDefault, canSet: app.isPackaged, platform: process.platform };
 }
 
 /**
@@ -81,17 +88,17 @@ export function getDefaultBrowserStatus(): DefaultBrowserStatus {
  * Windows 10+ ignores programmatic changes; open the Default apps settings page instead.
  */
 export async function makeDefaultBrowser(): Promise<DefaultBrowserStatus> {
-  if (!app.isPackaged) return getDefaultBrowserStatus()
+  if (!app.isPackaged) return getDefaultBrowserStatus();
   for (const scheme of WEB_SCHEMES) {
     try {
-      app.setAsDefaultProtocolClient(scheme)
+      app.setAsDefaultProtocolClient(scheme);
     } catch (error) {
-      console.warn(`Could not register as the ${scheme} handler:`, error)
+      console.warn(`Could not register as the ${scheme} handler:`, error);
     }
   }
-  const status = getDefaultBrowserStatus()
-  if (!status.isDefault && process.platform === 'win32') {
-    await shell.openExternal('ms-settings:defaultapps').catch(() => undefined)
+  const status = getDefaultBrowserStatus();
+  if (!status.isDefault && process.platform === "win32") {
+    await shell.openExternal("ms-settings:defaultapps").catch(() => undefined);
   }
-  return status
+  return status;
 }

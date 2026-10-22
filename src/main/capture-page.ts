@@ -1,7 +1,7 @@
-import type { NativeImage, Rectangle, WebContents } from 'electron'
+import type { NativeImage, Rectangle, WebContents } from "electron";
 
 /** Long enough for a busy page on a loaded machine; a capture that takes longer is stale anyway. */
-const CAPTURE_TIMEOUT_MS = 4_000
+const CAPTURE_TIMEOUT_MS = 4_000;
 
 /**
  * `contents.capturePage()` that always settles: null when the page is destroyed, the capture fails,
@@ -16,28 +16,31 @@ export function capturePageWithin(
   contents: WebContents,
   rect?: Rectangle,
   options?: { stayHidden?: boolean; stayAwake?: boolean },
-  timeoutMs = CAPTURE_TIMEOUT_MS
+  timeoutMs = CAPTURE_TIMEOUT_MS,
 ): Promise<NativeImage | null> {
-  if (contents.isDestroyed()) return Promise.resolve(null)
+  if (contents.isDestroyed()) return Promise.resolve(null);
   return new Promise((resolve) => {
-    let settled = false
+    let settled = false;
     const finish = (image: NativeImage | null): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (!contents.isDestroyed()) contents.removeListener('destroyed', onDestroyed)
-      resolve(image && !image.isEmpty() ? image : null)
-    }
-    const onDestroyed = (): void => finish(null)
-    const timer = setTimeout(() => finish(null), timeoutMs)
-    contents.once('destroyed', onDestroyed)
-    let capture: Promise<NativeImage>
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!contents.isDestroyed())
+        contents.removeListener("destroyed", onDestroyed);
+      resolve(image && !image.isEmpty() ? image : null);
+    };
+    const onDestroyed = (): void => finish(null);
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    contents.once("destroyed", onDestroyed);
+    let capture: Promise<NativeImage>;
     try {
-      capture = rect ? contents.capturePage(rect, options) : contents.capturePage(undefined, options)
+      capture = rect
+        ? contents.capturePage(rect, options)
+        : contents.capturePage(undefined, options);
     } catch {
-      finish(null)
-      return
+      finish(null);
+      return;
     }
-    capture.then(finish, () => finish(null))
-  })
+    capture.then(finish, () => finish(null));
+  });
 }

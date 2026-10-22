@@ -1,11 +1,15 @@
-import { SettingsGroup, SettingsRow } from './SettingsControls'
-import { usePageWatchersEnabled } from './useWatchers'
+import { SettingsGroup, SettingsRow } from "./SettingsControls";
+import { usePageWatchersEnabled } from "./useWatchers";
 
 /** Settings → General → Page Watchers: "Enable page watchers" (on by default). */
 export function PageWatchersToggle(): React.JSX.Element {
-  const enabled = usePageWatchersEnabled()
+  const enabled = usePageWatchersEnabled();
   return (
-    <SettingsGroup title="Page Watchers" status={enabled === null ? undefined : enabled ? 'On' : 'Off'} statusOn={enabled === true}>
+    <SettingsGroup
+      title="Page Watchers"
+      status={enabled === null ? undefined : enabled ? "On" : "Off"}
+      statusOn={enabled === true}
+    >
       <SettingsRow
         label="Enable page watchers"
         hint="Get a notification when a watched page changes."
@@ -16,10 +20,14 @@ export function PageWatchersToggle(): React.JSX.Element {
           className="settings-switch"
           checked={enabled ?? false}
           disabled={enabled === null}
-          onChange={(event) => { void window.api.browser.watchers.setEnabled(event.target.checked).catch(() => undefined) }}
+          onChange={(event) => {
+            void window.api.browser.watchers
+              .setEnabled(event.target.checked)
+              .catch(() => undefined);
+          }}
           aria-label="Enable page watchers"
         />
       </SettingsRow>
     </SettingsGroup>
-  )
+  );
 }

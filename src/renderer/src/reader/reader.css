@@ -10,12 +10,16 @@
   --reader-control-active: rgba(0, 0, 0, 0.14);
   --reader-code-bg: rgba(0, 0, 0, 0.05);
   --reader-measure: 68ch;
-  --reader-serif: 'Iowan Old Style', 'Charter', 'Georgia', 'Palatino Linotype', 'Times New Roman', serif;
-  --reader-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, system-ui, sans-serif;
+  --reader-serif:
+    'Iowan Old Style', 'Charter', 'Georgia', 'Palatino Linotype',
+    'Times New Roman', serif;
+  --reader-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial,
+    system-ui, sans-serif;
   color-scheme: light;
 }
 
-:root[data-theme='sepia'] {
+:root[data-theme="sepia"] {
   --reader-bg: #f4ecd8;
   --reader-fg: #3b2f1e;
   --reader-muted: #7a6a52;
@@ -27,7 +31,7 @@
   --reader-code-bg: rgba(91, 70, 54, 0.08);
 }
 
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   --reader-bg: #1c1c1e;
   --reader-fg: #e8e6e3;
   --reader-muted: #9a9a9f;
@@ -40,12 +44,19 @@
   color-scheme: dark;
 }
 
-:root[data-width='narrow'] { --reader-measure: 56ch; }
-:root[data-width='wide'] { --reader-measure: 86ch; }
+:root[data-width="narrow"] {
+  --reader-measure: 56ch;
+}
+:root[data-width="wide"] {
+  --reader-measure: 86ch;
+}
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
   margin: 0;
   background: var(--reader-bg);
   color: var(--reader-fg);
@@ -89,7 +100,9 @@ button {
 .reader-back:hover,
 .reader-settings-toggle:hover,
 .reader-segmented button:hover,
-.reader-stepper button:hover:not(:disabled) { background: var(--reader-control-active); }
+.reader-stepper button:hover:not(:disabled) {
+  background: var(--reader-control-active);
+}
 
 .reader-back {
   display: inline-flex;
@@ -124,7 +137,9 @@ button {
   background: var(--reader-control);
 }
 
-.reader-settings-anchor { position: relative; }
+.reader-settings-anchor {
+  position: relative;
+}
 
 .reader-settings-toggle {
   font-family: var(--reader-serif);
@@ -146,7 +161,9 @@ button {
   gap: 12px;
 }
 
-.reader-settings[hidden] { display: none; }
+.reader-settings[hidden] {
+  display: none;
+}
 
 .reader-setting {
   display: grid;
@@ -173,14 +190,32 @@ button {
   font-weight: 600;
 }
 
-.font-serif { font-family: var(--reader-serif); }
-.font-sans { font-family: var(--reader-sans); }
+.font-serif {
+  font-family: var(--reader-serif);
+}
+.font-sans {
+  font-family: var(--reader-sans);
+}
 
-.theme-swatch { border: 1px solid var(--reader-rule) !important; }
-.reader-themes .theme-light { background: #fbfbf9; color: #1d1d1f; }
-.reader-themes .theme-sepia { background: #f4ecd8; color: #3b2f1e; }
-.reader-themes .theme-dark { background: #1c1c1e; color: #e8e6e3; }
-.reader-themes .theme-swatch.is-current { outline: 2px solid var(--reader-link); outline-offset: 1px; }
+.theme-swatch {
+  border: 1px solid var(--reader-rule) !important;
+}
+.reader-themes .theme-light {
+  background: #fbfbf9;
+  color: #1d1d1f;
+}
+.reader-themes .theme-sepia {
+  background: #f4ecd8;
+  color: #3b2f1e;
+}
+.reader-themes .theme-dark {
+  background: #1c1c1e;
+  color: #e8e6e3;
+}
+.reader-themes .theme-swatch.is-current {
+  outline: 2px solid var(--reader-link);
+  outline-offset: 1px;
+}
 
 .reader-stepper {
   display: grid;
@@ -195,7 +230,10 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-.reader-stepper button:disabled { opacity: 0.4; cursor: default; }
+.reader-stepper button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 
 .reader-page {
   padding: 40px 24px 96px;
@@ -210,7 +248,10 @@ button {
   overflow-wrap: break-word;
 }
 
-:root[data-font='sans'] .reader-article { font-family: var(--reader-sans); line-height: 1.55; }
+:root[data-font="sans"] .reader-article {
+  font-family: var(--reader-sans);
+  line-height: 1.55;
+}
 
 .reader-status {
   color: var(--reader-muted);
@@ -220,7 +261,9 @@ button {
   margin-top: 20vh;
 }
 
-.reader-status.is-error { color: inherit; }
+.reader-status.is-error {
+  color: inherit;
+}
 
 .reader-header {
   margin-bottom: 1.6em;
@@ -251,7 +294,10 @@ button {
   color: var(--reader-muted);
 }
 
-.reader-content a { color: var(--reader-link); text-underline-offset: 0.15em; }
+.reader-content a {
+  color: var(--reader-link);
+  text-underline-offset: 0.15em;
+}
 .reader-content img,
 .reader-content svg {
   display: block;
@@ -260,8 +306,12 @@ button {
   margin: 1.2em auto;
   border-radius: 4px;
 }
-.reader-content img.is-broken { display: none; }
-.reader-content figure { margin: 1.4em 0; }
+.reader-content img.is-broken {
+  display: none;
+}
+.reader-content figure {
+  margin: 1.4em 0;
+}
 .reader-content figcaption,
 .reader-content .caption {
   font-family: var(--reader-sans);
@@ -271,9 +321,16 @@ button {
 }
 .reader-content h2,
 .reader-content h3,
-.reader-content h4 { line-height: 1.25; margin: 1.6em 0 0.5em; }
-.reader-content h2 { font-size: 1.35em; }
-.reader-content h3 { font-size: 1.15em; }
+.reader-content h4 {
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+}
+.reader-content h2 {
+  font-size: 1.35em;
+}
+.reader-content h3 {
+  font-size: 1.15em;
+}
 .reader-content blockquote {
   margin: 1.2em 0;
   padding: 0 0 0 1em;
@@ -287,9 +344,18 @@ button {
   background: var(--reader-code-bg);
   border-radius: 4px;
 }
-.reader-content code { padding: 0.1em 0.3em; }
-.reader-content pre { padding: 0.9em 1em; overflow-x: auto; line-height: 1.45; }
-.reader-content pre code { padding: 0; background: none; }
+.reader-content code {
+  padding: 0.1em 0.3em;
+}
+.reader-content pre {
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+.reader-content pre code {
+  padding: 0;
+  background: none;
+}
 .reader-content table {
   border-collapse: collapse;
   display: block;
@@ -298,8 +364,16 @@ button {
   margin: 1.2em 0;
 }
 .reader-content th,
-.reader-content td { border: 1px solid var(--reader-rule); padding: 0.4em 0.6em; text-align: left; }
-.reader-content hr { border: 0; border-top: 1px solid var(--reader-rule); margin: 2em 0; }
+.reader-content td {
+  border: 1px solid var(--reader-rule);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.reader-content hr {
+  border: 0;
+  border-top: 1px solid var(--reader-rule);
+  margin: 2em 0;
+}
 
 /* Read Aloud: the toolbar's Listen button (shown only while Read Aloud is on in Settings) and the
    sentence being spoken, painted with the CSS Custom Highlight API (no change to the article DOM). */

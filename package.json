@@ -7,6 +7,8 @@
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
+    "format": "bun fmt",
+    "format:check": "bun fmt --check",
     "dev": "bun scripts/dev.ts",
     "dev:bare": "bun scripts/build-mac-trackpad-swipe.ts --dev && bun scripts/build-google-sign-in.ts && electron-vite dev",
     "build": "electron-vite build && bun scripts/build-mac-trackpad-swipe.ts && bun scripts/build-google-sign-in.ts",

@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       shots:
-        description: 'comma list of scenes (empty = all): hero,palette,split,reader,glance,history,settings,newtab'
+        description: "comma list of scenes (empty = all): hero,palette,split,reader,glance,history,settings,newtab"
         required: false
-        default: ''
+        default: ""
 
 concurrency:
   group: readme-screenshots-${{ github.ref }}

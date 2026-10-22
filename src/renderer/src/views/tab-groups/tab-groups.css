@@ -79,7 +79,7 @@
 }
 
 .tab-item.is-grouped::before {
-  content: '';
+  content: "";
   position: absolute;
   left: -7px;
   top: 4px;

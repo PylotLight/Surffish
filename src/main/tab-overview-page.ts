@@ -329,4 +329,4 @@ export const TAB_OVERVIEW_HTML = String.raw`<!doctype html>
 })()
 </script>
 </body>
-</html>`
+</html>`;

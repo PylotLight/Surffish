@@ -14,10 +14,10 @@ Surffish's main process and types it into Bramble's own form. Code: `src/main/br
 
 ## After a restart
 
-| Mode | On disk | After Surffish restarts |
-| --- | --- | --- |
-| **PIN keeps working** (default) | device key protected by `safeStorage` (macOS Keychain), PIN slot and Touch ID slot | PIN and Touch ID work straight away. The master password is never needed again. |
-| **Require master password after Surffish restarts** | only the PIN wrapped under the master password (`rearm`) | not armed. Unlock once in Bramble's own form; Surffish sees the master password it was given and, if it opens `rearm`, turns the PIN back on. |
+| Mode                                                | On disk                                                                            | After Surffish restarts                                                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PIN keeps working** (default)                     | device key protected by `safeStorage` (macOS Keychain), PIN slot and Touch ID slot | PIN and Touch ID work straight away. The master password is never needed again.                                                               |
+| **Require master password after Surffish restarts** | only the PIN wrapped under the master password (`rearm`)                           | not armed. Unlock once in Bramble's own form; Surffish sees the master password it was given and, if it opens `rearm`, turns the PIN back on. |
 
 Persisted is the default for new setups wherever `safeStorage` can protect the key. Where it can't
 (Linux without a keyring), memory-only is the only option.

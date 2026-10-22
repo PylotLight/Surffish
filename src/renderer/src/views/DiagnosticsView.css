@@ -49,12 +49,24 @@
   background: rgba(27, 32, 38, 0.97);
   text-align: left;
 }
-.diagnostics-table th:first-child { width: 34%; }
-.diagnostics-table th:nth-child(2) { width: 9%; }
-.diagnostics-table th:nth-child(3) { width: 11%; }
-.diagnostics-table th:nth-child(4) { width: 12%; }
-.diagnostics-table th:nth-child(5) { width: 8%; }
-.diagnostics-table th.diagnostics-actions-heading { width: 26%; }
+.diagnostics-table th:first-child {
+  width: 34%;
+}
+.diagnostics-table th:nth-child(2) {
+  width: 9%;
+}
+.diagnostics-table th:nth-child(3) {
+  width: 11%;
+}
+.diagnostics-table th:nth-child(4) {
+  width: 12%;
+}
+.diagnostics-table th:nth-child(5) {
+  width: 8%;
+}
+.diagnostics-table th.diagnostics-actions-heading {
+  width: 26%;
+}
 .diagnostics-table th button {
   width: 100%;
   padding: 7px 8px;
@@ -107,9 +119,18 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.diagnostics-kind-tab .diagnostics-badge { background: rgba(126, 226, 168, 0.14); color: #a8efc5; }
-.diagnostics-kind-gpu .diagnostics-badge { background: rgba(255, 178, 122, 0.14); color: #ffc9a0; }
-.diagnostics-kind-extension .diagnostics-badge { background: rgba(154, 184, 223, 0.16); color: #c0d5f1; }
+.diagnostics-kind-tab .diagnostics-badge {
+  background: rgba(126, 226, 168, 0.14);
+  color: #a8efc5;
+}
+.diagnostics-kind-gpu .diagnostics-badge {
+  background: rgba(255, 178, 122, 0.14);
+  color: #ffc9a0;
+}
+.diagnostics-kind-extension .diagnostics-badge {
+  background: rgba(154, 184, 223, 0.16);
+  color: #c0d5f1;
+}
 .diagnostics-label {
   min-width: 0;
   overflow: hidden;

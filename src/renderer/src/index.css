@@ -1,27 +1,33 @@
 @font-face {
-  font-family: 'Maple Mono';
-  src: url('./assets/fonts/maple-mono/MapleMono-Variable.woff2') format('woff2');
+  font-family: "Maple Mono";
+  src: url("./assets/fonts/maple-mono/MapleMono-Variable.woff2") format("woff2");
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Maple Mono';
-  src: url('./assets/fonts/maple-mono/MapleMono-Italic-Variable.woff2') format('woff2');
+  font-family: "Maple Mono";
+  src: url("./assets/fonts/maple-mono/MapleMono-Italic-Variable.woff2")
+    format("woff2");
   font-style: italic;
   font-weight: 100 800;
   font-display: swap;
 }
 :root {
   color-scheme: dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "SF Pro Text",
+    sans-serif;
   color: #f2f4f6;
   background: transparent;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
-:root[data-ui-font='maple-mono'] {
-  font-family: 'Maple Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+:root[data-ui-font="maple-mono"] {
+  font-family: "Maple Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * {
   box-sizing: border-box;
@@ -48,5 +54,9 @@ textarea {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: linear-gradient(165deg, rgba(30, 34, 42, 0.48), rgba(10, 12, 15, 0.62));
+  background: linear-gradient(
+    165deg,
+    rgba(30, 34, 42, 0.48),
+    rgba(10, 12, 15, 0.62)
+  );
 }

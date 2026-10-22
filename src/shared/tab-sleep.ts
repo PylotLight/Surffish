@@ -1,4 +1,4 @@
-import type { BrowserTabSleep } from './types'
+import type { BrowserTabSleep } from "./types";
 
 /**
  * Why a tab is asleep, for the moon's tooltip in the sidebar:
@@ -10,20 +10,27 @@ import type { BrowserTabSleep } from './types'
  */
 export function describeTabSleep(sleep: BrowserTabSleep | undefined): string {
   switch (sleep?.reason) {
-    case 'idle': return sleep.minutes ? `Slept after ${formatSleepMinutes(sleep.minutes)} in the background` : 'Slept after being in the background'
-    case 'memory': return 'Put to sleep early by memory saver (memory was low)'
-    case 'manual': return 'Hibernated by you'
-    case 'crashed': return 'Page process ended in the background'
-    case 'restored':
-    default: return 'Not loaded since Surffish started'
+    case "idle":
+      return sleep.minutes
+        ? `Slept after ${formatSleepMinutes(sleep.minutes)} in the background`
+        : "Slept after being in the background";
+    case "memory":
+      return "Put to sleep early by memory saver (memory was low)";
+    case "manual":
+      return "Hibernated by you";
+    case "crashed":
+      return "Page process ended in the background";
+    case "restored":
+    default:
+      return "Not loaded since Surffish started";
   }
 }
 
 function formatSleepMinutes(minutes: number): string {
-  return minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`
+  return minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`;
 }
 
 /** Restored tabs never woke up this run: shown fainter than tabs Surffish put to sleep. */
 export function isRestoredSleep(sleep: BrowserTabSleep | undefined): boolean {
-  return !sleep || sleep.reason === 'restored'
+  return !sleep || sleep.reason === "restored";
 }

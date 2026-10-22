@@ -1,8 +1,15 @@
 function hasPath(root, path) {
-  return path.split('.').reduce((value, key) => value == null ? undefined : value[key], root) !== undefined;
+  return (
+    path
+      .split(".")
+      .reduce(
+        (value, key) => (value == null ? undefined : value[key]),
+        root,
+      ) !== undefined
+  );
 }
 
-const browserApi = typeof browser === 'undefined' ? null : browser;
+const browserApi = typeof browser === "undefined" ? null : browser;
 const result = {
   backgroundReply: false,
   backgroundError: null,
@@ -11,27 +18,27 @@ const result = {
   storageOnChangedEvent: false,
   storageOnChangedKeys: [],
   apis: {
-    runtime: hasPath(chrome, 'runtime.getManifest'),
-    storageLocal: hasPath(chrome, 'storage.local.get'),
-    storageSession: hasPath(chrome, 'storage.session.get'),
-    storageOnChanged: hasPath(chrome, 'storage.onChanged'),
-    alarms: hasPath(chrome, 'alarms.create'),
-    idle: hasPath(chrome, 'idle.queryState'),
-    offscreen: hasPath(chrome, 'offscreen.createDocument'),
-    identity: hasPath(chrome, 'identity.getAuthToken'),
-    webAuthenticationProxy: hasPath(chrome, 'webAuthenticationProxy'),
-    webNavigation: hasPath(chrome, 'webNavigation.onCompleted'),
-    contextMenus: hasPath(chrome, 'contextMenus.create'),
-    notifications: hasPath(chrome, 'notifications.create'),
-    commands: hasPath(chrome, 'commands.onCommand'),
+    runtime: hasPath(chrome, "runtime.getManifest"),
+    storageLocal: hasPath(chrome, "storage.local.get"),
+    storageSession: hasPath(chrome, "storage.session.get"),
+    storageOnChanged: hasPath(chrome, "storage.onChanged"),
+    alarms: hasPath(chrome, "alarms.create"),
+    idle: hasPath(chrome, "idle.queryState"),
+    offscreen: hasPath(chrome, "offscreen.createDocument"),
+    identity: hasPath(chrome, "identity.getAuthToken"),
+    webAuthenticationProxy: hasPath(chrome, "webAuthenticationProxy"),
+    webNavigation: hasPath(chrome, "webNavigation.onCompleted"),
+    contextMenus: hasPath(chrome, "contextMenus.create"),
+    notifications: hasPath(chrome, "notifications.create"),
+    commands: hasPath(chrome, "commands.onCommand"),
     browserNamespace: Boolean(browserApi),
-    browserStorageSession: hasPath(browserApi, 'storage.session.get')
-  }
+    browserStorageSession: hasPath(browserApi, "storage.session.get"),
+  },
 };
 
 if (chrome.storage?.onChanged) {
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName === 'local') {
+    if (areaName === "local") {
       result.storageOnChangedKeys.push(...Object.keys(changes));
       if (changes.surffishContentProbe) result.storageOnChangedEvent = true;
     }
@@ -41,30 +48,35 @@ if (chrome.storage?.onChanged) {
 let pending = 2;
 function finishOne() {
   pending -= 1;
-  if (pending === 0) document.documentElement.dataset.surffishExtensionProbe = JSON.stringify(result);
+  if (pending === 0)
+    document.documentElement.dataset.surffishExtensionProbe =
+      JSON.stringify(result);
 }
 
 function requestBackgroundProbe(attempt = 1) {
-  chrome.runtime.sendMessage({ type: 'surffish-extension-probe' }, (response) => {
-    const error = chrome.runtime.lastError?.message || null;
-    if (!response && error && attempt < 5) {
-      setTimeout(() => requestBackgroundProbe(attempt + 1), attempt * 100);
-      return;
-    }
-    result.backgroundReply = Boolean(response);
-    result.backgroundError = error;
-    result.background = response || null;
-    finishOne();
-  });
+  chrome.runtime.sendMessage(
+    { type: "surffish-extension-probe" },
+    (response) => {
+      const error = chrome.runtime.lastError?.message || null;
+      if (!response && error && attempt < 5) {
+        setTimeout(() => requestBackgroundProbe(attempt + 1), attempt * 100);
+        return;
+      }
+      result.backgroundReply = Boolean(response);
+      result.backgroundError = error;
+      result.background = response || null;
+      finishOne();
+    },
+  );
 }
 
 requestBackgroundProbe();
 
-chrome.storage.local.set({ surffishContentProbe: 'stored' }, () => {
+chrome.storage.local.set({ surffishContentProbe: "stored" }, () => {
   const setError = chrome.runtime.lastError?.message;
-  chrome.storage.local.get('surffishContentProbe', (values) => {
+  chrome.storage.local.get("surffishContentProbe", (values) => {
     const getError = chrome.runtime.lastError?.message;
-    result.storageLocalRoundTrip = values?.surffishContentProbe === 'stored';
+    result.storageLocalRoundTrip = values?.surffishContentProbe === "stored";
     result.storageError = setError || getError || null;
     setTimeout(finishOne, 150);
   });

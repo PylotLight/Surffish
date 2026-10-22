@@ -1,221 +1,555 @@
-import { randomUUID } from 'node:crypto'
-import { planSetupTabClose } from '../shared/bramble-setup-close'
-import { capturePageWithin } from './capture-page'
-import { shouldHandOffSignIn, signInContinueUrl } from './google-webkit-sign-in-policy.ts'
-import { hasGoogleSessionCookie, isWebKitGoogleSignInAvailable, runWebKitGoogleSignIn } from './google-webkit-sign-in'
-import { Buffer } from 'node:buffer'
-import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { app, clipboard, dialog, Menu, screen, WebContentsView, type BaseWindow, type ContextMenuParams, type Event, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
-import type { BrowserBounds, BrowserFindState, BrowserState, BrowserTabSleep, BrowserTabSummary, SearchEngineId, TabSleepMinutes } from '../shared/types'
-import { planExtensionTabReveal, type ExtensionTabRecord } from '../shared/extension-tabs'
-import { DEFAULT_SEARCH_ENGINE, getSearchHomepage, isBrowserTabSleeping, isYouTubeUrl, pageMadeUrlKind, resolveNavigationTarget, SURFFISH_QUICK_LINKS_URL, typedHttpsFallbackUrl } from '../shared/navigation'
-import { normalizeSettingsTarget, parseSettingsUrl, SETTINGS_TAB_TITLE, settingsSiteOrigin, SURFFISH_SETTINGS_URL, type SettingsTarget } from '../shared/settings-tab'
-import { DEFAULT_TAB_SLEEP_MINUTES, isTabSleepMinutes, MAX_CACHED_FAVICON_BYTES, normalizeCachedFaviconDataUrl, normalizeFaviconUrl, normalizeHttpOrigin } from '../shared/persistence'
-import { cleanLinkUrl } from '../shared/clean-link'
-import { zoomActionForWheel, type PageZoomAction } from '../shared/zoom'
-import { getBrowsingHistory, recordBrowsingVisit, updateLatestVisitFavicon, updateLatestVisitTitle } from './history'
-import { BROWSER_SESSION_PARTITION, PRIVATE_SESSION_PARTITION as PRIVATE_PARTITION, clearPageSessionData, clearPrivateSession, getBrowserSession, getPageSession, getPrivateSession, whenPageSessionReady } from './browser-session'
-import { getSpace, getSpacesSettings, partitionForSpaceId, saveSpacesSettings, spacesEnabled } from './spaces-store'
-import { forgetSessionCookieSnapshot } from './session-cookies'
-import { adjacentSpaceId, DEFAULT_SPACE_ID, placeRestoredTabs, removeSpace, resolveSpaceId, spaceIdAtNumber, type SavedWindowSpaces, type SpacesSnapshot } from '../shared/spaces'
-import { forgetPrivateDownloads } from './downloads'
-import { newTabBackgroundOnOpen } from './new-tab-backgrounds'
-import { forgetSavedTabHistories, getBrowserNewTabPage, getBrowserNewTabPreferences, getBrowserSiteFaviconCache, getCachedBrowserSiteFavicon, getBrowserSiteSettings, getBrowserTabSleepMinutes, saveBrowserWindowsSession, saveBrowserSiteFavicon } from './browser-persistence'
-import type { SavedWindowState } from '../shared/window-geometry'
-import { toggleBookmarksBar } from './bookmarks-bar'
-import { bookmarkPage, bookmarkPagesInNewFolder, getBookmarksSnapshot, getFavouriteSites, isUrlBookmarked, recordBookmarkFavicon, removeBookmarksForUrl } from './bookmarks'
-import { showBrowserContextMenu } from './context-menu'
-import { translateInPlace } from './translation-service'
-import { getBrowserTranslationTarget } from './browser-persistence'
-import { isShowingPdf, printPdf } from './pdf-viewer'
-import { tabHoldsMediaSession, tabMediaHoldRecheckMs, trackTabMediaSession } from './media-session-keeper'
-import { trackTabMedia, tabPlayedMedia } from './tab-media'
-import { tabAudioState, trackTabAudio } from './tab-audio'
-import { tabAudioIndicator } from '../shared/tab-audio'
-import { forgetPrivateTabVolumes, pushTabVolume, setTabVolumeHost, setTabVolumeLevel, tabVolumeForUrl } from './tab-volume'
-import { formatTabVolume, stepTabVolume, TAB_VOLUME_COMMAND_STEP } from '../shared/tab-volume'
-import { attachPdfEditor, confirmDiscardPdfEdits, getPdfEditorSession, pdfEditorPreloadPath, sendPdfEditorCommand } from './pdf-editor'
-import { inMemoryPdfName, isEditablePdfSource, isInMemoryPdfSource, isPdfEditorUrl, PDF_EDITOR_URL, pdfEditorTabTitle, pdfNameFromUrl } from '../shared/pdf-editor'
-import { isLocalDocumentUrl } from '../shared/external-links'
-import { isBrambleExtensionUrl } from './bramble-poc-adapter'
-import { attachNetworkInspector, detachNetworkInspector } from './network-inspector'
-import { createBroadcastQueue } from '../shared/tab-broadcast'
-import { sendStateToWindowRenderers, sendTabsToWindowRenderers, setTabResyncHandler } from './tab-broadcast'
-import { activeTabSinceFor, captureLocalNewTabPage, focusVisibleShellPage, setSettingsSectionOpener, getBrowserChromeState, getMainRendererOrigin, getShellWindowFor, getWindowRenderers, handleBrowserPageMouseEvent, isFocusAddressShortcut, noteActiveTabForHistoryPanel, sendFocusAddressToVisibleRenderer, sendToMainWindowRenderers, sendToToolbarRenderer, sendToVisibleToolbarSurface, sendToWindowRenderers, setBrowserChromeState, setBrowserPageIsLocalNewTab } from './browser-shell'
-import { attachPagePopups, type PagePopupHost, userPopupResponse } from './page-popups'
-import { bindContentsToWindow, browserWindowNumber, currentBrowserWindow, focusedBrowserWindow, lastFocusedBrowserWindow, notifyBrowserWindowsChanged, runInWindow } from './window-scope'
-import { guardPageDragRegions } from './page-drag-guard'
-import { handleCommandPaletteShortcut } from './command-palette'
-import { getCustomSearchEngines, resolveAddressInput } from './search-keywords'
-import { buildFrequentSites, toQuickLinkSite, type QuickLinkSite } from '../shared/quick-links'
-import { noteLinkHover } from './preconnect'
-import { inputMayChangePage, restorableSleepHistory } from '../shared/wake-snapshot'
-import { forgetTabHistoryEntries, forgottenEntryIndexes, type SavedTabHistory, type TabHistoryForget } from '../shared/tab-history'
-import { dropPrivateWakeSnapshots, dropWakeSnapshot, endWakeSnapshot, endWakeSnapshotForTab, hasWakeSnapshot, keepWakeSnapshot, presentWakeSnapshot, presentWakeSnapshotAtStartup } from './wake-snapshot'
-import { forgetWakeSnapshotOnDisk, pruneWakeSnapshotsOnDisk } from './wake-snapshot-disk'
-import { avoidLinkStatusPointer, destroyLinkStatus, flashLinkStatus, hideLinkStatus, showLinkStatus } from './link-status'
-import { addLinkToReadingList, addTabToReadingList } from './reading-list-ipc'
-import { copyImageAtPoint, isCopyImageClick } from './copy-image'
-import { onPermissionDenied } from './proxy'
-import { noteTabLoadError, tabLoadError } from './load-errors'
-import { isAbortedNavigation, parseLoadError, shouldShowFullPageError, type NavigateResult } from '../shared/navigation-errors'
-import { attachTabSafety } from './safety'
-import { noteTypedHttpsUpgrade } from './https-only-mode'
-import { getTabInterstitial, onTabInterstitialChanged } from './tab-interstitials'
-import { forgetCertificateState, onCertificateStateChanged, pageSecurityFor } from './certificates'
-import { isTabCrashed, recoverCrashedTabOnActivate } from './tab-health'
-import { createPermissionToastThrottle, permissionDeniedMessage } from '../shared/site-permissions'
-import { startMacTrackpadSwipe, stopMacTrackpadSwipe, type MacTrackpadPinchPhase, type MacTrackpadSwipeBeginRequest, type MacTrackpadSwipeDirection } from './mac-trackpad-swipe'
-import { setPageViewOnScreen, type TabProcessEntry } from './tab-visibility'
-import { initialPageViewBounds, pageViewBounds } from '../shared/page-view-bounds'
-import { restoredTabInactiveSince } from './tab-archive-store'
-import type { TabArchiveCandidate } from '../shared/tab-archive'
-import { attachScreenshots, detachScreenshots, takeScreenshot } from './screenshot'
-import { attachReaderDetection, attachReaderHost, readerStateFor, readerViewFor, toggleReaderMode } from './reader-mode'
-import { controlReadAloud, readAloudEnabled, readAloudFromPage, readAloudMenuState } from './read-aloud-feature'
-import { canOfferReadAloud } from '../shared/read-aloud-gate'
-import { canWatchPage, watchPageFromTab } from './page-watchers-feature'
-import { createSplitGroup, encodeSessionSplits, noteRecentTab, orderTabsForSplits, pickLastUsedTab, removeTabFromSplits, replaceSplitPane, resizeSplitAt, splitDropSide, splitGroupOf, splitInfoFor, splitMoveFocusId, splitPaneRects, swapSplitPanes, MAX_SPLIT_PANES, type SavedSplit, type SplitGroup } from '../shared/split-view'
-import { notifySplitPagePointer, setSplitSurfaceHandlers, updateSplitSurface } from './split-view-surface'
-import { createTabGroup, encodeSessionTabGroups, normalizeTabGroups, tabGroupInfoFor, tabGroupLabel, updateTabGroup, TAB_GROUP_COLORS, type SavedTabGroup, type TabGroup } from '../shared/tab-groups'
-import { emitGlanceLinkHover, glanceShiftClickEnabled, isGlanceOpenIn, noteGlanceWindowState, openGlance, setGlanceHost, zoomOpenGlance, type GlanceSource } from './glance-entry'
-import { applySavedPageZoom, enablePagePinchZoom, forgetPrivatePageZoom, stepPageZoom } from './page-zoom'
-import { dropBrowserTabOnMiniWindow, focusMiniWindowAddress, getMiniWindowSettings, noteMiniWindowChanged, openMiniWindowNewTab, popOutTabToMenuBar, popOutTabToMiniWindow, returnMiniWindowToBrowser, setMiniWindowHost, type MiniWindowTabAudio } from './mini-window-entry'
-import { canPopOutUrl } from '../shared/mini-window'
-import { miniReturnBeforeId, miniTabOrigin, moveTabId, sidebarDropBeforeId, type MiniTabOrigin, type SidebarRowHit } from '../shared/mini-window-tab-drag'
-import { isGlanceableUrl, isShiftClickLinkOpen } from '../shared/glance'
-import { pinStepBeforeId } from '../shared/pinned-reorder'
-import { setOmniboxPrerenderHost, takeOmniboxPrerender, type PrerenderTabHistory } from './omnibox-prerender'
-import { isNavHistoryTarget, navHistoryMenu, type BrowserNavHistoryMenu, type NavHistoryDirection, type NavHistoryOpenDisposition } from '../shared/nav-history-menu'
-import { attachTabOverview, closeTabOverview, detachTabOverview, getTabOverviewContentsId, getTabOverviewContentsIds, getTabOverviewSelectedId, getTabOverviewState, moveTabOverviewSelection, isTabOverviewOpen, openTabOverview, setTabOverviewProgress, settleTabOverview, toggleTabOverview, type TabOverviewItem } from './tab-overview'
+import { randomUUID } from "node:crypto";
+import { planSetupTabClose } from "../shared/bramble-setup-close";
+import { capturePageWithin } from "./capture-page";
+import {
+  shouldHandOffSignIn,
+  signInContinueUrl,
+} from "./google-webkit-sign-in-policy.ts";
+import {
+  hasGoogleSessionCookie,
+  isWebKitGoogleSignInAvailable,
+  runWebKitGoogleSignIn,
+} from "./google-webkit-sign-in";
+import { Buffer } from "node:buffer";
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  app,
+  clipboard,
+  dialog,
+  Menu,
+  screen,
+  WebContentsView,
+  type BaseWindow,
+  type ContextMenuParams,
+  type Event,
+  type MenuItemConstructorOptions,
+  type WebContents,
+  type WebFrameMain,
+} from "electron";
+import type {
+  BrowserBounds,
+  BrowserFindState,
+  BrowserState,
+  BrowserTabSleep,
+  BrowserTabSummary,
+  SearchEngineId,
+  TabSleepMinutes,
+} from "../shared/types";
+import {
+  planExtensionTabReveal,
+  type ExtensionTabRecord,
+} from "../shared/extension-tabs";
+import {
+  DEFAULT_SEARCH_ENGINE,
+  getSearchHomepage,
+  isBrowserTabSleeping,
+  isYouTubeUrl,
+  pageMadeUrlKind,
+  resolveNavigationTarget,
+  SURFFISH_QUICK_LINKS_URL,
+  typedHttpsFallbackUrl,
+} from "../shared/navigation";
+import {
+  normalizeSettingsTarget,
+  parseSettingsUrl,
+  SETTINGS_TAB_TITLE,
+  settingsSiteOrigin,
+  SURFFISH_SETTINGS_URL,
+  type SettingsTarget,
+} from "../shared/settings-tab";
+import {
+  DEFAULT_TAB_SLEEP_MINUTES,
+  isTabSleepMinutes,
+  MAX_CACHED_FAVICON_BYTES,
+  normalizeCachedFaviconDataUrl,
+  normalizeFaviconUrl,
+  normalizeHttpOrigin,
+} from "../shared/persistence";
+import { cleanLinkUrl } from "../shared/clean-link";
+import { zoomActionForWheel, type PageZoomAction } from "../shared/zoom";
+import {
+  getBrowsingHistory,
+  recordBrowsingVisit,
+  updateLatestVisitFavicon,
+  updateLatestVisitTitle,
+} from "./history";
+import {
+  BROWSER_SESSION_PARTITION,
+  PRIVATE_SESSION_PARTITION as PRIVATE_PARTITION,
+  clearPageSessionData,
+  clearPrivateSession,
+  getBrowserSession,
+  getPageSession,
+  getPrivateSession,
+  whenPageSessionReady,
+} from "./browser-session";
+import {
+  getSpace,
+  getSpacesSettings,
+  partitionForSpaceId,
+  saveSpacesSettings,
+  spacesEnabled,
+} from "./spaces-store";
+import { forgetSessionCookieSnapshot } from "./session-cookies";
+import {
+  adjacentSpaceId,
+  DEFAULT_SPACE_ID,
+  placeRestoredTabs,
+  removeSpace,
+  resolveSpaceId,
+  spaceIdAtNumber,
+  type SavedWindowSpaces,
+  type SpacesSnapshot,
+} from "../shared/spaces";
+import { forgetPrivateDownloads } from "./downloads";
+import { newTabBackgroundOnOpen } from "./new-tab-backgrounds";
+import {
+  forgetSavedTabHistories,
+  getBrowserNewTabPage,
+  getBrowserNewTabPreferences,
+  getBrowserSiteFaviconCache,
+  getCachedBrowserSiteFavicon,
+  getBrowserSiteSettings,
+  getBrowserTabSleepMinutes,
+  saveBrowserWindowsSession,
+  saveBrowserSiteFavicon,
+} from "./browser-persistence";
+import type { SavedWindowState } from "../shared/window-geometry";
+import { toggleBookmarksBar } from "./bookmarks-bar";
+import {
+  bookmarkPage,
+  bookmarkPagesInNewFolder,
+  getBookmarksSnapshot,
+  getFavouriteSites,
+  isUrlBookmarked,
+  recordBookmarkFavicon,
+  removeBookmarksForUrl,
+} from "./bookmarks";
+import { showBrowserContextMenu } from "./context-menu";
+import { translateInPlace } from "./translation-service";
+import { getBrowserTranslationTarget } from "./browser-persistence";
+import { isShowingPdf, printPdf } from "./pdf-viewer";
+import {
+  tabHoldsMediaSession,
+  tabMediaHoldRecheckMs,
+  trackTabMediaSession,
+} from "./media-session-keeper";
+import { trackTabMedia, tabPlayedMedia } from "./tab-media";
+import { tabAudioState, trackTabAudio } from "./tab-audio";
+import { tabAudioIndicator } from "../shared/tab-audio";
+import {
+  forgetPrivateTabVolumes,
+  pushTabVolume,
+  setTabVolumeHost,
+  setTabVolumeLevel,
+  tabVolumeForUrl,
+} from "./tab-volume";
+import {
+  formatTabVolume,
+  stepTabVolume,
+  TAB_VOLUME_COMMAND_STEP,
+} from "../shared/tab-volume";
+import {
+  attachPdfEditor,
+  confirmDiscardPdfEdits,
+  getPdfEditorSession,
+  pdfEditorPreloadPath,
+  sendPdfEditorCommand,
+} from "./pdf-editor";
+import {
+  inMemoryPdfName,
+  isEditablePdfSource,
+  isInMemoryPdfSource,
+  isPdfEditorUrl,
+  PDF_EDITOR_URL,
+  pdfEditorTabTitle,
+  pdfNameFromUrl,
+} from "../shared/pdf-editor";
+import { isLocalDocumentUrl } from "../shared/external-links";
+import { isBrambleExtensionUrl } from "./bramble-poc-adapter";
+import {
+  attachNetworkInspector,
+  detachNetworkInspector,
+} from "./network-inspector";
+import { createBroadcastQueue } from "../shared/tab-broadcast";
+import {
+  sendStateToWindowRenderers,
+  sendTabsToWindowRenderers,
+  setTabResyncHandler,
+} from "./tab-broadcast";
+import {
+  activeTabSinceFor,
+  captureLocalNewTabPage,
+  focusVisibleShellPage,
+  setSettingsSectionOpener,
+  getBrowserChromeState,
+  getMainRendererOrigin,
+  getShellWindowFor,
+  getWindowRenderers,
+  handleBrowserPageMouseEvent,
+  isFocusAddressShortcut,
+  noteActiveTabForHistoryPanel,
+  sendFocusAddressToVisibleRenderer,
+  sendToMainWindowRenderers,
+  sendToToolbarRenderer,
+  sendToVisibleToolbarSurface,
+  sendToWindowRenderers,
+  setBrowserChromeState,
+  setBrowserPageIsLocalNewTab,
+} from "./browser-shell";
+import {
+  attachPagePopups,
+  type PagePopupHost,
+  userPopupResponse,
+} from "./page-popups";
+import {
+  bindContentsToWindow,
+  browserWindowNumber,
+  currentBrowserWindow,
+  focusedBrowserWindow,
+  lastFocusedBrowserWindow,
+  notifyBrowserWindowsChanged,
+  runInWindow,
+} from "./window-scope";
+import { guardPageDragRegions } from "./page-drag-guard";
+import { handleCommandPaletteShortcut } from "./command-palette";
+import { getCustomSearchEngines, resolveAddressInput } from "./search-keywords";
+import {
+  buildFrequentSites,
+  toQuickLinkSite,
+  type QuickLinkSite,
+} from "../shared/quick-links";
+import { noteLinkHover } from "./preconnect";
+import {
+  inputMayChangePage,
+  restorableSleepHistory,
+} from "../shared/wake-snapshot";
+import {
+  forgetTabHistoryEntries,
+  forgottenEntryIndexes,
+  type SavedTabHistory,
+  type TabHistoryForget,
+} from "../shared/tab-history";
+import {
+  dropPrivateWakeSnapshots,
+  dropWakeSnapshot,
+  endWakeSnapshot,
+  endWakeSnapshotForTab,
+  hasWakeSnapshot,
+  keepWakeSnapshot,
+  presentWakeSnapshot,
+  presentWakeSnapshotAtStartup,
+} from "./wake-snapshot";
+import {
+  forgetWakeSnapshotOnDisk,
+  pruneWakeSnapshotsOnDisk,
+} from "./wake-snapshot-disk";
+import {
+  avoidLinkStatusPointer,
+  destroyLinkStatus,
+  flashLinkStatus,
+  hideLinkStatus,
+  showLinkStatus,
+} from "./link-status";
+import { addLinkToReadingList, addTabToReadingList } from "./reading-list-ipc";
+import { copyImageAtPoint, isCopyImageClick } from "./copy-image";
+import { onPermissionDenied } from "./proxy";
+import { noteTabLoadError, tabLoadError } from "./load-errors";
+import {
+  isAbortedNavigation,
+  parseLoadError,
+  shouldShowFullPageError,
+  type NavigateResult,
+} from "../shared/navigation-errors";
+import { attachTabSafety } from "./safety";
+import { noteTypedHttpsUpgrade } from "./https-only-mode";
+import {
+  getTabInterstitial,
+  onTabInterstitialChanged,
+} from "./tab-interstitials";
+import {
+  forgetCertificateState,
+  onCertificateStateChanged,
+  pageSecurityFor,
+} from "./certificates";
+import { isTabCrashed, recoverCrashedTabOnActivate } from "./tab-health";
+import {
+  createPermissionToastThrottle,
+  permissionDeniedMessage,
+} from "../shared/site-permissions";
+import {
+  startMacTrackpadSwipe,
+  stopMacTrackpadSwipe,
+  type MacTrackpadPinchPhase,
+  type MacTrackpadSwipeBeginRequest,
+  type MacTrackpadSwipeDirection,
+} from "./mac-trackpad-swipe";
+import { setPageViewOnScreen, type TabProcessEntry } from "./tab-visibility";
+import {
+  initialPageViewBounds,
+  pageViewBounds,
+} from "../shared/page-view-bounds";
+import { restoredTabInactiveSince } from "./tab-archive-store";
+import type { TabArchiveCandidate } from "../shared/tab-archive";
+import {
+  attachScreenshots,
+  detachScreenshots,
+  takeScreenshot,
+} from "./screenshot";
+import {
+  attachReaderDetection,
+  attachReaderHost,
+  readerStateFor,
+  readerViewFor,
+  toggleReaderMode,
+} from "./reader-mode";
+import {
+  controlReadAloud,
+  readAloudEnabled,
+  readAloudFromPage,
+  readAloudMenuState,
+} from "./read-aloud-feature";
+import { canOfferReadAloud } from "../shared/read-aloud-gate";
+import { canWatchPage, watchPageFromTab } from "./page-watchers-feature";
+import {
+  createSplitGroup,
+  encodeSessionSplits,
+  noteRecentTab,
+  orderTabsForSplits,
+  pickLastUsedTab,
+  removeTabFromSplits,
+  replaceSplitPane,
+  resizeSplitAt,
+  splitDropSide,
+  splitGroupOf,
+  splitInfoFor,
+  splitMoveFocusId,
+  splitPaneRects,
+  swapSplitPanes,
+  MAX_SPLIT_PANES,
+  type SavedSplit,
+  type SplitGroup,
+} from "../shared/split-view";
+import {
+  notifySplitPagePointer,
+  setSplitSurfaceHandlers,
+  updateSplitSurface,
+} from "./split-view-surface";
+import {
+  createTabGroup,
+  encodeSessionTabGroups,
+  normalizeTabGroups,
+  tabGroupInfoFor,
+  tabGroupLabel,
+  updateTabGroup,
+  TAB_GROUP_COLORS,
+  type SavedTabGroup,
+  type TabGroup,
+} from "../shared/tab-groups";
+import {
+  emitGlanceLinkHover,
+  glanceShiftClickEnabled,
+  isGlanceOpenIn,
+  noteGlanceWindowState,
+  openGlance,
+  setGlanceHost,
+  zoomOpenGlance,
+  type GlanceSource,
+} from "./glance-entry";
+import {
+  applySavedPageZoom,
+  enablePagePinchZoom,
+  forgetPrivatePageZoom,
+  stepPageZoom,
+} from "./page-zoom";
+import {
+  dropBrowserTabOnMiniWindow,
+  focusMiniWindowAddress,
+  getMiniWindowSettings,
+  noteMiniWindowChanged,
+  openMiniWindowNewTab,
+  popOutTabToMenuBar,
+  popOutTabToMiniWindow,
+  returnMiniWindowToBrowser,
+  setMiniWindowHost,
+  type MiniWindowTabAudio,
+} from "./mini-window-entry";
+import { canPopOutUrl } from "../shared/mini-window";
+import {
+  miniReturnBeforeId,
+  miniTabOrigin,
+  moveTabId,
+  sidebarDropBeforeId,
+  type MiniTabOrigin,
+  type SidebarRowHit,
+} from "../shared/mini-window-tab-drag";
+import { isGlanceableUrl, isShiftClickLinkOpen } from "../shared/glance";
+import { pinStepBeforeId } from "../shared/pinned-reorder";
+import {
+  setOmniboxPrerenderHost,
+  takeOmniboxPrerender,
+  type PrerenderTabHistory,
+} from "./omnibox-prerender";
+import {
+  isNavHistoryTarget,
+  navHistoryMenu,
+  type BrowserNavHistoryMenu,
+  type NavHistoryDirection,
+  type NavHistoryOpenDisposition,
+} from "../shared/nav-history-menu";
+import {
+  attachTabOverview,
+  closeTabOverview,
+  detachTabOverview,
+  getTabOverviewContentsId,
+  getTabOverviewContentsIds,
+  getTabOverviewSelectedId,
+  getTabOverviewState,
+  moveTabOverviewSelection,
+  isTabOverviewOpen,
+  openTabOverview,
+  setTabOverviewProgress,
+  settleTabOverview,
+  toggleTabOverview,
+  type TabOverviewItem,
+} from "./tab-overview";
 
-export const START_PAGE = 'https://online.bonjourr.fr/'
+export const START_PAGE = "https://online.bonjourr.fr/";
 interface BrowserTab {
-  id: string
+  id: string;
   /** The window the tab is in; changes when the tab is moved to another window. */
-  win: BrowserWindowState
-  view: WebContentsView | null
-  faviconUrl: string | null
+  win: BrowserWindowState;
+  view: WebContentsView | null;
+  faviconUrl: string | null;
   /** The icon URL the page last reported that `faviconUrl` shows (its http URL; `faviconUrl` may be its cached data: copy). */
-  faviconSource: string | null
-  faviconRevision: number
-  error: string | null
-  downloadStartedForCurrentLoad: boolean
-  pauseAutoplayUntilVisited: boolean
-  lastUrl: string
-  pendingUrl: string
-  pinned: boolean
-  inactiveSince: number | null
-  sleepTimer: ReturnType<typeof setTimeout> | null
+  faviconSource: string | null;
+  faviconRevision: number;
+  error: string | null;
+  downloadStartedForCurrentLoad: boolean;
+  pauseAutoplayUntilVisited: boolean;
+  lastUrl: string;
+  pendingUrl: string;
+  pinned: boolean;
+  inactiveSince: number | null;
+  sleepTimer: ReturnType<typeof setTimeout> | null;
   /** Why the tab has no view (null: never loaded this run, i.e. restored). Cleared when it loads. */
-  sleep: BrowserTabSleep | null
-  pageScrollEdges: BrowserPageScrollEdges
+  sleep: BrowserTabSleep | null;
+  pageScrollEdges: BrowserPageScrollEdges;
   /** visualViewport.scale reported by the page; above 1 means the user pinch-zoomed in. */
-  pageScale: number
+  pageScale: number;
   /** Extension origin (chrome-extension://id/) when this tab hosts an extension UI page. */
-  extensionPageOrigin: string | null
-  extensionPreloadPath: string | null
-  extensionPageOwner: ExtensionPageOwner | null
+  extensionPageOrigin: string | null;
+  extensionPreloadPath: string | null;
+  extensionPageOwner: ExtensionPageOwner | null;
   /** Private tab: in-memory session, never saved to history, the session file or the favicon cache. */
-  isPrivate: boolean
+  isPrivate: boolean;
   /** The built-in viewer is showing a PDF (refreshed on frame loads so the toolbar can offer Edit PDF). */
-  showingPdf: boolean
+  showingPdf: boolean;
   /** Opened by a page for a blob:/data: URL: closes again if all it did was start a download (as in Chrome). */
-  closeIfOnlyDownload?: boolean
+  closeIfOnlyDownload?: boolean;
   /** Set while the tab shows the PDF editor instead of the page; the view then runs on the editor session. */
-  pdfEditor: PdfEditorTabState | null
+  pdfEditor: PdfEditorTabState | null;
   /** Back/forward list to restore instead of a plain load (a tab brought back from the archive). */
-  restoreHistory: { entries: Electron.NavigationEntry[]; index: number } | null
+  restoreHistory: { entries: Electron.NavigationEntry[]; index: number } | null;
   /** The Space the tab is in (shared/spaces.ts); always Default while Spaces are off. */
-  spaceId: string
+  spaceId: string;
   /** Tab group (BrowserWindowState.groups), or null. */
-  groupId: string | null
+  groupId: string | null;
   /** Tab volume 0..1 (tab-volume.ts) and the site it belongs to; follows the tab across windows and sleep. */
-  volume: number
-  volumeOrigin: string | null
+  volume: number;
+  volumeOrigin: string | null;
 }
 
 interface PdfEditorTabState {
   /** The PDF's own http(s)/file URL; what the tab reports, persists and goes back to. */
-  sourceUrl: string
-  name: string
-  dirty: boolean
+  sourceUrl: string;
+  name: string;
+  dirty: boolean;
   /**
    * A page-made blob:/data: PDF can't be loaded again from main, so its original view is kept
    * (hidden, off screen) while the editor is open: the editor reads the bytes from it, and Back to
    * viewer puts it back as it was.
    */
-  sourceView?: WebContentsView | null
+  sourceView?: WebContentsView | null;
 }
 
 /** Who opened an extension UI tab: Bramble's own integration or a Chrome Web Store extension. */
-export type ExtensionPageOwner = 'bramble' | 'web-store'
+export type ExtensionPageOwner = "bramble" | "web-store";
 interface BrowserPageScrollEdges {
-  canScrollLeft: boolean
-  canScrollRight: boolean
+  canScrollLeft: boolean;
+  canScrollRight: boolean;
 }
 interface ActiveMacTrackpadSwipe {
-  contents: WebContents
-  tabId: string
-  direction: MacTrackpadSwipeDirection
-  token: number
+  contents: WebContents;
+  tabId: string;
+  direction: MacTrackpadSwipeDirection;
+  token: number;
 }
-const UNKNOWN_PAGE_SCROLL_EDGES: BrowserPageScrollEdges = { canScrollLeft: true, canScrollRight: true }
-const MAC_SWIPE_BEGIN_CHANNEL = 'browser:mac-trackpad-swipe:begin'
-const MAC_SWIPE_PROGRESS_CHANNEL = 'browser:mac-trackpad-swipe:progress'
-const MAC_SWIPE_END_CHANNEL = 'browser:mac-trackpad-swipe:end'
-const MAC_SWIPE_RESET_CHANNEL = 'browser:mac-trackpad-swipe:reset'
-export const BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL = 'browser:background-youtube-autoplay:allow'
-const MAC_SWIPE_SETTLE_MS = 180
-const MAC_SWIPE_DEBUG = process.env.SURFFISH_SWIPE_DEBUG === '1'
-interface FindState { tabId: string | null; open: boolean; text: string; result: BrowserFindState['result'] }
+const UNKNOWN_PAGE_SCROLL_EDGES: BrowserPageScrollEdges = {
+  canScrollLeft: true,
+  canScrollRight: true,
+};
+const MAC_SWIPE_BEGIN_CHANNEL = "browser:mac-trackpad-swipe:begin";
+const MAC_SWIPE_PROGRESS_CHANNEL = "browser:mac-trackpad-swipe:progress";
+const MAC_SWIPE_END_CHANNEL = "browser:mac-trackpad-swipe:end";
+const MAC_SWIPE_RESET_CHANNEL = "browser:mac-trackpad-swipe:reset";
+export const BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL =
+  "browser:background-youtube-autoplay:allow";
+const MAC_SWIPE_SETTLE_MS = 180;
+const MAC_SWIPE_DEBUG = process.env.SURFFISH_SWIPE_DEBUG === "1";
+interface FindState {
+  tabId: string | null;
+  open: boolean;
+  text: string;
+  result: BrowserFindState["result"];
+}
 
 /** One browser window: its tabs (in sidebar order) and the per-window page state. */
 interface BrowserWindowState {
-  window: BaseWindow
-  tabs: BrowserTab[]
-  activeTabId: string | null
+  window: BaseWindow;
+  tabs: BrowserTab[];
+  activeTabId: string | null;
   /** Page area in window coordinates (where the active site view sits). */
-  browserBounds: BrowserBounds
-  findState: FindState
-  confirmingWindowClose: boolean
+  browserBounds: BrowserBounds;
+  findState: FindState;
+  confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
-  isPrivate: boolean
+  isPrivate: boolean;
   /** Split views in this window; the active tab is the focused pane of the one on screen (see split-view.ts). */
-  splits: SplitGroup[]
+  splits: SplitGroup[];
   /** Tab ids, most recently activated first ("split with last used tab"). */
-  recentTabIds: string[]
+  recentTabIds: string[];
   /** The Space this window shows; the sidebar lists only its tabs. */
-  activeSpaceId: string
+  activeSpaceId: string;
   /** Last active tab per Space, so switching back lands where you were. */
-  spaceActiveTabs: Map<string, string>
+  spaceActiveTabs: Map<string, string>;
   /** Tab groups in this window (shared/tab-groups.ts has the rules). */
-  groups: TabGroup[]
+  groups: TabGroup[];
   /**
    * A mini window (mini-window.ts): a small always-on-top window holding one tab (or, with grouping
    * 'tabs', a collection of them), with no shell surfaces. It is not a registered browser window, so
    * "the current window" never resolves to it; tabs it would open go to a normal window
    * (browserTargetForMini). Every tab in it counts as on screen (never slept, discarded or archived).
    */
-  mini: boolean
+  mini: boolean;
   /** Mini window only: the window its first tab came from (Return to Browser's fallback; each tab's own is in miniTabHomes). */
-  miniHome: BrowserWindowState | null
+  miniHome: BrowserWindowState | null;
 }
-const windowStates: BrowserWindowState[] = []
-let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE
-let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES
-let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null
-let nextMacTrackpadSwipeToken = 0
-const tabThumbnails = new Map<string, string>()
+const windowStates: BrowserWindowState[] = [];
+let selectedSearchEngine: SearchEngineId = DEFAULT_SEARCH_ENGINE;
+let tabSleepMinutes: TabSleepMinutes = DEFAULT_TAB_SLEEP_MINUTES;
+let activeMacTrackpadSwipe: ActiveMacTrackpadSwipe | null = null;
+let nextMacTrackpadSwipeToken = 0;
+const tabThumbnails = new Map<string, string>();
 // Every New Tab looks the same, so one snapshot stands in for any that were never on screen.
-let newTabThumbnail: string | null = null
-const THUMBNAIL_WIDTH = 640
+let newTabThumbnail: string | null = null;
+const THUMBNAIL_WIDTH = 640;
 /** When each tab last came on screen as the active tab (wake snapshots skip tabs only passed through). */
-const tabShownAt = new WeakMap<BrowserTab, number>()
+const tabShownAt = new WeakMap<BrowserTab, number>();
 /** A tab must have been the active tab this long before leaving for its picture to be kept (wake-snapshot.ts). */
-const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500
+const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500;
 /**
  * Leaving a tab captures it (capturePage) and encodes an overview thumbnail plus a wake snapshot: the
  * biggest main-process cost of a tab switch. A page that nothing has changed since its last picture
@@ -223,101 +557,145 @@ const WAKE_SNAPSHOT_MIN_SHOWN_MS = 1500
  * for up to this long, so flipping between tabs you are reading doesn't redo it. Pages can change on
  * their own (timers, animation), so an unchanged-looking picture still expires.
  */
-const TAB_PICTURE_MAX_AGE_MS = 60_000
+const TAB_PICTURE_MAX_AGE_MS = 60_000;
 /** Bumped by anything that may change how a tab's page looks (tabPictureChanged). */
-const tabPictureRevision = new WeakMap<BrowserTab, number>()
+const tabPictureRevision = new WeakMap<BrowserTab, number>();
 /** The last picture taken of each tab: what it showed and when. */
-const tabPictureTaken = new WeakMap<BrowserTab, { revision: number; contents: WebContents; url: string; width: number; height: number; at: number }>()
+const tabPictureTaken = new WeakMap<
+  BrowserTab,
+  {
+    revision: number;
+    contents: WebContents;
+    url: string;
+    width: number;
+    height: number;
+    at: number;
+  }
+>();
 /** Tabs whose page is playing media right now (always treated as changed). */
-const tabsPlayingMedia = new WeakSet<BrowserTab>()
+const tabsPlayingMedia = new WeakSet<BrowserTab>();
 /** Memory saver on (memory-saver.ts pushes it): background tabs may be discarded, so they may need a wake snapshot. */
-let memorySaverActive = true
+let memorySaverActive = true;
 /** Preconnect cooldown key for the private session (its partition name is ''). */
-const PRIVATE_PRECONNECT_KEY = '(private)'
-const FAVICON_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'])
-const faviconFetches = new Map<string, Promise<string | null>>()
+const PRIVATE_PRECONNECT_KEY = "(private)";
+const FAVICON_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+]);
+const faviconFetches = new Map<string, Promise<string | null>>();
 
-function configuredStartPage(engine: SearchEngineId = selectedSearchEngine): string {
-  const page = getBrowserNewTabPage()
-  if (page === 'search') return getSearchHomepage(engine)
-  return page === 'bonjourr' ? START_PAGE : SURFFISH_QUICK_LINKS_URL
+function configuredStartPage(
+  engine: SearchEngineId = selectedSearchEngine,
+): string {
+  const page = getBrowserNewTabPage();
+  if (page === "search") return getSearchHomepage(engine);
+  return page === "bonjourr" ? START_PAGE : SURFFISH_QUICK_LINKS_URL;
 }
 
-function isLiveWindow(w: BrowserWindowState | undefined): w is BrowserWindowState {
-  return Boolean(w && windowStates.includes(w) && !w.window.isDestroyed())
+function isLiveWindow(
+  w: BrowserWindowState | undefined,
+): w is BrowserWindowState {
+  return Boolean(w && windowStates.includes(w) && !w.window.isDestroyed());
 }
 
-function windowStateFor(window: BaseWindow | null | undefined): BrowserWindowState | undefined {
-  return window ? windowStates.find((w) => w.window === window && !w.window.isDestroyed()) : undefined
+function windowStateFor(
+  window: BaseWindow | null | undefined,
+): BrowserWindowState | undefined {
+  return window
+    ? windowStates.find((w) => w.window === window && !w.window.isDestroyed())
+    : undefined;
 }
 
 /** The window an implicit call is for: the IPC sender's, else the focused / last focused one. */
 function currentWindowState(): BrowserWindowState | undefined {
-  const normal = windowStates.filter((w) => !w.mini)
-  return windowStateFor(currentBrowserWindow()) ?? (normal.length === 1 ? normal[0] : undefined)
+  const normal = windowStates.filter((w) => !w.mini);
+  return (
+    windowStateFor(currentBrowserWindow()) ??
+    (normal.length === 1 ? normal[0] : undefined)
+  );
 }
 
 /** Every tab in every window. */
 function allTabs(): BrowserTab[] {
-  return windowStates.flatMap((w) => w.tabs)
+  return windowStates.flatMap((w) => w.tabs);
 }
 
 function findTab(id: string | null | undefined): BrowserTab | undefined {
-  if (!id) return undefined
+  if (!id) return undefined;
   for (const w of windowStates) {
-    const tab = w.tabs.find((candidate) => candidate.id === id)
-    if (tab) return tab
+    const tab = w.tabs.find((candidate) => candidate.id === id);
+    if (tab) return tab;
   }
-  return undefined
+  return undefined;
 }
 
 function tabForContents(contents: WebContents): BrowserTab | undefined {
   for (const w of windowStates) {
-    const tab = w.tabs.find((candidate) => candidate.view?.webContents === contents)
-    if (tab) return tab
+    const tab = w.tabs.find(
+      (candidate) => candidate.view?.webContents === contents,
+    );
+    if (tab) return tab;
   }
-  return undefined
+  return undefined;
 }
 
-function activeTabOf(w: BrowserWindowState | undefined): BrowserTab | undefined {
-  return w ? w.tabs.find((tab) => tab.id === w.activeTabId) : undefined
+function activeTabOf(
+  w: BrowserWindowState | undefined,
+): BrowserTab | undefined {
+  return w ? w.tabs.find((tab) => tab.id === w.activeTabId) : undefined;
 }
 
 function isActiveTab(tab: BrowserTab): boolean {
-  return tab.win.activeTabId === tab.id
+  return tab.win.activeTabId === tab.id;
 }
 
 /** The window's tabs in one Space (the active one by default), in sidebar list order. */
-function spaceTabsOf(w: BrowserWindowState | undefined, spaceId = w?.activeSpaceId): BrowserTab[] {
-  return w ? w.tabs.filter((tab) => tab.spaceId === spaceId) : []
+function spaceTabsOf(
+  w: BrowserWindowState | undefined,
+  spaceId = w?.activeSpaceId,
+): BrowserTab[] {
+  return w ? w.tabs.filter((tab) => tab.spaceId === spaceId) : [];
 }
 
 /** The session partition a tab's page runs in: private, its Space's own, or the profile one. */
 function partitionForTab(tab: BrowserTab): string {
-  return tab.isPrivate ? '' : partitionForSpaceId(tab.spaceId)
+  return tab.isPrivate ? "" : partitionForSpaceId(tab.spaceId);
 }
 
 function pageSessionForTab(tab: BrowserTab): Electron.Session {
-  return tab.isPrivate ? getPrivateSession() : getPageSession(partitionForTab(tab))
+  return tab.isPrivate
+    ? getPrivateSession()
+    : getPageSession(partitionForTab(tab));
 }
 
 /** After `index` was taken out of `tabs`: the tab now there (or the last before it) in the same Space. */
-function neighbourInSpace(tabs: readonly BrowserTab[], index: number, spaceId: string): BrowserTab | undefined {
-  for (let at = index; at < tabs.length; at += 1) if (tabs[at]!.spaceId === spaceId) return tabs[at]
-  for (let at = Math.min(index, tabs.length) - 1; at >= 0; at -= 1) if (tabs[at]!.spaceId === spaceId) return tabs[at]
-  return undefined
+function neighbourInSpace(
+  tabs: readonly BrowserTab[],
+  index: number,
+  spaceId: string,
+): BrowserTab | undefined {
+  for (let at = index; at < tabs.length; at += 1)
+    if (tabs[at]!.spaceId === spaceId) return tabs[at];
+  for (let at = Math.min(index, tabs.length) - 1; at >= 0; at -= 1)
+    if (tabs[at]!.spaceId === spaceId) return tabs[at];
+  return undefined;
 }
 
 /** The split view `tab` is a pane of, if any. */
 function splitOf(tab: BrowserTab | undefined): SplitGroup | undefined {
-  return tab ? splitGroupOf(tab.win.splits, tab.id) : undefined
+  return tab ? splitGroupOf(tab.win.splits, tab.id) : undefined;
 }
 
 /** Tabs whose pages are on screen: the active tab, or every pane of its split. */
 function onScreenTabIds(w: BrowserWindowState | undefined): string[] {
-  const active = activeTabOf(w)
-  if (!active) return []
-  return splitOf(active)?.tabIds.slice() ?? [active.id]
+  const active = activeTabOf(w);
+  if (!active) return [];
+  return splitOf(active)?.tabIds.slice() ?? [active.id];
 }
 
 /**
@@ -326,226 +704,326 @@ function onScreenTabIds(w: BrowserWindowState | undefined): string[] {
  * like a tucked mini window's tab.
  */
 function isTabOnScreen(tab: BrowserTab): boolean {
-  return tab.win.mini || isActiveTab(tab) || Boolean(splitOf(activeTabOf(tab.win))?.tabIds.includes(tab.id))
+  return (
+    tab.win.mini ||
+    isActiveTab(tab) ||
+    Boolean(splitOf(activeTabOf(tab.win))?.tabIds.includes(tab.id))
+  );
 }
 
 /** Where a tab's page is drawn (window coordinates): its pane in a split on screen, else the page area. */
 function pageBoundsOf(tab: BrowserTab): BrowserBounds {
-  const w = tab.win
-  const split = splitOf(activeTabOf(w))
-  const index = split ? split.tabIds.indexOf(tab.id) : -1
-  if (!split || index < 0 || w.browserBounds.width <= 0 || w.browserBounds.height <= 0) return { ...w.browserBounds }
-  return splitPaneRects(w.browserBounds, split.sizes).panes[index] ?? { ...w.browserBounds }
+  const w = tab.win;
+  const split = splitOf(activeTabOf(w));
+  const index = split ? split.tabIds.indexOf(tab.id) : -1;
+  if (
+    !split ||
+    index < 0 ||
+    w.browserBounds.width <= 0 ||
+    w.browserBounds.height <= 0
+  )
+    return { ...w.browserBounds };
+  return (
+    splitPaneRects(w.browserBounds, split.sizes).panes[index] ?? {
+      ...w.browserBounds,
+    }
+  );
 }
 
 /** No argument: the current window's active tab. With an id: that tab, in whichever window it is. */
 function getTab(id?: string | null): BrowserTab | undefined {
-  return id === undefined ? activeTabOf(currentWindowState()) : findTab(id)
+  return id === undefined ? activeTabOf(currentWindowState()) : findTab(id);
 }
 
 function currentUrl(tab: BrowserTab): string {
-  if (tab.pdfEditor) return tab.pdfEditor.sourceUrl
-  return tab.view?.webContents.getURL() || tab.lastUrl || tab.pendingUrl || configuredStartPage()
+  if (tab.pdfEditor) return tab.pdfEditor.sourceUrl;
+  return (
+    tab.view?.webContents.getURL() ||
+    tab.lastUrl ||
+    tab.pendingUrl ||
+    configuredStartPage()
+  );
 }
 
 function isExtensionPage(tab: BrowserTab, url: string): boolean {
-  return tab.extensionPageOrigin !== null && isBrambleExtensionUrl(url, tab.extensionPageOrigin)
+  return (
+    tab.extensionPageOrigin !== null &&
+    isBrambleExtensionUrl(url, tab.extensionPageOrigin)
+  );
 }
-export function shouldPauseBackgroundYouTubeAutoplay(contents: WebContents): boolean {
-  if (contents.isDestroyed()) return false
-  const tab = tabForContents(contents)
-  return Boolean(tab?.pauseAutoplayUntilVisited && !isTabOnScreen(tab))
+export function shouldPauseBackgroundYouTubeAutoplay(
+  contents: WebContents,
+): boolean {
+  if (contents.isDestroyed()) return false;
+  const tab = tabForContents(contents);
+  return Boolean(tab?.pauseAutoplayUntilVisited && !isTabOnScreen(tab));
 }
 function pageTitle(tab: BrowserTab): string {
-  if (tab.pdfEditor) return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty)
-  if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return 'New Tab'
-  if (isSettingsTab(tab)) return SETTINGS_TAB_TITLE
-  const title = tab.view?.webContents.getTitle().trim()
-  if (title) return title
+  if (tab.pdfEditor)
+    return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty);
+  if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return "New Tab";
+  if (isSettingsTab(tab)) return SETTINGS_TAB_TITLE;
+  const title = tab.view?.webContents.getTitle().trim();
+  if (title) return title;
   try {
-    return new URL(currentUrl(tab)).hostname || 'New tab'
+    return new URL(currentUrl(tab)).hostname || "New tab";
   } catch {
-    return 'New tab'
+    return "New tab";
   }
 }
 
 function getState(w = currentWindowState()): BrowserState {
-  const tab = activeTabOf(w)
-  const contents = tab?.view?.webContents
+  const tab = activeTabOf(w);
+  const contents = tab?.view?.webContents;
   return {
     url: tab ? currentUrl(tab) : configuredStartPage(),
-    title: tab ? pageTitle(tab) : 'New tab',
+    title: tab ? pageTitle(tab) : "New tab",
     loading: contents?.isLoading() ?? false,
     // Back from the editor returns to the viewer.
     // A restored tab that hasn't loaded yet answers from the list it will wake with.
-    canGoBack: tab?.pdfEditor ? true : contents?.navigationHistory.canGoBack() ?? (tab?.restoreHistory ? tab.restoreHistory.index > 0 : false),
-    canGoForward: tab?.pdfEditor ? false : contents?.navigationHistory.canGoForward() ?? (tab?.restoreHistory ? tab.restoreHistory.index < tab.restoreHistory.entries.length - 1 : false),
+    canGoBack: tab?.pdfEditor
+      ? true
+      : (contents?.navigationHistory.canGoBack() ??
+        (tab?.restoreHistory ? tab.restoreHistory.index > 0 : false)),
+    canGoForward: tab?.pdfEditor
+      ? false
+      : (contents?.navigationHistory.canGoForward() ??
+        (tab?.restoreHistory
+          ? tab.restoreHistory.index < tab.restoreHistory.entries.length - 1
+          : false)),
     error: tab?.error ?? null,
     private: tab?.isPrivate ?? w?.isPrivate ?? false,
-    zoomFactor: contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
-    pdf: tab?.pdfEditor ? 'editor' : tab?.showingPdf ? 'viewer' : null,
+    zoomFactor:
+      contents && !contents.isDestroyed() ? contents.getZoomFactor() : 1,
+    pdf: tab?.pdfEditor ? "editor" : tab?.showingPdf ? "viewer" : null,
     reader: tab?.pdfEditor ? null : readerStateFor(contents),
     interstitial: getTabInterstitial(contents),
-    loadError: tab ? tabLoadError(tab, tab.error, currentUrl(tab), contents && !contents.isDestroyed() ? contents : undefined) : null,
-    security: tab && !tab.pdfEditor && !tab.error ? pageSecurityFor(contents) : null,
+    loadError: tab
+      ? tabLoadError(
+          tab,
+          tab.error,
+          currentUrl(tab),
+          contents && !contents.isDestroyed() ? contents : undefined,
+        )
+      : null,
+    security:
+      tab && !tab.pdfEditor && !tab.error ? pageSecurityFor(contents) : null,
     activeTabSince: w ? activeTabSinceFor(w.window) : 0,
     ...(tabPlayedMedia(contents) ? { media: true } : {}),
-    settings: tab && isSettingsTab(tab) ? settingsTabState(tab) : null
-  }
+    settings: tab && isSettingsTab(tab) ? settingsTabState(tab) : null,
+  };
 }
 
 function getTabSummaries(w = currentWindowState()): BrowserTabSummary[] {
-  if (!w) return []
-  const membersOf = new Map<string, string[]>()
-  for (const tab of w.tabs) if (tab.groupId) membersOf.set(tab.groupId, [...(membersOf.get(tab.groupId) ?? []), tab.id])
+  if (!w) return [];
+  const membersOf = new Map<string, string[]>();
+  for (const tab of w.tabs)
+    if (tab.groupId)
+      membersOf.set(tab.groupId, [
+        ...(membersOf.get(tab.groupId) ?? []),
+        tab.id,
+      ]);
   return spaceTabsOf(w).map((tab) => {
-    const split = splitInfoFor(w.splits, tab.id)
-    const group = tab.groupId ? tabGroupInfoFor(w.groups.find((candidate) => candidate.id === tab.groupId), membersOf.get(tab.groupId) ?? [], tab.id) : undefined
+    const split = splitInfoFor(w.splits, tab.id);
+    const group = tab.groupId
+      ? tabGroupInfoFor(
+          w.groups.find((candidate) => candidate.id === tab.groupId),
+          membersOf.get(tab.groupId) ?? [],
+          tab.id,
+        )
+      : undefined;
     return {
-    id: tab.id,
-    url: currentUrl(tab),
-    title: pageTitle(tab),
-    faviconUrl: tab.faviconUrl,
-    loading: tab.view?.webContents.isLoading() ?? false,
-    active: tab.id === w.activeTabId,
-    pinned: tab.pinned,
-    sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
-    ...(tab.view === null && tab.sleep ? { sleep: tab.sleep } : {}),
-    private: tab.isPrivate,
-    ...tabAudioSummary(tab),
-    muted: Boolean(tab.view && !tab.view.webContents.isDestroyed() && tab.view.webContents.isAudioMuted()),
-    ...(tab.volume !== 1 ? { volume: tab.volume } : {}),
-    crashed: isTabCrashed(tab.view?.webContents),
-    ...(split ? { split } : {}),
-    ...(group ? { group } : {})
-  }
-  })
+      id: tab.id,
+      url: currentUrl(tab),
+      title: pageTitle(tab),
+      faviconUrl: tab.faviconUrl,
+      loading: tab.view?.webContents.isLoading() ?? false,
+      active: tab.id === w.activeTabId,
+      pinned: tab.pinned,
+      sleeping: isBrowserTabSleeping(tab.view !== null, currentUrl(tab)),
+      ...(tab.view === null && tab.sleep ? { sleep: tab.sleep } : {}),
+      private: tab.isPrivate,
+      ...tabAudioSummary(tab),
+      muted: Boolean(
+        tab.view &&
+        !tab.view.webContents.isDestroyed() &&
+        tab.view.webContents.isAudioMuted(),
+      ),
+      ...(tab.volume !== 1 ? { volume: tab.volume } : {}),
+      crashed: isTabCrashed(tab.view?.webContents),
+      ...(split ? { split } : {}),
+      ...(group ? { group } : {}),
+    };
+  });
 }
 
 function persistPageFavicon(pageUrl: string, faviconUrl: string | null): void {
-  if (!faviconUrl) return
-  const safeFaviconUrl = normalizeFaviconUrl(faviconUrl)
-  const origin = normalizeHttpOrigin(pageUrl)
-  if (!safeFaviconUrl || !origin) return
-  updateLatestVisitFavicon(pageUrl, safeFaviconUrl)
+  if (!faviconUrl) return;
+  const safeFaviconUrl = normalizeFaviconUrl(faviconUrl);
+  const origin = normalizeHttpOrigin(pageUrl);
+  if (!safeFaviconUrl || !origin) return;
+  updateLatestVisitFavicon(pageUrl, safeFaviconUrl);
 
-  recordBookmarkFavicon(pageUrl, safeFaviconUrl)
-  notifyHistoryChanged()
+  recordBookmarkFavicon(pageUrl, safeFaviconUrl);
+  notifyHistoryChanged();
 }
 
-async function readBoundedFaviconBody(response: Response): Promise<Buffer | null> {
-  const body = response.body
-  if (!body) return null
-  const reader = body.getReader()
-  const chunks: Buffer[] = []
-  let total = 0
+async function readBoundedFaviconBody(
+  response: Response,
+): Promise<Buffer | null> {
+  const body = response.body;
+  if (!body) return null;
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
       if (total > MAX_CACHED_FAVICON_BYTES) {
-        await reader.cancel()
-        return null
+        await reader.cancel();
+        return null;
       }
-      chunks.push(Buffer.from(value))
+      chunks.push(Buffer.from(value));
     }
-    return total > 0 ? Buffer.concat(chunks, total) : null
+    return total > 0 ? Buffer.concat(chunks, total) : null;
   } catch {
-    return null
+    return null;
   } finally {
-    try { reader.releaseLock() } catch { /* the stream may already be cancelled */ }
+    try {
+      reader.releaseLock();
+    } catch {
+      /* the stream may already be cancelled */
+    }
   }
 }
 
-function cachePageFavicon(pageUrl: string, faviconUrl: string): Promise<string | null> {
-  const origin = normalizeHttpOrigin(pageUrl)
-  if (!origin) return Promise.resolve(null)
-  const inlineIcon = normalizeCachedFaviconDataUrl(faviconUrl)
+function cachePageFavicon(
+  pageUrl: string,
+  faviconUrl: string,
+): Promise<string | null> {
+  const origin = normalizeHttpOrigin(pageUrl);
+  if (!origin) return Promise.resolve(null);
+  const inlineIcon = normalizeCachedFaviconDataUrl(faviconUrl);
   if (inlineIcon) {
-    const previous = getCachedBrowserSiteFavicon(origin)
-    const saved = saveBrowserSiteFavicon(origin, inlineIcon)
-    if (saved && previous !== saved) sendToMainWindowRenderers('browser:site-icon:changed', { origin, faviconUrl: saved })
-    return Promise.resolve(saved)
+    const previous = getCachedBrowserSiteFavicon(origin);
+    const saved = saveBrowserSiteFavicon(origin, inlineIcon);
+    if (saved && previous !== saved)
+      sendToMainWindowRenderers("browser:site-icon:changed", {
+        origin,
+        faviconUrl: saved,
+      });
+    return Promise.resolve(saved);
   }
-  const safeIconUrl = normalizeFaviconUrl(faviconUrl)
-  if (!safeIconUrl) return Promise.resolve(null)
-  const key = `${origin}\n${safeIconUrl}`
-  const inFlight = faviconFetches.get(key)
-  if (inFlight) return inFlight
+  const safeIconUrl = normalizeFaviconUrl(faviconUrl);
+  if (!safeIconUrl) return Promise.resolve(null);
+  const key = `${origin}\n${safeIconUrl}`;
+  const inFlight = faviconFetches.get(key);
+  if (inFlight) return inFlight;
 
   const request = (async (): Promise<string | null> => {
     try {
       const response = await getBrowserSession().fetch(safeIconUrl, {
-        redirect: 'follow',
-        signal: AbortSignal.timeout(8_000)
-      })
-      if (!response.ok) return null
-      const finalUrl = normalizeFaviconUrl(response.url || safeIconUrl)
-      if (!finalUrl) return null
-      const declaredSize = Number(response.headers.get('content-length'))
-      if (Number.isFinite(declaredSize) && declaredSize > MAX_CACHED_FAVICON_BYTES) return null
-      const mimeFromHeader = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+        redirect: "follow",
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!response.ok) return null;
+      const finalUrl = normalizeFaviconUrl(response.url || safeIconUrl);
+      if (!finalUrl) return null;
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (
+        Number.isFinite(declaredSize) &&
+        declaredSize > MAX_CACHED_FAVICON_BYTES
+      )
+        return null;
+      const mimeFromHeader =
+        response.headers
+          .get("content-type")
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() ?? "";
       const mime = FAVICON_MIME_TYPES.has(mimeFromHeader)
         ? mimeFromHeader
-        : mimeFromHeader === 'application/octet-stream' && new URL(finalUrl).pathname.toLowerCase().endsWith('.ico')
-          ? 'image/x-icon'
-          : null
-      if (!mime) return null
-      const bytes = await readBoundedFaviconBody(response)
-      if (!bytes) return null
-      const dataUrl = normalizeCachedFaviconDataUrl(`data:${mime};base64,${bytes.toString('base64')}`)
-      if (!dataUrl) return null
-      const previous = getCachedBrowserSiteFavicon(origin)
-      const saved = saveBrowserSiteFavicon(origin, dataUrl)
-      if (saved && previous !== saved) sendToMainWindowRenderers('browser:site-icon:changed', { origin, faviconUrl: saved })
-      return saved
+        : mimeFromHeader === "application/octet-stream" &&
+            new URL(finalUrl).pathname.toLowerCase().endsWith(".ico")
+          ? "image/x-icon"
+          : null;
+      if (!mime) return null;
+      const bytes = await readBoundedFaviconBody(response);
+      if (!bytes) return null;
+      const dataUrl = normalizeCachedFaviconDataUrl(
+        `data:${mime};base64,${bytes.toString("base64")}`,
+      );
+      if (!dataUrl) return null;
+      const previous = getCachedBrowserSiteFavicon(origin);
+      const saved = saveBrowserSiteFavicon(origin, dataUrl);
+      if (saved && previous !== saved)
+        sendToMainWindowRenderers("browser:site-icon:changed", {
+          origin,
+          faviconUrl: saved,
+        });
+      return saved;
     } catch {
-      return null
+      return null;
     }
-  })()
-  faviconFetches.set(key, request)
+  })();
+  faviconFetches.set(key, request);
   void request.finally(() => {
-    if (faviconFetches.get(key) === request) faviconFetches.delete(key)
-  })
-  return request
+    if (faviconFetches.get(key) === request) faviconFetches.delete(key);
+  });
+  return request;
 }
 
 function refreshTabFavicon(tab: BrowserTab): void {
-  const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed()) return
-  const pageUrl = contents.getURL()
-  if (!/^https?:\/\//i.test(pageUrl)) return
-  const revision = ++tab.faviconRevision
+  const contents = tab.view?.webContents;
+  if (!contents || contents.isDestroyed()) return;
+  const pageUrl = contents.getURL();
+  if (!/^https?:\/\//i.test(pageUrl)) return;
+  const revision = ++tab.faviconRevision;
   const script = `(() => {
     const links = Array.from(document.querySelectorAll('link[rel~="icon"], link[rel~="apple-touch-icon"]'));
     links.sort((a, b) => (b.sizes?.toString().length ?? 0) - (a.sizes?.toString().length ?? 0));
     return links.find((link) => link.href)?.href ?? null;
-  })()`
-  void contents.executeJavaScript(script, true).then((value: unknown) => {
-    if (tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
-    let faviconUrl = typeof value === 'string' ? value : null
-    if (faviconUrl) {
-      try {
-        const parsed = new URL(faviconUrl)
-        const allowedDataImage = parsed.protocol === 'data:' && parsed.href.startsWith('data:image/') && parsed.href.length <= 500_000
-        const allowedWebImage = (parsed.protocol === 'http:' || parsed.protocol === 'https:')
-          && parsed.username.length === 0 && parsed.password.length === 0 && parsed.href.length <= 4_096
-        if (!allowedDataImage && !allowedWebImage) faviconUrl = null
-      } catch {
-        faviconUrl = null
+  })()`;
+  void contents
+    .executeJavaScript(script, true)
+    .then((value: unknown) => {
+      if (
+        tab.view?.webContents !== contents ||
+        tab.faviconRevision !== revision ||
+        contents.getURL() !== pageUrl
+      )
+        return;
+      let faviconUrl = typeof value === "string" ? value : null;
+      if (faviconUrl) {
+        try {
+          const parsed = new URL(faviconUrl);
+          const allowedDataImage =
+            parsed.protocol === "data:" &&
+            parsed.href.startsWith("data:image/") &&
+            parsed.href.length <= 500_000;
+          const allowedWebImage =
+            (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+            parsed.username.length === 0 &&
+            parsed.password.length === 0 &&
+            parsed.href.length <= 4_096;
+          if (!allowedDataImage && !allowedWebImage) faviconUrl = null;
+        } catch {
+          faviconUrl = null;
+        }
       }
-    }
-    if (!faviconUrl) {
-      try {
-        faviconUrl = `${new URL(pageUrl).origin}/favicon.ico`
-      } catch {
-        faviconUrl = null
+      if (!faviconUrl) {
+        try {
+          faviconUrl = `${new URL(pageUrl).origin}/favicon.ico`;
+        } catch {
+          faviconUrl = null;
+        }
       }
-    }
-    if (!faviconUrl) return
-    showTabFavicon(tab, contents, pageUrl, faviconUrl, revision)
-  }).catch(() => undefined)
+      if (!faviconUrl) return;
+      showTabFavicon(tab, contents, pageUrl, faviconUrl, revision);
+    })
+    .catch(() => undefined);
 }
 
 /**
@@ -559,172 +1037,236 @@ function refreshTabFavicon(tab: BrowserTab): void {
  * re-fetch either), and a new icon replaces a cached one only once its own copy (or, failing that,
  * its URL) is ready, so the tab never shows a blank in between.
  */
-function showTabFavicon(tab: BrowserTab, contents: WebContents, pageUrl: string, faviconUrl: string, revision: number): void {
-  if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl)
-  if (tab.faviconSource === faviconUrl && tab.faviconUrl) return
-  tab.faviconSource = faviconUrl
-  const showingCopy = tab.faviconUrl?.startsWith('data:') === true
+function showTabFavicon(
+  tab: BrowserTab,
+  contents: WebContents,
+  pageUrl: string,
+  faviconUrl: string,
+  revision: number,
+): void {
+  if (!tab.isPrivate) persistPageFavicon(pageUrl, faviconUrl);
+  if (tab.faviconSource === faviconUrl && tab.faviconUrl) return;
+  tab.faviconSource = faviconUrl;
+  const showingCopy = tab.faviconUrl?.startsWith("data:") === true;
   if (tab.isPrivate || !showingCopy) {
     if (tab.faviconUrl !== faviconUrl) {
-      tab.faviconUrl = faviconUrl
-      publishTabs(tab.win)
+      tab.faviconUrl = faviconUrl;
+      publishTabs(tab.win);
     }
-    if (tab.isPrivate) return
+    if (tab.isPrivate) return;
   }
   void cachePageFavicon(pageUrl, faviconUrl).then((cachedIcon) => {
-    if (tab.view?.webContents !== contents || tab.faviconRevision !== revision || contents.getURL() !== pageUrl) return
-    const next = cachedIcon ?? faviconUrl
+    if (
+      tab.view?.webContents !== contents ||
+      tab.faviconRevision !== revision ||
+      contents.getURL() !== pageUrl
+    )
+      return;
+    const next = cachedIcon ?? faviconUrl;
     if (tab.faviconUrl !== next) {
-      tab.faviconUrl = next
-      publishTabs(tab.win)
+      tab.faviconUrl = next;
+      publishTabs(tab.win);
     }
-  })
+  });
 }
 
-let historyChangedTimer: ReturnType<typeof setTimeout> | null = null
+let historyChangedTimer: ReturnType<typeof setTimeout> | null = null;
 /** Navigations, title and favicon updates arrive in bursts; renderers refetch history once per burst. */
 function notifyHistoryChanged(): void {
-  if (historyChangedTimer) return
+  if (historyChangedTimer) return;
   historyChangedTimer = setTimeout(() => {
-    historyChangedTimer = null
-    sendToMainWindowRenderers('browser:history-changed')
-  }, 300)
+    historyChangedTimer = null;
+    sendToMainWindowRenderers("browser:history-changed");
+  }, 300);
 }
 
-let windowListTimer: ReturnType<typeof setTimeout> | null = null
-let lastWindowListKey = ''
+let windowListTimer: ReturnType<typeof setTimeout> | null = null;
+let lastWindowListKey = "";
 /** Active tab titles feed the Window menu; tell it (debounced) when one changes. */
 function noteWindowTitles(): void {
-  if (windowListTimer) return
+  if (windowListTimer) return;
   windowListTimer = setTimeout(() => {
-    windowListTimer = null
-    const key = windowStates.map((w) => `${w.isPrivate}:${pageTitleOfWindow(w)}`).join('\n')
-    if (key === lastWindowListKey) return
-    lastWindowListKey = key
-    notifyBrowserWindowsChanged()
-  }, 250)
+    windowListTimer = null;
+    const key = windowStates
+      .map((w) => `${w.isPrivate}:${pageTitleOfWindow(w)}`)
+      .join("\n");
+    if (key === lastWindowListKey) return;
+    lastWindowListKey = key;
+    notifyBrowserWindowsChanged();
+  }, 250);
 }
 
 function publishTabs(w = currentWindowState()): void {
-  if (!isLiveWindow(w)) return
-  keepSplitTabsTogether(w)
-  keepTabGroupsTogether(w)
+  if (!isLiveWindow(w)) return;
+  keepSplitTabsTogether(w);
+  keepTabGroupsTogether(w);
   // Sent once per frame at most, as a diff (see tab-broadcast).
-  broadcastQueue.mark(w, false)
+  broadcastQueue.mark(w, false);
 }
 
 function publishState(w = currentWindowState()): void {
-  if (!isLiveWindow(w)) return
+  if (!isLiveWindow(w)) return;
   // Synchronous, so it stays in order with Cmd+Y (the tab broadcast below is coalesced per frame).
-  noteActiveTabForHistoryPanel(w.activeTabId, w.window)
-  const state = getState(w)
+  noteActiveTabForHistoryPanel(w.activeTabId, w.window);
+  const state = getState(w);
   // Crash / hang / HTTPS notices and in-page load errors are drawn by the content renderer, like the local New Tab page.
   // So is the Settings tab (it has no page view).
-  setBrowserPageIsLocalNewTab(state.url === SURFFISH_QUICK_LINKS_URL || state.settings != null || state.interstitial !== null || state.loadError?.fullPage === true, w.window)
-  broadcastQueue.mark(w, true)
+  setBrowserPageIsLocalNewTab(
+    state.url === SURFFISH_QUICK_LINKS_URL ||
+      state.settings != null ||
+      state.interstitial !== null ||
+      state.loadError?.fullPage === true,
+    w.window,
+  );
+  broadcastQueue.mark(w, true);
   // A glance belongs to the tab it opened over: a tab switch (or the tab closing) closes it.
-  noteGlanceWindowState(w.window)
+  noteGlanceWindowState(w.window);
 }
 
 /** A load, title or tab change burst becomes one `browser:state` + one `browser:tabs` diff per frame. */
-const broadcastQueue = createBroadcastQueue<BrowserWindowState>((w, stateChanged) => {
-  if (!isLiveWindow(w)) return
-  // The mini window has no shell surfaces; its header page draws the tab's title/URL/loading.
-  if (w.mini) return void noteMiniWindowChanged(w.window)
-  if (stateChanged) sendStateToWindowRenderers(w.window, getState(w))
-  sendTabsToWindowRenderers(w.window, getTabSummaries(w))
-  // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
-  if (spacesEnabled()) publishSpaces(w)
-  noteWindowTitles()
-})
+const broadcastQueue = createBroadcastQueue<BrowserWindowState>(
+  (w, stateChanged) => {
+    if (!isLiveWindow(w)) return;
+    // The mini window has no shell surfaces; its header page draws the tab's title/URL/loading.
+    if (w.mini) return void noteMiniWindowChanged(w.window);
+    if (stateChanged) sendStateToWindowRenderers(w.window, getState(w));
+    sendTabsToWindowRenderers(w.window, getTabSummaries(w));
+    // Tab counts per Space (switcher tooltips); nothing extra is sent while Spaces are off.
+    if (spacesEnabled()) publishSpaces(w);
+    noteWindowTitles();
+  },
+);
 setTabResyncHandler((window) => {
-  const w = windowStateFor(window)
-  if (w) broadcastQueue.mark(w, true)
-})
+  const w = windowStateFor(window);
+  if (w) broadcastQueue.mark(w, true);
+});
 
 function publishAllWindows(): void {
-  for (const w of [...windowStates]) publishState(w)
+  for (const w of [...windowStates]) publishState(w);
 }
 
 /** Freeze the saved session while the app quits, so windows closing one by one don't drop out of it. */
-let sessionFrozen = false
+let sessionFrozen = false;
 export function freezeBrowserSession(): void {
   // Read the back/forward lists now: the flush at quit may run after the windows (and their pages) are gone.
-  persistOpenTabs(true)
-  sessionFrozen = true
+  persistOpenTabs(true);
+  sessionFrozen = true;
 }
 
 /** The last back/forward list read from each live tab, for when its page is gone by the time the write runs. */
-const lastSessionHistory = new WeakMap<BrowserTab, BrowserTab['restoreHistory']>()
+const lastSessionHistory = new WeakMap<
+  BrowserTab,
+  BrowserTab["restoreHistory"]
+>();
 
 /**
  * What a tab's back/forward list is for the saved session: the live page's, else the one it went
  * to sleep with (or was restored with and hasn't woken to yet). Validated and capped in
  * shared/tab-history.ts; the editor's view (PDF editor) has no page history worth keeping.
  */
-function sessionHistoryOf(tab: BrowserTab): BrowserTab['restoreHistory'] {
-  if (tab.pdfEditor || tab.extensionPageOrigin) return null
-  const contents = tab.view?.webContents
-  if (!contents) return tab.restoreHistory
-  if (contents.isDestroyed()) return lastSessionHistory.get(tab) ?? null
+function sessionHistoryOf(tab: BrowserTab): BrowserTab["restoreHistory"] {
+  if (tab.pdfEditor || tab.extensionPageOrigin) return null;
+  const contents = tab.view?.webContents;
+  if (!contents) return tab.restoreHistory;
+  if (contents.isDestroyed()) return lastSessionHistory.get(tab) ?? null;
   try {
-    const history = { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
-    lastSessionHistory.set(tab, history)
-    return history
+    const history = {
+      entries: contents.navigationHistory.getAllEntries(),
+      index: contents.navigationHistory.getActiveIndex(),
+    };
+    lastSessionHistory.set(tab, history);
+    return history;
   } catch {
-    return lastSessionHistory.get(tab) ?? null
+    return lastSessionHistory.get(tab) ?? null;
   }
 }
 
 function persistOpenTabs(captureHistoryNow = false): void {
-  if (sessionFrozen) return
+  if (sessionFrozen) return;
   // Private windows are never saved; private tabs in normal windows are skipped.
-  const windows = windowStates.filter((w) => !w.isPrivate && !w.mini && !w.window.isDestroyed())
-  if (windows.length === 0) return
+  const windows = windowStates.filter(
+    (w) => !w.isPrivate && !w.mini && !w.window.isDestroyed(),
+  );
+  if (windows.length === 0) return;
   // The mini window's tab is saved as the last tab of its home window (or the first window), so a
   // restart never loses it; it comes back as an ordinary tab.
-  const miniTabs = windowStates.filter((w) => w.mini && !w.window.isDestroyed()).flatMap((w) => w.tabs.map((tab) => ({ tab, home: miniTabHomes.get(tab) ?? w.miniHome })))
+  const miniTabs = windowStates
+    .filter((w) => w.mini && !w.window.isDestroyed())
+    .flatMap((w) =>
+      w.tabs.map((tab) => ({ tab, home: miniTabHomes.get(tab) ?? w.miniHome })),
+    );
   // Each at the slot it popped out of (mini-window-tab-drag.ts), so a restart puts it back there.
   const withMiniTabs = (w: BrowserWindowState): BrowserTab[] => {
-    const list = w.tabs.slice()
-    for (const { tab } of miniTabs.filter(({ home }) => (home && windows.includes(home) ? home : windows[0]) === w)) {
-      const beforeId = miniTabOrigins.get(tab) ? miniReturnBeforeId(miniTabOrigins.get(tab), list.map((candidate) => candidate.id)) : null
-      const before = beforeId ? list.find((candidate) => candidate.id === beforeId) : undefined
+    const list = w.tabs.slice();
+    for (const { tab } of miniTabs.filter(
+      ({ home }) => (home && windows.includes(home) ? home : windows[0]) === w,
+    )) {
+      const beforeId = miniTabOrigins.get(tab)
+        ? miniReturnBeforeId(
+            miniTabOrigins.get(tab),
+            list.map((candidate) => candidate.id),
+          )
+        : null;
+      const before = beforeId
+        ? list.find((candidate) => candidate.id === beforeId)
+        : undefined;
       // Never between a split's panes: before the split.
-      const split = before ? splitOf(before) : undefined
-      const anchor = split ? list.findIndex((candidate) => split.tabIds.includes(candidate.id)) : before ? list.indexOf(before) : -1
-      list.splice(anchor < 0 ? list.length : anchor, 0, tab)
+      const split = before ? splitOf(before) : undefined;
+      const anchor = split
+        ? list.findIndex((candidate) => split.tabIds.includes(candidate.id))
+        : before
+          ? list.indexOf(before)
+          : -1;
+      list.splice(anchor < 0 ? list.length : anchor, 0, tab);
     }
-    return list
-  }
+    return list;
+  };
   // Local files opened from the OS are not restored (the path may be gone, and restore only allows http(s)).
-  const keptTabs: BrowserTab[][] = []
+  const keptTabs: BrowserTab[][] = [];
   const saved = windows.map((w) => {
     // Nor are page-made blob:/data: pages: the blob dies with the page that made it.
     // Nor is the Settings tab: it is opened again from the gear / ⌘, and costs nothing to rebuild.
-    const kept = withMiniTabs(w).filter((tab) => !tab.isPrivate && !isSettingsTab(tab) && !currentUrl(tab).startsWith('file:') && !pageMadeUrlKind(currentUrl(tab)))
-    const splits = encodeSessionSplits(kept.map((tab) => tab.id), w.splits)
-    const spaces = encodeWindowSpaces(w, kept)
-    const groups = encodeSessionTabGroups(kept.map((tab) => tab.id), (id) => findTab(id)?.groupId ?? null, w.groups)
-    keptTabs.push(kept)
+    const kept = withMiniTabs(w).filter(
+      (tab) =>
+        !tab.isPrivate &&
+        !isSettingsTab(tab) &&
+        !currentUrl(tab).startsWith("file:") &&
+        !pageMadeUrlKind(currentUrl(tab)),
+    );
+    const splits = encodeSessionSplits(
+      kept.map((tab) => tab.id),
+      w.splits,
+    );
+    const spaces = encodeWindowSpaces(w, kept);
+    const groups = encodeSessionTabGroups(
+      kept.map((tab) => tab.id),
+      (id) => findTab(id)?.groupId ?? null,
+      w.groups,
+    );
+    keptTabs.push(kept);
     return {
       urls: kept.map(currentUrl),
       // Settings active at quit: the tab used before it comes back as the active one.
       activeIndex: sessionActiveIndex(w, kept),
-      pinnedIndexes: kept.flatMap((tab, index) => tab.pinned ? [index] : []),
+      pinnedIndexes: kept.flatMap((tab, index) => (tab.pinned ? [index] : [])),
       geometry: windowGeometry(w.window),
       tabIds: kept.map((tab) => tab.id),
       windowKey: String(w.window.id),
       ...(splits.length > 0 ? { splits } : {}),
       ...(spaces ? { spaces } : {}),
-      ...(groups.length > 0 ? { groups } : {})
-    }
-  })
-  const focused = windowStateFor(focusedBrowserWindow())
+      ...(groups.length > 0 ? { groups } : {}),
+    };
+  });
+  const focused = windowStateFor(focusedBrowserWindow());
   // Back/forward lists are read when the coalesced write runs (once per burst), or now at quit.
-  const collect = (): BrowserTab['restoreHistory'][][] => keptTabs.map((kept) => kept.map(sessionHistoryOf))
-  const captured = captureHistoryNow ? collect() : null
-  saveBrowserWindowsSession(saved, focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1, captured ? () => captured : collect)
+  const collect = (): BrowserTab["restoreHistory"][][] =>
+    keptTabs.map((kept) => kept.map(sessionHistoryOf));
+  const captured = captureHistoryNow ? collect() : null;
+  saveBrowserWindowsSession(
+    saved,
+    focused ? Math.max(0, windows.indexOf(focused)) : saved.length - 1,
+    captured ? () => captured : collect,
+  );
 }
 
 /**
@@ -736,242 +1278,382 @@ function persistOpenTabs(captureHistoryNow = false): void {
  */
 export function forgetTabNavigationHistory(forget: TabHistoryForget): void {
   for (const tab of allTabs()) {
-    if (tab.isPrivate || tab.win.isPrivate) continue
-    if (tab.restoreHistory) tab.restoreHistory = forgetTabHistoryEntries(tab.restoreHistory, forget)
-    const cached = lastSessionHistory.get(tab)
-    if (cached) lastSessionHistory.set(tab, forgetTabHistoryEntries(cached, forget))
-    const contents = tab.view?.webContents
-    if (!contents || contents.isDestroyed() || tab.pdfEditor) continue
+    if (tab.isPrivate || tab.win.isPrivate) continue;
+    if (tab.restoreHistory)
+      tab.restoreHistory = forgetTabHistoryEntries(tab.restoreHistory, forget);
+    const cached = lastSessionHistory.get(tab);
+    if (cached)
+      lastSessionHistory.set(tab, forgetTabHistoryEntries(cached, forget));
+    const contents = tab.view?.webContents;
+    if (!contents || contents.isDestroyed() || tab.pdfEditor) continue;
     try {
-      const history = contents.navigationHistory
-      if (forget === 'all') {
-        history.clear()
+      const history = contents.navigationHistory;
+      if (forget === "all") {
+        history.clear();
       } else {
-        const urls = history.getAllEntries().map((entry) => entry.url)
-        for (const at of forgottenEntryIndexes(urls, history.getActiveIndex(), forget)) history.removeEntryAtIndex(at)
+        const urls = history.getAllEntries().map((entry) => entry.url);
+        for (const at of forgottenEntryIndexes(
+          urls,
+          history.getActiveIndex(),
+          forget,
+        ))
+          history.removeEntryAtIndex(at);
       }
     } catch (error) {
-      console.error('Could not clear a tab\'s back/forward list:', error)
+      console.error("Could not clear a tab's back/forward list:", error);
     }
   }
-  persistOpenTabs(true)
-  forgetSavedTabHistories(forget)
-  publishAllWindows()
+  persistOpenTabs(true);
+  forgetSavedTabHistories(forget);
+  publishAllWindows();
 }
 
 function windowGeometry(window: BaseWindow): SavedWindowState | null {
-  if (window.isDestroyed()) return null
+  if (window.isDestroyed()) return null;
   try {
-    return { bounds: window.getNormalBounds(), maximized: window.isMaximized(), fullScreen: window.isFullScreen() }
+    return {
+      bounds: window.getNormalBounds(),
+      maximized: window.isMaximized(),
+      fullScreen: window.isFullScreen(),
+    };
   } catch {
-    return null
+    return null;
   }
 }
 
 function toggleTabBookmark(id: string): void {
-  const tab = getTab(id)
-  if (!tab) return
-  const url = currentUrl(tab)
-  if (!normalizeHttpOrigin(url)) return
-  if (isUrlBookmarked(url)) removeBookmarksForUrl(url)
-  else bookmarkPage(url, pageTitle(tab), tab.faviconUrl, tab.isPrivate)
+  const tab = getTab(id);
+  if (!tab) return;
+  const url = currentUrl(tab);
+  if (!normalizeHttpOrigin(url)) return;
+  if (isUrlBookmarked(url)) removeBookmarksForUrl(url);
+  else bookmarkPage(url, pageTitle(tab), tab.faviconUrl, tab.isPrivate);
 }
 
 /** Cmd+D / the star: bookmark the page (into Favourites) and open the edit popover for it. */
 function bookmarkTabAndEdit(id: string): void {
-  const tab = getTab(id)
-  if (!tab) return
-  const result = bookmarkPage(currentUrl(tab), pageTitle(tab), tab.faviconUrl, tab.isPrivate)
-  if (!result) return
-  runInWindow(tab.win.window, () => sendToVisibleToolbarSurface('browser:bookmarks:edit-current', { id: result.node.id, created: result.created }))
+  const tab = getTab(id);
+  if (!tab) return;
+  const result = bookmarkPage(
+    currentUrl(tab),
+    pageTitle(tab),
+    tab.faviconUrl,
+    tab.isPrivate,
+  );
+  if (!result) return;
+  runInWindow(tab.win.window, () =>
+    sendToVisibleToolbarSurface("browser:bookmarks:edit-current", {
+      id: result.node.id,
+      created: result.created,
+    }),
+  );
 }
 
 /** Cmd+Shift+D: every regular (non-private) web tab into a new top-level folder. */
-export function bookmarkAllBrowserTabs(w = currentWindowState()): { folderId: string; title: string; added: number } | null {
-  if (!w) return null
-  const browserBounds = w.browserBounds
+export function bookmarkAllBrowserTabs(
+  w = currentWindowState(),
+): { folderId: string; title: string; added: number } | null {
+  if (!w) return null;
+  const browserBounds = w.browserBounds;
   const pages = tabsInSidebarOrder(w)
     .filter((tab) => !tab.isPrivate && normalizeHttpOrigin(currentUrl(tab)))
-    .map((tab) => ({ url: currentUrl(tab), title: pageTitle(tab) }))
-  const stamp = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date())
-  const result = bookmarkPagesInNewFolder(pages, `Tabs · ${stamp}`)
+    .map((tab) => ({ url: currentUrl(tab), title: pageTitle(tab) }));
+  const stamp = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+  const result = bookmarkPagesInNewFolder(pages, `Tabs · ${stamp}`);
   if (!result) {
-    flashLinkStatus('No web tabs to bookmark', browserBounds, undefined, w.window)
-    return null
+    flashLinkStatus(
+      "No web tabs to bookmark",
+      browserBounds,
+      undefined,
+      w.window,
+    );
+    return null;
   }
-  flashLinkStatus(`Bookmarked ${result.added} tab${result.added === 1 ? '' : 's'} in “${result.folder.title}”`, browserBounds, 2400, w.window)
-  return { folderId: result.folder.id, title: result.folder.title, added: result.added }
+  flashLinkStatus(
+    `Bookmarked ${result.added} tab${result.added === 1 ? "" : "s"} in “${result.folder.title}”`,
+    browserBounds,
+    2400,
+    w.window,
+  );
+  return {
+    folderId: result.folder.id,
+    title: result.folder.title,
+    added: result.added,
+  };
 }
 
 /** The page a tab shows (the active tab without an id), for features that save it (Reading List). */
-export function getBrowserTabPageInfo(id?: string | null): { id: string; url: string; title: string; faviconUrl: string | null; private: boolean } | null {
-  const tab = getTab(id)
-  if (!tab) return null
-  return { id: tab.id, url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl, private: tab.isPrivate }
+export function getBrowserTabPageInfo(id?: string | null): {
+  id: string;
+  url: string;
+  title: string;
+  faviconUrl: string | null;
+  private: boolean;
+} | null {
+  const tab = getTab(id);
+  if (!tab) return null;
+  return {
+    id: tab.id,
+    url: currentUrl(tab),
+    title: pageTitle(tab),
+    faviconUrl: tab.faviconUrl,
+    private: tab.isPrivate,
+  };
 }
 
 function applyTabBounds(w: BrowserWindowState): void {
-  const { browserBounds } = w
-  const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0
+  const { browserBounds } = w;
+  const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
-  const split = splitOf(activeTabOf(w))
-  const layout = split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null
+  const split = splitOf(activeTabOf(w));
+  const layout =
+    split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null;
   for (const tab of w.tabs) {
-    if (!tab.view) continue
-    const pane = split ? split.tabIds.indexOf(tab.id) : -1
-    const visible = tab.id === w.activeTabId || pane >= 0
-    const bounds = layout && pane >= 0 ? layout.panes[pane] ?? browserBounds : browserBounds
+    if (!tab.view) continue;
+    const pane = split ? split.tabIds.indexOf(tab.id) : -1;
+    const visible = tab.id === w.activeTabId || pane >= 0;
+    const bounds =
+      layout && pane >= 0
+        ? (layout.panes[pane] ?? browserBounds)
+        : browserBounds;
     // Reader view stands in for the page while it is open; the page stays loaded off screen.
-    const reader = readerViewFor(tab.view.webContents)
+    const reader = readerViewFor(tab.view.webContents);
     // Only the page on screen stays in the window. A zero-size view still counts as visible on
     // macOS, so background tabs used to keep running rAF/timers at full speed and kept the GPU
     // process waking up; detached + hidden, Chromium throttles them like Chrome's background tabs.
     // Size first, then attach, and leave off-screen views at the size they last had instead of
     // 0x0 (they're detached, which is what throttles them): attaching a 0x0 view and resizing it a
     // moment later showed a frame of stale/empty page on every tab switch (page-view-bounds.ts).
-    const target = pageViewBounds(visible && pageAreaShown, bounds)
+    const target = pageViewBounds(visible && pageAreaShown, bounds);
     if (target) {
-      tab.view.setBounds(target)
-      reader?.setBounds(target)
+      tab.view.setBounds(target);
+      reader?.setBounds(target);
     }
     if (!w.window.isDestroyed()) {
-      setPageViewOnScreen(w.window, tab.view, visible && pageAreaShown && !reader)
-      if (reader) setPageViewOnScreen(w.window, reader, visible && pageAreaShown)
+      setPageViewOnScreen(
+        w.window,
+        tab.view,
+        visible && pageAreaShown && !reader,
+      );
+      if (reader)
+        setPageViewOnScreen(w.window, reader, visible && pageAreaShown);
     }
   }
   if (!w.window.isDestroyed()) {
-    updateSplitSurface(w.window, split && layout ? { bounds: { ...browserBounds }, layout, focusedIndex: split.tabIds.indexOf(w.activeTabId ?? '') } : null)
+    updateSplitSurface(
+      w.window,
+      split && layout
+        ? {
+            bounds: { ...browserBounds },
+            layout,
+            focusedIndex: split.tabIds.indexOf(w.activeTabId ?? ""),
+          }
+        : null,
+    );
   }
 }
 
 function cancelSleepTimer(tab: BrowserTab): void {
-  if (tab.sleepTimer) clearTimeout(tab.sleepTimer)
-  tab.sleepTimer = null
+  if (tab.sleepTimer) clearTimeout(tab.sleepTimer);
+  tab.sleepTimer = null;
 }
 
 /**
  * `keepPausedMedia`: timed sleep leaves a paused media session (Now Playing / media keys) alone;
  * Hibernate Tab doesn't. `reason` is shown on the sidebar moon (shared/tab-sleep.ts).
  */
-function hibernateTab(tab: BrowserTab, reason: BrowserTabSleep, keepPausedMedia = true): void {
-  if (isTabOnScreen(tab) || !tab.view) return
+function hibernateTab(
+  tab: BrowserTab,
+  reason: BrowserTabSleep,
+  keepPausedMedia = true,
+): void {
+  if (isTabOnScreen(tab) || !tab.view) return;
   // A blob: page can't be loaded again from main (it only resolves for the page that made it), so it stays awake.
-  if (pageMadeUrlKind(currentUrl(tab)) === 'blob') return
-  const contents = tab.view.webContents
-  if (!contents.isDestroyed() && (contents.isCurrentlyAudible() || (keepPausedMedia && tabHoldsMediaSession(contents)))) {
-    cancelSleepTimer(tab)
-    tab.sleepTimer = setTimeout(() => hibernateTab(tab, reason), contents.isCurrentlyAudible() ? 60_000 : tabMediaHoldRecheckMs(contents))
-    return
+  if (pageMadeUrlKind(currentUrl(tab)) === "blob") return;
+  const contents = tab.view.webContents;
+  if (
+    !contents.isDestroyed() &&
+    (contents.isCurrentlyAudible() ||
+      (keepPausedMedia && tabHoldsMediaSession(contents)))
+  ) {
+    cancelSleepTimer(tab);
+    tab.sleepTimer = setTimeout(
+      () => hibernateTab(tab, reason),
+      contents.isCurrentlyAudible() ? 60_000 : tabMediaHoldRecheckMs(contents),
+    );
+    return;
   }
-  tab.lastUrl = currentUrl(tab)
-  tab.pendingUrl = tab.lastUrl
-  const history = sleepHistoryOf(contents, tab.lastUrl)
-  disposeTabView(tab)
-  tab.sleep = reason
+  tab.lastUrl = currentUrl(tab);
+  tab.pendingUrl = tab.lastUrl;
+  const history = sleepHistoryOf(contents, tab.lastUrl);
+  disposeTabView(tab);
+  tab.sleep = reason;
   // Waking restores the back/forward list with Chromium's page state (scroll position, form
   // values) as a history load that prefers the HTTP cache, instead of a fresh loadURL at the top.
-  tab.restoreHistory = history
-  persistOpenTabs()
-  publishState(tab.win)
+  tab.restoreHistory = history;
+  persistOpenTabs();
+  publishState(tab.win);
 }
 
 /** The tab's back/forward list to wake it with (null when it can't come back to `url` that way). */
-function sleepHistoryOf(contents: Electron.WebContents, url: string): BrowserTab['restoreHistory'] {
+function sleepHistoryOf(
+  contents: Electron.WebContents,
+  url: string,
+): BrowserTab["restoreHistory"] {
   try {
-    if (contents.isDestroyed()) return null
-    return restorableSleepHistory(contents.navigationHistory.getAllEntries(), contents.navigationHistory.getActiveIndex(), url)
+    if (contents.isDestroyed()) return null;
+    return restorableSleepHistory(
+      contents.navigationHistory.getAllEntries(),
+      contents.navigationHistory.getActiveIndex(),
+      url,
+    );
   } catch {
-    return null
+    return null;
   }
 }
 
 function scheduleTabSleep(tab: BrowserTab): void {
-  cancelSleepTimer(tab)
+  cancelSleepTimer(tab);
   // An editor tab holds unsaved edits in memory, so it never sleeps.
-  if (tabSleepMinutes === 0 || !tab.view || tab.extensionPageOrigin || tab.pdfEditor || isTabOnScreen(tab) || tab.inactiveSince === null) return
-  const delay = Math.max(0, tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince))
-  const minutes = tabSleepMinutes
-  tab.sleepTimer = setTimeout(() => hibernateTab(tab, { reason: 'idle', minutes }), delay)
+  if (
+    tabSleepMinutes === 0 ||
+    !tab.view ||
+    tab.extensionPageOrigin ||
+    tab.pdfEditor ||
+    isTabOnScreen(tab) ||
+    tab.inactiveSince === null
+  )
+    return;
+  const delay = Math.max(
+    0,
+    tabSleepMinutes * 60_000 - (Date.now() - tab.inactiveSince),
+  );
+  const minutes = tabSleepMinutes;
+  tab.sleepTimer = setTimeout(
+    () => hibernateTab(tab, { reason: "idle", minutes }),
+    delay,
+  );
 }
 
 function markTabInactive(tab: BrowserTab): void {
-  tab.inactiveSince = Date.now()
-  scheduleTabSleep(tab)
+  tab.inactiveSince = Date.now();
+  scheduleTabSleep(tab);
 }
 
-function openBackgroundTab(url: string, isPrivate = false, w = currentWindowState()): void {
-  const id = createTab(url, selectedSearchEngine, false, false, true, false, undefined, undefined, isPrivate, false, w)
-  if (id) persistOpenTabs()
+function openBackgroundTab(
+  url: string,
+  isPrivate = false,
+  w = currentWindowState(),
+): void {
+  const id = createTab(
+    url,
+    selectedSearchEngine,
+    false,
+    false,
+    true,
+    false,
+    undefined,
+    undefined,
+    isPrivate,
+    false,
+    w,
+  );
+  if (id) persistOpenTabs();
 }
 
 /** Close a page-made PDF's original view kept behind the editor (tab or window closed). */
 function disposeStashedPdfSource(tab: BrowserTab): void {
-  const stash = tab.pdfEditor?.sourceView
-  if (!stash || !tab.pdfEditor) return
-  tab.pdfEditor.sourceView = null
-  detachNetworkInspector(stash.webContents)
-  if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, stash, false)
-  if (!stash.webContents.isDestroyed()) stash.webContents.close()
+  const stash = tab.pdfEditor?.sourceView;
+  if (!stash || !tab.pdfEditor) return;
+  tab.pdfEditor.sourceView = null;
+  detachNetworkInspector(stash.webContents);
+  if (!tab.win.window.isDestroyed())
+    setPageViewOnScreen(tab.win.window, stash, false);
+  if (!stash.webContents.isDestroyed()) stash.webContents.close();
 }
 
 function disposeTabView(tab: BrowserTab): void {
-  disposeStashedPdfSource(tab)
-  cancelSleepTimer(tab)
+  disposeStashedPdfSource(tab);
+  cancelSleepTimer(tab);
   // A view replaced or dropped for another load never comes back through an older history.
-  tab.restoreHistory = null
-  const view = tab.view
-  if (!view) return
+  tab.restoreHistory = null;
+  const view = tab.view;
+  if (!view) return;
   // Clear the reference first so its destroyed event cannot remove the logical tab.
-  tab.view = null
-  detachNetworkInspector(view.webContents)
-  if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, view, false)
-  if (!view.webContents.isDestroyed()) view.webContents.close()
-  applyTabBounds(tab.win)
+  tab.view = null;
+  detachNetworkInspector(view.webContents);
+  if (!tab.win.window.isDestroyed())
+    setPageViewOnScreen(tab.win.window, view, false);
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+  applyTabBounds(tab.win);
 }
 
 function ensureTabLoaded(tab: BrowserTab): void {
-  if (tab.view || !isLiveWindow(tab.win)) return
-  const target = tab.pendingUrl || tab.lastUrl || configuredStartPage()
+  if (tab.view || !isLiveWindow(tab.win)) return;
+  const target = tab.pendingUrl || tab.lastUrl || configuredStartPage();
   // Drawn by the window's content renderer: never a page view (so never a web page's process).
   if (target === SURFFISH_QUICK_LINKS_URL || target === SURFFISH_SETTINGS_URL) {
-    tab.pendingUrl = ''
-    return
+    tab.pendingUrl = "";
+    return;
   }
-  tab.pendingUrl = target
-  const view = createTabView(tab)
-  if (!view) return
-  tab.sleep = null
-  tab.pendingUrl = ''
-  if (isActiveTab(tab)) tab.inactiveSince = null
-  applyTabBounds(tab.win)
-  const contents = view.webContents
+  tab.pendingUrl = target;
+  const view = createTabView(tab);
+  if (!view) return;
+  tab.sleep = null;
+  tab.pendingUrl = "";
+  if (isActiveTab(tab)) tab.inactiveSince = null;
+  applyTabBounds(tab.win);
+  const contents = view.webContents;
   // Private pages wait for their session's proxy/ad-block setup so nothing ever goes out direct.
-  const ready = !tab.pdfEditor && (tab.isPrivate || partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
-    ? whenPageSessionReady(tab.isPrivate ? PRIVATE_PARTITION : partitionForTab(tab))
-    : Promise.resolve()
-  const restore = tab.restoreHistory
-  tab.restoreHistory = null
-  void ready.then(() => contents.isDestroyed() ? undefined : restore ? contents.navigationHistory.restore(restore) : contents.loadURL(target)).catch((error: unknown) => {
-    if (tab.view?.webContents !== contents) return
-    // Superseded by a redirect, history replace or another load: not a failure.
-    if (isAbortedNavigation(error)) return
-    const message = error instanceof Error ? error.message : String(error)
-    if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
-      return new Promise<void>((resolve) => setTimeout(resolve, 100)).then(() => {
-        if (tab.view?.webContents !== contents) return
-        if (tab.downloadStartedForCurrentLoad) tab.error = null
-        else noteLoadRejection(tab, message, target)
-        publishState(tab.win)
-      })
-    }
-    if (tab.downloadStartedForCurrentLoad) {
-      tab.error = null
-      publishState(tab.win)
-      return
-    }
-    noteLoadRejection(tab, message, target)
-    publishState(tab.win)
-  })
+  const ready =
+    !tab.pdfEditor &&
+    (tab.isPrivate || partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
+      ? whenPageSessionReady(
+          tab.isPrivate ? PRIVATE_PARTITION : partitionForTab(tab),
+        )
+      : Promise.resolve();
+  const restore = tab.restoreHistory;
+  tab.restoreHistory = null;
+  void ready
+    .then(() =>
+      contents.isDestroyed()
+        ? undefined
+        : restore
+          ? contents.navigationHistory.restore(restore)
+          : contents.loadURL(target),
+    )
+    .catch((error: unknown) => {
+      if (tab.view?.webContents !== contents) return;
+      // Superseded by a redirect, history replace or another load: not a failure.
+      if (isAbortedNavigation(error)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        !tab.downloadStartedForCurrentLoad &&
+        message.includes("ERR_FAILED")
+      ) {
+        return new Promise<void>((resolve) => setTimeout(resolve, 100)).then(
+          () => {
+            if (tab.view?.webContents !== contents) return;
+            if (tab.downloadStartedForCurrentLoad) tab.error = null;
+            else noteLoadRejection(tab, message, target);
+            publishState(tab.win);
+          },
+        );
+      }
+      if (tab.downloadStartedForCurrentLoad) {
+        tab.error = null;
+        publishState(tab.win);
+        return;
+      }
+      noteLoadRejection(tab, message, target);
+      publishState(tab.win);
+    });
 }
 
 /**
@@ -980,90 +1662,127 @@ function ensureTabLoaded(tab: BrowserTab): void {
  * page) record it with the same full-page rule, so a new or restored tab never ends up as a blank
  * page with a toast over it.
  */
-function noteLoadRejection(tab: BrowserTab, message: string, url: string): void {
-  if (tab.error !== null) return
-  tab.error = message
-  noteTabLoadError(tab, message, url, shouldShowFullPageError(parseLoadError(message).code))
+function noteLoadRejection(
+  tab: BrowserTab,
+  message: string,
+  url: string,
+): void {
+  if (tab.error !== null) return;
+  tab.error = message;
+  noteTabLoadError(
+    tab,
+    message,
+    url,
+    shouldShowFullPageError(parseLoadError(message).code),
+  );
 }
 
 function activateTabInternal(id: string): boolean {
-  const tab = getTab(id)
-  if (!tab) return false
-  const w = tab.win
-  if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe()
+  const tab = getTab(id);
+  if (!tab) return false;
+  const w = tab.win;
+  if (w.activeTabId !== id) cancelActiveMacTrackpadSwipe();
   // A wake snapshot belongs to the tab it was shown for; switching away takes it down at once.
-  endWakeSnapshot(w.window, id)
+  endWakeSnapshot(w.window, id);
   // Opening a tab from another Space (palette, archive, extensions, a moved tab) shows that Space.
-  const spaceChanged = tab.spaceId !== w.activeSpaceId
+  const spaceChanged = tab.spaceId !== w.activeSpaceId;
   if (spaceChanged) {
-    if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId)
-    w.activeSpaceId = tab.spaceId
+    if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId);
+    w.activeSpaceId = tab.spaceId;
   }
-  w.spaceActiveTabs.set(tab.spaceId, id)
+  w.spaceActiveTabs.set(tab.spaceId, id);
   // Opening a tab inside a collapsed group expands the group (as in Chrome).
-  const collapsedGroup = w.groups.find((group) => group.id === tab.groupId && group.collapsed)
-  if (collapsedGroup) collapsedGroup.collapsed = false
-  const previous = activeTabOf(w)
-  const wasOnScreen = onScreenTabIds(w)
+  const collapsedGroup = w.groups.find(
+    (group) => group.id === tab.groupId && group.collapsed,
+  );
+  if (collapsedGroup) collapsedGroup.collapsed = false;
+  const previous = activeTabOf(w);
+  const wasOnScreen = onScreenTabIds(w);
   if (previous && previous.id !== id) {
-    hideLinkStatus(false, w.window)
-    if (w.findState.open) closeFindBar(false, w)
+    hideLinkStatus(false, w.window);
+    if (w.findState.open) closeFindBar(false, w);
   }
   // Best effort: grab the outgoing tab while it is still on screen for the tab overview, and keep
   // a larger copy to show if it is asleep the next time it is opened (wake-snapshot.ts).
-  if (previous && previous.id !== id) void captureTabThumbnail(previous, wasShownLongEnough(previous))
-  w.activeTabId = id
-  if (previous?.id !== id) tabShownAt.set(tab, Date.now())
-  w.recentTabIds = noteRecentTab(w.recentTabIds, id)
+  if (previous && previous.id !== id)
+    void captureTabThumbnail(previous, wasShownLongEnough(previous));
+  w.activeTabId = id;
+  if (previous?.id !== id) tabShownAt.set(tab, Date.now());
+  w.recentTabIds = noteRecentTab(w.recentTabIds, id);
   // Everything that left the screen starts its sleep clock; everything on it (both panes of a split) wakes.
-  const nowOnScreen = onScreenTabIds(w)
+  const nowOnScreen = onScreenTabIds(w);
   for (const goneId of wasOnScreen) {
-    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId)
-    if (gone && gone.win === w) markTabInactive(gone)
+    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId);
+    if (gone && gone.win === w) markTabInactive(gone);
   }
-  const shown = nowOnScreen.map((shownId) => findTab(shownId)).filter((candidate): candidate is BrowserTab => candidate?.win === w)
+  const shown = nowOnScreen
+    .map((shownId) => findTab(shownId))
+    .filter((candidate): candidate is BrowserTab => candidate?.win === w);
   // Woken from sleep onto the screen alone (not in a split): its snapshot covers the reload.
-  const wakeUrl = shown.length === 1 && shown[0] === tab && !tab.view ? (tab.pendingUrl || tab.lastUrl) : null
+  const wakeUrl =
+    shown.length === 1 && shown[0] === tab && !tab.view
+      ? tab.pendingUrl || tab.lastUrl
+      : null;
   for (const pane of shown) {
-    if (pane.view === null && (pane !== tab || wakeUrl === null)) dropWakeSnapshot(pane.id)
-    cancelSleepTimer(pane)
-    pane.inactiveSince = null
-    pane.pauseAutoplayUntilVisited = false
-    ensureTabLoaded(pane)
+    if (pane.view === null && (pane !== tab || wakeUrl === null))
+      dropWakeSnapshot(pane.id);
+    cancelSleepTimer(pane);
+    pane.inactiveSince = null;
+    pane.pauseAutoplayUntilVisited = false;
+    ensureTabLoaded(pane);
   }
   // Attach the view before focusing it; a detached view can't take focus.
-  applyTabBounds(w)
+  applyTabBounds(w);
   for (const pane of shown) {
-    const paneContents = pane.view?.webContents
-    if (pane !== tab && paneContents && !paneContents.isDestroyed()) paneContents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
+    const paneContents = pane.view?.webContents;
+    if (pane !== tab && paneContents && !paneContents.isDestroyed())
+      paneContents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL);
   }
-  const contents = tab.view?.webContents
+  const contents = tab.view?.webContents;
   if (contents && !contents.isDestroyed()) {
-    contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL)
+    contents.send(BACKGROUND_YOUTUBE_AUTOPLAY_ALLOW_CHANNEL);
     // With Reader view open the keyboard belongs to the article, not the page under it.
-    const focusTarget = readerViewFor(contents)?.webContents ?? contents
-    focusTarget.focus()
-    recoverCrashedTabOnActivate(contents)
+    const focusTarget = readerViewFor(contents)?.webContents ?? contents;
+    focusTarget.focus();
+    recoverCrashedTabOnActivate(contents);
   }
-  applyTabBounds(w)
-  if (wakeUrl && tab.view && !tab.pdfEditor && !readerViewFor(tab.view.webContents)) {
+  applyTabBounds(w);
+  if (
+    wakeUrl &&
+    tab.view &&
+    !tab.pdfEditor &&
+    !readerViewFor(tab.view.webContents)
+  ) {
     // A restored tab's first wake after a restart has no snapshot in memory: the saved one (never private).
-    presentWakeSnapshot(w.window, tab.id, tab.view.webContents, pageBoundsOf(tab), wakeUrl, tab.isPrivate ? null : partitionForTab(tab))
+    presentWakeSnapshot(
+      w.window,
+      tab.id,
+      tab.view.webContents,
+      pageBoundsOf(tab),
+      wakeUrl,
+      tab.isPrivate ? null : partitionForTab(tab),
+    );
   } else if (wakeUrl) {
-    dropWakeSnapshot(tab.id)
+    dropWakeSnapshot(tab.id);
   }
-  publishState(w)
-  if (spaceChanged) publishSpaces(w)
-  return true
+  publishState(w);
+  if (spaceChanged) publishSpaces(w);
+  return true;
 }
 
-function showTabContextMenu(contents: WebContents, event: Event, params: ContextMenuParams): void {
-  const tab = tabForContents(contents)
-  const w = tab?.win ?? windowStateFor(getShellWindowFor(contents))
-  if (!isLiveWindow(w)) return
-  const isBrowserPage = tab !== undefined
-  const editorTab = tab?.pdfEditor ? tab : undefined
-  const origin = isBrowserPage ? { x: w.browserBounds.x, y: w.browserBounds.y } : getMainRendererOrigin(contents) ?? { x: 0, y: 0 }
+function showTabContextMenu(
+  contents: WebContents,
+  event: Event,
+  params: ContextMenuParams,
+): void {
+  const tab = tabForContents(contents);
+  const w = tab?.win ?? windowStateFor(getShellWindowFor(contents));
+  if (!isLiveWindow(w)) return;
+  const isBrowserPage = tab !== undefined;
+  const editorTab = tab?.pdfEditor ? tab : undefined;
+  const origin = isBrowserPage
+    ? { x: w.browserBounds.x, y: w.browserBounds.y }
+    : (getMainRendererOrigin(contents) ?? { x: 0, y: 0 });
   showBrowserContextMenu(event, contents, params, {
     window: w.window,
     pageActions: isBrowserPage,
@@ -1071,131 +1790,323 @@ function showTabContextMenu(contents: WebContents, event: Event, params: Context
     offsetY: origin.y,
     searchEngine: selectedSearchEngine,
     translationTarget: getBrowserTranslationTarget(),
-    translatePage: (target) => { translateBrowserPage(target, w) },
-    translateText: (text, target) => { translateBrowserText(text, target, w) },
+    translatePage: (target) => {
+      translateBrowserPage(target, w);
+    },
+    translateText: (text, target) => {
+      translateBrowserText(text, target, w);
+    },
     openInNewTab: (url) => {
-      const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
-      if (id) persistOpenTabs()
+      const id = createTab(
+        url,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        w,
+      );
+      if (id) persistOpenTabs();
     },
     openInBackgroundTab: (url) => openBackgroundTab(url, false, w),
-    openInGlance: isBrowserPage && editorTab === undefined && !tab.extensionPageOrigin ? (url) => { void openGlance(contents, url) } : undefined,
+    openInGlance:
+      isBrowserPage && editorTab === undefined && !tab.extensionPageOrigin
+        ? (url) => {
+            void openGlance(contents, url);
+          }
+        : undefined,
     pdfDocument: isBrowserPage && isShowingPdf(contents),
-    printPage: isBrowserPage ? () => { void printPdf(contents).catch((error: unknown) => console.warn('Could not print:', error)) } : undefined,
-    editPdf: isBrowserPage && editorTab === undefined ? () => { if (tab) openPdfEditor(tab.id) } : undefined,
-    pdfEditor: editorTab ? {
-      save: () => sendPdfEditorCommand(contents, 'save'),
-      backToViewer: () => { closePdfEditor(editorTab.id) }
-    } : undefined,
-    takeScreenshot: isBrowserPage && isActiveTab(tab) ? () => { void runInWindow(tab.win.window, () => takeScreenshot('choose')) } : undefined,
-    readerView: isBrowserPage && editorTab === undefined && readerStateFor(contents) !== null ? () => { void toggleReaderMode(contents) } : undefined,
-    // Never offered for private tabs: a watcher would re-fetch the page outside the private session.
-    // Not in private tabs (see addTabToReadingList).
-    addToReadingList: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate
-      ? (target) => { if (target === 'page') addTabToReadingList(tab.id); else addLinkToReadingList(target.url, target.title) }
-      : undefined,
-    watchPage: isBrowserPage && editorTab === undefined && tab && !tab.isPrivate && canWatchPage(contents.getURL())
-      ? (mode) => { void watchPageFromTab(contents, mode, pageTitle(tab)) }
-      : undefined,
-    // Always a user action, so private tabs read too (nothing about the text is kept).
-    readAloud: isBrowserPage && canOfferReadAloud({ enabled: readAloudEnabled(), url: contents.getURL(), pdf: editorTab !== undefined || isShowingPdf(contents) })
-      ? (target, selection) => {
-          if (target === 'stop' || target === 'toggle') controlReadAloud(target)
-          else void readAloudFromPage(contents, target, selection, { x: params.x, y: params.y })
+    printPage: isBrowserPage
+      ? () => {
+          void printPdf(contents).catch((error: unknown) =>
+            console.warn("Could not print:", error),
+          );
         }
       : undefined,
-    readAloudState: readAloudMenuState()
-  })
+    editPdf:
+      isBrowserPage && editorTab === undefined
+        ? () => {
+            if (tab) openPdfEditor(tab.id);
+          }
+        : undefined,
+    pdfEditor: editorTab
+      ? {
+          save: () => sendPdfEditorCommand(contents, "save"),
+          backToViewer: () => {
+            closePdfEditor(editorTab.id);
+          },
+        }
+      : undefined,
+    takeScreenshot:
+      isBrowserPage && isActiveTab(tab)
+        ? () => {
+            void runInWindow(tab.win.window, () => takeScreenshot("choose"));
+          }
+        : undefined,
+    readerView:
+      isBrowserPage &&
+      editorTab === undefined &&
+      readerStateFor(contents) !== null
+        ? () => {
+            void toggleReaderMode(contents);
+          }
+        : undefined,
+    // Never offered for private tabs: a watcher would re-fetch the page outside the private session.
+    // Not in private tabs (see addTabToReadingList).
+    addToReadingList:
+      isBrowserPage && editorTab === undefined && tab && !tab.isPrivate
+        ? (target) => {
+            if (target === "page") addTabToReadingList(tab.id);
+            else addLinkToReadingList(target.url, target.title);
+          }
+        : undefined,
+    watchPage:
+      isBrowserPage &&
+      editorTab === undefined &&
+      tab &&
+      !tab.isPrivate &&
+      canWatchPage(contents.getURL())
+        ? (mode) => {
+            void watchPageFromTab(contents, mode, pageTitle(tab));
+          }
+        : undefined,
+    // Always a user action, so private tabs read too (nothing about the text is kept).
+    readAloud:
+      isBrowserPage &&
+      canOfferReadAloud({
+        enabled: readAloudEnabled(),
+        url: contents.getURL(),
+        pdf: editorTab !== undefined || isShowingPdf(contents),
+      })
+        ? (target, selection) => {
+            if (target === "stop" || target === "toggle")
+              controlReadAloud(target);
+            else
+              void readAloudFromPage(contents, target, selection, {
+                x: params.x,
+                y: params.y,
+              });
+          }
+        : undefined,
+    readAloudState: readAloudMenuState(),
+  });
 }
 
-type TabMenuExtrasProvider = (id: string) => MenuItemConstructorOptions[]
-let tabMenuExtrasProvider: TabMenuExtrasProvider | null = null
+type TabMenuExtrasProvider = (id: string) => MenuItemConstructorOptions[];
+let tabMenuExtrasProvider: TabMenuExtrasProvider | null = null;
 
 /** Extra tab context-menu items from feature modules (tab archive) that import this file. */
-export function setBrowserTabMenuExtras(provider: TabMenuExtrasProvider | null): void {
-  tabMenuExtrasProvider = provider
+export function setBrowserTabMenuExtras(
+  provider: TabMenuExtrasProvider | null,
+): void {
+  tabMenuExtrasProvider = provider;
 }
 
 function tabMenuExtras(id: string): MenuItemConstructorOptions[] {
   try {
-    return tabMenuExtrasProvider?.(id) ?? []
+    return tabMenuExtrasProvider?.(id) ?? [];
   } catch (error) {
-    console.warn('Tab menu extras failed:', error)
-    return []
+    console.warn("Tab menu extras failed:", error);
+    return [];
   }
 }
 
 /** Move Pin Left / Right, enabled when there is a pin on that side (the keyboard-free way to reorder pins). */
 function pinnedTabMoveItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  const pins = spaceTabsOf(tab.win, tab.spaceId).filter((item) => item.pinned).map((item) => item.id)
+  const pins = spaceTabsOf(tab.win, tab.spaceId)
+    .filter((item) => item.pinned)
+    .map((item) => item.id);
   return [
-    { label: 'Move Pin Left', enabled: pinStepBeforeId(pins, tab.id, -1) !== undefined, click: () => { stepPinnedTab(tab.id, -1) } },
-    { label: 'Move Pin Right', enabled: pinStepBeforeId(pins, tab.id, 1) !== undefined, click: () => { stepPinnedTab(tab.id, 1) } }
-  ]
+    {
+      label: "Move Pin Left",
+      enabled: pinStepBeforeId(pins, tab.id, -1) !== undefined,
+      click: () => {
+        stepPinnedTab(tab.id, -1);
+      },
+    },
+    {
+      label: "Move Pin Right",
+      enabled: pinStepBeforeId(pins, tab.id, 1) !== undefined,
+      click: () => {
+        stepPinnedTab(tab.id, 1);
+      },
+    },
+  ];
 }
 
 function showBrowserTabContextMenu(id: string): void {
-  const tab = getTab(id)
-  if (!tab || !isLiveWindow(tab.win)) return
-  const { activeTabId } = tab.win
-  const tabs = spaceTabsOf(tab.win, tab.spaceId)
-  const origin = normalizeHttpOrigin(currentUrl(tab))
-  const bookmarked = Boolean(origin && isUrlBookmarked(currentUrl(tab)))
+  const tab = getTab(id);
+  if (!tab || !isLiveWindow(tab.win)) return;
+  const { activeTabId } = tab.win;
+  const tabs = spaceTabsOf(tab.win, tab.spaceId);
+  const origin = normalizeHttpOrigin(currentUrl(tab));
+  const bookmarked = Boolean(origin && isUrlBookmarked(currentUrl(tab)));
   const items: MenuItemConstructorOptions[] = [
-    { label: bookmarked ? 'Remove Bookmark' : 'Bookmark Tab', ...tabMenuAccelerator('bookmark'), enabled: Boolean(origin), click: () => toggleTabBookmark(id) },
-    { label: 'Bookmark All Tabs…', ...tabMenuAccelerator('bookmarkAllTabs'), click: () => { bookmarkAllBrowserTabs() } },
+    {
+      label: bookmarked ? "Remove Bookmark" : "Bookmark Tab",
+      ...tabMenuAccelerator("bookmark"),
+      enabled: Boolean(origin),
+      click: () => toggleTabBookmark(id),
+    },
+    {
+      label: "Bookmark All Tabs…",
+      ...tabMenuAccelerator("bookmarkAllTabs"),
+      click: () => {
+        bookmarkAllBrowserTabs();
+      },
+    },
     // Never for private tabs: the Reading List keeps (and will sync) what it saves.
-    { label: 'Add to Reading List', ...tabMenuAccelerator('readingList'), enabled: Boolean(origin) && !tab.isPrivate, click: () => addTabToReadingList(id) },
-    { label: tab.pinned ? 'Unpin Tab' : 'Pin Tab', ...tabMenuAccelerator('pin'), click: () => setBrowserTabPinned(id, !tab.pinned) },
+    {
+      label: "Add to Reading List",
+      ...tabMenuAccelerator("readingList"),
+      enabled: Boolean(origin) && !tab.isPrivate,
+      click: () => addTabToReadingList(id),
+    },
+    {
+      label: tab.pinned ? "Unpin Tab" : "Pin Tab",
+      ...tabMenuAccelerator("pin"),
+      click: () => setBrowserTabPinned(id, !tab.pinned),
+    },
     ...(tab.pinned ? pinnedTabMoveItems(tab) : []),
-    { label: 'Duplicate Tab', ...tabMenuAccelerator('duplicate'), click: () => { void duplicateBrowserTab(id) } },
-    { label: 'Pop Out to Mini Window', ...tabMenuAccelerator('miniWindow'), enabled: canPopOutTab(tab), click: () => { void popOutTabToMiniWindow(id) } },
+    {
+      label: "Duplicate Tab",
+      ...tabMenuAccelerator("duplicate"),
+      click: () => {
+        void duplicateBrowserTab(id);
+      },
+    },
+    {
+      label: "Pop Out to Mini Window",
+      ...tabMenuAccelerator("miniWindow"),
+      enabled: canPopOutTab(tab),
+      click: () => {
+        void popOutTabToMiniWindow(id);
+      },
+    },
     // Hidden with the menu bar icon set to Never.
-    ...(getMiniWindowSettings().menuBarIcon === 'never' ? [] : [{ label: 'Open in Menu Bar', enabled: canPopOutTab(tab), click: () => { void popOutTabToMenuBar(id) } }]),
-    { label: 'Copy Link', ...tabMenuAccelerator('copyLink'), enabled: Boolean(origin), click: () => clipboard.writeText(currentUrl(tab)) },
-    { label: 'Copy Clean Link', ...tabMenuAccelerator('copyCleanLink'), enabled: Boolean(origin), click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))) },
-    { type: 'separator' },
-    { label: 'Reload Tab', ...tabMenuAccelerator('reload'), click: () => reloadBrowserTab(id) },
-    { label: 'Suspend Tab', enabled: !isTabOnScreen(tab) && tab.view !== null, click: () => { suspendBrowserTab(id) } },
-    { label: 'Suspend Other Tabs', enabled: tabs.some((candidate) => candidate.id !== id && candidate.id !== activeTabId && !isTabOnScreen(candidate) && candidate.view !== null), click: () => suspendOtherBrowserTabs(id) },
-    { type: 'separator' },
+    ...(getMiniWindowSettings().menuBarIcon === "never"
+      ? []
+      : [
+          {
+            label: "Open in Menu Bar",
+            enabled: canPopOutTab(tab),
+            click: () => {
+              void popOutTabToMenuBar(id);
+            },
+          },
+        ]),
+    {
+      label: "Copy Link",
+      ...tabMenuAccelerator("copyLink"),
+      enabled: Boolean(origin),
+      click: () => clipboard.writeText(currentUrl(tab)),
+    },
+    {
+      label: "Copy Clean Link",
+      ...tabMenuAccelerator("copyCleanLink"),
+      enabled: Boolean(origin),
+      click: () => clipboard.writeText(cleanLinkUrl(currentUrl(tab))),
+    },
+    { type: "separator" },
+    {
+      label: "Reload Tab",
+      ...tabMenuAccelerator("reload"),
+      click: () => reloadBrowserTab(id),
+    },
+    {
+      label: "Suspend Tab",
+      enabled: !isTabOnScreen(tab) && tab.view !== null,
+      click: () => {
+        suspendBrowserTab(id);
+      },
+    },
+    {
+      label: "Suspend Other Tabs",
+      enabled: tabs.some(
+        (candidate) =>
+          candidate.id !== id &&
+          candidate.id !== activeTabId &&
+          !isTabOnScreen(candidate) &&
+          candidate.view !== null,
+      ),
+      click: () => suspendOtherBrowserTabs(id),
+    },
+    { type: "separator" },
     // Feature items bring their own trailing separator.
     ...tabMenuExtras(id),
-    { label: 'Close Tab', ...tabMenuAccelerator('close'), click: () => closeBrowserTab(id) },
-    { label: 'Close Tabs Above', enabled: tabs.some((_candidate, index) => index < tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'above') },
-    { label: 'Close Tabs Below', enabled: tabs.some((_candidate, index) => index > tabs.findIndex((entry) => entry.id === id)), click: () => closeBrowserTabsRelative(id, 'below') },
-    { label: 'Close Other Tabs', ...tabMenuAccelerator('closeOthers'), enabled: tabs.length > 1, click: () => closeBrowserTabsRelative(id, 'others') },
-    { type: 'separator' },
+    {
+      label: "Close Tab",
+      ...tabMenuAccelerator("close"),
+      click: () => closeBrowserTab(id),
+    },
+    {
+      label: "Close Tabs Above",
+      enabled: tabs.some(
+        (_candidate, index) =>
+          index < tabs.findIndex((entry) => entry.id === id),
+      ),
+      click: () => closeBrowserTabsRelative(id, "above"),
+    },
+    {
+      label: "Close Tabs Below",
+      enabled: tabs.some(
+        (_candidate, index) =>
+          index > tabs.findIndex((entry) => entry.id === id),
+      ),
+      click: () => closeBrowserTabsRelative(id, "below"),
+    },
+    {
+      label: "Close Other Tabs",
+      ...tabMenuAccelerator("closeOthers"),
+      enabled: tabs.length > 1,
+      click: () => closeBrowserTabsRelative(id, "others"),
+    },
+    { type: "separator" },
     ...splitTabMenuItems(tab),
     ...groupTabMenuItems(tab),
     ...spaceTabMenuItems(tab),
-    ...moveTabMenuItems(tab)
-  ]
-  Menu.buildFromTemplate(items).popup({ window: tab.win.window })
+    ...moveTabMenuItems(tab),
+  ];
+  Menu.buildFromTemplate(items).popup({ window: tab.win.window });
 }
 
 /** "Move to New Window" plus one "Move to <window>" per other window the tab may go to. */
 function moveTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  const targets = windowStates.filter((w) => w !== tab.win && !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
+  const targets = windowStates.filter(
+    (w) => w !== tab.win && !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w),
+  );
   return [
-    { label: 'Move to New Window', enabled: tab.win.tabs.length > 1, click: () => { moveBrowserTabToNewWindow(tab.id) } },
+    {
+      label: "Move to New Window",
+      enabled: tab.win.tabs.length > 1,
+      click: () => {
+        moveBrowserTabToNewWindow(tab.id);
+      },
+    },
     ...targets.map((w): MenuItemConstructorOptions => ({
       label: `Move to ${browserWindowLabel(w.window)}`,
-      click: () => { moveBrowserTabToWindow(tab.id, w.window) }
-    }))
-  ]
+      click: () => {
+        moveBrowserTabToWindow(tab.id, w.window);
+      },
+    })),
+  ];
 }
 
 function resolveBrowserViewPreload(): string | null {
-  const preload = 'mac-trackpad-swipe.cjs'
-  const mainDirectory = dirname(fileURLToPath(import.meta.url))
-  const appPath = app.getAppPath()
+  const preload = "mac-trackpad-swipe.cjs";
+  const mainDirectory = dirname(fileURLToPath(import.meta.url));
+  const appPath = app.getAppPath();
   const candidates = [
-    join(mainDirectory, '../preload', preload),
-    join(mainDirectory, '../../preload', preload),
-    join(appPath, 'out/preload', preload),
-    join(appPath, 'src/preload', preload)
-  ]
-  return candidates.find((candidate) => existsSync(candidate)) ?? null
+    join(mainDirectory, "../preload", preload),
+    join(mainDirectory, "../../preload", preload),
+    join(appPath, "out/preload", preload),
+    join(appPath, "src/preload", preload),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 /**
@@ -1203,51 +2114,84 @@ function resolveBrowserViewPreload(): string | null {
  * secure"). Hand its sign-in pages to the native WebKit helper, import the
  * session it returns, then continue where the page was headed.
  */
-let lastGoogleSignInImportAt = 0
-const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000
+let lastGoogleSignInImportAt = 0;
+const GOOGLE_SIGN_IN_LOOP_GUARD_MS = 2 * 60 * 1000;
 // The cancelled load a hand-off leaves behind is not an address error.
-const googleHandOffAt = new WeakMap<Electron.WebContents, number>()
+const googleHandOffAt = new WeakMap<Electron.WebContents, number>();
 
-function handOffGoogleSignIn(contents: Electron.WebContents, url: string): boolean {
+function handOffGoogleSignIn(
+  contents: Electron.WebContents,
+  url: string,
+): boolean {
   // The WebKit sign-in imports into the profile session; a Space with its own logins signs in in the tab.
-  if (contents.session !== getBrowserSession()) return false
-  if (!isWebKitGoogleSignInAvailable() || !shouldHandOffSignIn(url, hasGoogleSessionCookie())) return false
+  if (contents.session !== getBrowserSession()) return false;
+  if (
+    !isWebKitGoogleSignInAvailable() ||
+    !shouldHandOffSignIn(url, hasGoogleSessionCookie())
+  )
+    return false;
   // If Google sends us straight back to sign-in right after an import, it did
   // not accept the session in Electron; don't trap the user in a pop-up loop.
   if (Date.now() - lastGoogleSignInImportAt < GOOGLE_SIGN_IN_LOOP_GUARD_MS) {
-    console.warn('[google sign-in] Google asked for sign-in again right after an import; leaving it in the tab.')
-    return false
+    console.warn(
+      "[google sign-in] Google asked for sign-in again right after an import; leaving it in the tab.",
+    );
+    return false;
   }
-  const continueUrl = signInContinueUrl(url)
-  googleHandOffAt.set(contents, Date.now())
+  const continueUrl = signInContinueUrl(url);
+  googleHandOffAt.set(contents, Date.now());
   void runWebKitGoogleSignIn(continueUrl).then((result) => {
-    if (contents.isDestroyed()) return
-    if (result === 'signed-in') {
-      lastGoogleSignInImportAt = Date.now()
-      void contents.loadURL(continueUrl).catch(() => {})
-    }
-    else if (result === 'failed') console.warn('[google sign-in] WebKit sign-in failed; the session was not imported.')
-  })
-  return true
+    if (contents.isDestroyed()) return;
+    if (result === "signed-in") {
+      lastGoogleSignInImportAt = Date.now();
+      void contents.loadURL(continueUrl).catch(() => {});
+    } else if (result === "failed")
+      console.warn(
+        "[google sign-in] WebKit sign-in failed; the session was not imported.",
+      );
+  });
+  return true;
 }
 
 /** What a tab's popups need from the browser: links out of them open as tabs in the tab's window. */
 function pagePopupHost(tab: BrowserTab): PagePopupHost {
   return {
     openTab: (url, activate) => {
-      if (!isLiveWindow(tab.win)) return
-      if (!activate) return openBackgroundTab(url, tab.isPrivate, tab.win)
-      if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)) persistOpenTabs()
+      if (!isLiveWindow(tab.win)) return;
+      if (!activate) return openBackgroundTab(url, tab.isPrivate, tab.win);
+      if (
+        createTab(
+          url,
+          selectedSearchEngine,
+          true,
+          false,
+          false,
+          false,
+          undefined,
+          undefined,
+          tab.isPrivate,
+          false,
+          tab.win,
+        )
+      )
+        persistOpenTabs();
     },
-    handOffSignIn: (contents, url) => !tab.isPrivate && handOffGoogleSignIn(contents, url)
-  }
+    handOffSignIn: (contents, url) =>
+      !tab.isPrivate && handOffGoogleSignIn(contents, url),
+  };
 }
 
 /** A site tab's webPreferences (Glance pages get the same, so a promoted glance is a normal tab). */
-function tabWebPreferences(tab: BrowserTab, pauseAutoplay = tab.pauseAutoplayUntilVisited): Electron.WebPreferences {
-  const needsBrowserViewPreload = process.platform === 'darwin' || pauseAutoplay
-  const browserViewPreload = needsBrowserViewPreload ? resolveBrowserViewPreload() : null
-  const preload = tab.extensionPreloadPath ?? browserViewPreload
+function tabWebPreferences(
+  tab: BrowserTab,
+  pauseAutoplay = tab.pauseAutoplayUntilVisited,
+): Electron.WebPreferences {
+  const needsBrowserViewPreload =
+    process.platform === "darwin" || pauseAutoplay;
+  const browserViewPreload = needsBrowserViewPreload
+    ? resolveBrowserViewPreload()
+    : null;
+  const preload = tab.extensionPreloadPath ?? browserViewPreload;
   return {
     ...(preload ? { preload } : {}),
     nodeIntegration: false,
@@ -1260,12 +2204,14 @@ function tabWebPreferences(tab: BrowserTab, pauseAutoplay = tab.pauseAutoplayUnt
     // Remote pages still get no Node.js: sandbox stays on.
     nodeIntegrationInSubFrames: true,
     // Private tabs: the in-memory session. Otherwise the tab's Space partition (Default = the profile one).
-    ...(tab.isPrivate ? { session: getPrivateSession() } : { session: pageSessionForTab(tab) }),
+    ...(tab.isPrivate
+      ? { session: getPrivateSession() }
+      : { session: pageSessionForTab(tab) }),
     // On for every tab; the session decides (private tabs: off unless the user opts in).
     spellcheck: true,
     // Explicit: background tabs must be throttled (timers, rAF) once they leave the screen.
-    backgroundThrottling: true
-  }
+    backgroundThrottling: true,
+  };
 }
 
 /**
@@ -1273,309 +2219,479 @@ function tabWebPreferences(tab: BrowserTab, pauseAutoplay = tab.pauseAutoplayUnt
  * openPageMadeTab), or a promoted Glance's view (glance.ts), taken over as is. It keeps the opener's process, session and window.opener, which a blob: URL
  * needs to resolve; its webPreferences are the opener's, so ours below are not applied.
  */
-function createTabView(tab: BrowserTab, opened?: { webContents: Electron.WebContents; webPreferences?: Electron.WebPreferences } | { view: WebContentsView }): WebContentsView | null {
-  if (!isLiveWindow(tab.win)) return null
-  if (tab.pdfEditor) return createPdfEditorView(tab)
+function createTabView(
+  tab: BrowserTab,
+  opened?:
+    | {
+        webContents: Electron.WebContents;
+        webPreferences?: Electron.WebPreferences;
+      }
+    | { view: WebContentsView },
+): WebContentsView | null {
+  if (!isLiveWindow(tab.win)) return null;
+  if (tab.pdfEditor) return createPdfEditorView(tab);
   // A promoted Glance brings its whole view (a webContents can't move to a second view).
-  const view = opened && 'view' in opened ? opened.view : opened ? new WebContentsView({ webContents: opened.webContents, ...(opened.webPreferences ? { webPreferences: opened.webPreferences } : {}) }) : new WebContentsView({
-    webPreferences: tabWebPreferences(tab)
-  })
-  tab.view = view
+  const view =
+    opened && "view" in opened
+      ? opened.view
+      : opened
+        ? new WebContentsView({
+            webContents: opened.webContents,
+            ...(opened.webPreferences
+              ? { webPreferences: opened.webPreferences }
+              : {}),
+          })
+        : new WebContentsView({
+            webPreferences: tabWebPreferences(tab),
+          });
+  tab.view = view;
   // Site tabs are always below the local toolbar, sidebar, and full-app surfaces. applyTabBounds
   // attaches the view (at index 0) only while it is the tab on screen. Start at the page-area size
   // so the first load lays out at its real width (no 0-width layout + resize on first show).
-  view.setBounds(initialPageViewBounds(tab.win.browserBounds))
+  view.setBounds(initialPageViewBounds(tab.win.browserBounds));
   // Not on screen until applyTabBounds attaches it (getVisible() == on screen for every page view).
-  view.setVisible(false)
+  view.setVisible(false);
 
-  const contents = view.webContents
-  bindContentsToWindow(contents, tab.win.window)
-  attachNetworkInspector(tab.id, contents)
-  attachTabSafety(contents)
-  if (!tab.extensionPageOrigin) attachReaderDetection(contents)
-  const isCurrentContents = (): boolean => tab.view?.webContents === contents
+  const contents = view.webContents;
+  bindContentsToWindow(contents, tab.win.window);
+  attachNetworkInspector(tab.id, contents);
+  attachTabSafety(contents);
+  if (!tab.extensionPageOrigin) attachReaderDetection(contents);
+  const isCurrentContents = (): boolean => tab.view?.webContents === contents;
   // Anything that may change how the page looks invalidates its last picture (captureTabThumbnail).
-  const pictureChanged = (): void => { if (isCurrentContents()) tabPictureChanged(tab) }
-  contents.on('input-event', (_event, input) => { if (inputMayChangePage(input)) pictureChanged() })
-  contents.on('did-navigate', pictureChanged)
-  contents.on('did-navigate-in-page', pictureChanged)
-  contents.on('did-stop-loading', pictureChanged)
-  contents.on('did-frame-finish-load', pictureChanged)
-  contents.on('page-title-updated', pictureChanged)
-  contents.on('zoom-changed', pictureChanged)
-  contents.on('found-in-page', pictureChanged)
+  const pictureChanged = (): void => {
+    if (isCurrentContents()) tabPictureChanged(tab);
+  };
+  contents.on("input-event", (_event, input) => {
+    if (inputMayChangePage(input)) pictureChanged();
+  });
+  contents.on("did-navigate", pictureChanged);
+  contents.on("did-navigate-in-page", pictureChanged);
+  contents.on("did-stop-loading", pictureChanged);
+  contents.on("did-frame-finish-load", pictureChanged);
+  contents.on("page-title-updated", pictureChanged);
+  contents.on("zoom-changed", pictureChanged);
+  contents.on("found-in-page", pictureChanged);
   // Playing media always counts as a changed picture. (The speaker follows audibility instead: trackTabAudio.)
-  contents.on('media-started-playing', () => { if (isCurrentContents()) tabsPlayingMedia.add(tab) })
-  contents.on('media-paused', () => { if (isCurrentContents()) { tabsPlayingMedia.delete(tab); tabPictureChanged(tab) } })
-  contents.once('destroyed', () => tabsPlayingMedia.delete(tab))
-  contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (!isCurrentContents()) return
+  contents.on("media-started-playing", () => {
+    if (isCurrentContents()) tabsPlayingMedia.add(tab);
+  });
+  contents.on("media-paused", () => {
+    if (isCurrentContents()) {
+      tabsPlayingMedia.delete(tab);
+      tabPictureChanged(tab);
+    }
+  });
+  contents.once("destroyed", () => tabsPlayingMedia.delete(tab));
+  contents.on("before-mouse-event", (_event, mouseEvent) => {
+    if (!isCurrentContents()) return;
     if (tab.win.splits.length > 0) {
-      notifySplitPagePointer(tab.win.window, mouseEvent)
+      notifySplitPagePointer(tab.win.window, mouseEvent);
       // Clicking the other pane of a split focuses it.
-      if (mouseEvent.type === 'mouseDown' && !isActiveTab(tab) && isTabOnScreen(tab)) focusSplitPane(tab.id, false)
+      if (
+        mouseEvent.type === "mouseDown" &&
+        !isActiveTab(tab) &&
+        isTabOnScreen(tab)
+      )
+        focusSplitPane(tab.id, false);
     }
     if (!isActiveTab(tab)) {
-      if (mouseEvent.type === 'mouseMove' && isTabOnScreen(tab)) avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window)
-      return
+      if (mouseEvent.type === "mouseMove" && isTabOnScreen(tab))
+        avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window);
+      return;
     }
     // The sidebar reveal reads window x; a split pane's view doesn't start at the page area's left edge.
-    const offsetX = pageBoundsOf(tab).x - tab.win.browserBounds.x
-    handleBrowserPageMouseEvent(offsetX ? { type: mouseEvent.type, x: mouseEvent.x + offsetX } : mouseEvent, tab.win.window)
-    if (mouseEvent.type === 'mouseMove') avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window)
+    const offsetX = pageBoundsOf(tab).x - tab.win.browserBounds.x;
+    handleBrowserPageMouseEvent(
+      offsetX
+        ? { type: mouseEvent.type, x: mouseEvent.x + offsetX }
+        : mouseEvent,
+      tab.win.window,
+    );
+    if (mouseEvent.type === "mouseMove")
+      avoidLinkStatusPointer(mouseEvent.x, mouseEvent.y, tab.win.window);
     if (isCopyImageClick(mouseEvent)) {
-      void copyImageAtPoint(contents, mouseEvent.x, mouseEvent.y).then((copied) => {
-        if (copied) flashLinkStatus('Image copied', pageBoundsOf(tab), undefined, tab.win.window)
-      })
+      void copyImageAtPoint(contents, mouseEvent.x, mouseEvent.y).then(
+        (copied) => {
+          if (copied)
+            flashLinkStatus(
+              "Image copied",
+              pageBoundsOf(tab),
+              undefined,
+              tab.win.window,
+            );
+        },
+      );
     }
-  })
+  });
   // Keyboard focus landing in the other pane (Tab key, a page focusing itself on click) focuses that pane.
-  contents.on('focus', () => {
-    if (isCurrentContents() && !isActiveTab(tab) && isTabOnScreen(tab)) focusSplitPane(tab.id, false)
-  })
-  contents.on('update-target-url', (_event, url) => {
-    if (!isCurrentContents()) return
+  contents.on("focus", () => {
+    if (isCurrentContents() && !isActiveTab(tab) && isTabOnScreen(tab))
+      focusSplitPane(tab.id, false);
+  });
+  contents.on("update-target-url", (_event, url) => {
+    if (!isCurrentContents()) return;
     // Link hovers for Glance's hook (glance-entry.ts); a no-op with no listeners.
-    emitGlanceLinkHover(contents, url)
-    if (!isTabOnScreen(tab)) return
+    emitGlanceLinkHover(contents, url);
+    if (!isTabOnScreen(tab)) return;
     // The mini window has no link status bubble (no shell surfaces to stack it under).
-    if (!tab.win.mini) showLinkStatus(url, pageBoundsOf(tab), tab.win.window)
+    if (!tab.win.mini) showLinkStatus(url, pageBoundsOf(tab), tab.win.window);
     // Resting on a link for ~200 ms preconnects its origin in this tab's own session.
-    noteLinkHover(contents, url, () => networkContextForTab(tab))
-  })
-  contents.on('found-in-page', (_event, result) => {
-    const { findState } = tab.win
-    if (!isCurrentContents() || findState.tabId !== tab.id || !findState.open) return
-    findState.result = { activeMatchOrdinal: result.activeMatchOrdinal, matches: result.matches, finalUpdate: result.finalUpdate }
-    publishFindState(tab.win)
-  })
+    noteLinkHover(contents, url, () => networkContextForTab(tab));
+  });
+  contents.on("found-in-page", (_event, result) => {
+    const { findState } = tab.win;
+    if (!isCurrentContents() || findState.tabId !== tab.id || !findState.open)
+      return;
+    findState.result = {
+      activeMatchOrdinal: result.activeMatchOrdinal,
+      matches: result.matches,
+      finalUpdate: result.finalUpdate,
+    };
+    publishFindState(tab.win);
+  });
   // Ctrl/Cmd + mouse wheel (and Windows precision-touchpad zoom) step the page zoom like Chrome.
-  contents.on('zoom-changed', (_event, direction) => {
-    const action = zoomActionForWheel(direction)
-    if (action && isCurrentContents()) zoomTab(tab, action)
-  })
-  contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
+  contents.on("zoom-changed", (_event, direction) => {
+    const action = zoomActionForWheel(direction);
+    if (action && isCurrentContents()) zoomTab(tab, action);
+  });
+  contents.on("context-menu", (event, params) =>
+    showTabContextMenu(contents, event, params),
+  );
   // A background tab whose renderer died (crash, OOM, or "Kill process" in Task Manager) goes to
   // sleep instead of holding a dead view; selecting it reloads it. The active tab keeps its view
   // so Reload works in place.
-  contents.on('render-process-gone', (_event, details) => {
-    if (details.reason === 'clean-exit' || !isCurrentContents() || isTabOnScreen(tab)) return
+  contents.on("render-process-gone", (_event, details) => {
+    if (
+      details.reason === "clean-exit" ||
+      !isCurrentContents() ||
+      isTabOnScreen(tab)
+    )
+      return;
     setImmediate(() => {
-      if (isCurrentContents() && !isTabOnScreen(tab)) hibernateTab(tab, { reason: 'crashed' })
-    })
-  })
-  if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab))
-  guardPageDragRegions(contents)
-  trackTabMediaSession(contents)
-  trackTabAudio(contents, () => { if (isCurrentContents()) publishTabs(tab.win) })
-  trackTabMedia(contents, () => { if (isCurrentContents() && isActiveTab(tab)) publishState(tab.win) })
-  contents.on('media-started-playing', () => {
-    if (!isCurrentContents() || !tab.pauseAutoplayUntilVisited || isTabOnScreen(tab) || contents.isDestroyed()) return
-    void contents.executeJavaScript(`
+      if (isCurrentContents() && !isTabOnScreen(tab))
+        hibernateTab(tab, { reason: "crashed" });
+    });
+  });
+  if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab));
+  guardPageDragRegions(contents);
+  trackTabMediaSession(contents);
+  trackTabAudio(contents, () => {
+    if (isCurrentContents()) publishTabs(tab.win);
+  });
+  trackTabMedia(contents, () => {
+    if (isCurrentContents() && isActiveTab(tab)) publishState(tab.win);
+  });
+  contents.on("media-started-playing", () => {
+    if (
+      !isCurrentContents() ||
+      !tab.pauseAutoplayUntilVisited ||
+      isTabOnScreen(tab) ||
+      contents.isDestroyed()
+    )
+      return;
+    void contents
+      .executeJavaScript(
+        `
       for (const media of document.querySelectorAll('video, audio')) {
         if (!media.paused && !media.ended) media.pause()
       }
-    `).catch(() => undefined)
-  })
-  enablePagePinchZoom(contents)
+    `,
+      )
+      .catch(() => undefined);
+  });
+  enablePagePinchZoom(contents);
   contents.setWindowOpenHandler((details) => {
-    if (tab.extensionPageOrigin && tab.extensionPreloadPath && isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)) {
-      openExtensionPageTab(details.url, tab.extensionPageOrigin, tab.extensionPreloadPath, tab.extensionPageOwner ?? 'bramble')
-      return { action: 'deny' }
+    if (
+      tab.extensionPageOrigin &&
+      tab.extensionPreloadPath &&
+      isBrambleExtensionUrl(details.url, tab.extensionPageOrigin)
+    ) {
+      openExtensionPageTab(
+        details.url,
+        tab.extensionPageOrigin,
+        tab.extensionPreloadPath,
+        tab.extensionPageOwner ?? "bramble",
+      );
+      return { action: "deny" };
     }
     // Shift+click on a link: peek at it in a Glance over this page instead of a new window
     // (Settings → General; off keeps the old Shift+click behaviour below).
-    if (!tab.extensionPageOrigin && !tab.pdfEditor && isShiftClickLinkOpen(details) && isGlanceableUrl(details.url) && glanceShiftClickEnabled()) {
+    if (
+      !tab.extensionPageOrigin &&
+      !tab.pdfEditor &&
+      isShiftClickLinkOpen(details) &&
+      isGlanceableUrl(details.url) &&
+      glanceShiftClickEnabled()
+    ) {
       // No glance sheet in the small mini window: the link opens as a background tab in the browser.
-      if (tab.win.mini) openBackgroundTab(details.url, tab.isPrivate, tab.win)
-      else void openGlance(contents, details.url)
-      return { action: 'deny' }
+      if (tab.win.mini) openBackgroundTab(details.url, tab.isPrivate, tab.win);
+      else void openGlance(contents, details.url);
+      return { action: "deny" };
     }
     // blob:/data: links and window.open(blobUrl): let Chromium make the new contents (same process,
     // session and opener, or the blob won't resolve) and adopt it as a tab. Same popup rules as http(s).
-    if (!tab.extensionPageOrigin && pageMadeUrlKind(details.url) && isLiveWindow(tab.win)) {
-      const inTab = details.disposition === 'background-tab' || details.disposition === 'foreground-tab' || getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs
-      if (!inTab) return { action: 'deny' }
-      const activate = details.disposition !== 'background-tab'
+    if (
+      !tab.extensionPageOrigin &&
+      pageMadeUrlKind(details.url) &&
+      isLiveWindow(tab.win)
+    ) {
+      const inTab =
+        details.disposition === "background-tab" ||
+        details.disposition === "foreground-tab" ||
+        getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs;
+      if (!inTab) return { action: "deny" };
+      const activate = details.disposition !== "background-tab";
       return {
-        action: 'allow',
+        action: "allow",
         outlivesOpener: true,
-        createWindow: (options) => openPageMadeTab(tab, details.url, activate, options)
-      }
+        createWindow: (options) =>
+          openPageMadeTab(tab, details.url, activate, options),
+      };
     }
     // A sized window.open right after a click or key press (Disqus/OAuth sign-in, 3-D Secure): a
     // real popup that keeps window.opener, like Chrome. "Open pop-ups in tabs" keeps them as tabs.
-    if (!tab.extensionPageOrigin && !getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
-      const popup = userPopupResponse(contents, details)
-      if (popup) return popup
+    if (
+      !tab.extensionPageOrigin &&
+      !getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs
+    ) {
+      const popup = userPopupResponse(contents, details);
+      if (popup) return popup;
     }
-    const target = resolveNavigationTarget(details.url, selectedSearchEngine)
+    const target = resolveNavigationTarget(details.url, selectedSearchEngine);
     if (target && /^https?:\/\//i.test(target)) {
-      if (tab.extensionPageOwner === 'web-store') {
+      if (tab.extensionPageOwner === "web-store") {
         // Links from an extension's options page open as ordinary Surffish tabs.
-        if (createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, false, false, tab.win)) persistOpenTabs()
-      } else if (details.disposition === 'background-tab') {
-        openBackgroundTab(target, tab.isPrivate, tab.win)
-      } else if (details.disposition === 'foreground-tab' || getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs) {
+        if (
+          createTab(
+            target,
+            selectedSearchEngine,
+            details.disposition !== "background-tab",
+            false,
+            false,
+            false,
+            undefined,
+            undefined,
+            false,
+            false,
+            tab.win,
+          )
+        )
+          persistOpenTabs();
+      } else if (details.disposition === "background-tab") {
+        openBackgroundTab(target, tab.isPrivate, tab.win);
+      } else if (
+        details.disposition === "foreground-tab" ||
+        getBrowserSiteSettings(contents.getURL())?.openPopupsInTabs
+      ) {
         // target=_blank links (and window.open without popup features) are 'foreground-tab': open them
         // like a normal new tab. Only real popups ('new-window', with size features) stay behind the site toggle.
-        const popupTabId = createTab(target, selectedSearchEngine, true, false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)
-        if (popupTabId) persistOpenTabs()
+        const popupTabId = createTab(
+          target,
+          selectedSearchEngine,
+          true,
+          false,
+          false,
+          false,
+          undefined,
+          undefined,
+          tab.isPrivate,
+          false,
+          tab.win,
+        );
+        if (popupTabId) persistOpenTabs();
       }
     }
-    return { action: 'deny' }
-  })
-  contents.on('before-input-event', (event, inputEvent) => {
+    return { action: "deny" };
+  });
+  contents.on("before-input-event", (event, inputEvent) => {
     if (isFocusAddressShortcut(inputEvent)) {
-      event.preventDefault()
-      sendFocusAddressToVisibleRenderer(tab.win.window)
-      return
+      event.preventDefault();
+      sendFocusAddressToVisibleRenderer(tab.win.window);
+      return;
     }
-    if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
-    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
-  })
-  contents.on('will-navigate', (event, url) => {
-    if (isExtensionPage(tab, url)) return
+    if (
+      inputEvent.type !== "keyDown" ||
+      (!inputEvent.control && !inputEvent.meta)
+    )
+      return;
+    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault();
+  });
+  contents.on("will-navigate", (event, url) => {
+    if (isExtensionPage(tab, url)) return;
     // A page's own blob:/data: link. Chromium still blocks top-level data: documents (downloads pass).
-    if (!tab.extensionPageOrigin && pageMadeUrlKind(url)) return
-    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url)) return event.preventDefault()
-    if (!tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
-  })
-  contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
-    if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url)) return event.preventDefault()
-    if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url)) event.preventDefault()
-  })
-  contents.on('did-start-loading', () => {
-    if (!isCurrentContents()) return
-    tab.error = null
-    publishState(tab.win)
-  })
-  contents.on('did-start-navigation', (_event, url, isInPlace, isMainFrame) => {
-    if (isCurrentContents() && isMainFrame && !isInPlace) tab.showingPdf = false
-    if (!isCurrentContents() || !isMainFrame || (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))) return
-    if (!isInPlace && isActiveTab(tab)) hideLinkStatus(false, tab.win.window)
-    tab.downloadStartedForCurrentLoad = false
-    tab.lastUrl = url
+    if (!tab.extensionPageOrigin && pageMadeUrlKind(url)) return;
+    if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url))
+      return event.preventDefault();
+    if (!tab.isPrivate && handOffGoogleSignIn(contents, url))
+      event.preventDefault();
+  });
+  contents.on("will-redirect", (event, url, _isInPlace, isMainFrame) => {
+    if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))
+      return event.preventDefault();
+    if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url))
+      event.preventDefault();
+  });
+  contents.on("did-start-loading", () => {
+    if (!isCurrentContents()) return;
+    tab.error = null;
+    publishState(tab.win);
+  });
+  contents.on("did-start-navigation", (_event, url, isInPlace, isMainFrame) => {
+    if (isCurrentContents() && isMainFrame && !isInPlace)
+      tab.showingPdf = false;
+    if (
+      !isCurrentContents() ||
+      !isMainFrame ||
+      (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))
+    )
+      return;
+    if (!isInPlace && isActiveTab(tab)) hideLinkStatus(false, tab.win.window);
+    tab.downloadStartedForCurrentLoad = false;
+    tab.lastUrl = url;
     // Same document (pushState / replaceState / #hash): same icon, which stays.
     if (!isInPlace) {
-      tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
-      tab.faviconSource = null
-      tab.faviconRevision += 1
+      tab.faviconUrl = /^https?:\/\//i.test(url)
+        ? getCachedBrowserSiteFavicon(url)
+        : null;
+      tab.faviconSource = null;
+      tab.faviconRevision += 1;
     }
-    persistOpenTabs()
-    publishTabs(tab.win)
-  })
-  contents.on('page-favicon-updated', (_event, favicons) => {
-    if (!isCurrentContents()) return
-    const pageUrl = contents.getURL()
-    if (!/^https?:\/\//i.test(pageUrl)) return
+    persistOpenTabs();
+    publishTabs(tab.win);
+  });
+  contents.on("page-favicon-updated", (_event, favicons) => {
+    if (!isCurrentContents()) return;
+    const pageUrl = contents.getURL();
+    if (!/^https?:\/\//i.test(pageUrl)) return;
     const faviconUrl = favicons
-      .map((candidate) => normalizeFaviconUrl(candidate) ?? normalizeCachedFaviconDataUrl(candidate))
-      .find((candidate): candidate is string => candidate !== null)
-    if (!faviconUrl) return
-    showTabFavicon(tab, contents, pageUrl, faviconUrl, ++tab.faviconRevision)
-  })
-  contents.on('did-stop-loading', () => {
-    if (!isCurrentContents()) return
-    tab.showingPdf = isShowingPdf(contents)
-    publishState(tab.win)
-    refreshTabFavicon(tab)
-  })
+      .map(
+        (candidate) =>
+          normalizeFaviconUrl(candidate) ??
+          normalizeCachedFaviconDataUrl(candidate),
+      )
+      .find((candidate): candidate is string => candidate !== null);
+    if (!faviconUrl) return;
+    showTabFavicon(tab, contents, pageUrl, faviconUrl, ++tab.faviconRevision);
+  });
+  contents.on("did-stop-loading", () => {
+    if (!isCurrentContents()) return;
+    tab.showingPdf = isShowingPdf(contents);
+    publishState(tab.win);
+    refreshTabFavicon(tab);
+  });
   // The built-in PDF viewer is a child frame; notice it (and its absence) as soon as frames load.
-  contents.on('did-frame-finish-load', (_event, isMainFrame) => {
-    if (!isCurrentContents() || isMainFrame) return
-    const showingPdf = isShowingPdf(contents)
-    if (showingPdf === tab.showingPdf) return
-    tab.showingPdf = showingPdf
-    if (isActiveTab(tab)) publishState(tab.win)
-  })
-  contents.on('did-navigate', (_event, url) => {
-    if (!isCurrentContents()) return
+  contents.on("did-frame-finish-load", (_event, isMainFrame) => {
+    if (!isCurrentContents() || isMainFrame) return;
+    const showingPdf = isShowingPdf(contents);
+    if (showingPdf === tab.showingPdf) return;
+    tab.showingPdf = showingPdf;
+    if (isActiveTab(tab)) publishState(tab.win);
+  });
+  contents.on("did-navigate", (_event, url) => {
+    if (!isCurrentContents()) return;
     // Something committed: no longer a tab that only exists for a download.
-    tab.closeIfOnlyDownload = false
-    applySavedZoom(tab, url)
-    applyTabVolumeForUrl(tab, url)
-    const { findState } = tab.win
+    tab.closeIfOnlyDownload = false;
+    applySavedZoom(tab, url);
+    applyTabVolumeForUrl(tab, url);
+    const { findState } = tab.win;
     if (findState.open && findState.tabId === tab.id) {
       // A new document: the old matches are gone, so search the new page for the same text.
-      findState.result = null
-      if (findState.text) contents.findInPage(findState.text, { findNext: true })
-      publishFindState(tab.win)
+      findState.result = null;
+      if (findState.text)
+        contents.findInPage(findState.text, { findNext: true });
+      publishFindState(tab.win);
     }
-    tab.lastUrl = url
-    persistOpenTabs()
-    publishState(tab.win)
+    tab.lastUrl = url;
+    persistOpenTabs();
+    publishState(tab.win);
     if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
-      recordBrowsingVisit(url, pageTitle(tab))
-      notifyHistoryChanged()
+      recordBrowsingVisit(url, pageTitle(tab));
+      notifyHistoryChanged();
     }
-  })
-  contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame) return
-    resetMacTrackpadSwipeFor(contents)
-    tab.lastUrl = url
-    persistOpenTabs()
-    publishState(tab.win)
+  });
+  contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
+    if (!isCurrentContents() || !isMainFrame) return;
+    resetMacTrackpadSwipeFor(contents);
+    tab.lastUrl = url;
+    persistOpenTabs();
+    publishState(tab.win);
     if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
-      recordBrowsingVisit(url, pageTitle(tab))
-      notifyHistoryChanged()
+      recordBrowsingVisit(url, pageTitle(tab));
+      notifyHistoryChanged();
     }
-  })
-  contents.on('page-title-updated', (_event, title) => {
-    if (!isCurrentContents()) return
-    if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title)
-    publishState(tab.win)
-    refreshTabFavicon(tab)
-    notifyHistoryChanged()
-  })
-  contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame) return
-    resetMacTrackpadSwipeFor(contents)
-    if (errorCode === -3) return
-    if (tab.downloadStartedForCurrentLoad) {
-      tab.error = null
-      publishState(tab.win)
-      return
-    }
-    tab.error = `${errorDescription} (${errorCode})`
-    noteTabLoadError(tab, tab.error, validatedURL, shouldShowFullPageError(errorCode))
-    publishState(tab.win)
-  })
-  contents.on('did-stop-loading', () => {
+  });
+  contents.on("page-title-updated", (_event, title) => {
+    if (!isCurrentContents()) return;
+    if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title);
+    publishState(tab.win);
+    refreshTabFavicon(tab);
+    notifyHistoryChanged();
+  });
+  contents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isCurrentContents() || !isMainFrame) return;
+      resetMacTrackpadSwipeFor(contents);
+      if (errorCode === -3) return;
+      if (tab.downloadStartedForCurrentLoad) {
+        tab.error = null;
+        publishState(tab.win);
+        return;
+      }
+      tab.error = `${errorDescription} (${errorCode})`;
+      noteTabLoadError(
+        tab,
+        tab.error,
+        validatedURL,
+        shouldShowFullPageError(errorCode),
+      );
+      publishState(tab.win);
+    },
+  );
+  contents.on("did-stop-loading", () => {
     setTimeout(() => {
       // Overview open and tab switches capture fresh shots anyway; only seed tabs that have none,
       // so ordinary page loads don't pay for a full-page capture + JPEG encode on the main thread.
-      if (isCurrentContents() && isActiveTab(tab) && !isTabOverviewOpen(tab.win.window) && !tabThumbnails.has(tab.id) && !pendingPictures.has(tab.id)) void captureTabThumbnail(tab)
-    }, 700)
-  })
-  contents.on('destroyed', () => {
+      if (
+        isCurrentContents() &&
+        isActiveTab(tab) &&
+        !isTabOverviewOpen(tab.win.window) &&
+        !tabThumbnails.has(tab.id) &&
+        !pendingPictures.has(tab.id)
+      )
+        void captureTabThumbnail(tab);
+    }, 700);
+  });
+  contents.on("destroyed", () => {
     if (activeMacTrackpadSwipe?.contents === contents) {
-      activeMacTrackpadSwipe = null
-      nextMacTrackpadSwipeToken += 1
+      activeMacTrackpadSwipe = null;
+      nextMacTrackpadSwipeToken += 1;
     }
-    detachNetworkInspector(contents)
-    if (!isCurrentContents()) return
-    removeDestroyedTab(tab)
-  })
-  return view
+    detachNetworkInspector(contents);
+    if (!isCurrentContents()) return;
+    removeDestroyedTab(tab);
+  });
+  return view;
 }
 
 /** A tab's page went away underneath it (not through closeBrowserTab): drop the tab and pick another. */
 function removeDestroyedTab(tab: BrowserTab): void {
-  disposeStashedPdfSource(tab)
-  const w = tab.win
-  const index = w.tabs.findIndex((candidate) => candidate.id === tab.id)
-  if (index < 0) return
-  const { groups, partners } = removeTabFromSplits(w.splits, tab.id)
-  w.splits = groups
-  w.tabs.splice(index, 1)
+  disposeStashedPdfSource(tab);
+  const w = tab.win;
+  const index = w.tabs.findIndex((candidate) => candidate.id === tab.id);
+  if (index < 0) return;
+  const { groups, partners } = removeTabFromSplits(w.splits, tab.id);
+  w.splits = groups;
+  w.tabs.splice(index, 1);
   if (w.activeTabId === tab.id) {
-    w.activeTabId = null
-    const replacement = findTab(partners[0]) ?? neighbourInSpace(w.tabs, index, tab.spaceId)
-    if (replacement) activateTabInternal(replacement.id)
-    else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w)
+    w.activeTabId = null;
+    const replacement =
+      findTab(partners[0]) ?? neighbourInSpace(w.tabs, index, tab.spaceId);
+    if (replacement) activateTabInternal(replacement.id);
+    else if (isLiveWindow(w)) newBrowserTab(undefined, undefined, w);
   }
-  publishState(w)
+  publishState(w);
 }
 
 /**
@@ -1583,27 +2699,49 @@ function removeDestroyedTab(tab: BrowserTab): void {
  * already created for it (Electron's createWindow contract: return exactly that one); it navigates
  * itself, so the tab never loads anything from main.
  */
-function openPageMadeTab(opener: BrowserTab, url: string, activate: boolean, options: Electron.BrowserWindowConstructorOptions): Electron.WebContents {
-  const opened = (options as { webContents?: Electron.WebContents }).webContents
-  const id = createTab(undefined, selectedSearchEngine, activate, true, false, false, undefined, undefined, opener.isPrivate, false, opener.win, opener.spaceId)
-  const tab = id ? findTab(id) : undefined
+function openPageMadeTab(
+  opener: BrowserTab,
+  url: string,
+  activate: boolean,
+  options: Electron.BrowserWindowConstructorOptions,
+): Electron.WebContents {
+  const opened = (options as { webContents?: Electron.WebContents })
+    .webContents;
+  const id = createTab(
+    undefined,
+    selectedSearchEngine,
+    activate,
+    true,
+    false,
+    false,
+    undefined,
+    undefined,
+    opener.isPrivate,
+    false,
+    opener.win,
+    opener.spaceId,
+  );
+  const tab = id ? findTab(id) : undefined;
   if (!tab || !opened) {
     // Can't happen while the opener's window is live (checked before allowing); hand back a dead end.
-    if (tab) closeBrowserTab(tab.id, false)
-    return opened ?? new WebContentsView().webContents
+    if (tab) closeBrowserTab(tab.id, false);
+    return opened ?? new WebContentsView().webContents;
   }
-  tab.lastUrl = url
-  tab.pendingUrl = ''
-  tab.faviconUrl = null
-  tab.faviconSource = null
-  tab.closeIfOnlyDownload = true
-  const view = createTabView(tab, { webContents: opened, webPreferences: options.webPreferences })
-  if (view && isActiveTab(tab)) tab.inactiveSince = null
-  applyTabBounds(tab.win)
-  if (isActiveTab(tab)) view?.webContents.focus()
-  else scheduleTabSleep(tab)
-  publishState(tab.win)
-  return opened
+  tab.lastUrl = url;
+  tab.pendingUrl = "";
+  tab.faviconUrl = null;
+  tab.faviconSource = null;
+  tab.closeIfOnlyDownload = true;
+  const view = createTabView(tab, {
+    webContents: opened,
+    webPreferences: options.webPreferences,
+  });
+  if (view && isActiveTab(tab)) tab.inactiveSince = null;
+  applyTabBounds(tab.win);
+  if (isActiveTab(tab)) view?.webContents.focus();
+  else scheduleTabSleep(tab);
+  publishState(tab.win);
+  return opened;
 }
 
 /**
@@ -1612,11 +2750,11 @@ function openPageMadeTab(opener: BrowserTab, url: string, activate: boolean, opt
  * swipe preload, network inspector). Only main ever navigates it.
  */
 function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
-  if (!isLiveWindow(tab.win)) return null
-  const preload = pdfEditorPreloadPath()
+  if (!isLiveWindow(tab.win)) return null;
+  const preload = pdfEditorPreloadPath();
   if (!preload) {
-    console.warn('[pdf editor] preload missing; editor unavailable')
-    return null
+    console.warn("[pdf editor] preload missing; editor unavailable");
+    return null;
   }
   const view = new WebContentsView({
     webPreferences: {
@@ -1629,230 +2767,304 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
       allowRunningInsecureContent: false,
       nodeIntegrationInSubFrames: false,
       spellcheck: !tab.isPrivate,
-      backgroundThrottling: true
-    }
-  })
-  tab.view = view
+      backgroundThrottling: true,
+    },
+  });
+  tab.view = view;
   // Attached by applyTabBounds while on screen, like site views.
-  view.setBounds(initialPageViewBounds(tab.win.browserBounds))
+  view.setBounds(initialPageViewBounds(tab.win.browserBounds));
   // Not on screen until applyTabBounds attaches it (getVisible() == on screen for every page view).
-  view.setVisible(false)
-  const contents = view.webContents
-  bindContentsToWindow(contents, tab.win.window)
-  const isCurrentContents = (): boolean => tab.view?.webContents === contents
-  contents.on('context-menu', (event, params) => showTabContextMenu(contents, event, params))
-  contents.on('before-mouse-event', (_event, mouseEvent) => {
-    if (isActiveTab(tab) && isCurrentContents()) handleBrowserPageMouseEvent(mouseEvent, tab.win.window)
-  })
-  contents.on('before-input-event', (event, inputEvent) => {
-    if (inputEvent.type !== 'keyDown' || (!inputEvent.control && !inputEvent.meta)) return
+  view.setVisible(false);
+  const contents = view.webContents;
+  bindContentsToWindow(contents, tab.win.window);
+  const isCurrentContents = (): boolean => tab.view?.webContents === contents;
+  contents.on("context-menu", (event, params) =>
+    showTabContextMenu(contents, event, params),
+  );
+  contents.on("before-mouse-event", (_event, mouseEvent) => {
+    if (isActiveTab(tab) && isCurrentContents())
+      handleBrowserPageMouseEvent(mouseEvent, tab.win.window);
+  });
+  contents.on("before-input-event", (event, inputEvent) => {
+    if (
+      inputEvent.type !== "keyDown" ||
+      (!inputEvent.control && !inputEvent.meta)
+    )
+      return;
     // Cmd/Ctrl+S saves here (and only here), so the page and the app menu never both fire.
     // Cmd/Ctrl+Shift+S falls through to the screenshot shortcut.
-    if (inputEvent.key.toLowerCase() === 's' && !inputEvent.alt && !inputEvent.shift) {
-      event.preventDefault()
-      if (!inputEvent.isAutoRepeat) sendPdfEditorCommand(contents, 'save')
-      return
+    if (
+      inputEvent.key.toLowerCase() === "s" &&
+      !inputEvent.alt &&
+      !inputEvent.shift
+    ) {
+      event.preventDefault();
+      if (!inputEvent.isAutoRepeat) sendPdfEditorCommand(contents, "save");
+      return;
     }
-    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault()
-  })
+    if (handleBrowserShortcutInput(inputEvent, tab.id)) event.preventDefault();
+  });
   // Links inside the PDF open as ordinary tabs; the editor page itself never navigates.
   contents.setWindowOpenHandler((details) => {
-    const target = resolveNavigationTarget(details.url, selectedSearchEngine)
+    const target = resolveNavigationTarget(details.url, selectedSearchEngine);
     if (target && /^https?:\/\//i.test(target)) {
-      const id = createTab(target, selectedSearchEngine, details.disposition !== 'background-tab', false, false, false, undefined, undefined, tab.isPrivate, false, tab.win)
-      if (id) persistOpenTabs()
+      const id = createTab(
+        target,
+        selectedSearchEngine,
+        details.disposition !== "background-tab",
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        tab.isPrivate,
+        false,
+        tab.win,
+      );
+      if (id) persistOpenTabs();
     }
-    return { action: 'deny' }
-  })
-  contents.on('will-navigate', (event) => event.preventDefault())
-  contents.on('will-redirect', (event, url) => { if (!isPdfEditorUrl(url)) event.preventDefault() })
-  contents.on('did-start-loading', () => {
-    if (!isCurrentContents()) return
-    tab.error = null
-    publishState(tab.win)
-  })
-  contents.on('did-stop-loading', () => { if (isCurrentContents()) publishState(tab.win) })
-  contents.on('page-title-updated', () => { if (isCurrentContents()) publishState(tab.win) })
-  contents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
-    if (!isCurrentContents() || !isMainFrame || errorCode === -3) return
-    tab.error = `${errorDescription} (${errorCode})`
-    publishState(tab.win)
-  })
-  contents.on('render-process-gone', () => {
+    return { action: "deny" };
+  });
+  contents.on("will-navigate", (event) => event.preventDefault());
+  contents.on("will-redirect", (event, url) => {
+    if (!isPdfEditorUrl(url)) event.preventDefault();
+  });
+  contents.on("did-start-loading", () => {
+    if (!isCurrentContents()) return;
+    tab.error = null;
+    publishState(tab.win);
+  });
+  contents.on("did-stop-loading", () => {
+    if (isCurrentContents()) publishState(tab.win);
+  });
+  contents.on("page-title-updated", () => {
+    if (isCurrentContents()) publishState(tab.win);
+  });
+  contents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (!isCurrentContents() || !isMainFrame || errorCode === -3) return;
+      tab.error = `${errorDescription} (${errorCode})`;
+      publishState(tab.win);
+    },
+  );
+  contents.on("render-process-gone", () => {
     // A crashed editor has lost its edits either way; don't nag on close.
-    if (isCurrentContents() && tab.pdfEditor) tab.pdfEditor.dirty = false
-  })
-  contents.on('destroyed', () => {
-    if (!isCurrentContents()) return
-    removeDestroyedTab(tab)
-  })
-  return view
+    if (isCurrentContents() && tab.pdfEditor) tab.pdfEditor.dirty = false;
+  });
+  contents.on("destroyed", () => {
+    if (!isCurrentContents()) return;
+    removeDestroyedTab(tab);
+  });
+  return view;
 }
 
 /**
  * Swap a tab's view: the PDF editor in place of the page, or back. Navigation history is not kept,
  * except for a page-made PDF (`keepView`), whose page view is set aside on the editor state instead.
  */
-function replaceTabView(tab: BrowserTab, editor: PdfEditorTabState | null, url: string, keepView = false): void {
-  const kept = keepView ? tab.view : null
+function replaceTabView(
+  tab: BrowserTab,
+  editor: PdfEditorTabState | null,
+  url: string,
+  keepView = false,
+): void {
+  const kept = keepView ? tab.view : null;
   if (kept && editor) {
-    cancelSleepTimer(tab)
-    tab.restoreHistory = null
-    tab.view = null
-    if (!tab.win.window.isDestroyed()) setPageViewOnScreen(tab.win.window, kept, false)
-    editor.sourceView = kept
+    cancelSleepTimer(tab);
+    tab.restoreHistory = null;
+    tab.view = null;
+    if (!tab.win.window.isDestroyed())
+      setPageViewOnScreen(tab.win.window, kept, false);
+    editor.sourceView = kept;
   } else {
-    disposeTabView(tab)
+    disposeTabView(tab);
   }
-  tab.pdfEditor = editor
-  tab.showingPdf = false
-  tab.error = null
-  tab.lastUrl = editor ? editor.sourceUrl : url
-  tab.pendingUrl = url
+  tab.pdfEditor = editor;
+  tab.showingPdf = false;
+  tab.error = null;
+  tab.lastUrl = editor ? editor.sourceUrl : url;
+  tab.pendingUrl = url;
   if (isActiveTab(tab)) {
-    ensureTabLoaded(tab)
-    applyTabBounds(tab.win)
-    const contents = tab.view?.webContents
-    if (contents && !contents.isDestroyed()) contents.focus()
+    ensureTabLoaded(tab);
+    applyTabBounds(tab.win);
+    const contents = tab.view?.webContents;
+    if (contents && !contents.isDestroyed()) contents.focus();
   }
-  persistOpenTabs()
-  publishState(tab.win)
+  persistOpenTabs();
+  publishState(tab.win);
 }
 
 /** Edit PDF: open the PDF the tab shows in the bundled pdf.js editor. */
 export function openPdfEditor(id = getTab()?.id): boolean {
-  const tab = id ? getTab(id) : undefined
-  const contents = tab?.view?.webContents
-  if (!tab || tab.pdfEditor || tab.extensionPageOrigin || !contents || contents.isDestroyed() || !isShowingPdf(contents)) return false
-  const sourceUrl = contents.getURL()
+  const tab = id ? getTab(id) : undefined;
+  const contents = tab?.view?.webContents;
+  if (
+    !tab ||
+    tab.pdfEditor ||
+    tab.extensionPageOrigin ||
+    !contents ||
+    contents.isDestroyed() ||
+    !isShowingPdf(contents)
+  )
+    return false;
+  const sourceUrl = contents.getURL();
   if (isInMemoryPdfSource(sourceUrl)) {
-    replaceTabView(tab, { sourceUrl, name: inMemoryPdfName(contents.getTitle()), dirty: false }, PDF_EDITOR_URL, true)
-    return true
+    replaceTabView(
+      tab,
+      { sourceUrl, name: inMemoryPdfName(contents.getTitle()), dirty: false },
+      PDF_EDITOR_URL,
+      true,
+    );
+    return true;
   }
-  if (!isEditablePdfSource(sourceUrl)) return false
+  if (!isEditablePdfSource(sourceUrl)) return false;
   // Keep a web PDF's viewer behind the editor: the editor reads the bytes from it (signed-in and
   // one-shot links like Gmail attachments 401 on a refetch), and Back to viewer is instant.
-  const isWeb = /^https?:/i.test(sourceUrl)
-  replaceTabView(tab, { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false }, PDF_EDITOR_URL, isWeb)
-  return true
+  const isWeb = /^https?:/i.test(sourceUrl);
+  replaceTabView(
+    tab,
+    { sourceUrl, name: pdfNameFromUrl(sourceUrl), dirty: false },
+    PDF_EDITOR_URL,
+    isWeb,
+  );
+  return true;
 }
 
 /** Back to viewer for a page-made PDF: put its original view back, as it was. */
 function restoreStashedPdfSource(tab: BrowserTab): boolean {
-  const stash = tab.pdfEditor?.sourceView
-  if (!stash || !tab.pdfEditor || stash.webContents.isDestroyed()) return false
-  tab.pdfEditor.sourceView = null
-  disposeTabView(tab)
-  tab.pdfEditor = null
-  tab.view = stash
-  tab.showingPdf = isShowingPdf(stash.webContents)
-  tab.error = null
-  tab.lastUrl = stash.webContents.getURL()
-  tab.pendingUrl = ''
-  applyTabBounds(tab.win)
-  if (isActiveTab(tab) && !stash.webContents.isDestroyed()) stash.webContents.focus()
-  persistOpenTabs()
-  publishState(tab.win)
-  return true
+  const stash = tab.pdfEditor?.sourceView;
+  if (!stash || !tab.pdfEditor || stash.webContents.isDestroyed()) return false;
+  tab.pdfEditor.sourceView = null;
+  disposeTabView(tab);
+  tab.pdfEditor = null;
+  tab.view = stash;
+  tab.showingPdf = isShowingPdf(stash.webContents);
+  tab.error = null;
+  tab.lastUrl = stash.webContents.getURL();
+  tab.pendingUrl = "";
+  applyTabBounds(tab.win);
+  if (isActiveTab(tab) && !stash.webContents.isDestroyed())
+    stash.webContents.focus();
+  persistOpenTabs();
+  publishState(tab.win);
+  return true;
 }
 
 function allowLeavingPdfEditor(tab: BrowserTab, action: string): boolean {
-  if (!tab.pdfEditor?.dirty) return true
-  return confirmDiscardPdfEdits(tab.win.window, tab.pdfEditor.name, action)
+  if (!tab.pdfEditor?.dirty) return true;
+  return confirmDiscardPdfEdits(tab.win.window, tab.pdfEditor.name, action);
 }
 
 /** Back to viewer: reload the original PDF in the built-in viewer (asks first if there are unsaved edits). */
 export function closePdfEditor(id = getTab()?.id): boolean {
-  const tab = id ? getTab(id) : undefined
-  if (!tab?.pdfEditor) return false
-  if (!allowLeavingPdfEditor(tab, 'Discard Changes')) return false
-  if (restoreStashedPdfSource(tab)) return true
-  replaceTabView(tab, null, tab.pdfEditor.sourceUrl)
-  return true
+  const tab = id ? getTab(id) : undefined;
+  if (!tab?.pdfEditor) return false;
+  if (!allowLeavingPdfEditor(tab, "Discard Changes")) return false;
+  if (restoreStashedPdfSource(tab)) return true;
+  replaceTabView(tab, null, tab.pdfEditor.sourceUrl);
+  return true;
 }
 
 /** App menu / toolbar: Edit PDF on a PDF, Back to Viewer in the editor. */
 export function togglePdfEditor(): boolean {
-  const tab = getTab()
-  if (!tab) return false
-  return tab.pdfEditor ? closePdfEditor(tab.id) : openPdfEditor(tab.id)
+  const tab = getTab();
+  if (!tab) return false;
+  return tab.pdfEditor ? closePdfEditor(tab.id) : openPdfEditor(tab.id);
 }
 
 /** App menu Save while the editor is the active tab. */
 export function savePdfEditor(): boolean {
-  const contents = getTab()?.pdfEditor ? getTab()?.view?.webContents : null
-  if (!contents || contents.isDestroyed()) return false
-  sendPdfEditorCommand(contents, 'save')
-  return true
+  const contents = getTab()?.pdfEditor ? getTab()?.view?.webContents : null;
+  if (!contents || contents.isDestroyed()) return false;
+  sendPdfEditorCommand(contents, "save");
+  return true;
 }
 
 function hasUnsavedPdfEdits(w: BrowserWindowState): BrowserTab[] {
-  return w.tabs.filter((tab) => tab.pdfEditor?.dirty)
+  return w.tabs.filter((tab) => tab.pdfEditor?.dirty);
 }
 
 function pdfEditorTabFor(contents: WebContents): BrowserTab | undefined {
-  const tab = tabForContents(contents)
-  return tab?.pdfEditor ? tab : undefined
+  const tab = tabForContents(contents);
+  return tab?.pdfEditor ? tab : undefined;
 }
 
 function tabForPage(contents: WebContents): BrowserTab | undefined {
-  return tabForContents(contents)
+  return tabForContents(contents);
 }
 
 attachReaderHost({
   activePage: () => getActiveTabWebContents(),
   isPrivate: (page) => tabForPage(page)?.isPrivate ?? false,
   changed: (page) => {
-    const tab = tabForPage(page)
-    if (!tab) return
-    applyTabBounds(tab.win)
-    if (isActiveTab(tab)) publishState(tab.win)
+    const tab = tabForPage(page);
+    if (!tab) return;
+    applyTabBounds(tab.win);
+    if (isActiveTab(tab)) publishState(tab.win);
   },
   handleShortcut: (page, input) => {
-    const tab = tabForPage(page)
-    return tab ? handleBrowserShortcutInput(input, tab.id) : false
+    const tab = tabForPage(page);
+    return tab ? handleBrowserShortcutInput(input, tab.id) : false;
   },
   openInNewTab: (page, url, background) => {
-    const tab = tabForPage(page)
-    const isPrivate = tab?.isPrivate ?? false
-    if (background) openBackgroundTab(url, isPrivate, tab?.win)
-    else if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, isPrivate, false, tab?.win ?? currentWindowState())) persistOpenTabs()
+    const tab = tabForPage(page);
+    const isPrivate = tab?.isPrivate ?? false;
+    if (background) openBackgroundTab(url, isPrivate, tab?.win);
+    else if (
+      createTab(
+        url,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        isPrivate,
+        false,
+        tab?.win ?? currentWindowState(),
+      )
+    )
+      persistOpenTabs();
   },
   notify: (message) => {
-    const w = currentWindowState()
-    if (w) flashLinkStatus(message, w.browserBounds, 2400, w.window)
+    const w = currentWindowState();
+    if (w) flashLinkStatus(message, w.browserBounds, 2400, w.window);
   },
-  window: (page) => (page ? tabForPage(page)?.win.window : currentWindowState()?.window) ?? null
-})
+  window: (page) =>
+    (page ? tabForPage(page)?.win.window : currentWindowState()?.window) ??
+    null,
+});
 
 attachPdfEditor({
   documentFor: (contents) => {
-    const tab = pdfEditorTabFor(contents)
-    if (!tab?.pdfEditor) return null
+    const tab = pdfEditorTabFor(contents);
+    if (!tab?.pdfEditor) return null;
     return {
       sourceUrl: tab.pdfEditor.sourceUrl,
       name: tab.pdfEditor.name,
       isPrivate: tab.isPrivate,
       sourceSession: pageSessionForTab(tab),
-      sourceContents: tab.pdfEditor.sourceView?.webContents ?? null
-    }
+      sourceContents: tab.pdfEditor.sourceView?.webContents ?? null,
+    };
   },
   setDirty: (contents, dirty) => {
-    const tab = pdfEditorTabFor(contents)
-    if (!tab?.pdfEditor || tab.pdfEditor.dirty === dirty) return
-    tab.pdfEditor.dirty = dirty
-    publishState(tab.win)
+    const tab = pdfEditorTabFor(contents);
+    if (!tab?.pdfEditor || tab.pdfEditor.dirty === dirty) return;
+    tab.pdfEditor.dirty = dirty;
+    publishState(tab.win);
   },
   backToViewer: (contents) => {
-    const tab = pdfEditorTabFor(contents)
-    if (tab) closePdfEditor(tab.id)
+    const tab = pdfEditorTabFor(contents);
+    if (tab) closePdfEditor(tab.id);
   },
-  window: () => currentWindowState()?.window ?? null
-})
+  window: () => currentWindowState()?.window ?? null,
+});
 
 function glanceSourceTab(source: GlanceSource): BrowserTab | undefined {
-  const tab = findTab(source.tabId)
-  return tab && tab.view?.webContents === source.contents ? tab : undefined
+  const tab = findTab(source.tabId);
+  return tab && tab.view?.webContents === source.contents ? tab : undefined;
 }
 
 /**
@@ -1862,78 +3074,135 @@ function glanceSourceTab(source: GlanceSource): BrowserTab | undefined {
  */
 setGlanceHost({
   sourceFor: (contents) => {
-    const tab = tabForContents(contents)
-    if (!tab || tab.extensionPageOrigin || tab.pdfEditor || tab.win.mini || !isLiveWindow(tab.win) || contents.isDestroyed()) return null
-    return { tabId: tab.id, window: tab.win.window, contents, isPrivate: tab.isPrivate }
+    const tab = tabForContents(contents);
+    if (
+      !tab ||
+      tab.extensionPageOrigin ||
+      tab.pdfEditor ||
+      tab.win.mini ||
+      !isLiveWindow(tab.win) ||
+      contents.isDestroyed()
+    )
+      return null;
+    return {
+      tabId: tab.id,
+      window: tab.win.window,
+      contents,
+      isPrivate: tab.isPrivate,
+    };
   },
   pageWebPreferences: (source) => {
-    const tab = glanceSourceTab(source)
-    if (!tab) throw new Error('Glance source tab is gone')
-    return tabWebPreferences(tab, false)
+    const tab = glanceSourceTab(source);
+    if (!tab) throw new Error("Glance source tab is gone");
+    return tabWebPreferences(tab, false);
   },
   adoptAsTab: (source, pageView, url, activate) => {
-    const opener = findTab(source.tabId)
-    const w = opener?.win ?? windowStateFor(source.window)
-    if (!isLiveWindow(w) || pageView.webContents.isDestroyed()) return null
-    const at = opener ? w.tabs.indexOf(opener) : -1
-    const id = createTab(undefined, selectedSearchEngine, activate, true, false, false, undefined, at >= 0 ? at + 1 : undefined, source.isPrivate, false, w, opener?.spaceId)
-    const tab = id ? findTab(id) : undefined
-    if (!tab) return null
-    tab.lastUrl = url
-    tab.pendingUrl = ''
-    tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
-    tab.faviconSource = null
-    if (opener?.groupId) tab.groupId = opener.groupId
-    const view = createTabView(tab, { view: pageView })
+    const opener = findTab(source.tabId);
+    const w = opener?.win ?? windowStateFor(source.window);
+    if (!isLiveWindow(w) || pageView.webContents.isDestroyed()) return null;
+    const at = opener ? w.tabs.indexOf(opener) : -1;
+    const id = createTab(
+      undefined,
+      selectedSearchEngine,
+      activate,
+      true,
+      false,
+      false,
+      undefined,
+      at >= 0 ? at + 1 : undefined,
+      source.isPrivate,
+      false,
+      w,
+      opener?.spaceId,
+    );
+    const tab = id ? findTab(id) : undefined;
+    if (!tab) return null;
+    tab.lastUrl = url;
+    tab.pendingUrl = "";
+    tab.faviconUrl = /^https?:\/\//i.test(url)
+      ? getCachedBrowserSiteFavicon(url)
+      : null;
+    tab.faviconSource = null;
+    if (opener?.groupId) tab.groupId = opener.groupId;
+    const view = createTabView(tab, { view: pageView });
     if (!view) {
-      closeBrowserTab(tab.id, false)
-      return null
+      closeBrowserTab(tab.id, false);
+      return null;
     }
-    if (isActiveTab(tab)) tab.inactiveSince = null
-    applySavedZoom(tab, url)
-    applyTabBounds(tab.win)
-    if (isActiveTab(tab)) view.webContents.focus()
-    else scheduleTabSleep(tab)
-    refreshTabFavicon(tab)
-    persistOpenTabs()
-    publishTabs(tab.win)
-    publishState(tab.win)
-    return tab.id
+    if (isActiveTab(tab)) tab.inactiveSince = null;
+    applySavedZoom(tab, url);
+    applyTabBounds(tab.win);
+    if (isActiveTab(tab)) view.webContents.focus();
+    else scheduleTabSleep(tab);
+    refreshTabFavicon(tab);
+    persistOpenTabs();
+    publishTabs(tab.win);
+    publishState(tab.win);
+    return tab.id;
   },
   openInSplitView: (tabId) => openBrowserTabInSplitView(tabId),
   canSplit: (source) => canSplitTab(findTab(source.tabId)),
   openTab: (source, url, activate) => {
-    const w = findTab(source.tabId)?.win ?? windowStateFor(source.window)
-    if (!activate) return openBackgroundTab(url, source.isPrivate, w)
-    if (createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, source.isPrivate, false, w)) persistOpenTabs()
+    const w = findTab(source.tabId)?.win ?? windowStateFor(source.window);
+    if (!activate) return openBackgroundTab(url, source.isPrivate, w);
+    if (
+      createTab(
+        url,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        source.isPrivate,
+        false,
+        w,
+      )
+    )
+      persistOpenTabs();
   },
   searchEngine: () => selectedSearchEngine,
   focusSource: (source) => {
-    const tab = glanceSourceTab(source)
-    const contents = tab?.view?.webContents
-    if (!tab || !contents || contents.isDestroyed() || !isTabOnScreen(tab)) return
-    ;(readerViewFor(contents)?.webContents ?? contents).focus()
+    const tab = glanceSourceTab(source);
+    const contents = tab?.view?.webContents;
+    if (!tab || !contents || contents.isDestroyed() || !isTabOnScreen(tab))
+      return;
+    (readerViewFor(contents)?.webContents ?? contents).focus();
   },
-  handleShortcut: (source, input) => handleBrowserShortcutInput(input, findTab(source.tabId)?.id ?? null),
+  handleShortcut: (source, input) =>
+    handleBrowserShortcutInput(input, findTab(source.tabId)?.id ?? null),
   isActiveTab: (window, tabId) => {
-    const tab = findTab(tabId)
-    return Boolean(tab && tab.win.window === window && isTabOnScreen(tab))
+    const tab = findTab(tabId);
+    return Boolean(tab && tab.win.window === window && isTabOnScreen(tab));
   },
-  bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
-})
+  bindToWindow: (contents, window) => bindContentsToWindow(contents, window),
+});
 
 /** The tab's back history as an omnibox prerender copies it (null on the New Tab / Settings tab). */
 function tabHistoryForPrerender(tab: BrowserTab): PrerenderTabHistory | null {
-  const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed()) return null
-  return { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
+  const contents = tab.view?.webContents;
+  if (!contents || contents.isDestroyed()) return null;
+  return {
+    entries: contents.navigationHistory.getAllEntries(),
+    index: contents.navigationHistory.getActiveIndex(),
+  };
 }
 
 /** Only a site tab showing its page, or the New Tab / Settings tab, can take a swapped-in page. */
 function canTakePrerender(tab: BrowserTab): boolean {
-  if (tab.pdfEditor || tab.extensionPageOrigin || tab.win.mini || !isLiveWindow(tab.win)) return false
-  if (tab.view) return !tab.view.webContents.isDestroyed()
-  return tab.lastUrl === SURFFISH_QUICK_LINKS_URL || tab.lastUrl === SURFFISH_SETTINGS_URL
+  if (
+    tab.pdfEditor ||
+    tab.extensionPageOrigin ||
+    tab.win.mini ||
+    !isLiveWindow(tab.win)
+  )
+    return false;
+  if (tab.view) return !tab.view.webContents.isDestroyed();
+  return (
+    tab.lastUrl === SURFFISH_QUICK_LINKS_URL ||
+    tab.lastUrl === SURFFISH_SETTINGS_URL
+  );
 }
 
 /**
@@ -1942,53 +3211,59 @@ function canTakePrerender(tab: BrowserTab): boolean {
  * (URL, favicon, history visit, zoom, volume) is set here. Keeps the old page's mute.
  */
 function adoptPrerenderedView(tab: BrowserTab, view: WebContentsView): boolean {
-  const contents = view.webContents
-  if (contents.isDestroyed() || !isLiveWindow(tab.win) || !canTakePrerender(tab)) {
-    if (!contents.isDestroyed()) contents.close()
-    return false
+  const contents = view.webContents;
+  if (
+    contents.isDestroyed() ||
+    !isLiveWindow(tab.win) ||
+    !canTakePrerender(tab)
+  ) {
+    if (!contents.isDestroyed()) contents.close();
+    return false;
   }
-  const old = tab.view?.webContents
-  const muted = Boolean(old && !old.isDestroyed() && old.isAudioMuted())
-  const url = contents.getURL()
-  settingsTabTargets.delete(tab)
+  const old = tab.view?.webContents;
+  const muted = Boolean(old && !old.isDestroyed() && old.isAudioMuted());
+  const url = contents.getURL();
+  settingsTabTargets.delete(tab);
   // Drops the old page (its destroyed event no longer belongs to the tab); nothing paints until
   // the new view is attached below, in the same task.
-  disposeTabView(tab)
-  tab.pendingUrl = ''
-  tab.lastUrl = url
-  tab.error = null
-  tab.showingPdf = false
-  tab.closeIfOnlyDownload = false
-  tab.downloadStartedForCurrentLoad = false
-  tab.faviconUrl = /^https?:\/\//i.test(url) ? getCachedBrowserSiteFavicon(url) : null
-  tab.faviconSource = null
-  tab.faviconRevision += 1
+  disposeTabView(tab);
+  tab.pendingUrl = "";
+  tab.lastUrl = url;
+  tab.error = null;
+  tab.showingPdf = false;
+  tab.closeIfOnlyDownload = false;
+  tab.downloadStartedForCurrentLoad = false;
+  tab.faviconUrl = /^https?:\/\//i.test(url)
+    ? getCachedBrowserSiteFavicon(url)
+    : null;
+  tab.faviconSource = null;
+  tab.faviconRevision += 1;
   if (!createTabView(tab, { view })) {
-    if (!contents.isDestroyed()) contents.close()
-    return false
+    if (!contents.isDestroyed()) contents.close();
+    return false;
   }
-  if (muted) contents.setAudioMuted(true)
-  tab.sleep = null
-  if (isActiveTab(tab)) tab.inactiveSince = null
-  applySavedZoom(tab, url)
-  applyTabVolumeForUrl(tab, url)
-  applyTabBounds(tab.win)
-  if (isActiveTab(tab)) contents.focus()
+  if (muted) contents.setAudioMuted(true);
+  tab.sleep = null;
+  if (isActiveTab(tab)) tab.inactiveSince = null;
+  applySavedZoom(tab, url);
+  applyTabVolumeForUrl(tab, url);
+  applyTabBounds(tab.win);
+  if (isActiveTab(tab)) contents.focus();
   if (!tab.isPrivate && /^https?:\/\//i.test(url)) {
-    recordBrowsingVisit(url, pageTitle(tab))
-    notifyHistoryChanged()
+    recordBrowsingVisit(url, pageTitle(tab));
+    notifyHistoryChanged();
   }
-  refreshTabFavicon(tab)
-  persistOpenTabs()
-  publishTabs(tab.win)
-  publishState(tab.win)
-  return true
+  refreshTabFavicon(tab);
+  persistOpenTabs();
+  publishTabs(tab.win);
+  publishState(tab.win);
+  return true;
 }
 
 setOmniboxPrerenderHost({
   activeTarget: () => {
-    const tab = getTab()
-    if (!tab || !isLiveWindow(tab.win)) return null
+    const tab = getTab();
+    if (!tab || !isLiveWindow(tab.win)) return null;
     return {
       tabId: tab.id,
       window: tab.win.window,
@@ -1997,12 +3272,15 @@ setOmniboxPrerenderHost({
       eligible: canTakePrerender(tab),
       webPreferences: tabWebPreferences(tab, false),
       bounds: pageBoundsOf(tab),
-      contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
-      history: tabHistoryForPrerender(tab)
-    }
+      contents:
+        tab.view && !tab.view.webContents.isDestroyed()
+          ? tab.view.webContents
+          : null,
+      history: tabHistoryForPrerender(tab),
+    };
   },
-  bindToWindow: (contents, window) => bindContentsToWindow(contents, window)
-})
+  bindToWindow: (contents, window) => bindContentsToWindow(contents, window),
+});
 
 // ---------------------------------------------------------------------------
 // Mini windows (mini-window-entry.ts / mini-window.ts): each holds one tab's live page in a small
@@ -2011,128 +3289,173 @@ setOmniboxPrerenderHost({
 // and, being its window's active tab, counts as on screen: never slept, discarded or archived.
 
 /** Set while the mini window opens its own page (createTab otherwise sends mini tabs to a browser window). */
-let creatingMiniTab = false
+let creatingMiniTab = false;
 /** The browser window each mini window tab came from (where Return to Browser puts it back). */
-const miniTabHomes = new WeakMap<BrowserTab, BrowserWindowState>()
+const miniTabHomes = new WeakMap<BrowserTab, BrowserWindowState>();
 /** Where each mini window tab sat in its home window's sidebar (its neighbours), so it goes back there. */
-const miniTabOrigins = new WeakMap<BrowserTab, MiniTabOrigin>()
+const miniTabOrigins = new WeakMap<BrowserTab, MiniTabOrigin>();
 
 /** The sidebar row under a screen point in `w` (its shell renderers), and which half of it. */
-async function sidebarRowAt(w: BrowserWindowState, point: { x: number; y: number }): Promise<SidebarRowHit | null> {
-  if (w.window.isDestroyed()) return null
-  const content = w.window.getContentBounds()
+async function sidebarRowAt(
+  w: BrowserWindowState,
+  point: { x: number; y: number },
+): Promise<SidebarRowHit | null> {
+  if (w.window.isDestroyed()) return null;
+  const content = w.window.getContentBounds();
   for (const contents of getWindowRenderers(w.window)) {
     // Where its view sits now (an overlay sidebar is its own view; its shell metrics can lag a slide).
-    const view = w.window.contentView.children.find((child) => child instanceof WebContentsView && child.webContents === contents)
-    if (!view || !view.getVisible() || contents.isDestroyed()) continue
-    const offset = view.getBounds()
-    const x = point.x - content.x - offset.x
-    const y = point.y - content.y - offset.y
+    const view = w.window.contentView.children.find(
+      (child) =>
+        child instanceof WebContentsView && child.webContents === contents,
+    );
+    if (!view || !view.getVisible() || contents.isDestroyed()) continue;
+    const offset = view.getBounds();
+    const x = point.x - content.x - offset.x;
+    const y = point.y - content.y - offset.y;
     try {
-      const hit = await contents.executeJavaScript(`(() => { const el = document.elementFromPoint(${x}, ${y}); const row = el && el.closest('[data-browser-tab-id]'); if (!row) return null; const r = row.getBoundingClientRect(); return { id: String(row.dataset.browserTabId), after: ${y} > r.top + r.height / 2 } })()`, false) as unknown
-      if (hit && typeof hit === 'object' && typeof (hit as SidebarRowHit).id === 'string') return { id: (hit as SidebarRowHit).id, after: (hit as SidebarRowHit).after === true }
+      const hit = (await contents.executeJavaScript(
+        `(() => { const el = document.elementFromPoint(${x}, ${y}); const row = el && el.closest('[data-browser-tab-id]'); if (!row) return null; const r = row.getBoundingClientRect(); return { id: String(row.dataset.browserTabId), after: ${y} > r.top + r.height / 2 } })()`,
+        false,
+      )) as unknown;
+      if (
+        hit &&
+        typeof hit === "object" &&
+        typeof (hit as SidebarRowHit).id === "string"
+      )
+        return {
+          id: (hit as SidebarRowHit).id,
+          after: (hit as SidebarRowHit).after === true,
+        };
     } catch {
       // Renderer busy or gone: no row.
     }
   }
-  return null
+  return null;
 }
 
 /** Show or clear a drop line in `window`'s sidebar: before `beforeId` (null: at the end), or none (`active` false). */
-function sendSidebarDropHint(window: BaseWindow | null, hint: { beforeId: string | null } | null): void {
+function sendSidebarDropHint(
+  window: BaseWindow | null,
+  hint: { beforeId: string | null } | null,
+): void {
   for (const w of windowStates) {
-    if (w.mini || !isLiveWindow(w)) continue
-    try { sendToWindowRenderers(w.window, 'browser:tabs:external-drop', w.window === window ? hint : null) } catch { /* closing */ }
+    if (w.mini || !isLiveWindow(w)) continue;
+    try {
+      sendToWindowRenderers(
+        w.window,
+        "browser:tabs:external-drop",
+        w.window === window ? hint : null,
+      );
+    } catch {
+      /* closing */
+    }
   }
 }
 
 /** A mini window's tab (`tabId`, else its active one). */
-function miniTabOf(mini: BrowserWindowState | undefined, tabId?: string): BrowserTab | undefined {
-  if (!mini) return undefined
-  return tabId ? mini.tabs.find((tab) => tab.id === tabId) : activeTabOf(mini)
+function miniTabOf(
+  mini: BrowserWindowState | undefined,
+  tabId?: string,
+): BrowserTab | undefined {
+  if (!mini) return undefined;
+  return tabId ? mini.tabs.find((tab) => tab.id === tabId) : activeTabOf(mini);
 }
 
 /** Where tabs opened from the mini window go: its home window, the last focused one, any normal one, or a new one. */
-function browserTargetForMini(mini: BrowserWindowState | undefined): BrowserWindowState | undefined {
-  const home = mini?.miniHome
-  const focused = windowStateFor(lastFocusedBrowserWindow())
-  const candidate = (isLiveWindow(focused) && !focused.mini ? focused : undefined)
-    ?? (home && isLiveWindow(home) ? home : undefined)
-    ?? windowStates.find((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
-    ?? windowStates.find((w) => !w.mini && isLiveWindow(w))
-  if (candidate) return candidate
-  const created = browserWindowFactory?.({})
-  return created ? windowStateFor(created) : undefined
+function browserTargetForMini(
+  mini: BrowserWindowState | undefined,
+): BrowserWindowState | undefined {
+  const home = mini?.miniHome;
+  const focused = windowStateFor(lastFocusedBrowserWindow());
+  const candidate =
+    (isLiveWindow(focused) && !focused.mini ? focused : undefined) ??
+    (home && isLiveWindow(home) ? home : undefined) ??
+    windowStates.find((w) => !w.mini && !w.isPrivate && isLiveWindow(w)) ??
+    windowStates.find((w) => !w.mini && isLiveWindow(w));
+  if (candidate) return candidate;
+  const created = browserWindowFactory?.({});
+  return created ? windowStateFor(created) : undefined;
 }
 
 function miniStateFor(window: BaseWindow): BrowserWindowState | undefined {
-  const w = windowStateFor(window)
-  return w?.mini ? w : undefined
+  const w = windowStateFor(window);
+  return w?.mini ? w : undefined;
 }
 
 /** Page commands pressed in (or sent to) the mini window's tab. False: not a page command, run it as usual. */
 function runMiniTabCommand(tab: BrowserTab, command: TabCommand): boolean {
-  const contents = tab.view?.webContents
-  const live = contents && !contents.isDestroyed() ? contents : null
+  const contents = tab.view?.webContents;
+  const live = contents && !contents.isDestroyed() ? contents : null;
   switch (command) {
-    case 'miniWindow':
+    case "miniWindow":
       // This tab goes back; any other mini windows (and the rest of its collection) stay out.
-      returnMiniWindowToBrowser({ tabId: tab.id })
-      return true
-    case 'close':
-      closeBrowserTab(tab.id)
-      return true
-    case 'reload':
-    case 'hardReload':
-      reloadBrowserTab(tab.id, command === 'hardReload')
-      return true
-    case 'back':
-      if (live?.navigationHistory.canGoBack()) live.navigationHistory.goBack()
-      return true
-    case 'forward':
-      if (live?.navigationHistory.canGoForward()) live.navigationHistory.goForward()
-      return true
-    case 'zoomIn':
-    case 'zoomOut':
-    case 'zoomReset':
-      zoomTab(tab, command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset')
-      return true
-    case 'copyLink':
-    case 'copyCleanLink':
-    case 'bookmark':
-    case 'readingList':
-      return false
+      returnMiniWindowToBrowser({ tabId: tab.id });
+      return true;
+    case "close":
+      closeBrowserTab(tab.id);
+      return true;
+    case "reload":
+    case "hardReload":
+      reloadBrowserTab(tab.id, command === "hardReload");
+      return true;
+    case "back":
+      if (live?.navigationHistory.canGoBack()) live.navigationHistory.goBack();
+      return true;
+    case "forward":
+      if (live?.navigationHistory.canGoForward())
+        live.navigationHistory.goForward();
+      return true;
+    case "zoomIn":
+    case "zoomOut":
+    case "zoomReset":
+      zoomTab(
+        tab,
+        command === "zoomIn" ? "in" : command === "zoomOut" ? "out" : "reset",
+      );
+      return true;
+    case "copyLink":
+    case "copyCleanLink":
+    case "bookmark":
+    case "readingList":
+      return false;
     default:
       // Window-level commands (find, split, history, tab cycling…) belong to the browser window.
-      return true
+      return true;
   }
 }
 
 /** The sidebar row's speaker state (shared/tab-audio.ts): audible with a short hold, and heard since load. */
-function tabAudioSummary(tab: BrowserTab): { audible: boolean; audioHeard?: true } {
-  const { audible, heard } = tabAudioState(tab.view?.webContents)
-  return { audible, ...(heard ? { audioHeard: true as const } : {}) }
+function tabAudioSummary(tab: BrowserTab): {
+  audible: boolean;
+  audioHeard?: true;
+} {
+  const { audible, heard } = tabAudioState(tab.view?.webContents);
+  return { audible, ...(heard ? { audioHeard: true as const } : {}) };
 }
 
 /** The mini header's / strip chip's speaker: the same states as the sidebar row (shared/tab-audio.ts). */
 function miniTabAudio(tab: BrowserTab): MiniWindowTabAudio {
-  const contents = tab.view?.webContents
-  const live = contents && !contents.isDestroyed() ? contents : null
-  const muted = live ? live.isAudioMuted() : false
-  const { audible, heard } = tabAudioState(live)
-  return { audio: tabAudioIndicator({ audible, muted, heard, volume: tab.volume }), muted, volume: tab.volume }
+  const contents = tab.view?.webContents;
+  const live = contents && !contents.isDestroyed() ? contents : null;
+  const muted = live ? live.isAudioMuted() : false;
+  const { audible, heard } = tabAudioState(live);
+  return {
+    audio: tabAudioIndicator({ audible, muted, heard, volume: tab.volume }),
+    muted,
+    volume: tab.volume,
+  };
 }
 
 /** Make `win` the mini window's BrowserWindowState (no tabs yet). */
 function attachMiniWindowState(win: BaseWindow): BrowserWindowState {
-  const existing = windowStateFor(win)
-  if (existing) return existing
+  const existing = windowStateFor(win);
+  if (existing) return existing;
   const w: BrowserWindowState = {
     window: win,
     tabs: [],
     activeTabId: null,
     browserBounds: { x: 0, y: 0, width: 0, height: 0 },
-    findState: { tabId: null, open: false, text: '', result: null },
+    findState: { tabId: null, open: false, text: "", result: null },
     confirmingWindowClose: false,
     isPrivate: false,
     splits: [],
@@ -2141,235 +3464,380 @@ function attachMiniWindowState(win: BaseWindow): BrowserWindowState {
     spaceActiveTabs: new Map(),
     groups: [],
     mini: true,
-    miniHome: null
-  }
-  windowStates.push(w)
-  win.on('closed', () => {
-    const index = windowStates.indexOf(w)
-    if (index < 0) return
-    windowStates.splice(index, 1)
-    const closingTabs = [...w.tabs]
-    w.tabs.length = 0
-    w.activeTabId = null
-    w.miniHome = null
+    miniHome: null,
+  };
+  windowStates.push(w);
+  win.on("closed", () => {
+    const index = windowStates.indexOf(w);
+    if (index < 0) return;
+    windowStates.splice(index, 1);
+    const closingTabs = [...w.tabs];
+    w.tabs.length = 0;
+    w.activeTabId = null;
+    w.miniHome = null;
     for (const tab of closingTabs) {
-      cancelSleepTimer(tab)
-      disposeStashedPdfSource(tab)
-      forgetTabPicture(tab.id)
-      const view = tab.view
-      tab.view = null
+      cancelSleepTimer(tab);
+      disposeStashedPdfSource(tab);
+      forgetTabPicture(tab.id);
+      const view = tab.view;
+      tab.view = null;
       if (view) {
-        detachNetworkInspector(view.webContents)
-        if (!view.webContents.isDestroyed()) view.webContents.close()
+        detachNetworkInspector(view.webContents);
+        if (!view.webContents.isDestroyed()) view.webContents.close();
       }
     }
-    if (closingTabs.some((tab) => tab.isPrivate) && !allTabs().some((tab) => tab.isPrivate)) endPrivateSession()
-    persistOpenTabs()
-  })
-  return w
+    if (
+      closingTabs.some((tab) => tab.isPrivate) &&
+      !allTabs().some((tab) => tab.isPrivate)
+    )
+      endPrivateSession();
+    persistOpenTabs();
+  });
+  return w;
 }
 
 /** Can this tab go into the mini window? Loaded or sleeping web pages; not New Tab, the PDF editor or extension pages. */
 function canPopOutTab(tab: BrowserTab | undefined): tab is BrowserTab {
-  return Boolean(tab && !tab.win.mini && !tab.pdfEditor && !tab.extensionPageOrigin && canPopOutUrl(currentUrl(tab)))
+  return Boolean(
+    tab &&
+    !tab.win.mini &&
+    !tab.pdfEditor &&
+    !tab.extensionPageOrigin &&
+    canPopOutUrl(currentUrl(tab)),
+  );
 }
 
 /** Is `id` (default: the current window's active tab) a tab that can pop out to the mini window? */
 export function canPopOutBrowserTab(id?: string | null): boolean {
-  return canPopOutTab(getTab(id ?? undefined))
+  return canPopOutTab(getTab(id ?? undefined));
 }
 
 /** The current browser window's active tab (palette commands that take "this tab"). */
 export function getBrowserActiveTabId(): string | null {
-  return getTab()?.id ?? null
+  return getTab()?.id ?? null;
 }
 
 /** Any mini window open (with its tab)? */
 export function hasMiniWindows(): boolean {
-  return windowStates.some((candidate) => candidate.mini && isLiveWindow(candidate) && candidate.activeTabId !== null)
+  return windowStates.some(
+    (candidate) =>
+      candidate.mini &&
+      isLiveWindow(candidate) &&
+      candidate.activeTabId !== null,
+  );
 }
 
 setMiniWindowHost({
-  attachWindow: (win) => { attachMiniWindowState(win) },
+  attachWindow: (win) => {
+    attachMiniWindowState(win);
+  },
   activeTabId: () => getTab()?.id ?? null,
   canPopOut: (tabId) => canPopOutTab(findTab(tabId)),
   adoptTab: (tabId, win, beforeId = null) => {
-    const tab = findTab(tabId)
-    const mini = miniStateFor(win)
-    if (!tab || !isLiveWindow(mini) || tab.win === mini) return false
-    const fromMini = tab.win.mini
+    const tab = findTab(tabId);
+    const mini = miniStateFor(win);
+    if (!tab || !isLiveWindow(mini) || tab.win === mini) return false;
+    const fromMini = tab.win.mini;
     // From a browser window: web pages only. From another mini window (merge / drag between collections): any of its tabs.
-    if (!fromMini && !canPopOutTab(tab)) return false
+    if (!fromMini && !canPopOutTab(tab)) return false;
     // A collection is all private or all normal (a private page never shares a window with normal ones).
-    if (mini.tabs.length > 0 && mini.isPrivate !== tab.isPrivate) return false
-    const from = tab.win
+    if (mini.tabs.length > 0 && mini.isPrivate !== tab.isPrivate) return false;
+    const from = tab.win;
     if (mini.tabs.length === 0) {
-      mini.isPrivate = tab.isPrivate
-      mini.miniHome = fromMini ? miniTabHomes.get(tab) ?? from.miniHome : from
+      mini.isPrivate = tab.isPrivate;
+      mini.miniHome = fromMini
+        ? (miniTabHomes.get(tab) ?? from.miniHome)
+        : from;
     }
     if (!fromMini) {
-      miniTabHomes.set(tab, from)
-      const origin = miniTabOrigin(from.tabs.map((candidate) => candidate.id), tab.id)
-      if (origin) miniTabOrigins.set(tab, origin)
+      miniTabHomes.set(tab, from);
+      const origin = miniTabOrigin(
+        from.tabs.map((candidate) => candidate.id),
+        tab.id,
+      );
+      if (origin) miniTabOrigins.set(tab, origin);
     }
-    mini.activeSpaceId = tab.spaceId
+    mini.activeSpaceId = tab.spaceId;
     // The window keeps a tab: popping out its last one leaves a New Tab behind (in the same Space).
-    if (!fromMini && from.tabs.length === 1) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
-    detachTabFromWindow(tab)
+    if (!fromMini && from.tabs.length === 1)
+      createTab(
+        undefined,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        from,
+        tab.spaceId,
+      );
+    detachTabFromWindow(tab);
     // Its group stays behind; the mini window has none.
-    tab.groupId = null
-    adoptTabIntoWindow(tab, mini, beforeId && mini.tabs.some((candidate) => candidate.id === beforeId) ? beforeId : null)
-    activateTabInternal(tab.id)
-    persistOpenTabs()
-    publishState(from)
-    publishState(mini)
-    return true
+    tab.groupId = null;
+    adoptTabIntoWindow(
+      tab,
+      mini,
+      beforeId && mini.tabs.some((candidate) => candidate.id === beforeId)
+        ? beforeId
+        : null,
+    );
+    activateTabInternal(tab.id);
+    persistOpenTabs();
+    publishState(from);
+    publishState(mini);
+    return true;
   },
   tabs: (win) => {
-    const mini = miniStateFor(win)
-    if (!mini) return []
-    return mini.tabs.map((tab) => ({ tabId: tab.id, title: pageTitle(tab), url: currentUrl(tab), faviconUrl: tab.faviconUrl, active: tab.id === mini.activeTabId, playing: tabAudioState(tab.view?.webContents).audible, ...miniTabAudio(tab) }))
+    const mini = miniStateFor(win);
+    if (!mini) return [];
+    return mini.tabs.map((tab) => ({
+      tabId: tab.id,
+      title: pageTitle(tab),
+      url: currentUrl(tab),
+      faviconUrl: tab.faviconUrl,
+      active: tab.id === mini.activeTabId,
+      playing: tabAudioState(tab.view?.webContents).audible,
+      ...miniTabAudio(tab),
+    }));
   },
   activateTab: (win, tabId) => {
-    const tab = miniTabOf(miniStateFor(win), tabId)
-    if (!tab) return false
-    if (tab.win.activeTabId !== tab.id) activateTabInternal(tab.id)
-    publishState(tab.win)
-    return true
+    const tab = miniTabOf(miniStateFor(win), tabId);
+    if (!tab) return false;
+    if (tab.win.activeTabId !== tab.id) activateTabInternal(tab.id);
+    publishState(tab.win);
+    return true;
   },
   openUrl: (url, win) => {
-    const mini = miniStateFor(win)
-    if (!isLiveWindow(mini) || mini.tabs.length > 0) return null
-    mini.isPrivate = false
-    mini.miniHome = windowStateFor(lastFocusedBrowserWindow()) ?? null
-    mini.activeSpaceId = DEFAULT_SPACE_ID
-    creatingMiniTab = true
+    const mini = miniStateFor(win);
+    if (!isLiveWindow(mini) || mini.tabs.length > 0) return null;
+    mini.isPrivate = false;
+    mini.miniHome = windowStateFor(lastFocusedBrowserWindow()) ?? null;
+    mini.activeSpaceId = DEFAULT_SPACE_ID;
+    creatingMiniTab = true;
     try {
       // The normal profile session (Default Space): signed-in sites stay signed in.
-      const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, mini, DEFAULT_SPACE_ID)
-      if (id) persistOpenTabs()
-      return id
+      const id = createTab(
+        url,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        mini,
+        DEFAULT_SPACE_ID,
+      );
+      if (id) persistOpenTabs();
+      return id;
     } finally {
-      creatingMiniTab = false
+      creatingMiniTab = false;
     }
   },
   newTab: (win, like = null) => {
-    const mini = miniStateFor(win)
-    if (!isLiveWindow(mini)) return null
+    const mini = miniStateFor(win);
+    if (!isLiveWindow(mini)) return null;
     if (mini.tabs.length === 0) {
       // A window of its own (grouping 'stack' / 'separate'): private, home and Space like the one + was pressed in.
-      const source = like ? miniStateFor(like) : undefined
-      mini.isPrivate = source?.isPrivate ?? false
-      mini.miniHome = source?.miniHome ?? windowStateFor(lastFocusedBrowserWindow()) ?? null
-      mini.activeSpaceId = source?.activeSpaceId ?? DEFAULT_SPACE_ID
+      const source = like ? miniStateFor(like) : undefined;
+      mini.isPrivate = source?.isPrivate ?? false;
+      mini.miniHome =
+        source?.miniHome ?? windowStateFor(lastFocusedBrowserWindow()) ?? null;
+      mini.activeSpaceId = source?.activeSpaceId ?? DEFAULT_SPACE_ID;
     }
-    creatingMiniTab = true
+    creatingMiniTab = true;
     try {
       // The New Tab is the browser's own (no page view): returned to a browser window it is a New Tab there.
-      const id = createTab(SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, mini.isPrivate, false, mini, mini.activeSpaceId)
-      const tab = findTab(id ?? undefined)
-      if (tab && mini.miniHome) miniTabHomes.set(tab, mini.miniHome)
+      const id = createTab(
+        SURFFISH_QUICK_LINKS_URL,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        mini.isPrivate,
+        false,
+        mini,
+        mini.activeSpaceId,
+      );
+      const tab = findTab(id ?? undefined);
+      if (tab && mini.miniHome) miniTabHomes.set(tab, mini.miniHome);
       if (id) {
-        persistOpenTabs()
-        publishState(mini)
+        persistOpenTabs();
+        publishState(mini);
       }
-      return id
+      return id;
     } finally {
-      creatingMiniTab = false
+      creatingMiniTab = false;
     }
   },
   navigate: async (win, input) => {
-    const tab = activeTabOf(miniStateFor(win))
-    if (!tab) return { ok: false }
-    const result = await navigateTabTo(tab, input, selectedSearchEngine)
-    return { ok: result.ok }
+    const tab = activeTabOf(miniStateFor(win));
+    if (!tab) return { ok: false };
+    const result = await navigateTabTo(tab, input, selectedSearchEngine);
+    return { ok: result.ok };
   },
   omniboxSources: (win) => {
-    const mini = miniStateFor(win)
-    const home = mini?.miniHome && isLiveWindow(mini.miniHome) ? mini.miniHome : windowStateFor(lastFocusedBrowserWindow())
+    const mini = miniStateFor(win);
+    const home =
+      mini?.miniHome && isLiveWindow(mini.miniHome)
+        ? mini.miniHome
+        : windowStateFor(lastFocusedBrowserWindow());
     // Like the toolbar of the window it belongs to: that window's tabs (a normal mini window never lists private ones).
-    const tabs = (home && !home.mini ? home.tabs : []).filter((tab) => mini?.isPrivate || !tab.isPrivate).map((tab) => ({ title: pageTitle(tab), url: currentUrl(tab) }))
-    const bookmarks = getBookmarksSnapshot().nodes.flatMap((node) => node.type === 'bookmark' && node.url ? [{ title: node.title, url: node.url }] : [])
-    return { tabs, history: getBrowsingHistory(), bookmarks, engines: getCustomSearchEngines() }
+    const tabs = (home && !home.mini ? home.tabs : [])
+      .filter((tab) => mini?.isPrivate || !tab.isPrivate)
+      .map((tab) => ({ title: pageTitle(tab), url: currentUrl(tab) }));
+    const bookmarks = getBookmarksSnapshot().nodes.flatMap((node) =>
+      node.type === "bookmark" && node.url
+        ? [{ title: node.title, url: node.url }]
+        : [],
+    );
+    return {
+      tabs,
+      history: getBrowsingHistory(),
+      bookmarks,
+      engines: getCustomSearchEngines(),
+    };
   },
   newTabSites: () => {
     // The New Tab page's lists (Browser.tsx): favourites in order, then frequently visited.
-    const favourites = getFavouriteSites()
-    const sites: QuickLinkSite[] = [...favourites.map(toQuickLinkSite).filter((site): site is QuickLinkSite => site !== null), ...buildFrequentSites(getBrowsingHistory(), favourites)]
-    const icons = getBrowserSiteFaviconCache(sites.map((site) => site.origin))
-    return sites.map((site) => ({ ...site, faviconUrl: icons[site.origin] ?? site.faviconUrl }))
+    const favourites = getFavouriteSites();
+    const sites: QuickLinkSite[] = [
+      ...favourites
+        .map(toQuickLinkSite)
+        .filter((site): site is QuickLinkSite => site !== null),
+      ...buildFrequentSites(getBrowsingHistory(), favourites),
+    ];
+    const icons = getBrowserSiteFaviconCache(sites.map((site) => site.origin));
+    return sites.map((site) => ({
+      ...site,
+      faviconUrl: icons[site.origin] ?? site.faviconUrl,
+    }));
   },
   newTabPreferences: () => getBrowserNewTabPreferences(),
   newTabBackground: () => newTabBackgroundOnOpen(),
   returnTab: (win, tabId) => {
-    const mini = miniStateFor(win)
-    const tab = miniTabOf(mini, tabId)
-    if (!mini || !tab) return false
-    const home = miniTabHomes.get(tab) ?? mini.miniHome
-    const target = (home && isLiveWindow(home) && canMoveTabTo(tab, home) ? home : undefined)
-      ?? (() => { const focused = windowStateFor(lastFocusedBrowserWindow()); return isLiveWindow(focused) && !focused.mini && canMoveTabTo(tab, focused) ? focused : undefined })()
-      ?? windowStates.find((w) => !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w))
+    const mini = miniStateFor(win);
+    const tab = miniTabOf(mini, tabId);
+    if (!mini || !tab) return false;
+    const home = miniTabHomes.get(tab) ?? mini.miniHome;
+    const target =
+      (home && isLiveWindow(home) && canMoveTabTo(tab, home)
+        ? home
+        : undefined) ??
+      (() => {
+        const focused = windowStateFor(lastFocusedBrowserWindow());
+        return isLiveWindow(focused) &&
+          !focused.mini &&
+          canMoveTabTo(tab, focused)
+          ? focused
+          : undefined;
+      })() ??
+      windowStates.find(
+        (w) => !w.mini && isLiveWindow(w) && canMoveTabTo(tab, w),
+      );
     if (target) {
       // Back where it popped out of (home only); moving its only tab out closes the mini window (detachTabFromWindow).
-      const beforeId = target === home ? miniReturnBeforeId(miniTabOrigins.get(tab), target.tabs.map((candidate) => candidate.id)) : null
-      return moveBrowserTabToWindow(tab.id, target.window, beforeId)
+      const beforeId =
+        target === home
+          ? miniReturnBeforeId(
+              miniTabOrigins.get(tab),
+              target.tabs.map((candidate) => candidate.id),
+            )
+          : null;
+      return moveBrowserTabToWindow(tab.id, target.window, beforeId);
     }
     // No browser window left (macOS keeps running without one): a new window takes the tab over.
-    const created = browserWindowFactory?.({ private: home?.isPrivate === true && tab.isPrivate, adoptTabId: tab.id })
-    return Boolean(created && findTab(tab.id)?.win.window === created)
+    const created = browserWindowFactory?.({
+      private: home?.isPrivate === true && tab.isPrivate,
+      adoptTabId: tab.id,
+    });
+    return Boolean(created && findTab(tab.id)?.win.window === created);
   },
   returnTabAt: async (win, tabId, window, point) => {
-    const tab = miniTabOf(miniStateFor(win), tabId)
-    const to = windowStateFor(window)
-    if (!tab || !isLiveWindow(to) || to.mini || !canMoveTabTo(tab, to)) return false
-    const ids = to.tabs.map((candidate) => candidate.id)
-    const hit = await sidebarRowAt(to, point)
+    const tab = miniTabOf(miniStateFor(win), tabId);
+    const to = windowStateFor(window);
+    if (!tab || !isLiveWindow(to) || to.mini || !canMoveTabTo(tab, to))
+      return false;
+    const ids = to.tabs.map((candidate) => candidate.id);
+    const hit = await sidebarRowAt(to, point);
     // Off the sidebar (on the page): back where it came from in its home window, else the end.
-    const beforeId = hit ? sidebarDropBeforeId(hit, ids, tab.id) : to === miniTabHomes.get(tab) ? miniReturnBeforeId(miniTabOrigins.get(tab), ids) : null
-    if (findTab(tab.id) !== tab || !tab.win.mini) return false
-    return moveBrowserTabToWindow(tab.id, to.window, beforeId)
+    const beforeId = hit
+      ? sidebarDropBeforeId(hit, ids, tab.id)
+      : to === miniTabHomes.get(tab)
+        ? miniReturnBeforeId(miniTabOrigins.get(tab), ids)
+        : null;
+    if (findTab(tab.id) !== tab || !tab.win.mini) return false;
+    return moveBrowserTabToWindow(tab.id, to.window, beforeId);
   },
   dropHintAt: async (window, point, tabId) => {
-    const to = window ? windowStateFor(window) : undefined
-    if (!window || !isLiveWindow(to) || to.mini) return sendSidebarDropHint(null, null)
-    const hit = await sidebarRowAt(to, point)
-    sendSidebarDropHint(window, { beforeId: hit ? sidebarDropBeforeId(hit, to.tabs.map((candidate) => candidate.id), tabId) : null })
+    const to = window ? windowStateFor(window) : undefined;
+    if (!window || !isLiveWindow(to) || to.mini)
+      return sendSidebarDropHint(null, null);
+    const hit = await sidebarRowAt(to, point);
+    sendSidebarDropHint(window, {
+      beforeId: hit
+        ? sidebarDropBeforeId(
+            hit,
+            to.tabs.map((candidate) => candidate.id),
+            tabId,
+          )
+        : null,
+    });
   },
   clearDropHint: () => sendSidebarDropHint(null, null),
-  browserWindows: () => windowStates
-    .filter((w) => !w.mini && isLiveWindow(w) && w.window.isVisible() && !w.window.isMinimized())
-    .map((w) => ({ window: w.window, bounds: w.window.getBounds() })),
+  browserWindows: () =>
+    windowStates
+      .filter(
+        (w) =>
+          !w.mini &&
+          isLiveWindow(w) &&
+          w.window.isVisible() &&
+          !w.window.isMinimized(),
+      )
+      .map((w) => ({ window: w.window, bounds: w.window.getBounds() })),
   reorderTab: (win, tabId, index) => {
-    const mini = miniStateFor(win)
-    const tab = miniTabOf(mini, tabId)
-    if (!mini || !tab) return false
-    const next = moveTabId(mini.tabs.map((candidate) => candidate.id), tabId, index)
-    if (next.every((id, at) => mini.tabs[at]?.id === id)) return false
-    mini.tabs.sort((a, b) => next.indexOf(a.id) - next.indexOf(b.id))
-    persistOpenTabs()
-    publishState(mini)
-    return true
+    const mini = miniStateFor(win);
+    const tab = miniTabOf(mini, tabId);
+    if (!mini || !tab) return false;
+    const next = moveTabId(
+      mini.tabs.map((candidate) => candidate.id),
+      tabId,
+      index,
+    );
+    if (next.every((id, at) => mini.tabs[at]?.id === id)) return false;
+    mini.tabs.sort((a, b) => next.indexOf(a.id) - next.indexOf(b.id));
+    persistOpenTabs();
+    publishState(mini);
+    return true;
   },
   closeTab: (win, tabId) => {
-    const tab = miniTabOf(miniStateFor(win), tabId)
-    if (tab) closeBrowserTab(tab.id, true)
-    else if (!win.isDestroyed()) win.close()
+    const tab = miniTabOf(miniStateFor(win), tabId);
+    if (tab) closeBrowserTab(tab.id, true);
+    else if (!win.isDestroyed()) win.close();
   },
   setPageBounds: (win, bounds) => {
-    const mini = miniStateFor(win)
-    if (!mini) return
-    mini.browserBounds = { ...bounds }
-    applyTabBounds(mini)
+    const mini = miniStateFor(win);
+    if (!mini) return;
+    mini.browserBounds = { ...bounds };
+    applyTabBounds(mini);
   },
   pageContents: (win) => {
-    const contents = activeTabOf(miniStateFor(win))?.view?.webContents
-    return contents && !contents.isDestroyed() ? contents : null
+    const contents = activeTabOf(miniStateFor(win))?.view?.webContents;
+    return contents && !contents.isDestroyed() ? contents : null;
   },
   header: (win) => {
-    const tab = activeTabOf(miniStateFor(win))
-    if (!tab) return null
-    const contents = tab.view?.webContents
-    const live = contents && !contents.isDestroyed() ? contents : null
+    const tab = activeTabOf(miniStateFor(win));
+    if (!tab) return null;
+    const contents = tab.view?.webContents;
+    const live = contents && !contents.isDestroyed() ? contents : null;
     return {
       tabId: tab.id,
       title: pageTitle(tab),
@@ -2383,58 +3851,82 @@ setMiniWindowHost({
       loading: live ? live.isLoadingMainFrame() : false,
       canGoBack: live ? live.navigationHistory.canGoBack() : false,
       private: tab.isPrivate,
-      ...miniTabAudio(tab)
-    }
+      ...miniTabAudio(tab),
+    };
   },
   setTabVolume: (win, tabId, volume) => {
-    const tab = miniTabOf(miniStateFor(win), tabId)
-    if (tab) setBrowserTabVolume(tab.id, volume)
+    const tab = miniTabOf(miniStateFor(win), tabId);
+    if (tab) setBrowserTabVolume(tab.id, volume);
   },
   setTabMuted: (win, tabId, muted) => {
-    const tab = miniTabOf(miniStateFor(win), tabId)
-    if (tab) setBrowserTabMuted(tab.id, muted)
+    const tab = miniTabOf(miniStateFor(win), tabId);
+    if (tab) setBrowserTabMuted(tab.id, muted);
   },
   handleShortcut: (win, input) => {
-    const tab = activeTabOf(miniStateFor(win))
-    return tab ? handleBrowserShortcutInput(input, tab.id) : false
+    const tab = activeTabOf(miniStateFor(win));
+    return tab ? handleBrowserShortcutInput(input, tab.id) : false;
   },
   notify: (message) => flashBrowserStatus(message, 3500),
-  browserTabs: () => windowStates
-    .filter((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
-    .flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab) => ({ tabId: tab.id, url: currentUrl(tab) })))
-})
+  browserTabs: () =>
+    windowStates
+      .filter((w) => !w.mini && !w.isPrivate && isLiveWindow(w))
+      .flatMap((w) =>
+        w.tabs
+          .filter((tab) => !tab.isPrivate)
+          .map((tab) => ({ tabId: tab.id, url: currentUrl(tab) })),
+      ),
+});
 
 export interface ExtensionPageTabOptions {
-  extensionUrl: string
-  preloadPath: string
-  owner: ExtensionPageOwner
+  extensionUrl: string;
+  preloadPath: string;
+  owner: ExtensionPageOwner;
 }
 
-function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine, activate = true, deferLoad = false, pauseAutoplayUntilVisited = false, pinned = false, extensionPage?: ExtensionPageTabOptions, insertAt?: number, isPrivate = false, allowLocalDocument = false, targetWindow: BrowserWindowState | undefined = currentWindowState(), spaceId?: string): string | null {
+function createTab(
+  input?: string,
+  engine: SearchEngineId = selectedSearchEngine,
+  activate = true,
+  deferLoad = false,
+  pauseAutoplayUntilVisited = false,
+  pinned = false,
+  extensionPage?: ExtensionPageTabOptions,
+  insertAt?: number,
+  isPrivate = false,
+  allowLocalDocument = false,
+  targetWindow: BrowserWindowState | undefined = currentWindowState(),
+  spaceId?: string,
+): string | null {
   // The mini window holds one tab: anything opened from it (links, context menu, popups as tabs)
   // goes to a normal window, which comes forward for a foreground tab.
-  const redirected = targetWindow?.mini === true && !creatingMiniTab
-  const w = redirected ? browserTargetForMini(targetWindow) : targetWindow
-  if (!isLiveWindow(w)) return null
+  const redirected = targetWindow?.mini === true && !creatingMiniTab;
+  const w = redirected ? browserTargetForMini(targetWindow) : targetWindow;
+  if (!isLiveWindow(w)) return null;
   if (redirected && activate && !w.window.isDestroyed()) {
-    w.window.show()
-    w.window.focus()
+    w.window.show();
+    w.window.focus();
   }
-  const { tabs } = w
+  const { tabs } = w;
   // Every page tab in a private window is private; with no address it opens the private New Tab.
-  const makePrivate = (isPrivate || w.isPrivate) && !extensionPage
-  const requested = input ?? (w.isPrivate && !extensionPage ? SURFFISH_QUICK_LINKS_URL : undefined)
-  const target = extensionPage && requested
-    ? requested
-    : allowLocalDocument && requested && isLocalDocumentUrl(requested)
-    ? requested
-    : requested === SURFFISH_QUICK_LINKS_URL
-    ? SURFFISH_QUICK_LINKS_URL
-    : requested === SURFFISH_SETTINGS_URL && creatingSettingsTab
-    ? SURFFISH_SETTINGS_URL
-    : requested ? resolveAddressInput(requested, engine) ?? configuredStartPage(engine) : configuredStartPage(engine)
-  const previous = activeTabOf(w)
-  const shouldActivate = activate || w.activeTabId === null
+  const makePrivate = (isPrivate || w.isPrivate) && !extensionPage;
+  const requested =
+    input ??
+    (w.isPrivate && !extensionPage ? SURFFISH_QUICK_LINKS_URL : undefined);
+  const target =
+    extensionPage && requested
+      ? requested
+      : allowLocalDocument && requested && isLocalDocumentUrl(requested)
+        ? requested
+        : requested === SURFFISH_QUICK_LINKS_URL
+          ? SURFFISH_QUICK_LINKS_URL
+          : requested === SURFFISH_SETTINGS_URL && creatingSettingsTab
+            ? SURFFISH_SETTINGS_URL
+            : requested
+              ? (resolveAddressInput(requested, engine) ??
+                configuredStartPage(engine))
+              : configuredStartPage(engine);
+  const previous = activeTabOf(w);
+  const shouldActivate = activate || w.activeTabId === null;
   const tab: BrowserTab = {
     id: randomUUID(),
     win: w,
@@ -2444,7 +3936,8 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     faviconRevision: 0,
     error: null,
     downloadStartedForCurrentLoad: false,
-    pauseAutoplayUntilVisited: !shouldActivate && pauseAutoplayUntilVisited && isYouTubeUrl(target),
+    pauseAutoplayUntilVisited:
+      !shouldActivate && pauseAutoplayUntilVisited && isYouTubeUrl(target),
     lastUrl: target,
     pendingUrl: target,
     pinned,
@@ -2461,345 +3954,522 @@ function createTab(input?: string, engine: SearchEngineId = selectedSearchEngine
     pdfEditor: null,
     restoreHistory: null,
     // Extension pages need the profile session (that's where extensions load), so they stay in Default.
-    spaceId: extensionPage ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId),
+    spaceId: extensionPage
+      ? DEFAULT_SPACE_ID
+      : resolveSpaceId(getSpacesSettings(), spaceId ?? w.activeSpaceId),
     groupId: null,
     volume: 1,
-    volumeOrigin: null
-  }
+    volumeOrigin: null,
+  };
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
-  if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length) tabs.splice(insertAt, 0, tab)
-  else tabs.push(tab)
+  if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length)
+    tabs.splice(insertAt, 0, tab);
+  else tabs.push(tab);
   if (shouldActivate) {
     // The outgoing tab's picture, while it is still on screen (overview thumbnail + wake snapshot).
     // A page still loading has nothing worth showing yet (and may not answer a capture for a while).
     // Only for a page someone was looking at: opening tabs in a burst (restore, open all) pays nothing.
-    if (previous && previous.win === w && isActiveTab(previous) && previous.view && !previous.view.webContents.isLoading() && wasShownLongEnough(previous)) void captureTabThumbnail(previous, true)
+    if (
+      previous &&
+      previous.win === w &&
+      isActiveTab(previous) &&
+      previous.view &&
+      !previous.view.webContents.isLoading() &&
+      wasShownLongEnough(previous)
+    )
+      void captureTabThumbnail(previous, true);
     // The new tab replaces whatever was on screen (a split's panes go off screen together).
-    const wasOnScreen = previous ? onScreenTabIds(w) : []
+    const wasOnScreen = previous ? onScreenTabIds(w) : [];
     if (tab.spaceId !== w.activeSpaceId) {
-      if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId)
-      w.activeSpaceId = tab.spaceId
-      setImmediate(() => publishSpaces(w))
+      if (w.activeTabId) w.spaceActiveTabs.set(w.activeSpaceId, w.activeTabId);
+      w.activeSpaceId = tab.spaceId;
+      setImmediate(() => publishSpaces(w));
     }
-    w.spaceActiveTabs.set(tab.spaceId, tab.id)
-    w.activeTabId = tab.id
-    tabShownAt.set(tab, Date.now())
-    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
+    w.spaceActiveTabs.set(tab.spaceId, tab.id);
+    w.activeTabId = tab.id;
+    tabShownAt.set(tab, Date.now());
+    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id);
     for (const goneId of wasOnScreen) {
-      const gone = findTab(goneId)
-      if (gone && gone !== tab && gone.win === w) markTabInactive(gone)
+      const gone = findTab(goneId);
+      if (gone && gone !== tab && gone.win === w) markTabInactive(gone);
     }
-    tab.inactiveSince = null
+    tab.inactiveSince = null;
   } else {
-    tab.inactiveSince = Date.now()
+    tab.inactiveSince = Date.now();
   }
-  if (!deferLoad) ensureTabLoaded(tab)
-  applyTabBounds(w)
-  if (!shouldActivate) scheduleTabSleep(tab)
-  else tab.view?.webContents.focus()
-  publishState(w)
-  return tab.id
+  if (!deferLoad) ensureTabLoaded(tab);
+  applyTabBounds(w);
+  if (!shouldActivate) scheduleTabSleep(tab);
+  else tab.view?.webContents.focus();
+  publishState(w);
+  return tab.id;
 }
 
 /** What a new window starts with. */
 export interface BrowserWindowInit {
   /** A private window: all of its tabs are private and it is never saved. */
-  private?: boolean
+  private?: boolean;
   /** Tabs to restore (a saved window from the session file). */
-  session?: { urls: readonly string[]; activeIndex: number; pinnedIndexes: readonly number[]; splits?: readonly SavedSplit[]; spaces?: SavedWindowSpaces | null; groups?: readonly SavedTabGroup[]; histories?: ReadonlyArray<SavedTabHistory | null> }
+  session?: {
+    urls: readonly string[];
+    activeIndex: number;
+    pinnedIndexes: readonly number[];
+    splits?: readonly SavedSplit[];
+    spaces?: SavedWindowSpaces | null;
+    groups?: readonly SavedTabGroup[];
+    histories?: ReadonlyArray<SavedTabHistory | null>;
+  };
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
-  adoptTabId?: string
+  adoptTabId?: string;
 }
 
-let macSwipeStarted = false
+let macSwipeStarted = false;
 
-export function attachBrowserView(win: BaseWindow, init: BrowserWindowInit = {}): void {
-  if (windowStateFor(win)) return
+export function attachBrowserView(
+  win: BaseWindow,
+  init: BrowserWindowInit = {},
+): void {
+  if (windowStateFor(win)) return;
   const w: BrowserWindowState = {
     window: win,
     tabs: [],
     activeTabId: null,
     browserBounds: { x: 0, y: 0, width: 0, height: 0 },
-    findState: { tabId: null, open: false, text: '', result: null },
+    findState: { tabId: null, open: false, text: "", result: null },
     confirmingWindowClose: false,
     isPrivate: init.private === true,
     splits: [],
     recentTabIds: [],
     // A new window opens on the Space you're in (private windows have no Spaces).
-    activeSpaceId: init.private === true ? DEFAULT_SPACE_ID : resolveSpaceId(getSpacesSettings(), (windowStateFor(focusedBrowserWindow()) ?? currentWindowState())?.activeSpaceId),
+    activeSpaceId:
+      init.private === true
+        ? DEFAULT_SPACE_ID
+        : resolveSpaceId(
+            getSpacesSettings(),
+            (windowStateFor(focusedBrowserWindow()) ?? currentWindowState())
+              ?.activeSpaceId,
+          ),
     spaceActiveTabs: new Map(),
     groups: [],
     mini: false,
-    miniHome: null
-  }
-  windowStates.push(w)
-  tabSleepMinutes = getBrowserTabSleepMinutes()
+    miniHome: null,
+  };
+  windowStates.push(w);
+  tabSleepMinutes = getBrowserTabSleepMinutes();
   for (const contents of getWindowRenderers(win)) {
-    contents.on('context-menu', (event, params) => {
-      event.preventDefault()
-      const x = Number.isFinite(params.x) ? Math.round(params.x) : 0
-      const y = Number.isFinite(params.y) ? Math.round(params.y) : 0
+    contents.on("context-menu", (event, params) => {
+      event.preventDefault();
+      const x = Number.isFinite(params.x) ? Math.round(params.x) : 0;
+      const y = Number.isFinite(params.y) ? Math.round(params.y) : 0;
       // A split entry's halves carry their own tab id (data-browser-pane-id) inside the row's.
-      const script = `(() => { const el = document.elementFromPoint(${x}, ${y})?.closest('[data-browser-pane-id],[data-browser-tab-id]'); return el?.getAttribute('data-browser-pane-id') ?? el?.getAttribute('data-browser-tab-id') ?? null })()`
-      void contents.executeJavaScript(script, true).then((id: unknown) => {
-        if (typeof id === 'string' && getTab(id)) {
-          // Right-click on a tab of a multi-selection: the bulk menu (tab-selection.ts).
-          if (!tabSelectionHooks?.showMenu(id, win)) showBrowserTabContextMenu(id)
-        } else showTabContextMenu(contents, event, params)
-      }).catch(() => showTabContextMenu(contents, event, params))
-    })
+      const script = `(() => { const el = document.elementFromPoint(${x}, ${y})?.closest('[data-browser-pane-id],[data-browser-tab-id]'); return el?.getAttribute('data-browser-pane-id') ?? el?.getAttribute('data-browser-tab-id') ?? null })()`;
+      void contents
+        .executeJavaScript(script, true)
+        .then((id: unknown) => {
+          if (typeof id === "string" && getTab(id)) {
+            // Right-click on a tab of a multi-selection: the bulk menu (tab-selection.ts).
+            if (!tabSelectionHooks?.showMenu(id, win))
+              showBrowserTabContextMenu(id);
+          } else showTabContextMenu(contents, event, params);
+        })
+        .catch(() => showTabContextMenu(contents, event, params));
+    });
   }
-  if (process.platform === 'darwin') {
-    win.on('swipe', (_event, direction) => {
-      const contents = activeTabOf(w)?.view?.webContents
-      if (!contents) return
-      if (direction === 'right' && contents.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
-      else if (direction === 'left' && contents.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
-    })
+  if (process.platform === "darwin") {
+    win.on("swipe", (_event, direction) => {
+      const contents = activeTabOf(w)?.view?.webContents;
+      if (!contents) return;
+      if (direction === "right" && contents.navigationHistory.canGoBack())
+        contents.navigationHistory.goBack();
+      else if (
+        direction === "left" &&
+        contents.navigationHistory.canGoForward()
+      )
+        contents.navigationHistory.goForward();
+    });
   }
-  const adopted = init.adoptTabId ? findTab(init.adoptTabId) : undefined
+  const adopted = init.adoptTabId ? findTab(init.adoptTabId) : undefined;
   if (adopted && adopted.win !== w && canMoveTabTo(adopted, w)) {
     // A split pane brings its whole split along (tear-out / Move to New Window of a split entry).
-    moveTabsWithSplit(adopted, w, null)
+    moveTabsWithSplit(adopted, w, null);
   } else if (init.session && !w.isPrivate) {
-    const saved = init.session
-    const restoredAt = Date.now()
-    const restoredIds: (string | null)[] = []
+    const saved = init.session;
+    const restoredAt = Date.now();
+    const restoredIds: (string | null)[] = [];
     // Old sessions (and Spaces off) put everything in Default; deleted Spaces fold into Default too.
-    const placement = placeRestoredTabs(getSpacesSettings(), saved.spaces, saved.urls.length)
-    w.activeSpaceId = placement.activeSpace
+    const placement = placeRestoredTabs(
+      getSpacesSettings(),
+      saved.spaces,
+      saved.urls.length,
+    );
+    w.activeSpaceId = placement.activeSpace;
     saved.urls.forEach((url, index) => {
-      const id = createTab(url, selectedSearchEngine, false, true, false, saved.pinnedIndexes.includes(index), undefined, undefined, false, false, w, placement.tabSpaces[index])
-      restoredIds.push(id)
+      const id = createTab(
+        url,
+        selectedSearchEngine,
+        false,
+        true,
+        false,
+        saved.pinnedIndexes.includes(index),
+        undefined,
+        undefined,
+        false,
+        false,
+        w,
+        placement.tabSpaces[index],
+      );
+      restoredIds.push(id);
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
-      const tab = id ? getTab(id) : undefined
-      if (tab) tab.inactiveSince = restoredTabInactiveSince(currentUrl(tab), restoredAt)
+      const tab = id ? getTab(id) : undefined;
+      if (tab)
+        tab.inactiveSince = restoredTabInactiveSince(
+          currentUrl(tab),
+          restoredAt,
+        );
       // Its back/forward list from the last run: the first load restores it (navigationHistory.restore),
       // so Back/Forward, the hold-Back menu and the page's scroll position all come back.
-      const history = saved.histories?.[index]
-      if (tab && history && history.entries[history.index]?.url === currentUrl(tab)) tab.restoreHistory = { entries: history.entries.map((entry) => ({ ...entry })), index: history.index }
-    })
+      const history = saved.histories?.[index];
+      if (
+        tab &&
+        history &&
+        history.entries[history.index]?.url === currentUrl(tab)
+      )
+        tab.restoreHistory = {
+          entries: history.entries.map((entry) => ({ ...entry })),
+          index: history.index,
+        };
+    });
     for (const split of saved.splits ?? []) {
-      const ids = split.tabs.map((index) => restoredIds[index] ?? null)
-      if (ids.some((id) => !id || !findTab(id) || findTab(id)?.pinned || splitGroupOf(w.splits, id))) continue
+      const ids = split.tabs.map((index) => restoredIds[index] ?? null);
+      if (
+        ids.some(
+          (id) =>
+            !id ||
+            !findTab(id) ||
+            findTab(id)?.pinned ||
+            splitGroupOf(w.splits, id),
+        )
+      )
+        continue;
       // A split's panes share a Space (an edited file could say otherwise).
-      if (new Set(ids.map((id) => findTab(id)?.spaceId)).size !== 1) continue
-      const group = createSplitGroup(randomUUID(), ids as string[], split.sizes)
-      if (group) w.splits.push(group)
+      if (new Set(ids.map((id) => findTab(id)?.spaceId)).size !== 1) continue;
+      const group = createSplitGroup(
+        randomUUID(),
+        ids as string[],
+        split.sizes,
+      );
+      if (group) w.splits.push(group);
     }
     for (const savedGroup of saved.groups ?? []) {
-      const group = createTabGroup(randomUUID(), w.groups, savedGroup)
-      group.collapsed = savedGroup.collapsed
-      const members = savedGroup.tabs.map((index) => findTab(restoredIds[index])).filter((tab): tab is BrowserTab => Boolean(tab))
-      if (members.length === 0) continue
-      w.groups.push(group)
-      for (const member of members) member.groupId = group.id
+      const group = createTabGroup(randomUUID(), w.groups, savedGroup);
+      group.collapsed = savedGroup.collapsed;
+      const members = savedGroup.tabs
+        .map((index) => findTab(restoredIds[index]))
+        .filter((tab): tab is BrowserTab => Boolean(tab));
+      if (members.length === 0) continue;
+      w.groups.push(group);
+      for (const member of members) member.groupId = group.id;
     }
-    keepTabGroupsTogether(w)
-    for (const [spaceId, index] of Object.entries(saved.spaces?.spaceActiveTabs ?? {})) {
-      const id = restoredIds[index]
-      if (id && findTab(id)?.spaceId === spaceId) w.spaceActiveTabs.set(spaceId, id)
+    keepTabGroupsTogether(w);
+    for (const [spaceId, index] of Object.entries(
+      saved.spaces?.spaceActiveTabs ?? {},
+    )) {
+      const id = restoredIds[index];
+      if (id && findTab(id)?.spaceId === spaceId)
+        w.spaceActiveTabs.set(spaceId, id);
     }
     // Creating the first tab showed its Space; the window goes back to the saved one.
-    w.activeSpaceId = placement.activeSpace
-    const savedActive = findTab(restoredIds[saved.activeIndex])
-    w.activeTabId = (savedActive?.spaceId === w.activeSpaceId ? savedActive.id : null)
-      ?? w.spaceActiveTabs.get(w.activeSpaceId) ?? spaceTabsOf(w)[0]?.id ?? null
+    w.activeSpaceId = placement.activeSpace;
+    const savedActive = findTab(restoredIds[saved.activeIndex]);
+    w.activeTabId =
+      (savedActive?.spaceId === w.activeSpaceId ? savedActive.id : null) ??
+      w.spaceActiveTabs.get(w.activeSpaceId) ??
+      spaceTabsOf(w)[0]?.id ??
+      null;
     // Nothing in the saved Space (all its tabs were dropped): show the first tab's Space instead.
     if (!w.activeTabId && w.tabs[0]) {
-      w.activeSpaceId = w.tabs[0].spaceId
-      w.activeTabId = w.tabs[0].id
+      w.activeSpaceId = w.tabs[0].spaceId;
+      w.activeTabId = w.tabs[0].id;
     }
   }
-  if (w.tabs.length === 0) createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
-  w.activeTabId ??= w.tabs[0]?.id ?? null
-  if (w.activeTabId) w.recentTabIds = noteRecentTab(w.recentTabIds, w.activeTabId)
+  if (w.tabs.length === 0)
+    createTab(
+      undefined,
+      selectedSearchEngine,
+      true,
+      false,
+      false,
+      false,
+      undefined,
+      undefined,
+      false,
+      false,
+      w,
+    );
+  w.activeTabId ??= w.tabs[0]?.id ?? null;
+  if (w.activeTabId)
+    w.recentTabIds = noteRecentTab(w.recentTabIds, w.activeTabId);
   // A restored split on screen loads every pane, not just the focused one.
   for (const id of onScreenTabIds(w)) {
-    const pane = findTab(id)
-    if (pane) ensureTabLoaded(pane)
+    const pane = findTab(id);
+    if (pane) ensureTabLoaded(pane);
   }
   // Its saved picture covers the restored active tab until the page paints (wake-snapshot.ts).
-  if (init.session && !w.isPrivate) presentRestoredTabPicture(w)
-  const visibleAtStart = new Set(onScreenTabIds(w))
-  const now = Date.now()
+  if (init.session && !w.isPrivate) presentRestoredTabPicture(w);
+  const visibleAtStart = new Set(onScreenTabIds(w));
+  const now = Date.now();
   for (const tab of w.tabs) {
     if (!visibleAtStart.has(tab.id)) {
-      tab.inactiveSince ??= now
-      scheduleTabSleep(tab)
+      tab.inactiveSince ??= now;
+      scheduleTabSleep(tab);
     } else {
-      tab.inactiveSince = null
+      tab.inactiveSince = null;
     }
   }
-  applyTabBounds(w)
-  publishState(w)
-  persistOpenTabs()
-  if (process.platform === 'darwin' && !macSwipeStarted) {
+  applyTabBounds(w);
+  publishState(w);
+  persistOpenTabs();
+  if (process.platform === "darwin" && !macSwipeStarted) {
     // One native monitor serves every window; each gesture names the window it landed in.
     macSwipeStarted = startMacTrackpadSwipe(win, {
       onBegin: beginMacTrackpadSwipe,
       onProgress: reportMacTrackpadSwipeProgress,
       onEnd: finishMacTrackpadSwipe,
-      onPinch: handleMacTrackpadPinch
-    })
+      onPinch: handleMacTrackpadPinch,
+    });
   }
   attachTabOverview(win, {
     getItems: () => getTabOverviewItems(w),
     getPageBounds: () => ({ ...w.browserBounds }),
-    activate: (id) => { activateBrowserTab(id) },
-    closeTab: (id) => { closeBrowserTab(id) },
-    newTab: () => { newBrowserTab(undefined, undefined, w) },
-    focusPage: () => {
-      const contents = activeTabOf(w)?.view?.webContents
-      if (contents && !contents.isDestroyed()) contents.focus()
-      else focusVisibleShellPage(win)
+    activate: (id) => {
+      activateBrowserTab(id);
     },
-    handleShortcut: (input) => runInWindow(win, () => handleBrowserShortcutInput(input))
-  })
+    closeTab: (id) => {
+      closeBrowserTab(id);
+    },
+    newTab: () => {
+      newBrowserTab(undefined, undefined, w);
+    },
+    focusPage: () => {
+      const contents = activeTabOf(w)?.view?.webContents;
+      if (contents && !contents.isDestroyed()) contents.focus();
+      else focusVisibleShellPage(win);
+    },
+    handleShortcut: (input) =>
+      runInWindow(win, () => handleBrowserShortcutInput(input)),
+  });
   attachScreenshots(win, {
     getTarget: () => {
-      const tab = activeTabOf(w)
-      const contents = tab?.view?.webContents
-      if (!tab || !contents || contents.isDestroyed() || isLocalNewTab(tab)) return null
-      return { contents, isPrivate: tab.isPrivate, url: currentUrl(tab) }
+      const tab = activeTabOf(w);
+      const contents = tab?.view?.webContents;
+      if (!tab || !contents || contents.isDestroyed() || isLocalNewTab(tab))
+        return null;
+      return { contents, isPrivate: tab.isPrivate, url: currentUrl(tab) };
     },
     // In a split: the focused pane only.
-    getPageBounds: () => { const tab = activeTabOf(w); return tab ? pageBoundsOf(tab) : { ...w.browserBounds } },
-    focusPage: () => {
-      const contents = activeTabOf(w)?.view?.webContents
-      if (contents && !contents.isDestroyed()) contents.focus()
-      else focusVisibleShellPage(win)
+    getPageBounds: () => {
+      const tab = activeTabOf(w);
+      return tab ? pageBoundsOf(tab) : { ...w.browserBounds };
     },
-    flash: (message) => { const tab = activeTabOf(w); flashLinkStatus(message, tab ? pageBoundsOf(tab) : w.browserBounds, 2000, win) },
-    handleShortcut: (input) => runInWindow(win, () => handleBrowserShortcutInput(input))
-  })
-  attachSplitSurface(w)
+    focusPage: () => {
+      const contents = activeTabOf(w)?.view?.webContents;
+      if (contents && !contents.isDestroyed()) contents.focus();
+      else focusVisibleShellPage(win);
+    },
+    flash: (message) => {
+      const tab = activeTabOf(w);
+      flashLinkStatus(
+        message,
+        tab ? pageBoundsOf(tab) : w.browserBounds,
+        2000,
+        win,
+      );
+    },
+    handleShortcut: (input) =>
+      runInWindow(win, () => handleBrowserShortcutInput(input)),
+  });
+  attachSplitSurface(w);
   // Window moves and resizes go into the saved session too (debounced; the write itself is deferred).
-  let geometryTimer: ReturnType<typeof setTimeout> | null = null
+  let geometryTimer: ReturnType<typeof setTimeout> | null = null;
   const persistGeometry = (): void => {
-    if (geometryTimer) clearTimeout(geometryTimer)
-    geometryTimer = setTimeout(() => { geometryTimer = null; persistOpenTabs() }, 400)
-  }
-  for (const event of ['resize', 'move', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen'] as const) win.on(event as 'resize', persistGeometry)
-  win.on('close', (event) => {
-    if (geometryTimer) clearTimeout(geometryTimer)
-    const unsaved = hasUnsavedPdfEdits(w)
+    if (geometryTimer) clearTimeout(geometryTimer);
+    geometryTimer = setTimeout(() => {
+      geometryTimer = null;
+      persistOpenTabs();
+    }, 400);
+  };
+  for (const event of [
+    "resize",
+    "move",
+    "maximize",
+    "unmaximize",
+    "enter-full-screen",
+    "leave-full-screen",
+  ] as const)
+    win.on(event as "resize", persistGeometry);
+  win.on("close", (event) => {
+    if (geometryTimer) clearTimeout(geometryTimer);
+    const unsaved = hasUnsavedPdfEdits(w);
     if (unsaved.length > 0) {
-      const name = unsaved.length === 1 ? unsaved[0]!.pdfEditor!.name : `${unsaved.length} PDFs`
-      if (!confirmDiscardPdfEdits(win, name, 'Close Window')) {
-        event.preventDefault()
+      const name =
+        unsaved.length === 1
+          ? unsaved[0]!.pdfEditor!.name
+          : `${unsaved.length} PDFs`;
+      if (!confirmDiscardPdfEdits(win, name, "Close Window")) {
+        event.preventDefault();
         // A cancelled close also cancels a quit, so keep saving the session.
-        sessionFrozen = false
-        return
+        sessionFrozen = false;
+        return;
       }
-      for (const tab of unsaved) tab.pdfEditor!.dirty = false
+      for (const tab of unsaved) tab.pdfEditor!.dirty = false;
     }
-    persistOpenTabs()
-  })
-  win.on('closed', () => {
-    const index = windowStates.indexOf(w)
-    if (index < 0) return
-    if (activeMacTrackpadSwipe && w.tabs.some((tab) => tab.view?.webContents === activeMacTrackpadSwipe?.contents)) cancelActiveMacTrackpadSwipe()
-    detachTabOverview(win)
-    detachScreenshots(win)
-    destroyLinkStatus(win)
-    windowStates.splice(index, 1)
-    const closingTabs = [...w.tabs]
-    w.tabs.length = 0
-    w.splits = []
-    w.activeTabId = null
+    persistOpenTabs();
+  });
+  win.on("closed", () => {
+    const index = windowStates.indexOf(w);
+    if (index < 0) return;
+    if (
+      activeMacTrackpadSwipe &&
+      w.tabs.some(
+        (tab) => tab.view?.webContents === activeMacTrackpadSwipe?.contents,
+      )
+    )
+      cancelActiveMacTrackpadSwipe();
+    detachTabOverview(win);
+    detachScreenshots(win);
+    destroyLinkStatus(win);
+    windowStates.splice(index, 1);
+    const closingTabs = [...w.tabs];
+    w.tabs.length = 0;
+    w.splits = [];
+    w.activeTabId = null;
     for (const tab of closingTabs) {
-      cancelSleepTimer(tab)
-      disposeStashedPdfSource(tab)
-      forgetTabPicture(tab.id)
-      const view = tab.view
-      tab.view = null
+      cancelSleepTimer(tab);
+      disposeStashedPdfSource(tab);
+      forgetTabPicture(tab.id);
+      const view = tab.view;
+      tab.view = null;
       if (view) {
-        detachNetworkInspector(view.webContents)
-        if (!view.webContents.isDestroyed()) view.webContents.close()
+        detachNetworkInspector(view.webContents);
+        if (!view.webContents.isDestroyed()) view.webContents.close();
       }
     }
     if (windowStates.length === 0) {
-      cancelActiveMacTrackpadSwipe()
-      if (macSwipeStarted) stopMacTrackpadSwipe()
-      macSwipeStarted = false
-      newTabThumbnail = null
+      cancelActiveMacTrackpadSwipe();
+      if (macSwipeStarted) stopMacTrackpadSwipe();
+      macSwipeStarted = false;
+      newTabThumbnail = null;
     }
-    if (closingTabs.some((tab) => tab.isPrivate) && !allTabs().some((tab) => tab.isPrivate)) endPrivateSession()
+    if (
+      closingTabs.some((tab) => tab.isPrivate) &&
+      !allTabs().some((tab) => tab.isPrivate)
+    )
+      endPrivateSession();
     // Drop the window from the saved session; the last window's tabs stay saved for the next launch.
-    persistOpenTabs()
-    noteWindowTitles()
-  })
+    persistOpenTabs();
+    noteWindowTitles();
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Windows: labels for menus, and moving tabs between windows (the view moves, the page never reloads).
 
-type BrowserWindowFactory = (init: BrowserWindowInit & { position?: { x: number; y: number }; size?: { width: number; height: number } }) => BaseWindow | null
-let browserWindowFactory: BrowserWindowFactory | null = null
+type BrowserWindowFactory = (
+  init: BrowserWindowInit & {
+    position?: { x: number; y: number };
+    size?: { width: number; height: number };
+  },
+) => BaseWindow | null;
+let browserWindowFactory: BrowserWindowFactory | null = null;
 
 /** window.ts registers how to open a window, so tab moves can tear a tab out into one. */
-export function setBrowserWindowFactory(factory: BrowserWindowFactory | null): void {
-  browserWindowFactory = factory
+export function setBrowserWindowFactory(
+  factory: BrowserWindowFactory | null,
+): void {
+  browserWindowFactory = factory;
 }
 
 function pageTitleOfWindow(w: BrowserWindowState): string {
-  const tab = activeTabOf(w)
-  return tab ? pageTitle(tab) : 'New Tab'
+  const tab = activeTabOf(w);
+  return tab ? pageTitle(tab) : "New Tab";
 }
 
 /** "Window 2 — Example Domain" (private windows say so). */
 export function browserWindowLabel(window: BaseWindow): string {
-  const w = windowStateFor(window)
-  const number = browserWindowNumber(window)
-  const title = w ? pageTitleOfWindow(w) : 'Surffish'
-  const short = title.length > 48 ? `${title.slice(0, 47)}…` : title
-  return `${w?.isPrivate ? 'Private ' : ''}Window ${number > 0 ? number : ''} — ${short}`.replace('Window  —', 'Window —')
+  const w = windowStateFor(window);
+  const number = browserWindowNumber(window);
+  const title = w ? pageTitleOfWindow(w) : "Surffish";
+  const short = title.length > 48 ? `${title.slice(0, 47)}…` : title;
+  return `${w?.isPrivate ? "Private " : ""}Window ${number > 0 ? number : ""} — ${short}`.replace(
+    "Window  —",
+    "Window —",
+  );
 }
 
 /** Private windows only take private tabs (a normal tab can't switch to the private session). */
 function canMoveTabTo(tab: BrowserTab, w: BrowserWindowState): boolean {
-  return !w.isPrivate || tab.isPrivate
+  return !w.isPrivate || tab.isPrivate;
 }
 
 /** Take a tab out of its window without closing it. The window picks another tab, or closes when it was the last. */
 function detachTabFromWindow(tab: BrowserTab): void {
-  const from = tab.win
-  const index = from.tabs.indexOf(tab)
-  if (index < 0) return
-  const wasActive = from.activeTabId === tab.id
+  const from = tab.win;
+  const index = from.tabs.indexOf(tab);
+  if (index < 0) return;
+  const wasActive = from.activeTabId === tab.id;
   if (wasActive) {
-    cancelActiveMacTrackpadSwipe()
-    hideLinkStatus(false, from.window)
+    cancelActiveMacTrackpadSwipe();
+    hideLinkStatus(false, from.window);
   }
-  if (from.findState.tabId === tab.id) closeFindBar(false, from)
-  const { groups, partners } = removeTabFromSplits(from.splits, tab.id)
-  from.splits = groups
-  from.recentTabIds = from.recentTabIds.filter((id) => id !== tab.id)
-  from.tabs.splice(index, 1)
+  if (from.findState.tabId === tab.id) closeFindBar(false, from);
+  const { groups, partners } = removeTabFromSplits(from.splits, tab.id);
+  from.splits = groups;
+  from.recentTabIds = from.recentTabIds.filter((id) => id !== tab.id);
+  from.tabs.splice(index, 1);
   if (tab.view) {
-    const reader = readerViewFor(tab.view.webContents)
+    const reader = readerViewFor(tab.view.webContents);
     if (!from.window.isDestroyed()) {
-      setPageViewOnScreen(from.window, tab.view, false)
-      if (reader) setPageViewOnScreen(from.window, reader, false)
+      setPageViewOnScreen(from.window, tab.view, false);
+      if (reader) setPageViewOnScreen(from.window, reader, false);
     }
-    tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 })
+    tab.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   }
-  if (wasActive) from.activeTabId = null
+  if (wasActive) from.activeTabId = null;
   if (from.tabs.length === 0) {
     // Emptied by the move: close it once the move has finished.
-    setImmediate(() => { if (!from.window.isDestroyed() && from.tabs.length === 0) from.window.close() })
-    return
+    setImmediate(() => {
+      if (!from.window.isDestroyed() && from.tabs.length === 0)
+        from.window.close();
+    });
+    return;
   }
   if (wasActive) {
     // Stay in the Space: its next tab, or a fresh New Tab when the move emptied it. A mini window's
     // tabs can come from different Spaces: its neighbour in the strip takes over.
-    const replacement = findTab(partners[0]) ?? (from.mini ? from.tabs[Math.min(index, from.tabs.length - 1)] : neighbourInSpace(from.tabs, index, tab.spaceId))
-    if (replacement) activateTabInternal(replacement.id)
-    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, from, tab.spaceId)
+    const replacement =
+      findTab(partners[0]) ??
+      (from.mini
+        ? from.tabs[Math.min(index, from.tabs.length - 1)]
+        : neighbourInSpace(from.tabs, index, tab.spaceId));
+    if (replacement) activateTabInternal(replacement.id);
+    else
+      createTab(
+        undefined,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        from,
+        tab.spaceId,
+      );
   } else {
-    applyTabBounds(from)
-    publishState(from)
+    applyTabBounds(from);
+    publishState(from);
   }
 }
 
@@ -2807,74 +4477,118 @@ function detachTabFromWindow(tab: BrowserTab): void {
  * Move a tab into another window; a split pane takes its whole split along (same panes, sizes and
  * focused pane), so a split entry moves as one. Pages keep running: only the views move.
  */
-function moveTabsWithSplit(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
-  const from = tab.win
-  const group = splitOf(tab)
+function moveTabsWithSplit(
+  tab: BrowserTab,
+  to: BrowserWindowState,
+  beforeId: string | null,
+): void {
+  const from = tab.win;
+  const group = splitOf(tab);
   const members = group
-    ? group.tabIds.map((id) => findTab(id)).filter((member): member is BrowserTab => member?.win === from && canMoveTabTo(member, to))
-    : [tab]
+    ? group.tabIds
+        .map((id) => findTab(id))
+        .filter(
+          (member): member is BrowserTab =>
+            member?.win === from && canMoveTabTo(member, to),
+        )
+    : [tab];
   // Activate only the pane that keeps focus: activating each pane in turn let the other pane's late
   // focus event (async on macOS) switch the active pane in the new window.
-  const focusId = splitMoveFocusId(members.map((member) => member.id), from.activeTabId, tab.id)
-  if (group) from.splits = from.splits.filter((candidate) => candidate !== group)
+  const focusId = splitMoveFocusId(
+    members.map((member) => member.id),
+    from.activeTabId,
+    tab.id,
+  );
+  if (group)
+    from.splits = from.splits.filter((candidate) => candidate !== group);
   // Never drop in between another split's panes.
-  const before = beforeId ? findTab(beforeId) : undefined
-  const beforeGroup = before ? splitOf(before) : undefined
-  const anchor = beforeGroup ? to.tabs.find((candidate) => beforeGroup.tabIds.includes(candidate.id))?.id ?? beforeId : beforeId
-  for (const member of members) detachTabFromWindow(member)
-  for (const member of members) adoptTabIntoWindow(member, to, anchor)
+  const before = beforeId ? findTab(beforeId) : undefined;
+  const beforeGroup = before ? splitOf(before) : undefined;
+  const anchor = beforeGroup
+    ? (to.tabs.find((candidate) => beforeGroup.tabIds.includes(candidate.id))
+        ?.id ?? beforeId)
+    : beforeId;
+  for (const member of members) detachTabFromWindow(member);
+  for (const member of members) adoptTabIntoWindow(member, to, anchor);
   if (group && members.length === group.tabIds.length) {
-    const moved = createSplitGroup(group.id, group.tabIds, group.sizes)
-    if (moved) to.splits.push(moved)
+    const moved = createSplitGroup(group.id, group.tabIds, group.sizes);
+    if (moved) to.splits.push(moved);
   }
-  if (focusId) activateTabInternal(focusId)
+  if (focusId) activateTabInternal(focusId);
 }
 
 /** Put a detached tab into `to`'s list without activating it (the caller activates the one to focus). */
-function adoptTabIntoWindow(tab: BrowserTab, to: BrowserWindowState, beforeId: string | null): void {
-  tab.win = to
-  const contents = tab.view?.webContents
-  if (contents && !contents.isDestroyed()) bindContentsToWindow(contents, to.window)
-  let at = beforeId ? to.tabs.findIndex((candidate) => candidate.id === beforeId) : -1
+function adoptTabIntoWindow(
+  tab: BrowserTab,
+  to: BrowserWindowState,
+  beforeId: string | null,
+): void {
+  tab.win = to;
+  const contents = tab.view?.webContents;
+  if (contents && !contents.isDestroyed())
+    bindContentsToWindow(contents, to.window);
+  let at = beforeId
+    ? to.tabs.findIndex((candidate) => candidate.id === beforeId)
+    : -1;
   if (at < 0 || to.tabs[at]?.pinned !== tab.pinned) {
     // End of the tab's own group (pinned icons or the list).
-    let last = -1
-    to.tabs.forEach((candidate, index) => { if (candidate.pinned === tab.pinned) last = index })
-    at = tab.pinned ? last + 1 : (last < 0 ? to.tabs.length : last + 1)
+    let last = -1;
+    to.tabs.forEach((candidate, index) => {
+      if (candidate.pinned === tab.pinned) last = index;
+    });
+    at = tab.pinned ? last + 1 : last < 0 ? to.tabs.length : last + 1;
   }
-  to.tabs.splice(at, 0, tab)
+  to.tabs.splice(at, 0, tab);
   // Off screen until activated; activating the focused pane wakes every pane of its split again.
-  if (tab.inactiveSince === null) markTabInactive(tab)
+  if (tab.inactiveSince === null) markTabInactive(tab);
 }
 
 /** Move a tab (with its live page) into another open window, before `beforeId` or at the end. */
-export function moveBrowserTabToWindow(id: string, target: BaseWindow, beforeId: string | null = null): boolean {
-  const tab = findTab(id)
-  const to = windowStateFor(target)
-  if (!tab || !isLiveWindow(to) || to === tab.win || !canMoveTabTo(tab, to)) return false
-  moveTabsWithSplit(tab, to, beforeId)
-  persistOpenTabs()
+export function moveBrowserTabToWindow(
+  id: string,
+  target: BaseWindow,
+  beforeId: string | null = null,
+): boolean {
+  const tab = findTab(id);
+  const to = windowStateFor(target);
+  if (!tab || !isLiveWindow(to) || to === tab.win || !canMoveTabTo(tab, to))
+    return false;
+  moveTabsWithSplit(tab, to, beforeId);
+  persistOpenTabs();
   if (!to.window.isDestroyed()) {
-    to.window.show()
-    to.window.focus()
+    to.window.show();
+    to.window.focus();
   }
-  return true
+  return true;
 }
 
 /** "Move to New Window" / tearing a tab out: a new window (of the same kind) that takes the tab over. */
-export function moveBrowserTabToNewWindow(id: string, position?: { x: number; y: number }): boolean {
-  const tab = findTab(id)
+export function moveBrowserTabToNewWindow(
+  id: string,
+  position?: { x: number; y: number },
+): boolean {
+  const tab = findTab(id);
   // Something has to stay behind: a window's only tab (or only split) can't tear out.
-  if (!tab || tab.win.tabs.length <= (splitOf(tab)?.tabIds.length ?? 1) || !browserWindowFactory) return false
-  let size: { width: number; height: number } | undefined
+  if (
+    !tab ||
+    tab.win.tabs.length <= (splitOf(tab)?.tabIds.length ?? 1) ||
+    !browserWindowFactory
+  )
+    return false;
+  let size: { width: number; height: number } | undefined;
   try {
-    const [width = 0, height = 0] = tab.win.window.getSize()
-    if (width > 0 && height > 0) size = { width, height }
+    const [width = 0, height = 0] = tab.win.window.getSize();
+    if (width > 0 && height > 0) size = { width, height };
   } catch {
     // Use the default size.
   }
-  const created = browserWindowFactory({ private: tab.win.isPrivate, adoptTabId: id, position, size })
-  return Boolean(created && findTab(id)?.win.window === created)
+  const created = browserWindowFactory({
+    private: tab.win.isPrivate,
+    adoptTabId: id,
+    position,
+    size,
+  });
+  return Boolean(created && findTab(id)?.win.window === created);
 }
 
 /**
@@ -2882,41 +4596,73 @@ export function moveBrowserTabToNewWindow(id: string, position?: { x: number; y:
  * window: tear it out into a new window under the pointer. Back over its own window: nothing.
  */
 export function dropBrowserTabOutside(id: string): boolean {
-  const tab = findTab(id)
-  if (!tab) return false
-  const point = screen.getCursorScreenPoint()
+  const tab = findTab(id);
+  if (!tab) return false;
+  const point = screen.getCursorScreenPoint();
   const contains = (window: BaseWindow): boolean => {
-    if (window.isDestroyed() || window.isMinimized()) return false
-    const bounds = window.getBounds()
-    return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
-  }
+    if (window.isDestroyed() || window.isMinimized()) return false;
+    const bounds = window.getBounds();
+    return (
+      point.x >= bounds.x &&
+      point.y >= bounds.y &&
+      point.x < bounds.x + bounds.width &&
+      point.y < bounds.y + bounds.height
+    );
+  };
   // Over a mini window (they float above every window): it joins that one at the strip slot under the pointer.
-  if (canPopOutTab(tab) && dropBrowserTabOnMiniWindow(id, point)) return true
+  if (canPopOutTab(tab) && dropBrowserTabOnMiniWindow(id, point)) return true;
   // Back over its own window: the left/right edge of the page area splits the page with the tab.
-  if (contains(tab.win.window)) return dropTabOnPageEdge(tab, point)
-  const target = windowStates.find((w) => w !== tab.win && !w.mini && isLiveWindow(w) && contains(w.window) && canMoveTabTo(tab, w))
-  if (target) return moveBrowserTabToWindow(id, target.window)
-  if (windowStates.some((w) => w !== tab.win && isLiveWindow(w) && contains(w.window))) return false
-  return moveBrowserTabToNewWindow(id, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
+  if (contains(tab.win.window)) return dropTabOnPageEdge(tab, point);
+  const target = windowStates.find(
+    (w) =>
+      w !== tab.win &&
+      !w.mini &&
+      isLiveWindow(w) &&
+      contains(w.window) &&
+      canMoveTabTo(tab, w),
+  );
+  if (target) return moveBrowserTabToWindow(id, target.window);
+  if (
+    windowStates.some(
+      (w) => w !== tab.win && isLiveWindow(w) && contains(w.window),
+    )
+  )
+    return false;
+  return moveBrowserTabToNewWindow(id, {
+    x: Math.round(point.x - 80),
+    y: Math.round(point.y - 20),
+  });
 }
 
 /** Window menu / palette: every window with its label, in creation order. */
-export function listBrowserWindows(): { window: BaseWindow; label: string; private: boolean; focused: boolean }[] {
-  const focused = focusedBrowserWindow()
-  return windowStates.filter((w) => isLiveWindow(w) && !w.mini).map((w) => ({ window: w.window, label: browserWindowLabel(w.window), private: w.isPrivate, focused: w.window === focused }))
+export function listBrowserWindows(): {
+  window: BaseWindow;
+  label: string;
+  private: boolean;
+  focused: boolean;
+}[] {
+  const focused = focusedBrowserWindow();
+  return windowStates
+    .filter((w) => isLiveWindow(w) && !w.mini)
+    .map((w) => ({
+      window: w.window,
+      label: browserWindowLabel(w.window),
+      private: w.isPrivate,
+      focused: w.window === focused,
+    }));
 }
 
 export function getBrowserState(): BrowserState {
-  return getState()
+  return getState();
 }
 
 export function getBrowserTabs(): BrowserTabSummary[] {
-  return getTabSummaries()
+  return getTabSummaries();
 }
 
 /** Diagnostics: every tab with its live web contents (null while it sleeps). */
 export function getBrowserTabProcessEntries(): TabProcessEntry[] {
-  const several = windowStates.filter((w) => !w.mini).length > 1
+  const several = windowStates.filter((w) => !w.mini).length > 1;
   return allTabs().map((tab) => ({
     id: tab.id,
     // Task Manager names the mini window's tab as such.
@@ -2925,98 +4671,160 @@ export function getBrowserTabProcessEntries(): TabProcessEntry[] {
     active: isActiveTab(tab),
     pdfEditor: tab.pdfEditor !== null,
     extensionPage: tab.extensionPageOrigin !== null,
-    contents: tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null,
-    ...(several && !tab.win.mini ? { windowNumber: browserWindowNumber(tab.win.window) } : {}),
-    ...(spacesEnabled() && !tab.win.isPrivate ? { spaceName: getSpace(tab.spaceId)?.name ?? 'Default' } : {})
-  }))
+    contents:
+      tab.view && !tab.view.webContents.isDestroyed()
+        ? tab.view.webContents
+        : null,
+    ...(several && !tab.win.mini
+      ? { windowNumber: browserWindowNumber(tab.win.window) }
+      : {}),
+    ...(spacesEnabled() && !tab.win.isPrivate
+      ? { spaceName: getSpace(tab.spaceId)?.name ?? "Default" }
+      : {}),
+  }));
 }
 
-export function getBrowserTabUrlByWebContentsId(webContentsId: number): string | null {
-  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
-  const contents = tab?.view?.webContents
-  return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null
+export function getBrowserTabUrlByWebContentsId(
+  webContentsId: number,
+): string | null {
+  const tab = allTabs().find(
+    (candidate) => candidate.view?.webContents.id === webContentsId,
+  );
+  const contents = tab?.view?.webContents;
+  return tab && contents && !contents.isDestroyed() ? currentUrl(tab) : null;
 }
 
 /** The tab (id and window) a page WebContents belongs to, for the ad blocker's per-tab counts. */
-export function getBrowserTabRefByWebContentsId(webContentsId: number): { tabId: string; window: BaseWindow } | null {
-  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
-  return tab && isLiveWindow(tab.win) ? { tabId: tab.id, window: tab.win.window } : null
+export function getBrowserTabRefByWebContentsId(
+  webContentsId: number,
+): { tabId: string; window: BaseWindow } | null {
+  const tab = allTabs().find(
+    (candidate) => candidate.view?.webContents.id === webContentsId,
+  );
+  return tab && isLiveWindow(tab.win)
+    ? { tabId: tab.id, window: tab.win.window }
+    : null;
 }
 
 export function markBrowserDownloadStarted(webContentsId: number): void {
-  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === webContentsId)
-  if (!tab) return
-  tab.downloadStartedForCurrentLoad = true
+  const tab = allTabs().find(
+    (candidate) => candidate.view?.webContents.id === webContentsId,
+  );
+  if (!tab) return;
+  tab.downloadStartedForCurrentLoad = true;
   // A page's target=_blank blob:/data: link that turned out to be a download: drop the empty tab
   // (nothing ever committed in it) and go back to the page, like Chrome.
-  const contents = tab.view?.webContents
-  if (tab.closeIfOnlyDownload && contents && !contents.isDestroyed() && contents.navigationHistory.length() <= 1) {
-    tab.closeIfOnlyDownload = false
-    const w = tab.win
-    const back = w.activeTabId === tab.id ? w.recentTabIds.find((recent) => recent !== tab.id && findTab(recent)?.win === w) : undefined
+  const contents = tab.view?.webContents;
+  if (
+    tab.closeIfOnlyDownload &&
+    contents &&
+    !contents.isDestroyed() &&
+    contents.navigationHistory.length() <= 1
+  ) {
+    tab.closeIfOnlyDownload = false;
+    const w = tab.win;
+    const back =
+      w.activeTabId === tab.id
+        ? w.recentTabIds.find(
+            (recent) => recent !== tab.id && findTab(recent)?.win === w,
+          )
+        : undefined;
     setImmediate(() => {
-      if (!findTab(tab.id)) return
-      closeBrowserTab(tab.id, false)
-      if (back && findTab(back)) activateTabInternal(back)
-    })
-    return
+      if (!findTab(tab.id)) return;
+      closeBrowserTab(tab.id, false);
+      if (back && findTab(back)) activateTabInternal(back);
+    });
+    return;
   }
   if (tab.error !== null) {
-    tab.error = null
-    publishState(tab.win)
+    tab.error = null;
+    publishState(tab.win);
   }
 }
 
 export interface ExperimentalExtensionFrameDetails {
-  frameId: number
-  parentFrameId: number
-  processId: number
-  url: string
+  frameId: number;
+  parentFrameId: number;
+  processId: number;
+  url: string;
 }
 
 /**
  * Read-only frame mapping for the explicitly enabled extension-host experiment.
  * This function is not connected to a renderer or called by the normal app path.
  */
-export function getExperimentalExtensionFrames(electronTabId: number): ExperimentalExtensionFrameDetails[] | null {
-  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') return null
-  if (!Number.isSafeInteger(electronTabId) || electronTabId < 0) return null
+export function getExperimentalExtensionFrames(
+  electronTabId: number,
+): ExperimentalExtensionFrameDetails[] | null {
+  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== "1")
+    return null;
+  if (!Number.isSafeInteger(electronTabId) || electronTabId < 0) return null;
 
-  const tab = allTabs().find((candidate) => candidate.view?.webContents.id === electronTabId)
-  const contents = tab?.view?.webContents
-  if (!contents || contents.isDestroyed()) return null
+  const tab = allTabs().find(
+    (candidate) => candidate.view?.webContents.id === electronTabId,
+  );
+  const contents = tab?.view?.webContents;
+  if (!contents || contents.isDestroyed()) return null;
 
-  const mainFrame = contents.mainFrame
-  const frames = mainFrame.framesInSubtree.filter((frame) => !frame.detached)
-  const frameNodeIds = new Set(frames.map((frame) => frame.frameTreeNodeId))
-  if (!frames.some((frame) => frame.frameTreeNodeId === mainFrame.frameTreeNodeId)) return null
-  if (frames.some((frame) => frame.parent && !frameNodeIds.has(frame.parent.frameTreeNodeId))) return null
+  const mainFrame = contents.mainFrame;
+  const frames = mainFrame.framesInSubtree.filter((frame) => !frame.detached);
+  const frameNodeIds = new Set(frames.map((frame) => frame.frameTreeNodeId));
+  if (
+    !frames.some((frame) => frame.frameTreeNodeId === mainFrame.frameTreeNodeId)
+  )
+    return null;
+  if (
+    frames.some(
+      (frame) =>
+        frame.parent && !frameNodeIds.has(frame.parent.frameTreeNodeId),
+    )
+  )
+    return null;
 
   const extensionFrameId = (frame: WebFrameMain): number =>
-    frame.frameTreeNodeId === mainFrame.frameTreeNodeId ? 0 : frame.frameTreeNodeId
+    frame.frameTreeNodeId === mainFrame.frameTreeNodeId
+      ? 0
+      : frame.frameTreeNodeId;
 
-  if (frames.some((frame) => frame.parent && extensionFrameId(frame) <= 0)) return null
+  if (frames.some((frame) => frame.parent && extensionFrameId(frame) <= 0))
+    return null;
   return frames.map((frame) => ({
     frameId: extensionFrameId(frame),
     parentFrameId: frame.parent ? extensionFrameId(frame.parent) : -1,
     processId: frame.processId,
-    url: frame.url
-  }))
+    url: frame.url,
+  }));
 }
 
 /** Private tab: opens on the local New Tab (private variant) unless given a URL. */
 export function newPrivateBrowserTab(input?: string): string | null {
-  const w = currentWindowState()
-  const id = createTab(input ?? SURFFISH_QUICK_LINKS_URL, selectedSearchEngine, true, false, false, false, undefined, undefined, true, false, w)
-  if (id && w) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
-  return id
+  const w = currentWindowState();
+  const id = createTab(
+    input ?? SURFFISH_QUICK_LINKS_URL,
+    selectedSearchEngine,
+    true,
+    false,
+    false,
+    false,
+    undefined,
+    undefined,
+    true,
+    false,
+    w,
+  );
+  if (id && w) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+  return id;
 }
 
 /** Links from outside (the OS, update downloads) go to the current window, or the last normal one if that is private. */
 function normalWindowState(): BrowserWindowState | undefined {
-  const current = currentWindowState()
-  if (!current?.isPrivate) return current
-  return [...windowStates].reverse().find((w) => !w.isPrivate && !w.mini && isLiveWindow(w)) ?? current
+  const current = currentWindowState();
+  if (!current?.isPrivate) return current;
+  return (
+    [...windowStates]
+      .reverse()
+      .find((w) => !w.isPrivate && !w.mini && isLiveWindow(w)) ?? current
+  );
 }
 
 /**
@@ -3025,70 +4833,133 @@ function normalWindowState(): BrowserWindowState | undefined {
  * opener, never from a page or the address bar) are accepted.
  */
 export function openExternalBrowserTab(target: string): string | null {
-  const localDocument = isLocalDocumentUrl(target)
-  const url = localDocument ? target : resolveNavigationTarget(target)
-  if (!url || (!localDocument && !/^https?:\/\//i.test(url))) return null
-  const w = normalWindowState()
-  const id = createTab(url, selectedSearchEngine, true, false, false, false, undefined, undefined, false, localDocument, w)
-  if (id) persistOpenTabs()
-  if (id && w && !w.window.isDestroyed() && w.window !== currentBrowserWindow()) w.window.focus()
-  return id
+  const localDocument = isLocalDocumentUrl(target);
+  const url = localDocument ? target : resolveNavigationTarget(target);
+  if (!url || (!localDocument && !/^https?:\/\//i.test(url))) return null;
+  const w = normalWindowState();
+  const id = createTab(
+    url,
+    selectedSearchEngine,
+    true,
+    false,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    localDocument,
+    w,
+  );
+  if (id) persistOpenTabs();
+  if (id && w && !w.window.isDestroyed() && w.window !== currentBrowserWindow())
+    w.window.focus();
+  return id;
 }
 
-export async function translateBrowserPage(target: string, w = currentWindowState()): Promise<boolean> {
-  const contents = activeTabOf(w)?.view?.webContents
-  return contents ? translateInPlace(contents, target) : false
+export async function translateBrowserPage(
+  target: string,
+  w = currentWindowState(),
+): Promise<boolean> {
+  const contents = activeTabOf(w)?.view?.webContents;
+  return contents ? translateInPlace(contents, target) : false;
 }
-export async function translateBrowserText(text: string, target: string, w = currentWindowState()): Promise<boolean> {
-  const contents = activeTabOf(w)?.view?.webContents
-  return contents ? translateInPlace(contents, target, text) : false
+export async function translateBrowserText(
+  text: string,
+  target: string,
+  w = currentWindowState(),
+): Promise<boolean> {
+  const contents = activeTabOf(w)?.view?.webContents;
+  return contents ? translateInPlace(contents, target, text) : false;
 }
-export function newBrowserTab(input?: string, engine?: SearchEngineId, w = currentWindowState()): string | null {
-  const id = createTab(input, engine ?? selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
+export function newBrowserTab(
+  input?: string,
+  engine?: SearchEngineId,
+  w = currentWindowState(),
+): string | null {
+  const id = createTab(
+    input,
+    engine ?? selectedSearchEngine,
+    true,
+    false,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    false,
+    w,
+  );
   if (id && w) {
-    persistOpenTabs()
+    persistOpenTabs();
     // Only a blank New Tab wants the address bar. A tab opened on a URL (palette "open in new tab",
     // bookmarks) keeps focus on its page, as in Chrome, so typing and Space reach the site.
-    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window))
+    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL)
+      setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
   }
-  return id
+  return id;
 }
 
 /** Open extension UI only through this main-process-only path, never through address-bar navigation. */
-export function openExtensionPageTab(url: string, extensionUrl: string, preloadPath: string, owner: ExtensionPageOwner): string | null {
-  if (!preloadPath || !isBrambleExtensionUrl(url, extensionUrl)) return null
-  let tab = allTabs().find((candidate) => candidate.extensionPageOrigin === extensionUrl && isExtensionPage(candidate, currentUrl(candidate)))
+export function openExtensionPageTab(
+  url: string,
+  extensionUrl: string,
+  preloadPath: string,
+  owner: ExtensionPageOwner,
+): string | null {
+  if (!preloadPath || !isBrambleExtensionUrl(url, extensionUrl)) return null;
+  let tab = allTabs().find(
+    (candidate) =>
+      candidate.extensionPageOrigin === extensionUrl &&
+      isExtensionPage(candidate, currentUrl(candidate)),
+  );
   if (!tab) {
-    const id = createTab(url, selectedSearchEngine, true, false, false, false, { extensionUrl, preloadPath, owner }, undefined, false, false, normalWindowState())
-    if (!id) return null
-    tab = findTab(id)
+    const id = createTab(
+      url,
+      selectedSearchEngine,
+      true,
+      false,
+      false,
+      false,
+      { extensionUrl, preloadPath, owner },
+      undefined,
+      false,
+      false,
+      normalWindowState(),
+    );
+    if (!id) return null;
+    tab = findTab(id);
   } else {
-    tab.extensionPreloadPath = preloadPath
-    tab.extensionPageOwner = owner
+    tab.extensionPreloadPath = preloadPath;
+    tab.extensionPageOwner = owner;
     if (currentUrl(tab) !== url) {
-      tab.lastUrl = url
-      tab.pendingUrl = url
-      tab.restoreHistory = null
-      tab.error = null
-      const contents = tab.view?.webContents
+      tab.lastUrl = url;
+      tab.pendingUrl = url;
+      tab.restoreHistory = null;
+      tab.error = null;
+      const contents = tab.view?.webContents;
       if (contents && !contents.isDestroyed()) {
         void contents.loadURL(url).catch((error: unknown) => {
-          if (tab?.view?.webContents !== contents || isAbortedNavigation(error)) return
-          noteLoadRejection(tab, error instanceof Error ? error.message : String(error), url)
-          publishState(tab.win)
-        })
+          if (tab?.view?.webContents !== contents || isAbortedNavigation(error))
+            return;
+          noteLoadRejection(
+            tab,
+            error instanceof Error ? error.message : String(error),
+            url,
+          );
+          publishState(tab.win);
+        });
       } else {
-        ensureTabLoaded(tab)
+        ensureTabLoaded(tab);
       }
     }
   }
-  if (!tab) return null
+  if (!tab) return null;
   // Already open (Bramble's "Create your vault" with the setup tab from earlier) or just created:
   // either way the tab comes forward in its window, over any Settings panel, like Chrome does.
-  revealTabForExtension(tab)
-  persistOpenTabs()
-  publishState(tab.win)
-  return tab.id
+  revealTabForExtension(tab);
+  persistOpenTabs();
+  publishState(tab.win);
+  return tab.id;
 }
 
 /**
@@ -3098,37 +4969,54 @@ export function openExtensionPageTab(url: string, extensionUrl: string, preloadP
  * tab hidden behind an open Settings panel or in a window behind the current one.
  */
 function revealTabForExtension(tab: BrowserTab): void {
-  activateTabInternal(tab.id)
-  const home = tab.win
-  if (!isLiveWindow(home)) return
-  const window = home.window
+  activateTabInternal(tab.id);
+  const home = tab.win;
+  if (!isLiveWindow(home)) return;
+  const window = home.window;
   const plan = planExtensionTabReveal({
     sidebarMode: getBrowserChromeState(window).sidebarMode,
     minimized: window.isMinimized(),
-    visible: window.isVisible()
-  })
-  if (plan.closePanel) setBrowserChromeState({ sidebarMode: 'tabs' }, window)
-  if (plan.restore) window.restore()
-  if (plan.show) window.show()
-  window.focus()
-  const contents = activeTabOf(home)?.view?.webContents
-  if (contents && !contents.isDestroyed()) contents.focus()
+    visible: window.isVisible(),
+  });
+  if (plan.closePanel) setBrowserChromeState({ sidebarMode: "tabs" }, window);
+  if (plan.restore) window.restore();
+  if (plan.show) window.show();
+  window.focus();
+  const contents = activeTabOf(home)?.view?.webContents;
+  if (contents && !contents.isDestroyed()) contents.focus();
 }
 
 /** Open Bramble UI only through this main-process-only path, never through address-bar navigation. */
-export function openBrambleExtensionTab(url: string, extensionUrl: string, preloadPath: string): string | null {
-  return openExtensionPageTab(url, extensionUrl, preloadPath, 'bramble')
+export function openBrambleExtensionTab(
+  url: string,
+  extensionUrl: string,
+  preloadPath: string,
+): string | null {
+  return openExtensionPageTab(url, extensionUrl, preloadPath, "bramble");
 }
 
 export function isBrambleExtensionTab(contents: WebContents): boolean {
-  const tab = tabForContents(contents)
-  return Boolean(tab && tab.extensionPageOwner === 'bramble' && isExtensionPage(tab, currentUrl(tab)))
+  const tab = tabForContents(contents);
+  return Boolean(
+    tab &&
+    tab.extensionPageOwner === "bramble" &&
+    isExtensionPage(tab, currentUrl(tab)),
+  );
 }
 
 /** True when `contents` is a Surffish tab showing a page of the extension at `extensionUrl`. */
-export function isExtensionPageTab(contents: WebContents, extensionUrl: string, owner: ExtensionPageOwner): boolean {
-  const tab = tabForContents(contents)
-  return Boolean(tab && tab.extensionPageOwner === owner && tab.extensionPageOrigin === extensionUrl && isExtensionPage(tab, currentUrl(tab)))
+export function isExtensionPageTab(
+  contents: WebContents,
+  extensionUrl: string,
+  owner: ExtensionPageOwner,
+): boolean {
+  const tab = tabForContents(contents);
+  return Boolean(
+    tab &&
+    tab.extensionPageOwner === owner &&
+    tab.extensionPageOrigin === extensionUrl &&
+    isExtensionPage(tab, currentUrl(tab)),
+  );
 }
 
 /** Close extension-host tabs before replacing or unloading Bramble's extension build. */
@@ -3137,26 +5025,43 @@ export function isExtensionPageTab(contents: WebContents, extensionUrl: string, 
  * for a New Tab first, so the window stays (see planSetupTabClose). False when it is not a tab.
  */
 export function closeTabKeepingWindow(contents: WebContents): boolean {
-  const tab = tabForContents(contents)
-  if (!tab) return false
-  const w = tab.win
-  if (planSetupTabClose({ tabCount: w.tabs.length, mini: w.mini }) === 'replace-with-new-tab') {
-    createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
+  const tab = tabForContents(contents);
+  if (!tab) return false;
+  const w = tab.win;
+  if (
+    planSetupTabClose({ tabCount: w.tabs.length, mini: w.mini }) ===
+    "replace-with-new-tab"
+  ) {
+    createTab(
+      undefined,
+      selectedSearchEngine,
+      true,
+      false,
+      false,
+      false,
+      undefined,
+      undefined,
+      false,
+      false,
+      w,
+      tab.spaceId,
+    );
   }
-  closeBrowserTab(tab.id, false)
-  return true
+  closeBrowserTab(tab.id, false);
+  return true;
 }
 
 export function closeBrambleExtensionTabs(): void {
   for (const tab of allTabs()) {
-    if (tab.extensionPageOrigin && tab.extensionPageOwner === 'bramble') closeBrowserTab(tab.id)
+    if (tab.extensionPageOrigin && tab.extensionPageOwner === "bramble")
+      closeBrowserTab(tab.id);
   }
 }
 
 /** Close tabs showing pages of one extension (before disabling, updating, or uninstalling it). */
 export function closeExtensionPageTabs(extensionUrl: string): void {
   for (const tab of allTabs()) {
-    if (tab.extensionPageOrigin === extensionUrl) closeBrowserTab(tab.id)
+    if (tab.extensionPageOrigin === extensionUrl) closeBrowserTab(tab.id);
   }
 }
 
@@ -3165,29 +5070,32 @@ export function closeExtensionPageTabs(extensionUrl: string): void {
 // know Surffish's tab model, so the extension shim asks here. Tab IDs are the tab's WebContents id
 // (what content scripts see as sender.tab.id); unloaded tabs get a stable synthetic id.
 
-const syntheticExtensionTabIds = new Map<string, number>()
-let nextSyntheticExtensionTabId = 1_000_000
+const syntheticExtensionTabIds = new Map<string, number>();
+let nextSyntheticExtensionTabId = 1_000_000;
 
 function extensionTabId(tab: BrowserTab): number {
-  const contents = tab.view?.webContents
-  if (contents && !contents.isDestroyed()) return contents.id
-  let id = syntheticExtensionTabIds.get(tab.id)
+  const contents = tab.view?.webContents;
+  if (contents && !contents.isDestroyed()) return contents.id;
+  let id = syntheticExtensionTabIds.get(tab.id);
   if (id === undefined) {
-    id = nextSyntheticExtensionTabId++
-    syntheticExtensionTabIds.set(tab.id, id)
+    id = nextSyntheticExtensionTabId++;
+    syntheticExtensionTabIds.set(tab.id, id);
   }
-  return id
+  return id;
 }
 
 /** Whether the tab is in the window the user last used; left out when that is not known. */
 function currentWindowFlag(tab: BrowserTab): { currentWindow?: boolean } {
-  const current = currentWindowState()
-  return current ? { currentWindow: tab.win === current } : {}
+  const current = currentWindowState();
+  return current ? { currentWindow: tab.win === current } : {};
 }
 
-function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord {
-  const contents = tab.view?.webContents
-  const live = contents && !contents.isDestroyed()
+function extensionTabRecord(
+  tab: BrowserTab,
+  index: number,
+): ExtensionTabRecord {
+  const contents = tab.view?.webContents;
+  const live = contents && !contents.isDestroyed();
   return {
     id: extensionTabId(tab),
     index,
@@ -3198,475 +5106,704 @@ function extensionTabRecord(tab: BrowserTab, index: number): ExtensionTabRecord 
     title: pageTitle(tab),
     faviconUrl: tab.faviconUrl,
     loading: Boolean(live && contents.isLoading()),
-    sleeping: !live
-  }
+    sleeping: !live,
+  };
 }
 
 function findTabByExtensionId(id: number | undefined): BrowserTab | undefined {
   if (id === undefined) {
-    const active = getTab()
-    return active?.isPrivate ? undefined : active
+    const active = getTab();
+    return active?.isPrivate ? undefined : active;
   }
-  return allTabs().find((tab) => !tab.isPrivate && extensionTabId(tab) === id)
+  return allTabs().find((tab) => !tab.isPrivate && extensionTabId(tab) === id);
 }
 
 /** Extensions never see private tabs (like Chrome's default "not allowed in Incognito"). */
 export function listExtensionTabs(): ExtensionTabRecord[] {
-  return windowStates.flatMap((w) => w.tabs.filter((tab) => !tab.isPrivate).map((tab, index) => extensionTabRecord(tab, index)))
+  return windowStates.flatMap((w) =>
+    w.tabs
+      .filter((tab) => !tab.isPrivate)
+      .map((tab, index) => extensionTabRecord(tab, index)),
+  );
 }
 
 /** The (non-private) Surffish tab showing `contents`, for tabs.getCurrent from an extension page. */
-export function getExtensionTabForContents(contents: WebContents): ExtensionTabRecord | null {
-  const tab = tabForContents(contents)
-  return tab && !tab.isPrivate ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
+export function getExtensionTabForContents(
+  contents: WebContents,
+): ExtensionTabRecord | null {
+  const tab = tabForContents(contents);
+  return tab && !tab.isPrivate
+    ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab))
+    : null;
 }
 
-export function getExtensionTab(id: number | undefined): ExtensionTabRecord | null {
-  const tab = findTabByExtensionId(id)
-  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
+export function getExtensionTab(
+  id: number | undefined,
+): ExtensionTabRecord | null {
+  const tab = findTabByExtensionId(id);
+  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null;
 }
 
-export function reloadExtensionTab(id: number | undefined, bypassCache: boolean): boolean {
-  const tab = findTabByExtensionId(id)
-  if (!tab) return false
-  const contents = tab.view?.webContents
+export function reloadExtensionTab(
+  id: number | undefined,
+  bypassCache: boolean,
+): boolean {
+  const tab = findTabByExtensionId(id);
+  if (!tab) return false;
+  const contents = tab.view?.webContents;
   if (!contents || contents.isDestroyed()) {
-    ensureTabLoaded(tab)
-    return true
+    ensureTabLoaded(tab);
+    return true;
   }
-  if (bypassCache) contents.reloadIgnoringCache()
-  else contents.reload()
-  return true
+  if (bypassCache) contents.reloadIgnoringCache();
+  else contents.reload();
+  return true;
 }
 
 /** Navigate/activate/pin a tab for an extension. `url` must already be checked by the caller. */
-export function updateExtensionTab(id: number | undefined, update: { url?: string; active?: boolean; pinned?: boolean }): ExtensionTabRecord | null {
-  const tab = findTabByExtensionId(id)
-  if (!tab) return null
-  if (typeof update.pinned === 'boolean') setBrowserTabPinned(tab.id, update.pinned)
+export function updateExtensionTab(
+  id: number | undefined,
+  update: { url?: string; active?: boolean; pinned?: boolean },
+): ExtensionTabRecord | null {
+  const tab = findTabByExtensionId(id);
+  if (!tab) return null;
+  if (typeof update.pinned === "boolean")
+    setBrowserTabPinned(tab.id, update.pinned);
   if (update.url) {
-    tab.lastUrl = update.url
-    tab.pendingUrl = update.url
-    tab.restoreHistory = null
-    tab.error = null
-    const contents = tab.view?.webContents
-    if (contents && !contents.isDestroyed()) void contents.loadURL(update.url).catch(() => {})
-    else if (isActiveTab(tab) || update.active) ensureTabLoaded(tab)
+    tab.lastUrl = update.url;
+    tab.pendingUrl = update.url;
+    tab.restoreHistory = null;
+    tab.error = null;
+    const contents = tab.view?.webContents;
+    if (contents && !contents.isDestroyed())
+      void contents.loadURL(update.url).catch(() => {});
+    else if (isActiveTab(tab) || update.active) ensureTabLoaded(tab);
   }
-  if (update.active) revealTabForExtension(tab)
-  persistOpenTabs()
-  publishState(tab.win)
-  return extensionTabRecord(tab, tab.win.tabs.indexOf(tab))
+  if (update.active) revealTabForExtension(tab);
+  persistOpenTabs();
+  publishState(tab.win);
+  return extensionTabRecord(tab, tab.win.tabs.indexOf(tab));
 }
 
 /** Open a tab for an extension (http(s) or that extension's own page, checked by the caller). */
-export function createExtensionTab(url: string | undefined, active: boolean, extensionPage?: ExtensionPageTabOptions): ExtensionTabRecord | null {
-  const id = extensionPage && url
-    ? openExtensionPageTab(url, extensionPage.extensionUrl, extensionPage.preloadPath, extensionPage.owner)
-    : createTab(url, selectedSearchEngine, active, false, false, false, undefined, undefined, false, false, normalWindowState())
-  if (!id) return null
-  const tab = findTab(id)
+export function createExtensionTab(
+  url: string | undefined,
+  active: boolean,
+  extensionPage?: ExtensionPageTabOptions,
+): ExtensionTabRecord | null {
+  const id =
+    extensionPage && url
+      ? openExtensionPageTab(
+          url,
+          extensionPage.extensionUrl,
+          extensionPage.preloadPath,
+          extensionPage.owner,
+        )
+      : createTab(
+          url,
+          selectedSearchEngine,
+          active,
+          false,
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          false,
+          normalWindowState(),
+        );
+  if (!id) return null;
+  const tab = findTab(id);
   // Extension pages were already brought forward by openExtensionPageTab.
-  if (tab && active && !extensionPage) revealTabForExtension(tab)
-  persistOpenTabs()
-  if (tab) publishState(tab.win)
-  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null
+  if (tab && active && !extensionPage) revealTabForExtension(tab);
+  persistOpenTabs();
+  if (tab) publishState(tab.win);
+  return tab ? extensionTabRecord(tab, tab.win.tabs.indexOf(tab)) : null;
 }
 
 export function removeExtensionTabs(ids: readonly number[]): void {
   for (const id of ids) {
-    const tab = findTabByExtensionId(id)
-    if (tab) closeBrowserTab(tab.id)
+    const tab = findTabByExtensionId(id);
+    if (tab) closeBrowserTab(tab.id);
   }
 }
 
 /** A tab's live WebContents (null while it sleeps), in whichever window it is. */
-export function getBrowserTabWebContents(id: string | null | undefined): WebContents | null {
-  const contents = findTab(id)?.view?.webContents
-  return contents && !contents.isDestroyed() ? contents : null
+export function getBrowserTabWebContents(
+  id: string | null | undefined,
+): WebContents | null {
+  const contents = findTab(id)?.view?.webContents;
+  return contents && !contents.isDestroyed() ? contents : null;
 }
 
 /** Main-frame WebContents of the active tab, when it is loaded. */
 export function getActiveTabWebContents(): WebContents | null {
-  const contents = getTab()?.view?.webContents
-  return contents && !contents.isDestroyed() ? contents : null
+  const contents = getTab()?.view?.webContents;
+  return contents && !contents.isDestroyed() ? contents : null;
 }
 
 export type TabCommand =
-  | 'bookmark' | 'pin' | 'duplicate' | 'copyLink' | 'copyCleanLink' | 'reload' | 'hardReload' | 'close' | 'closeOthers'
-  | 'back' | 'forward' | 'previousTab' | 'nextTab'
-  | 'find' | 'findNext' | 'findPrevious'
-  | 'zoomIn' | 'zoomOut' | 'zoomReset'
-  | 'history' | 'downloads'
-  | 'bookmarkAllTabs' | 'bookmarks' | 'bookmarksBar'
-  | 'screenshot'
-  | 'splitView' | 'focusPaneLeft' | 'focusPaneRight'
-  | 'readingList'
-  | 'miniWindow'
+  | "bookmark"
+  | "pin"
+  | "duplicate"
+  | "copyLink"
+  | "copyCleanLink"
+  | "reload"
+  | "hardReload"
+  | "close"
+  | "closeOthers"
+  | "back"
+  | "forward"
+  | "previousTab"
+  | "nextTab"
+  | "find"
+  | "findNext"
+  | "findPrevious"
+  | "zoomIn"
+  | "zoomOut"
+  | "zoomReset"
+  | "history"
+  | "downloads"
+  | "bookmarkAllTabs"
+  | "bookmarks"
+  | "bookmarksBar"
+  | "screenshot"
+  | "splitView"
+  | "focusPaneLeft"
+  | "focusPaneRight"
+  | "readingList"
+  | "miniWindow";
 
 interface CommandShortcut {
-  key: string
-  shift?: boolean
+  key: string;
+  shift?: boolean;
   /** Match with or without Shift (Cmd+= and Cmd++ both zoom in). */
-  anyShift?: boolean
-  alt?: boolean
+  anyShift?: boolean;
+  alt?: boolean;
   /** Needs the platform's primary modifier (Cmd on macOS, where Ctrl+letter is text editing). */
-  primaryOnly?: boolean
-  accelerator: string
+  primaryOnly?: boolean;
+  accelerator: string;
 }
 
-const IS_MAC = process.platform === 'darwin'
+const IS_MAC = process.platform === "darwin";
 
 // One table for browser shortcuts: the key handler, the app menu and the tab context menu all read it.
 export const TAB_COMMAND_SHORTCUTS: Record<TabCommand, CommandShortcut> = {
-  bookmark: { key: 'd', accelerator: 'CmdOrCtrl+D' },
-  pin: { key: 'p', shift: true, accelerator: 'CmdOrCtrl+Shift+P' },
+  bookmark: { key: "d", accelerator: "CmdOrCtrl+D" },
+  pin: { key: "p", shift: true, accelerator: "CmdOrCtrl+Shift+P" },
   // Cmd+Shift+D is Chrome's "Bookmark all tabs"; Duplicate stays in the tab menu without a shortcut.
-  duplicate: { key: '', accelerator: '' },
-  bookmarkAllTabs: { key: 'd', shift: true, accelerator: 'CmdOrCtrl+Shift+D' },
-  bookmarks: { key: 'b', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+B' },
+  duplicate: { key: "", accelerator: "" },
+  bookmarkAllTabs: { key: "d", shift: true, accelerator: "CmdOrCtrl+Shift+D" },
+  bookmarks: {
+    key: "b",
+    alt: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Alt+B",
+  },
   // Chrome's binding for Show/Hide Bookmarks Bar.
-  bookmarksBar: { key: 'b', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+B' },
-  copyLink: { key: 'c', shift: true, accelerator: 'CmdOrCtrl+Shift+C' },
-  copyCleanLink: { key: 'c', shift: true, alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Shift+C' },
-  reload: { key: 'r', accelerator: 'CmdOrCtrl+R' },
-  hardReload: { key: 'r', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+R' },
-  close: { key: 'w', accelerator: 'CmdOrCtrl+W' },
-  closeOthers: { key: 'w', alt: true, accelerator: 'CmdOrCtrl+Alt+W' },
-  back: { key: '[', primaryOnly: true, accelerator: 'CmdOrCtrl+[' },
-  forward: { key: ']', primaryOnly: true, accelerator: 'CmdOrCtrl+]' },
-  previousTab: { key: '[', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+[' },
-  nextTab: { key: ']', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+]' },
-  find: { key: 'f', primaryOnly: true, accelerator: 'CmdOrCtrl+F' },
-  findNext: { key: 'g', primaryOnly: true, accelerator: 'CmdOrCtrl+G' },
-  findPrevious: { key: 'g', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+G' },
+  bookmarksBar: {
+    key: "b",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+B",
+  },
+  copyLink: { key: "c", shift: true, accelerator: "CmdOrCtrl+Shift+C" },
+  copyCleanLink: {
+    key: "c",
+    shift: true,
+    alt: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Alt+Shift+C",
+  },
+  reload: { key: "r", accelerator: "CmdOrCtrl+R" },
+  hardReload: {
+    key: "r",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+R",
+  },
+  close: { key: "w", accelerator: "CmdOrCtrl+W" },
+  closeOthers: { key: "w", alt: true, accelerator: "CmdOrCtrl+Alt+W" },
+  back: { key: "[", primaryOnly: true, accelerator: "CmdOrCtrl+[" },
+  forward: { key: "]", primaryOnly: true, accelerator: "CmdOrCtrl+]" },
+  previousTab: {
+    key: "[",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+[",
+  },
+  nextTab: {
+    key: "]",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+]",
+  },
+  find: { key: "f", primaryOnly: true, accelerator: "CmdOrCtrl+F" },
+  findNext: { key: "g", primaryOnly: true, accelerator: "CmdOrCtrl+G" },
+  findPrevious: {
+    key: "g",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+G",
+  },
   // Cmd/Ctrl+Shift+= is Split View, so Zoom In is Cmd/Ctrl+= only (a layout's unshifted "+" still folds to "=").
-  zoomIn: { key: '=', primaryOnly: true, accelerator: 'CmdOrCtrl+=' },
-  zoomOut: { key: '-', primaryOnly: true, accelerator: 'CmdOrCtrl+-' },
-  zoomReset: { key: '0', primaryOnly: true, accelerator: 'CmdOrCtrl+0' },
+  zoomIn: { key: "=", primaryOnly: true, accelerator: "CmdOrCtrl+=" },
+  zoomOut: { key: "-", primaryOnly: true, accelerator: "CmdOrCtrl+-" },
+  zoomReset: { key: "0", primaryOnly: true, accelerator: "CmdOrCtrl+0" },
   // Chrome's bindings: Cmd+Y / Cmd+Shift+J on macOS, Ctrl+H / Ctrl+J elsewhere (Ctrl+Y is Redo there).
-  history: IS_MAC ? { key: 'y', primaryOnly: true, accelerator: 'Cmd+Y' } : { key: 'h', primaryOnly: true, accelerator: 'Ctrl+H' },
-  downloads: IS_MAC ? { key: 'j', shift: true, primaryOnly: true, accelerator: 'Cmd+Shift+J' } : { key: 'j', primaryOnly: true, accelerator: 'Ctrl+J' },
+  history: IS_MAC
+    ? { key: "y", primaryOnly: true, accelerator: "Cmd+Y" }
+    : { key: "h", primaryOnly: true, accelerator: "Ctrl+H" },
+  downloads: IS_MAC
+    ? { key: "j", shift: true, primaryOnly: true, accelerator: "Cmd+Shift+J" }
+    : { key: "j", primaryOnly: true, accelerator: "Ctrl+J" },
   // Free in Chrome on every platform (it has no screenshot binding); Cmd+Shift+3/4/5 stay with macOS.
-  screenshot: { key: 's', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+S' },
+  screenshot: {
+    key: "s",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+S",
+  },
   // Split the tab with the last used one (or unsplit); the arrows move focus between panes.
-  splitView: { key: '=', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+=' },
-  focusPaneLeft: { key: 'arrowleft', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Left' },
-  focusPaneRight: { key: 'arrowright', alt: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Alt+Right' },
+  splitView: {
+    key: "=",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+=",
+  },
+  focusPaneLeft: {
+    key: "arrowleft",
+    alt: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Alt+Left",
+  },
+  focusPaneRight: {
+    key: "arrowright",
+    alt: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Alt+Right",
+  },
   // Safari/Orion use Cmd+Shift+D, which is Bookmark All Tabs here (Chrome's binding); Cmd/Ctrl+Shift+L is free.
-  readingList: { key: 'l', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+L' },
+  readingList: {
+    key: "l",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+L",
+  },
   // Pop the tab out to the mini window, or (in the mini window) put it back. Free in Chrome on macOS.
-  miniWindow: { key: 'm', shift: true, primaryOnly: true, accelerator: 'CmdOrCtrl+Shift+M' }
-}
+  miniWindow: {
+    key: "m",
+    shift: true,
+    primaryOnly: true,
+    accelerator: "CmdOrCtrl+Shift+M",
+  },
+};
 
-function tabMenuAccelerator(command: TabCommand): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
+function tabMenuAccelerator(
+  command: TabCommand,
+): Pick<MenuItemConstructorOptions, "accelerator" | "registerAccelerator"> {
   // Shown as a hint only; the app menu and before-input-event do the real handling.
-  const { accelerator } = TAB_COMMAND_SHORTCUTS[command]
-  return accelerator ? { accelerator, registerAccelerator: false } : {}
+  const { accelerator } = TAB_COMMAND_SHORTCUTS[command];
+  return accelerator ? { accelerator, registerAccelerator: false } : {};
 }
 
 export function runTabCommand(command: TabCommand, tabId = getTab()?.id): void {
-  const ownerTab = findTab(tabId)
+  const ownerTab = findTab(tabId);
   // The mini window's tab: page commands act on it; the rest go to the browser window as usual.
-  if (ownerTab?.win.mini && runMiniTabCommand(ownerTab, command)) return
-  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window
-  if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
-    runInWindow(owner, () => runTabCommand(command, tabId))
-    return
+  if (ownerTab?.win.mini && runMiniTabCommand(ownerTab, command)) return;
+  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window;
+  if (
+    owner &&
+    owner !== currentBrowserWindow() &&
+    isLiveWindow(windowStateFor(owner))
+  ) {
+    runInWindow(owner, () => runTabCommand(command, tabId));
+    return;
   }
   switch (command) {
-    case 'miniWindow':
-      if (tabId) void popOutTabToMiniWindow(tabId)
-      return
-    case 'close':
-      closeBrowserTabFromShortcut(tabId)
-      return
-    case 'back':
-      browserBack()
-      return
-    case 'forward':
-      browserForward()
-      return
-    case 'previousTab':
-      cycleBrowserTab(-1)
-      return
-    case 'nextTab':
-      cycleBrowserTab(1)
-      return
-    case 'find':
-      openFindBar()
-      return
-    case 'findNext':
-      stepFind(true)
-      return
-    case 'findPrevious':
-      stepFind(false)
-      return
-    case 'zoomIn':
-    case 'zoomOut':
-    case 'zoomReset':
-      zoomActiveBrowserTab(command === 'zoomIn' ? 'in' : command === 'zoomOut' ? 'out' : 'reset')
-      return
-    case 'history':
-    case 'downloads':
-    case 'bookmarks':
-      toggleBrowserPanel(command)
-      return
-    case 'bookmarkAllTabs':
-      bookmarkAllBrowserTabs()
-      return
-    case 'bookmarksBar':
-      toggleBookmarksBar()
-      return
-    case 'screenshot':
-      void takeScreenshot('choose')
-      return
-    case 'splitView':
-      toggleBrowserSplitView()
-      return
-    case 'focusPaneLeft':
-    case 'focusPaneRight':
-      focusAdjacentSplitPane(command === 'focusPaneLeft' ? -1 : 1)
-      return
-    case 'readingList':
-      addTabToReadingList(tabId)
-      return
+    case "miniWindow":
+      if (tabId) void popOutTabToMiniWindow(tabId);
+      return;
+    case "close":
+      closeBrowserTabFromShortcut(tabId);
+      return;
+    case "back":
+      browserBack();
+      return;
+    case "forward":
+      browserForward();
+      return;
+    case "previousTab":
+      cycleBrowserTab(-1);
+      return;
+    case "nextTab":
+      cycleBrowserTab(1);
+      return;
+    case "find":
+      openFindBar();
+      return;
+    case "findNext":
+      stepFind(true);
+      return;
+    case "findPrevious":
+      stepFind(false);
+      return;
+    case "zoomIn":
+    case "zoomOut":
+    case "zoomReset":
+      zoomActiveBrowserTab(
+        command === "zoomIn" ? "in" : command === "zoomOut" ? "out" : "reset",
+      );
+      return;
+    case "history":
+    case "downloads":
+    case "bookmarks":
+      toggleBrowserPanel(command);
+      return;
+    case "bookmarkAllTabs":
+      bookmarkAllBrowserTabs();
+      return;
+    case "bookmarksBar":
+      toggleBookmarksBar();
+      return;
+    case "screenshot":
+      void takeScreenshot("choose");
+      return;
+    case "splitView":
+      toggleBrowserSplitView();
+      return;
+    case "focusPaneLeft":
+    case "focusPaneRight":
+      focusAdjacentSplitPane(command === "focusPaneLeft" ? -1 : 1);
+      return;
+    case "readingList":
+      addTabToReadingList(tabId);
+      return;
   }
-  const tab = tabId ? getTab(tabId) : undefined
-  if (!tab) return
+  const tab = tabId ? getTab(tabId) : undefined;
+  if (!tab) return;
   switch (command) {
-    case 'bookmark':
-      if (normalizeHttpOrigin(currentUrl(tab))) bookmarkTabAndEdit(tab.id)
-      break
-    case 'pin':
-      setBrowserTabPinned(tab.id, !tab.pinned)
-      break
-    case 'duplicate':
-      duplicateBrowserTab(tab.id)
-      break
-    case 'copyLink':
-      if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(currentUrl(tab))
-      break
-    case 'copyCleanLink':
-      if (normalizeHttpOrigin(currentUrl(tab))) clipboard.writeText(cleanLinkUrl(currentUrl(tab)))
-      break
-    case 'reload':
-      reloadBrowserTab(tab.id)
-      break
-    case 'hardReload':
-      reloadBrowserTab(tab.id, true)
-      break
-    case 'closeOthers':
-      closeBrowserTabsRelative(tab.id, 'others')
-      break
+    case "bookmark":
+      if (normalizeHttpOrigin(currentUrl(tab))) bookmarkTabAndEdit(tab.id);
+      break;
+    case "pin":
+      setBrowserTabPinned(tab.id, !tab.pinned);
+      break;
+    case "duplicate":
+      duplicateBrowserTab(tab.id);
+      break;
+    case "copyLink":
+      if (normalizeHttpOrigin(currentUrl(tab)))
+        clipboard.writeText(currentUrl(tab));
+      break;
+    case "copyCleanLink":
+      if (normalizeHttpOrigin(currentUrl(tab)))
+        clipboard.writeText(cleanLinkUrl(currentUrl(tab)));
+      break;
+    case "reload":
+      reloadBrowserTab(tab.id);
+      break;
+    case "hardReload":
+      reloadBrowserTab(tab.id, true);
+      break;
+    case "closeOthers":
+      closeBrowserTabsRelative(tab.id, "others");
+      break;
   }
 }
 
 // Shift turns these into other characters on most layouts ({ } + _); fold them back so Cmd+Shift+[ matches '['.
-const SHIFTED_KEY_ALIASES: Record<string, string> = { '{': '[', '}': ']', '+': '=', '_': '-' }
-const CODE_KEYS: Record<string, string> = { BracketLeft: '[', BracketRight: ']', Equal: '=', Minus: '-' }
+const SHIFTED_KEY_ALIASES: Record<string, string> = {
+  "{": "[",
+  "}": "]",
+  "+": "=",
+  _: "-",
+};
+const CODE_KEYS: Record<string, string> = {
+  BracketLeft: "[",
+  BracketRight: "]",
+  Equal: "=",
+  Minus: "-",
+};
 
 /** Normalises a before-input-event (Opt changes `key` on macOS, so fall back to `code`). */
-export function handleBrowserShortcutInput(input: Electron.Input, tabId: string | null | undefined = getTab()?.id ?? null): boolean {
-  if (input.type !== 'keyDown' || (!input.control && !input.meta)) return false
+export function handleBrowserShortcutInput(
+  input: Electron.Input,
+  tabId: string | null | undefined = getTab()?.id ?? null,
+): boolean {
+  if (input.type !== "keyDown" || (!input.control && !input.meta)) return false;
   // Spaces: Ctrl+1..9 on macOS (Cmd+1..9 stays tab select), Ctrl+Shift+1..9 elsewhere. Only while Spaces are on.
-  const spaceDigit = /^Digit([1-9])$/.exec(input.code)
-  if (spaceDigit && spacesEnabled() && !input.alt && !input.meta && input.control && (IS_MAC ? !input.shift : input.shift)) {
-    selectBrowserSpaceByNumber(Number(spaceDigit[1]))
-    return true
+  const spaceDigit = /^Digit([1-9])$/.exec(input.code);
+  if (
+    spaceDigit &&
+    spacesEnabled() &&
+    !input.alt &&
+    !input.meta &&
+    input.control &&
+    (IS_MAC ? !input.shift : input.shift)
+  ) {
+    selectBrowserSpaceByNumber(Number(spaceDigit[1]));
+    return true;
   }
-  let key = input.key.toLowerCase()
+  let key = input.key.toLowerCase();
   if (input.alt) {
-    if (/^Key[A-Z]$/.test(input.code)) key = input.code.slice(3).toLowerCase()
-    else if (/^Digit\d$/.test(input.code)) key = input.code.slice(5)
-    else if (CODE_KEYS[input.code]) key = CODE_KEYS[input.code]!
+    if (/^Key[A-Z]$/.test(input.code)) key = input.code.slice(3).toLowerCase();
+    else if (/^Digit\d$/.test(input.code)) key = input.code.slice(5);
+    else if (CODE_KEYS[input.code]) key = CODE_KEYS[input.code]!;
   }
-  key = SHIFTED_KEY_ALIASES[key] ?? key
-  const primary = IS_MAC ? input.meta : input.control
-  return handleBrowserShortcut(key, input.shift, tabId, input.alt, primary)
+  key = SHIFTED_KEY_ALIASES[key] ?? key;
+  const primary = IS_MAC ? input.meta : input.control;
+  return handleBrowserShortcut(key, input.shift, tabId, input.alt, primary);
 }
 
-export function handleBrowserShortcut(key: string, shift: boolean, tabId: string | null | undefined = getTab()?.id ?? null, alt = false, primary = true): boolean {
-  const ownerTab = findTab(tabId)
+export function handleBrowserShortcut(
+  key: string,
+  shift: boolean,
+  tabId: string | null | undefined = getTab()?.id ?? null,
+  alt = false,
+  primary = true,
+): boolean {
+  const ownerTab = findTab(tabId);
   // The mini window isn't a registered browser window, so it can't scope a call (runInWindow would no-op and recurse).
-  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window
-  if (owner && owner !== currentBrowserWindow() && isLiveWindow(windowStateFor(owner))) {
-    return runInWindow(owner, () => handleBrowserShortcut(key, shift, tabId, alt, primary))
+  const owner = ownerTab?.win.mini ? undefined : ownerTab?.win.window;
+  if (
+    owner &&
+    owner !== currentBrowserWindow() &&
+    isLiveWindow(windowStateFor(owner))
+  ) {
+    return runInWindow(owner, () =>
+      handleBrowserShortcut(key, shift, tabId, alt, primary),
+    );
   }
   // In a mini window: ⌘/Ctrl+T opens a New Tab in that mini window, ⌘/Ctrl+L shows its address field
   // (links clicked in it still open in a browser window).
   if (ownerTab?.win.mini && primary && !alt && !shift) {
-    if (key === 't' && openMiniWindowNewTab(ownerTab.win.window)) return true
-    if (key === 'l' && focusMiniWindowAddress(ownerTab.win.window)) return true
+    if (key === "t" && openMiniWindowNewTab(ownerTab.win.window)) return true;
+    if (key === "l" && focusMiniWindowAddress(ownerTab.win.window)) return true;
   }
   // Cmd/Ctrl+G groups the sidebar's multi-selection when 2+ tabs are selected; otherwise it's Find Next.
-  if (key === 'g' && !shift && !alt && primary && tabSelectionHooks?.groupShortcut()) return true
-  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [TabCommand, CommandShortcut][]) {
-    if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue
-    if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue
-    if (shortcut.primaryOnly && !primary) continue
+  if (
+    key === "g" &&
+    !shift &&
+    !alt &&
+    primary &&
+    tabSelectionHooks?.groupShortcut()
+  )
+    return true;
+  for (const [command, shortcut] of Object.entries(TAB_COMMAND_SHORTCUTS) as [
+    TabCommand,
+    CommandShortcut,
+  ][]) {
+    if (shortcut.key !== key || Boolean(shortcut.alt) !== alt) continue;
+    if (!shortcut.anyShift && Boolean(shortcut.shift) !== shift) continue;
+    if (shortcut.primaryOnly && !primary) continue;
     // Pane focus keys are only taken while a split is on screen; otherwise the page gets them.
-    if ((command === 'focusPaneLeft' || command === 'focusPaneRight') && !splitOf(findTab(tabId) ?? getTab())) continue
-    runTabCommand(command, tabId ?? undefined)
-    return true
+    if (
+      (command === "focusPaneLeft" || command === "focusPaneRight") &&
+      !splitOf(findTab(tabId) ?? getTab())
+    )
+      continue;
+    runTabCommand(command, tabId ?? undefined);
+    return true;
   }
   // Cmd/Ctrl+K and Cmd/Ctrl+Shift+A: the command palette wins over the page unless turned off in Settings.
-  if (handleCommandPaletteShortcut(key, shift, alt, primary)) return true
-  if (alt) return false
+  if (handleCommandPaletteShortcut(key, shift, alt, primary)) return true;
+  if (alt) return false;
   if (primary && !shift && /^[1-9]$/.test(key)) {
-    selectBrowserTabByNumber(Number(key))
-    return true
+    selectBrowserTabByNumber(Number(key));
+    return true;
   }
-  if (key === 'l' && !shift) {
-    sendFocusAddressToVisibleRenderer()
-    return true
+  if (key === "l" && !shift) {
+    sendFocusAddressToVisibleRenderer();
+    return true;
   }
   // Cmd/Ctrl+, : the Settings tab (pressed in a mini window, it opens in a browser window).
-  if (key === ',' && !shift && primary) {
-    openSettingsTab(undefined, ownerTab?.win.window)
-    return true
+  if (key === "," && !shift && primary) {
+    openSettingsTab(undefined, ownerTab?.win.window);
+    return true;
   }
-  if (key === 't' && !shift) {
-    newBrowserTab()
-    return true
+  if (key === "t" && !shift) {
+    newBrowserTab();
+    return true;
   }
-  if (key === 't' && shift) {
-    reopenClosedBrowserTab()
-    return true
+  if (key === "t" && shift) {
+    reopenClosedBrowserTab();
+    return true;
   }
-  if ((key === '\\' || key === '|') && shift) {
-    toggleTabOverview()
-    return true
+  if ((key === "\\" || key === "|") && shift) {
+    toggleTabOverview();
+    return true;
   }
-  if (key === 'tab' && spaceTabsOf(currentWindowState()).length > 1) {
-    cycleBrowserTab(shift ? -1 : 1)
-    return true
+  if (key === "tab" && spaceTabsOf(currentWindowState()).length > 1) {
+    cycleBrowserTab(shift ? -1 : 1);
+    return true;
   }
-  return false
+  return false;
 }
 
 /** Tabs in the order the sidebar shows them: pinned icons first, then the list. */
 function tabsInSidebarOrder(w = currentWindowState()): BrowserTab[] {
-  const tabs = spaceTabsOf(w)
-  return [...tabs.filter((tab) => tab.pinned), ...tabs.filter((tab) => !tab.pinned)]
+  const tabs = spaceTabsOf(w);
+  return [
+    ...tabs.filter((tab) => tab.pinned),
+    ...tabs.filter((tab) => !tab.pinned),
+  ];
 }
 
 /** Cmd+1..8 selects that tab, Cmd+9 the last one (as in Chrome). */
 export function selectBrowserTabByNumber(number: number): void {
   // Sidebar entries: a split counts once, and selecting it lands on its last used pane.
-  const w = currentWindowState()
+  const w = currentWindowState();
   const ordered = tabsInSidebarOrder().flatMap((tab) => {
-    const group = splitOf(tab)
-    if (!group || !w) return [tab]
-    if (w.tabs.find((candidate) => group.tabIds.includes(candidate.id)) !== tab) return []
-    const recent = pickLastUsedTab(w.recentTabIds, null, (id) => group.tabIds.includes(id))
-    return [findTab(recent) ?? tab]
-  })
-  const target = number === 9 ? ordered[ordered.length - 1] : ordered[number - 1]
-  if (!target) return
-  if (!isActiveTab(target)) activateBrowserTab(target.id)
+    const group = splitOf(tab);
+    if (!group || !w) return [tab];
+    if (w.tabs.find((candidate) => group.tabIds.includes(candidate.id)) !== tab)
+      return [];
+    const recent = pickLastUsedTab(w.recentTabIds, null, (id) =>
+      group.tabIds.includes(id),
+    );
+    return [findTab(recent) ?? tab];
+  });
+  const target =
+    number === 9 ? ordered[ordered.length - 1] : ordered[number - 1];
+  if (!target) return;
+  if (!isActiveTab(target)) activateBrowserTab(target.id);
   // From the tab overview, land on the chosen tab.
-  if (isTabOverviewOpen()) closeTabOverview(target.id)
+  if (isTabOverviewOpen()) closeTabOverview(target.id);
 }
 
 function closeOverviewForPanel(): void {
-  if (isTabOverviewOpen()) closeTabOverview(getTab()?.id, false)
+  if (isTabOverviewOpen()) closeTabOverview(getTab()?.id, false);
 }
 
 /** Cmd+Shift+Backspace: Settings → Privacy (Clear browsing data). */
 export function openClearBrowsingData(): void {
-  openSettingsTab({ section: 'privacy' })
+  openSettingsTab({ section: "privacy" });
 }
 
 /** Cmd+Y / Cmd+Shift+J / Cmd+Opt+B: toggle the history sidebar, downloads or the bookmarks manager. */
-function toggleBrowserPanel(mode: 'history' | 'downloads' | 'bookmarks'): void {
-  closeOverviewForPanel()
-  const current = getBrowserChromeState().sidebarMode
-  setBrowserChromeState({ sidebarMode: current === mode ? 'tabs' : mode })
+function toggleBrowserPanel(mode: "history" | "downloads" | "bookmarks"): void {
+  closeOverviewForPanel();
+  const current = getBrowserChromeState().sidebarMode;
+  setBrowserChromeState({ sidebarMode: current === mode ? "tabs" : mode });
 }
 
 // ---------------------------------------------------------------------------
 // Find in page. The bar lives in the toolbar overlay renderer; main keeps the query so
 // Cmd+G works with focus anywhere (page, toolbar, tab overview).
 
-onTabInterstitialChanged(() => publishAllWindows())
-onCertificateStateChanged(() => publishAllWindows())
+onTabInterstitialChanged(() => publishAllWindows());
+onCertificateStateChanged(() => publishAllWindows());
 
-const CLOSED_FIND_STATE: FindState = { tabId: null, open: false, text: '', result: null }
+const CLOSED_FIND_STATE: FindState = {
+  tabId: null,
+  open: false,
+  text: "",
+  result: null,
+};
 
 function publishFindState(w = currentWindowState()): void {
-  if (isLiveWindow(w)) sendToWindowRenderers(w.window, 'browser:find', getBrowserFindState(w))
+  if (isLiveWindow(w))
+    sendToWindowRenderers(w.window, "browser:find", getBrowserFindState(w));
 }
 
-export function getBrowserFindState(w = currentWindowState()): BrowserFindState {
-  const findState = w?.findState ?? CLOSED_FIND_STATE
-  return { open: findState.open, text: findState.text, result: findState.result ? { ...findState.result } : null }
+export function getBrowserFindState(
+  w = currentWindowState(),
+): BrowserFindState {
+  const findState = w?.findState ?? CLOSED_FIND_STATE;
+  return {
+    open: findState.open,
+    text: findState.text,
+    result: findState.result ? { ...findState.result } : null,
+  };
 }
 
 function findContents(w: BrowserWindowState): WebContents | null {
-  const tab = w.findState.tabId ? getTab(w.findState.tabId) : undefined
-  const contents = tab?.win === w ? tab.view?.webContents : null
-  return contents && !contents.isDestroyed() ? contents : null
+  const tab = w.findState.tabId ? getTab(w.findState.tabId) : undefined;
+  const contents = tab?.win === w ? tab.view?.webContents : null;
+  return contents && !contents.isDestroyed() ? contents : null;
 }
 
 /** Cmd+F: open (or refocus) the find bar for the active page. */
 export function openFindBar(): boolean {
-  const w = currentWindowState()
-  if (!w) return false
-  closeOverviewForPanel()
-  const tab = activeTabOf(w)
-  const contents = tab?.view?.webContents
-  if (!tab || !contents || contents.isDestroyed() || currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return false
-  if (w.findState.tabId !== tab.id) w.findState = { tabId: tab.id, open: true, text: w.findState.text, result: null }
-  w.findState.open = true
-  publishFindState(w)
+  const w = currentWindowState();
+  if (!w) return false;
+  closeOverviewForPanel();
+  const tab = activeTabOf(w);
+  const contents = tab?.view?.webContents;
+  if (
+    !tab ||
+    !contents ||
+    contents.isDestroyed() ||
+    currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
+  )
+    return false;
+  if (w.findState.tabId !== tab.id)
+    w.findState = {
+      tabId: tab.id,
+      open: true,
+      text: w.findState.text,
+      result: null,
+    };
+  w.findState.open = true;
+  publishFindState(w);
   // Focus the toolbar so typing goes to the find field; it selects the old query for retyping.
-  if (!runInWindow(w.window, () => sendToToolbarRenderer('browser:find:focus', true))) {
-    w.findState.open = false
-    publishFindState(w)
-    return false
+  if (
+    !runInWindow(w.window, () =>
+      sendToToolbarRenderer("browser:find:focus", true),
+    )
+  ) {
+    w.findState.open = false;
+    publishFindState(w);
+    return false;
   }
-  if (w.findState.text && !w.findState.result) contents.findInPage(w.findState.text, { findNext: true })
-  return true
+  if (w.findState.text && !w.findState.result)
+    contents.findInPage(w.findState.text, { findNext: true });
+  return true;
 }
 
 /** Typing in the find field: a new search for `text` (empty clears the highlight). */
 export function setBrowserFindQuery(input: unknown): void {
-  const w = currentWindowState()
-  if (!w || typeof input !== 'string' || !w.findState.open) return
-  const text = input.slice(0, 1_000)
-  const contents = findContents(w)
-  w.findState.text = text
-  w.findState.result = null
-  if (!contents) return publishFindState(w)
-  if (text) contents.findInPage(text, { findNext: true })
-  else contents.stopFindInPage('clearSelection')
-  publishFindState(w)
+  const w = currentWindowState();
+  if (!w || typeof input !== "string" || !w.findState.open) return;
+  const text = input.slice(0, 1_000);
+  const contents = findContents(w);
+  w.findState.text = text;
+  w.findState.result = null;
+  if (!contents) return publishFindState(w);
+  if (text) contents.findInPage(text, { findNext: true });
+  else contents.stopFindInPage("clearSelection");
+  publishFindState(w);
 }
 
 /** Enter / Cmd+G (forward) and Shift+Enter / Cmd+Shift+G (backward). */
 export function stepFind(forward: boolean): void {
-  const w = currentWindowState()
-  if (!w) return
-  const { findState } = w
+  const w = currentWindowState();
+  if (!w) return;
+  const { findState } = w;
   if (!findState.open || !findState.text || findState.tabId !== w.activeTabId) {
-    openFindBar()
-    return
+    openFindBar();
+    return;
   }
-  findContents(w)?.findInPage(findState.text, { forward, findNext: false })
+  findContents(w)?.findInPage(findState.text, { forward, findNext: false });
 }
 
 /** Esc or the close button: clear the highlight, hide the bar, hand focus back to the page. */
 export function closeFindBar(focusPage = true, w = currentWindowState()): void {
-  if (!w) return
-  const contents = findContents(w)
-  if (contents) contents.stopFindInPage('clearSelection')
-  const wasOpen = w.findState.open
-  w.findState = { tabId: null, open: false, text: w.findState.text, result: null }
-  if (wasOpen) publishFindState(w)
+  if (!w) return;
+  const contents = findContents(w);
+  if (contents) contents.stopFindInPage("clearSelection");
+  const wasOpen = w.findState.open;
+  w.findState = {
+    tabId: null,
+    open: false,
+    text: w.findState.text,
+    result: null,
+  };
+  if (wasOpen) publishFindState(w);
   if (focusPage) {
-    const active = activeTabOf(w)?.view?.webContents
-    if (active && !active.isDestroyed()) active.focus()
+    const active = activeTabOf(w)?.view?.webContents;
+    if (active && !active.isDestroyed()) active.focus();
   }
 }
 
@@ -3675,117 +5812,152 @@ export function closeFindBar(focusPage = true, w = currentWindowState()): void {
 // memory only (forgotten with the private session).
 
 function applySavedZoom(tab: BrowserTab, url: string): void {
-  applySavedPageZoom(tab.view?.webContents, url, tab.isPrivate)
+  applySavedPageZoom(tab.view?.webContents, url, tab.isPrivate);
 }
 
 function zoomTab(tab: BrowserTab, action: PageZoomAction): void {
-  if (stepPageZoom(tab.view?.webContents, action, tab.isPrivate) === null) return
-  if (isActiveTab(tab)) publishState(tab.win)
+  if (stepPageZoom(tab.view?.webContents, action, tab.isPrivate) === null)
+    return;
+  if (isActiveTab(tab)) publishState(tab.win);
 }
 
 /** Cmd + / Cmd - / Cmd 0 and the omnibox zoom pill. */
 export function zoomActiveBrowserTab(action: unknown): void {
-  if (action !== 'in' && action !== 'out' && action !== 'reset') return
+  if (action !== "in" && action !== "out" && action !== "reset") return;
   // A Glance open over the tab owns zoom (View menu, palette): it is what the user is reading.
-  const w = currentWindowState()
-  if (w && zoomOpenGlance(w.window, action)) return
-  const tab = getTab()
-  if (tab) zoomTab(tab, action)
+  const w = currentWindowState();
+  if (w && zoomOpenGlance(w.window, action)) return;
+  const tab = getTab();
+  if (tab) zoomTab(tab, action);
 }
 
 export function setBrowserSearchEngine(engine: SearchEngineId): void {
-  selectedSearchEngine = engine
+  selectedSearchEngine = engine;
 }
 
 /** The search engine the address bar uses right now. */
 export function getSelectedSearchEngine(): SearchEngineId {
-  return selectedSearchEngine
+  return selectedSearchEngine;
 }
 
 /**
  * The active tab's network (its page session and partition), for speculative preconnects: the
  * IPC sender's window, else the focused one. Null with no window or no active tab.
  */
-export function getActiveTabNetworkContext(): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
-  const tab = activeTabOf(currentWindowState())
-  if (!tab || tab.pdfEditor || tab.extensionPageOrigin) return null
-  return { session: pageSessionForTab(tab), partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab), isPrivate: tab.isPrivate }
+export function getActiveTabNetworkContext(): {
+  session: Electron.Session;
+  partition: string;
+  isPrivate: boolean;
+} | null {
+  const tab = activeTabOf(currentWindowState());
+  if (!tab || tab.pdfEditor || tab.extensionPageOrigin) return null;
+  return {
+    session: pageSessionForTab(tab),
+    partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab),
+    isPrivate: tab.isPrivate,
+  };
 }
 
 /**
  * A sleeping tab the pointer rests on in the sidebar: the URL it will wake to and its network, so
  * preconnect.ts can warm the origin before the click. Null for awake/private/local tabs.
  */
-export function getSleepingTabPreconnectTarget(id: string): { url: string; context: { session: Electron.Session; partition: string; isPrivate: boolean } } | null {
-  const tab = findTab(id)
-  if (!tab || tab.view || tab.isPrivate) return null
-  const url = tab.pendingUrl || tab.lastUrl
-  const context = url ? networkContextForTab(tab) : null
-  return context ? { url, context } : null
+export function getSleepingTabPreconnectTarget(id: string): {
+  url: string;
+  context: { session: Electron.Session; partition: string; isPrivate: boolean };
+} | null {
+  const tab = findTab(id);
+  if (!tab || tab.view || tab.isPrivate) return null;
+  const url = tab.pendingUrl || tab.lastUrl;
+  const context = url ? networkContextForTab(tab) : null;
+  return context ? { url, context } : null;
 }
 
-function networkContextForTab(tab: BrowserTab): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
-  if (tab.pdfEditor || tab.extensionPageOrigin) return null
-  return { session: pageSessionForTab(tab), partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab), isPrivate: tab.isPrivate }
+function networkContextForTab(
+  tab: BrowserTab,
+): { session: Electron.Session; partition: string; isPrivate: boolean } | null {
+  if (tab.pdfEditor || tab.extensionPageOrigin) return null;
+  return {
+    session: pageSessionForTab(tab),
+    partition: tab.isPrivate ? PRIVATE_PRECONNECT_KEY : partitionForTab(tab),
+    isPrivate: tab.isPrivate,
+  };
 }
 
-export function setBrowserTabSleepMinutes(value: unknown): TabSleepMinutes | null {
-  if (!isTabSleepMinutes(value)) return null
-  tabSleepMinutes = value
+export function setBrowserTabSleepMinutes(
+  value: unknown,
+): TabSleepMinutes | null {
+  if (!isTabSleepMinutes(value)) return null;
+  tabSleepMinutes = value;
   for (const tab of allTabs()) {
-    if (isTabOnScreen(tab)) continue
-    scheduleTabSleep(tab)
+    if (isTabOnScreen(tab)) continue;
+    scheduleTabSleep(tab);
   }
-  return tabSleepMinutes
+  return tabSleepMinutes;
 }
 
 export function activateBrowserTab(id: string): boolean {
-  const activated = activateTabInternal(id)
+  const activated = activateTabInternal(id);
   if (activated) {
-    persistOpenTabs()
+    persistOpenTabs();
     // Switching to a tab that lives in another window (archive restore, extensions) brings that window forward.
-    const window = findTab(id)?.win.window
-    if (window && !window.isDestroyed() && window !== currentBrowserWindow()) window.focus()
+    const window = findTab(id)?.win.window;
+    if (window && !window.isDestroyed() && window !== currentBrowserWindow())
+      window.focus();
   }
-  return activated
+  return activated;
 }
 
 export function cycleBrowserTab(offset: number): void {
-  const w = currentWindowState()
-  const ordered = tabsInSidebarOrder(w)
-  if (!w || ordered.length < 2) return
-  const activeIndex = ordered.findIndex((tab) => tab.id === w.activeTabId)
-  const nextIndex = (activeIndex + offset + ordered.length) % ordered.length
-  const next = ordered[nextIndex]
-  if (next) activateBrowserTab(next.id)
+  const w = currentWindowState();
+  const ordered = tabsInSidebarOrder(w);
+  if (!w || ordered.length < 2) return;
+  const activeIndex = ordered.findIndex((tab) => tab.id === w.activeTabId);
+  const nextIndex = (activeIndex + offset + ordered.length) % ordered.length;
+  const next = ordered[nextIndex];
+  if (next) activateBrowserTab(next.id);
 }
 
-const MAX_RECENTLY_CLOSED_TABS = 25
-interface RecentlyClosedTab { url: string; index: number; pinned: boolean }
-const recentlyClosedTabs: RecentlyClosedTab[] = []
+const MAX_RECENTLY_CLOSED_TABS = 25;
+interface RecentlyClosedTab {
+  url: string;
+  index: number;
+  pinned: boolean;
+}
+const recentlyClosedTabs: RecentlyClosedTab[] = [];
 
 function rememberClosedTab(tab: BrowserTab, index: number): void {
   // Extension UI pages need their preload wiring and a blank New Tab isn't worth bringing back.
   // Private tabs leave no trace, so they can't be reopened either.
-  if (tab.extensionPageOrigin || tab.isPrivate) return
-  const url = currentUrl(tab)
+  if (tab.extensionPageOrigin || tab.isPrivate) return;
+  const url = currentUrl(tab);
   // Settings is one tab per window, opened from the gear / ⌘,; reopening it would make a second one.
-  if (!url || url === SURFFISH_QUICK_LINKS_URL || isSettingsTab(tab)) return
-  recentlyClosedTabs.push({ url, index, pinned: tab.pinned })
-  if (recentlyClosedTabs.length > MAX_RECENTLY_CLOSED_TABS) recentlyClosedTabs.shift()
+  if (!url || url === SURFFISH_QUICK_LINKS_URL || isSettingsTab(tab)) return;
+  recentlyClosedTabs.push({ url, index, pinned: tab.pinned });
+  if (recentlyClosedTabs.length > MAX_RECENTLY_CLOSED_TABS)
+    recentlyClosedTabs.shift();
 }
 
 /** Cmd+Shift+T: bring back the most recently closed tab at its old position. */
 export function hasRecentlyClosedBrowserTabs(): boolean {
-  return recentlyClosedTabs.length > 0
+  return recentlyClosedTabs.length > 0;
 }
 
 export function reopenClosedBrowserTab(): string | null {
-  const entry = recentlyClosedTabs.pop()
-  if (!entry) return null
-  const id = createTab(entry.url, selectedSearchEngine, true, false, false, entry.pinned, undefined, entry.index)
-  if (id) persistOpenTabs()
-  return id
+  const entry = recentlyClosedTabs.pop();
+  if (!entry) return null;
+  const id = createTab(
+    entry.url,
+    selectedSearchEngine,
+    true,
+    false,
+    false,
+    entry.pinned,
+    undefined,
+    entry.index,
+  );
+  if (id) persistOpenTabs();
+  return id;
 }
 
 // ---------------------------------------------------------------------------
@@ -3793,122 +5965,167 @@ export function reopenClosedBrowserTab(): string | null {
 
 /** A new document committed: another site takes its saved level (frames already asked; re-send if it changed). */
 function applyTabVolumeForUrl(tab: BrowserTab, url: string): void {
-  const before = tab.volume
-  if (tabVolumeForUrl(tab, url) === before) return
-  pushTabVolume(tab.view?.webContents, tab.volume)
-  publishTabs(tab.win)
+  const before = tab.volume;
+  if (tabVolumeForUrl(tab, url) === before) return;
+  pushTabVolume(tab.view?.webContents, tab.volume);
+  publishTabs(tab.win);
 }
 
 /** Set a tab's volume (0..1) and remember it for its site. */
 export function setBrowserTabVolume(id: string, value: unknown): boolean {
-  const tab = findTab(id)
-  if (!tab) return false
-  const volume = setTabVolumeLevel(tab, currentUrl(tab), value)
-  if (volume === null) return false
-  pushTabVolume(tab.view?.webContents, volume)
-  publishTabs(tab.win)
-  return true
+  const tab = findTab(id);
+  if (!tab) return false;
+  const volume = setTabVolumeLevel(tab, currentUrl(tab), value);
+  if (volume === null) return false;
+  pushTabVolume(tab.view?.webContents, volume);
+  publishTabs(tab.win);
+  return true;
 }
 
 /** ⌘K Volume Up / Down: step the active tab's volume and say where it landed. */
 export function stepActiveBrowserTabVolume(direction: 1 | -1): void {
-  const tab = getTab()
-  if (!tab) return
-  setBrowserTabVolume(tab.id, stepTabVolume(tab.volume, direction * TAB_VOLUME_COMMAND_STEP))
-  flashBrowserStatus(`Tab volume ${formatTabVolume(tab.volume)}`, 1500)
+  const tab = getTab();
+  if (!tab) return;
+  setBrowserTabVolume(
+    tab.id,
+    stepTabVolume(tab.volume, direction * TAB_VOLUME_COMMAND_STEP),
+  );
+  flashBrowserStatus(`Tab volume ${formatTabVolume(tab.volume)}`, 1500);
 }
 
 setTabVolumeHost({
   stateFor: (contents) => tabForContents(contents) ?? null,
   sitesReset: (origins) => {
     for (const w of windowStates) {
-      let changed = false
+      let changed = false;
       for (const tab of w.tabs) {
-        if (!tab.volumeOrigin || (origins && !origins.includes(tab.volumeOrigin)) || tab.volume === 1) continue
-        tab.volume = 1
-        pushTabVolume(tab.view?.webContents, 1)
-        changed = true
+        if (
+          !tab.volumeOrigin ||
+          (origins && !origins.includes(tab.volumeOrigin)) ||
+          tab.volume === 1
+        )
+          continue;
+        tab.volume = 1;
+        pushTabVolume(tab.view?.webContents, 1);
+        changed = true;
       }
-      if (changed) publishTabs(w)
+      if (changed) publishTabs(w);
     }
-  }
-})
+  },
+});
 
 export function setBrowserTabMuted(id: string, muted: boolean): boolean {
-  const contents = getTab(id)?.view?.webContents
-  if (!contents || contents.isDestroyed()) return false
-  contents.setAudioMuted(muted)
-  const tab = getTab(id)
-  if (tab) publishTabs(tab.win)
-  return true
+  const contents = getTab(id)?.view?.webContents;
+  if (!contents || contents.isDestroyed()) return false;
+  contents.setAudioMuted(muted);
+  const tab = getTab(id);
+  if (tab) publishTabs(tab.win);
+  return true;
 }
 
 export function closeBrowserTab(id: string, rememberClosed = true): void {
-  const tab = findTab(id)
-  if (!tab) return
-  const w = tab.win
-  const { tabs } = w
-  const index = tabs.indexOf(tab)
-  if (index < 0) return
-  if (!allowLeavingPdfEditor(tab, 'Close Tab')) return
-  if (tab.pdfEditor) tab.pdfEditor.dirty = false
-  endWakeSnapshotForTab(id)
-  forgetTabPicture(id)
-  forgetSavedWakeSnapshot(tab)
-  const wasActive = w.activeTabId === id
-  if (wasActive) cancelActiveMacTrackpadSwipe()
-  if (wasActive) hideLinkStatus(false, w.window)
-  if (w.findState.tabId === id) closeFindBar(false, w)
-  if (rememberClosed) rememberClosedTab(tab, index)
-  const wasSettings = isSettingsTab(tab)
+  const tab = findTab(id);
+  if (!tab) return;
+  const w = tab.win;
+  const { tabs } = w;
+  const index = tabs.indexOf(tab);
+  if (index < 0) return;
+  if (!allowLeavingPdfEditor(tab, "Close Tab")) return;
+  if (tab.pdfEditor) tab.pdfEditor.dirty = false;
+  endWakeSnapshotForTab(id);
+  forgetTabPicture(id);
+  forgetSavedWakeSnapshot(tab);
+  const wasActive = w.activeTabId === id;
+  if (wasActive) cancelActiveMacTrackpadSwipe();
+  if (wasActive) hideLinkStatus(false, w.window);
+  if (w.findState.tabId === id) closeFindBar(false, w);
+  if (rememberClosed) rememberClosedTab(tab, index);
+  const wasSettings = isSettingsTab(tab);
   // Closing a pane leaves its partner on screen (and focused, when the closed pane was).
-  const { groups, partners } = removeTabFromSplits(w.splits, id)
-  w.splits = groups
-  w.recentTabIds = w.recentTabIds.filter((recent) => recent !== id)
-  tabs.splice(index, 1)
-  cancelSleepTimer(tab)
-  if (wasActive) w.activeTabId = null
-  disposeTabView(tab)
-  if (tab.isPrivate && !allTabs().some((candidate) => candidate.isPrivate)) endPrivateSession()
+  const { groups, partners } = removeTabFromSplits(w.splits, id);
+  w.splits = groups;
+  w.recentTabIds = w.recentTabIds.filter((recent) => recent !== id);
+  tabs.splice(index, 1);
+  cancelSleepTimer(tab);
+  if (wasActive) w.activeTabId = null;
+  disposeTabView(tab);
+  if (tab.isPrivate && !allTabs().some((candidate) => candidate.isPrivate))
+    endPrivateSession();
   if (tabs.length === 0) {
-    w.activeTabId = null
+    w.activeTabId = null;
     // The last tab of one of several windows closes that window; the final window keeps a fresh New Tab.
     // A mini window closes with its last tab.
     if (w.mini || hasOtherWindows(w)) {
-      setImmediate(() => { if (!w.window.isDestroyed() && w.tabs.length === 0) w.window.close() })
-      return
+      setImmediate(() => {
+        if (!w.window.isDestroyed() && w.tabs.length === 0) w.window.close();
+      });
+      return;
     }
-    createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w)
-    persistOpenTabs()
-    return
+    createTab(
+      undefined,
+      selectedSearchEngine,
+      true,
+      false,
+      false,
+      false,
+      undefined,
+      undefined,
+      false,
+      false,
+      w,
+    );
+    persistOpenTabs();
+    return;
   }
   if (wasActive) {
     // Closing Settings goes back to the tab you were on before it (Settings is a detour, not a place).
-    const replacement = findTab(partners[0]) ?? (wasSettings ? lastUsedTabInSpace(w, tab.spaceId) : undefined) ?? (w.mini ? tabs[Math.min(index, tabs.length - 1)] : neighbourInSpace(tabs, index, tab.spaceId))
-    if (replacement) activateTabInternal(replacement.id)
+    const replacement =
+      findTab(partners[0]) ??
+      (wasSettings ? lastUsedTabInSpace(w, tab.spaceId) : undefined) ??
+      (w.mini
+        ? tabs[Math.min(index, tabs.length - 1)]
+        : neighbourInSpace(tabs, index, tab.spaceId));
+    if (replacement) activateTabInternal(replacement.id);
     // The Space's last tab closed while other Spaces still have tabs: the Space keeps a New Tab.
-    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, tab.spaceId)
+    else
+      createTab(
+        undefined,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        w,
+        tab.spaceId,
+      );
   } else {
-    applyTabBounds(w)
+    applyTabBounds(w);
   }
-  persistOpenTabs()
-  publishState(w)
+  persistOpenTabs();
+  publishState(w);
 }
 
 /** Other normal windows (the mini window doesn't count: closing the last browser tab never hands the app to it). */
 function hasOtherWindows(w: BrowserWindowState): boolean {
-  return windowStates.some((other) => other !== w && !other.mini && isLiveWindow(other))
+  return windowStates.some(
+    (other) => other !== w && !other.mini && isLiveWindow(other),
+  );
 }
 
 /** Last private tab closed: wipe the in-memory session and forget its downloads. */
 function endPrivateSession(): void {
-  forgetPrivatePageZoom()
-  forgetPrivateTabVolumes()
-  for (const [id, job] of [...pendingPictures]) if (job.wake?.isPrivate) cancelTabPictureEncode(id)
-  dropPrivateWakeSnapshots()
-  forgetPrivateDownloads()
-  forgetCertificateState(PRIVATE_PARTITION)
-  void clearPrivateSession()
+  forgetPrivatePageZoom();
+  forgetPrivateTabVolumes();
+  for (const [id, job] of [...pendingPictures])
+    if (job.wake?.isPrivate) cancelTabPictureEncode(id);
+  dropPrivateWakeSnapshots();
+  forgetPrivateDownloads();
+  forgetCertificateState(PRIVATE_PARTITION);
+  void clearPrivateSession();
 }
 
 /**
@@ -3917,278 +6134,378 @@ function endPrivateSession(): void {
  * open, the last tab just closes its window (like Chrome).
  */
 export function closeBrowserTabFromShortcut(tabId = getTab()?.id): void {
-  const w = findTab(tabId)?.win ?? currentWindowState()
-  if (!w) return
+  const w = findTab(tabId)?.win ?? currentWindowState();
+  if (!w) return;
   if (w.tabs.length > 1 || w.mini || hasOtherWindows(w)) {
-    if (tabId) closeBrowserTab(tabId)
-    return
+    if (tabId) closeBrowserTab(tabId);
+    return;
   }
-  const win = w.window
-  if (win.isDestroyed() || w.confirmingWindowClose) return
-  w.confirmingWindowClose = true
-  void dialog.showMessageBox(win, {
-    type: 'question',
-    buttons: ['Close Window', 'Cancel'],
-    defaultId: 0,
-    cancelId: 1,
-    message: 'Close the window?',
-    detail: 'This is your last tab.'
-  }).then(({ response }) => {
-    if (response === 0 && !win.isDestroyed()) win.close()
-  }).finally(() => {
-    w.confirmingWindowClose = false
-  })
+  const win = w.window;
+  if (win.isDestroyed() || w.confirmingWindowClose) return;
+  w.confirmingWindowClose = true;
+  void dialog
+    .showMessageBox(win, {
+      type: "question",
+      buttons: ["Close Window", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      message: "Close the window?",
+      detail: "This is your last tab.",
+    })
+    .then(({ response }) => {
+      if (response === 0 && !win.isDestroyed()) win.close();
+    })
+    .finally(() => {
+      w.confirmingWindowClose = false;
+    });
 }
 
 export function setBrowserTabPinned(id: string, pinned: boolean): boolean {
-  const tab = getTab(id)
-  if (!tab) return false
-  if (tab.pinned === pinned) return true
+  const tab = getTab(id);
+  if (!tab) return false;
+  if (tab.pinned === pinned) return true;
   // Pinned tabs live in the Favourites strip, which has no split entries: pinning unsplits first.
   if (pinned && splitOf(tab)) {
-    tab.win.splits = removeTabFromSplits(tab.win.splits, tab.id).groups
-    applyTabBounds(tab.win)
-    publishState(tab.win)
+    tab.win.splits = removeTabFromSplits(tab.win.splits, tab.id).groups;
+    applyTabBounds(tab.win);
+    publishState(tab.win);
   }
-  tab.pinned = pinned
+  tab.pinned = pinned;
   // A new pin goes to the end of the strip (pins keep the order the user gave them, never their old
   // slot in the tab list): move it right after the window's last other pinned tab.
   if (pinned) {
-    const { tabs } = tab.win
-    tabs.splice(tabs.indexOf(tab), 1)
-    let last = -1
-    tabs.forEach((item, index) => { if (item.pinned) last = index })
-    tabs.splice(last + 1, 0, tab)
+    const { tabs } = tab.win;
+    tabs.splice(tabs.indexOf(tab), 1);
+    let last = -1;
+    tabs.forEach((item, index) => {
+      if (item.pinned) last = index;
+    });
+    tabs.splice(last + 1, 0, tab);
   }
-  persistOpenTabs()
-  publishTabs(tab.win)
-  return true
+  persistOpenTabs();
+  publishTabs(tab.win);
+  return true;
 }
 
 /** Move Pin Left / Right (tab menu): one step along the pinned strip of the tab's Space. */
 function stepPinnedTab(id: string, direction: -1 | 1): boolean {
-  const tab = getTab(id)
-  if (!tab?.pinned) return false
-  const pins = spaceTabsOf(tab.win, tab.spaceId).filter((item) => item.pinned).map((item) => item.id)
-  const beforeId = pinStepBeforeId(pins, id, direction)
-  return beforeId === undefined ? false : moveBrowserTab(id, beforeId)
+  const tab = getTab(id);
+  if (!tab?.pinned) return false;
+  const pins = spaceTabsOf(tab.win, tab.spaceId)
+    .filter((item) => item.pinned)
+    .map((item) => item.id);
+  const beforeId = pinStepBeforeId(pins, id, direction);
+  return beforeId === undefined ? false : moveBrowserTab(id, beforeId);
 }
 
 /**
  * Move a tab so it lands before `beforeId` (or at the end when null). Pinned and unpinned tabs keep
  * their own groups. A `beforeId` in another window moves the tab into that window.
  */
-export function moveBrowserTab(id: string, beforeId: string | null, groupId?: string | null): boolean {
-  const moving = findTab(id)
-  if (!moving || id === beforeId) return false
-  const before = beforeId ? findTab(beforeId) : undefined
-  if (before && before.win !== moving.win) return moveBrowserTabToWindow(id, before.win.window, beforeId)
-  const { tabs } = moving.win
-  const from = tabs.indexOf(moving)
-  if (from < 0) return false
+export function moveBrowserTab(
+  id: string,
+  beforeId: string | null,
+  groupId?: string | null,
+): boolean {
+  const moving = findTab(id);
+  if (!moving || id === beforeId) return false;
+  const before = beforeId ? findTab(beforeId) : undefined;
+  if (before && before.win !== moving.win)
+    return moveBrowserTabToWindow(id, before.win.window, beforeId);
+  const { tabs } = moving.win;
+  const from = tabs.indexOf(moving);
+  if (from < 0) return false;
   // A split moves as one block, and nothing lands in between another split's panes.
-  const group = splitOf(moving)
-  if (group && beforeId && group.tabIds.includes(beforeId)) return false
-  const beforeGroup = before ? splitOf(before) : undefined
-  const anchorId = beforeGroup ? tabs.find((item) => beforeGroup.tabIds.includes(item.id))?.id ?? beforeId : beforeId
-  const orderBefore = tabs.map((item) => item.id).join('|')
-  const block = group ? tabs.filter((item) => group.tabIds.includes(item.id)) : [moving]
-  for (const item of block) tabs.splice(tabs.indexOf(item), 1)
-  const tab = moving
-  let to = anchorId ? tabs.findIndex((item) => item.id === anchorId) : -1
+  const group = splitOf(moving);
+  if (group && beforeId && group.tabIds.includes(beforeId)) return false;
+  const beforeGroup = before ? splitOf(before) : undefined;
+  const anchorId = beforeGroup
+    ? (tabs.find((item) => beforeGroup.tabIds.includes(item.id))?.id ??
+      beforeId)
+    : beforeId;
+  const orderBefore = tabs.map((item) => item.id).join("|");
+  const block = group
+    ? tabs.filter((item) => group.tabIds.includes(item.id))
+    : [moving];
+  for (const item of block) tabs.splice(tabs.indexOf(item), 1);
+  const tab = moving;
+  let to = anchorId ? tabs.findIndex((item) => item.id === anchorId) : -1;
   if (to < 0) {
     // append after the last tab in the same pinned group
-    let last = -1
-    tabs.forEach((item, index) => { if (item.pinned === tab.pinned) last = index })
-    to = last + 1
+    let last = -1;
+    tabs.forEach((item, index) => {
+      if (item.pinned === tab.pinned) last = index;
+    });
+    to = last + 1;
   }
-  tabs.splice(to, 0, ...block)
+  tabs.splice(to, 0, ...block);
   // A sidebar drop says which group it landed in (null = outside every group); a split moves as one.
-  let regrouped = false
+  let regrouped = false;
   if (groupId !== undefined) {
-    const target = groupId && tab.win.groups.some((candidate) => candidate.id === groupId) && !tab.pinned ? groupId : null
+    const target =
+      groupId &&
+      tab.win.groups.some((candidate) => candidate.id === groupId) &&
+      !tab.pinned
+        ? groupId
+        : null;
     for (const item of block) {
-      if (item.groupId !== target) regrouped = true
-      item.groupId = target
+      if (item.groupId !== target) regrouped = true;
+      item.groupId = target;
     }
   }
-  if (!regrouped && tabs.map((item) => item.id).join('|') === orderBefore) return false
-  persistOpenTabs()
-  publishTabs(tab.win)
-  return true
+  if (!regrouped && tabs.map((item) => item.id).join("|") === orderBefore)
+    return false;
+  persistOpenTabs();
+  publishTabs(tab.win);
+  return true;
 }
 
 export function duplicateBrowserTab(id: string): string | null {
-  const tab = getTab(id)
+  const tab = getTab(id);
   // One Settings tab per window.
-  if (!tab || isSettingsTab(tab)) return null
-  const duplicateId = createTab(currentUrl(tab), selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, tab.win)
-  if (duplicateId) persistOpenTabs()
-  return duplicateId
+  if (!tab || isSettingsTab(tab)) return null;
+  const duplicateId = createTab(
+    currentUrl(tab),
+    selectedSearchEngine,
+    true,
+    false,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    false,
+    tab.win,
+  );
+  if (duplicateId) persistOpenTabs();
+  return duplicateId;
 }
 
 export function reloadBrowserTab(id: string, ignoreCache = false): void {
-  const tab = getTab(id)
-  if (!tab) return
-  if (!allowLeavingPdfEditor(tab, 'Reload')) return
-  if (tab.pdfEditor) tab.pdfEditor.dirty = false
+  const tab = getTab(id);
+  if (!tab) return;
+  if (!allowLeavingPdfEditor(tab, "Reload")) return;
+  if (tab.pdfEditor) tab.pdfEditor.dirty = false;
   if (tab.view && !tab.view.webContents.isDestroyed()) {
-    if (ignoreCache) tab.view.webContents.reloadIgnoringCache()
-    else tab.view.webContents.reload()
-  }
-  else activateTabInternal(id)
+    if (ignoreCache) tab.view.webContents.reloadIgnoringCache();
+    else tab.view.webContents.reload();
+  } else activateTabInternal(id);
 }
 
 /** `reason`: 'memory' from the memory saver; everything else is the user asking. */
-export function suspendBrowserTab(id: string, reason: 'manual' | 'memory' = 'manual'): void {
-  const tab = getTab(id)
-  if (tab && !isTabOnScreen(tab)) hibernateTab(tab, { reason }, false)
+export function suspendBrowserTab(
+  id: string,
+  reason: "manual" | "memory" = "manual",
+): void {
+  const tab = getTab(id);
+  if (tab && !isTabOnScreen(tab)) hibernateTab(tab, { reason }, false);
 }
 
 /** Suspend every other tab in the same window (the active one stays awake). */
 export function suspendOtherBrowserTabs(keepId: string): void {
-  const w = findTab(keepId)?.win ?? currentWindowState()
+  const w = findTab(keepId)?.win ?? currentWindowState();
   for (const tab of [...(w?.tabs ?? [])]) {
-    if (tab.id !== keepId && !isTabOnScreen(tab)) hibernateTab(tab, { reason: 'manual' }, false)
+    if (tab.id !== keepId && !isTabOnScreen(tab))
+      hibernateTab(tab, { reason: "manual" }, false);
   }
 }
 
-function closeBrowserTabsRelative(id: string, relation: 'above' | 'below' | 'others'): void {
+function closeBrowserTabsRelative(
+  id: string,
+  relation: "above" | "below" | "others",
+): void {
   // Within the tab's Space only (the list you're looking at).
-  const target = findTab(id)
-  const tabs = target ? spaceTabsOf(target.win, target.spaceId) : []
-  const targetIndex = tabs.findIndex((tab) => tab.id === id)
-  if (targetIndex < 0) return
+  const target = findTab(id);
+  const tabs = target ? spaceTabsOf(target.win, target.spaceId) : [];
+  const targetIndex = tabs.findIndex((tab) => tab.id === id);
+  if (targetIndex < 0) return;
   const idsToClose = tabs.flatMap((tab, index) => {
-    const shouldClose = relation === 'above' ? index < targetIndex
-      : relation === 'below' ? index > targetIndex
-        : tab.id !== id
-    return shouldClose ? [tab.id] : []
-  })
-  for (const tabId of idsToClose) closeBrowserTab(tabId)
+    const shouldClose =
+      relation === "above"
+        ? index < targetIndex
+        : relation === "below"
+          ? index > targetIndex
+          : tab.id !== id;
+    return shouldClose ? [tab.id] : [];
+  });
+  for (const tabId of idsToClose) closeBrowserTab(tabId);
 }
 
-export async function navigateBrowser(input: string, engine: SearchEngineId = selectedSearchEngine): Promise<NavigateResult> {
-  return navigateTabTo(getTab(), input, engine)
+export async function navigateBrowser(
+  input: string,
+  engine: SearchEngineId = selectedSearchEngine,
+): Promise<NavigateResult> {
+  return navigateTabTo(getTab(), input, engine);
 }
 
 /** Address-bar input for `tab`: the toolbar omnibox's (current window's tab) and a mini window's address field. */
-async function navigateTabTo(tab: BrowserTab | undefined, input: string, engine: SearchEngineId): Promise<NavigateResult> {
+async function navigateTabTo(
+  tab: BrowserTab | undefined,
+  input: string,
+  engine: SearchEngineId,
+): Promise<NavigateResult> {
   // surffish://settings typed in the address bar: the window's Settings tab (focused, or opened). From
   // a mini window it opens in a browser window, like ⌘, there.
-  const settingsTarget = parseSettingsUrl(input)
-  if (settingsTarget) return openSettingsTab(settingsTarget, tab?.win.mini ? tab.win.window : undefined) ? { ok: true } : { ok: false, reason: 'cancelled' }
-  const url = resolveAddressInput(input, engine)
-  if (!url) return { ok: false, reason: 'invalid' }
-  if (!tab) return { ok: false, reason: 'cancelled' }
+  const settingsTarget = parseSettingsUrl(input);
+  if (settingsTarget)
+    return openSettingsTab(
+      settingsTarget,
+      tab?.win.mini ? tab.win.window : undefined,
+    )
+      ? { ok: true }
+      : { ok: false, reason: "cancelled" };
+  const url = resolveAddressInput(input, engine);
+  if (!url) return { ok: false, reason: "invalid" };
+  if (!tab) return { ok: false, reason: "cancelled" };
   if (tab.pdfEditor) {
     // Leaving the editor: ask about unsaved edits, then load the address in a normal page view.
-    if (!allowLeavingPdfEditor(tab, 'Leave Page')) return { ok: false, reason: 'cancelled' }
-    replaceTabView(tab, null, url)
-    return tab.view ? { ok: true } : { ok: false, reason: 'cancelled' }
+    if (!allowLeavingPdfEditor(tab, "Leave Page"))
+      return { ok: false, reason: "cancelled" };
+    replaceTabView(tab, null, url);
+    return tab.view ? { ok: true } : { ok: false, reason: "cancelled" };
   }
   // The address bar already prerendered exactly this page for this tab (omnibox-prerender.ts): swap it in.
-  const prerendered = takeOmniboxPrerender(tab.id, url, tabHistoryForPrerender(tab))
-  if (prerendered && adoptPrerenderedView(tab, prerendered)) return { ok: true }
-  const typedHttpFallback = typedHttpsFallbackUrl(input, url)
+  const prerendered = takeOmniboxPrerender(
+    tab.id,
+    url,
+    tabHistoryForPrerender(tab),
+  );
+  if (prerendered && adoptPrerenderedView(tab, prerendered))
+    return { ok: true };
+  const typedHttpFallback = typedHttpsFallbackUrl(input, url);
   // A URL typed on the New Tab or the Settings tab loads in that tab (it stops being Settings).
-  if ((tab.lastUrl === SURFFISH_QUICK_LINKS_URL || tab.lastUrl === SURFFISH_SETTINGS_URL) && !tab.view) {
-    settingsTabTargets.delete(tab)
-    tab.lastUrl = url
-    tab.pendingUrl = url
-    tab.error = null
-    ensureTabLoaded(tab)
-    if (!tab.view) return { ok: false, reason: 'cancelled' }
+  if (
+    (tab.lastUrl === SURFFISH_QUICK_LINKS_URL ||
+      tab.lastUrl === SURFFISH_SETTINGS_URL) &&
+    !tab.view
+  ) {
+    settingsTabTargets.delete(tab);
+    tab.lastUrl = url;
+    tab.pendingUrl = url;
+    tab.error = null;
+    ensureTabLoaded(tab);
+    if (!tab.view) return { ok: false, reason: "cancelled" };
     // ensureTabLoaded created the view (TS still narrows tab.view to null from the check above).
-    const loadedView = tab.view as WebContentsView | null
-    if (typedHttpFallback && loadedView) noteTypedHttpsUpgrade(loadedView.webContents, url, typedHttpFallback)
-    publishState(tab.win)
-    return { ok: true }
+    const loadedView = tab.view as WebContentsView | null;
+    if (typedHttpFallback && loadedView)
+      noteTypedHttpsUpgrade(loadedView.webContents, url, typedHttpFallback);
+    publishState(tab.win);
+    return { ok: true };
   }
-  tab.error = null
-  ensureTabLoaded(tab)
-  const contents = tab.view?.webContents
-  if (!contents) return { ok: false, reason: 'cancelled' }
-  publishState(tab.win)
+  tab.error = null;
+  ensureTabLoaded(tab);
+  const contents = tab.view?.webContents;
+  if (!contents) return { ok: false, reason: "cancelled" };
+  publishState(tab.win);
   try {
-    if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION)
-    else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION) await whenPageSessionReady(partitionForTab(tab))
-    if (typedHttpFallback) noteTypedHttpsUpgrade(contents, url, typedHttpFallback)
-    await contents.loadURL(url)
-    return { ok: true }
+    if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION);
+    else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
+      await whenPageSessionReady(partitionForTab(tab));
+    if (typedHttpFallback)
+      noteTypedHttpsUpgrade(contents, url, typedHttpFallback);
+    await contents.loadURL(url);
+    return { ok: true };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!tab.downloadStartedForCurrentLoad && message.includes('ERR_FAILED')) {
-      await new Promise((resolve) => setTimeout(resolve, 100))
+    const message = error instanceof Error ? error.message : String(error);
+    if (!tab.downloadStartedForCurrentLoad && message.includes("ERR_FAILED")) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (tab.downloadStartedForCurrentLoad) {
-      tab.error = null
-      publishState(tab.win)
-      return { ok: true }
+      tab.error = null;
+      publishState(tab.win);
+      return { ok: true };
     }
-    if (message.includes('ERR_ABORTED') && Date.now() - (googleHandOffAt.get(contents) ?? 0) < 5000) {
-      tab.error = null
-      publishState(tab.win)
-      return { ok: true }
+    if (
+      message.includes("ERR_ABORTED") &&
+      Date.now() - (googleHandOffAt.get(contents) ?? 0) < 5000
+    ) {
+      tab.error = null;
+      publishState(tab.win);
+      return { ok: true };
     }
     // The page superseded this load (redirect, history replace, service worker, a newer
     // navigation). did-fail-load already ignores -3; any error now belongs to the newer load.
-    if (isAbortedNavigation(error)) return { ok: true }
-    if (tab.view?.webContents !== contents) return { ok: false, reason: 'cancelled' }
+    if (isAbortedNavigation(error)) return { ok: true };
+    if (tab.view?.webContents !== contents)
+      return { ok: false, reason: "cancelled" };
     // did-fail-load usually got here first with the same failure; keep its details. When it didn't
     // (a provisional failure that never committed an error page, e.g. the proxy refusing the
     // connection), the error still belongs in the page area, not a toast over a blank tab.
     if (tab.error === null) {
-      tab.error = message
-      noteTabLoadError(tab, message, url, shouldShowFullPageError(parseLoadError(message).code))
+      tab.error = message;
+      noteTabLoadError(
+        tab,
+        message,
+        url,
+        shouldShowFullPageError(parseLoadError(message).code),
+      );
     }
-    publishState(tab.win)
-    return { ok: false, reason: 'load', code: parseLoadError(message).code, message }
+    publishState(tab.win);
+    return {
+      ok: false,
+      reason: "load",
+      code: parseLoadError(message).code,
+      message,
+    };
   }
 }
 
 export function setBrowserBounds(input: unknown): void {
-  const w = currentWindowState()
-  if (!w || typeof input !== 'object' || input === null) return
-  const bounds = input as Partial<BrowserBounds>
-  const values = [bounds.x, bounds.y, bounds.width, bounds.height]
-  if (values.some((value) => typeof value !== 'number' || !Number.isFinite(value))) return
-  const browserBounds = w.browserBounds = {
+  const w = currentWindowState();
+  if (!w || typeof input !== "object" || input === null) return;
+  const bounds = input as Partial<BrowserBounds>;
+  const values = [bounds.x, bounds.y, bounds.width, bounds.height];
+  if (
+    values.some((value) => typeof value !== "number" || !Number.isFinite(value))
+  )
+    return;
+  const browserBounds = (w.browserBounds = {
     x: Math.max(0, Math.round(bounds.x!)),
     y: Math.max(0, Math.round(bounds.y!)),
     width: Math.max(0, Math.round(bounds.width!)),
-    height: Math.max(0, Math.round(bounds.height!))
-  }
+    height: Math.max(0, Math.round(bounds.height!)),
+  });
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
-  if (browserBounds.width === 0 || browserBounds.height === 0) hideLinkStatus(false, w.window)
-  applyTabBounds(w)
+  if (browserBounds.width === 0 || browserBounds.height === 0)
+    hideLinkStatus(false, w.window);
+  applyTabBounds(w);
 }
 
-export function syncBrowserBoundsToWindow(width: number, height: number, overlayMode: boolean, window?: BaseWindow): void {
-  const w = window ? windowStateFor(window) : currentWindowState()
-  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return
-  const { browserBounds } = w
-  if (browserBounds.width <= 0 || browserBounds.height <= 0) return
-  const y = Math.min(browserBounds.y, height)
+export function syncBrowserBoundsToWindow(
+  width: number,
+  height: number,
+  overlayMode: boolean,
+  window?: BaseWindow,
+): void {
+  const w = window ? windowStateFor(window) : currentWindowState();
+  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return;
+  const { browserBounds } = w;
+  if (browserBounds.width <= 0 || browserBounds.height <= 0) return;
+  const y = Math.min(browserBounds.y, height);
   const nextBounds: BrowserBounds = {
     x: 0,
     y,
     width,
-    height: Math.max(0, height - y)
-  }
-  if (nextBounds.x === browserBounds.x && nextBounds.y === browserBounds.y
-    && nextBounds.width === browserBounds.width && nextBounds.height === browserBounds.height) return
-  w.browserBounds = nextBounds
-  applyTabBounds(w)
+    height: Math.max(0, height - y),
+  };
+  if (
+    nextBounds.x === browserBounds.x &&
+    nextBounds.y === browserBounds.y &&
+    nextBounds.width === browserBounds.width &&
+    nextBounds.height === browserBounds.height
+  )
+    return;
+  w.browserBounds = nextBounds;
+  applyTabBounds(w);
 }
 
 function cancelActiveMacTrackpadSwipe(): void {
-  const swipe = activeMacTrackpadSwipe
-  activeMacTrackpadSwipe = null
-  nextMacTrackpadSwipeToken += 1
-  if (!swipe || swipe.contents.isDestroyed()) return
+  const swipe = activeMacTrackpadSwipe;
+  activeMacTrackpadSwipe = null;
+  nextMacTrackpadSwipeToken += 1;
+  if (!swipe || swipe.contents.isDestroyed()) return;
   try {
-    swipe.contents.send(MAC_SWIPE_RESET_CHANNEL)
+    swipe.contents.send(MAC_SWIPE_RESET_CHANNEL);
   } catch {
     // The renderer may be closing while the trackpad gesture is settling.
   }
@@ -4196,12 +6513,12 @@ function cancelActiveMacTrackpadSwipe(): void {
 
 function resetMacTrackpadSwipeFor(contents: WebContents): void {
   if (activeMacTrackpadSwipe?.contents === contents) {
-    activeMacTrackpadSwipe = null
-    nextMacTrackpadSwipeToken += 1
+    activeMacTrackpadSwipe = null;
+    nextMacTrackpadSwipeToken += 1;
   }
-  if (process.platform !== 'darwin' || contents.isDestroyed()) return
+  if (process.platform !== "darwin" || contents.isDestroyed()) return;
   try {
-    contents.send(MAC_SWIPE_RESET_CHANNEL)
+    contents.send(MAC_SWIPE_RESET_CHANNEL);
   } catch {
     // Ignore a renderer that is already navigating away.
   }
@@ -4212,90 +6529,134 @@ function windowForGesture(handle: unknown): BrowserWindowState | undefined {
   if (Buffer.isBuffer(handle)) {
     const match = windowStates.find((w) => {
       try {
-        return isLiveWindow(w) && w.window.getNativeWindowHandle().equals(handle)
+        return (
+          isLiveWindow(w) && w.window.getNativeWindowHandle().equals(handle)
+        );
       } catch {
-        return false
+        return false;
       }
-    })
-    if (match) return match
+    });
+    if (match) return match;
   }
-  return windowStateFor(focusedBrowserWindow()) ?? currentWindowState()
+  return windowStateFor(focusedBrowserWindow()) ?? currentWindowState();
 }
 
-function beginMacTrackpadSwipe(request: MacTrackpadSwipeBeginRequest): number | undefined {
-  const w = windowForGesture(request.windowHandle)
+function beginMacTrackpadSwipe(
+  request: MacTrackpadSwipeBeginRequest,
+): number | undefined {
+  const w = windowForGesture(request.windowHandle);
   const refuse = (reason: string): undefined => {
-    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] refused:', reason, { direction: request.direction, x: request.x, y: request.y, bounds: w?.browserBounds })
-    return undefined
-  }
-  if (process.platform !== 'darwin' || !isLiveWindow(w)) return refuse('no browser window')
-  const browserBounds = w.browserBounds
+    if (MAC_SWIPE_DEBUG)
+      console.info("[trackpad swipe] refused:", reason, {
+        direction: request.direction,
+        x: request.x,
+        y: request.y,
+        bounds: w?.browserBounds,
+      });
+    return undefined;
+  };
+  if (process.platform !== "darwin" || !isLiveWindow(w))
+    return refuse("no browser window");
+  const browserBounds = w.browserBounds;
   if (isTabOverviewOpen(w.window)) {
     // In the grid, horizontal swipes step the selection instead of navigating history.
-    const overviewId = getTabOverviewContentsId(w.window)
-    if (getTabOverviewState(w.window) !== 'open' || overviewId === null) return refuse('tab overview animating')
-    if (request.direction !== 'back' && request.direction !== 'forward') return refuse('bad request')
-    cancelActiveMacTrackpadSwipe()
-    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking overview selection', request.direction)
-    return overviewId
+    const overviewId = getTabOverviewContentsId(w.window);
+    if (getTabOverviewState(w.window) !== "open" || overviewId === null)
+      return refuse("tab overview animating");
+    if (request.direction !== "back" && request.direction !== "forward")
+      return refuse("bad request");
+    cancelActiveMacTrackpadSwipe();
+    if (MAC_SWIPE_DEBUG)
+      console.info(
+        "[trackpad swipe] tracking overview selection",
+        request.direction,
+      );
+    return overviewId;
   }
   // The handle picks the window (windowForGesture); an unmatched handle falls back to the focused
   // window rather than rejecting the swipe (a bad compare here used to reject every swipe).
-  if ((request.direction !== 'back' && request.direction !== 'forward')
-    || !Number.isFinite(request.x) || !Number.isFinite(request.y)) return refuse('bad request')
-  const spaceSwipe = sidebarSwipeId(w, request)
+  if (
+    (request.direction !== "back" && request.direction !== "forward") ||
+    !Number.isFinite(request.x) ||
+    !Number.isFinite(request.y)
+  )
+    return refuse("bad request");
+  const spaceSwipe = sidebarSwipeId(w, request);
   if (spaceSwipe !== undefined) {
-    cancelActiveMacTrackpadSwipe()
-    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking Space switch', request.direction)
-    return spaceSwipe
+    cancelActiveMacTrackpadSwipe();
+    if (MAC_SWIPE_DEBUG)
+      console.info("[trackpad swipe] tracking Space switch", request.direction);
+    return spaceSwipe;
   }
-  if (browserBounds.width <= 0 || browserBounds.height <= 0
-    || request.x < browserBounds.x || request.y < browserBounds.y
-    || request.x >= browserBounds.x + browserBounds.width
-    || request.y >= browserBounds.y + browserBounds.height) return refuse('outside page bounds')
+  if (
+    browserBounds.width <= 0 ||
+    browserBounds.height <= 0 ||
+    request.x < browserBounds.x ||
+    request.y < browserBounds.y ||
+    request.x >= browserBounds.x + browserBounds.width ||
+    request.y >= browserBounds.y + browserBounds.height
+  )
+    return refuse("outside page bounds");
 
   // In a split, the pane under the fingers navigates (focused or not).
-  const tab = tabAtWindowPoint(w, request.x, request.y) ?? activeTabOf(w)
-  const contents = tab?.view?.webContents
-  if (!tab || !contents || contents.isDestroyed()) return refuse('no active tab')
-  const canPageConsume = request.direction === 'back'
-    ? tab.pageScrollEdges.canScrollLeft
-    : tab.pageScrollEdges.canScrollRight
-  if (canPageConsume) return refuse(`page can still scroll ${JSON.stringify(tab.pageScrollEdges)}`)
+  const tab = tabAtWindowPoint(w, request.x, request.y) ?? activeTabOf(w);
+  const contents = tab?.view?.webContents;
+  if (!tab || !contents || contents.isDestroyed())
+    return refuse("no active tab");
+  const canPageConsume =
+    request.direction === "back"
+      ? tab.pageScrollEdges.canScrollLeft
+      : tab.pageScrollEdges.canScrollRight;
+  if (canPageConsume)
+    return refuse(
+      `page can still scroll ${JSON.stringify(tab.pageScrollEdges)}`,
+    );
 
   try {
-    const canNavigate = request.direction === 'back'
-      ? contents.navigationHistory.canGoBack()
-      : contents.navigationHistory.canGoForward()
-    if (!canNavigate) return refuse('no history in that direction')
-    if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] tracking', request.direction)
+    const canNavigate =
+      request.direction === "back"
+        ? contents.navigationHistory.canGoBack()
+        : contents.navigationHistory.canGoForward();
+    if (!canNavigate) return refuse("no history in that direction");
+    if (MAC_SWIPE_DEBUG)
+      console.info("[trackpad swipe] tracking", request.direction);
 
-    cancelActiveMacTrackpadSwipe()
+    cancelActiveMacTrackpadSwipe();
     const swipe: ActiveMacTrackpadSwipe = {
       contents,
       tabId: tab.id,
       direction: request.direction,
-      token: ++nextMacTrackpadSwipeToken
-    }
-    activeMacTrackpadSwipe = swipe
-    contents.send(MAC_SWIPE_BEGIN_CHANNEL, { direction: swipe.direction })
-    return contents.id
+      token: ++nextMacTrackpadSwipeToken,
+    };
+    activeMacTrackpadSwipe = swipe;
+    contents.send(MAC_SWIPE_BEGIN_CHANNEL, { direction: swipe.direction });
+    return contents.id;
   } catch (error) {
-    console.warn('[trackpad swipe] Could not start page navigation:', error)
-    return undefined
+    console.warn("[trackpad swipe] Could not start page navigation:", error);
+    return undefined;
   }
 }
 
-function reportMacTrackpadSwipeProgress(contentsId: number, progress: number): void {
-  if (getTabOverviewContentsIds().includes(contentsId)) return
-  const swipe = activeMacTrackpadSwipe
-  if (!swipe || swipe.contents.id !== contentsId || swipe.contents.isDestroyed()) return
+function reportMacTrackpadSwipeProgress(
+  contentsId: number,
+  progress: number,
+): void {
+  if (getTabOverviewContentsIds().includes(contentsId)) return;
+  const swipe = activeMacTrackpadSwipe;
+  if (
+    !swipe ||
+    swipe.contents.id !== contentsId ||
+    swipe.contents.isDestroyed()
+  )
+    return;
   try {
     swipe.contents.send(MAC_SWIPE_PROGRESS_CHANNEL, {
-      progress: Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0
-    })
+      progress: Number.isFinite(progress)
+        ? Math.max(0, Math.min(1, progress))
+        : 0,
+    });
   } catch {
-    cancelActiveMacTrackpadSwipe()
+    cancelActiveMacTrackpadSwipe();
   }
 }
 
@@ -4303,87 +6664,139 @@ function finishMacTrackpadSwipe(
   contentsId: number,
   direction: MacTrackpadSwipeDirection,
   committed: boolean,
-  _maxProgress: number
+  _maxProgress: number,
 ): void {
-  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] end', { direction, committed, maxProgress: _maxProgress })
-  if (finishSidebarSwipe(contentsId, direction, committed)) return
-  const overviewWindow = windowStates.find((w) => getTabOverviewContentsId(w.window) === contentsId)
+  if (MAC_SWIPE_DEBUG)
+    console.info("[trackpad swipe] end", {
+      direction,
+      committed,
+      maxProgress: _maxProgress,
+    });
+  if (finishSidebarSwipe(contentsId, direction, committed)) return;
+  const overviewWindow = windowStates.find(
+    (w) => getTabOverviewContentsId(w.window) === contentsId,
+  );
   if (overviewWindow) {
     // Selection follows the fingers: swipe right moves right, swipe left moves left.
-    if (committed) moveTabOverviewSelection(direction === 'back' ? 1 : -1, overviewWindow.window)
-    return
+    if (committed)
+      moveTabOverviewSelection(
+        direction === "back" ? 1 : -1,
+        overviewWindow.window,
+      );
+    return;
   }
-  const swipe = activeMacTrackpadSwipe
-  if (!swipe || swipe.contents.id !== contentsId || swipe.direction !== direction) return
+  const swipe = activeMacTrackpadSwipe;
+  if (
+    !swipe ||
+    swipe.contents.id !== contentsId ||
+    swipe.direction !== direction
+  )
+    return;
   if (swipe.contents.isDestroyed()) {
-    activeMacTrackpadSwipe = null
-    nextMacTrackpadSwipeToken += 1
-    return
+    activeMacTrackpadSwipe = null;
+    nextMacTrackpadSwipeToken += 1;
+    return;
   }
 
   try {
-    swipe.contents.send(MAC_SWIPE_END_CHANNEL, { committed })
+    swipe.contents.send(MAC_SWIPE_END_CHANNEL, { committed });
   } catch {
-    cancelActiveMacTrackpadSwipe()
-    return
+    cancelActiveMacTrackpadSwipe();
+    return;
   }
 
   if (!committed) {
-    activeMacTrackpadSwipe = null
-    nextMacTrackpadSwipeToken += 1
-    return
+    activeMacTrackpadSwipe = null;
+    nextMacTrackpadSwipeToken += 1;
+    return;
   }
 
   setTimeout(() => {
-    if (activeMacTrackpadSwipe !== swipe || swipe.token !== nextMacTrackpadSwipeToken) return
-    activeMacTrackpadSwipe = null
-    nextMacTrackpadSwipeToken += 1
-    const currentTab = getTab(swipe.tabId)
-    if (!currentTab || !isTabOnScreen(currentTab) || currentTab.view?.webContents !== swipe.contents
-      || swipe.contents.isDestroyed() || !isLiveWindow(currentTab.win)) {
-      resetMacTrackpadSwipeFor(swipe.contents)
-      return
+    if (
+      activeMacTrackpadSwipe !== swipe ||
+      swipe.token !== nextMacTrackpadSwipeToken
+    )
+      return;
+    activeMacTrackpadSwipe = null;
+    nextMacTrackpadSwipeToken += 1;
+    const currentTab = getTab(swipe.tabId);
+    if (
+      !currentTab ||
+      !isTabOnScreen(currentTab) ||
+      currentTab.view?.webContents !== swipe.contents ||
+      swipe.contents.isDestroyed() ||
+      !isLiveWindow(currentTab.win)
+    ) {
+      resetMacTrackpadSwipeFor(swipe.contents);
+      return;
     }
 
     try {
-      const canNavigate = direction === 'back'
-        ? swipe.contents.navigationHistory.canGoBack()
-        : swipe.contents.navigationHistory.canGoForward()
+      const canNavigate =
+        direction === "back"
+          ? swipe.contents.navigationHistory.canGoBack()
+          : swipe.contents.navigationHistory.canGoForward();
       if (!canNavigate) {
-        resetMacTrackpadSwipeFor(swipe.contents)
-      } else if (direction === 'back') {
-        swipe.contents.navigationHistory.goBack()
+        resetMacTrackpadSwipeFor(swipe.contents);
+      } else if (direction === "back") {
+        swipe.contents.navigationHistory.goBack();
       } else {
-        swipe.contents.navigationHistory.goForward()
+        swipe.contents.navigationHistory.goForward();
       }
     } catch (error) {
-      console.warn('[trackpad swipe] Could not commit page navigation:', error)
-      resetMacTrackpadSwipeFor(swipe.contents)
+      console.warn("[trackpad swipe] Could not commit page navigation:", error);
+      resetMacTrackpadSwipeFor(swipe.contents);
     }
-  }, MAC_SWIPE_SETTLE_MS + 20)
+  }, MAC_SWIPE_SETTLE_MS + 20);
 }
 
-export function updateBrowserTrackpadScrollEdges(contents: WebContents, input: unknown): void {
-  if (process.platform !== 'darwin' || contents.isDestroyed() || typeof input !== 'object' || input === null) return
-  const edges = input as Partial<BrowserPageScrollEdges>
-  if (typeof edges.canScrollLeft !== 'boolean' || typeof edges.canScrollRight !== 'boolean') return
-  const tab = tabForContents(contents)
-  if (tab) tab.pageScrollEdges = { canScrollLeft: edges.canScrollLeft, canScrollRight: edges.canScrollRight }
+export function updateBrowserTrackpadScrollEdges(
+  contents: WebContents,
+  input: unknown,
+): void {
+  if (
+    process.platform !== "darwin" ||
+    contents.isDestroyed() ||
+    typeof input !== "object" ||
+    input === null
+  )
+    return;
+  const edges = input as Partial<BrowserPageScrollEdges>;
+  if (
+    typeof edges.canScrollLeft !== "boolean" ||
+    typeof edges.canScrollRight !== "boolean"
+  )
+    return;
+  const tab = tabForContents(contents);
+  if (tab)
+    tab.pageScrollEdges = {
+      canScrollLeft: edges.canScrollLeft,
+      canScrollRight: edges.canScrollRight,
+    };
 }
 
-export function updateBrowserPageScale(contents: WebContents, input: unknown): void {
-  if (contents.isDestroyed() || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) return
-  const tab = tabForContents(contents)
-  if (tab) tab.pageScale = input
+export function updateBrowserPageScale(
+  contents: WebContents,
+  input: unknown,
+): void {
+  if (
+    contents.isDestroyed() ||
+    typeof input !== "number" ||
+    !Number.isFinite(input) ||
+    input <= 0
+  )
+    return;
+  const tab = tabForContents(contents);
+  if (tab) tab.pageScale = input;
 }
 
 function tabPictureChanged(tab: BrowserTab): void {
-  tabPictureRevision.set(tab, (tabPictureRevision.get(tab) ?? 0) + 1)
+  tabPictureRevision.set(tab, (tabPictureRevision.get(tab) ?? 0) + 1);
 }
 
 /** Memory saver (memory-saver.ts) turned on or off. */
 export function setBrowserMemorySaverActive(active: boolean): void {
-  memorySaverActive = active
+  memorySaverActive = active;
 }
 
 /**
@@ -4392,37 +6805,47 @@ export function setBrowserMemorySaverActive(active: boolean): void {
  * (A tab hibernated by hand without one just reloads as before.)
  */
 function tabCanSleep(tab: BrowserTab): boolean {
-  if (tab.extensionPageOrigin || tab.pdfEditor) return false
-  return tabSleepMinutes > 0 || (memorySaverActive && !tab.pinned)
+  if (tab.extensionPageOrigin || tab.pdfEditor) return false;
+  return tabSleepMinutes > 0 || (memorySaverActive && !tab.pinned);
 }
 
 /** The tab's last picture still shows its page as it is now (see TAB_PICTURE_MAX_AGE_MS). */
-function tabPictureIsCurrent(tab: BrowserTab, contents: WebContents, url: string, size: { width: number; height: number }): boolean {
-  const taken = tabPictureTaken.get(tab)
-  return taken !== undefined
-    && taken.contents === contents
-    && taken.revision === (tabPictureRevision.get(tab) ?? 0)
-    && taken.url === url
-    && taken.width === size.width && taken.height === size.height
-    && Date.now() - taken.at < TAB_PICTURE_MAX_AGE_MS
-    && !tabsPlayingMedia.has(tab)
+function tabPictureIsCurrent(
+  tab: BrowserTab,
+  contents: WebContents,
+  url: string,
+  size: { width: number; height: number },
+): boolean {
+  const taken = tabPictureTaken.get(tab);
+  return (
+    taken !== undefined &&
+    taken.contents === contents &&
+    taken.revision === (tabPictureRevision.get(tab) ?? 0) &&
+    taken.url === url &&
+    taken.width === size.width &&
+    taken.height === size.height &&
+    Date.now() - taken.at < TAB_PICTURE_MAX_AGE_MS &&
+    !tabsPlayingMedia.has(tab)
+  );
 }
 
 function wasShownLongEnough(tab: BrowserTab): boolean {
-  const shownAt = tabShownAt.get(tab)
+  const shownAt = tabShownAt.get(tab);
   // Never stamped: the tab was on screen from start-up (restored session), so it counts as seen.
-  return shownAt === undefined || Date.now() - shownAt >= wakeSnapshotMinShownMs()
+  return (
+    shownAt === undefined || Date.now() - shownAt >= wakeSnapshotMinShownMs()
+  );
 }
 
 /** WAKE_SNAPSHOT_MIN_SHOWN_MS; the perf bench lowers it (SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS) to time the full switch-away cost without dwelling 1.5 s per tab. */
 function wakeSnapshotMinShownMs(): number {
-  const override = process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS
-  const ms = override ? Number(override) : NaN
-  return Number.isFinite(ms) && ms >= 0 ? ms : WAKE_SNAPSHOT_MIN_SHOWN_MS
+  const override = process.env.SURFFISH_WAKE_SNAPSHOT_MIN_SHOWN_MS;
+  const ms = override ? Number(override) : NaN;
+  return Number.isFinite(ms) && ms >= 0 ? ms : WAKE_SNAPSHOT_MIN_SHOWN_MS;
 }
 
 function isLocalNewTab(tab: BrowserTab): boolean {
-  return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL
+  return !tab.view && currentUrl(tab) === SURFFISH_QUICK_LINKS_URL;
 }
 
 // ---------------------------------------------------------------------------
@@ -4435,27 +6858,45 @@ function isLocalNewTab(tab: BrowserTab): boolean {
 // can't be split, duplicated or popped out to a mini window.
 
 /** Where each Settings tab should be (section / site / category) and a revision bumped per request. */
-const settingsTabTargets = new WeakMap<BrowserTab, { target: SettingsTarget; revision: number }>()
-let settingsTargetRevision = 0
+const settingsTabTargets = new WeakMap<
+  BrowserTab,
+  { target: SettingsTarget; revision: number }
+>();
+let settingsTargetRevision = 0;
 /** createTab only makes a Settings tab when openSettingsTab asks (a typed address goes through openSettingsTab). */
-let creatingSettingsTab = false
+let creatingSettingsTab = false;
 
 function isSettingsTab(tab: BrowserTab | undefined): boolean {
-  return Boolean(tab && !tab.view && !tab.pdfEditor && !tab.extensionPageOrigin && tab.lastUrl === SURFFISH_SETTINGS_URL)
+  return Boolean(
+    tab &&
+    !tab.view &&
+    !tab.pdfEditor &&
+    !tab.extensionPageOrigin &&
+    tab.lastUrl === SURFFISH_SETTINGS_URL,
+  );
 }
 
-function settingsTabState(tab: BrowserTab): NonNullable<BrowserState['settings']> {
-  const entry = settingsTabTargets.get(tab) ?? { target: { section: 'settings' as const }, revision: 0 }
-  return { ...entry.target, revision: entry.revision }
+function settingsTabState(
+  tab: BrowserTab,
+): NonNullable<BrowserState["settings"]> {
+  const entry = settingsTabTargets.get(tab) ?? {
+    target: { section: "settings" as const },
+    revision: 0,
+  };
+  return { ...entry.target, revision: entry.revision };
 }
 
 /** The tab used most recently before `except` in that Space (Settings closing returns there). */
-function lastUsedTabInSpace(w: BrowserWindowState, spaceId: string): BrowserTab | undefined {
+function lastUsedTabInSpace(
+  w: BrowserWindowState,
+  spaceId: string,
+): BrowserTab | undefined {
   for (const id of w.recentTabIds) {
-    const candidate = w.tabs.find((tab) => tab.id === id)
-    if (candidate && candidate.spaceId === spaceId && !isSettingsTab(candidate)) return candidate
+    const candidate = w.tabs.find((tab) => tab.id === id);
+    if (candidate && candidate.spaceId === spaceId && !isSettingsTab(candidate))
+      return candidate;
   }
-  return undefined
+  return undefined;
 }
 
 /**
@@ -4463,56 +6904,64 @@ function lastUsedTabInSpace(w: BrowserWindowState, spaceId: string): BrowserTab 
  * tab is active, the page of the tab used before it (the one closing Settings returns to).
  */
 export function getPageBehindSettings(): WebContents | null {
-  const w = currentWindowState()
-  const active = w ? activeTabOf(w) : undefined
-  if (!w || !active) return null
-  const tab = isSettingsTab(active) ? lastUsedTabInSpace(w, active.spaceId) : active
-  const contents = tab?.view?.webContents
-  return contents && !contents.isDestroyed() ? contents : null
+  const w = currentWindowState();
+  const active = w ? activeTabOf(w) : undefined;
+  if (!w || !active) return null;
+  const tab = isSettingsTab(active)
+    ? lastUsedTabInSpace(w, active.spaceId)
+    : active;
+  const contents = tab?.view?.webContents;
+  return contents && !contents.isDestroyed() ? contents : null;
 }
 
-function sessionActiveIndex(w: BrowserWindowState, kept: readonly BrowserTab[]): number {
-  const active = kept.findIndex((tab) => tab.id === w.activeTabId)
-  if (active >= 0) return active
+function sessionActiveIndex(
+  w: BrowserWindowState,
+  kept: readonly BrowserTab[],
+): number {
+  const active = kept.findIndex((tab) => tab.id === w.activeTabId);
+  if (active >= 0) return active;
   for (const id of w.recentTabIds) {
-    const index = kept.findIndex((tab) => tab.id === id)
-    if (index >= 0) return index
+    const index = kept.findIndex((tab) => tab.id === id);
+    if (index >= 0) return index;
   }
-  return -1
+  return -1;
 }
 
 /** The browser window Settings opens in: never a mini window (its tabs go to a browser window). */
-function settingsWindowFor(window?: BaseWindow | null): BrowserWindowState | undefined {
-  const own = windowStateFor(window)
-  if (own && !own.mini) return own
-  if (own?.mini) return browserTargetForMini(own)
-  const current = currentWindowState()
-  if (current && !current.mini) return current
-  const focused = windowStateFor(lastFocusedBrowserWindow())
-  if (focused && !focused.mini) return focused
-  return browserTargetForMini(undefined)
+function settingsWindowFor(
+  window?: BaseWindow | null,
+): BrowserWindowState | undefined {
+  const own = windowStateFor(window);
+  if (own && !own.mini) return own;
+  if (own?.mini) return browserTargetForMini(own);
+  const current = currentWindowState();
+  if (current && !current.mini) return current;
+  const focused = windowStateFor(lastFocusedBrowserWindow());
+  if (focused && !focused.mini) return focused;
+  return browserTargetForMini(undefined);
 }
 
 /** Index in `w.tabs` right after the active tab, past the rest of its split or tab group. */
 function settingsTabInsertAt(w: BrowserWindowState): number {
-  const active = activeTabOf(w)
-  let index = active ? w.tabs.indexOf(active) : -1
-  if (index < 0) return w.tabs.length
-  const split = splitOf(active!)
+  const active = activeTabOf(w);
+  let index = active ? w.tabs.indexOf(active) : -1;
+  if (index < 0) return w.tabs.length;
+  const split = splitOf(active!);
   while (index + 1 < w.tabs.length) {
-    const next = w.tabs[index + 1]!
-    const sameGroup = active!.groupId !== null && next.groupId === active!.groupId
-    const sameSplit = split ? split.tabIds.includes(next.id) : false
-    if (!sameGroup && !sameSplit) break
-    index += 1
+    const next = w.tabs[index + 1]!;
+    const sameGroup =
+      active!.groupId !== null && next.groupId === active!.groupId;
+    const sameSplit = split ? split.tabIds.includes(next.id) : false;
+    if (!sameGroup && !sameSplit) break;
+    index += 1;
   }
-  return index + 1
+  return index + 1;
 }
 
 /** The Settings tab of a window, if it has one. */
 export function getSettingsTabId(window?: BaseWindow | null): string | null {
-  const w = settingsWindowFor(window)
-  return w?.tabs.find(isSettingsTab)?.id ?? null
+  const w = settingsWindowFor(window);
+  return w?.tabs.find(isSettingsTab)?.id ?? null;
 }
 
 /**
@@ -4520,62 +6969,89 @@ export function getSettingsTabId(window?: BaseWindow | null): string | null {
  * one right after the active tab. From a mini window or the menu bar popout it opens in a browser
  * window, which comes forward. Returns the Settings tab's id.
  */
-export function openSettingsTab(input?: unknown, window?: BaseWindow | null): string | null {
-  const target = normalizeSettingsTarget(input)
-  const w = settingsWindowFor(window ?? currentBrowserWindow())
-  if (!isLiveWindow(w)) return null
-  closeOverviewForPanel()
-  settingsTargetRevision += 1
-  const revision = settingsTargetRevision
-  let tab = w.tabs.find(isSettingsTab)
+export function openSettingsTab(
+  input?: unknown,
+  window?: BaseWindow | null,
+): string | null {
+  const target = normalizeSettingsTarget(input);
+  const w = settingsWindowFor(window ?? currentBrowserWindow());
+  if (!isLiveWindow(w)) return null;
+  closeOverviewForPanel();
+  settingsTargetRevision += 1;
+  const revision = settingsTargetRevision;
+  let tab = w.tabs.find(isSettingsTab);
   if (tab) {
-    settingsTabTargets.set(tab, { target, revision })
+    settingsTabTargets.set(tab, { target, revision });
     // Settings belongs to whichever Space you are in.
-    if (tab.spaceId !== w.activeSpaceId) tab.spaceId = w.activeSpaceId
-    if (w.activeTabId === tab.id) publishState(w)
-    else activateTabInternal(tab.id)
+    if (tab.spaceId !== w.activeSpaceId) tab.spaceId = w.activeSpaceId;
+    if (w.activeTabId === tab.id) publishState(w);
+    else activateTabInternal(tab.id);
   } else {
-    creatingSettingsTab = true
-    let id: string | null = null
+    creatingSettingsTab = true;
+    let id: string | null = null;
     try {
-      id = createTab(SURFFISH_SETTINGS_URL, selectedSearchEngine, true, false, false, false, undefined, settingsTabInsertAt(w), false, false, w)
+      id = createTab(
+        SURFFISH_SETTINGS_URL,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        settingsTabInsertAt(w),
+        false,
+        false,
+        w,
+      );
     } finally {
-      creatingSettingsTab = false
+      creatingSettingsTab = false;
     }
-    tab = findTab(id)
-    if (!tab) return null
-    settingsTabTargets.set(tab, { target, revision })
-    publishState(w)
+    tab = findTab(id);
+    if (!tab) return null;
+    settingsTabTargets.set(tab, { target, revision });
+    publishState(w);
   }
   // A full-page panel (Downloads, Bookmarks) or History over the page closes so Settings shows.
-  const mode = getBrowserChromeState(w.window).sidebarMode
-  if (mode === 'downloads' || mode === 'bookmarks' || mode === 'history') setBrowserChromeState({ sidebarMode: 'tabs' }, w.window, 'settings tab')
+  const mode = getBrowserChromeState(w.window).sidebarMode;
+  if (mode === "downloads" || mode === "bookmarks" || mode === "history")
+    setBrowserChromeState({ sidebarMode: "tabs" }, w.window, "settings tab");
   if (!w.window.isDestroyed()) {
-    if (w.window.isMinimized()) w.window.restore()
+    if (w.window.isMinimized()) w.window.restore();
     if (!w.window.isFocused()) {
-      w.window.show()
-      w.window.focus()
+      w.window.show();
+      w.window.focus();
     }
   }
   // Keyboard to the content renderer (the one drawing Settings) once the layout has switched to it.
-  const shown = w.window
-  setImmediate(() => { if (!shown.isDestroyed()) focusVisibleShellPage(shown) })
-  return tab.id
+  const shown = w.window;
+  setImmediate(() => {
+    if (!shown.isDestroyed()) focusVisibleShellPage(shown);
+  });
+  return tab.id;
 }
 
 /** A settings page named by the chrome state (old callers, ⌘K): Sites lands on the active tab's site. */
-function openSettingsSectionFromChrome(section: string, window: BaseWindow): void {
-  const w = settingsWindowFor(window)
-  const active = w ? activeTabOf(w) : undefined
-  const host = section === 'site' && active && !isSettingsTab(active) ? settingsSiteOrigin(currentUrl(active)) : null
-  openSettingsTab({ section, ...(host ? { host } : {}) }, w?.window ?? window)
+function openSettingsSectionFromChrome(
+  section: string,
+  window: BaseWindow,
+): void {
+  const w = settingsWindowFor(window);
+  const active = w ? activeTabOf(w) : undefined;
+  const host =
+    section === "site" && active && !isSettingsTab(active)
+      ? settingsSiteOrigin(currentUrl(active))
+      : null;
+  openSettingsTab({ section, ...(host ? { host } : {}) }, w?.window ?? window);
 }
-setSettingsSectionOpener(openSettingsSectionFromChrome)
+setSettingsSectionOpener(openSettingsSectionFromChrome);
 
 function thumbnailDataUrl(image: Electron.NativeImage): string {
-  const size = image.getSize()
-  const scaled = size.width > THUMBNAIL_WIDTH ? image.resize({ width: THUMBNAIL_WIDTH, quality: 'good' }) : image
-  return `data:image/jpeg;base64,${scaled.toJPEG(72).toString('base64')}`
+  const size = image.getSize();
+  const scaled =
+    size.width > THUMBNAIL_WIDTH
+      ? image.resize({ width: THUMBNAIL_WIDTH, quality: "good" })
+      : image;
+  return `data:image/jpeg;base64,${scaled.toJPEG(72).toString("base64")}`;
 }
 
 /**
@@ -4586,127 +7062,217 @@ function thumbnailDataUrl(image: Electron.NativeImage): string {
  * pending encodes before it reads.
  */
 interface PendingTabPicture {
-  tab: BrowserTab
-  image: Electron.NativeImage
-  wake: { pageArea: { width: number; height: number }; url: string; isPrivate: boolean; partition: string } | null
-  timer: ReturnType<typeof setTimeout>
+  tab: BrowserTab;
+  image: Electron.NativeImage;
+  wake: {
+    pageArea: { width: number; height: number };
+    url: string;
+    isPrivate: boolean;
+    partition: string;
+  } | null;
+  timer: ReturnType<typeof setTimeout>;
 }
-const pendingPictures = new Map<string, PendingTabPicture>()
-const TAB_PICTURE_ENCODE_DELAY_MS = 300
+const pendingPictures = new Map<string, PendingTabPicture>();
+const TAB_PICTURE_ENCODE_DELAY_MS = 300;
 
-function scheduleTabPictureEncode(tab: BrowserTab, image: Electron.NativeImage, wake: PendingTabPicture['wake']): void {
-  cancelTabPictureEncode(tab.id)
-  const timer = setTimeout(() => encodeTabPicture(tab.id), TAB_PICTURE_ENCODE_DELAY_MS)
-  pendingPictures.set(tab.id, { tab, image, wake, timer })
+function scheduleTabPictureEncode(
+  tab: BrowserTab,
+  image: Electron.NativeImage,
+  wake: PendingTabPicture["wake"],
+): void {
+  cancelTabPictureEncode(tab.id);
+  const timer = setTimeout(
+    () => encodeTabPicture(tab.id),
+    TAB_PICTURE_ENCODE_DELAY_MS,
+  );
+  pendingPictures.set(tab.id, { tab, image, wake, timer });
 }
 
 function cancelTabPictureEncode(id: string): void {
-  const job = pendingPictures.get(id)
-  if (!job) return
-  clearTimeout(job.timer)
-  pendingPictures.delete(id)
+  const job = pendingPictures.get(id);
+  if (!job) return;
+  clearTimeout(job.timer);
+  pendingPictures.delete(id);
 }
 
 function encodeTabPicture(id: string): void {
-  const job = pendingPictures.get(id)
-  if (!job) return
-  cancelTabPictureEncode(id)
-  if (!allTabs().includes(job.tab)) return
+  const job = pendingPictures.get(id);
+  if (!job) return;
+  cancelTabPictureEncode(id);
+  if (!allTabs().includes(job.tab)) return;
   try {
-    tabThumbnails.set(id, thumbnailDataUrl(job.image))
+    tabThumbnails.set(id, thumbnailDataUrl(job.image));
   } catch (error) {
-    console.warn('[tab picture] could not encode:', error)
+    console.warn("[tab picture] could not encode:", error);
   }
-  const { wake, image, tab } = job
-  if (!wake) return
+  const { wake, image, tab } = job;
+  if (!wake) return;
   setImmediate(() => {
     // Closed meanwhile, or a newer capture is already waiting: this one is stale.
-    if (!allTabs().includes(tab) || pendingPictures.has(id)) return
-    keepWakeSnapshot(id, image, wake.pageArea, wake.url, wake.isPrivate, wake.partition)
-  })
+    if (!allTabs().includes(tab) || pendingPictures.has(id)) return;
+    keepWakeSnapshot(
+      id,
+      image,
+      wake.pageArea,
+      wake.url,
+      wake.isPrivate,
+      wake.partition,
+    );
+  });
 }
 
 /** The tab overview is about to read thumbnails: encode every capture still waiting. */
 function flushTabPictureEncodes(): void {
-  for (const id of [...pendingPictures.keys()]) encodeTabPicture(id)
+  for (const id of [...pendingPictures.keys()]) encodeTabPicture(id);
 }
 
 /** The tab closed: its thumbnail and wake snapshot go, including a capture still waiting to be encoded. */
 function forgetTabPicture(id: string): void {
-  cancelTabPictureEncode(id)
-  tabThumbnails.delete(id)
-  dropWakeSnapshot(id)
+  cancelTabPictureEncode(id);
+  tabThumbnails.delete(id);
+  dropWakeSnapshot(id);
 }
 
 /** A tab closed by the user: its saved picture goes, unless another open tab shows the same page (quitting keeps them all). */
 function forgetSavedWakeSnapshot(tab: BrowserTab): void {
-  if (sessionFrozen || tab.isPrivate) return
-  const url = currentUrl(tab)
-  const partition = partitionForTab(tab)
-  if (allTabs().some((other) => other !== tab && !other.isPrivate && currentUrl(other) === url && partitionForTab(other) === partition)) return
-  forgetWakeSnapshotOnDisk(url, partition)
+  if (sessionFrozen || tab.isPrivate) return;
+  const url = currentUrl(tab);
+  const partition = partitionForTab(tab);
+  if (
+    allTabs().some(
+      (other) =>
+        other !== tab &&
+        !other.isPrivate &&
+        currentUrl(other) === url &&
+        partitionForTab(other) === partition,
+    )
+  )
+    return;
+  forgetWakeSnapshotOnDisk(url, partition);
 }
 
 /** The restored window's tab on screen (alone, not a split) shows its saved picture while it loads. */
 function presentRestoredTabPicture(w: BrowserWindowState): void {
-  const shown = onScreenTabIds(w)
-  const tab = shown.length === 1 ? findTab(shown[0]) : undefined
-  const contents = tab?.view?.webContents
-  if (!tab || !contents || tab.isPrivate || tab.pdfEditor) return
-  presentWakeSnapshotAtStartup(w.window, tab.id, contents, () => pageBoundsOf(tab), currentUrl(tab), partitionForTab(tab), () => isActiveTab(tab) && tab.view?.webContents === contents)
+  const shown = onScreenTabIds(w);
+  const tab = shown.length === 1 ? findTab(shown[0]) : undefined;
+  const contents = tab?.view?.webContents;
+  if (!tab || !contents || tab.isPrivate || tab.pdfEditor) return;
+  presentWakeSnapshotAtStartup(
+    w.window,
+    tab.id,
+    contents,
+    () => pageBoundsOf(tab),
+    currentUrl(tab),
+    partitionForTab(tab),
+    () => isActiveTab(tab) && tab.view?.webContents === contents,
+  );
 }
 
 /** After start-up: saved pictures of pages no open tab shows any more are removed (wake-snapshot-disk.ts). */
 export function pruneSavedWakeSnapshots(): void {
-  pruneWakeSnapshotsOnDisk(allTabs().filter((tab) => !tab.isPrivate).map((tab) => ({ url: currentUrl(tab), partition: partitionForTab(tab) })))
+  pruneWakeSnapshotsOnDisk(
+    allTabs()
+      .filter((tab) => !tab.isPrivate)
+      .map((tab) => ({
+        url: currentUrl(tab),
+        partition: partitionForTab(tab),
+      })),
+  );
 }
 
 /** A wake snapshot of `url` fitting `pageArea` is stored or waiting to be encoded. */
-function hasCurrentWakePicture(id: string, url: string, pageArea: { width: number; height: number }): boolean {
-  const pending = pendingPictures.get(id)?.wake
-  if (pending) return pending.url === url && pending.pageArea.width === pageArea.width && pending.pageArea.height === pageArea.height
-  return hasWakeSnapshot(id, url, pageArea)
+function hasCurrentWakePicture(
+  id: string,
+  url: string,
+  pageArea: { width: number; height: number },
+): boolean {
+  const pending = pendingPictures.get(id)?.wake;
+  if (pending)
+    return (
+      pending.url === url &&
+      pending.pageArea.width === pageArea.width &&
+      pending.pageArea.height === pageArea.height
+    );
+  return hasWakeSnapshot(id, url, pageArea);
 }
 
-async function captureTabThumbnail(tab: BrowserTab, forWake = false): Promise<void> {
-  const { browserBounds } = tab.win
-  if (!isActiveTab(tab) || browserBounds.width <= 0 || browserBounds.height <= 0) return
+async function captureTabThumbnail(
+  tab: BrowserTab,
+  forWake = false,
+): Promise<void> {
+  const { browserBounds } = tab.win;
+  if (
+    !isActiveTab(tab) ||
+    browserBounds.width <= 0 ||
+    browserBounds.height <= 0
+  )
+    return;
   if (isLocalNewTab(tab)) {
-    const image = await captureLocalNewTabPage({ ...browserBounds }, tab.win.window)
-    if (!image || !allTabs().includes(tab)) return
-    const shot = thumbnailDataUrl(image)
-    tabThumbnails.set(tab.id, shot)
-    newTabThumbnail = shot
-    return
+    const image = await captureLocalNewTabPage(
+      { ...browserBounds },
+      tab.win.window,
+    );
+    if (!image || !allTabs().includes(tab)) return;
+    const shot = thumbnailDataUrl(image);
+    tabThumbnails.set(tab.id, shot);
+    newTabThumbnail = shot;
+    return;
   }
-  const contents = tab.view?.webContents
-  if (!contents || contents.isDestroyed()) return
+  const contents = tab.view?.webContents;
+  if (!contents || contents.isDestroyed()) return;
   try {
-    const bounds = pageBoundsOf(tab)
-    const pageArea = forWake && tabCanSleep(tab) ? bounds : null
-    const url = currentUrl(tab)
+    const bounds = pageBoundsOf(tab);
+    const pageArea = forWake && tabCanSleep(tab) ? bounds : null;
+    const url = currentUrl(tab);
     // Nothing changed since the last picture: the thumbnail (and wake snapshot, if one is wanted) still stand.
-    if ((tabThumbnails.has(tab.id) || pendingPictures.has(tab.id)) && tabPictureIsCurrent(tab, contents, url, bounds) && (!pageArea || hasCurrentWakePicture(tab.id, url, pageArea))) return
-    const taken = { revision: tabPictureRevision.get(tab) ?? 0, contents, url, width: bounds.width, height: bounds.height, at: Date.now() }
+    if (
+      (tabThumbnails.has(tab.id) || pendingPictures.has(tab.id)) &&
+      tabPictureIsCurrent(tab, contents, url, bounds) &&
+      (!pageArea || hasCurrentWakePicture(tab.id, url, pageArea))
+    )
+      return;
+    const taken = {
+      revision: tabPictureRevision.get(tab) ?? 0,
+      contents,
+      url,
+      width: bounds.width,
+      height: bounds.height,
+      at: Date.now(),
+    };
     // stayHidden: the outgoing tab is detached right after this call, and a capture still pending
     // then (a busy or still-loading page) must not hold it "visible" (unthrottled) until it lands.
-    const image = await capturePageWithin(contents, undefined, { stayHidden: true })
-    if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return
-    tabPictureTaken.set(tab, taken)
-    const wake = pageArea && tab.view?.webContents === contents ? { pageArea, url, isPrivate: tab.isPrivate, partition: partitionForTab(tab) } : null
-    scheduleTabPictureEncode(tab, image, wake)
+    const image = await capturePageWithin(contents, undefined, {
+      stayHidden: true,
+    });
+    if (!image || contents.isDestroyed() || !allTabs().includes(tab)) return;
+    tabPictureTaken.set(tab, taken);
+    const wake =
+      pageArea && tab.view?.webContents === contents
+        ? {
+            pageArea,
+            url,
+            isPrivate: tab.isPrivate,
+            partition: partitionForTab(tab),
+          }
+        : null;
+    scheduleTabPictureEncode(tab, image, wake);
   } catch {
     // A page that is navigating or crashing just keeps its previous thumbnail.
   }
 }
 
-async function getTabOverviewItems(w: BrowserWindowState): Promise<TabOverviewItem[]> {
-  const active = activeTabOf(w)
+async function getTabOverviewItems(
+  w: BrowserWindowState,
+): Promise<TabOverviewItem[]> {
+  const active = activeTabOf(w);
   if (active) {
     // Fresh shot of what is on screen right now; don't hold the gesture up for a slow page.
-    await Promise.race([captureTabThumbnail(active), new Promise((resolve) => setTimeout(resolve, 120))])
+    await Promise.race([
+      captureTabThumbnail(active),
+      new Promise((resolve) => setTimeout(resolve, 120)),
+    ]);
   }
-  flushTabPictureEncodes()
+  flushTabPictureEncodes();
   return getTabSummaries(w).map((summary) => ({
     id: summary.id,
     url: summary.url,
@@ -4716,188 +7282,247 @@ async function getTabOverviewItems(w: BrowserWindowState): Promise<TabOverviewIt
     pinned: summary.pinned,
     sleeping: summary.sleeping,
     newTab: summary.url === SURFFISH_QUICK_LINKS_URL,
-    thumbnail: tabThumbnails.get(summary.id) ?? (summary.url === SURFFISH_QUICK_LINKS_URL ? newTabThumbnail : null)
-  }))
+    thumbnail:
+      tabThumbnails.get(summary.id) ??
+      (summary.url === SURFFISH_QUICK_LINKS_URL ? newTabThumbnail : null),
+  }));
 }
 
 // How much pinch (summed NSEvent magnification) carries the overview the whole way in or out.
-const PINCH_FULL_TRAVEL = 0.55
+const PINCH_FULL_TRAVEL = 0.55;
 // Progress per second at release that counts as a flick, whatever the distance travelled.
-const PINCH_FLICK_SPEED = 1.6
-let pinchMode: 'none' | 'open' | 'close' | 'swallow' = 'none'
-let pinchWindow: BaseWindow | null = null
-let pinchSamples: { at: number; progress: number }[] = []
+const PINCH_FLICK_SPEED = 1.6;
+let pinchMode: "none" | "open" | "close" | "swallow" = "none";
+let pinchWindow: BaseWindow | null = null;
+let pinchSamples: { at: number; progress: number }[] = [];
 
 function pinchProgress(magnification: number): number {
-  const travel = magnification / PINCH_FULL_TRAVEL
-  const progress = pinchMode === 'open' ? -travel : 1 - travel
-  return Math.min(1.25, Math.max(-0.05, progress))
+  const travel = magnification / PINCH_FULL_TRAVEL;
+  const progress = pinchMode === "open" ? -travel : 1 - travel;
+  return Math.min(1.25, Math.max(-0.05, progress));
 }
 
 function trackPinchProgress(magnification: number): number {
-  const progress = pinchProgress(magnification)
-  const now = Date.now()
-  pinchSamples.push({ at: now, progress })
-  while (pinchSamples.length > 2 && now - pinchSamples[0]!.at > 120) pinchSamples.shift()
-  setTabOverviewProgress(progress, pinchWindow)
-  return progress
+  const progress = pinchProgress(magnification);
+  const now = Date.now();
+  pinchSamples.push({ at: now, progress });
+  while (pinchSamples.length > 2 && now - pinchSamples[0]!.at > 120)
+    pinchSamples.shift();
+  setTabOverviewProgress(progress, pinchWindow);
+  return progress;
 }
 
 function pinchVelocity(): number {
-  const first = pinchSamples[0]
-  const last = pinchSamples[pinchSamples.length - 1]
-  if (!first || !last || last.at - first.at < 8) return 0
-  return (last.progress - first.progress) / ((last.at - first.at) / 1000)
+  const first = pinchSamples[0];
+  const last = pinchSamples[pinchSamples.length - 1];
+  if (!first || !last || last.at - first.at < 8) return 0;
+  return (last.progress - first.progress) / ((last.at - first.at) / 1000);
 }
 
-function handleMacTrackpadPinch(phase: MacTrackpadPinchPhase, magnification: number): boolean {
-  if (MAC_SWIPE_DEBUG && phase !== 'change') {
-    console.info('[trackpad swipe] pinch', phase, { magnification, mode: pinchMode, overview: getTabOverviewState(pinchWindow), pageScale: getTab()?.pageScale })
+function handleMacTrackpadPinch(
+  phase: MacTrackpadPinchPhase,
+  magnification: number,
+): boolean {
+  if (MAC_SWIPE_DEBUG && phase !== "change") {
+    console.info("[trackpad swipe] pinch", phase, {
+      magnification,
+      mode: pinchMode,
+      overview: getTabOverviewState(pinchWindow),
+      pageScale: getTab()?.pageScale,
+    });
   }
-  if (phase === 'begin') {
-    pinchSamples = []
-    pinchMode = 'none'
-    const w = windowStateFor(focusedBrowserWindow()) ?? currentWindowState()
-    pinchWindow = w?.window ?? null
-    const overview = getTabOverviewState(pinchWindow)
-    if (overview === 'opening' || overview === 'closing') {
+  if (phase === "begin") {
+    pinchSamples = [];
+    pinchMode = "none";
+    const w = windowStateFor(focusedBrowserWindow()) ?? currentWindowState();
+    pinchWindow = w?.window ?? null;
+    const overview = getTabOverviewState(pinchWindow);
+    if (overview === "opening" || overview === "closing") {
       // Mid-animation: eat the pinch so the page underneath doesn't zoom.
-      pinchMode = 'swallow'
-      return true
+      pinchMode = "swallow";
+      return true;
     }
-    if (overview === 'open') {
-      pinchMode = magnification > 0 ? 'close' : 'swallow'
-      if (pinchMode === 'close') {
+    if (overview === "open") {
+      pinchMode = magnification > 0 ? "close" : "swallow";
+      if (pinchMode === "close") {
         // Swap the page underneath now so it is already there as the selected card grows into it.
-        const selected = getTabOverviewSelectedId(pinchWindow)
-        if (selected && selected !== w?.activeTabId) activateBrowserTab(selected)
-        trackPinchProgress(magnification)
+        const selected = getTabOverviewSelectedId(pinchWindow);
+        if (selected && selected !== w?.activeTabId)
+          activateBrowserTab(selected);
+        trackPinchProgress(magnification);
       }
-      return true
+      return true;
     }
     // A Glance on screen: the pinch is its page's (visual zoom), never the tab overview's.
-    if (isGlanceOpenIn(pinchWindow)) return false
-    if (magnification > 0) return false
-    if (!isLiveWindow(w) || !w.window.isFocused()) return false
-    const tab = activeTabOf(w)
+    if (isGlanceOpenIn(pinchWindow)) return false;
+    if (magnification > 0) return false;
+    if (!isLiveWindow(w) || !w.window.isFocused()) return false;
+    const tab = activeTabOf(w);
     // Pinching in on a zoomed-in page should zoom it back out, not open the overview.
-    if (!tab || tab.pageScale > 1.01) return false
-    pinchMode = 'open'
-    void openTabOverview({ interactive: true }, w.window)
-    trackPinchProgress(magnification)
-    return true
+    if (!tab || tab.pageScale > 1.01) return false;
+    pinchMode = "open";
+    void openTabOverview({ interactive: true }, w.window);
+    trackPinchProgress(magnification);
+    return true;
   }
 
-  const mode = pinchMode
-  if (mode === 'none' || mode === 'swallow') {
-    if (phase !== 'change') pinchMode = 'none'
-    return mode === 'swallow'
+  const mode = pinchMode;
+  if (mode === "none" || mode === "swallow") {
+    if (phase !== "change") pinchMode = "none";
+    return mode === "swallow";
   }
-  if (phase === 'change') {
-    trackPinchProgress(magnification)
-    return true
+  if (phase === "change") {
+    trackPinchProgress(magnification);
+    return true;
   }
 
-  const progress = pinchSamples[pinchSamples.length - 1]?.progress ?? (mode === 'open' ? 0 : 1)
-  const velocity = pinchVelocity()
-  pinchMode = 'none'
-  pinchSamples = []
-  if (phase === 'cancel') {
-    settleTabOverview(mode === 'close', undefined, true, pinchWindow)
-    return true
+  const progress =
+    pinchSamples[pinchSamples.length - 1]?.progress ??
+    (mode === "open" ? 0 : 1);
+  const velocity = pinchVelocity();
+  pinchMode = "none";
+  pinchSamples = [];
+  if (phase === "cancel") {
+    settleTabOverview(mode === "close", undefined, true, pinchWindow);
+    return true;
   }
   // Released: a flick wins, otherwise go wherever it is closer to.
-  const open = velocity > PINCH_FLICK_SPEED ? true
-    : velocity < -PINCH_FLICK_SPEED ? false
-      : mode === 'open' ? progress > 0.4 : progress > 0.6
-  if (MAC_SWIPE_DEBUG) console.info('[trackpad swipe] pinch released', { mode, progress, velocity, open })
-  settleTabOverview(open, open ? undefined : windowStateFor(pinchWindow)?.activeTabId ?? undefined, true, pinchWindow)
-  return true
+  const open =
+    velocity > PINCH_FLICK_SPEED
+      ? true
+      : velocity < -PINCH_FLICK_SPEED
+        ? false
+        : mode === "open"
+          ? progress > 0.4
+          : progress > 0.6;
+  if (MAC_SWIPE_DEBUG)
+    console.info("[trackpad swipe] pinch released", {
+      mode,
+      progress,
+      velocity,
+      open,
+    });
+  settleTabOverview(
+    open,
+    open ? undefined : (windowStateFor(pinchWindow)?.activeTabId ?? undefined),
+    true,
+    pinchWindow,
+  );
+  return true;
 }
 
 export function browserBack(): void {
   if (getTab()?.pdfEditor) {
-    closePdfEditor()
-    return
+    closePdfEditor();
+    return;
   }
-  const contents = getTab()?.view?.webContents
-  if (contents?.navigationHistory.canGoBack()) contents.navigationHistory.goBack()
+  const contents = getTab()?.view?.webContents;
+  if (contents?.navigationHistory.canGoBack())
+    contents.navigationHistory.goBack();
 }
 
 export function browserForward(): void {
-  const contents = getTab()?.view?.webContents
-  if (contents?.navigationHistory.canGoForward()) contents.navigationHistory.goForward()
+  const contents = getTab()?.view?.webContents;
+  if (contents?.navigationHistory.canGoForward())
+    contents.navigationHistory.goForward();
 }
 
 /** Navigation history entries the press-and-hold Back/Forward menu lists for the active tab (the focused split pane). */
-export function getBrowserNavHistory(direction: NavHistoryDirection): BrowserNavHistoryMenu {
-  const tab = getTab()
-  const contents = tab?.view?.webContents
-  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed()) return { direction, entries: [], total: 0 }
-  const history = contents.navigationHistory
+export function getBrowserNavHistory(
+  direction: NavHistoryDirection,
+): BrowserNavHistoryMenu {
+  const tab = getTab();
+  const contents = tab?.view?.webContents;
+  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed())
+    return { direction, entries: [], total: 0 };
+  const history = contents.navigationHistory;
   const all = history.getAllEntries().map((entry) => ({
     url: entry.url,
-    title: entry.url === SURFFISH_QUICK_LINKS_URL ? 'New Tab' : entry.title
-  }))
-  const menu = navHistoryMenu(all, history.getActiveIndex(), direction)
+    title: entry.url === SURFFISH_QUICK_LINKS_URL ? "New Tab" : entry.title,
+  }));
+  const menu = navHistoryMenu(all, history.getActiveIndex(), direction);
   return {
     ...menu,
     // Read-only lookups in the favicon cache: nothing is fetched or written, private tabs included.
-    entries: menu.entries.map((entry) => ({ ...entry, faviconUrl: /^https?:\/\//i.test(entry.url) ? getCachedBrowserSiteFavicon(entry.url) : null }))
-  }
+    entries: menu.entries.map((entry) => ({
+      ...entry,
+      faviconUrl: /^https?:\/\//i.test(entry.url)
+        ? getCachedBrowserSiteFavicon(entry.url)
+        : null,
+    })),
+  };
 }
 
 /**
  * Go to one entry of the active tab's history (a row of the Back/Forward menu), or open that
  * entry's URL in a new tab right after it (Cmd/Ctrl- or middle-click), keeping private tabs private.
  */
-export function browserGoToNavHistory(index: number, disposition: NavHistoryOpenDisposition = 'current'): boolean {
-  const tab = getTab()
-  const contents = tab?.view?.webContents
-  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed()) return false
-  const history = contents.navigationHistory
-  if (!isNavHistoryTarget(index, history.length(), history.getActiveIndex())) return false
-  if (disposition === 'current') {
-    history.goToIndex(index)
-    return true
+export function browserGoToNavHistory(
+  index: number,
+  disposition: NavHistoryOpenDisposition = "current",
+): boolean {
+  const tab = getTab();
+  const contents = tab?.view?.webContents;
+  if (!tab || tab.pdfEditor || !contents || contents.isDestroyed())
+    return false;
+  const history = contents.navigationHistory;
+  if (!isNavHistoryTarget(index, history.length(), history.getActiveIndex()))
+    return false;
+  if (disposition === "current") {
+    history.goToIndex(index);
+    return true;
   }
-  const url = history.getEntryAtIndex(index)?.url
-  if (!url) return false
-  const w = tab.win
-  const position = w.tabs.indexOf(tab)
-  const id = createTab(url, selectedSearchEngine, disposition === 'foreground-tab', false, disposition === 'background-tab', false, undefined, position >= 0 ? position + 1 : undefined, tab.isPrivate, false, w, tab.spaceId)
-  if (id) persistOpenTabs()
-  return Boolean(id)
+  const url = history.getEntryAtIndex(index)?.url;
+  if (!url) return false;
+  const w = tab.win;
+  const position = w.tabs.indexOf(tab);
+  const id = createTab(
+    url,
+    selectedSearchEngine,
+    disposition === "foreground-tab",
+    false,
+    disposition === "background-tab",
+    false,
+    undefined,
+    position >= 0 ? position + 1 : undefined,
+    tab.isPrivate,
+    false,
+    w,
+    tab.spaceId,
+  );
+  if (id) persistOpenTabs();
+  return Boolean(id);
 }
 
 export function browserReload(): void {
-  const id = getTab()?.id
-  if (id) reloadBrowserTab(id)
+  const id = getTab()?.id;
+  if (id) reloadBrowserTab(id);
 }
 
 /** "Back to <page>" on an in-page error whose failed load never replaced the page: just hide it. */
 export function dismissActiveLoadError(): boolean {
-  const tab = getTab()
-  if (!tab || !tab.error) return false
-  tab.error = null
-  publishState(tab.win)
-  return true
+  const tab = getTab();
+  if (!tab || !tab.error) return false;
+  tab.error = null;
+  publishState(tab.win);
+  return true;
 }
 
 /** The active tab currently shows a load error (certificate viewer: show the failure, not a stale record). */
 export function activeTabHasLoadError(): boolean {
-  return Boolean(getTab()?.error)
+  return Boolean(getTab()?.error);
 }
 
 export function browserStop(): void {
-  getTab()?.view?.webContents.stop()
+  getTab()?.view?.webContents.stop();
 }
 
 export async function browserPictureInPicture(): Promise<boolean> {
-  const contents = getTab()?.view?.webContents
-  if (!contents || contents.isDestroyed()) return false
+  const contents = getTab()?.view?.webContents;
+  if (!contents || contents.isDestroyed()) return false;
   try {
-    const result = await contents.executeJavaScript(`(async () => {
+    const result = await contents.executeJavaScript(
+      `(async () => {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture()
         return true
@@ -4908,34 +7533,44 @@ export async function browserPictureInPicture(): Promise<boolean> {
       if (!video || typeof video.requestPictureInPicture !== 'function') return false
       await video.requestPictureInPicture()
       return document.pictureInPictureElement === video
-    })()`, true)
-    return result === true
+    })()`,
+      true,
+    );
+    return result === true;
   } catch {
-    return false
+    return false;
   }
 }
 
 // A blocked permission shouldn't look like a broken page: flash a short notice over the active tab.
-const shouldToastPermission = createPermissionToastThrottle()
+const shouldToastPermission = createPermissionToastThrottle();
 onPermissionDenied((contents, permission, requestingUrl) => {
-  const tab = tabForContents(contents)
-  if (!tab?.view || !isTabOnScreen(tab) || contents.isDestroyed()) return
-  let origin = ''
+  const tab = tabForContents(contents);
+  if (!tab?.view || !isTabOnScreen(tab) || contents.isDestroyed()) return;
+  let origin = "";
   try {
-    origin = new URL(requestingUrl).origin
+    origin = new URL(requestingUrl).origin;
   } catch {
     // Unknown origin: still say what was blocked.
   }
-  if (!shouldToastPermission(permission, origin)) return
-  flashLinkStatus(permissionDeniedMessage(permission, origin), pageBoundsOf(tab), 3200, tab.win.window)
-})
+  if (!shouldToastPermission(permission, origin)) return;
+  flashLinkStatus(
+    permissionDeniedMessage(permission, origin),
+    pageBoundsOf(tab),
+    3200,
+    tab.win.window,
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Tab archive hooks (the feature itself lives in tab-archive.ts)
 
 export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
   return allTabs().map((tab) => {
-    const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+    const contents =
+      tab.view && !tab.view.webContents.isDestroyed()
+        ? tab.view.webContents
+        : null;
     return {
       id: tab.id,
       url: currentUrl(tab),
@@ -4947,79 +7582,113 @@ export function getBrowserTabArchiveCandidates(): TabArchiveCandidate[] {
       private: tab.isPrivate,
       extensionPage: Boolean(tab.extensionPageOrigin),
       unsavedPdfEdits: Boolean(tab.pdfEditor?.dirty),
-      inactiveSince: isTabOnScreen(tab) ? null : tab.inactiveSince
-    }
-  })
+      inactiveSince: isTabOnScreen(tab) ? null : tab.inactiveSince,
+    };
+  });
 }
 
 /** Ids of every tab in the same window as `id` (the tab included). */
 export function getBrowserTabIdsInSameWindow(id: string): string[] {
   // "Other tabs" means the ones in the same window and Space.
-  const tab = findTab(id)
-  return tab ? spaceTabsOf(tab.win, tab.spaceId).map((candidate) => candidate.id) : []
+  const tab = findTab(id);
+  return tab
+    ? spaceTabsOf(tab.win, tab.spaceId).map((candidate) => candidate.id)
+    : [];
 }
 
 export interface BrowserTabArchiveCapture {
-  url: string
-  title: string
-  faviconUrl: string | null
+  url: string;
+  title: string;
+  faviconUrl: string | null;
   /** The tab's Space (only while Spaces are on); a restore goes back there if it still exists. */
-  spaceId?: string
-  spaceName?: string
+  spaceId?: string;
+  spaceName?: string;
   /** The tab's group label and colour, kept with the archived tab. */
-  groupName?: string
-  groupColor?: string
-  history?: { entries: Electron.NavigationEntry[]; index: number }
+  groupName?: string;
+  groupColor?: string;
+  history?: { entries: Electron.NavigationEntry[]; index: number };
 }
 
 /** What the archive keeps of a tab: URL, title, favicon and (when loaded) its back/forward list. */
-export function captureBrowserTabForArchive(id: string): BrowserTabArchiveCapture | null {
-  const tab = getTab(id)
-  if (!tab || tab.isPrivate || tab.extensionPageOrigin) return null
-  const capture: BrowserTabArchiveCapture = { url: currentUrl(tab), title: pageTitle(tab), faviconUrl: tab.faviconUrl }
-  const group = tab.win.groups.find((candidate) => candidate.id === tab.groupId)
+export function captureBrowserTabForArchive(
+  id: string,
+): BrowserTabArchiveCapture | null {
+  const tab = getTab(id);
+  if (!tab || tab.isPrivate || tab.extensionPageOrigin) return null;
+  const capture: BrowserTabArchiveCapture = {
+    url: currentUrl(tab),
+    title: pageTitle(tab),
+    faviconUrl: tab.faviconUrl,
+  };
+  const group = tab.win.groups.find(
+    (candidate) => candidate.id === tab.groupId,
+  );
   if (group) {
-    capture.groupName = tabGroupLabel(group)
-    capture.groupColor = group.color
+    capture.groupName = tabGroupLabel(group);
+    capture.groupColor = group.color;
   }
   if (spacesEnabled()) {
-    capture.spaceId = tab.spaceId
-    capture.spaceName = getSpace(tab.spaceId)?.name ?? 'Default'
+    capture.spaceId = tab.spaceId;
+    capture.spaceName = getSpace(tab.spaceId)?.name ?? "Default";
   }
-  const contents = tab.view && !tab.view.webContents.isDestroyed() ? tab.view.webContents : null
+  const contents =
+    tab.view && !tab.view.webContents.isDestroyed()
+      ? tab.view.webContents
+      : null;
   if (contents && !tab.pdfEditor) {
     try {
-      capture.history = { entries: contents.navigationHistory.getAllEntries(), index: contents.navigationHistory.getActiveIndex() }
+      capture.history = {
+        entries: contents.navigationHistory.getAllEntries(),
+        index: contents.navigationHistory.getActiveIndex(),
+      };
     } catch {
       // Older runtimes or a page mid-teardown: the URL alone still restores the tab.
     }
   }
-  return capture
+  return capture;
 }
 
 /** Close a tab into the archive (it doesn't go on the Reopen Closed Tab stack). True when it closed. */
 export function closeBrowserTabForArchive(id: string): boolean {
-  closeBrowserTab(id, false)
-  return !getTab(id)
+  closeBrowserTab(id, false);
+  return !getTab(id);
 }
 
 /** Reopen an archived tab into the focused (or last focused) normal window; background tabs stay asleep until first opened. */
-export function openArchivedBrowserTab(url: string, history: { entries: Electron.NavigationEntry[]; index: number } | undefined, activate = true, spaceId?: string): string | null {
-  const w = normalWindowState()
+export function openArchivedBrowserTab(
+  url: string,
+  history: { entries: Electron.NavigationEntry[]; index: number } | undefined,
+  activate = true,
+  spaceId?: string,
+): string | null {
+  const w = normalWindowState();
   // Back into its Space when that still exists (else the window's current Space).
-  const id = createTab(url, selectedSearchEngine, activate, true, false, false, undefined, undefined, false, false, w, spaceId && getSpace(spaceId) ? spaceId : undefined)
-  const tab = id ? getTab(id) : undefined
-  if (!tab) return null
-  if (history && history.entries.length > 0) tab.restoreHistory = history
-  if (activate) activateTabInternal(tab.id)
-  else publishState(tab.win)
-  persistOpenTabs()
-  return id
+  const id = createTab(
+    url,
+    selectedSearchEngine,
+    activate,
+    true,
+    false,
+    false,
+    undefined,
+    undefined,
+    false,
+    false,
+    w,
+    spaceId && getSpace(spaceId) ? spaceId : undefined,
+  );
+  const tab = id ? getTab(id) : undefined;
+  if (!tab) return null;
+  if (history && history.entries.length > 0) tab.restoreHistory = history;
+  if (activate) activateTabInternal(tab.id);
+  else publishState(tab.win);
+  persistOpenTabs();
+  return id;
 }
 
 export function flashBrowserStatus(message: string, durationMs = 2000): void {
-  const w = currentWindowState()
-  if (w) flashLinkStatus(message, w.browserBounds, durationMs, w.window)
+  const w = currentWindowState();
+  if (w) flashLinkStatus(message, w.browserBounds, durationMs, w.window);
 }
 
 // ---------------------------------------------------------------------------
@@ -5029,49 +7698,82 @@ export function flashBrowserStatus(message: string, durationMs = 2000): void {
 
 /** Keep each split's tabs adjacent in the tab list (the sidebar draws them as one entry) and drop stale splits. */
 function keepSplitTabsTogether(w: BrowserWindowState): void {
-  if (w.splits.length === 0) return
-  const present = new Set(w.tabs.map((tab) => tab.id))
+  if (w.splits.length === 0) return;
+  const present = new Set(w.tabs.map((tab) => tab.id));
   for (const group of [...w.splits]) {
     for (const id of group.tabIds) {
-      if (!present.has(id) || findTab(id)?.pinned) w.splits = removeTabFromSplits(w.splits, id).groups
+      if (!present.has(id) || findTab(id)?.pinned)
+        w.splits = removeTabFromSplits(w.splits, id).groups;
     }
   }
-  const order = orderTabsForSplits(w.tabs.map((tab) => tab.id), w.splits)
-  if (order.every((id, index) => w.tabs[index]?.id === id)) return
-  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]))
-  w.tabs.splice(0, w.tabs.length, ...order.map((id) => byId.get(id)!))
+  const order = orderTabsForSplits(
+    w.tabs.map((tab) => tab.id),
+    w.splits,
+  );
+  if (order.every((id, index) => w.tabs[index]?.id === id)) return;
+  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]));
+  w.tabs.splice(0, w.tabs.length, ...order.map((id) => byId.get(id)!));
 }
 
 /** Can this tab be a pane? Not pinned (Favourites strip), and not the local New Tab page (it has no page view). */
 function canSplitTab(tab: BrowserTab | undefined): tab is BrowserTab {
-  return Boolean(tab && isLiveWindow(tab.win) && !tab.pinned && currentUrl(tab) !== SURFFISH_QUICK_LINKS_URL && !isSettingsTab(tab))
+  return Boolean(
+    tab &&
+    isLiveWindow(tab.win) &&
+    !tab.pinned &&
+    currentUrl(tab) !== SURFFISH_QUICK_LINKS_URL &&
+    !isSettingsTab(tab),
+  );
 }
 
 /** Same window, both splittable, and never a private tab next to a normal one. */
-function canSplitTogether(a: BrowserTab | undefined, b: BrowserTab | undefined): boolean {
-  return canSplitTab(a) && canSplitTab(b) && a !== b && a.win === b.win && a.isPrivate === b.isPrivate && a.spaceId === b.spaceId
+function canSplitTogether(
+  a: BrowserTab | undefined,
+  b: BrowserTab | undefined,
+): boolean {
+  return (
+    canSplitTab(a) &&
+    canSplitTab(b) &&
+    a !== b &&
+    a.win === b.win &&
+    a.isPrivate === b.isPrivate &&
+    a.spaceId === b.spaceId
+  );
 }
 
-function splitWith(ids: readonly string[], focusId: string, sizes?: readonly number[]): boolean {
-  const tabs = ids.map((id) => findTab(id))
-  const first = tabs[0]
-  if (!first || tabs.length < 2 || tabs.length > MAX_SPLIT_PANES || tabs.some((tab) => tab === first ? !canSplitTab(tab) : !canSplitTogether(first, tab))) return false
-  const w = first.win
+function splitWith(
+  ids: readonly string[],
+  focusId: string,
+  sizes?: readonly number[],
+): boolean {
+  const tabs = ids.map((id) => findTab(id));
+  const first = tabs[0];
+  if (
+    !first ||
+    tabs.length < 2 ||
+    tabs.length > MAX_SPLIT_PANES ||
+    tabs.some((tab) =>
+      tab === first ? !canSplitTab(tab) : !canSplitTogether(first, tab),
+    )
+  )
+    return false;
+  const w = first.win;
   // A tab can only be in one split: take the tabs out of the ones they were in.
-  for (const tab of tabs) w.splits = removeTabFromSplits(w.splits, tab!.id).groups
-  const group = createSplitGroup(randomUUID(), ids, sizes)
-  if (!group) return false
-  w.splits.push(group)
-  keepSplitTabsTogether(w)
-  if (isTabOverviewOpen(w.window)) closeTabOverview(focusId, false)
-  activateTabInternal(focusId)
-  persistOpenTabs()
-  return true
+  for (const tab of tabs)
+    w.splits = removeTabFromSplits(w.splits, tab!.id).groups;
+  const group = createSplitGroup(randomUUID(), ids, sizes);
+  if (!group) return false;
+  w.splits.push(group);
+  keepSplitTabsTogether(w);
+  if (isTabOverviewOpen(w.window)) closeTabOverview(focusId, false);
+  activateTabInternal(focusId);
+  persistOpenTabs();
+  return true;
 }
 
 /** "Split with…": `id` on the left, `otherId` on the right, `id` focused. */
 export function splitBrowserTabWith(id: string, otherId: string): boolean {
-  return splitWith([id, otherId], id)
+  return splitWith([id, otherId], id);
 }
 
 /**
@@ -5079,260 +7781,380 @@ export function splitBrowserTabWith(id: string, otherId: string): boolean {
  * takes the place of the pane that isn't focused.
  */
 export function openBrowserTabInSplitView(id: string): boolean {
-  const tab = findTab(id)
-  const active = tab ? activeTabOf(tab.win) : undefined
-  if (!tab || !active || active === tab) return false
-  const group = splitOf(active)
-  if (!group) return splitWith([active.id, id], id)
-  if (group.tabIds.includes(id) || !canSplitTogether(active, tab)) return false
-  const replaced = group.tabIds.find((paneId) => paneId !== active.id)
-  if (!replaced) return false
-  const w = tab.win
-  w.splits = removeTabFromSplits(w.splits, id).groups
-  w.splits = w.splits.map((candidate) => candidate.id === group.id ? replaceSplitPane(candidate, replaced, id) : candidate)
-  keepSplitTabsTogether(w)
-  activateTabInternal(id)
-  const left = findTab(replaced)
-  if (left && !isTabOnScreen(left)) markTabInactive(left)
-  persistOpenTabs()
-  publishState(w)
-  return true
+  const tab = findTab(id);
+  const active = tab ? activeTabOf(tab.win) : undefined;
+  if (!tab || !active || active === tab) return false;
+  const group = splitOf(active);
+  if (!group) return splitWith([active.id, id], id);
+  if (group.tabIds.includes(id) || !canSplitTogether(active, tab)) return false;
+  const replaced = group.tabIds.find((paneId) => paneId !== active.id);
+  if (!replaced) return false;
+  const w = tab.win;
+  w.splits = removeTabFromSplits(w.splits, id).groups;
+  w.splits = w.splits.map((candidate) =>
+    candidate.id === group.id
+      ? replaceSplitPane(candidate, replaced, id)
+      : candidate,
+  );
+  keepSplitTabsTogether(w);
+  activateTabInternal(id);
+  const left = findTab(replaced);
+  if (left && !isTabOnScreen(left)) markTabInactive(left);
+  persistOpenTabs();
+  publishState(w);
+  return true;
 }
 
 /** Tabs the "Split with…" menu offers for `id`: the window's other splittable tabs, most recently used first. */
 function splitCandidates(tab: BrowserTab): BrowserTab[] {
-  const w = tab.win
+  const w = tab.win;
   const rank = (candidate: BrowserTab): number => {
-    const index = w.recentTabIds.indexOf(candidate.id)
-    return index < 0 ? Number.MAX_SAFE_INTEGER : index
-  }
-  return w.tabs.filter((candidate) => canSplitTogether(tab, candidate) && !splitOf(candidate)).sort((a, b) => rank(a) - rank(b))
+    const index = w.recentTabIds.indexOf(candidate.id);
+    return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+  };
+  return w.tabs
+    .filter(
+      (candidate) => canSplitTogether(tab, candidate) && !splitOf(candidate),
+    )
+    .sort((a, b) => rank(a) - rank(b));
 }
 
 /** Cmd/Ctrl+Shift+=: split the active tab with the last used one (active on the left), or unsplit. */
 export function toggleBrowserSplitView(): boolean {
-  const w = currentWindowState()
-  const active = activeTabOf(w)
-  if (!w || !active) return false
-  if (splitOf(active)) return unsplitBrowserTab(active.id)
-  const other = pickLastUsedTab(w.recentTabIds, active.id, (id) => canSplitTogether(active, findTab(id)) && !splitOf(findTab(id)))
-    ?? splitCandidates(active)[0]?.id
+  const w = currentWindowState();
+  const active = activeTabOf(w);
+  if (!w || !active) return false;
+  if (splitOf(active)) return unsplitBrowserTab(active.id);
+  const other =
+    pickLastUsedTab(
+      w.recentTabIds,
+      active.id,
+      (id) => canSplitTogether(active, findTab(id)) && !splitOf(findTab(id)),
+    ) ?? splitCandidates(active)[0]?.id;
   if (!other || !canSplitTab(active)) {
-    const message = canSplitTab(active) ? 'Open another tab to split with' : (active as BrowserTab).pinned ? 'Unpin the tab to split it' : 'Open a page to split it'
-    flashLinkStatus(message, w.browserBounds, 2200, w.window)
-    return false
+    const message = canSplitTab(active)
+      ? "Open another tab to split with"
+      : (active as BrowserTab).pinned
+        ? "Unpin the tab to split it"
+        : "Open a page to split it";
+    flashLinkStatus(message, w.browserBounds, 2200, w.window);
+    return false;
   }
-  return splitWith([active.id, other], active.id)
+  return splitWith([active.id, other], active.id);
 }
 
 /** Unsplit the split `id` is in; the focused pane stays on screen. */
 export function unsplitBrowserTab(id = getTab()?.id): boolean {
-  const tab = findTab(id)
-  const group = splitOf(tab)
-  if (!tab || !group) return false
-  const w = tab.win
-  const wasOnScreen = onScreenTabIds(w)
-  w.splits = w.splits.filter((candidate) => candidate !== group)
-  const nowOnScreen = onScreenTabIds(w)
+  const tab = findTab(id);
+  const group = splitOf(tab);
+  if (!tab || !group) return false;
+  const w = tab.win;
+  const wasOnScreen = onScreenTabIds(w);
+  w.splits = w.splits.filter((candidate) => candidate !== group);
+  const nowOnScreen = onScreenTabIds(w);
   for (const goneId of wasOnScreen) {
-    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId)
-    if (gone) markTabInactive(gone)
+    const gone = nowOnScreen.includes(goneId) ? undefined : findTab(goneId);
+    if (gone) markTabInactive(gone);
   }
-  applyTabBounds(w)
-  persistOpenTabs()
-  publishState(w)
-  return true
+  applyTabBounds(w);
+  persistOpenTabs();
+  publishState(w);
+  return true;
 }
 
 /** Swap the panes of the split `id` is in (the layout stays, the pages trade places). */
 export function swapBrowserSplitPanes(id = getTab()?.id): boolean {
-  const tab = findTab(id)
-  const group = splitOf(tab)
-  if (!tab || !group) return false
-  const w = tab.win
-  w.splits = w.splits.map((candidate) => candidate === group ? swapSplitPanes(candidate) : candidate)
-  keepSplitTabsTogether(w)
-  applyTabBounds(w)
-  persistOpenTabs()
-  publishState(w)
-  return true
+  const tab = findTab(id);
+  const group = splitOf(tab);
+  if (!tab || !group) return false;
+  const w = tab.win;
+  w.splits = w.splits.map((candidate) =>
+    candidate === group ? swapSplitPanes(candidate) : candidate,
+  );
+  keepSplitTabsTogether(w);
+  applyTabBounds(w);
+  persistOpenTabs();
+  publishState(w);
+  return true;
 }
 
 /** Pop a pane out into its own tab (placed right after the split) and show it on its own. */
 export function popOutBrowserSplitPane(id = getTab()?.id): boolean {
-  const tab = findTab(id)
-  const group = splitOf(tab)
-  if (!tab || !group) return false
-  const w = tab.win
-  w.splits = removeTabFromSplits(w.splits, tab.id).groups
-  const from = w.tabs.indexOf(tab)
-  const lastMember = Math.max(...group.tabIds.map((memberId) => w.tabs.findIndex((candidate) => candidate.id === memberId)))
+  const tab = findTab(id);
+  const group = splitOf(tab);
+  if (!tab || !group) return false;
+  const w = tab.win;
+  w.splits = removeTabFromSplits(w.splits, tab.id).groups;
+  const from = w.tabs.indexOf(tab);
+  const lastMember = Math.max(
+    ...group.tabIds.map((memberId) =>
+      w.tabs.findIndex((candidate) => candidate.id === memberId),
+    ),
+  );
   if (from >= 0 && lastMember > from) {
-    w.tabs.splice(from, 1)
-    w.tabs.splice(lastMember, 0, tab)
+    w.tabs.splice(from, 1);
+    w.tabs.splice(lastMember, 0, tab);
   }
-  activateTabInternal(tab.id)
-  persistOpenTabs()
-  return true
+  activateTabInternal(tab.id);
+  persistOpenTabs();
+  return true;
 }
 
 /** Make the pane showing `id` the focused one (the active tab), optionally moving keyboard focus into it. */
 function focusSplitPane(id: string | undefined, focusContents = true): boolean {
-  const tab = findTab(id)
-  if (!tab || !isTabOnScreen(tab)) return false
+  const tab = findTab(id);
+  if (!tab || !isTabOnScreen(tab)) return false;
   if (isActiveTab(tab)) {
-    if (focusContents) tab.view?.webContents.focus()
-    return true
+    if (focusContents) tab.view?.webContents.focus();
+    return true;
   }
-  const w = tab.win
+  const w = tab.win;
   if (focusContents) {
-    activateTabInternal(tab.id)
+    activateTabInternal(tab.id);
   } else {
     // A click already put the keyboard there; just move the active tab without refocusing.
-    cancelActiveMacTrackpadSwipe()
-    hideLinkStatus(false, w.window)
-    if (w.findState.open) closeFindBar(false, w)
-    w.activeTabId = tab.id
-    tabShownAt.set(tab, Date.now())
-    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id)
-    applyTabBounds(w)
-    publishState(w)
+    cancelActiveMacTrackpadSwipe();
+    hideLinkStatus(false, w.window);
+    if (w.findState.open) closeFindBar(false, w);
+    w.activeTabId = tab.id;
+    tabShownAt.set(tab, Date.now());
+    w.recentTabIds = noteRecentTab(w.recentTabIds, tab.id);
+    applyTabBounds(w);
+    publishState(w);
   }
-  persistOpenTabs()
-  return true
+  persistOpenTabs();
+  return true;
 }
 
 /** Cmd/Ctrl+Alt+Left/Right: focus the pane to the left/right of the focused one. */
 export function focusAdjacentSplitPane(offset: number): boolean {
-  const active = getTab()
-  const group = splitOf(active)
-  if (!active || !group) return false
-  const index = group.tabIds.indexOf(active.id)
-  const next = group.tabIds[Math.max(0, Math.min(group.tabIds.length - 1, index + offset))]
-  return next !== active.id && focusSplitPane(next, true)
+  const active = getTab();
+  const group = splitOf(active);
+  if (!active || !group) return false;
+  const index = group.tabIds.indexOf(active.id);
+  const next =
+    group.tabIds[
+      Math.max(0, Math.min(group.tabIds.length - 1, index + offset))
+    ];
+  return next !== active.id && focusSplitPane(next, true);
 }
 
 /** Even out the split on screen (double-click on the divider). */
 export function resetBrowserSplitSizes(): boolean {
-  const w = currentWindowState()
-  const group = splitOf(activeTabOf(w))
-  if (!w || !group) return false
-  w.splits = w.splits.map((candidate) => candidate === group ? { ...candidate, sizes: group.tabIds.map(() => 1 / group.tabIds.length) } : candidate)
-  applyTabBounds(w)
-  persistOpenTabs()
-  return true
+  const w = currentWindowState();
+  const group = splitOf(activeTabOf(w));
+  if (!w || !group) return false;
+  w.splits = w.splits.map((candidate) =>
+    candidate === group
+      ? { ...candidate, sizes: group.tabIds.map(() => 1 / group.tabIds.length) }
+      : candidate,
+  );
+  applyTabBounds(w);
+  persistOpenTabs();
+  return true;
 }
 
 /** The tab whose pane is under a window-coordinate point (null when no split is on screen). */
-function tabAtWindowPoint(w: BrowserWindowState, x: number, y: number): BrowserTab | undefined {
-  const group = splitOf(activeTabOf(w))
-  if (!group || !Number.isFinite(x) || !Number.isFinite(y)) return undefined
-  const layout = splitPaneRects(w.browserBounds, group.sizes)
-  const index = layout.cells.findIndex((cell) => x >= cell.x && x < cell.x + cell.width && y >= cell.y && y < cell.y + cell.height)
-  return index >= 0 ? findTab(group.tabIds[index]) : undefined
+function tabAtWindowPoint(
+  w: BrowserWindowState,
+  x: number,
+  y: number,
+): BrowserTab | undefined {
+  const group = splitOf(activeTabOf(w));
+  if (!group || !Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  const layout = splitPaneRects(w.browserBounds, group.sizes);
+  const index = layout.cells.findIndex(
+    (cell) =>
+      x >= cell.x &&
+      x < cell.x + cell.width &&
+      y >= cell.y &&
+      y < cell.y + cell.height,
+  );
+  return index >= 0 ? findTab(group.tabIds[index]) : undefined;
 }
 
 /** A sidebar tab dropped over its own window's page area: the outer left/right edge splits it with the page. */
-function dropTabOnPageEdge(tab: BrowserTab, screenPoint: { x: number; y: number }): boolean {
-  const w = tab.win
-  let content: Electron.Rectangle
+function dropTabOnPageEdge(
+  tab: BrowserTab,
+  screenPoint: { x: number; y: number },
+): boolean {
+  const w = tab.win;
+  let content: Electron.Rectangle;
   try {
-    content = w.window.getContentBounds()
+    content = w.window.getContentBounds();
   } catch {
-    return false
+    return false;
   }
-  const side = splitDropSide(w.browserBounds, screenPoint.x - content.x, screenPoint.y - content.y)
-  return side ? dropTabIntoSplit(tab.id, side) : false
+  const side = splitDropSide(
+    w.browserBounds,
+    screenPoint.x - content.x,
+    screenPoint.y - content.y,
+  );
+  return side ? dropTabIntoSplit(tab.id, side) : false;
 }
 
 /**
  * Put `id` on the `side` of the page on screen: a new split with the active tab, or (when a split is
  * already on screen) in place of the pane on that side.
  */
-export function dropTabIntoSplit(id: string, side: 'left' | 'right'): boolean {
-  const tab = findTab(id)
-  const w = tab?.win
-  const active = activeTabOf(w)
-  if (!tab || !w || !active || tab === active || splitOf(tab)) return false
-  const group = splitOf(active)
-  if (!group) return splitWith(side === 'left' ? [tab.id, active.id] : [active.id, tab.id], tab.id)
-  if (!canSplitTogether(active, tab)) return false
-  const replaced = side === 'left' ? group.tabIds[0]! : group.tabIds[group.tabIds.length - 1]!
-  w.splits = w.splits.map((candidate) => candidate === group ? replaceSplitPane(candidate, replaced, tab.id) : candidate)
-  keepSplitTabsTogether(w)
-  activateTabInternal(tab.id)
-  const gone = findTab(replaced)
-  if (gone && !isTabOnScreen(gone)) markTabInactive(gone)
-  persistOpenTabs()
-  publishState(w)
-  return true
+export function dropTabIntoSplit(id: string, side: "left" | "right"): boolean {
+  const tab = findTab(id);
+  const w = tab?.win;
+  const active = activeTabOf(w);
+  if (!tab || !w || !active || tab === active || splitOf(tab)) return false;
+  const group = splitOf(active);
+  if (!group)
+    return splitWith(
+      side === "left" ? [tab.id, active.id] : [active.id, tab.id],
+      tab.id,
+    );
+  if (!canSplitTogether(active, tab)) return false;
+  const replaced =
+    side === "left" ? group.tabIds[0]! : group.tabIds[group.tabIds.length - 1]!;
+  w.splits = w.splits.map((candidate) =>
+    candidate === group
+      ? replaceSplitPane(candidate, replaced, tab.id)
+      : candidate,
+  );
+  keepSplitTabsTogether(w);
+  activateTabInternal(tab.id);
+  const gone = findTab(replaced);
+  if (gone && !isTabOnScreen(gone)) markTabInactive(gone);
+  persistOpenTabs();
+  publishState(w);
+  return true;
 }
 
 /** Tab context-menu items: split actions for a pane, or the ways to split a plain tab. */
 function splitTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  const group = splitOf(tab)
+  const group = splitOf(tab);
   if (group) {
     return [
-      { label: 'Swap Split Panes', click: () => { swapBrowserSplitPanes(tab.id) } },
-      { label: 'Open Pane as Its Own Tab', click: () => { popOutBrowserSplitPane(tab.id) } },
-      { label: 'Unsplit Tabs', ...tabMenuAccelerator('splitView'), click: () => { unsplitBrowserTab(tab.id) } },
-      { type: 'separator' }
-    ]
+      {
+        label: "Swap Split Panes",
+        click: () => {
+          swapBrowserSplitPanes(tab.id);
+        },
+      },
+      {
+        label: "Open Pane as Its Own Tab",
+        click: () => {
+          popOutBrowserSplitPane(tab.id);
+        },
+      },
+      {
+        label: "Unsplit Tabs",
+        ...tabMenuAccelerator("splitView"),
+        click: () => {
+          unsplitBrowserTab(tab.id);
+        },
+      },
+      { type: "separator" },
+    ];
   }
-  const active = activeTabOf(tab.win)
-  const candidates = canSplitTab(tab) ? splitCandidates(tab).slice(0, 20) : []
-  const short = (title: string): string => title.length > 48 ? `${title.slice(0, 47)}…` : title
+  const active = activeTabOf(tab.win);
+  const candidates = canSplitTab(tab) ? splitCandidates(tab).slice(0, 20) : [];
+  const short = (title: string): string =>
+    title.length > 48 ? `${title.slice(0, 47)}…` : title;
   return [
-    { label: 'Open in Split View', enabled: Boolean(active && active !== tab && canSplitTogether(active, tab)), click: () => { openBrowserTabInSplitView(tab.id) } },
     {
-      label: 'Split with…',
-      enabled: candidates.length > 0,
-      submenu: candidates.length > 0
-        ? candidates.map((candidate): MenuItemConstructorOptions => ({ label: short(pageTitle(candidate)), click: () => { splitBrowserTabWith(tab.id, candidate.id) } }))
-        : [{ label: 'No other tabs to split with', enabled: false }]
+      label: "Open in Split View",
+      enabled: Boolean(
+        active && active !== tab && canSplitTogether(active, tab),
+      ),
+      click: () => {
+        openBrowserTabInSplitView(tab.id);
+      },
     },
-    { type: 'separator' }
-  ]
+    {
+      label: "Split with…",
+      enabled: candidates.length > 0,
+      submenu:
+        candidates.length > 0
+          ? candidates.map((candidate): MenuItemConstructorOptions => ({
+              label: short(pageTitle(candidate)),
+              click: () => {
+                splitBrowserTabWith(tab.id, candidate.id);
+              },
+            }))
+          : [{ label: "No other tabs to split with", enabled: false }],
+    },
+    { type: "separator" },
+  ];
 }
 
 /** The divider and pane-margin input from the split surface behind the panes. */
 function attachSplitSurface(w: BrowserWindowState): void {
-  const group = (): SplitGroup | undefined => splitOf(activeTabOf(w))
+  const group = (): SplitGroup | undefined => splitOf(activeTabOf(w));
   setSplitSurfaceHandlers(w.window, {
     resize: (index, x) => {
-      const current = group()
-      if (!current) return
-      const sizes = resizeSplitAt(w.browserBounds, current.sizes, index, x)
-      w.splits = w.splits.map((candidate) => candidate === current ? { ...candidate, sizes } : candidate)
-      applyTabBounds(w)
+      const current = group();
+      if (!current) return;
+      const sizes = resizeSplitAt(w.browserBounds, current.sizes, index, x);
+      w.splits = w.splits.map((candidate) =>
+        candidate === current ? { ...candidate, sizes } : candidate,
+      );
+      applyTabBounds(w);
     },
     resizeEnd: () => persistOpenTabs(),
-    reset: () => { runInWindow(w.window, () => resetBrowserSplitSizes()) },
-    focusPane: (index) => { focusSplitPane(group()?.tabIds[index], true) }
-  })
+    reset: () => {
+      runInWindow(w.window, () => resetBrowserSplitSizes());
+    },
+    focusPane: (index) => {
+      focusSplitPane(group()?.tabIds[index], true);
+    },
+  });
 }
 
 /** Split views of the current window, for the renderer and smoke tests. */
 export interface BrowserSplitSnapshot {
-  splits: { id: string; tabIds: string[]; sizes: number[] }[]
+  splits: { id: string; tabIds: string[]; sizes: number[] }[];
   /** The split on screen, with each pane's view bounds (window coordinates). */
-  visible: { id: string; focusedTabId: string; panes: BrowserBounds[]; dividers: BrowserBounds[] } | null
+  visible: {
+    id: string;
+    focusedTabId: string;
+    panes: BrowserBounds[];
+    dividers: BrowserBounds[];
+  } | null;
 }
 
 export function getBrowserSplitState(): BrowserSplitSnapshot {
-  const w = currentWindowState()
-  const group = splitOf(activeTabOf(w))
-  const layout = w && group ? splitPaneRects(w.browserBounds, group.sizes) : null
+  const w = currentWindowState();
+  const group = splitOf(activeTabOf(w));
+  const layout =
+    w && group ? splitPaneRects(w.browserBounds, group.sizes) : null;
   return {
-    splits: (w?.splits ?? []).map((candidate) => ({ id: candidate.id, tabIds: candidate.tabIds.slice(), sizes: candidate.sizes.slice() })),
-    visible: w && group && layout ? { id: group.id, focusedTabId: w.activeTabId ?? '', panes: layout.panes, dividers: layout.dividers } : null
-  }
+    splits: (w?.splits ?? []).map((candidate) => ({
+      id: candidate.id,
+      tabIds: candidate.tabIds.slice(),
+      sizes: candidate.sizes.slice(),
+    })),
+    visible:
+      w && group && layout
+        ? {
+            id: group.id,
+            focusedTabId: w.activeTabId ?? "",
+            panes: layout.panes,
+            dividers: layout.dividers,
+          }
+        : null,
+  };
 }
 
 /** Whether `id` (default: the active tab) can be split, and whether it already is. */
-export function getBrowserTabSplitStatus(id = getTab()?.id): { split: boolean; canSplit: boolean } {
-  const tab = findTab(id)
-  return { split: Boolean(splitOf(tab)), canSplit: Boolean(tab && canSplitTab(tab) && (splitOf(tab) || splitCandidates(tab).length > 0)) }
+export function getBrowserTabSplitStatus(id = getTab()?.id): {
+  split: boolean;
+  canSplit: boolean;
+} {
+  const tab = findTab(id);
+  return {
+    split: Boolean(splitOf(tab)),
+    canSplit: Boolean(
+      tab &&
+      canSplitTab(tab) &&
+      (splitOf(tab) || splitCandidates(tab).length > 0),
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -5341,95 +8163,154 @@ export function getBrowserTabSplitStatus(id = getTab()?.id): { split: boolean; c
 // "close other tabs" and the palette's tab list only see that Space. With Spaces off every tab is
 // in Default, so all of this is the identity.
 
-const SPACE_SWIPE_ID_BASE = 2_000_000_000
+const SPACE_SWIPE_ID_BASE = 2_000_000_000;
 
 /** Per window in the session file; null while everything is in Default (so the file is unchanged). */
-function encodeWindowSpaces(w: BrowserWindowState, kept: readonly BrowserTab[]): SavedWindowSpaces | null {
-  if (!spacesEnabled()) return null
-  const tabSpaces = kept.map((tab) => tab.spaceId)
-  const spaceActiveTabs: Record<string, number> = {}
+function encodeWindowSpaces(
+  w: BrowserWindowState,
+  kept: readonly BrowserTab[],
+): SavedWindowSpaces | null {
+  if (!spacesEnabled()) return null;
+  const tabSpaces = kept.map((tab) => tab.spaceId);
+  const spaceActiveTabs: Record<string, number> = {};
   for (const [spaceId, tabId] of w.spaceActiveTabs) {
-    const index = kept.findIndex((tab) => tab.id === tabId)
-    if (index >= 0 && kept[index]!.spaceId === spaceId) spaceActiveTabs[spaceId] = index
+    const index = kept.findIndex((tab) => tab.id === tabId);
+    if (index >= 0 && kept[index]!.spaceId === spaceId)
+      spaceActiveTabs[spaceId] = index;
   }
-  if (tabSpaces.every((id) => id === DEFAULT_SPACE_ID) && w.activeSpaceId === DEFAULT_SPACE_ID) return null
-  return { tabSpaces, activeSpace: w.activeSpaceId, ...(Object.keys(spaceActiveTabs).length > 0 ? { spaceActiveTabs } : {}) }
+  if (
+    tabSpaces.every((id) => id === DEFAULT_SPACE_ID) &&
+    w.activeSpaceId === DEFAULT_SPACE_ID
+  )
+    return null;
+  return {
+    tabSpaces,
+    activeSpace: w.activeSpaceId,
+    ...(Object.keys(spaceActiveTabs).length > 0 ? { spaceActiveTabs } : {}),
+  };
 }
 
-export function getBrowserSpacesSnapshot(w = currentWindowState()): SpacesSnapshot {
-  const settings = getSpacesSettings()
-  const tabCounts: Record<string, number> = {}
-  for (const tab of w?.tabs ?? []) tabCounts[tab.spaceId] = (tabCounts[tab.spaceId] ?? 0) + 1
+export function getBrowserSpacesSnapshot(
+  w = currentWindowState(),
+): SpacesSnapshot {
+  const settings = getSpacesSettings();
+  const tabCounts: Record<string, number> = {};
+  for (const tab of w?.tabs ?? [])
+    tabCounts[tab.spaceId] = (tabCounts[tab.spaceId] ?? 0) + 1;
   return {
     // Private windows have no Spaces.
     enabled: settings.enabled && !w?.isPrivate,
     spaces: settings.spaces,
     activeSpaceId: w?.activeSpaceId ?? DEFAULT_SPACE_ID,
-    tabCounts
-  }
+    tabCounts,
+  };
 }
 
 function publishSpaces(w: BrowserWindowState): void {
-  if (!isLiveWindow(w)) return
-  sendToWindowRenderers(w.window, 'browser:spaces', getBrowserSpacesSnapshot(w))
+  if (!isLiveWindow(w)) return;
+  sendToWindowRenderers(
+    w.window,
+    "browser:spaces",
+    getBrowserSpacesSnapshot(w),
+  );
 }
 
 export function publishBrowserSpaces(): void {
-  for (const w of windowStates) publishSpaces(w)
+  for (const w of windowStates) publishSpaces(w);
 }
 
 /** Show `spaceId` in a window: its last active tab, its first tab, or a fresh New Tab. */
-function switchSpaceIn(w: BrowserWindowState | undefined, spaceId: string): boolean {
-  if (!isLiveWindow(w) || w.isPrivate || !spacesEnabled() || !getSpace(spaceId)) return false
-  if (w.activeSpaceId === spaceId && activeTabOf(w)?.spaceId === spaceId) return true
-  const remembered = findTab(w.spaceActiveTabs.get(spaceId))
-  const target = remembered && remembered.win === w && remembered.spaceId === spaceId ? remembered : tabsInSidebarOrder({ ...w, activeSpaceId: spaceId } as BrowserWindowState)[0]
-  if (target) activateTabInternal(target.id)
-  else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, spaceId)
-  publishSpaces(w)
-  persistOpenTabs()
-  return true
+function switchSpaceIn(
+  w: BrowserWindowState | undefined,
+  spaceId: string,
+): boolean {
+  if (!isLiveWindow(w) || w.isPrivate || !spacesEnabled() || !getSpace(spaceId))
+    return false;
+  if (w.activeSpaceId === spaceId && activeTabOf(w)?.spaceId === spaceId)
+    return true;
+  const remembered = findTab(w.spaceActiveTabs.get(spaceId));
+  const target =
+    remembered && remembered.win === w && remembered.spaceId === spaceId
+      ? remembered
+      : tabsInSidebarOrder({
+          ...w,
+          activeSpaceId: spaceId,
+        } as BrowserWindowState)[0];
+  if (target) activateTabInternal(target.id);
+  else
+    createTab(
+      undefined,
+      selectedSearchEngine,
+      true,
+      false,
+      false,
+      false,
+      undefined,
+      undefined,
+      false,
+      false,
+      w,
+      spaceId,
+    );
+  publishSpaces(w);
+  persistOpenTabs();
+  return true;
 }
 
-export function switchBrowserSpace(spaceId: string, window?: BaseWindow): boolean {
-  return switchSpaceIn(window ? windowStateFor(window) : currentWindowState(), spaceId)
+export function switchBrowserSpace(
+  spaceId: string,
+  window?: BaseWindow,
+): boolean {
+  return switchSpaceIn(
+    window ? windowStateFor(window) : currentWindowState(),
+    spaceId,
+  );
 }
 
 /** Next/previous Space (swipe, palette), no wrapping. */
-export function cycleBrowserSpace(offset: number, window?: BaseWindow): boolean {
-  const w = window ? windowStateFor(window) : currentWindowState()
-  if (!w) return false
-  const next = adjacentSpaceId(getSpacesSettings(), w.activeSpaceId, offset)
-  return next ? switchSpaceIn(w, next) : false
+export function cycleBrowserSpace(
+  offset: number,
+  window?: BaseWindow,
+): boolean {
+  const w = window ? windowStateFor(window) : currentWindowState();
+  if (!w) return false;
+  const next = adjacentSpaceId(getSpacesSettings(), w.activeSpaceId, offset);
+  return next ? switchSpaceIn(w, next) : false;
 }
 
 /** Ctrl+1..9 (macOS) / Ctrl+Shift+1..9: the Space at that position. */
 export function selectBrowserSpaceByNumber(number: number): boolean {
-  const id = spaceIdAtNumber(getSpacesSettings(), number)
-  return id ? switchBrowserSpace(id) : false
+  const id = spaceIdAtNumber(getSpacesSettings(), number);
+  return id ? switchBrowserSpace(id) : false;
 }
 
 /** Tabs whose page runs in the wrong session after a partition change get a fresh view (reloads from the URL). */
 function resyncTabSessions(): void {
   for (const w of windowStates) {
     for (const tab of w.tabs) {
-      if (tab.isPrivate || !tab.view || tab.view.webContents.isDestroyed() || tab.pdfEditor) continue
-      if (tab.view.webContents.session === pageSessionForTab(tab)) continue
-      tab.lastUrl = currentUrl(tab)
-      tab.pendingUrl = tab.lastUrl
-      disposeTabView(tab)
-      if (isTabOnScreen(tab)) ensureTabLoaded(tab)
+      if (
+        tab.isPrivate ||
+        !tab.view ||
+        tab.view.webContents.isDestroyed() ||
+        tab.pdfEditor
+      )
+        continue;
+      if (tab.view.webContents.session === pageSessionForTab(tab)) continue;
+      tab.lastUrl = currentUrl(tab);
+      tab.pendingUrl = tab.lastUrl;
+      disposeTabView(tab);
+      if (isTabOnScreen(tab)) ensureTabLoaded(tab);
     }
-    applyTabBounds(w)
-    publishState(w)
+    applyTabBounds(w);
+    publishState(w);
   }
 }
 
 /** A Space's partition / proxy choice changed (spaces-ipc.ts): move its tabs onto the right session. */
 export function applyBrowserSpaceSessions(): void {
-  resyncTabSessions()
-  publishBrowserSpaces()
-  persistOpenTabs()
+  resyncTabSessions();
+  publishBrowserSpaces();
+  persistOpenTabs();
 }
 
 /**
@@ -5438,68 +8319,122 @@ export function applyBrowserSpaceSessions(): void {
  * change session), so it reloads from its URL in the new Space's session.
  */
 export function moveBrowserTabToSpace(id: string, spaceId: string): boolean {
-  const tab = findTab(id)
-  if (!tab || !spacesEnabled() || tab.win.isPrivate || !getSpace(spaceId) || tab.spaceId === spaceId) return false
-  const w = tab.win
-  const fromSpace = tab.spaceId
-  const group = splitOf(tab)
-  const members = group ? group.tabIds.map((memberId) => findTab(memberId)).filter((member): member is BrowserTab => member?.win === w) : [tab]
-  const crossesPartition = partitionForSpaceId(spaceId) !== partitionForSpaceId(fromSpace)
+  const tab = findTab(id);
+  if (
+    !tab ||
+    !spacesEnabled() ||
+    tab.win.isPrivate ||
+    !getSpace(spaceId) ||
+    tab.spaceId === spaceId
+  )
+    return false;
+  const w = tab.win;
+  const fromSpace = tab.spaceId;
+  const group = splitOf(tab);
+  const members = group
+    ? group.tabIds
+        .map((memberId) => findTab(memberId))
+        .filter((member): member is BrowserTab => member?.win === w)
+    : [tab];
+  const crossesPartition =
+    partitionForSpaceId(spaceId) !== partitionForSpaceId(fromSpace);
   // Extension pages need the profile session; an unsaved PDF has to be dealt with first.
-  if (crossesPartition && members.some((member) => member.extensionPageOrigin && !member.isPrivate)) return false
-  if (crossesPartition && members.some((member) => member.pdfEditor && !allowLeavingPdfEditor(member, 'Move to Space'))) return false
-  const activeMoves = members.some((member) => member.id === w.activeTabId)
-  const firstIndex = Math.min(...members.map((member) => w.tabs.indexOf(member)))
-  for (const member of members) w.tabs.splice(w.tabs.indexOf(member), 1)
-  w.tabs.push(...members)
+  if (
+    crossesPartition &&
+    members.some((member) => member.extensionPageOrigin && !member.isPrivate)
+  )
+    return false;
+  if (
+    crossesPartition &&
+    members.some(
+      (member) =>
+        member.pdfEditor && !allowLeavingPdfEditor(member, "Move to Space"),
+    )
+  )
+    return false;
+  const activeMoves = members.some((member) => member.id === w.activeTabId);
+  const firstIndex = Math.min(
+    ...members.map((member) => w.tabs.indexOf(member)),
+  );
+  for (const member of members) w.tabs.splice(w.tabs.indexOf(member), 1);
+  w.tabs.push(...members);
   for (const member of members) {
-    member.spaceId = spaceId
-    member.groupId = null
-    if (!member.isPrivate && member.view && !member.view.webContents.isDestroyed() && member.view.webContents.session !== pageSessionForTab(member)) {
-      member.lastUrl = currentUrl(member)
-      member.pendingUrl = member.lastUrl
-      member.pdfEditor = null
-      disposeTabView(member)
+    member.spaceId = spaceId;
+    member.groupId = null;
+    if (
+      !member.isPrivate &&
+      member.view &&
+      !member.view.webContents.isDestroyed() &&
+      member.view.webContents.session !== pageSessionForTab(member)
+    ) {
+      member.lastUrl = currentUrl(member);
+      member.pendingUrl = member.lastUrl;
+      member.pdfEditor = null;
+      disposeTabView(member);
     }
   }
-  w.spaceActiveTabs.set(spaceId, activeMoves && w.activeTabId ? w.activeTabId : tab.id)
+  w.spaceActiveTabs.set(
+    spaceId,
+    activeMoves && w.activeTabId ? w.activeTabId : tab.id,
+  );
   if (activeMoves) {
-    const replacement = neighbourInSpace(w.tabs, firstIndex, fromSpace)
-    if (replacement) activateTabInternal(replacement.id)
-    else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, fromSpace)
-    for (const member of members) markTabInactive(member)
+    const replacement = neighbourInSpace(w.tabs, firstIndex, fromSpace);
+    if (replacement) activateTabInternal(replacement.id);
+    else
+      createTab(
+        undefined,
+        selectedSearchEngine,
+        true,
+        false,
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        false,
+        w,
+        fromSpace,
+      );
+    for (const member of members) markTabInactive(member);
   }
-  applyTabBounds(w)
-  publishState(w)
-  publishSpaces(w)
-  persistOpenTabs()
-  return true
+  applyTabBounds(w);
+  publishState(w);
+  publishSpaces(w);
+  persistOpenTabs();
+  return true;
 }
 
 /** Tab context menu: "Move to Space ▸" (only while Spaces are on). */
 function spaceTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  const settings = getSpacesSettings()
-  if (!settings.enabled || tab.win.isPrivate || settings.spaces.length < 2) return []
-  return [{
-    label: splitOf(tab) ? 'Move Split to Space' : 'Move to Space',
-    submenu: settings.spaces.map((space): MenuItemConstructorOptions => ({
-      label: `${space.icon ? `${space.icon} ` : ''}${space.name}`,
-      type: 'checkbox',
-      checked: space.id === tab.spaceId,
-      enabled: space.id !== tab.spaceId,
-      click: () => { moveBrowserTabToSpace(tab.id, space.id) }
-    }))
-  }]
+  const settings = getSpacesSettings();
+  if (!settings.enabled || tab.win.isPrivate || settings.spaces.length < 2)
+    return [];
+  return [
+    {
+      label: splitOf(tab) ? "Move Split to Space" : "Move to Space",
+      submenu: settings.spaces.map((space): MenuItemConstructorOptions => ({
+        label: `${space.icon ? `${space.icon} ` : ""}${space.name}`,
+        type: "checkbox",
+        checked: space.id === tab.spaceId,
+        enabled: space.id !== tab.spaceId,
+        click: () => {
+          moveBrowserTabToSpace(tab.id, space.id);
+        },
+      })),
+    },
+  ];
 }
 
 /** Tabs of a Space in every window (delete asks before closing them). */
 export function countBrowserTabsInSpace(spaceId: string): number {
-  return allTabs().filter((tab) => tab.spaceId === spaceId && !tab.win.isPrivate).length
+  return allTabs().filter(
+    (tab) => tab.spaceId === spaceId && !tab.win.isPrivate,
+  ).length;
 }
 
 /** Tabs outside Default in every window (turning Spaces off moves them into Default). */
 export function countBrowserTabsOutsideDefaultSpace(): number {
-  return allTabs().filter((tab) => tab.spaceId !== DEFAULT_SPACE_ID).length
+  return allTabs().filter((tab) => tab.spaceId !== DEFAULT_SPACE_ID).length;
 }
 
 /**
@@ -5508,27 +8443,31 @@ export function countBrowserTabsOutsideDefaultSpace(): number {
  * data is wiped.
  */
 export function deleteBrowserSpace(spaceId: string): boolean {
-  const settings = getSpacesSettings()
-  const space = getSpace(spaceId)
-  if (!space || spaceId === DEFAULT_SPACE_ID) return false
-  const partition = partitionForSpaceId(spaceId)
-  const fallback = adjacentSpaceId(settings, spaceId, -1) ?? adjacentSpaceId(settings, spaceId, 1) ?? DEFAULT_SPACE_ID
+  const settings = getSpacesSettings();
+  const space = getSpace(spaceId);
+  if (!space || spaceId === DEFAULT_SPACE_ID) return false;
+  const partition = partitionForSpaceId(spaceId);
+  const fallback =
+    adjacentSpaceId(settings, spaceId, -1) ??
+    adjacentSpaceId(settings, spaceId, 1) ??
+    DEFAULT_SPACE_ID;
   for (const w of [...windowStates]) {
-    if (w.activeSpaceId === spaceId) switchSpaceIn(w, fallback)
-    for (const tab of spaceTabsOf(w, spaceId)) closeBrowserTab(tab.id, false)
-    w.spaceActiveTabs.delete(spaceId)
+    if (w.activeSpaceId === spaceId) switchSpaceIn(w, fallback);
+    for (const tab of spaceTabsOf(w, spaceId)) closeBrowserTab(tab.id, false);
+    w.spaceActiveTabs.delete(spaceId);
   }
   // A refused close (unsaved PDF edits) keeps the tab: it moves to Default instead of vanishing.
-  for (const tab of allTabs()) if (tab.spaceId === spaceId) tab.spaceId = DEFAULT_SPACE_ID
-  saveSpacesSettings(removeSpace(getSpacesSettings(), spaceId))
+  for (const tab of allTabs())
+    if (tab.spaceId === spaceId) tab.spaceId = DEFAULT_SPACE_ID;
+  saveSpacesSettings(removeSpace(getSpacesSettings(), spaceId));
   if (partition !== BROWSER_SESSION_PARTITION) {
-    forgetSessionCookieSnapshot(partition)
-    void clearPageSessionData(partition)
+    forgetSessionCookieSnapshot(partition);
+    void clearPageSessionData(partition);
   }
-  resyncTabSessions()
-  publishBrowserSpaces()
-  persistOpenTabs()
-  return true
+  resyncTabSessions();
+  publishBrowserSpaces();
+  persistOpenTabs();
+  return true;
 }
 
 /**
@@ -5538,28 +8477,42 @@ export function deleteBrowserSpace(spaceId: string): boolean {
  */
 export function mergeAllSpacesIntoDefault(): void {
   for (const w of windowStates) {
-    for (const tab of w.tabs) tab.spaceId = DEFAULT_SPACE_ID
-    w.activeSpaceId = DEFAULT_SPACE_ID
-    w.spaceActiveTabs.clear()
+    for (const tab of w.tabs) tab.spaceId = DEFAULT_SPACE_ID;
+    w.activeSpaceId = DEFAULT_SPACE_ID;
+    w.spaceActiveTabs.clear();
   }
 }
 
 /** Two-finger swipe over the sidebar steps through Spaces (macOS native swipe module). */
-function sidebarSwipeId(w: BrowserWindowState, request: MacTrackpadSwipeBeginRequest): number | undefined {
-  if (!spacesEnabled() || w.isPrivate || getSpacesSettings().spaces.length < 2) return undefined
-  if (!Number.isFinite(request.x) || !Number.isFinite(request.y)) return undefined
-  const chrome = getBrowserChromeState(w.window)
-  if (chrome.sidebarMode !== 'tabs') return undefined
-  const overSidebar = request.x < w.browserBounds.x || (chrome.sidebarHovered && request.x < chrome.sidebarWidth)
-  return overSidebar ? SPACE_SWIPE_ID_BASE + windowStates.indexOf(w) : undefined
+function sidebarSwipeId(
+  w: BrowserWindowState,
+  request: MacTrackpadSwipeBeginRequest,
+): number | undefined {
+  if (!spacesEnabled() || w.isPrivate || getSpacesSettings().spaces.length < 2)
+    return undefined;
+  if (!Number.isFinite(request.x) || !Number.isFinite(request.y))
+    return undefined;
+  const chrome = getBrowserChromeState(w.window);
+  if (chrome.sidebarMode !== "tabs") return undefined;
+  const overSidebar =
+    request.x < w.browserBounds.x ||
+    (chrome.sidebarHovered && request.x < chrome.sidebarWidth);
+  return overSidebar
+    ? SPACE_SWIPE_ID_BASE + windowStates.indexOf(w)
+    : undefined;
 }
 
-function finishSidebarSwipe(contentsId: number, direction: MacTrackpadSwipeDirection, committed: boolean): boolean {
-  if (contentsId < SPACE_SWIPE_ID_BASE) return false
-  const w = windowStates[contentsId - SPACE_SWIPE_ID_BASE]
+function finishSidebarSwipe(
+  contentsId: number,
+  direction: MacTrackpadSwipeDirection,
+  committed: boolean,
+): boolean {
+  if (contentsId < SPACE_SWIPE_ID_BASE) return false;
+  const w = windowStates[contentsId - SPACE_SWIPE_ID_BASE];
   // Content follows the fingers, like pages: swipe right = the Space to the left.
-  if (committed && w) cycleBrowserSpace(direction === 'back' ? -1 : 1, w.window)
-  return true
+  if (committed && w)
+    cycleBrowserSpace(direction === "back" ? -1 : 1, w.window);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -5568,311 +8521,501 @@ function finishSidebarSwipe(contentsId: number, direction: MacTrackpadSwipeDirec
 
 /** Enforce the grouping rules on a window: contiguous runs, no pinned tabs, splits in one group, one Space. */
 function keepTabGroupsTogether(w: BrowserWindowState): void {
-  if (w.groups.length === 0 && w.tabs.every((tab) => !tab.groupId)) return
-  const result = normalizeTabGroups(w.tabs.map((tab) => ({ id: tab.id, groupId: tab.groupId, pinned: tab.pinned, spaceId: tab.spaceId, splitId: splitOf(tab)?.id ?? null })), w.groups)
-  for (const tab of w.tabs) tab.groupId = result.groupOf.get(tab.id) ?? null
-  w.groups = result.groups
-  if (result.order.every((id, index) => w.tabs[index]?.id === id)) return
-  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]))
-  w.tabs.splice(0, w.tabs.length, ...result.order.map((id) => byId.get(id)!))
+  if (w.groups.length === 0 && w.tabs.every((tab) => !tab.groupId)) return;
+  const result = normalizeTabGroups(
+    w.tabs.map((tab) => ({
+      id: tab.id,
+      groupId: tab.groupId,
+      pinned: tab.pinned,
+      spaceId: tab.spaceId,
+      splitId: splitOf(tab)?.id ?? null,
+    })),
+    w.groups,
+  );
+  for (const tab of w.tabs) tab.groupId = result.groupOf.get(tab.id) ?? null;
+  w.groups = result.groups;
+  if (result.order.every((id, index) => w.tabs[index]?.id === id)) return;
+  const byId = new Map(w.tabs.map((tab) => [tab.id, tab]));
+  w.tabs.splice(0, w.tabs.length, ...result.order.map((id) => byId.get(id)!));
 }
 
-function groupById(w: BrowserWindowState | undefined, groupId: string | null | undefined): TabGroup | undefined {
-  return w && groupId ? w.groups.find((group) => group.id === groupId) : undefined
+function groupById(
+  w: BrowserWindowState | undefined,
+  groupId: string | null | undefined,
+): TabGroup | undefined {
+  return w && groupId
+    ? w.groups.find((group) => group.id === groupId)
+    : undefined;
 }
 
 /** The window a group is in (group ids are unique across windows). */
 function windowOfGroup(groupId: string): BrowserWindowState | undefined {
-  return windowStates.find((w) => w.groups.some((group) => group.id === groupId))
+  return windowStates.find((w) =>
+    w.groups.some((group) => group.id === groupId),
+  );
 }
 
 function groupMembers(w: BrowserWindowState, groupId: string): BrowserTab[] {
-  return w.tabs.filter((tab) => tab.groupId === groupId)
+  return w.tabs.filter((tab) => tab.groupId === groupId);
 }
 
 /** Tabs `ids` plus their split partners, unpinned, in one window and Space (the first tab's). */
 function groupableTabs(ids: readonly string[]): BrowserTab[] {
-  const first = findTab(ids[0])
-  if (!first) return []
-  const picked = new Set<BrowserTab>()
+  const first = findTab(ids[0]);
+  if (!first) return [];
+  const picked = new Set<BrowserTab>();
   for (const id of ids) {
-    const tab = findTab(id)
-    if (!tab || tab.win !== first.win || tab.spaceId !== first.spaceId || tab.pinned) continue
-    const split = splitOf(tab)
-    for (const member of split ? split.tabIds.map((memberId) => findTab(memberId)) : [tab]) if (member && !member.pinned) picked.add(member)
+    const tab = findTab(id);
+    if (
+      !tab ||
+      tab.win !== first.win ||
+      tab.spaceId !== first.spaceId ||
+      tab.pinned
+    )
+      continue;
+    const split = splitOf(tab);
+    for (const member of split
+      ? split.tabIds.map((memberId) => findTab(memberId))
+      : [tab])
+      if (member && !member.pinned) picked.add(member);
   }
-  return first.win.tabs.filter((tab) => picked.has(tab))
+  return first.win.tabs.filter((tab) => picked.has(tab));
 }
 
 function afterGroupChange(w: BrowserWindowState): void {
-  keepTabGroupsTogether(w)
-  applyTabBounds(w)
-  publishState(w)
-  persistOpenTabs()
+  keepTabGroupsTogether(w);
+  applyTabBounds(w);
+  publishState(w);
+  persistOpenTabs();
 }
 
 /** New group from tabs (the first tab's position); returns the group id. */
-export function createBrowserTabGroup(ids: readonly string[], input: { name?: unknown; color?: unknown } = {}): string | null {
-  const tabs = groupableTabs(ids)
-  const first = tabs[0]
-  if (!first) return null
-  const w = first.win
-  const group = createTabGroup(randomUUID(), w.groups, input)
-  w.groups.push(group)
+export function createBrowserTabGroup(
+  ids: readonly string[],
+  input: { name?: unknown; color?: unknown } = {},
+): string | null {
+  const tabs = groupableTabs(ids);
+  const first = tabs[0];
+  if (!first) return null;
+  const w = first.win;
+  const group = createTabGroup(randomUUID(), w.groups, input);
+  w.groups.push(group);
   // Gather the members right where the first one is.
-  const at = w.tabs.indexOf(first)
-  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1)
-  w.tabs.splice(Math.min(at, w.tabs.length), 0, ...tabs)
-  for (const tab of tabs) tab.groupId = group.id
-  afterGroupChange(w)
-  return group.id
+  const at = w.tabs.indexOf(first);
+  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1);
+  w.tabs.splice(Math.min(at, w.tabs.length), 0, ...tabs);
+  for (const tab of tabs) tab.groupId = group.id;
+  afterGroupChange(w);
+  return group.id;
 }
 
 /** Add tabs to a group (they move to its end). */
-export function addBrowserTabsToGroup(ids: readonly string[], groupId: string): boolean {
-  const w = windowOfGroup(groupId)
-  const members = w ? groupMembers(w, groupId) : []
-  if (!w || members.length === 0) return false
-  const tabs = groupableTabs(ids).filter((tab) => tab.win === w && tab.spaceId === members[0]!.spaceId && tab.groupId !== groupId)
-  if (tabs.length === 0) return false
-  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1)
-  const last = w.tabs.indexOf(members[members.length - 1]!)
-  w.tabs.splice(last + 1, 0, ...tabs)
-  for (const tab of tabs) tab.groupId = groupId
-  afterGroupChange(w)
-  return true
+export function addBrowserTabsToGroup(
+  ids: readonly string[],
+  groupId: string,
+): boolean {
+  const w = windowOfGroup(groupId);
+  const members = w ? groupMembers(w, groupId) : [];
+  if (!w || members.length === 0) return false;
+  const tabs = groupableTabs(ids).filter(
+    (tab) =>
+      tab.win === w &&
+      tab.spaceId === members[0]!.spaceId &&
+      tab.groupId !== groupId,
+  );
+  if (tabs.length === 0) return false;
+  for (const tab of tabs) w.tabs.splice(w.tabs.indexOf(tab), 1);
+  const last = w.tabs.indexOf(members[members.length - 1]!);
+  w.tabs.splice(last + 1, 0, ...tabs);
+  for (const tab of tabs) tab.groupId = groupId;
+  afterGroupChange(w);
+  return true;
 }
 
 /** Take tabs out of their group; they go just after it so the group stays one run. */
 export function removeBrowserTabsFromGroup(ids: readonly string[]): boolean {
-  const tabs = groupableTabs(ids).filter((tab) => tab.groupId)
-  const w = tabs[0]?.win
-  if (!w) return false
+  const tabs = groupableTabs(ids).filter((tab) => tab.groupId);
+  const w = tabs[0]?.win;
+  if (!w) return false;
   for (const tab of tabs) {
-    const groupId = tab.groupId!
-    tab.groupId = null
-    const rest = groupMembers(w, groupId)
-    const last = rest[rest.length - 1]
+    const groupId = tab.groupId!;
+    tab.groupId = null;
+    const rest = groupMembers(w, groupId);
+    const last = rest[rest.length - 1];
     if (last && w.tabs.indexOf(last) > w.tabs.indexOf(tab)) {
-      w.tabs.splice(w.tabs.indexOf(tab), 1)
-      w.tabs.splice(w.tabs.indexOf(last) + 1, 0, tab)
+      w.tabs.splice(w.tabs.indexOf(tab), 1);
+      w.tabs.splice(w.tabs.indexOf(last) + 1, 0, tab);
     }
   }
-  afterGroupChange(w)
-  return true
+  afterGroupChange(w);
+  return true;
 }
 
 /** Rename / recolour / collapse. Collapsing the group that holds the active tab moves you to a tab outside it. */
-export function updateBrowserTabGroup(groupId: string, patch: { name?: unknown; color?: unknown; collapsed?: unknown }): boolean {
-  const w = windowOfGroup(groupId)
-  const group = groupById(w, groupId)
-  if (!w || !group) return false
-  const next = updateTabGroup(group, patch)
-  w.groups = w.groups.map((candidate) => candidate === group ? next : candidate)
+export function updateBrowserTabGroup(
+  groupId: string,
+  patch: { name?: unknown; color?: unknown; collapsed?: unknown },
+): boolean {
+  const w = windowOfGroup(groupId);
+  const group = groupById(w, groupId);
+  if (!w || !group) return false;
+  const next = updateTabGroup(group, patch);
+  w.groups = w.groups.map((candidate) =>
+    candidate === group ? next : candidate,
+  );
   if (next.collapsed && !group.collapsed) {
-    const active = activeTabOf(w)
+    const active = activeTabOf(w);
     if (active?.groupId === groupId) {
       // Like Chrome: the next tab outside the group in this Space, or a New Tab.
-      const tabs = spaceTabsOf(w, active.spaceId).filter((tab) => !tab.pinned)
-      const at = tabs.indexOf(active)
-      const outside = [...tabs.slice(at + 1), ...tabs.slice(0, at).reverse()].find((tab) => tab.groupId !== groupId)
-      if (outside) activateTabInternal(outside.id)
-      else createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, undefined, false, false, w, active.spaceId)
+      const tabs = spaceTabsOf(w, active.spaceId).filter((tab) => !tab.pinned);
+      const at = tabs.indexOf(active);
+      const outside = [
+        ...tabs.slice(at + 1),
+        ...tabs.slice(0, at).reverse(),
+      ].find((tab) => tab.groupId !== groupId);
+      if (outside) activateTabInternal(outside.id);
+      else
+        createTab(
+          undefined,
+          selectedSearchEngine,
+          true,
+          false,
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          false,
+          w,
+          active.spaceId,
+        );
       // Activating a tab expands its group; this one stays collapsed.
-      const still = groupById(w, groupId)
-      if (still) still.collapsed = true
+      const still = groupById(w, groupId);
+      if (still) still.collapsed = true;
     }
   }
-  afterGroupChange(w)
-  return true
+  afterGroupChange(w);
+  return true;
 }
 
 export function toggleBrowserTabGroupCollapsed(groupId: string): boolean {
-  const group = groupById(windowOfGroup(groupId), groupId)
-  return group ? updateBrowserTabGroup(groupId, { collapsed: !group.collapsed }) : false
+  const group = groupById(windowOfGroup(groupId), groupId);
+  return group
+    ? updateBrowserTabGroup(groupId, { collapsed: !group.collapsed })
+    : false;
 }
 
 /** Ungroup: the tabs stay where they are. */
 export function ungroupBrowserTabGroup(groupId: string): boolean {
-  const w = windowOfGroup(groupId)
-  if (!w) return false
-  for (const tab of groupMembers(w, groupId)) tab.groupId = null
-  w.groups = w.groups.filter((group) => group.id !== groupId)
-  afterGroupChange(w)
-  return true
+  const w = windowOfGroup(groupId);
+  if (!w) return false;
+  for (const tab of groupMembers(w, groupId)) tab.groupId = null;
+  w.groups = w.groups.filter((group) => group.id !== groupId);
+  afterGroupChange(w);
+  return true;
 }
 
 /** Close every tab in the group (the caller confirms when it's more than one). */
 export function closeBrowserTabGroup(groupId: string): boolean {
-  const w = windowOfGroup(groupId)
-  if (!w) return false
-  for (const tab of groupMembers(w, groupId)) closeBrowserTab(tab.id)
-  return true
+  const w = windowOfGroup(groupId);
+  if (!w) return false;
+  for (const tab of groupMembers(w, groupId)) closeBrowserTab(tab.id);
+  return true;
 }
 
 /** New Tab at the end of the group, in its Space. */
 export function newBrowserTabInGroup(groupId: string): string | null {
-  const w = windowOfGroup(groupId)
-  const members = w ? groupMembers(w, groupId) : []
-  const last = members[members.length - 1]
-  if (!w || !last) return null
-  const id = createTab(undefined, selectedSearchEngine, true, false, false, false, undefined, w.tabs.indexOf(last) + 1, false, false, w, last.spaceId)
-  const tab = findTab(id)
+  const w = windowOfGroup(groupId);
+  const members = w ? groupMembers(w, groupId) : [];
+  const last = members[members.length - 1];
+  if (!w || !last) return null;
+  const id = createTab(
+    undefined,
+    selectedSearchEngine,
+    true,
+    false,
+    false,
+    false,
+    undefined,
+    w.tabs.indexOf(last) + 1,
+    false,
+    false,
+    w,
+    last.spaceId,
+  );
+  const tab = findTab(id);
   if (tab) {
-    tab.groupId = groupId
-    afterGroupChange(w)
+    tab.groupId = groupId;
+    afterGroupChange(w);
   }
-  return id
+  return id;
 }
 
 /** Drag a group header: the whole group lands before `beforeId` (never inside another group or split). */
-export function moveBrowserTabGroup(groupId: string, beforeId: string | null): boolean {
-  const w = windowOfGroup(groupId)
-  if (!w) return false
-  const before = beforeId ? findTab(beforeId) : undefined
-  if (before && before.win !== w) return moveBrowserTabGroupToWindow(groupId, before.win.window)
-  const members = groupMembers(w, groupId)
-  if (members.length === 0 || (before && before.groupId === groupId)) return false
-  const orderBefore = w.tabs.map((tab) => tab.id).join('|')
-  for (const tab of members) w.tabs.splice(w.tabs.indexOf(tab), 1)
+export function moveBrowserTabGroup(
+  groupId: string,
+  beforeId: string | null,
+): boolean {
+  const w = windowOfGroup(groupId);
+  if (!w) return false;
+  const before = beforeId ? findTab(beforeId) : undefined;
+  if (before && before.win !== w)
+    return moveBrowserTabGroupToWindow(groupId, before.win.window);
+  const members = groupMembers(w, groupId);
+  if (members.length === 0 || (before && before.groupId === groupId))
+    return false;
+  const orderBefore = w.tabs.map((tab) => tab.id).join("|");
+  for (const tab of members) w.tabs.splice(w.tabs.indexOf(tab), 1);
   // Snap to the start of whatever group / split `before` is in.
-  let anchor = before
-  if (anchor?.groupId) anchor = w.tabs.find((tab) => tab.groupId === anchor!.groupId)
-  const split = splitOf(anchor)
-  if (split) anchor = w.tabs.find((tab) => split.tabIds.includes(tab.id)) ?? anchor
-  let at = anchor ? w.tabs.indexOf(anchor) : -1
-  if (at < 0) at = w.tabs.length
-  w.tabs.splice(at, 0, ...members)
-  if (w.tabs.map((tab) => tab.id).join('|') === orderBefore) return false
-  afterGroupChange(w)
-  return true
+  let anchor = before;
+  if (anchor?.groupId)
+    anchor = w.tabs.find((tab) => tab.groupId === anchor!.groupId);
+  const split = splitOf(anchor);
+  if (split)
+    anchor = w.tabs.find((tab) => split.tabIds.includes(tab.id)) ?? anchor;
+  let at = anchor ? w.tabs.indexOf(anchor) : -1;
+  if (at < 0) at = w.tabs.length;
+  w.tabs.splice(at, 0, ...members);
+  if (w.tabs.map((tab) => tab.id).join("|") === orderBefore) return false;
+  afterGroupChange(w);
+  return true;
 }
 
 /** Move a whole group (its splits too) into another window, or a new one when `target` is null. */
-export function moveBrowserTabGroupToWindow(groupId: string, target: BaseWindow | null, position?: { x: number; y: number }): boolean {
-  const from = windowOfGroup(groupId)
-  const group = groupById(from, groupId)
-  if (!from || !group) return false
-  const members = groupMembers(from, groupId)
-  if (members.length === 0 || members.some((tab) => !canMoveTabTo(tab, windowStateFor(target) ?? from))) return false
-  const focus = members.find((tab) => tab.id === from.activeTabId) ?? members[0]!
-  let to: BrowserWindowState | undefined
+export function moveBrowserTabGroupToWindow(
+  groupId: string,
+  target: BaseWindow | null,
+  position?: { x: number; y: number },
+): boolean {
+  const from = windowOfGroup(groupId);
+  const group = groupById(from, groupId);
+  if (!from || !group) return false;
+  const members = groupMembers(from, groupId);
+  if (
+    members.length === 0 ||
+    members.some((tab) => !canMoveTabTo(tab, windowStateFor(target) ?? from))
+  )
+    return false;
+  const focus =
+    members.find((tab) => tab.id === from.activeTabId) ?? members[0]!;
+  let to: BrowserWindowState | undefined;
   if (target) {
-    to = windowStateFor(target)
-    if (!isLiveWindow(to) || to === from) return false
+    to = windowStateFor(target);
+    if (!isLiveWindow(to) || to === from) return false;
   } else {
     // Something has to stay behind in the old window.
-    if (from.tabs.length <= members.length || !browserWindowFactory) return false
-    let size: { width: number; height: number } | undefined
+    if (from.tabs.length <= members.length || !browserWindowFactory)
+      return false;
+    let size: { width: number; height: number } | undefined;
     try {
-      const [width = 0, height = 0] = from.window.getSize()
-      if (width > 0 && height > 0) size = { width, height }
+      const [width = 0, height = 0] = from.window.getSize();
+      if (width > 0 && height > 0) size = { width, height };
     } catch {
       // Default size.
     }
-    const created = browserWindowFactory({ private: from.isPrivate, adoptTabId: members[0]!.id, position, size })
-    to = created ? windowStateFor(created) : undefined
-    if (!to) return false
+    const created = browserWindowFactory({
+      private: from.isPrivate,
+      adoptTabId: members[0]!.id,
+      position,
+      size,
+    });
+    to = created ? windowStateFor(created) : undefined;
+    if (!to) return false;
   }
-  for (const tab of members) if (tab.win !== to) moveTabsWithSplit(tab, to, null)
-  const moved = { ...group }
-  to.groups = [...to.groups.filter((candidate) => candidate.id !== groupId), moved]
-  from.groups = from.groups.filter((candidate) => candidate.id !== groupId)
-  for (const tab of members) if (tab.win === to) tab.groupId = groupId
-  activateTabInternal(focus.id)
-  afterGroupChange(to)
-  publishState(from)
-  if (!to.window.isDestroyed()) to.window.focus()
-  return true
+  for (const tab of members)
+    if (tab.win !== to) moveTabsWithSplit(tab, to, null);
+  const moved = { ...group };
+  to.groups = [
+    ...to.groups.filter((candidate) => candidate.id !== groupId),
+    moved,
+  ];
+  from.groups = from.groups.filter((candidate) => candidate.id !== groupId);
+  for (const tab of members) if (tab.win === to) tab.groupId = groupId;
+  activateTabInternal(focus.id);
+  afterGroupChange(to);
+  publishState(from);
+  if (!to.window.isDestroyed()) to.window.focus();
+  return true;
 }
 
 /** A group header drag ended outside the list: another window under the pointer, else a new window. */
 export function dropBrowserTabGroupOutside(groupId: string): boolean {
-  const from = windowOfGroup(groupId)
-  if (!from) return false
-  const point = screen.getCursorScreenPoint()
+  const from = windowOfGroup(groupId);
+  if (!from) return false;
+  const point = screen.getCursorScreenPoint();
   const contains = (window: BaseWindow): boolean => {
-    if (window.isDestroyed() || window.isMinimized()) return false
-    const bounds = window.getBounds()
-    return point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
-  }
-  if (contains(from.window)) return false
-  const target = windowStates.find((w) => w !== from && !w.mini && isLiveWindow(w) && contains(w.window))
-  if (target) return moveBrowserTabGroupToWindow(groupId, target.window)
-  return moveBrowserTabGroupToWindow(groupId, null, { x: Math.round(point.x - 80), y: Math.round(point.y - 20) })
+    if (window.isDestroyed() || window.isMinimized()) return false;
+    const bounds = window.getBounds();
+    return (
+      point.x >= bounds.x &&
+      point.y >= bounds.y &&
+      point.x < bounds.x + bounds.width &&
+      point.y < bounds.y + bounds.height
+    );
+  };
+  if (contains(from.window)) return false;
+  const target = windowStates.find(
+    (w) => w !== from && !w.mini && isLiveWindow(w) && contains(w.window),
+  );
+  if (target) return moveBrowserTabGroupToWindow(groupId, target.window);
+  return moveBrowserTabGroupToWindow(groupId, null, {
+    x: Math.round(point.x - 80),
+    y: Math.round(point.y - 20),
+  });
 }
 
 /** Groups of the current window's Space, for the palette ("Add Tab to Group: …"). */
-export function listBrowserTabGroups(w = currentWindowState()): { id: string; label: string; color: string; collapsed: boolean; count: number }[] {
-  if (!w) return []
-  const visible = new Set(spaceTabsOf(w).map((tab) => tab.groupId))
-  return w.groups.filter((group) => visible.has(group.id)).map((group) => ({ id: group.id, label: tabGroupLabel(group), color: group.color, collapsed: group.collapsed, count: groupMembers(w, group.id).length }))
+export function listBrowserTabGroups(w = currentWindowState()): {
+  id: string;
+  label: string;
+  color: string;
+  collapsed: boolean;
+  count: number;
+}[] {
+  if (!w) return [];
+  const visible = new Set(spaceTabsOf(w).map((tab) => tab.groupId));
+  return w.groups
+    .filter((group) => visible.has(group.id))
+    .map((group) => ({
+      id: group.id,
+      label: tabGroupLabel(group),
+      color: group.color,
+      collapsed: group.collapsed,
+      count: groupMembers(w, group.id).length,
+    }));
 }
 
 /** The active tab's group id (palette commands act on it). */
 export function activeBrowserTabGroupId(): string | null {
-  return activeTabOf(currentWindowState())?.groupId ?? null
+  return activeTabOf(currentWindowState())?.groupId ?? null;
 }
 
 /** The window a tab is in (tab-selection.ts moves a selection into one new window). */
 export function browserWindowOfTab(id: string): BaseWindow | null {
-  return findTab(id)?.win.window ?? null
+  return findTab(id)?.win.window ?? null;
 }
 
 interface TabSelectionHooks {
   /** Right-click on tab `id`: show the multi-select menu and return true, or false for the normal tab menu. */
-  showMenu: (id: string, window: BaseWindow) => boolean
+  showMenu: (id: string, window: BaseWindow) => boolean;
   /** Cmd/Ctrl+G: group the selection and return true, or false to leave the key to Find Next. */
-  groupShortcut: () => boolean
+  groupShortcut: () => boolean;
 }
-let tabSelectionHooks: TabSelectionHooks | null = null
+let tabSelectionHooks: TabSelectionHooks | null = null;
 /** tab-selection.ts owns the sidebar multi-select (its state lives in the renderer). */
 export function setTabSelectionHooks(hooks: TabSelectionHooks | null): void {
-  tabSelectionHooks = hooks
+  tabSelectionHooks = hooks;
 }
 
-type TabGroupHeaderMenuHook = (groupId: string) => MenuItemConstructorOptions[]
-let groupHeaderMenuHook: TabGroupHeaderMenuHook | null = null
+type TabGroupHeaderMenuHook = (groupId: string) => MenuItemConstructorOptions[];
+let groupHeaderMenuHook: TabGroupHeaderMenuHook | null = null;
 /** tab-groups-ipc.ts supplies the rename / close-with-confirm items (they need the renderer and dialogs). */
 export function setTabGroupMenuHook(hook: TabGroupHeaderMenuHook | null): void {
-  groupHeaderMenuHook = hook
+  groupHeaderMenuHook = hook;
 }
 
 /** Tab context menu: Add to New Group / Add to Group ▸ / Remove from Group. */
 function groupTabMenuItems(tab: BrowserTab): MenuItemConstructorOptions[] {
-  if (tab.pinned) return []
-  const w = tab.win
-  const others = listBrowserTabGroups(w).filter((group) => group.id !== tab.groupId && windowOfGroup(group.id) === w && groupMembers(w, group.id)[0]?.spaceId === tab.spaceId)
+  if (tab.pinned) return [];
+  const w = tab.win;
+  const others = listBrowserTabGroups(w).filter(
+    (group) =>
+      group.id !== tab.groupId &&
+      windowOfGroup(group.id) === w &&
+      groupMembers(w, group.id)[0]?.spaceId === tab.spaceId,
+  );
   return [
-    { label: 'Add Tab to New Group', click: () => { createBrowserTabGroup([tab.id]) } },
-    ...(others.length > 0 ? [{
-      label: 'Add Tab to Group',
-      submenu: others.map((group): MenuItemConstructorOptions => ({ label: `${group.label} (${group.count})`, click: () => { addBrowserTabsToGroup([tab.id], group.id) } }))
-    }] : []),
-    ...(tab.groupId ? [{ label: 'Remove from Group', click: () => { removeBrowserTabsFromGroup([tab.id]) } }] : []),
-    { type: 'separator' as const }
-  ]
+    {
+      label: "Add Tab to New Group",
+      click: () => {
+        createBrowserTabGroup([tab.id]);
+      },
+    },
+    ...(others.length > 0
+      ? [
+          {
+            label: "Add Tab to Group",
+            submenu: others.map((group): MenuItemConstructorOptions => ({
+              label: `${group.label} (${group.count})`,
+              click: () => {
+                addBrowserTabsToGroup([tab.id], group.id);
+              },
+            })),
+          },
+        ]
+      : []),
+    ...(tab.groupId
+      ? [
+          {
+            label: "Remove from Group",
+            click: () => {
+              removeBrowserTabsFromGroup([tab.id]);
+            },
+          },
+        ]
+      : []),
+    { type: "separator" as const },
+  ];
 }
 
 /** Right-click on a group header. */
 export function showBrowserTabGroupMenu(groupId: string): boolean {
-  const w = windowOfGroup(groupId)
-  const group = groupById(w, groupId)
-  if (!w || !group) return false
-  const others = windowStates.filter((candidate) => candidate !== w && !candidate.mini && isLiveWindow(candidate) && !candidate.isPrivate === !w.isPrivate)
+  const w = windowOfGroup(groupId);
+  const group = groupById(w, groupId);
+  if (!w || !group) return false;
+  const others = windowStates.filter(
+    (candidate) =>
+      candidate !== w &&
+      !candidate.mini &&
+      isLiveWindow(candidate) &&
+      !candidate.isPrivate === !w.isPrivate,
+  );
   const items: MenuItemConstructorOptions[] = [
     ...(groupHeaderMenuHook?.(groupId) ?? []),
     {
-      label: 'Colour',
-      submenu: TAB_GROUP_COLORS.map((color): MenuItemConstructorOptions => ({ label: color[0]!.toUpperCase() + color.slice(1), type: 'checkbox', checked: group.color === color, click: () => { updateBrowserTabGroup(groupId, { color }) } }))
+      label: "Colour",
+      submenu: TAB_GROUP_COLORS.map((color): MenuItemConstructorOptions => ({
+        label: color[0]!.toUpperCase() + color.slice(1),
+        type: "checkbox",
+        checked: group.color === color,
+        click: () => {
+          updateBrowserTabGroup(groupId, { color });
+        },
+      })),
     },
-    { label: group.collapsed ? 'Expand Group' : 'Collapse Group', click: () => { toggleBrowserTabGroupCollapsed(groupId) } },
-    { label: 'New Tab in Group', click: () => { newBrowserTabInGroup(groupId) } },
-    { type: 'separator' },
-    { label: 'Ungroup', click: () => { ungroupBrowserTabGroup(groupId) } },
-    { label: 'Move Group to New Window', enabled: w.tabs.length > groupMembers(w, groupId).length, click: () => { moveBrowserTabGroupToWindow(groupId, null) } },
-    ...others.map((candidate): MenuItemConstructorOptions => ({ label: `Move Group to ${browserWindowLabel(candidate.window)}`, click: () => { moveBrowserTabGroupToWindow(groupId, candidate.window) } }))
-  ]
-  Menu.buildFromTemplate(items).popup({ window: w.window })
-  return true
+    {
+      label: group.collapsed ? "Expand Group" : "Collapse Group",
+      click: () => {
+        toggleBrowserTabGroupCollapsed(groupId);
+      },
+    },
+    {
+      label: "New Tab in Group",
+      click: () => {
+        newBrowserTabInGroup(groupId);
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Ungroup",
+      click: () => {
+        ungroupBrowserTabGroup(groupId);
+      },
+    },
+    {
+      label: "Move Group to New Window",
+      enabled: w.tabs.length > groupMembers(w, groupId).length,
+      click: () => {
+        moveBrowserTabGroupToWindow(groupId, null);
+      },
+    },
+    ...others.map((candidate): MenuItemConstructorOptions => ({
+      label: `Move Group to ${browserWindowLabel(candidate.window)}`,
+      click: () => {
+        moveBrowserTabGroupToWindow(groupId, candidate.window);
+      },
+    })),
+  ];
+  Menu.buildFromTemplate(items).popup({ window: w.window });
+  return true;
 }

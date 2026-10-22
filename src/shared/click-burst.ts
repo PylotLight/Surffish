@@ -5,24 +5,34 @@
  */
 export interface ClickBurst {
   /** Clicks in the current burst so far. */
-  clicks: number
+  clicks: number;
   /** When the last click landed (ms, any monotonic clock). */
-  lastAt: number
+  lastAt: number;
 }
 
-export const EMPTY_CLICK_BURST: ClickBurst = { clicks: 0, lastAt: Number.NEGATIVE_INFINITY }
+export const EMPTY_CLICK_BURST: ClickBurst = {
+  clicks: 0,
+  lastAt: Number.NEGATIVE_INFINITY,
+};
 
 export interface ClickBurstOptions {
-  count: number
-  gapMs: number
+  count: number;
+  gapMs: number;
 }
 
-export const TRIPLE_CLICK: ClickBurstOptions = { count: 3, gapMs: 450 }
+export const TRIPLE_CLICK: ClickBurstOptions = { count: 3, gapMs: 450 };
 
 /** Add a click at `now`. `fired` is true on the click that completes a burst, which then starts over. */
-export function registerClick(burst: ClickBurst, now: number, options: ClickBurstOptions = TRIPLE_CLICK): { burst: ClickBurst; fired: boolean } {
-  const continues = Number.isFinite(burst.lastAt) && now >= burst.lastAt && now - burst.lastAt <= options.gapMs
-  const clicks = continues ? burst.clicks + 1 : 1
-  if (clicks >= options.count) return { burst: EMPTY_CLICK_BURST, fired: true }
-  return { burst: { clicks, lastAt: now }, fired: false }
+export function registerClick(
+  burst: ClickBurst,
+  now: number,
+  options: ClickBurstOptions = TRIPLE_CLICK,
+): { burst: ClickBurst; fired: boolean } {
+  const continues =
+    Number.isFinite(burst.lastAt) &&
+    now >= burst.lastAt &&
+    now - burst.lastAt <= options.gapMs;
+  const clicks = continues ? burst.clicks + 1 : 1;
+  if (clicks >= options.count) return { burst: EMPTY_CLICK_BURST, fired: true };
+  return { burst: { clicks, lastAt: now }, fired: false };
 }

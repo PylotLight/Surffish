@@ -1,1 +1,2 @@
-document.documentElement.dataset.surffishFirefoxMainWorld = 'ran-without-extension-api-namespace';
+document.documentElement.dataset.surffishFirefoxMainWorld =
+  "ran-without-extension-api-namespace";

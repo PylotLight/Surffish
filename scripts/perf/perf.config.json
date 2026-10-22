@@ -34,67 +34,453 @@
     }
   },
   "metrics": {
-    "bundle.mainJs": { "kind": "deterministic", "label": "main JS at startup (index.js + imports)", "unit": "KB" },
-    "bundle.mainTotal": { "kind": "deterministic", "label": "main process JS, all chunks", "unit": "KB" },
-    "bundle.preload": { "kind": "deterministic", "label": "preload scripts", "unit": "KB" },
-    "bundle.rendererEagerJs": { "kind": "deterministic", "label": "renderer JS loaded at startup", "unit": "KB" },
-    "bundle.rendererJs": { "kind": "deterministic", "label": "renderer JS, all assets", "unit": "KB" },
-    "bundle.rendererCss": { "kind": "deterministic", "label": "renderer CSS", "unit": "KB" },
-    "bundle.appPayload": { "kind": "deterministic", "label": "packaged app payload (app.asar contents)", "unit": "KB", "abs": 51200, "$comment": "build.files + production node_modules closure minus build.files exclusions (scripts/perf/app-payload.ts)" },
-    "bundle.appFiles": { "kind": "deterministic", "label": "files in app.asar", "unit": "", "abs": 10 },
-    "startup.firstPaintMs": { "kind": "noisy", "label": "cold start to first paint", "unit": "ms", "abs": 150, "stat": "min", "$comment": "best of the runs: a busy pod stalls single cold starts by 0.5-3 s on identical code" },
-    "startup.windowMs": { "kind": "noisy", "label": "cold start to window", "unit": "ms", "abs": 100, "stat": "min" },
-    "startup.mainImportMs": { "kind": "noisy", "label": "main process JS load (import of out/main/index.js)", "unit": "ms", "abs": 8, "stat": "min" },
-    "startup.ipcCount": { "kind": "deterministic", "label": "IPC messages during startup", "unit": "", "abs": 12, "$comment": "batched broadcasts: 146-155 on identical code" },
-    "mem1.totalMB": { "kind": "noisy", "label": "memory, 1 tab", "unit": "MB", "abs": 15 },
-    "memMid.totalMB": { "kind": "noisy", "label": "memory, 10 tabs", "unit": "MB", "abs": 20 },
-    "memMax.totalMB": { "kind": "noisy", "label": "memory, 30 tabs", "unit": "MB", "abs": 30 },
-    "memMax.gpuMB": { "kind": "noisy", "label": "GPU process memory, 30 tabs", "unit": "MB", "abs": 15, "platforms": { "linux": { "noisyFail": false } }, "$comment": "warn-only on linux: SwiftShader's GPU process sits at ~57-61 MB or ~92-103 MB on identical code (bimodal, Oct 2026 CI), so +30-40% swings flipped the check. The Mac job is where GPU memory means something." },
-    "memMax.processes": { "kind": "deterministic", "label": "processes, 30 tabs", "unit": "" },
-    "openTabs.ipcCount": { "kind": "noisy", "label": "IPC messages opening 20 tabs", "unit": "", "abs": 25, "failPct": 20, "$comment": "timing-dependent, so noisy (gets the confirmation pass): tab/state broadcasts are coalesced per frame, 115-151 on identical code (Oct 2026 CI)" },
-    "openTabs.ipcBytes": { "kind": "noisy", "label": "IPC payload opening 20 tabs", "unit": "KB", "abs": 10240, "failPct": 15, "$comment": "timing-dependent like ipcCount: 59-76 KB on identical code (Oct 2026 CI), so noisy (gets the confirmation pass)" },
-    "openTabs.mainCpuMs": { "kind": "noisy", "label": "main CPU opening 20 tabs", "unit": "ms", "abs": 100 },
-    "tabSwitch.medianMs": { "kind": "noisy", "label": "tab switch to painted", "unit": "ms", "abs": 20, "$comment": "software-rendered pods: per-run medians range ~23-40 ms on identical code" },
-    "newTab.siteFirstPaintMs": { "kind": "noisy", "label": "new site tab first paint", "unit": "ms", "abs": 40 },
-    "newTab.newTabPageMs": { "kind": "noisy", "label": "New Tab page shown", "unit": "ms", "abs": 20 },
-    "idle.ipcCount": { "kind": "deterministic", "label": "idle IPC messages (5s, 30 tabs)", "unit": "", "abs": 2 },
-    "idle.timerFires": { "kind": "deterministic", "label": "idle main-process timer fires (5s)", "unit": "", "abs": 3 },
-    "idle.backgroundTabsCpuMsPerSec": { "kind": "noisy", "label": "background tabs CPU, idle", "unit": "ms/s", "abs": 20 },
-    "idle.mainCpuMsPerSec": { "kind": "noisy", "label": "main process CPU, idle", "unit": "ms/s", "abs": 10 },
-    "windowCycles.processesGrowth": { "kind": "leak", "label": "processes left after 3 window open/close", "unit": "" },
-    "windowCycles.webContentsGrowth": { "kind": "leak", "label": "webContents left after 3 window open/close", "unit": "" },
-    "windowCycles.memGrowthMB": { "kind": "noisy", "label": "memory growth after 3 window open/close", "unit": "MB", "abs": 40 },
-    "tabSwitch.mainCpuMsPerSwitch": { "kind": "noisy", "label": "main-thread CPU per tab switch", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
-    "tabSwitch.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, switching tabs", "unit": "ms", "abs": 25, "warnOnly": true, "group": "responsiveness" },
-    "keySwitch.medianMs": { "kind": "noisy", "label": "keyboard tab switch, key to painted", "unit": "ms", "abs": 20, "warnOnly": true, "group": "responsiveness" },
-    "keySwitch.mainCpuMsPerSwitch": { "kind": "noisy", "label": "main-thread CPU leaving a tab you were reading (capture, thumbnail, wake snapshot)", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
-    "openTabs.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, opening 20 tabs", "unit": "ms", "abs": 30, "warnOnly": true, "group": "responsiveness" },
-    "openTabs.loop.longTasks": { "kind": "noisy", "label": "main-thread long tasks (over 50 ms), opening 20 tabs", "unit": "", "abs": 3, "warnOnly": true, "group": "responsiveness" },
-    "closeTabs.medianMs": { "kind": "noisy", "label": "close tab to next tab painted", "unit": "ms", "abs": 20, "warnOnly": true, "group": "responsiveness" },
-    "closeTabs.mainCpuMsPerClose": { "kind": "noisy", "label": "main-thread CPU per tab close", "unit": "ms", "abs": 5, "warnOnly": true, "group": "responsiveness" },
-    "closeTabs.loop.maxBlockMs": { "kind": "noisy", "label": "longest main-thread block, closing tabs", "unit": "ms", "abs": 25, "warnOnly": true, "group": "responsiveness" },
-    "pointer.mainCpuMs": { "kind": "noisy", "label": "main-thread CPU for 48 mouse moves and wheel scrolls over a page", "unit": "ms", "abs": 10, "warnOnly": true, "group": "responsiveness" },
-    "shell.longFrames": { "kind": "noisy", "label": "shell long frames (toolbar/sidebar) during tab operations", "unit": "", "abs": 3, "warnOnly": true, "group": "responsiveness" },
-    "shell.blockingMs": { "kind": "noisy", "label": "shell blocking time during tab operations", "unit": "ms", "abs": 50, "warnOnly": true, "group": "responsiveness" },
-    "hang.maxBlockMs": { "kind": "noisy", "label": "hang check: longest main-thread block, any phase", "unit": "ms", "abs": 50, "warnOnly": true, "group": "responsiveness" },
-    "hang.longTasks": { "kind": "noisy", "label": "main-thread long tasks, all phases", "unit": "", "abs": 5, "warnOnly": true, "group": "responsiveness" },
-    "startup.phases.mainLoadedMs": { "kind": "noisy", "label": "main JS loaded (out/main/index.js evaluated)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.electronReadyMs": { "kind": "noisy", "label": "Electron ready (app 'ready' event)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.profileReadyMs": { "kind": "noisy", "label": "profile ready (proxy, safety, cookies, downloads)", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.windowCreatedMs": { "kind": "noisy", "label": "first window created", "unit": "ms", "abs": 60, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.toolbarReadyMs": { "kind": "noisy", "label": "toolbar rendered (first React commit)", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.renderer.toolbarCommitMs": { "kind": "noisy", "label": "toolbar JS start-up inside its renderer (navigation → first commit)", "unit": "ms", "abs": 30, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.newTabLoadMs": { "kind": "noisy", "label": "first tab (New Tab page) loaded", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.windowPaintedMs": { "kind": "noisy", "label": "first window painted (deferred start-up begins)", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.adblockReadyMs": { "kind": "noisy", "label": "deferred: ad filter ready", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
-    "startup.phases.extensionsReadyMs": { "kind": "noisy", "label": "deferred: extensions ready, page requests released", "unit": "ms", "abs": 100, "stat": "min", "warnOnly": true, "group": "phases" },
-    "warm.startup.phases.toolbarReadyMs": { "kind": "noisy", "label": "warm start: toolbar rendered", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
-    "warm.startup.firstPaintMs": { "kind": "noisy", "label": "warm start: first paint (New Tab page)", "unit": "ms", "abs": 80, "stat": "min", "warnOnly": true, "group": "phases" },
-    "sites.renderers": { "kind": "deterministic", "label": "renderers hosting 16 tabs over 4 sites", "unit": "", "abs": 1, "warnOnly": true, "$comment": "pages + iframes of the site tabs" },
-    "sites.memMB": { "kind": "noisy", "label": "memory of those renderers", "unit": "MB", "abs": 30, "warnOnly": true },
-    "adblock.frameStartBytes": { "kind": "deterministic", "label": "ad-filter CSS + scriptlets sent per navigation", "unit": "KB", "abs": 2048, "warnOnly": true, "$comment": "bench fixture: video.localhost, 18 scriptlets sharing helpers + site and generic CSS" },
-    "adblock.frameStartMainMs": { "kind": "noisy", "label": "ad-filter frame-start main time per navigation", "unit": "ms", "abs": 2, "warnOnly": true },
-    "adblock.frameUpdates": { "kind": "noisy", "label": "ad-filter DOM-update IPC per navigation", "unit": "", "abs": 2, "warnOnly": true },
-    "adblock.sameDocFrameStarts": { "kind": "deterministic", "label": "ad-filter injections on same-document navigations", "unit": "", "abs": 0, "warnOnly": true }
+    "bundle.mainJs": {
+      "kind": "deterministic",
+      "label": "main JS at startup (index.js + imports)",
+      "unit": "KB"
+    },
+    "bundle.mainTotal": {
+      "kind": "deterministic",
+      "label": "main process JS, all chunks",
+      "unit": "KB"
+    },
+    "bundle.preload": {
+      "kind": "deterministic",
+      "label": "preload scripts",
+      "unit": "KB"
+    },
+    "bundle.rendererEagerJs": {
+      "kind": "deterministic",
+      "label": "renderer JS loaded at startup",
+      "unit": "KB"
+    },
+    "bundle.rendererJs": {
+      "kind": "deterministic",
+      "label": "renderer JS, all assets",
+      "unit": "KB"
+    },
+    "bundle.rendererCss": {
+      "kind": "deterministic",
+      "label": "renderer CSS",
+      "unit": "KB"
+    },
+    "bundle.appPayload": {
+      "kind": "deterministic",
+      "label": "packaged app payload (app.asar contents)",
+      "unit": "KB",
+      "abs": 51200,
+      "$comment": "build.files + production node_modules closure minus build.files exclusions (scripts/perf/app-payload.ts)"
+    },
+    "bundle.appFiles": {
+      "kind": "deterministic",
+      "label": "files in app.asar",
+      "unit": "",
+      "abs": 10
+    },
+    "startup.firstPaintMs": {
+      "kind": "noisy",
+      "label": "cold start to first paint",
+      "unit": "ms",
+      "abs": 150,
+      "stat": "min",
+      "$comment": "best of the runs: a busy pod stalls single cold starts by 0.5-3 s on identical code"
+    },
+    "startup.windowMs": {
+      "kind": "noisy",
+      "label": "cold start to window",
+      "unit": "ms",
+      "abs": 100,
+      "stat": "min"
+    },
+    "startup.mainImportMs": {
+      "kind": "noisy",
+      "label": "main process JS load (import of out/main/index.js)",
+      "unit": "ms",
+      "abs": 8,
+      "stat": "min"
+    },
+    "startup.ipcCount": {
+      "kind": "deterministic",
+      "label": "IPC messages during startup",
+      "unit": "",
+      "abs": 12,
+      "$comment": "batched broadcasts: 146-155 on identical code"
+    },
+    "mem1.totalMB": {
+      "kind": "noisy",
+      "label": "memory, 1 tab",
+      "unit": "MB",
+      "abs": 15
+    },
+    "memMid.totalMB": {
+      "kind": "noisy",
+      "label": "memory, 10 tabs",
+      "unit": "MB",
+      "abs": 20
+    },
+    "memMax.totalMB": {
+      "kind": "noisy",
+      "label": "memory, 30 tabs",
+      "unit": "MB",
+      "abs": 30
+    },
+    "memMax.gpuMB": {
+      "kind": "noisy",
+      "label": "GPU process memory, 30 tabs",
+      "unit": "MB",
+      "abs": 15,
+      "platforms": { "linux": { "noisyFail": false } },
+      "$comment": "warn-only on linux: SwiftShader's GPU process sits at ~57-61 MB or ~92-103 MB on identical code (bimodal, Oct 2026 CI), so +30-40% swings flipped the check. The Mac job is where GPU memory means something."
+    },
+    "memMax.processes": {
+      "kind": "deterministic",
+      "label": "processes, 30 tabs",
+      "unit": ""
+    },
+    "openTabs.ipcCount": {
+      "kind": "noisy",
+      "label": "IPC messages opening 20 tabs",
+      "unit": "",
+      "abs": 25,
+      "failPct": 20,
+      "$comment": "timing-dependent, so noisy (gets the confirmation pass): tab/state broadcasts are coalesced per frame, 115-151 on identical code (Oct 2026 CI)"
+    },
+    "openTabs.ipcBytes": {
+      "kind": "noisy",
+      "label": "IPC payload opening 20 tabs",
+      "unit": "KB",
+      "abs": 10240,
+      "failPct": 15,
+      "$comment": "timing-dependent like ipcCount: 59-76 KB on identical code (Oct 2026 CI), so noisy (gets the confirmation pass)"
+    },
+    "openTabs.mainCpuMs": {
+      "kind": "noisy",
+      "label": "main CPU opening 20 tabs",
+      "unit": "ms",
+      "abs": 100
+    },
+    "tabSwitch.medianMs": {
+      "kind": "noisy",
+      "label": "tab switch to painted",
+      "unit": "ms",
+      "abs": 20,
+      "$comment": "software-rendered pods: per-run medians range ~23-40 ms on identical code"
+    },
+    "newTab.siteFirstPaintMs": {
+      "kind": "noisy",
+      "label": "new site tab first paint",
+      "unit": "ms",
+      "abs": 40
+    },
+    "newTab.newTabPageMs": {
+      "kind": "noisy",
+      "label": "New Tab page shown",
+      "unit": "ms",
+      "abs": 20
+    },
+    "idle.ipcCount": {
+      "kind": "deterministic",
+      "label": "idle IPC messages (5s, 30 tabs)",
+      "unit": "",
+      "abs": 2
+    },
+    "idle.timerFires": {
+      "kind": "deterministic",
+      "label": "idle main-process timer fires (5s)",
+      "unit": "",
+      "abs": 3
+    },
+    "idle.backgroundTabsCpuMsPerSec": {
+      "kind": "noisy",
+      "label": "background tabs CPU, idle",
+      "unit": "ms/s",
+      "abs": 20
+    },
+    "idle.mainCpuMsPerSec": {
+      "kind": "noisy",
+      "label": "main process CPU, idle",
+      "unit": "ms/s",
+      "abs": 10
+    },
+    "windowCycles.processesGrowth": {
+      "kind": "leak",
+      "label": "processes left after 3 window open/close",
+      "unit": ""
+    },
+    "windowCycles.webContentsGrowth": {
+      "kind": "leak",
+      "label": "webContents left after 3 window open/close",
+      "unit": ""
+    },
+    "windowCycles.memGrowthMB": {
+      "kind": "noisy",
+      "label": "memory growth after 3 window open/close",
+      "unit": "MB",
+      "abs": 40
+    },
+    "tabSwitch.mainCpuMsPerSwitch": {
+      "kind": "noisy",
+      "label": "main-thread CPU per tab switch",
+      "unit": "ms",
+      "abs": 5,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "tabSwitch.loop.maxBlockMs": {
+      "kind": "noisy",
+      "label": "longest main-thread block, switching tabs",
+      "unit": "ms",
+      "abs": 25,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "keySwitch.medianMs": {
+      "kind": "noisy",
+      "label": "keyboard tab switch, key to painted",
+      "unit": "ms",
+      "abs": 20,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "keySwitch.mainCpuMsPerSwitch": {
+      "kind": "noisy",
+      "label": "main-thread CPU leaving a tab you were reading (capture, thumbnail, wake snapshot)",
+      "unit": "ms",
+      "abs": 5,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "openTabs.loop.maxBlockMs": {
+      "kind": "noisy",
+      "label": "longest main-thread block, opening 20 tabs",
+      "unit": "ms",
+      "abs": 30,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "openTabs.loop.longTasks": {
+      "kind": "noisy",
+      "label": "main-thread long tasks (over 50 ms), opening 20 tabs",
+      "unit": "",
+      "abs": 3,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "closeTabs.medianMs": {
+      "kind": "noisy",
+      "label": "close tab to next tab painted",
+      "unit": "ms",
+      "abs": 20,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "closeTabs.mainCpuMsPerClose": {
+      "kind": "noisy",
+      "label": "main-thread CPU per tab close",
+      "unit": "ms",
+      "abs": 5,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "closeTabs.loop.maxBlockMs": {
+      "kind": "noisy",
+      "label": "longest main-thread block, closing tabs",
+      "unit": "ms",
+      "abs": 25,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "pointer.mainCpuMs": {
+      "kind": "noisy",
+      "label": "main-thread CPU for 48 mouse moves and wheel scrolls over a page",
+      "unit": "ms",
+      "abs": 10,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "shell.longFrames": {
+      "kind": "noisy",
+      "label": "shell long frames (toolbar/sidebar) during tab operations",
+      "unit": "",
+      "abs": 3,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "shell.blockingMs": {
+      "kind": "noisy",
+      "label": "shell blocking time during tab operations",
+      "unit": "ms",
+      "abs": 50,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "hang.maxBlockMs": {
+      "kind": "noisy",
+      "label": "hang check: longest main-thread block, any phase",
+      "unit": "ms",
+      "abs": 50,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "hang.longTasks": {
+      "kind": "noisy",
+      "label": "main-thread long tasks, all phases",
+      "unit": "",
+      "abs": 5,
+      "warnOnly": true,
+      "group": "responsiveness"
+    },
+    "startup.phases.mainLoadedMs": {
+      "kind": "noisy",
+      "label": "main JS loaded (out/main/index.js evaluated)",
+      "unit": "ms",
+      "abs": 60,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.electronReadyMs": {
+      "kind": "noisy",
+      "label": "Electron ready (app 'ready' event)",
+      "unit": "ms",
+      "abs": 60,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.profileReadyMs": {
+      "kind": "noisy",
+      "label": "profile ready (proxy, safety, cookies, downloads)",
+      "unit": "ms",
+      "abs": 60,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.windowCreatedMs": {
+      "kind": "noisy",
+      "label": "first window created",
+      "unit": "ms",
+      "abs": 60,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.toolbarReadyMs": {
+      "kind": "noisy",
+      "label": "toolbar rendered (first React commit)",
+      "unit": "ms",
+      "abs": 80,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.renderer.toolbarCommitMs": {
+      "kind": "noisy",
+      "label": "toolbar JS start-up inside its renderer (navigation → first commit)",
+      "unit": "ms",
+      "abs": 30,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.newTabLoadMs": {
+      "kind": "noisy",
+      "label": "first tab (New Tab page) loaded",
+      "unit": "ms",
+      "abs": 80,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.windowPaintedMs": {
+      "kind": "noisy",
+      "label": "first window painted (deferred start-up begins)",
+      "unit": "ms",
+      "abs": 100,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.adblockReadyMs": {
+      "kind": "noisy",
+      "label": "deferred: ad filter ready",
+      "unit": "ms",
+      "abs": 100,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "startup.phases.extensionsReadyMs": {
+      "kind": "noisy",
+      "label": "deferred: extensions ready, page requests released",
+      "unit": "ms",
+      "abs": 100,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "warm.startup.phases.toolbarReadyMs": {
+      "kind": "noisy",
+      "label": "warm start: toolbar rendered",
+      "unit": "ms",
+      "abs": 80,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "warm.startup.firstPaintMs": {
+      "kind": "noisy",
+      "label": "warm start: first paint (New Tab page)",
+      "unit": "ms",
+      "abs": 80,
+      "stat": "min",
+      "warnOnly": true,
+      "group": "phases"
+    },
+    "sites.renderers": {
+      "kind": "deterministic",
+      "label": "renderers hosting 16 tabs over 4 sites",
+      "unit": "",
+      "abs": 1,
+      "warnOnly": true,
+      "$comment": "pages + iframes of the site tabs"
+    },
+    "sites.memMB": {
+      "kind": "noisy",
+      "label": "memory of those renderers",
+      "unit": "MB",
+      "abs": 30,
+      "warnOnly": true
+    },
+    "adblock.frameStartBytes": {
+      "kind": "deterministic",
+      "label": "ad-filter CSS + scriptlets sent per navigation",
+      "unit": "KB",
+      "abs": 2048,
+      "warnOnly": true,
+      "$comment": "bench fixture: video.localhost, 18 scriptlets sharing helpers + site and generic CSS"
+    },
+    "adblock.frameStartMainMs": {
+      "kind": "noisy",
+      "label": "ad-filter frame-start main time per navigation",
+      "unit": "ms",
+      "abs": 2,
+      "warnOnly": true
+    },
+    "adblock.frameUpdates": {
+      "kind": "noisy",
+      "label": "ad-filter DOM-update IPC per navigation",
+      "unit": "",
+      "abs": 2,
+      "warnOnly": true
+    },
+    "adblock.sameDocFrameStarts": {
+      "kind": "deterministic",
+      "label": "ad-filter injections on same-document navigations",
+      "unit": "",
+      "abs": 0,
+      "warnOnly": true
+    }
   }
 }

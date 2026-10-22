@@ -14,8 +14,14 @@
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(42, 50, 59, 0.985), rgba(17, 21, 26, 0.99));
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    145deg,
+    rgba(42, 50, 59, 0.985),
+    rgba(17, 21, 26, 0.99)
+  );
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.07);
   color: #f2f4f6;
   font-size: 13px;
   text-align: left;
@@ -23,8 +29,12 @@
   animation: read-aloud-in 120ms ease-out;
 }
 @keyframes read-aloud-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .read-aloud-header {
   display: flex;
@@ -47,8 +57,13 @@
   cursor: pointer;
   font: inherit;
 }
-.read-aloud-close { font-size: 18px; line-height: 1; }
-.read-aloud-text-button { text-decoration: underline; }
+.read-aloud-close {
+  font-size: 18px;
+  line-height: 1;
+}
+.read-aloud-text-button {
+  text-decoration: underline;
+}
 .read-aloud-message {
   display: flex;
   align-items: center;
@@ -57,7 +72,9 @@
   color: rgba(245, 247, 250, 0.75);
   font-size: 12px;
 }
-.read-aloud-message.is-error { color: #ffb4a8; }
+.read-aloud-message.is-error {
+  color: #ffb4a8;
+}
 .read-aloud-download {
   display: flex;
   flex-direction: column;
@@ -88,9 +105,17 @@
   color: #f2f4f6;
   cursor: pointer;
 }
-.read-aloud-transport button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
-.read-aloud-transport button:disabled { opacity: 0.4; cursor: default; }
-.read-aloud-transport .read-aloud-play { background: rgba(126, 226, 168, 0.16); color: #a4edbd; }
+.read-aloud-transport button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+}
+.read-aloud-transport button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.read-aloud-transport .read-aloud-play {
+  background: rgba(126, 226, 168, 0.16);
+  color: #a4edbd;
+}
 .read-aloud-transport svg {
   width: 16px;
   height: 16px;

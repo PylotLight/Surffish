@@ -7,38 +7,69 @@
  *   <id>/<version>/           the adapted, unpacked extension Electron loads
  *   <id>/worker-stamp         fingerprint of the staged worker scripts (fresh-worker reloads)
  */
-import { app, BrowserWindow, dialog, screen, type BaseWindow, type WebContents } from 'electron'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import type { BramblePopupAnchor, WebStoreExtensionsState, WebStoreExtensionSummary } from '../shared/types'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  screen,
+  type BaseWindow,
+  type WebContents,
+} from "electron";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type {
+  BramblePopupAnchor,
+  WebStoreExtensionsState,
+  WebStoreExtensionSummary,
+} from "../shared/types";
 import {
   chromeWebStoreCrxUrl,
   compareExtensionVersions,
   isAllowedChromeWebStoreDownloadUrl,
   isChromeExtensionId,
-  parseChromeWebStoreInput
-} from '../shared/chrome-web-store'
-import { analyzeExtensionCompatibility, compatibilityLabel, type ExtensionCompatibility, type ExtensionDnrSummary } from '../shared/extension-compat'
-import { isAllowedExtensionTabUrl, type ExtensionAccess } from '../shared/extension-tabs'
-import type { ExtensionTabsCaller } from './extension-tabs-host'
-import { anchoredPopupBounds } from '../shared/window-geometry'
-import { getBrowserSession } from './browser-session'
+  parseChromeWebStoreInput,
+} from "../shared/chrome-web-store";
+import {
+  analyzeExtensionCompatibility,
+  compatibilityLabel,
+  type ExtensionCompatibility,
+  type ExtensionDnrSummary,
+} from "../shared/extension-compat";
+import {
+  isAllowedExtensionTabUrl,
+  type ExtensionAccess,
+} from "../shared/extension-tabs";
+import type { ExtensionTabsCaller } from "./extension-tabs-host";
+import { anchoredPopupBounds } from "../shared/window-geometry";
+import { getBrowserSession } from "./browser-session";
 import {
   closeExtensionPageTabs,
   createExtensionTab,
   getBrowserTabUrlByWebContentsId,
   isExtensionPageTab,
-  openExtensionPageTab
-} from './browser'
-import { sendToMainWindowRenderers } from './browser-shell'
-import { getMainWindow } from './window'
-import { parseCrx } from './crx'
-import { extractExtensionZip } from './bramble-release'
-import { createRestrictedFetch } from './restricted-fetch'
-import { activateStagedDirectory, assertExtensionIdentity, loadExtensionWithFreshWorker, writeJsonAtomic, type StagedActivation } from './extension-staging'
-import { ensureExtensionWorkerPreload } from './extension-worker-preload'
-import { setExtensionAdblockExemptHosts } from './extension-adblock-exemptions'
+  openExtensionPageTab,
+} from "./browser";
+import { sendToMainWindowRenderers } from "./browser-shell";
+import { getMainWindow } from "./window";
+import { parseCrx } from "./crx";
+import { extractExtensionZip } from "./bramble-release";
+import { createRestrictedFetch } from "./restricted-fetch";
+import {
+  activateStagedDirectory,
+  assertExtensionIdentity,
+  loadExtensionWithFreshWorker,
+  writeJsonAtomic,
+  type StagedActivation,
+} from "./extension-staging";
+import { ensureExtensionWorkerPreload } from "./extension-worker-preload";
+import { setExtensionAdblockExemptHosts } from "./extension-adblock-exemptions";
 import {
   collectDnrRulesets,
   collectExtensionSources,
@@ -48,98 +79,121 @@ import {
   readExtensionIconDataUrl,
   resolveManifestMessage,
   stageWebStoreExtension,
-  writeExtensionShimFiles
-} from './web-store-extension-adapter'
+  writeExtensionShimFiles,
+} from "./web-store-extension-adapter";
 
-const EXTENSIONS_DIRECTORY = 'extensions'
-const RECORDS_FILE = 'installed.json'
-const MAX_CRX_BYTES = 64 * 1024 * 1024
-const POPUP_MIN = { width: 25, height: 25 }
-const POPUP_MAX = { width: 800, height: 600 }
-const mainDirectory = dirname(fileURLToPath(import.meta.url))
+const EXTENSIONS_DIRECTORY = "extensions";
+const RECORDS_FILE = "installed.json";
+const MAX_CRX_BYTES = 64 * 1024 * 1024;
+const POPUP_MIN = { width: 25, height: 25 };
+const POPUP_MAX = { width: 800, height: 600 };
+const mainDirectory = dirname(fileURLToPath(import.meta.url));
 
-type JsonRecord = Record<string, unknown>
+type JsonRecord = Record<string, unknown>;
 
 interface InstalledRecord {
-  id: string
-  version: string
-  name: string
-  enabled: boolean
-  installedAt: number
-  updatedAt: number
-  compatibility: ExtensionCompatibility['level']
-  gaps: string[]
-  shimmed: string[]
+  id: string;
+  version: string;
+  name: string;
+  enabled: boolean;
+  installedAt: number;
+  updatedAt: number;
+  compatibility: ExtensionCompatibility["level"];
+  gaps: string[];
+  shimmed: string[];
 }
 
 interface LoadedEntry {
-  extension: Electron.Extension
-  directory: string
-  manifest: JsonRecord
+  extension: Electron.Extension;
+  directory: string;
+  manifest: JsonRecord;
 }
 
-const records = new Map<string, InstalledRecord>()
-const loaded = new Map<string, LoadedEntry>()
-const loadErrors = new Map<string, string>()
-const state = { busy: false, busyId: null as string | null, notice: null as string | null, error: null as string | null }
-let popup: { window: BrowserWindow; id: string } | null = null
-let storePreloadRegistered = false
+const records = new Map<string, InstalledRecord>();
+const loaded = new Map<string, LoadedEntry>();
+const loadErrors = new Map<string, string>();
+const state = {
+  busy: false,
+  busyId: null as string | null,
+  notice: null as string | null,
+  error: null as string | null,
+};
+let popup: { window: BrowserWindow; id: string } | null = null;
+let storePreloadRegistered = false;
 
 function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
 }
 
 function rootDirectory(): string {
-  return join(app.getPath('userData'), EXTENSIONS_DIRECTORY)
+  return join(app.getPath("userData"), EXTENSIONS_DIRECTORY);
 }
 
 function extensionDirectory(id: string, version: string): string {
-  return join(rootDirectory(), id, version)
+  return join(rootDirectory(), id, version);
 }
 
 function stampPath(id: string): string {
-  return join(rootDirectory(), id, 'worker-stamp')
+  return join(rootDirectory(), id, "worker-stamp");
 }
 
 function resolvePreload(name: string): string {
-  return join(mainDirectory, '../preload', name)
+  return join(mainDirectory, "../preload", name);
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
 }
 
 // ---------------------------------------------------------------------------
 // Persistence
 
 function parseRecord(value: unknown): InstalledRecord | null {
-  if (!isRecord(value) || !isChromeExtensionId(value.id) || typeof value.version !== 'string' || !/^\d+(\.\d+){0,3}$/.test(value.version)) return null
-  const level = value.compatibility === 'supported' || value.compatibility === 'partial' ? value.compatibility : 'partial'
+  if (
+    !isRecord(value) ||
+    !isChromeExtensionId(value.id) ||
+    typeof value.version !== "string" ||
+    !/^\d+(\.\d+){0,3}$/.test(value.version)
+  )
+    return null;
+  const level =
+    value.compatibility === "supported" || value.compatibility === "partial"
+      ? value.compatibility
+      : "partial";
   return {
     id: value.id,
     version: value.version,
-    name: typeof value.name === 'string' ? value.name : value.id,
+    name: typeof value.name === "string" ? value.name : value.id,
     enabled: value.enabled !== false,
-    installedAt: typeof value.installedAt === 'number' ? value.installedAt : Date.now(),
-    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : Date.now(),
+    installedAt:
+      typeof value.installedAt === "number" ? value.installedAt : Date.now(),
+    updatedAt:
+      typeof value.updatedAt === "number" ? value.updatedAt : Date.now(),
     compatibility: level,
     gaps: stringList(value.gaps),
-    shimmed: stringList(value.shimmed)
-  }
+    shimmed: stringList(value.shimmed),
+  };
 }
 
 function readRecords(): void {
-  records.clear()
+  records.clear();
   try {
-    const parsed = JSON.parse(readFileSync(join(rootDirectory(), RECORDS_FILE), 'utf8')) as unknown
-    const list = isRecord(parsed) && Array.isArray(parsed.extensions) ? parsed.extensions : []
+    const parsed = JSON.parse(
+      readFileSync(join(rootDirectory(), RECORDS_FILE), "utf8"),
+    ) as unknown;
+    const list =
+      isRecord(parsed) && Array.isArray(parsed.extensions)
+        ? parsed.extensions
+        : [];
     for (const entry of list) {
-      const record = parseRecord(entry)
-      if (record) records.set(record.id, record)
+      const record = parseRecord(entry);
+      if (record) records.set(record.id, record);
     }
   } catch {
     // No installed extensions yet (or an unreadable list, which starts empty).
@@ -147,79 +201,108 @@ function readRecords(): void {
 }
 
 function saveRecords(): void {
-  writeJsonAtomic(join(rootDirectory(), RECORDS_FILE), { version: 1, extensions: [...records.values()] })
+  writeJsonAtomic(join(rootDirectory(), RECORDS_FILE), {
+    version: 1,
+    extensions: [...records.values()],
+  });
 }
 
 // ---------------------------------------------------------------------------
 // State
 
 function summary(record: InstalledRecord): WebStoreExtensionSummary {
-  const entry = loaded.get(record.id)
-  const directory = entry?.directory ?? extensionDirectory(record.id, record.version)
-  let manifest: JsonRecord = entry?.manifest ?? {}
+  const entry = loaded.get(record.id);
+  const directory =
+    entry?.directory ?? extensionDirectory(record.id, record.version);
+  let manifest: JsonRecord = entry?.manifest ?? {};
   if (!entry) {
     try {
-      const parsed = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as unknown
-      if (isRecord(parsed)) manifest = parsed
+      const parsed = JSON.parse(
+        readFileSync(join(directory, "manifest.json"), "utf8"),
+      ) as unknown;
+      if (isRecord(parsed)) manifest = parsed;
     } catch {
-      manifest = {}
+      manifest = {};
     }
   }
   return {
     id: record.id,
-    name: resolveManifestMessage(directory, manifest, manifest.name) || record.name,
-    description: resolveManifestMessage(directory, manifest, manifest.description),
+    name:
+      resolveManifestMessage(directory, manifest, manifest.name) || record.name,
+    description: resolveManifestMessage(
+      directory,
+      manifest,
+      manifest.description,
+    ),
     version: record.version,
     enabled: record.enabled,
     loaded: loaded.has(record.id),
-    iconDataUrl: existsSync(directory) ? readExtensionIconDataUrl(directory, manifest) : null,
+    iconDataUrl: existsSync(directory)
+      ? readExtensionIconDataUrl(directory, manifest)
+      : null,
     hasPopup: manifestPopupPath(manifest) !== null,
     hasOptions: manifestOptionsPath(manifest) !== null,
     compatibility: record.compatibility,
     gaps: [...record.gaps],
     shimmed: [...record.shimmed],
-    permissions: stringList(manifest.permissions).filter((entry) => !entry.includes('://') && entry !== '<all_urls>'),
-    hostPermissions: [...stringList(manifest.host_permissions), ...stringList(manifest.permissions).filter((entry) => entry.includes('://') || entry === '<all_urls>')],
+    permissions: stringList(manifest.permissions).filter(
+      (entry) => !entry.includes("://") && entry !== "<all_urls>",
+    ),
+    hostPermissions: [
+      ...stringList(manifest.host_permissions),
+      ...stringList(manifest.permissions).filter(
+        (entry) => entry.includes("://") || entry === "<all_urls>",
+      ),
+    ],
     installedAt: record.installedAt,
     updatedAt: record.updatedAt,
-    error: loadErrors.get(record.id) ?? null
-  }
+    error: loadErrors.get(record.id) ?? null,
+  };
 }
 
 export function getWebStoreExtensionsState(): WebStoreExtensionsState {
   return {
-    extensions: [...records.values()].sort((a, b) => a.installedAt - b.installedAt).map(summary),
+    extensions: [...records.values()]
+      .sort((a, b) => a.installedAt - b.installedAt)
+      .map(summary),
     busy: state.busy,
     busyId: state.busyId,
     popupOpenId: popup && !popup.window.isDestroyed() ? popup.id : null,
     notice: state.notice,
-    error: state.error
-  }
+    error: state.error,
+  };
 }
 
 function publish(): void {
   try {
-    sendToMainWindowRenderers('browser:extensions:changed', getWebStoreExtensionsState())
+    sendToMainWindowRenderers(
+      "browser:extensions:changed",
+      getWebStoreExtensionsState(),
+    );
   } catch {
     // A renderer closing mid-install must not break the main process.
   }
 }
 
 function setStatus(patch: Partial<typeof state>): void {
-  Object.assign(state, patch)
-  publish()
+  Object.assign(state, patch);
+  publish();
 }
 
 /** Ad-block exemptions: hosts a loaded extension's content scripts or code rely on. */
 function refreshAdblockExemptions(): void {
-  const hosts = new Set<string>()
+  const hosts = new Set<string>();
   for (const entry of loaded.values()) {
-    const scripts = Array.isArray(entry.manifest.content_scripts) ? entry.manifest.content_scripts.filter(isRecord) : []
-    const matches = scripts.flatMap((script) => stringList(script.matches))
-    const usesExtPay = matches.some((pattern) => /extensionpay\.com/i.test(pattern)) || existsSync(join(entry.directory, 'ExtPay.js'))
-    if (usesExtPay) hosts.add('extensionpay.com')
+    const scripts = Array.isArray(entry.manifest.content_scripts)
+      ? entry.manifest.content_scripts.filter(isRecord)
+      : [];
+    const matches = scripts.flatMap((script) => stringList(script.matches));
+    const usesExtPay =
+      matches.some((pattern) => /extensionpay\.com/i.test(pattern)) ||
+      existsSync(join(entry.directory, "ExtPay.js"));
+    if (usesExtPay) hosts.add("extensionpay.com");
   }
-  setExtensionAdblockExemptHosts(hosts)
+  setExtensionAdblockExemptHosts(hosts);
 }
 
 /**
@@ -227,39 +310,51 @@ function refreshAdblockExemptions(): void {
  * (enforced by Surffish) and the hidden bridge page (webNavigation events, DNR state). The modules
  * load on demand, only once an extension needs them (keeps them out of the startup bundle).
  */
-type RuntimeSupport = typeof import('./extension-runtime-support')
-let runtimeSupport: RuntimeSupport | null = null
-const runtimeSupportIds = new Set<string>()
+type RuntimeSupport = typeof import("./extension-runtime-support");
+let runtimeSupport: RuntimeSupport | null = null;
+const runtimeSupportIds = new Set<string>();
 
 function needsRuntimeSupport(manifest: JsonRecord): boolean {
-  const permissions = stringList(manifest.permissions)
-  return permissions.includes('webNavigation') || permissions.includes('declarativeNetRequest') || permissions.includes('declarativeNetRequestWithHostAccess') ||
-    (isRecord(manifest.declarative_net_request) && Array.isArray(manifest.declarative_net_request.rule_resources))
+  const permissions = stringList(manifest.permissions);
+  return (
+    permissions.includes("webNavigation") ||
+    permissions.includes("declarativeNetRequest") ||
+    permissions.includes("declarativeNetRequestWithHostAccess") ||
+    (isRecord(manifest.declarative_net_request) &&
+      Array.isArray(manifest.declarative_net_request.rule_resources))
+  );
 }
 
-async function startRuntimeSupport(id: string, entry: LoadedEntry): Promise<void> {
-  if (!needsRuntimeSupport(entry.manifest)) return
+async function startRuntimeSupport(
+  id: string,
+  entry: LoadedEntry,
+): Promise<void> {
+  if (!needsRuntimeSupport(entry.manifest)) return;
   try {
-    runtimeSupport ??= await import('./extension-runtime-support')
-    if (loaded.get(id) !== entry) return
-    runtimeSupportIds.add(id)
+    runtimeSupport ??= await import("./extension-runtime-support");
+    if (loaded.get(id) !== entry) return;
+    runtimeSupportIds.add(id);
     runtimeSupport.startExtensionRuntimeSupport({
       id,
       directory: entry.directory,
       manifest: entry.manifest,
       extensionUrl: entry.extension.url,
       session: getBrowserSession(),
-      statePath: join(rootDirectory(), id, 'dnr-state.json'),
-      isTab: (contents) => getBrowserTabUrlByWebContentsId(contents.id) !== null
-    })
+      statePath: join(rootDirectory(), id, "dnr-state.json"),
+      isTab: (contents) =>
+        getBrowserTabUrlByWebContentsId(contents.id) !== null,
+    });
   } catch (error) {
-    console.warn(`[extensions] could not start runtime support for ${id}:`, errorMessage(error))
+    console.warn(
+      `[extensions] could not start runtime support for ${id}:`,
+      errorMessage(error),
+    );
   }
 }
 
 function stopRuntimeSupport(id: string): void {
-  if (!runtimeSupportIds.delete(id)) return
-  runtimeSupport?.stopExtensionRuntimeSupport(id)
+  if (!runtimeSupportIds.delete(id)) return;
+  runtimeSupport?.stopExtensionRuntimeSupport(id);
 }
 
 // ---------------------------------------------------------------------------
@@ -271,226 +366,320 @@ function stopRuntimeSupport(id: string): void {
  */
 function prepareWorkerChannel(directory: string): void {
   try {
-    const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8').replace(/^\uFEFF/, '')) as unknown
-    if (isRecord(manifest) && needsRuntimeSupport(manifest)) ensureExtensionWorkerPreload(getBrowserSession())
+    const manifest = JSON.parse(
+      readFileSync(join(directory, "manifest.json"), "utf8").replace(
+        /^\uFEFF/,
+        "",
+      ),
+    ) as unknown;
+    if (isRecord(manifest) && needsRuntimeSupport(manifest))
+      ensureExtensionWorkerPreload(getBrowserSession());
   } catch {
     // Unreadable manifest: loading reports the error.
   }
 }
 
 async function loadInstalled(record: InstalledRecord): Promise<LoadedEntry> {
-  const directory = extensionDirectory(record.id, record.version)
-  if (!existsSync(join(directory, 'manifest.json'))) throw new Error(`The files for ${record.name} ${record.version} are missing. Reinstall it from the Chrome Web Store.`)
+  const directory = extensionDirectory(record.id, record.version);
+  if (!existsSync(join(directory, "manifest.json")))
+    throw new Error(
+      `The files for ${record.name} ${record.version} are missing. Reinstall it from the Chrome Web Store.`,
+    );
   // Refresh Surffish's shim so fixes reach extensions staged by an older Surffish.
-  writeExtensionShimFiles(directory)
-  prepareWorkerChannel(directory)
-  const browserSession = getBrowserSession()
-  const extension = await loadExtensionWithFreshWorker(browserSession, directory, stampPath(record.id), extensionWorkerFiles(directory))
+  writeExtensionShimFiles(directory);
+  prepareWorkerChannel(directory);
+  const browserSession = getBrowserSession();
+  const extension = await loadExtensionWithFreshWorker(
+    browserSession,
+    directory,
+    stampPath(record.id),
+    extensionWorkerFiles(directory),
+  );
   try {
-    assertExtensionIdentity(record.id, extension.id, `${record.name} install`)
+    assertExtensionIdentity(record.id, extension.id, `${record.name} install`);
   } catch (error) {
-    browserSession.extensions.removeExtension(extension.id)
-    throw error
+    browserSession.extensions.removeExtension(extension.id);
+    throw error;
   }
-  const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8')) as JsonRecord
-  const entry = { extension, directory, manifest }
-  loaded.set(record.id, entry)
-  loadErrors.delete(record.id)
-  refreshAdblockExemptions()
+  const manifest = JSON.parse(
+    readFileSync(join(directory, "manifest.json"), "utf8"),
+  ) as JsonRecord;
+  const entry = { extension, directory, manifest };
+  loaded.set(record.id, entry);
+  loadErrors.delete(record.id);
+  refreshAdblockExemptions();
   // Before page requests are released (the caller awaits loading): DNR rules apply to the first pages.
-  await startRuntimeSupport(record.id, entry)
-  return entry
+  await startRuntimeSupport(record.id, entry);
+  return entry;
 }
 
 function unloadExtension(id: string): void {
-  const entry = loaded.get(id)
-  if (popup?.id === id) disposePopup()
-  stopRuntimeSupport(id)
-  if (!entry) return
-  closeExtensionPageTabs(entry.extension.url)
+  const entry = loaded.get(id);
+  if (popup?.id === id) disposePopup();
+  stopRuntimeSupport(id);
+  if (!entry) return;
+  closeExtensionPageTabs(entry.extension.url);
   try {
-    getBrowserSession().extensions.removeExtension(entry.extension.id)
+    getBrowserSession().extensions.removeExtension(entry.extension.id);
   } catch {
     // Already removed.
   }
-  loaded.delete(id)
-  refreshAdblockExemptions()
+  loaded.delete(id);
+  refreshAdblockExemptions();
 }
 
 function registerStorePagePreload(): void {
-  if (storePreloadRegistered) return
-  const path = resolvePreload('web-store-page.cjs')
-  if (!existsSync(path)) return
+  if (storePreloadRegistered) return;
+  const path = resolvePreload("web-store-page.cjs");
+  if (!existsSync(path)) return;
   try {
-    getBrowserSession().registerPreloadScript({ type: 'frame', filePath: path })
-    storePreloadRegistered = true
+    getBrowserSession().registerPreloadScript({
+      type: "frame",
+      filePath: path,
+    });
+    storePreloadRegistered = true;
   } catch (error) {
-    console.warn('[extensions] could not register the Chrome Web Store page hook:', errorMessage(error))
+    console.warn(
+      "[extensions] could not register the Chrome Web Store page hook:",
+      errorMessage(error),
+    );
   }
 }
 
 /** Load every enabled installed extension. Call once after app ready, before tabs load pages. */
 export async function initializeWebStoreExtensions(): Promise<void> {
-  registerStorePagePreload()
-  readRecords()
+  registerStorePagePreload();
+  readRecords();
   for (const record of records.values()) {
-    if (!record.enabled) continue
+    if (!record.enabled) continue;
     try {
-      await loadInstalled(record)
+      await loadInstalled(record);
     } catch (error) {
-      loadErrors.set(record.id, errorMessage(error))
-      console.warn(`[extensions] could not load ${record.name}:`, errorMessage(error))
+      loadErrors.set(record.id, errorMessage(error));
+      console.warn(
+        `[extensions] could not load ${record.name}:`,
+        errorMessage(error),
+      );
     }
   }
-  publish()
+  publish();
 }
 
 // ---------------------------------------------------------------------------
 // Download, gate, stage, activate
 
 const webStoreFetch = createRestrictedFetch({
-  label: 'Chrome Web Store',
+  label: "Chrome Web Store",
   isAllowedUrl: (url) => isAllowedChromeWebStoreDownloadUrl(url),
   maxResponseBytes: MAX_CRX_BYTES,
   getSession: getBrowserSession,
-  maxRedirects: 5
-})
+  maxRedirects: 5,
+});
 
 interface PreparedPackage {
-  id: string
-  temporaryRoot: string
-  sourceDirectory: string
-  manifest: JsonRecord
-  name: string
-  version: string
-  compatibility: ExtensionCompatibility
-  publicKey: string
+  id: string;
+  temporaryRoot: string;
+  sourceDirectory: string;
+  manifest: JsonRecord;
+  name: string;
+  version: string;
+  compatibility: ExtensionCompatibility;
+  publicKey: string;
 }
 
 /** Static DNR rules Surffish can't enforce, for the install dialog (the matcher loads only when needed). */
-async function dnrRulesetSummary(directory: string, manifest: JsonRecord): Promise<ExtensionDnrSummary | undefined> {
-  const rulesets = collectDnrRulesets(directory, manifest)
-  if (rulesets.length === 0) return undefined
-  const { summarizeDnrRulesets } = await import('../shared/dnr')
-  return summarizeDnrRulesets(rulesets)
+async function dnrRulesetSummary(
+  directory: string,
+  manifest: JsonRecord,
+): Promise<ExtensionDnrSummary | undefined> {
+  const rulesets = collectDnrRulesets(directory, manifest);
+  if (rulesets.length === 0) return undefined;
+  const { summarizeDnrRulesets } = await import("../shared/dnr");
+  return summarizeDnrRulesets(rulesets);
 }
 
 async function downloadPackage(id: string): Promise<PreparedPackage> {
-  const response = await webStoreFetch(chromeWebStoreCrxUrl(id, process.versions.chrome))
-  if (response.status === 204 || response.status === 404) throw new Error('That extension was not found on the Chrome Web Store, or it is not offered for this Chrome version.')
-  if (!response.ok) throw new Error(`The Chrome Web Store download failed (HTTP ${response.status}).`)
-  const bytes = Buffer.from(await response.arrayBuffer())
-  if (bytes.length === 0) throw new Error('That extension was not found on the Chrome Web Store.')
-  const crx = parseCrx(bytes)
-  if (crx.extensionId !== id) throw new Error(`The downloaded package belongs to a different extension (${crx.extensionId}).`)
-  if (!crx.signatureVerified) throw new Error('The downloaded package failed its publisher signature check.')
+  const response = await webStoreFetch(
+    chromeWebStoreCrxUrl(id, process.versions.chrome),
+  );
+  if (response.status === 204 || response.status === 404)
+    throw new Error(
+      "That extension was not found on the Chrome Web Store, or it is not offered for this Chrome version.",
+    );
+  if (!response.ok)
+    throw new Error(
+      `The Chrome Web Store download failed (HTTP ${response.status}).`,
+    );
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length === 0)
+    throw new Error("That extension was not found on the Chrome Web Store.");
+  const crx = parseCrx(bytes);
+  if (crx.extensionId !== id)
+    throw new Error(
+      `The downloaded package belongs to a different extension (${crx.extensionId}).`,
+    );
+  if (!crx.signatureVerified)
+    throw new Error(
+      "The downloaded package failed its publisher signature check.",
+    );
 
-  mkdirSync(rootDirectory(), { recursive: true })
-  const temporaryRoot = mkdtempSync(join(rootDirectory(), 'stage-'))
+  mkdirSync(rootDirectory(), { recursive: true });
+  const temporaryRoot = mkdtempSync(join(rootDirectory(), "stage-"));
   try {
-    const sourceDirectory = join(temporaryRoot, 'source')
+    const sourceDirectory = join(temporaryRoot, "source");
     extractExtensionZip(crx.archive, sourceDirectory, {
-      label: 'extension package',
+      label: "extension package",
       maxArchiveBytes: MAX_CRX_BYTES,
-      skip: (path) => path === '_metadata' || path.startsWith('_metadata/')
-    })
-    const manifest = JSON.parse(readFileSync(join(sourceDirectory, 'manifest.json'), 'utf8').replace(/^\uFEFF/, '')) as unknown
-    if (!isRecord(manifest)) throw new Error('The extension manifest is not a JSON object.')
-    const version = typeof manifest.version === 'string' ? manifest.version : ''
+      skip: (path) => path === "_metadata" || path.startsWith("_metadata/"),
+    });
+    const manifest = JSON.parse(
+      readFileSync(join(sourceDirectory, "manifest.json"), "utf8").replace(
+        /^\uFEFF/,
+        "",
+      ),
+    ) as unknown;
+    if (!isRecord(manifest))
+      throw new Error("The extension manifest is not a JSON object.");
+    const version =
+      typeof manifest.version === "string" ? manifest.version : "";
     return {
       id,
       temporaryRoot,
       sourceDirectory,
       manifest,
-      name: resolveManifestMessage(sourceDirectory, manifest, manifest.name) || id,
+      name:
+        resolveManifestMessage(sourceDirectory, manifest, manifest.name) || id,
       version,
-      compatibility: analyzeExtensionCompatibility(manifest, collectExtensionSources(sourceDirectory), await dnrRulesetSummary(sourceDirectory, manifest)),
-      publicKey: crx.publicKey.toString('base64')
-    }
+      compatibility: analyzeExtensionCompatibility(
+        manifest,
+        collectExtensionSources(sourceDirectory),
+        await dnrRulesetSummary(sourceDirectory, manifest),
+      ),
+      publicKey: crx.publicKey.toString("base64"),
+    };
   } catch (error) {
-    rmSync(temporaryRoot, { recursive: true, force: true })
-    throw error
+    rmSync(temporaryRoot, { recursive: true, force: true });
+    throw error;
   }
 }
 
 function mainWindow(): BaseWindow | undefined {
-  const win = getMainWindow()
-  return win && !win.isDestroyed() ? win : undefined
+  const win = getMainWindow();
+  return win && !win.isDestroyed() ? win : undefined;
 }
 
-async function showDialog(options: Electron.MessageBoxOptions): Promise<number> {
-  if (process.env.SURFFISH_EXTENSIONS_AUTO_CONFIRM === '1' && !app.isPackaged) return typeof options.defaultId === 'number' ? options.defaultId : 0
-  const owner = mainWindow()
-  const result = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
-  return result.response
+async function showDialog(
+  options: Electron.MessageBoxOptions,
+): Promise<number> {
+  if (process.env.SURFFISH_EXTENSIONS_AUTO_CONFIRM === "1" && !app.isPackaged)
+    return typeof options.defaultId === "number" ? options.defaultId : 0;
+  const owner = mainWindow();
+  const result = owner
+    ? await dialog.showMessageBox(owner, options)
+    : await dialog.showMessageBox(options);
+  return result.response;
 }
 
-async function confirmInstall(prepared: PreparedPackage, updatingFrom: string | null): Promise<boolean> {
-  const { compatibility, manifest } = prepared
-  const label = compatibilityLabel(compatibility.level)
-  const permissions = stringList(manifest.permissions).filter((entry) => !entry.includes('://') && entry !== '<all_urls>')
-  const hosts = [...stringList(manifest.host_permissions), ...stringList(manifest.permissions).filter((entry) => entry.includes('://') || entry === '<all_urls>')]
-  if (compatibility.level === 'unsupported') {
+async function confirmInstall(
+  prepared: PreparedPackage,
+  updatingFrom: string | null,
+): Promise<boolean> {
+  const { compatibility, manifest } = prepared;
+  const label = compatibilityLabel(compatibility.level);
+  const permissions = stringList(manifest.permissions).filter(
+    (entry) => !entry.includes("://") && entry !== "<all_urls>",
+  );
+  const hosts = [
+    ...stringList(manifest.host_permissions),
+    ...stringList(manifest.permissions).filter(
+      (entry) => entry.includes("://") || entry === "<all_urls>",
+    ),
+  ];
+  if (compatibility.level === "unsupported") {
     await showDialog({
-      type: 'error',
+      type: "error",
       title: `${prepared.name} can’t run in Surffish`,
       message: `${prepared.name} ${prepared.version} is not compatible with Surffish.`,
-      detail: compatibility.blockers.map((blocker) => `• ${blocker}`).join('\n'),
-      buttons: ['OK'],
+      detail: compatibility.blockers
+        .map((blocker) => `• ${blocker}`)
+        .join("\n"),
+      buttons: ["OK"],
       defaultId: 0,
-      noLink: true
-    })
-    return false
+      noLink: true,
+    });
+    return false;
   }
   const detail = [
     `Compatibility: ${label}.`,
-    compatibility.gaps.length > 0 ? `Won’t work in Surffish:\n${compatibility.gaps.map((gap) => `• ${gap}`).join('\n')}` : '',
-    compatibility.shimmed.length > 0 ? `Provided by Surffish’s compatibility layer:\n${compatibility.shimmed.map((entry) => `• ${entry}`).join('\n')}` : '',
-    `Permissions: ${permissions.join(', ') || 'none'}.`,
-    `Site access: ${hosts.join(', ') || 'none'}.`,
-    `Downloaded from the Chrome Web Store; the package signature matches extension ID ${prepared.id}.`
-  ].filter(Boolean).join('\n\n')
-  const verb = updatingFrom ? 'Update' : 'Add'
+    compatibility.gaps.length > 0
+      ? `Won’t work in Surffish:\n${compatibility.gaps.map((gap) => `• ${gap}`).join("\n")}`
+      : "",
+    compatibility.shimmed.length > 0
+      ? `Provided by Surffish’s compatibility layer:\n${compatibility.shimmed.map((entry) => `• ${entry}`).join("\n")}`
+      : "",
+    `Permissions: ${permissions.join(", ") || "none"}.`,
+    `Site access: ${hosts.join(", ") || "none"}.`,
+    `Downloaded from the Chrome Web Store; the package signature matches extension ID ${prepared.id}.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const verb = updatingFrom ? "Update" : "Add";
   const response = await showDialog({
-    type: compatibility.level === 'partial' ? 'warning' : 'question',
+    type: compatibility.level === "partial" ? "warning" : "question",
     title: `${verb} ${prepared.name}?`,
     message: updatingFrom
       ? `Update ${prepared.name} from ${updatingFrom} to ${prepared.version}?`
       : `Add ${prepared.name} ${prepared.version} to Surffish?`,
     detail,
-    buttons: ['Cancel', `${verb} extension`],
+    buttons: ["Cancel", `${verb} extension`],
     defaultId: 1,
     cancelId: 0,
-    noLink: true
-  })
-  return response === 1
+    noLink: true,
+  });
+  return response === 1;
 }
 
 async function activatePrepared(prepared: PreparedPackage): Promise<void> {
-  const { id } = prepared
-  const previousRecord = records.get(id) ?? null
-  const previousEntry = loaded.get(id) ?? null
-  const finalDirectory = extensionDirectory(id, prepared.version)
-  const staged = stageWebStoreExtension(prepared.sourceDirectory, join(prepared.temporaryRoot, 'extension'), prepared.publicKey)
-  let activation: StagedActivation | null = null
-  const browserSession = getBrowserSession()
-  unloadExtension(id)
+  const { id } = prepared;
+  const previousRecord = records.get(id) ?? null;
+  const previousEntry = loaded.get(id) ?? null;
+  const finalDirectory = extensionDirectory(id, prepared.version);
+  const staged = stageWebStoreExtension(
+    prepared.sourceDirectory,
+    join(prepared.temporaryRoot, "extension"),
+    prepared.publicKey,
+  );
+  let activation: StagedActivation | null = null;
+  const browserSession = getBrowserSession();
+  unloadExtension(id);
   try {
-    activation = activateStagedDirectory(staged.stagedDirectory, finalDirectory)
-    prepareWorkerChannel(finalDirectory)
-    const extension = await loadExtensionWithFreshWorker(browserSession, finalDirectory, stampPath(id), extensionWorkerFiles(finalDirectory))
+    activation = activateStagedDirectory(
+      staged.stagedDirectory,
+      finalDirectory,
+    );
+    prepareWorkerChannel(finalDirectory);
+    const extension = await loadExtensionWithFreshWorker(
+      browserSession,
+      finalDirectory,
+      stampPath(id),
+      extensionWorkerFiles(finalDirectory),
+    );
     try {
-      assertExtensionIdentity(id, extension.id, 'Chrome Web Store package')
+      assertExtensionIdentity(id, extension.id, "Chrome Web Store package");
     } catch (error) {
-      browserSession.extensions.removeExtension(extension.id)
-      throw error
+      browserSession.extensions.removeExtension(extension.id);
+      throw error;
     }
-    const entry = { extension, directory: finalDirectory, manifest: staged.manifest }
-    loaded.set(id, entry)
-    loadErrors.delete(id)
-    activation.commit()
-    await startRuntimeSupport(id, entry)
-    const now = Date.now()
+    const entry = {
+      extension,
+      directory: finalDirectory,
+      manifest: staged.manifest,
+    };
+    loaded.set(id, entry);
+    loadErrors.delete(id);
+    activation.commit();
+    await startRuntimeSupport(id, entry);
+    const now = Date.now();
     records.set(id, {
       id,
       version: prepared.version,
@@ -498,182 +687,243 @@ async function activatePrepared(prepared: PreparedPackage): Promise<void> {
       enabled: true,
       installedAt: previousRecord?.installedAt ?? now,
       updatedAt: now,
-      compatibility: prepared.compatibility.level === 'supported' ? 'supported' : 'partial',
+      compatibility:
+        prepared.compatibility.level === "supported" ? "supported" : "partial",
       gaps: prepared.compatibility.gaps,
-      shimmed: prepared.compatibility.shimmed
-    })
-    saveRecords()
+      shimmed: prepared.compatibility.shimmed,
+    });
+    saveRecords();
     if (previousRecord && previousRecord.version !== prepared.version) {
-      rmSync(extensionDirectory(id, previousRecord.version), { recursive: true, force: true })
+      rmSync(extensionDirectory(id, previousRecord.version), {
+        recursive: true,
+        force: true,
+      });
     }
-    refreshAdblockExemptions()
+    refreshAdblockExemptions();
   } catch (error) {
-    const message = errorMessage(error)
-    if (loaded.has(id)) unloadExtension(id)
-    activation?.rollback()
-    let rollbackNote = ''
+    const message = errorMessage(error);
+    if (loaded.has(id)) unloadExtension(id);
+    activation?.rollback();
+    let rollbackNote = "";
     if (previousRecord && previousEntry) {
       try {
-        await loadInstalled(previousRecord)
+        await loadInstalled(previousRecord);
       } catch (restoreError) {
-        rollbackNote = ` The previous version could not be reloaded: ${errorMessage(restoreError)}`
+        rollbackNote = ` The previous version could not be reloaded: ${errorMessage(restoreError)}`;
       }
     }
-    throw new Error(`${message}${rollbackNote}`)
+    throw new Error(`${message}${rollbackNote}`);
   }
 }
 
-async function runExclusive(id: string | null, task: () => Promise<void>): Promise<WebStoreExtensionsState> {
+async function runExclusive(
+  id: string | null,
+  task: () => Promise<void>,
+): Promise<WebStoreExtensionsState> {
   if (state.busy) {
-    setStatus({ notice: 'Another extension change is still running.' })
-    return getWebStoreExtensionsState()
+    setStatus({ notice: "Another extension change is still running." });
+    return getWebStoreExtensionsState();
   }
-  setStatus({ busy: true, busyId: id, notice: null, error: null })
+  setStatus({ busy: true, busyId: id, notice: null, error: null });
   try {
-    await task()
+    await task();
   } catch (error) {
-    state.error = errorMessage(error)
+    state.error = errorMessage(error);
   } finally {
-    state.busy = false
-    state.busyId = null
-    publish()
+    state.busy = false;
+    state.busyId = null;
+    publish();
   }
-  return getWebStoreExtensionsState()
+  return getWebStoreExtensionsState();
 }
 
-async function installOrUpdate(id: string, mode: 'install' | 'update'): Promise<void> {
-  const existing = records.get(id)
-  const prepared = await downloadPackage(id)
+async function installOrUpdate(
+  id: string,
+  mode: "install" | "update",
+): Promise<void> {
+  const existing = records.get(id);
+  const prepared = await downloadPackage(id);
   try {
-    if (existing && compareExtensionVersions(prepared.version, existing.version) <= 0) {
-      if (mode === 'update') {
-        state.notice = `${existing.name} ${existing.version} is up to date.`
-        return
+    if (
+      existing &&
+      compareExtensionVersions(prepared.version, existing.version) <= 0
+    ) {
+      if (mode === "update") {
+        state.notice = `${existing.name} ${existing.version} is up to date.`;
+        return;
       }
       if (loaded.has(id) || !existing.enabled) {
-        state.notice = `${existing.name} ${existing.version} is already installed.`
-        return
+        state.notice = `${existing.name} ${existing.version} is already installed.`;
+        return;
       }
     }
-    if (!(await confirmInstall(prepared, existing && loaded.has(id) ? existing.version : null))) {
-      state.notice = prepared.compatibility.level === 'unsupported'
-        ? `${prepared.name} was not installed: it is not compatible with Surffish.`
-        : `${prepared.name} was not ${existing ? 'updated' : 'installed'}.`
-      return
+    if (
+      !(await confirmInstall(
+        prepared,
+        existing && loaded.has(id) ? existing.version : null,
+      ))
+    ) {
+      state.notice =
+        prepared.compatibility.level === "unsupported"
+          ? `${prepared.name} was not installed: it is not compatible with Surffish.`
+          : `${prepared.name} was not ${existing ? "updated" : "installed"}.`;
+      return;
     }
-    await activatePrepared(prepared)
-    state.notice = prepared.compatibility.level === 'partial'
-      ? `${prepared.name} ${prepared.version} installed with partial support (${prepared.compatibility.gaps.length} feature${prepared.compatibility.gaps.length === 1 ? '' : 's'} unavailable).`
-      : `${prepared.name} ${prepared.version} installed.`
+    await activatePrepared(prepared);
+    state.notice =
+      prepared.compatibility.level === "partial"
+        ? `${prepared.name} ${prepared.version} installed with partial support (${prepared.compatibility.gaps.length} feature${prepared.compatibility.gaps.length === 1 ? "" : "s"} unavailable).`
+        : `${prepared.name} ${prepared.version} installed.`;
   } finally {
-    rmSync(prepared.temporaryRoot, { recursive: true, force: true })
+    rmSync(prepared.temporaryRoot, { recursive: true, force: true });
   }
 }
 
 // ---------------------------------------------------------------------------
 // Public operations (renderer IPC)
 
-export function installWebStoreExtension(input: unknown): Promise<WebStoreExtensionsState> {
-  const id = parseChromeWebStoreInput(input)
+export function installWebStoreExtension(
+  input: unknown,
+): Promise<WebStoreExtensionsState> {
+  const id = parseChromeWebStoreInput(input);
   if (!id) {
-    setStatus({ error: 'Paste a Chrome Web Store link (chromewebstore.google.com/detail/…) or a 32-letter extension ID.', notice: null })
-    return Promise.resolve(getWebStoreExtensionsState())
+    setStatus({
+      error:
+        "Paste a Chrome Web Store link (chromewebstore.google.com/detail/…) or a 32-letter extension ID.",
+      notice: null,
+    });
+    return Promise.resolve(getWebStoreExtensionsState());
   }
-  return runExclusive(id, () => installOrUpdate(id, 'install'))
+  return runExclusive(id, () => installOrUpdate(id, "install"));
 }
 
-export function checkWebStoreExtensionUpdate(id: unknown): Promise<WebStoreExtensionsState> {
-  if (!isChromeExtensionId(id) || !records.has(id)) return Promise.resolve(getWebStoreExtensionsState())
-  return runExclusive(id, () => installOrUpdate(id, 'update'))
+export function checkWebStoreExtensionUpdate(
+  id: unknown,
+): Promise<WebStoreExtensionsState> {
+  if (!isChromeExtensionId(id) || !records.has(id))
+    return Promise.resolve(getWebStoreExtensionsState());
+  return runExclusive(id, () => installOrUpdate(id, "update"));
 }
 
-export function setWebStoreExtensionEnabled(id: unknown, enabled: unknown): Promise<WebStoreExtensionsState> {
-  if (!isChromeExtensionId(id) || typeof enabled !== 'boolean') return Promise.resolve(getWebStoreExtensionsState())
-  const record = records.get(id)
-  if (!record) return Promise.resolve(getWebStoreExtensionsState())
+export function setWebStoreExtensionEnabled(
+  id: unknown,
+  enabled: unknown,
+): Promise<WebStoreExtensionsState> {
+  if (!isChromeExtensionId(id) || typeof enabled !== "boolean")
+    return Promise.resolve(getWebStoreExtensionsState());
+  const record = records.get(id);
+  if (!record) return Promise.resolve(getWebStoreExtensionsState());
   return runExclusive(id, async () => {
     if (enabled) {
-      record.enabled = true
-      saveRecords()
+      record.enabled = true;
+      saveRecords();
       if (!loaded.has(id)) {
         try {
-          await loadInstalled(record)
+          await loadInstalled(record);
         } catch (error) {
-          loadErrors.set(id, errorMessage(error))
-          throw error
+          loadErrors.set(id, errorMessage(error));
+          throw error;
         }
       }
-      state.notice = `${record.name} is on. Reload open pages to apply it.`
+      state.notice = `${record.name} is on. Reload open pages to apply it.`;
     } else {
-      unloadExtension(id)
-      record.enabled = false
-      saveRecords()
-      state.notice = `${record.name} is off. Reload open pages to remove its changes.`
+      unloadExtension(id);
+      record.enabled = false;
+      saveRecords();
+      state.notice = `${record.name} is off. Reload open pages to remove its changes.`;
     }
-  })
+  });
 }
 
-export function uninstallWebStoreExtension(id: unknown): Promise<WebStoreExtensionsState> {
-  if (!isChromeExtensionId(id)) return Promise.resolve(getWebStoreExtensionsState())
-  const record = records.get(id)
-  if (!record) return Promise.resolve(getWebStoreExtensionsState())
+export function uninstallWebStoreExtension(
+  id: unknown,
+): Promise<WebStoreExtensionsState> {
+  if (!isChromeExtensionId(id))
+    return Promise.resolve(getWebStoreExtensionsState());
+  const record = records.get(id);
+  if (!record) return Promise.resolve(getWebStoreExtensionsState());
   return runExclusive(id, async () => {
     const response = await showDialog({
-      type: 'warning',
+      type: "warning",
       title: `Remove ${record.name}?`,
       message: `Remove ${record.name} from Surffish?`,
-      detail: 'Its settings and saved data in this Surffish profile are deleted too.',
-      buttons: ['Cancel', 'Remove'],
+      detail:
+        "Its settings and saved data in this Surffish profile are deleted too.",
+      buttons: ["Cancel", "Remove"],
       defaultId: 1,
       cancelId: 0,
-      noLink: true
-    })
-    if (response !== 1) return
-    const origin = loaded.get(id)?.extension.url.replace(/\/$/, '') ?? `chrome-extension://${id}`
-    unloadExtension(id)
+      noLink: true,
+    });
+    if (response !== 1) return;
+    const origin =
+      loaded.get(id)?.extension.url.replace(/\/$/, "") ??
+      `chrome-extension://${id}`;
+    unloadExtension(id);
     try {
-      await getBrowserSession().clearStorageData({ origin })
+      await getBrowserSession().clearStorageData({ origin });
     } catch {
       // Storage cleanup is best effort; the files are still removed.
     }
-    records.delete(id)
-    loadErrors.delete(id)
-    saveRecords()
-    rmSync(join(rootDirectory(), id), { recursive: true, force: true })
-    state.notice = `${record.name} was removed.`
-  })
+    records.delete(id);
+    loadErrors.delete(id);
+    saveRecords();
+    rmSync(join(rootDirectory(), id), { recursive: true, force: true });
+    state.notice = `${record.name} was removed.`;
+  });
 }
 
-export function openWebStoreExtensionOptions(id: unknown): WebStoreExtensionsState {
-  const entry = isChromeExtensionId(id) ? loaded.get(id) : undefined
-  const optionsPath = entry ? manifestOptionsPath(entry.manifest) : null
+export function openWebStoreExtensionOptions(
+  id: unknown,
+): WebStoreExtensionsState {
+  const entry = isChromeExtensionId(id) ? loaded.get(id) : undefined;
+  const optionsPath = entry ? manifestOptionsPath(entry.manifest) : null;
   if (!entry || !optionsPath) {
-    setStatus({ error: 'This extension has no options page, or it is turned off.' })
-    return getWebStoreExtensionsState()
+    setStatus({
+      error: "This extension has no options page, or it is turned off.",
+    });
+    return getWebStoreExtensionsState();
   }
-  disposePopup()
-  if (!openExtensionPageTab(`${entry.extension.url}${optionsPath}`, entry.extension.url, resolvePreload('extension-host.cjs'), 'web-store')) {
-    setStatus({ error: 'Could not open the extension’s options page.' })
+  disposePopup();
+  if (
+    !openExtensionPageTab(
+      `${entry.extension.url}${optionsPath}`,
+      entry.extension.url,
+      resolvePreload("extension-host.cjs"),
+      "web-store",
+    )
+  ) {
+    setStatus({ error: "Could not open the extension’s options page." });
   }
-  return getWebStoreExtensionsState()
+  return getWebStoreExtensionsState();
 }
 
 // ---------------------------------------------------------------------------
 // Toolbar popup
 
 function disposePopup(): void {
-  const current = popup
-  popup = null
-  if (current && !current.window.isDestroyed()) current.window.close()
-  publish()
+  const current = popup;
+  popup = null;
+  if (current && !current.window.isDestroyed()) current.window.close();
+  publish();
 }
 
-function popupBounds(anchor: BramblePopupAnchor | undefined, size: { width: number; height: number }): Electron.Rectangle {
-  const owner = mainWindow()
-  const display = owner ? screen.getDisplayMatching(owner.getBounds()) : screen.getPrimaryDisplay()
-  const area = display.workArea
-  const content = owner?.getContentBounds() ?? area
-  return anchoredPopupBounds(anchor, content, area, size, screen.getCursorScreenPoint())
+function popupBounds(
+  anchor: BramblePopupAnchor | undefined,
+  size: { width: number; height: number },
+): Electron.Rectangle {
+  const owner = mainWindow();
+  const display = owner
+    ? screen.getDisplayMatching(owner.getBounds())
+    : screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const content = owner?.getContentBounds() ?? area;
+  return anchoredPopupBounds(
+    anchor,
+    content,
+    area,
+    size,
+    screen.getCursorScreenPoint(),
+  );
 }
 
 /**
@@ -701,37 +951,56 @@ const MEASURE_POPUP_SCRIPT = `(() => {
   }
   const height = Math.max(root.getBoundingClientRect().height, body ? body.getBoundingClientRect().bottom + marginBottom : 0);
   return { width: Math.ceil(width), height: Math.ceil(height) };
-})()`
+})()`;
 
 function clampPopupSize(value: unknown): { width: number; height: number } {
-  const size = isRecord(value) ? value : {}
-  const width = typeof size.width === 'number' && Number.isFinite(size.width) ? size.width : 360
-  const height = typeof size.height === 'number' && Number.isFinite(size.height) ? size.height : 240
+  const size = isRecord(value) ? value : {};
+  const width =
+    typeof size.width === "number" && Number.isFinite(size.width)
+      ? size.width
+      : 360;
+  const height =
+    typeof size.height === "number" && Number.isFinite(size.height)
+      ? size.height
+      : 240;
   return {
-    width: Math.round(Math.min(POPUP_MAX.width, Math.max(POPUP_MIN.width, width))),
-    height: Math.round(Math.min(POPUP_MAX.height, Math.max(POPUP_MIN.height, height)))
-  }
+    width: Math.round(
+      Math.min(POPUP_MAX.width, Math.max(POPUP_MIN.width, width)),
+    ),
+    height: Math.round(
+      Math.min(POPUP_MAX.height, Math.max(POPUP_MIN.height, height)),
+    ),
+  };
 }
 
-export function openWebStoreExtensionPopup(id: unknown, anchor?: BramblePopupAnchor): WebStoreExtensionsState {
-  const entry = isChromeExtensionId(id) ? loaded.get(id) : undefined
+export function openWebStoreExtensionPopup(
+  id: unknown,
+  anchor?: BramblePopupAnchor,
+): WebStoreExtensionsState {
+  const entry = isChromeExtensionId(id) ? loaded.get(id) : undefined;
   if (!entry) {
-    setStatus({ error: 'That extension is not loaded. Turn it on in Settings → Integrations.' })
-    return getWebStoreExtensionsState()
+    setStatus({
+      error:
+        "That extension is not loaded. Turn it on in Settings → Integrations.",
+    });
+    return getWebStoreExtensionsState();
   }
   if (popup && popup.id === entry.extension.id && !popup.window.isDestroyed()) {
-    disposePopup()
-    return getWebStoreExtensionsState()
+    disposePopup();
+    return getWebStoreExtensionsState();
   }
-  disposePopup()
-  const popupPath = manifestPopupPath(entry.manifest)
+  disposePopup();
+  const popupPath = manifestPopupPath(entry.manifest);
   if (!popupPath) {
-    if (manifestOptionsPath(entry.manifest)) return openWebStoreExtensionOptions(entry.extension.id)
-    setStatus({ notice: `${entry.extension.name} has no popup or options page; it works on matching sites automatically.` })
-    return getWebStoreExtensionsState()
+    if (manifestOptionsPath(entry.manifest))
+      return openWebStoreExtensionOptions(entry.extension.id);
+    setStatus({
+      notice: `${entry.extension.name} has no popup or options page; it works on matching sites automatically.`,
+    });
+    return getWebStoreExtensionsState();
   }
-  const extensionUrl = entry.extension.url
-  const pageUrl = `${extensionUrl}${popupPath}`
+  const extensionUrl = entry.extension.url;
+  const pageUrl = `${extensionUrl}${popupPath}`;
   const window = new BrowserWindow({
     title: entry.extension.name,
     ...popupBounds(anchor, POPUP_MAX),
@@ -749,104 +1018,134 @@ export function openWebStoreExtensionPopup(id: unknown, anchor?: BramblePopupAnc
     parent: mainWindow(),
     webPreferences: {
       session: getBrowserSession(),
-      preload: resolvePreload('extension-host.cjs'),
+      preload: resolvePreload("extension-host.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      webSecurity: true
-    }
-  })
-  popup = { window, id: entry.extension.id }
-  const contents = window.webContents
-  window.on('closed', () => {
+      webSecurity: true,
+    },
+  });
+  popup = { window, id: entry.extension.id };
+  const contents = window.webContents;
+  window.on("closed", () => {
     if (popup?.window === window) {
-      popup = null
-      publish()
+      popup = null;
+      publish();
     }
-  })
-  window.on('blur', () => {
-    if (!window.isDestroyed() && window.isVisible()) window.close()
-  })
-  contents.on('before-input-event', (event, input) => {
-    if (input.type === 'keyDown' && input.key === 'Escape') {
-      event.preventDefault()
-      if (!window.isDestroyed()) window.close()
+  });
+  window.on("blur", () => {
+    if (!window.isDestroyed() && window.isVisible()) window.close();
+  });
+  contents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.key === "Escape") {
+      event.preventDefault();
+      if (!window.isDestroyed()) window.close();
     }
-  })
-  contents.on('will-navigate', (event, url) => {
-    if (!isAllowedExtensionTabUrl(url, entry.extension.id) || !url.startsWith(extensionUrl)) event.preventDefault()
-  })
+  });
+  contents.on("will-navigate", (event, url) => {
+    if (
+      !isAllowedExtensionTabUrl(url, entry.extension.id) ||
+      !url.startsWith(extensionUrl)
+    )
+      event.preventDefault();
+  });
   contents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith(extensionUrl)) {
-      openExtensionPageTab(url, extensionUrl, resolvePreload('extension-host.cjs'), 'web-store')
+      openExtensionPageTab(
+        url,
+        extensionUrl,
+        resolvePreload("extension-host.cjs"),
+        "web-store",
+      );
     } else if (/^https?:\/\//i.test(url)) {
-      createExtensionTab(url, true)
+      createExtensionTab(url, true);
     }
-    return { action: 'deny' }
-  })
+    return { action: "deny" };
+  });
   const fit = async (): Promise<void> => {
-    if (window.isDestroyed()) return
-    const size = clampPopupSize(await contents.executeJavaScript(MEASURE_POPUP_SCRIPT, true).catch(() => null))
-    if (window.isDestroyed()) return
-    window.setBounds(popupBounds(anchor, size))
-  }
-  contents.once('did-finish-load', () => {
+    if (window.isDestroyed()) return;
+    const size = clampPopupSize(
+      await contents
+        .executeJavaScript(MEASURE_POPUP_SCRIPT, true)
+        .catch(() => null),
+    );
+    if (window.isDestroyed()) return;
+    window.setBounds(popupBounds(anchor, size));
+  };
+  contents.once("did-finish-load", () => {
     void fit().then(() => {
-      if (window.isDestroyed()) return
-      window.show()
-      window.focus()
-      publish()
+      if (window.isDestroyed()) return;
+      window.show();
+      window.focus();
+      publish();
       // Late layout (fonts, async rendering): fit once more.
-      setTimeout(() => { void fit() }, 250)
-    })
-  })
+      setTimeout(() => {
+        void fit();
+      }, 250);
+    });
+  });
   void window.loadURL(pageUrl).catch((error: unknown) => {
-    setStatus({ error: `Could not open ${entry.extension.name}’s popup: ${errorMessage(error)}` })
-    if (!window.isDestroyed()) window.close()
-  })
-  return getWebStoreExtensionsState()
+    setStatus({
+      error: `Could not open ${entry.extension.name}’s popup: ${errorMessage(error)}`,
+    });
+    if (!window.isDestroyed()) window.close();
+  });
+  return getWebStoreExtensionsState();
 }
 
 // ---------------------------------------------------------------------------
 // Extension-page bridge (chrome.tabs + openOptionsPage shims)
 
 /** The loaded Web Store extension whose own popup/options page sent this IPC, or null. */
-export function webStoreExtensionForSender(sender: WebContents, senderFrame: Electron.WebFrameMain | null): LoadedEntry | null {
-  if (!senderFrame || senderFrame !== sender.mainFrame) return null
-  let url: URL
+export function webStoreExtensionForSender(
+  sender: WebContents,
+  senderFrame: Electron.WebFrameMain | null,
+): LoadedEntry | null {
+  if (!senderFrame || senderFrame !== sender.mainFrame) return null;
+  let url: URL;
   try {
-    url = new URL(senderFrame.url)
+    url = new URL(senderFrame.url);
   } catch {
-    return null
+    return null;
   }
-  if (url.protocol !== 'chrome-extension:') return null
-  const entry = loaded.get(url.hostname)
-  if (!entry) return null
-  const fromPopup = popup?.id === url.hostname && !popup.window.isDestroyed() && popup.window.webContents === sender
-  if (!fromPopup && !isExtensionPageTab(sender, entry.extension.url, 'web-store')) return null
-  return entry
+  if (url.protocol !== "chrome-extension:") return null;
+  const entry = loaded.get(url.hostname);
+  if (!entry) return null;
+  const fromPopup =
+    popup?.id === url.hostname &&
+    !popup.window.isDestroyed() &&
+    popup.window.webContents === sender;
+  if (
+    !fromPopup &&
+    !isExtensionPageTab(sender, entry.extension.url, "web-store")
+  )
+    return null;
+  return entry;
 }
 
 function accessFor(entry: LoadedEntry): ExtensionAccess {
   return {
     permissions: stringList(entry.manifest.permissions),
-    hostPermissions: stringList(entry.manifest.host_permissions)
-  }
+    hostPermissions: stringList(entry.manifest.host_permissions),
+  };
 }
 
 /** The chrome.tabs caller for a Web Store extension's own popup/options page, or null. */
-export function webStoreTabsCallerForSender(sender: WebContents, senderFrame: Electron.WebFrameMain | null): ExtensionTabsCaller | null {
-  const entry = webStoreExtensionForSender(sender, senderFrame)
-  if (!entry) return null
+export function webStoreTabsCallerForSender(
+  sender: WebContents,
+  senderFrame: Electron.WebFrameMain | null,
+): ExtensionTabsCaller | null {
+  const entry = webStoreExtensionForSender(sender, senderFrame);
+  if (!entry) return null;
   return {
     id: entry.extension.id,
     extensionUrl: entry.extension.url,
     access: accessFor(entry),
-    pagePreloadPath: resolvePreload('extension-host.cjs'),
-    owner: 'web-store',
+    pagePreloadPath: resolvePreload("extension-host.cjs"),
+    owner: "web-store",
     sender,
-    onActiveTabSwitch: () => closePopupAfterTabSwitch(entry)
-  }
+    onActiveTabSwitch: () => closePopupAfterTabSwitch(entry),
+  };
 }
 
 /**
@@ -854,34 +1153,43 @@ export function webStoreTabsCallerForSender(sender: WebContents, senderFrame: El
  * tick so the popup still gets the IPC reply it is awaiting.
  */
 function closePopupAfterTabSwitch(entry: LoadedEntry): void {
-  const current = popup
-  if (current?.id !== entry.extension.id) return
+  const current = popup;
+  if (current?.id !== entry.extension.id) return;
   setImmediate(() => {
-    if (popup === current) disposePopup()
-  })
+    if (popup === current) disposePopup();
+  });
 }
 
 export function openOptionsFromExtensionPage(entry: LoadedEntry): boolean {
-  openWebStoreExtensionOptions(entry.extension.id)
-  return true
+  openWebStoreExtensionOptions(entry.extension.id);
+  return true;
 }
 
 /** "Add to Surffish" clicked on a Web Store page: the ID comes from the frame's own URL. */
-export async function installFromStorePage(sender: WebContents, senderFrame: Electron.WebFrameMain | null): Promise<void> {
-  if (!senderFrame || senderFrame !== sender.mainFrame || sender.session !== getBrowserSession()) return
-  let url: URL
+export async function installFromStorePage(
+  sender: WebContents,
+  senderFrame: Electron.WebFrameMain | null,
+): Promise<void> {
+  if (
+    !senderFrame ||
+    senderFrame !== sender.mainFrame ||
+    sender.session !== getBrowserSession()
+  )
+    return;
+  let url: URL;
   try {
-    url = new URL(senderFrame.url)
+    url = new URL(senderFrame.url);
   } catch {
-    return
+    return;
   }
-  if (url.protocol !== 'https:' || url.hostname !== 'chromewebstore.google.com') return
-  const id = parseChromeWebStoreInput(url.toString())
-  if (!id) return
-  await installWebStoreExtension(id)
+  if (url.protocol !== "https:" || url.hostname !== "chromewebstore.google.com")
+    return;
+  const id = parseChromeWebStoreInput(url.toString());
+  if (!id) return;
+  await installWebStoreExtension(id);
 }
 
 export function disposeWebStoreExtensions(): void {
-  disposePopup()
-  runtimeSupport?.disposeExtensionRuntimeSupport()
+  disposePopup();
+  runtimeSupport?.disposeExtensionRuntimeSupport();
 }

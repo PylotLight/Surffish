@@ -20,7 +20,7 @@ name: electron bump
 # tracking issue with a compare link instead, and still runs ci on the branch.
 on:
   schedule:
-    - cron: '17 20 * * *' # 07:17 Melbourne (AEDT), daily
+    - cron: "17 20 * * *" # 07:17 Melbourne (AEDT), daily
   workflow_dispatch:
     inputs:
       policy:
@@ -31,7 +31,7 @@ on:
       version:
         description: Exact Electron version to pin instead (optional, e.g. 45.0.0-beta.4)
         type: string
-        default: ''
+        default: ""
       dry_run:
         description: Only report what would change
         type: boolean

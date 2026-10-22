@@ -126,4 +126,4 @@ export const QUICK_UNLOCK_OVERLAY_HTML = `<!doctype html>
 </script>
 </body>
 </html>
-`
+`;

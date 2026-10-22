@@ -1,20 +1,25 @@
-import { useEffect, useState } from 'react'
-import { SettingsRow } from './SettingsControls'
+import { useEffect, useState } from "react";
+import { SettingsRow } from "./SettingsControls";
 
-type Snapshot = Awaited<ReturnType<typeof window.api.browser.preconnect.get>>
+type Snapshot = Awaited<ReturnType<typeof window.api.browser.preconnect.get>>;
 
 /** Settings → General → Tabs: speculative preconnect while typing and on link hover, plus the omnibox prerender (on by default). */
 export function PreloadPagesSettings(): React.JSX.Element {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
+  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   useEffect(() => {
-    let live = true
-    void window.api.browser.preconnect.get().then((next) => { if (live) setSnapshot(next) }).catch(() => undefined)
-    const off = window.api.browser.preconnect.onChange(setSnapshot)
+    let live = true;
+    void window.api.browser.preconnect
+      .get()
+      .then((next) => {
+        if (live) setSnapshot(next);
+      })
+      .catch(() => undefined);
+    const off = window.api.browser.preconnect.onChange(setSnapshot);
     return () => {
-      live = false
-      off()
-    }
-  }, [])
+      live = false;
+      off();
+    };
+  }, []);
   return (
     <SettingsRow
       label="Preload pages for faster browsing"
@@ -26,9 +31,14 @@ export function PreloadPagesSettings(): React.JSX.Element {
         className="settings-switch"
         checked={snapshot?.enabled ?? true}
         disabled={!snapshot}
-        onChange={(event) => { void window.api.browser.preconnect.set({ enabled: event.target.checked }).then(setSnapshot).catch(() => undefined) }}
+        onChange={(event) => {
+          void window.api.browser.preconnect
+            .set({ enabled: event.target.checked })
+            .then(setSnapshot)
+            .catch(() => undefined);
+        }}
         aria-label="Preload pages for faster browsing"
       />
     </SettingsRow>
-  )
+  );
 }

@@ -48,9 +48,15 @@
   font-weight: 600;
   text-align: left;
 }
-.network-rules-table th:first-child { width: 48%; }
-.network-rules-table th:last-child { width: 40px; }
-.network-rules-table td { padding: 0 4px 0 0; }
+.network-rules-table th:first-child {
+  width: 48%;
+}
+.network-rules-table th:last-child {
+  width: 40px;
+}
+.network-rules-table td {
+  padding: 0 4px 0 0;
+}
 
 /* Site panel */
 .site-route-section .settings-segmented {
@@ -75,8 +81,12 @@
   font-size: 12px;
   font-weight: 600;
 }
-.site-route-effective .is-direct { color: #eac977; }
-.site-route-effective .is-proxy { color: #9ad8ad; }
+.site-route-effective .is-direct {
+  color: #eac977;
+}
+.site-route-effective .is-proxy {
+  color: #9ad8ad;
+}
 .site-route-control {
   display: flex;
   flex-direction: column;

@@ -5,14 +5,22 @@
   flex: 0 0 auto;
   align-items: center;
 }
-.cast-button.is-casting { color: #7fc8ff; }
-.cast-button .cast-glyph-fill { fill: currentColor; stroke: none; opacity: 0.85; }
+.cast-button.is-casting {
+  color: #7fc8ff;
+}
+.cast-button .cast-glyph-fill {
+  fill: currentColor;
+  stroke: none;
+  opacity: 0.85;
+}
 .browser-chrome .cast-popover {
   width: min(340px, calc(100vw - 24px));
   max-height: min(560px, var(--popover-room, 560px));
   font-size: var(--pop-body);
 }
-.browser-chrome .cast-header strong { font-size: var(--pop-title); }
+.browser-chrome .cast-header strong {
+  font-size: var(--pop-title);
+}
 /* Sidebar tab row badge while that tab is casting. */
 .tab-cast-badge {
   display: inline-flex;
@@ -32,4 +40,7 @@
   stroke-linejoin: round;
   stroke-width: 1.8;
 }
-.tab-cast-badge .cast-glyph-fill { fill: currentColor; stroke: none; }
+.tab-cast-badge .cast-glyph-fill {
+  fill: currentColor;
+  stroke: none;
+}

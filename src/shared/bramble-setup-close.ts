@@ -9,21 +9,29 @@
  * True for Bramble's setup page: `<extension>/options.html` with no `?screen=`. Bramble routes
  * `?screen=import` and `?screen=restore` (opened from its Settings) to other flows, which keep their tab.
  */
-export function isBrambleSetupPageUrl(candidate: string, extensionUrl: string): boolean {
-  let url: URL
-  let base: URL
+export function isBrambleSetupPageUrl(
+  candidate: string,
+  extensionUrl: string,
+): boolean {
+  let url: URL;
+  let base: URL;
   try {
-    url = new URL(candidate)
-    base = new URL(extensionUrl)
+    url = new URL(candidate);
+    base = new URL(extensionUrl);
   } catch {
-    return false
+    return false;
   }
-  if (url.protocol !== 'chrome-extension:' || url.protocol !== base.protocol || url.host !== base.host) return false
-  if (url.pathname !== '/options.html') return false
-  return !url.searchParams.has('screen')
+  if (
+    url.protocol !== "chrome-extension:" ||
+    url.protocol !== base.protocol ||
+    url.host !== base.host
+  )
+    return false;
+  if (url.pathname !== "/options.html") return false;
+  return !url.searchParams.has("screen");
 }
 
-export type SetupTabClosePlan = 'close' | 'replace-with-new-tab'
+export type SetupTabClosePlan = "close" | "replace-with-new-tab";
 
 /**
  * How to get rid of the finished setup tab. Closing the last tab of a window would close that window
@@ -31,7 +39,10 @@ export type SetupTabClosePlan = 'close' | 'replace-with-new-tab'
  * first: setup finishing should never take a window away. A mini window is a throwaway peek and closes
  * with its last tab as usual.
  */
-export function planSetupTabClose(window: { tabCount: number; mini: boolean }): SetupTabClosePlan {
-  if (window.mini) return 'close'
-  return window.tabCount <= 1 ? 'replace-with-new-tab' : 'close'
+export function planSetupTabClose(window: {
+  tabCount: number;
+  mini: boolean;
+}): SetupTabClosePlan {
+  if (window.mini) return "close";
+  return window.tabCount <= 1 ? "replace-with-new-tab" : "close";
 }

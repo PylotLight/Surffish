@@ -12,16 +12,21 @@
 //   - sandbox on: nothing. --disable-namespace-sandbox would route the write through the setuid
 //     helper, but the setuid sandbox can't create its namespaces inside an unprivileged pod.
 // SMOKE_KEEP_ZYGOTE=1 skips this.
-'use strict'
+"use strict";
 
 /**
  * @param {readonly string[]} argv the switches Electron is (or will be) launched with
  * @returns {string[]} extra switches to launch it with
  */
-function smokeChromiumArgs(argv = [], env = process.env, platform = process.platform) {
-  if (platform !== 'linux' || env.SMOKE_KEEP_ZYGOTE === '1') return []
-  if (env.ELECTRON_DISABLE_SANDBOX || argv.includes('--no-sandbox')) return ['--no-sandbox', '--no-zygote']
-  return []
+function smokeChromiumArgs(
+  argv = [],
+  env = process.env,
+  platform = process.platform,
+) {
+  if (platform !== "linux" || env.SMOKE_KEEP_ZYGOTE === "1") return [];
+  if (env.ELECTRON_DISABLE_SANDBOX || argv.includes("--no-sandbox"))
+    return ["--no-sandbox", "--no-zygote"];
+  return [];
 }
 
-module.exports = { smokeChromiumArgs }
+module.exports = { smokeChromiumArgs };

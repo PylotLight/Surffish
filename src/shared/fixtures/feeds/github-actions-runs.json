@@ -1,8 +1,53 @@
 {
   "total_count": 3,
   "workflow_runs": [
-    { "id": 9003, "name": "ci", "display_title": "feat: rss feeds", "run_number": 120, "run_attempt": 1, "event": "pull_request", "status": "in_progress", "conclusion": null, "head_branch": "feat/rss-feeds", "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9003", "created_at": "2026-10-13T10:00:00Z", "updated_at": "2026-10-13T10:01:00Z", "actor": { "login": "PylotLight" }, "repository": { "full_name": "PylotLight/Surffish" } },
-    { "id": 9002, "name": "ci", "display_title": "fix: CI stability", "run_number": 119, "run_attempt": 2, "event": "push", "status": "completed", "conclusion": "failure", "head_branch": "main", "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9002", "created_at": "2026-10-13T09:00:00Z", "updated_at": "2026-10-13T09:12:00Z", "actor": { "login": "PylotLight" }, "repository": { "full_name": "PylotLight/Surffish" } },
-    { "id": 9001, "name": "release", "display_title": "v0.1.4", "run_number": 12, "run_attempt": 1, "event": "workflow_dispatch", "status": "completed", "conclusion": "success", "head_branch": "main", "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9001", "created_at": "2026-10-12T09:00:00Z", "updated_at": "2026-10-12T09:20:00Z", "actor": { "login": "PylotLight" }, "repository": { "full_name": "PylotLight/Surffish" } }
+    {
+      "id": 9003,
+      "name": "ci",
+      "display_title": "feat: rss feeds",
+      "run_number": 120,
+      "run_attempt": 1,
+      "event": "pull_request",
+      "status": "in_progress",
+      "conclusion": null,
+      "head_branch": "feat/rss-feeds",
+      "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9003",
+      "created_at": "2026-10-13T10:00:00Z",
+      "updated_at": "2026-10-13T10:01:00Z",
+      "actor": { "login": "PylotLight" },
+      "repository": { "full_name": "PylotLight/Surffish" }
+    },
+    {
+      "id": 9002,
+      "name": "ci",
+      "display_title": "fix: CI stability",
+      "run_number": 119,
+      "run_attempt": 2,
+      "event": "push",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "main",
+      "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9002",
+      "created_at": "2026-10-13T09:00:00Z",
+      "updated_at": "2026-10-13T09:12:00Z",
+      "actor": { "login": "PylotLight" },
+      "repository": { "full_name": "PylotLight/Surffish" }
+    },
+    {
+      "id": 9001,
+      "name": "release",
+      "display_title": "v0.1.4",
+      "run_number": 12,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "html_url": "https://github.com/PylotLight/Surffish/actions/runs/9001",
+      "created_at": "2026-10-12T09:00:00Z",
+      "updated_at": "2026-10-12T09:20:00Z",
+      "actor": { "login": "PylotLight" },
+      "repository": { "full_name": "PylotLight/Surffish" }
+    }
   ]
 }

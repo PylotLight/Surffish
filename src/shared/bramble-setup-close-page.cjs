@@ -19,44 +19,56 @@
  *
  * Plain script, no imports. Under Node/Bun (tests) it exports its pure helpers instead.
  */
-;(function (root) {
-  'use strict'
+(function (root) {
+  "use strict";
 
-  var REGISTRY_KEY = 'vault.registry'
-  var BLOB_KEY = 'vault-blob-b64'
-  var CLOSE_DELAY_MS = 1500
+  var REGISTRY_KEY = "vault.registry";
+  var BLOB_KEY = "vault-blob-b64";
+  var CLOSE_DELAY_MS = 1500;
 
   /** Storage keys of vaults that hold a blob, from a chrome.storage.local snapshot. Never blob contents. */
   function presentVaultKeys(items) {
-    if (!items || typeof items !== 'object') return []
-    var registry = items[REGISTRY_KEY]
-    var vaults = registry && Array.isArray(registry.vaults) ? registry.vaults : []
-    var keys = [BLOB_KEY]
+    if (!items || typeof items !== "object") return [];
+    var registry = items[REGISTRY_KEY];
+    var vaults =
+      registry && Array.isArray(registry.vaults) ? registry.vaults : [];
+    var keys = [BLOB_KEY];
     for (var i = 0; i < vaults.length; i++) {
-      var id = vaults[i] && vaults[i].id
-      if (typeof id === 'string' && id) keys.push(BLOB_KEY + ':' + id)
+      var id = vaults[i] && vaults[i].id;
+      if (typeof id === "string" && id) keys.push(BLOB_KEY + ":" + id);
     }
-    var present = []
+    var present = [];
     for (var k = 0; k < keys.length; k++) {
-      var value = items[keys[k]]
-      if (typeof value === 'string' && value.length > 0 && present.indexOf(keys[k]) < 0) present.push(keys[k])
+      var value = items[keys[k]];
+      if (
+        typeof value === "string" &&
+        value.length > 0 &&
+        present.indexOf(keys[k]) < 0
+      )
+        present.push(keys[k]);
     }
-    return present.sort()
+    return present.sort();
   }
 
   /** Vault keys in `after` that were not in `before`. */
   function newVaultKeys(before, after) {
-    var known = Array.isArray(before) ? before : []
-    return (Array.isArray(after) ? after : []).filter(function (key) { return known.indexOf(key) < 0 })
+    var known = Array.isArray(before) ? before : [];
+    return (Array.isArray(after) ? after : []).filter(function (key) {
+      return known.indexOf(key) < 0;
+    });
   }
 
   /** options.html with no ?screen= (import / restore from Settings keep their tab). */
   function isSetupPageUrl(href) {
     try {
-      var url = new URL(href)
-      return url.protocol === 'chrome-extension:' && url.pathname === '/options.html' && !url.searchParams.has('screen')
+      var url = new URL(href);
+      return (
+        url.protocol === "chrome-extension:" &&
+        url.pathname === "/options.html" &&
+        !url.searchParams.has("screen")
+      );
     } catch (_error) {
-      return false
+      return false;
     }
   }
 
@@ -65,93 +77,162 @@
    * and a check icon, and nothing to fill in or press, and no spinner (the connecting state has one).
    */
   function looksDone(snapshot) {
-    return !!snapshot && snapshot.heading === true && snapshot.checkIcon === true && snapshot.controls === 0 && snapshot.spinner === false
+    return (
+      !!snapshot &&
+      snapshot.heading === true &&
+      snapshot.checkIcon === true &&
+      snapshot.controls === 0 &&
+      snapshot.spinner === false
+    );
   }
 
   /** The tab may close: the done screen is up and this page session produced a new vault. */
   function shouldClose(state) {
-    return !!state && state.setupPage === true && looksDone(state.screen) && Array.isArray(state.baseline) &&
+    return (
+      !!state &&
+      state.setupPage === true &&
+      looksDone(state.screen) &&
+      Array.isArray(state.baseline) &&
       newVaultKeys(state.baseline, state.current).length > 0
+    );
   }
 
-  if (typeof module === 'object' && module && module.exports) {
-    module.exports = { presentVaultKeys: presentVaultKeys, newVaultKeys: newVaultKeys, isSetupPageUrl: isSetupPageUrl, looksDone: looksDone, shouldClose: shouldClose, CLOSE_DELAY_MS: CLOSE_DELAY_MS }
-    return
+  if (typeof module === "object" && module && module.exports) {
+    module.exports = {
+      presentVaultKeys: presentVaultKeys,
+      newVaultKeys: newVaultKeys,
+      isSetupPageUrl: isSetupPageUrl,
+      looksDone: looksDone,
+      shouldClose: shouldClose,
+      CLOSE_DELAY_MS: CLOSE_DELAY_MS,
+    };
+    return;
   }
 
-  var document = root.document
-  if (!document || root.__surffishBrambleSetupClose) return
-  root.__surffishBrambleSetupClose = true
-  if (!isSetupPageUrl(root.location.href)) return
-  var bridge = root.surffishBramble
-  var api = root.chrome && root.chrome.storage ? root.chrome : root.browser
-  var local = api && api.storage && api.storage.local
-  if (!bridge || typeof bridge.closeSetupTab !== 'function' || !local) return
+  var document = root.document;
+  if (!document || root.__surffishBrambleSetupClose) return;
+  root.__surffishBrambleSetupClose = true;
+  if (!isSetupPageUrl(root.location.href)) return;
+  var bridge = root.surffishBramble;
+  var api = root.chrome && root.chrome.storage ? root.chrome : root.browser;
+  var local = api && api.storage && api.storage.local;
+  if (!bridge || typeof bridge.closeSetupTab !== "function" || !local) return;
 
   function storageGet(keys) {
     return new Promise(function (resolve, reject) {
       try {
         var pending = local.get(keys, function (items) {
-          var error = api.runtime && api.runtime.lastError
-          if (error) reject(new Error(error.message)); else resolve(items || {})
-        })
-        if (pending && typeof pending.then === 'function') pending.then(function (items) { resolve(items || {}) }, reject)
-      } catch (error) { reject(error) }
-    })
+          var error = api.runtime && api.runtime.lastError;
+          if (error) reject(new Error(error.message));
+          else resolve(items || {});
+        });
+        if (pending && typeof pending.then === "function")
+          pending.then(function (items) {
+            resolve(items || {});
+          }, reject);
+      } catch (error) {
+        reject(error);
+      }
+    });
   }
 
   // The registry first, then only the blob keys it names (values stay in this page; only key names are kept).
   function readVaultKeys() {
     return storageGet(REGISTRY_KEY).then(function (items) {
-      var registry = items[REGISTRY_KEY]
-      var vaults = registry && Array.isArray(registry.vaults) ? registry.vaults : []
-      var keys = [REGISTRY_KEY, BLOB_KEY]
-      for (var i = 0; i < vaults.length; i++) if (vaults[i] && typeof vaults[i].id === 'string' && vaults[i].id) keys.push(BLOB_KEY + ':' + vaults[i].id)
-      return storageGet(keys).then(presentVaultKeys)
-    })
+      var registry = items[REGISTRY_KEY];
+      var vaults =
+        registry && Array.isArray(registry.vaults) ? registry.vaults : [];
+      var keys = [REGISTRY_KEY, BLOB_KEY];
+      for (var i = 0; i < vaults.length; i++)
+        if (vaults[i] && typeof vaults[i].id === "string" && vaults[i].id)
+          keys.push(BLOB_KEY + ":" + vaults[i].id);
+      return storageGet(keys).then(presentVaultKeys);
+    });
   }
 
   function screenSnapshot() {
-    var page = document.getElementById('root') || document.body
-    if (!page) return null
+    var page = document.getElementById("root") || document.body;
+    if (!page) return null;
     return {
-      heading: !!page.querySelector('h1'),
-      checkIcon: !!page.querySelector('svg.lucide-check'),
-      controls: page.querySelectorAll('button, input, textarea, select, form, a[href]').length,
-      spinner: !!page.querySelector('.animate-spin')
-    }
+      heading: !!page.querySelector("h1"),
+      checkIcon: !!page.querySelector("svg.lucide-check"),
+      controls: page.querySelectorAll(
+        "button, input, textarea, select, form, a[href]",
+      ).length,
+      spinner: !!page.querySelector(".animate-spin"),
+    };
   }
 
   // What the vault store held when this page opened. Without it (storage unreadable) nothing closes.
-  var baseline = null
-  var closing = false
-  readVaultKeys().then(function (keys) { baseline = keys; check() }, function () { baseline = null })
+  var baseline = null;
+  var closing = false;
+  readVaultKeys().then(
+    function (keys) {
+      baseline = keys;
+      check();
+    },
+    function () {
+      baseline = null;
+    },
+  );
 
   function check() {
-    if (closing || !baseline || !looksDone(screenSnapshot())) return
-    closing = true
-    readVaultKeys().then(function (current) {
-      if (!shouldClose({ setupPage: true, screen: screenSnapshot(), baseline: baseline, current: current })) { closing = false; return }
-      root.setTimeout(function () {
-        if (!looksDone(screenSnapshot())) { closing = false; return }
-        Promise.resolve(bridge.closeSetupTab()).then(function (closed) { if (!closed) closing = false }, function () { closing = false })
-      }, CLOSE_DELAY_MS)
-    }, function () { closing = false })
+    if (closing || !baseline || !looksDone(screenSnapshot())) return;
+    closing = true;
+    readVaultKeys().then(
+      function (current) {
+        if (
+          !shouldClose({
+            setupPage: true,
+            screen: screenSnapshot(),
+            baseline: baseline,
+            current: current,
+          })
+        ) {
+          closing = false;
+          return;
+        }
+        root.setTimeout(function () {
+          if (!looksDone(screenSnapshot())) {
+            closing = false;
+            return;
+          }
+          Promise.resolve(bridge.closeSetupTab()).then(
+            function (closed) {
+              if (!closed) closing = false;
+            },
+            function () {
+              closing = false;
+            },
+          );
+        }, CLOSE_DELAY_MS);
+      },
+      function () {
+        closing = false;
+      },
+    );
   }
 
-  var scheduled = false
+  var scheduled = false;
   function schedule() {
-    if (scheduled) return
-    scheduled = true
+    if (scheduled) return;
+    scheduled = true;
     // setTimeout, not requestAnimationFrame: a join can finish while the tab is in the background.
-    root.setTimeout(function () { scheduled = false; check() }, 50)
+    root.setTimeout(function () {
+      scheduled = false;
+      check();
+    }, 50);
   }
 
   function boot() {
-    new root.MutationObserver(schedule).observe(document.body || document.documentElement, { childList: true, subtree: true })
-    schedule()
+    new root.MutationObserver(schedule).observe(
+      document.body || document.documentElement,
+      { childList: true, subtree: true },
+    );
+    schedule();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true })
-  else boot()
-})(typeof globalThis !== 'undefined' ? globalThis : this)
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  else boot();
+})(typeof globalThis !== "undefined" ? globalThis : this);

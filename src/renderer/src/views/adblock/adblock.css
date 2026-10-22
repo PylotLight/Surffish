@@ -13,8 +13,14 @@
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(42, 50, 59, 0.985), rgba(17, 21, 26, 0.99));
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    145deg,
+    rgba(42, 50, 59, 0.985),
+    rgba(17, 21, 26, 0.99)
+  );
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.07);
   color: #f2f4f6;
   font-size: 13px;
   text-align: left;
@@ -22,8 +28,12 @@
   animation: adblock-in 120ms ease-out;
 }
 @keyframes adblock-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .adblock-header {
   display: flex;
@@ -32,7 +42,9 @@
   gap: 8px;
   padding: 0 2px;
 }
-.adblock-header strong { font-weight: 650; }
+.adblock-header strong {
+  font-weight: 650;
+}
 .adblock-host {
   overflow: hidden;
   color: rgba(245, 247, 250, 0.62);
@@ -54,8 +66,16 @@
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
 }
-.adblock-switch-row > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
-.adblock-switch-row small { color: rgba(245, 247, 250, 0.6); font-size: 11.5px; }
+.adblock-switch-row > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.adblock-switch-row small {
+  color: rgba(245, 247, 250, 0.6);
+  font-size: 11.5px;
+}
 .adblock-reload {
   display: flex;
   align-items: center;
@@ -80,7 +100,9 @@
   cursor: default;
 }
 .adblock-reload-button:hover,
-.adblock-footer button:hover { background: rgba(255, 255, 255, 0.14); }
+.adblock-footer button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
 .adblock-summary {
   display: flex;
   align-items: baseline;
@@ -88,7 +110,12 @@
   padding: 0 2px;
   color: rgba(245, 247, 250, 0.72);
 }
-.adblock-total { color: #fff; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.adblock-total {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 .adblock-hosts {
   display: flex;
   min-height: 0;
@@ -106,11 +133,27 @@
   padding: 3px 4px;
   border-radius: 5px;
 }
-.adblock-host-row:nth-child(odd) { background: rgba(255, 255, 255, 0.035); }
-.adblock-host-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.adblock-host-count { color: rgba(245, 247, 250, 0.7); font-variant-numeric: tabular-nums; }
-.adblock-empty { margin: 4px 2px; color: rgba(245, 247, 250, 0.68); }
-.adblock-error { margin: 0 2px; color: #ff9b9b; font-size: 12px; }
+.adblock-host-row:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.035);
+}
+.adblock-host-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.adblock-host-count {
+  color: rgba(245, 247, 250, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.adblock-empty {
+  margin: 4px 2px;
+  color: rgba(245, 247, 250, 0.68);
+}
+.adblock-error {
+  margin: 0 2px;
+  color: #ff9b9b;
+  font-size: 12px;
+}
 .adblock-footer {
   display: flex;
   justify-content: space-between;

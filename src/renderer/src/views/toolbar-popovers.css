@@ -22,8 +22,12 @@
 .browser-chrome .downloads-popup-header > strong {
   font-size: var(--pop-title);
 }
-.browser-chrome .downloads-popup-header span { font-size: var(--pop-meta); }
-.browser-chrome .downloads-panel-popup .download-filename { font-size: var(--pop-body); }
+.browser-chrome .downloads-popup-header span {
+  font-size: var(--pop-meta);
+}
+.browser-chrome .downloads-panel-popup .download-filename {
+  font-size: var(--pop-body);
+}
 .browser-chrome .downloads-panel-popup .download-state,
 .browser-chrome .downloads-panel-popup .download-row-meta,
 .browser-chrome .downloads-panel-popup .download-progress-wrap,
@@ -33,13 +37,27 @@
 .browser-chrome .downloads-panel-popup .download-complete-size {
   font-size: var(--pop-meta);
 }
-.browser-chrome .downloads-panel-popup .download-row-actions button { font-size: 12px; }
-.browser-chrome .downloads-panel-popup .downloads-empty { font-size: var(--pop-body); }
-.browser-chrome .downloads-panel-popup .downloads-empty strong { font-size: var(--pop-title); }
-.browser-chrome .downloads-panel-popup .downloads-show-all { font-size: var(--pop-body); }
-.browser-chrome .downloads-panel-popup .downloads-search input { font-size: var(--pop-body); }
-.browser-chrome .downloads-panel-popup .downloads-action-message { font-size: 12px; }
-.browser-chrome .downloads-panel-popup .downloads-state-message { font-size: var(--pop-body); }
+.browser-chrome .downloads-panel-popup .download-row-actions button {
+  font-size: 12px;
+}
+.browser-chrome .downloads-panel-popup .downloads-empty {
+  font-size: var(--pop-body);
+}
+.browser-chrome .downloads-panel-popup .downloads-empty strong {
+  font-size: var(--pop-title);
+}
+.browser-chrome .downloads-panel-popup .downloads-show-all {
+  font-size: var(--pop-body);
+}
+.browser-chrome .downloads-panel-popup .downloads-search input {
+  font-size: var(--pop-body);
+}
+.browser-chrome .downloads-panel-popup .downloads-action-message {
+  font-size: 12px;
+}
+.browser-chrome .downloads-panel-popup .downloads-state-message {
+  font-size: var(--pop-body);
+}
 .browser-chrome .downloads-menu {
   min-width: 260px;
   max-height: min(320px, var(--popover-room, 320px));
@@ -56,17 +74,34 @@
   max-height: min(480px, var(--popover-room, 480px));
   font-size: var(--pop-body);
 }
-.browser-chrome .extensions-menu-header strong { font-size: var(--pop-title); }
-.browser-chrome .extensions-menu-header span { font-size: var(--pop-meta); }
+.browser-chrome .extensions-menu-header strong {
+  font-size: var(--pop-title);
+}
+.browser-chrome .extensions-menu-header span {
+  font-size: var(--pop-meta);
+}
 /* The list is the part that scrolls: without min-height 0 a flex child never shrinks below its
    content, and the footer (Manage extensions) was pushed out of the box. */
-.browser-chrome .extensions-menu-list { min-height: 0; flex: 1 1 auto; }
+.browser-chrome .extensions-menu-list {
+  min-height: 0;
+  flex: 1 1 auto;
+}
 .browser-chrome .extensions-menu-header,
-.browser-chrome .extensions-menu-manage { flex: 0 0 auto; }
-.browser-chrome .extensions-menu-name { font-size: var(--pop-body); }
-.browser-chrome .extensions-menu-name small { font-size: var(--pop-meta); }
-.browser-chrome .extensions-menu-manage { font-size: var(--pop-body); }
-.browser-chrome .extensions-menu-empty { font-size: var(--pop-body); }
+.browser-chrome .extensions-menu-manage {
+  flex: 0 0 auto;
+}
+.browser-chrome .extensions-menu-name {
+  font-size: var(--pop-body);
+}
+.browser-chrome .extensions-menu-name small {
+  font-size: var(--pop-meta);
+}
+.browser-chrome .extensions-menu-manage {
+  font-size: var(--pop-body);
+}
+.browser-chrome .extensions-menu-empty {
+  font-size: var(--pop-body);
+}
 
 /* ---- Bookmarks: toolbar dropdown, bookmarks-bar folders, star popover ---- */
 .browser-chrome .bookmarks-menu-panel {
@@ -76,17 +111,29 @@
 .browser-chrome .bookmarks-menu-root {
   max-height: min(520px, var(--popover-room, 520px));
 }
-.browser-chrome .bookmarks-menu-item { min-height: 30px; }
-.browser-chrome .bookmarks-menu-item kbd { font-size: var(--pop-meta); }
-.browser-chrome .bookmarks-menu-item.is-more { font-size: 12px; }
-.browser-chrome .bookmarks-menu-empty { font-size: 12.5px; }
+.browser-chrome .bookmarks-menu-item {
+  min-height: 30px;
+}
+.browser-chrome .bookmarks-menu-item kbd {
+  font-size: var(--pop-meta);
+}
+.browser-chrome .bookmarks-menu-item.is-more {
+  font-size: 12px;
+}
+.browser-chrome .bookmarks-menu-empty {
+  font-size: 12.5px;
+}
 .browser-chrome .bookmark-popover {
   width: 320px;
   max-height: min(520px, var(--popover-room, 520px));
   overflow-y: auto;
 }
-.browser-chrome .bookmark-popover-title { font-size: var(--pop-title); }
-.browser-chrome .bookmark-popover-note { font-size: var(--pop-meta); }
+.browser-chrome .bookmark-popover-title {
+  font-size: var(--pop-title);
+}
+.browser-chrome .bookmark-popover-note {
+  font-size: var(--pop-meta);
+}
 .browser-chrome .bookmark-popover-field,
 .browser-chrome .bookmark-popover-field input,
 .browser-chrome .bookmark-popover-actions .settings-action {
@@ -111,8 +158,12 @@
 }
 
 /* ---- History panel (opened from the toolbar, drawn in the sidebar) ---- */
-.history-sidebar .history-search input { font-size: var(--pop-body); }
-.history-sidebar .history-item strong { font-size: var(--pop-body); }
+.history-sidebar .history-search input {
+  font-size: var(--pop-body);
+}
+.history-sidebar .history-item strong {
+  font-size: var(--pop-body);
+}
 .history-sidebar .history-host,
 .history-sidebar .history-item time {
   font-size: var(--pop-meta);
@@ -125,7 +176,9 @@
   flex: 0 0 auto;
   align-items: center;
 }
-.reading-list-button { position: relative; }
+.reading-list-button {
+  position: relative;
+}
 .reading-list-badge {
   position: absolute;
   top: 1px;
@@ -147,9 +200,13 @@
   max-height: min(560px, var(--popover-room, 560px));
   font-size: var(--pop-body);
 }
-.browser-chrome .reading-list-header strong { font-size: var(--pop-title); }
+.browser-chrome .reading-list-header strong {
+  font-size: var(--pop-title);
+}
 .browser-chrome .reading-list-meta,
-.browser-chrome .reading-list-excerpt { font-size: var(--pop-meta); }
+.browser-chrome .reading-list-excerpt {
+  font-size: var(--pop-meta);
+}
 
 .adblock-control {
   position: relative;
@@ -157,8 +214,12 @@
   flex: 0 0 auto;
   align-items: center;
 }
-.adblock-button { position: relative; }
-.adblock-button.is-off svg { opacity: 0.55; }
+.adblock-button {
+  position: relative;
+}
+.adblock-button.is-off svg {
+  opacity: 0.55;
+}
 .adblock-badge {
   position: absolute;
   top: 1px;
@@ -180,10 +241,14 @@
   max-height: min(520px, var(--popover-room, 520px));
   font-size: var(--pop-body);
 }
-.browser-chrome .adblock-header strong { font-size: var(--pop-title); }
+.browser-chrome .adblock-header strong {
+  font-size: var(--pop-title);
+}
 
 /* ---- Back/Forward history menu (press-and-hold or right-click Back/Forward) ---- */
-.browser-chrome .browser-nav-buttons { position: relative; }
+.browser-chrome .browser-nav-buttons {
+  position: relative;
+}
 .browser-chrome .nav-history-menu {
   position: absolute;
   z-index: 12;
@@ -198,17 +263,31 @@
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(42, 50, 59, 0.97), rgba(17, 21, 26, 0.98));
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    145deg,
+    rgba(42, 50, 59, 0.97),
+    rgba(17, 21, 26, 0.98)
+  );
+  box-shadow:
+    0 14px 36px rgba(0, 0, 0, 0.42),
+    inset 0 1px rgba(255, 255, 255, 0.07);
   backdrop-filter: blur(24px) saturate(160%);
   font-size: var(--pop-body);
   -webkit-app-region: no-drag;
   animation: nav-history-menu-in 140ms ease-out;
 }
-.browser-chrome .nav-history-menu.is-forward { left: 30px; }
+.browser-chrome .nav-history-menu.is-forward {
+  left: 30px;
+}
 @keyframes nav-history-menu-in {
-  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 /* The rows scroll; the separator and Show Full History stay put (min-height 0 lets the flex child shrink). */
 .browser-chrome .nav-history-menu-list {
@@ -253,7 +332,11 @@
   border-radius: 4px;
   color: rgba(245, 247, 250, 0.7);
 }
-.browser-chrome .nav-history-menu-icon img { width: 16px; height: 16px; object-fit: contain; }
+.browser-chrome .nav-history-menu-icon img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
 .browser-chrome .nav-history-menu-icon > span {
   display: inline-flex;
   width: 16px;
@@ -264,7 +347,10 @@
   font-size: 10px;
   font-weight: 650;
 }
-.browser-chrome .nav-history-menu-icon svg { width: 15px; height: 15px; }
+.browser-chrome .nav-history-menu-icon svg {
+  width: 15px;
+  height: 15px;
+}
 .browser-chrome .nav-history-menu-title {
   min-width: 0;
   flex: 1 1 auto;
@@ -278,5 +364,11 @@
   margin: 2px 4px;
   background: rgba(255, 255, 255, 0.1);
 }
-.browser-chrome .nav-history-menu-full { flex: 0 0 auto; color: rgba(245, 247, 250, 0.8); }
-.browser-chrome .browser-nav-buttons .toolbar-button.is-current { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.browser-chrome .nav-history-menu-full {
+  flex: 0 0 auto;
+  color: rgba(245, 247, 250, 0.8);
+}
+.browser-chrome .browser-nav-buttons .toolbar-button.is-current {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}

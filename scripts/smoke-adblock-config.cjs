@@ -3,10 +3,10 @@
 // ADBLOCK_CACHE_FILE, isFullFilterConfig) or the app ignores the seed and downloads the real filter
 // lists at launch (slow, flaky, network-dependent, and noisy through the smokes' fake proxies).
 // smoke-harness.test.ts keeps them in sync.
-'use strict'
+"use strict";
 
 module.exports = {
-  ADBLOCK_CACHE_FILE: 'adblock-engine-v2.bin',
+  ADBLOCK_CACHE_FILE: "adblock-engine-v2.bin",
   ADBLOCK_CONFIG: Object.freeze({
     loadNetworkFilters: true,
     loadCosmeticFilters: true,
@@ -17,6 +17,6 @@ module.exports = {
     loadGenericCosmeticsFilters: true,
     loadPreprocessors: true,
     enableCompression: true,
-    enableOptimizations: true
-  })
-}
+    enableOptimizations: true,
+  }),
+};

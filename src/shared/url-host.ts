@@ -2,19 +2,19 @@
 
 /** The URL's hostname (already lower-case, IPv6 in brackets), or '' when it doesn't parse. */
 export function urlHostname(url: string | null | undefined): string {
-  if (!url) return ''
+  if (!url) return "";
   try {
-    return new URL(url).hostname
+    return new URL(url).hostname;
   } catch {
-    return ''
+    return "";
   }
 }
 
 /** Short host for labels: hostname without a leading "www."; the input itself when it doesn't parse. */
 export function displayHost(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./i, '')
+    return new URL(url).hostname.replace(/^www\./i, "");
   } catch {
-    return url
+    return url;
   }
 }

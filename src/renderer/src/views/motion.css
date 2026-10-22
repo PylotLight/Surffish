@@ -7,8 +7,10 @@
  * must not slide or vanish on its own inside the view, or the two drift apart again (the old
  * "scrim pops in, panel slides in later" look, and an instant cut on close). The view is hidden by
  * main once a close has landed. */
-.app-shell[data-surface='sidebar'] .browser-layout .browser-sidebar,
-.app-shell[data-surface='sidebar'] .browser-layout.is-sidebar-visible .browser-sidebar {
+.app-shell[data-surface="sidebar"] .browser-layout .browser-sidebar,
+.app-shell[data-surface="sidebar"]
+  .browser-layout.is-sidebar-visible
+  .browser-sidebar {
   transform: none;
   visibility: visible;
   transition: none;
@@ -16,37 +18,58 @@
 
 /* Hover states: short colour/opacity fades instead of hard flips (paint-only, tiny elements). */
 .tab-item {
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .tab-close {
-  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
 }
 .sidebar-icon-button,
 .tab-list .tab-group-header {
-  transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
 }
 .tab-list .tab-group-chevron {
-  transition: transform 160ms var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
+  transition: transform 160ms
+    var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
 }
 
 /* Group expand: the revealed rows ease in. `translate` (not transform) so it never fights the
  * drag-sort transforms; `backwards` fill so nothing is left applied after it ends. */
 .tab-item.is-group-revealing {
-  animation: motion-row-in 180ms var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) backwards;
+  animation: motion-row-in 180ms
+    var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) backwards;
 }
 @keyframes motion-row-in {
-  from { opacity: 0; translate: 0 -6px; }
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
 }
 
 /* Settings: opening a panel or switching section fades the content in (keyed per section). */
 .settings-content {
-  animation: motion-panel-in 180ms var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) backwards;
+  animation: motion-panel-in 180ms
+    var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)) backwards;
 }
 @keyframes motion-panel-in {
-  from { opacity: 0; translate: 0 6px; }
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
 }
 .settings-subnav button {
-  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {

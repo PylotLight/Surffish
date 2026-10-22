@@ -20,7 +20,16 @@
   bottom: 0;
   width: 0;
 }
-.toolbar-slot.is-folded > :is(.bookmarks-menu-control, .reading-list-control, .adblock-control, .cast-control, .downloads-toolbar-control, .extension-toolbar-buttons, .extension-overflow-control),
+.toolbar-slot.is-folded
+  > :is(
+    .bookmarks-menu-control,
+    .reading-list-control,
+    .adblock-control,
+    .cast-control,
+    .downloads-toolbar-control,
+    .extension-toolbar-buttons,
+    .extension-overflow-control
+  ),
 .toolbar-slot.is-folded .extension-overflow-control {
   position: static;
 }
@@ -29,11 +38,15 @@
 }
 
 /* Drag to reorder: the dragged button dims, a 2px line marks where it lands. */
-.toolbar-items.is-dragging { cursor: grabbing; }
-.toolbar-slot.is-drag-source { opacity: 0.45; }
+.toolbar-items.is-dragging {
+  cursor: grabbing;
+}
+.toolbar-slot.is-drag-source {
+  opacity: 0.45;
+}
 .toolbar-slot.is-drop-before::before,
 .toolbar-slot.is-drop-after::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 4px;
   bottom: 4px;
@@ -42,11 +55,17 @@
   background: #7ee2a8;
   pointer-events: none;
 }
-.toolbar-slot.is-drop-before::before { left: -2px; }
-.toolbar-slot.is-drop-after::after { right: -2px; }
+.toolbar-slot.is-drop-before::before {
+  left: -2px;
+}
+.toolbar-slot.is-drop-after::after {
+  right: -2px;
+}
 
 /* Downloads: a thin progress line under the glyph while something downloads. */
-.downloads-toolbar-button { position: relative; }
+.downloads-toolbar-button {
+  position: relative;
+}
 .downloads-toolbar-progress {
   position: absolute;
   right: 7px;
@@ -71,8 +90,12 @@
   animation: downloads-toolbar-indeterminate 1.2s ease-in-out infinite;
 }
 @keyframes downloads-toolbar-indeterminate {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(250%); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
 }
 
 /* ---- The Surffish menu button (logo + name) ---- */
@@ -124,8 +147,14 @@
   padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 13px;
-  background: linear-gradient(150deg, rgba(42, 50, 60, 0.99), rgba(18, 22, 28, 0.995));
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.08);
+  background: linear-gradient(
+    150deg,
+    rgba(42, 50, 60, 0.99),
+    rgba(18, 22, 28, 0.995)
+  );
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.08);
   color: rgba(248, 250, 252, 0.95);
   font-size: 13px;
   text-align: left;
@@ -133,12 +162,20 @@
   animation: surffish-menu-in 120ms ease-out;
 }
 @keyframes surffish-menu-in {
-  from { opacity: 0; transform: translateY(-3px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .surffish-menu,
-  .toolbar-item-menu { animation: none; }
+  .toolbar-item-menu {
+    animation: none;
+  }
 }
 .surffish-menu {
   right: -2px;
@@ -146,7 +183,9 @@
   max-height: min(520px, var(--popover-room, 520px));
   overflow: auto;
 }
-.toolbar-item-menu { width: 200px; }
+.toolbar-item-menu {
+  width: 200px;
+}
 .surffish-menu-list {
   display: flex;
   flex-direction: column;
@@ -160,7 +199,9 @@
   align-items: center;
   border-radius: 9px;
 }
-.surffish-menu-row:hover { background: rgba(255, 255, 255, 0.06); }
+.surffish-menu-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
 .surffish-menu-item,
 .toolbar-item-menu-item {
   display: flex;
@@ -242,9 +283,17 @@
   color: rgba(245, 247, 250, 0.4);
   cursor: pointer;
 }
-.surffish-menu-pin:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.surffish-menu-pin.is-pinned { color: #7ee2a8; }
-.surffish-menu-pin svg.is-pinned path:first-child { fill: currentColor; fill-opacity: 0.25; }
+.surffish-menu-pin:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.surffish-menu-pin.is-pinned {
+  color: #7ee2a8;
+}
+.surffish-menu-pin svg.is-pinned path:first-child {
+  fill: currentColor;
+  fill-opacity: 0.25;
+}
 .surffish-menu-separator,
 .toolbar-item-menu-separator {
   height: 1px;
@@ -279,7 +328,9 @@
 .toolbar-settings-row + .toolbar-settings-row {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-.toolbar-settings-row .surffish-menu-icon { color: rgba(245, 247, 250, 0.8); }
+.toolbar-settings-row .surffish-menu-icon {
+  color: rgba(245, 247, 250, 0.8);
+}
 .toolbar-settings-name {
   display: flex;
   flex: 1 1 auto;
@@ -308,9 +359,18 @@
   color: rgba(245, 247, 250, 0.7);
   cursor: pointer;
 }
-.toolbar-settings-move button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.09); color: #fff; }
-.toolbar-settings-move button:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.7); outline-offset: 0; }
-.toolbar-settings-move button:disabled { opacity: 0.3; cursor: default; }
+.toolbar-settings-move button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+.toolbar-settings-move button:focus-visible {
+  outline: 2px solid rgba(126, 226, 168, 0.7);
+  outline-offset: 0;
+}
+.toolbar-settings-move button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
 .toolbar-settings-move svg {
   width: 14px;
   height: 14px;

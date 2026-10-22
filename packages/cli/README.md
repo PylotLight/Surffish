@@ -51,12 +51,12 @@ surffish [options]                   after npm i -g @pylotlight/surffish
 
 Anything else (a URL, for example) is passed to Surffish. Put `--` in front of an argument the launcher would otherwise take, such as `-- --version`.
 
-| Environment | Effect |
-|---|---|
-| `XDG_CACHE_HOME` | cache base directory (default `~/.cache`) |
-| `SURFFISH_CLI_CACHE_DIR` | exact cache directory |
-| `GITHUB_TOKEN` | used for GitHub API calls, which only `--latest` or a version without a recorded checksum need (60 unauthenticated calls an hour) |
-| `NO_COLOR`, `CI` | no colour / plain output |
+| Environment              | Effect                                                                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `XDG_CACHE_HOME`         | cache base directory (default `~/.cache`)                                                                                         |
+| `SURFFISH_CLI_CACHE_DIR` | exact cache directory                                                                                                             |
+| `GITHUB_TOKEN`           | used for GitHub API calls, which only `--latest` or a version without a recorded checksum need (60 unauthenticated calls an hour) |
+| `NO_COLOR`, `CI`         | no colour / plain output                                                                                                          |
 
 ## How it verifies the download
 
@@ -82,15 +82,15 @@ This deletes the launcher's download cache (`~/.cache/surffish`, or `$XDG_CACHE_
 
 What Surffish itself leaves behind, all in your home folder:
 
-| Path | What |
-|---|---|
-| `~/Library/Application Support/Surffish` | your profile: bookmarks, history, cookies, settings, extensions |
-| `~/Library/Caches/Surffish`, `~/Library/Caches/com.pylotlight.surffish` | caches |
-| `~/Library/HTTPStorages/com.pylotlight.surffish` | macOS network storage |
-| `~/Library/Preferences/com.pylotlight.surffish.plist` | macOS preferences |
-| `~/Library/Saved Application State/com.pylotlight.surffish.savedState` | window restore state |
-| `~/Library/Logs/Surffish` | logs |
-| keychain item `Surffish Safe Storage` | the key that encrypts saved cookies, quick unlock and PDF signatures |
+| Path                                                                    | What                                                                 |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `~/Library/Application Support/Surffish`                                | your profile: bookmarks, history, cookies, settings, extensions      |
+| `~/Library/Caches/Surffish`, `~/Library/Caches/com.pylotlight.surffish` | caches                                                               |
+| `~/Library/HTTPStorages/com.pylotlight.surffish`                        | macOS network storage                                                |
+| `~/Library/Preferences/com.pylotlight.surffish.plist`                   | macOS preferences                                                    |
+| `~/Library/Saved Application State/com.pylotlight.surffish.savedState`  | window restore state                                                 |
+| `~/Library/Logs/Surffish`                                               | logs                                                                 |
+| keychain item `Surffish Safe Storage`                                   | the key that encrypts saved cookies, quick unlock and PDF signatures |
 
 To delete those too:
 
@@ -110,4 +110,3 @@ Left for you:
 ---
 
 Working on the launcher itself? See [DEVELOPING.md](https://github.com/PylotLight/Surffish/blob/main/packages/cli/DEVELOPING.md).
-

@@ -1,12 +1,12 @@
 /// <reference types="vite/client" />
 
-import type { PreloadAPI } from '../../preload/index'
+import type { PreloadAPI } from "../../preload/index";
 
 declare global {
   interface Window {
-    api: PreloadAPI
+    api: PreloadAPI;
     surffishBramble?: {
-      openOptionsPage: () => Promise<boolean>
-    }
+      openOptionsPage: () => Promise<boolean>;
+    };
   }
 }

@@ -1,7 +1,7 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { createSocket, type Socket } from 'node:dgram'
-import { lookup } from 'node:dns'
-import { networkInterfaces } from 'node:os'
+import { spawn, type ChildProcess } from "node:child_process";
+import { createSocket, type Socket } from "node:dgram";
+import { lookup } from "node:dns";
+import { networkInterfaces } from "node:os";
 import {
   CAST_SERVICE,
   MDNS_ADDRESS,
@@ -16,8 +16,8 @@ import {
   parseDnsSdZoneLine,
   type CastDeviceRecord,
   type CastInterface,
-  type MdnsQuestion
-} from '../shared/cast-mdns'
+  type MdnsQuestion,
+} from "../shared/cast-mdns";
 
 /**
  * mDNS browsing for `_googlecast._tcp` (shared/cast-mdns.ts does the packets and the record cache).
@@ -45,292 +45,419 @@ import {
  * (arrival time, sender, interface) and device.
  */
 
-export type DeviceListener = (devices: CastDeviceRecord[]) => void
+export type DeviceListener = (devices: CastDeviceRecord[]) => void;
 
-const DEBUG = process.env.SURFFISH_CAST_DEBUG === '1'
-const DNS_SD = '/usr/bin/dns-sd'
+const DEBUG = process.env.SURFFISH_CAST_DEBUG === "1";
+const DNS_SD = "/usr/bin/dns-sd";
 
 function testTarget(): { host: string; port: number } | null {
-  const raw = process.env.SURFFISH_CAST_MDNS_TARGET
-  const match = raw ? /^([^:]+):(\d+)$/.exec(raw) : null
-  return match ? { host: match[1]!, port: Number(match[2]) } : null
+  const raw = process.env.SURFFISH_CAST_MDNS_TARGET;
+  const match = raw ? /^([^:]+):(\d+)$/.exec(raw) : null;
+  return match ? { host: match[1]!, port: Number(match[2]) } : null;
 }
 
 interface QuerySocket {
-  socket: Socket
+  socket: Socket;
   /** debug label: the interface name, `5353` or `target` */
-  label: string
+  label: string;
   /** ephemeral-port socket bound to one interface (null: the shared 5353 socket / smoke target) */
-  iface: CastInterface | null
-  ready: boolean
+  iface: CastInterface | null;
+  ready: boolean;
 }
 
 export class CastBrowser {
-  private sockets: QuerySocket[] = []
-  private interfaces: CastInterface[] = []
-  private cache = new MdnsRecordCache()
-  private timer: ReturnType<typeof setTimeout> | null = null
-  private followUpTimer: ReturnType<typeof setTimeout> | null = null
-  private rounds = 0
-  private startedAt = 0
-  private active = false
-  private lastPublished = ''
-  private dnsSd: ChildProcess | null = null
-  private dnsSdWanted = false
-  private readonly resolving = new Set<string>()
+  private sockets: QuerySocket[] = [];
+  private interfaces: CastInterface[] = [];
+  private cache = new MdnsRecordCache();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private followUpTimer: ReturnType<typeof setTimeout> | null = null;
+  private rounds = 0;
+  private startedAt = 0;
+  private active = false;
+  private lastPublished = "";
+  private dnsSd: ChildProcess | null = null;
+  private dnsSdWanted = false;
+  private readonly resolving = new Set<string>();
 
   constructor(private readonly onDevices: DeviceListener) {}
 
   get running(): boolean {
-    return this.active
+    return this.active;
   }
 
   private debug(message: string): void {
-    if (DEBUG) console.log(`[cast-debug +${Date.now() - this.startedAt}ms] ${message}`)
+    if (DEBUG)
+      console.log(`[cast-debug +${Date.now() - this.startedAt}ms] ${message}`);
   }
 
   start(): void {
-    if (this.active) return
-    this.active = true
-    this.startedAt = Date.now()
-    this.rounds = 0
-    this.cache = new MdnsRecordCache()
-    this.lastPublished = ''
-    const target = testTarget()
+    if (this.active) return;
+    this.active = true;
+    this.startedAt = Date.now();
+    this.rounds = 0;
+    this.cache = new MdnsRecordCache();
+    this.lastPublished = "";
+    const target = testTarget();
     if (target) {
-      this.openSocket('target', null, 0, undefined)
+      this.openSocket("target", null, 0, undefined);
     } else {
-      this.interfaces = castInterfaces(networkInterfaces())
-      this.debug(`browse start; interfaces: ${this.interfaces.map((entry) => `${entry.name}=${entry.address}${entry.tunnel ? '(tunnel)' : ''}`).join(', ') || 'none'}`)
-      for (const iface of this.interfaces) this.openSocket(iface.name, iface, 0, iface.address)
-      this.openSocket('5353', null, MDNS_PORT, undefined)
+      this.interfaces = castInterfaces(networkInterfaces());
+      this.debug(
+        `browse start; interfaces: ${this.interfaces.map((entry) => `${entry.name}=${entry.address}${entry.tunnel ? "(tunnel)" : ""}`).join(", ") || "none"}`,
+      );
+      for (const iface of this.interfaces)
+        this.openSocket(iface.name, iface, 0, iface.address);
+      this.openSocket("5353", null, MDNS_PORT, undefined);
     }
-    this.syncDnsSd()
+    this.syncDnsSd();
     // First round as soon as the sockets are bound (or now, if none bind).
-    this.schedule(0)
+    this.schedule(0);
   }
 
   /** macOS: also ask mDNSResponder while this is on (the picker is open). */
   setSystemResolver(on: boolean): void {
-    this.dnsSdWanted = on
-    this.syncDnsSd()
+    this.dnsSdWanted = on;
+    this.syncDnsSd();
   }
 
-  private openSocket(label: string, iface: CastInterface | null, port: number, address: string | undefined): void {
-    const socket = createSocket({ type: 'udp4', reuseAddr: true })
-    const entry: QuerySocket = { socket, label, iface, ready: false }
-    this.sockets.push(entry)
-    socket.on('message', (packet, info) => this.onPacket(packet, info.address, entry))
-    socket.on('error', (error) => {
-      this.debug(`socket ${label} error: ${error.message}`)
-      this.closeSocket(entry)
-    })
-    socket.on('listening', () => {
-      if (!this.sockets.includes(entry)) return
-      entry.ready = true
-      try { socket.setMulticastTTL(255) } catch { /* not fatal */ }
+  private openSocket(
+    label: string,
+    iface: CastInterface | null,
+    port: number,
+    address: string | undefined,
+  ): void {
+    const socket = createSocket({ type: "udp4", reuseAddr: true });
+    const entry: QuerySocket = { socket, label, iface, ready: false };
+    this.sockets.push(entry);
+    socket.on("message", (packet, info) =>
+      this.onPacket(packet, info.address, entry),
+    );
+    socket.on("error", (error) => {
+      this.debug(`socket ${label} error: ${error.message}`);
+      this.closeSocket(entry);
+    });
+    socket.on("listening", () => {
+      if (!this.sockets.includes(entry)) return;
+      entry.ready = true;
+      try {
+        socket.setMulticastTTL(255);
+      } catch {
+        /* not fatal */
+      }
       if (iface) {
-        try { socket.setMulticastInterface(iface.address) } catch (error) { this.debug(`setMulticastInterface ${label}: ${(error as Error).message}`) }
+        try {
+          socket.setMulticastInterface(iface.address);
+        } catch (error) {
+          this.debug(
+            `setMulticastInterface ${label}: ${(error as Error).message}`,
+          );
+        }
       }
       if (port === MDNS_PORT) {
-        try { socket.setMulticastLoopback(true) } catch { /* not fatal */ }
+        try {
+          socket.setMulticastLoopback(true);
+        } catch {
+          /* not fatal */
+        }
         for (const candidate of this.interfaces) {
-          try { socket.addMembership(MDNS_ADDRESS, candidate.address) } catch { /* interface without multicast */ }
+          try {
+            socket.addMembership(MDNS_ADDRESS, candidate.address);
+          } catch {
+            /* interface without multicast */
+          }
         }
         if (this.interfaces.length === 0) {
-          try { socket.addMembership(MDNS_ADDRESS) } catch { /* no multicast at all */ }
+          try {
+            socket.addMembership(MDNS_ADDRESS);
+          } catch {
+            /* no multicast at all */
+          }
         }
       }
       // A socket that came up after the first round was sent joins in straight away.
-      if (this.rounds > 0) this.sendRound([{ name: CAST_SERVICE, type: MDNS_TYPE.PTR }, ...this.cache.followUps(Date.now())], [entry])
-    })
+      if (this.rounds > 0)
+        this.sendRound(
+          [
+            { name: CAST_SERVICE, type: MDNS_TYPE.PTR },
+            ...this.cache.followUps(Date.now()),
+          ],
+          [entry],
+        );
+    });
     try {
-      socket.bind(port, address)
+      socket.bind(port, address);
     } catch (error) {
-      this.debug(`bind ${label}: ${(error as Error).message}`)
-      this.closeSocket(entry)
+      this.debug(`bind ${label}: ${(error as Error).message}`);
+      this.closeSocket(entry);
     }
   }
 
   private closeSocket(entry: QuerySocket): void {
-    this.sockets = this.sockets.filter((candidate) => candidate !== entry)
-    try { entry.socket.close() } catch { /* already closed */ }
+    this.sockets = this.sockets.filter((candidate) => candidate !== entry);
+    try {
+      entry.socket.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   private onPacket(packet: Buffer, sender: string, entry: QuerySocket): void {
-    let records
+    let records;
     try {
-      records = decodeMdnsRecords(packet)
+      records = decodeMdnsRecords(packet);
     } catch {
-      return // someone else's malformed packet on the shared port
+      return; // someone else's malformed packet on the shared port
     }
-    if (records.length === 0) return
-    const now = Date.now()
-    const changed = this.cache.ingest(records, sender, now)
-    if (!changed) return
+    if (records.length === 0) return;
+    const now = Date.now();
+    const changed = this.cache.ingest(records, sender, now);
+    if (!changed) return;
     if (DEBUG) {
-      const via = entry.iface?.name ?? interfaceForAddress(this.interfaces, sender)?.name ?? '?'
-      this.debug(`answer from ${sender} on socket ${entry.label} (iface ${via}): ${records.map((record) => `${record.type}:${record.name}`).join(' ').slice(0, 300)}`)
+      const via =
+        entry.iface?.name ??
+        interfaceForAddress(this.interfaces, sender)?.name ??
+        "?";
+      this.debug(
+        `answer from ${sender} on socket ${entry.label} (iface ${via}): ${records
+          .map((record) => `${record.type}:${record.name}`)
+          .join(" ")
+          .slice(0, 300)}`,
+      );
     }
-    this.afterIngest(now)
+    this.afterIngest(now);
   }
 
   private afterIngest(now: number): void {
-    const devices = this.cache.devices(now)
-    const key = JSON.stringify(devices)
+    const devices = this.cache.devices(now);
+    const key = JSON.stringify(devices);
     if (devices.length > 0 && key !== this.lastPublished) {
-      this.lastPublished = key
-      this.debug(`devices: ${devices.map((device) => `${device.name} ${device.host}:${device.port}`).join(', ')}`)
-      this.onDevices(devices)
+      this.lastPublished = key;
+      this.debug(
+        `devices: ${devices.map((device) => `${device.name} ${device.host}:${device.port}`).join(", ")}`,
+      );
+      this.onDevices(devices);
     }
     if (this.cache.followUps(now).length > 0 && !this.followUpTimer) {
       // Ask for the missing SRV/TXT/A right away instead of waiting for the next round.
       this.followUpTimer = setTimeout(() => {
-        this.followUpTimer = null
-        const questions = this.cache.followUps(Date.now())
+        this.followUpTimer = null;
+        const questions = this.cache.followUps(Date.now());
         if (questions.length > 0 && this.active) {
-          this.debug(`follow-up: ${questions.map((question) => `${question.type}:${question.name}`).join(' ')}`)
-          this.sendRound(questions)
+          this.debug(
+            `follow-up: ${questions.map((question) => `${question.type}:${question.name}`).join(" ")}`,
+          );
+          this.sendRound(questions);
         }
-      }, 20)
-      this.followUpTimer.unref?.()
+      }, 20);
+      this.followUpTimer.unref?.();
     }
   }
 
   private schedule(delay: number): void {
-    if (this.timer) clearTimeout(this.timer)
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      this.timer = null
-      if (!this.active) return
-      this.rounds += 1
-      const round = this.rounds
-      void this.sendRound([{ name: CAST_SERVICE, type: MDNS_TYPE.PTR }, ...this.cache.followUps(Date.now())]).then((delivered) => {
-        if (this.active && this.rounds === round && !this.timer) this.schedule(nextQueryDelay(round, delivered))
-      })
-    }, delay)
-    this.timer.unref?.()
+      this.timer = null;
+      if (!this.active) return;
+      this.rounds += 1;
+      const round = this.rounds;
+      void this.sendRound([
+        { name: CAST_SERVICE, type: MDNS_TYPE.PTR },
+        ...this.cache.followUps(Date.now()),
+      ]).then((delivered) => {
+        if (this.active && this.rounds === round && !this.timer)
+          this.schedule(nextQueryDelay(round, delivered));
+      });
+    }, delay);
+    this.timer.unref?.();
   }
 
   /** Ask again now (the picker was opened again). */
   refresh(): void {
-    if (!this.active) return
-    this.rounds = 0
-    this.schedule(0)
+    if (!this.active) return;
+    this.rounds = 0;
+    this.schedule(0);
   }
 
   /** One send per socket (per interface on the shared 5353 socket). Resolves true when any send went out. */
-  private async sendRound(questions: MdnsQuestion[], only?: QuerySocket[]): Promise<boolean> {
-    const target = testTarget()
-    const qu = encodeMdnsQuestions(questions, true)
-    const qm = encodeMdnsQuestions(questions, false)
-    const sendOne = (entry: QuerySocket, packet: Uint8Array, host: string, port: number, label: string): Promise<boolean> => new Promise((done) => {
-      try {
-        entry.socket.send(packet, port, host, (error) => {
-          this.debug(`send ${label} -> ${host}:${port} ${error ? `failed: ${error.message}` : 'ok'}`)
-          done(!error)
-        })
-      } catch (error) {
-        this.debug(`send ${label} threw: ${(error as Error).message}`)
-        done(false)
-      }
-    })
-    const jobs: Promise<boolean>[] = []
+  private async sendRound(
+    questions: MdnsQuestion[],
+    only?: QuerySocket[],
+  ): Promise<boolean> {
+    const target = testTarget();
+    const qu = encodeMdnsQuestions(questions, true);
+    const qm = encodeMdnsQuestions(questions, false);
+    const sendOne = (
+      entry: QuerySocket,
+      packet: Uint8Array,
+      host: string,
+      port: number,
+      label: string,
+    ): Promise<boolean> =>
+      new Promise((done) => {
+        try {
+          entry.socket.send(packet, port, host, (error) => {
+            this.debug(
+              `send ${label} -> ${host}:${port} ${error ? `failed: ${error.message}` : "ok"}`,
+            );
+            done(!error);
+          });
+        } catch (error) {
+          this.debug(`send ${label} threw: ${(error as Error).message}`);
+          done(false);
+        }
+      });
+    const jobs: Promise<boolean>[] = [];
     for (const entry of only ?? this.sockets) {
-      if (!entry.ready) continue
-      if (target) jobs.push(sendOne(entry, qu, target.host, target.port, 'target (QU)'))
-      else if (entry.iface) jobs.push(sendOne(entry, qu, MDNS_ADDRESS, MDNS_PORT, `${entry.label} ${entry.iface.address} (QU)`))
+      if (!entry.ready) continue;
+      if (target)
+        jobs.push(sendOne(entry, qu, target.host, target.port, "target (QU)"));
+      else if (entry.iface)
+        jobs.push(
+          sendOne(
+            entry,
+            qu,
+            MDNS_ADDRESS,
+            MDNS_PORT,
+            `${entry.label} ${entry.iface.address} (QU)`,
+          ),
+        );
       else {
         // The shared socket: one interface at a time (the option applies to the next send).
-        jobs.push((async () => {
-          let any = false
-          for (const iface of this.interfaces) {
-            if (!this.sockets.includes(entry)) break
-            try { entry.socket.setMulticastInterface(iface.address) } catch { continue }
-            any = (await sendOne(entry, qm, MDNS_ADDRESS, MDNS_PORT, `5353 via ${iface.name} ${iface.address} (QM)`)) || any
-          }
-          if (this.interfaces.length === 0) any = await sendOne(entry, qm, MDNS_ADDRESS, MDNS_PORT, '5353 default (QM)')
-          return any
-        })())
+        jobs.push(
+          (async () => {
+            let any = false;
+            for (const iface of this.interfaces) {
+              if (!this.sockets.includes(entry)) break;
+              try {
+                entry.socket.setMulticastInterface(iface.address);
+              } catch {
+                continue;
+              }
+              any =
+                (await sendOne(
+                  entry,
+                  qm,
+                  MDNS_ADDRESS,
+                  MDNS_PORT,
+                  `5353 via ${iface.name} ${iface.address} (QM)`,
+                )) || any;
+            }
+            if (this.interfaces.length === 0)
+              any = await sendOne(
+                entry,
+                qm,
+                MDNS_ADDRESS,
+                MDNS_PORT,
+                "5353 default (QM)",
+              );
+            return any;
+          })(),
+        );
       }
     }
-    const results = await Promise.all(jobs)
-    return results.some(Boolean)
+    const results = await Promise.all(jobs);
+    return results.some(Boolean);
   }
 
   private syncDnsSd(): void {
-    const want = this.active && this.dnsSdWanted && process.platform === 'darwin' && !testTarget() && process.env.SURFFISH_CAST_DNSSD !== '0'
-    if (want && !this.dnsSd) this.startDnsSd()
-    else if (!want && this.dnsSd) this.stopDnsSd()
+    const want =
+      this.active &&
+      this.dnsSdWanted &&
+      process.platform === "darwin" &&
+      !testTarget() &&
+      process.env.SURFFISH_CAST_DNSSD !== "0";
+    if (want && !this.dnsSd) this.startDnsSd();
+    else if (!want && this.dnsSd) this.stopDnsSd();
   }
 
   private startDnsSd(): void {
-    let child: ChildProcess
+    let child: ChildProcess;
     try {
-      child = spawn(DNS_SD, ['-Z', '_googlecast._tcp', 'local'], { stdio: ['ignore', 'pipe', 'ignore'] })
+      child = spawn(DNS_SD, ["-Z", "_googlecast._tcp", "local"], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
     } catch (error) {
-      this.debug(`dns-sd spawn failed: ${(error as Error).message}`)
-      return
+      this.debug(`dns-sd spawn failed: ${(error as Error).message}`);
+      return;
     }
-    this.dnsSd = child
-    this.debug('dns-sd started')
-    let pending = ''
-    child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => {
-      pending += chunk
-      const lines = pending.split('\n')
-      pending = lines.pop() ?? ''
-      if (pending.length > 8_192) pending = ''
-      const records = lines.map(parseDnsSdZoneLine).filter((record) => record !== null)
-      if (records.length === 0 || this.dnsSd !== child) return
-      const now = Date.now()
-      if (this.cache.ingest(records, '', now)) {
-        this.debug(`dns-sd: ${records.map((record) => `${record.type}:${record.name}`).join(' ').slice(0, 300)}`)
-        this.resolveHosts(now)
-        this.afterIngest(now)
+    this.dnsSd = child;
+    this.debug("dns-sd started");
+    let pending = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      if (pending.length > 8_192) pending = "";
+      const records = lines
+        .map(parseDnsSdZoneLine)
+        .filter((record) => record !== null);
+      if (records.length === 0 || this.dnsSd !== child) return;
+      const now = Date.now();
+      if (this.cache.ingest(records, "", now)) {
+        this.debug(
+          `dns-sd: ${records
+            .map((record) => `${record.type}:${record.name}`)
+            .join(" ")
+            .slice(0, 300)}`,
+        );
+        this.resolveHosts(now);
+        this.afterIngest(now);
       }
-    })
-    child.on('error', (error) => {
-      this.debug(`dns-sd error: ${error.message}`)
-      if (this.dnsSd === child) this.dnsSd = null
-    })
-    child.on('exit', () => {
-      if (this.dnsSd === child) this.dnsSd = null
-    })
+    });
+    child.on("error", (error) => {
+      this.debug(`dns-sd error: ${error.message}`);
+      if (this.dnsSd === child) this.dnsSd = null;
+    });
+    child.on("exit", () => {
+      if (this.dnsSd === child) this.dnsSd = null;
+    });
   }
 
   /** dns-sd gives SRV hosts (`xxxx.local`), not addresses: the system resolver (mDNSResponder) has them. */
   private resolveHosts(now: number): void {
     for (const host of this.cache.unresolvedHosts(now)) {
-      if (this.resolving.has(host)) continue
-      this.resolving.add(host)
+      if (this.resolving.has(host)) continue;
+      this.resolving.add(host);
       lookup(host, { family: 4 }, (error, address) => {
-        this.resolving.delete(host)
-        if (!this.active) return
-        this.debug(`resolve ${host}: ${error ? error.message : address}`)
-        if (error || !address) return
-        const at = Date.now()
-        if (this.cache.ingest([{ name: host, type: MDNS_TYPE.A, ttl: 120, address }], '', at)) this.afterIngest(at)
-      })
+        this.resolving.delete(host);
+        if (!this.active) return;
+        this.debug(`resolve ${host}: ${error ? error.message : address}`);
+        if (error || !address) return;
+        const at = Date.now();
+        if (
+          this.cache.ingest(
+            [{ name: host, type: MDNS_TYPE.A, ttl: 120, address }],
+            "",
+            at,
+          )
+        )
+          this.afterIngest(at);
+      });
     }
   }
 
   private stopDnsSd(): void {
-    const child = this.dnsSd
-    this.dnsSd = null
+    const child = this.dnsSd;
+    this.dnsSd = null;
     if (child) {
-      this.debug('dns-sd stopped')
-      try { child.kill() } catch { /* already gone */ }
+      this.debug("dns-sd stopped");
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
     }
   }
 
   stop(): void {
-    if (this.timer) clearTimeout(this.timer)
-    if (this.followUpTimer) clearTimeout(this.followUpTimer)
-    this.timer = null
-    this.followUpTimer = null
-    if (this.active) this.debug('browse stop')
-    this.active = false
-    for (const entry of [...this.sockets]) this.closeSocket(entry)
-    this.stopDnsSd()
+    if (this.timer) clearTimeout(this.timer);
+    if (this.followUpTimer) clearTimeout(this.followUpTimer);
+    this.timer = null;
+    this.followUpTimer = null;
+    if (this.active) this.debug("browse stop");
+    this.active = false;
+    for (const entry of [...this.sockets]) this.closeSocket(entry);
+    this.stopDnsSd();
   }
 }

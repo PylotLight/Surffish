@@ -6,7 +6,11 @@
   justify-content: flex-end;
   gap: 6px;
 }
-.feed-items-actions .settings-action { width: auto; padding-inline: 10px; white-space: nowrap; }
+.feed-items-actions .settings-action {
+  width: auto;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
 .feed-items {
   display: flex;
   flex-direction: column;
@@ -16,7 +20,9 @@
   overflow: auto;
   list-style: none;
 }
-.feed-items li + li { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.feed-items li + li {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
 .feed-item {
   display: flex;
   flex-direction: column;
@@ -32,8 +38,13 @@
   cursor: pointer;
 }
 .feed-item:hover:not(:disabled),
-.feed-item:focus-visible { background: rgba(255, 255, 255, 0.06); outline: none; }
-.feed-item:disabled { cursor: default; }
+.feed-item:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+.feed-item:disabled {
+  cursor: default;
+}
 .feed-item-title {
   display: flex;
   align-items: center;
@@ -43,8 +54,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.is-unread .feed-item-title { font-weight: 600; }
-.is-read .feed-item-title { color: rgba(235, 240, 245, 0.62); }
+.is-unread .feed-item-title {
+  font-weight: 600;
+}
+.is-read .feed-item-title {
+  color: rgba(235, 240, 245, 0.62);
+}
 .feed-item-dot {
   flex: 0 0 auto;
   width: 7px;
@@ -59,7 +74,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.feed-item-summary { color: rgba(235, 240, 245, 0.42); }
+.feed-item-summary {
+  color: rgba(235, 240, 245, 0.42);
+}
 .feed-row-select {
   display: flex;
   flex: 1 1 240px;
@@ -75,9 +92,15 @@
   text-align: left;
   cursor: pointer;
 }
-.feed-row-select:hover { background: rgba(255, 255, 255, 0.05); }
-.feed-row.is-selected .feed-row-select { background: rgba(10, 132, 255, 0.16); }
-.feed-row.is-paused .feed-row-select { opacity: 0.6; }
+.feed-row-select:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.feed-row.is-selected .feed-row-select {
+  background: rgba(10, 132, 255, 0.16);
+}
+.feed-row.is-paused .feed-row-select {
+  opacity: 0.6;
+}
 .feed-notify {
   display: inline-flex;
   align-items: center;
@@ -85,7 +108,9 @@
   font-size: 12px;
   white-space: nowrap;
 }
-.feed-add + .feed-add { margin-top: 6px; }
+.feed-add + .feed-add {
+  margin-top: 6px;
+}
 .feed-discovered {
   display: flex;
   flex-direction: column;
@@ -101,14 +126,21 @@
   align-items: center;
   gap: 10px;
 }
-.feed-discovered .settings-action { flex: 0 0 auto; width: auto; padding-inline: 12px; }
+.feed-discovered .settings-action {
+  flex: 0 0 auto;
+  width: auto;
+  padding-inline: 12px;
+}
 .feed-discovered-copy {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
 }
-.feed-discovered-title { font-size: 12.5px; font-weight: 600; }
+.feed-discovered-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
 .feed-discovered-copy small,
 .feed-url {
   overflow: hidden;
@@ -117,4 +149,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.feeds-intro { margin: 0 4px 2px; }
+.feeds-intro {
+  margin: 0 4px 2px;
+}

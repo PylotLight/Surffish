@@ -625,4 +625,4 @@ export const SCREENSHOT_PAGE_HTML = String.raw`<!doctype html>
 })()
 </script>
 </body>
-</html>`
+</html>`;

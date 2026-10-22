@@ -36,4 +36,4 @@
  * @property {number | null} size      bytes, when known
  */
 
-export {}
+export {};

@@ -18,101 +18,153 @@
  */
 
 /** A title-only change sooner than this after the last one waits (a "typing…" title flips per key). */
-export const MINI_HEADER_TITLE_THROTTLE_MS = 250
+export const MINI_HEADER_TITLE_THROTTLE_MS = 250;
 /** Loading must last this long before the header shows it (same-document navigations blip for a frame or two). */
-export const MINI_HEADER_LOADING_DELAY_MS = 200
+export const MINI_HEADER_LOADING_DELAY_MS = 200;
 
 export interface HeaderPushPlan<S> {
   /** The state to send now (loading as the header should show it), or null: nothing to send. */
-  send: S | null
+  send: S | null;
   /** Plan again in this many ms (a held title, loading that may be about to show), or null. */
-  recheckMs: number | null
+  recheckMs: number | null;
 }
 
-export interface HeaderStateGate<S extends { title: string; loading: boolean }> {
+export interface HeaderStateGate<
+  S extends { title: string; loading: boolean },
+> {
   /** What to send for `state` now (`extra`: anything else that should count as a change, e.g. tab URLs). */
-  plan(state: S, extra?: string): HeaderPushPlan<S>
+  plan(state: S, extra?: string): HeaderPushPlan<S>;
   /** `state` (a plan's `send`, or the whole state for a fresh header page) went out. */
-  sent(state: S, extra?: string): void
+  sent(state: S, extra?: string): void;
   /** The header page was (re)loaded: it holds nothing, so the next plan always sends. */
-  reset(): void
+  reset(): void;
 }
 
 interface Keys {
   /** Everything. */
-  full: string
+  full: string;
   /** Everything but the title (what a held title change leaves alone). */
-  rest: string
+  rest: string;
 }
 
-function keysOf<S extends { title: string; loading: boolean }>(state: S, extra: string): Keys {
+function keysOf<S extends { title: string; loading: boolean }>(
+  state: S,
+  extra: string,
+): Keys {
   // The strip's chip titles count as titles too (a background chat tab retitling while it streams).
-  const tabs = (state as { tabs?: unknown }).tabs
-  const chips = Array.isArray(tabs) ? tabs.map((tab: { title?: unknown }) => ({ ...tab, title: '' })) : tabs
-  const titles = Array.isArray(tabs) ? tabs.map((tab: { title?: unknown }) => String(tab.title ?? '')).join('\u0001') : ''
-  const rest = JSON.stringify({ ...state, title: '', tabs: chips }) + '\u0000' + extra
-  return { full: `${rest}\u0000${state.title}\u0002${titles}`, rest }
+  const tabs = (state as { tabs?: unknown }).tabs;
+  const chips = Array.isArray(tabs)
+    ? tabs.map((tab: { title?: unknown }) => ({ ...tab, title: "" }))
+    : tabs;
+  const titles = Array.isArray(tabs)
+    ? tabs
+        .map((tab: { title?: unknown }) => String(tab.title ?? ""))
+        .join("\u0001")
+    : "";
+  const rest =
+    JSON.stringify({ ...state, title: "", tabs: chips }) + "\u0000" + extra;
+  return { full: `${rest}\u0000${state.title}\u0002${titles}`, rest };
 }
 
-export function createHeaderStateGate<S extends { title: string; loading: boolean }>(options: { now: () => number; titleThrottleMs?: number; loadingDelayMs?: number }): HeaderStateGate<S> {
-  const throttle = options.titleThrottleMs ?? MINI_HEADER_TITLE_THROTTLE_MS
-  const loadingDelay = options.loadingDelayMs ?? MINI_HEADER_LOADING_DELAY_MS
-  let last: (Keys & { title: string; loading: boolean }) | null = null
-  let titleAt = Number.NEGATIVE_INFINITY
+export function createHeaderStateGate<
+  S extends { title: string; loading: boolean },
+>(options: {
+  now: () => number;
+  titleThrottleMs?: number;
+  loadingDelayMs?: number;
+}): HeaderStateGate<S> {
+  const throttle = options.titleThrottleMs ?? MINI_HEADER_TITLE_THROTTLE_MS;
+  const loadingDelay = options.loadingDelayMs ?? MINI_HEADER_LOADING_DELAY_MS;
+  let last: (Keys & { title: string; loading: boolean }) | null = null;
+  let titleAt = Number.NEGATIVE_INFINITY;
   /** When this stretch of loading started (null: not loading). */
-  let loadingSince: number | null = null
+  let loadingSince: number | null = null;
   return {
-    plan(state, extra = '') {
-      const now = options.now()
-      let recheck: number | null = null
-      if (!state.loading) loadingSince = null
-      else loadingSince ??= now
+    plan(state, extra = "") {
+      const now = options.now();
+      let recheck: number | null = null;
+      if (!state.loading) loadingSince = null;
+      else loadingSince ??= now;
       // Already showing it: it stays. Otherwise only once it has lasted the delay.
-      const shownLoading = state.loading && (last?.loading === true || now - (loadingSince ?? now) >= loadingDelay)
-      if (state.loading && !shownLoading) recheck = Math.max(1, Math.ceil(loadingDelay - (now - (loadingSince ?? now))))
-      const shown: S = shownLoading === state.loading ? state : { ...state, loading: shownLoading }
-      const next = keysOf(shown, extra)
-      if (!last) return { send: shown, recheckMs: recheck }
-      if (next.full === last.full) return { send: null, recheckMs: recheck }
+      const shownLoading =
+        state.loading &&
+        (last?.loading === true || now - (loadingSince ?? now) >= loadingDelay);
+      if (state.loading && !shownLoading)
+        recheck = Math.max(
+          1,
+          Math.ceil(loadingDelay - (now - (loadingSince ?? now))),
+        );
+      const shown: S =
+        shownLoading === state.loading
+          ? state
+          : { ...state, loading: shownLoading };
+      const next = keysOf(shown, extra);
+      if (!last) return { send: shown, recheckMs: recheck };
+      if (next.full === last.full) return { send: null, recheckMs: recheck };
       // Only the title moved, and it moved a moment ago: hold it (the trailing push brings the latest).
       if (next.rest === last.rest && now - titleAt < throttle) {
-        const wait = Math.max(1, Math.ceil(throttle - (now - titleAt)))
-        return { send: null, recheckMs: recheck === null ? wait : Math.min(recheck, wait) }
+        const wait = Math.max(1, Math.ceil(throttle - (now - titleAt)));
+        return {
+          send: null,
+          recheckMs: recheck === null ? wait : Math.min(recheck, wait),
+        };
       }
-      return { send: shown, recheckMs: recheck }
+      return { send: shown, recheckMs: recheck };
     },
-    sent(state, extra = '') {
-      const keys = keysOf(state, extra)
+    sent(state, extra = "") {
+      const keys = keysOf(state, extra);
       // A title change (not the first push) starts the throttle window.
-      if (last && keys.full.slice(keys.rest.length) !== last.full.slice(last.rest.length)) titleAt = options.now()
-      last = { ...keys, title: state.title, loading: state.loading }
+      if (
+        last &&
+        keys.full.slice(keys.rest.length) !== last.full.slice(last.rest.length)
+      )
+        titleAt = options.now();
+      last = { ...keys, title: state.title, loading: state.loading };
     },
     reset() {
-      last = null
-    }
-  }
+      last = null;
+    },
+  };
 }
 
 /** Which fields differ between two pushed header states (tabs: which tab fields), for SURFFISH_DEBUG_HEADER's log (main/mini-header-debug.ts). */
-export function changedHeaderFields(previous: object | null, next: object): string[] {
-  if (!previous) return ['(first push)']
-  const before = previous as Record<string, unknown>
-  const after = next as Record<string, unknown>
-  const out: string[] = []
+export function changedHeaderFields(
+  previous: object | null,
+  next: object,
+): string[] {
+  if (!previous) return ["(first push)"];
+  const before = previous as Record<string, unknown>;
+  const after = next as Record<string, unknown>;
+  const out: string[] = [];
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const a = JSON.stringify(before[key])
-    const b = JSON.stringify(after[key])
-    if (a === b) continue
-    if (key === 'tabs' && Array.isArray(before[key]) && Array.isArray(after[key])) {
-      const was = before[key] as Array<Record<string, unknown>>
-      const now = after[key] as Array<Record<string, unknown>>
-      if (was.length !== now.length) { out.push(`tabs(${was.length}→${now.length})`); continue }
+    const a = JSON.stringify(before[key]);
+    const b = JSON.stringify(after[key]);
+    if (a === b) continue;
+    if (
+      key === "tabs" &&
+      Array.isArray(before[key]) &&
+      Array.isArray(after[key])
+    ) {
+      const was = before[key] as Array<Record<string, unknown>>;
+      const now = after[key] as Array<Record<string, unknown>>;
+      if (was.length !== now.length) {
+        out.push(`tabs(${was.length}→${now.length})`);
+        continue;
+      }
       now.forEach((tab, index) => {
-        for (const field of Object.keys(tab)) if (JSON.stringify(tab[field]) !== JSON.stringify(was[index]?.[field])) out.push(`tabs[${index}].${field}`)
-      })
-      continue
+        for (const field of Object.keys(tab))
+          if (
+            JSON.stringify(tab[field]) !== JSON.stringify(was[index]?.[field])
+          )
+            out.push(`tabs[${index}].${field}`);
+      });
+      continue;
     }
-    out.push(key === 'loading' || key === 'canGoBack' || key === 'crashed' ? `${key}=${b}` : key)
+    out.push(
+      key === "loading" || key === "canGoBack" || key === "crashed"
+        ? `${key}=${b}`
+        : key,
+    );
   }
-  return out
+  return out;
 }

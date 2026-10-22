@@ -21,7 +21,9 @@
   text-align: left;
   visibility: hidden;
   transform: translateX(100%);
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 220ms;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 220ms;
   will-change: transform;
 }
 /* `transform: none` (and no will-change) once open: either would make the panel the containing block of the fixed suggestion lists and clip them. */
@@ -29,7 +31,9 @@
   visibility: visible;
   transform: none;
   will-change: auto;
-  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s;
 }
 .new-tab-customize-header {
   display: flex;
@@ -60,12 +64,25 @@
   font-size: 12.5px;
   cursor: pointer;
 }
-.new-tab-customize-close { width: 28px; padding: 0; }
-.new-tab-customize-close svg { width: 15px; height: 15px; }
+.new-tab-customize-close {
+  width: 28px;
+  padding: 0;
+}
+.new-tab-customize-close svg {
+  width: 15px;
+  height: 15px;
+}
 .new-tab-customize-settings:hover,
-.new-tab-customize-close:hover { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.1); color: #fff; }
+.new-tab-customize-close:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
 .new-tab-customize-settings:focus-visible,
-.new-tab-customize-close:focus-visible { outline: 2px solid rgba(126, 226, 168, 0.6); outline-offset: 1px; }
+.new-tab-customize-close:focus-visible {
+  outline: 2px solid rgba(126, 226, 168, 0.6);
+  outline-offset: 1px;
+}
 .browser-layout .new-tab-customize .new-tab-customize-body {
   display: flex;
   width: 100%;
@@ -82,18 +99,38 @@
   scrollbar-width: thin;
 }
 .new-tab-customize .settings-row-control .settings-select,
-.new-tab-customize .settings-row-control .settings-input { width: 168px; }
-.new-tab-customize .settings-slider-row { grid-template-columns: 112px minmax(0, 1fr) 44px; }
+.new-tab-customize .settings-row-control .settings-input {
+  width: 168px;
+}
+.new-tab-customize .settings-slider-row {
+  grid-template-columns: 112px minmax(0, 1fr) 44px;
+}
 .new-tab-customize .settings-row:has(.weather-city-search),
-.new-tab-customize .settings-row:has(.weather-key-form) { flex-direction: column; align-items: stretch; gap: 8px; }
-.new-tab-customize .settings-row:has(.weather-city-search) .settings-row-control,
-.new-tab-customize .settings-row:has(.weather-key-form) .settings-row-control { width: 100%; }
-.new-tab-customize .new-tab-world-clock-editor { grid-template-columns: minmax(70px, 0.8fr) minmax(110px, 1.2fr) auto; }
+.new-tab-customize .settings-row:has(.weather-key-form) {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.new-tab-customize
+  .settings-row:has(.weather-city-search)
+  .settings-row-control,
+.new-tab-customize .settings-row:has(.weather-key-form) .settings-row-control {
+  width: 100%;
+}
+.new-tab-customize .new-tab-world-clock-editor {
+  grid-template-columns: minmax(70px, 0.8fr) minmax(110px, 1.2fr) auto;
+}
 @media (prefers-reduced-motion: reduce) {
   .browser-layout .new-tab-page .settings-view.new-tab-customize,
-  .browser-layout .new-tab-page .settings-view.new-tab-customize.is-open { transition: none; }
+  .browser-layout .new-tab-page .settings-view.new-tab-customize.is-open {
+    transition: none;
+  }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .browser-layout .new-tab-page .settings-view.new-tab-customize { background: #0f1317; }
+  .browser-layout .new-tab-page .settings-view.new-tab-customize {
+    background: #0f1317;
+  }
 }
-.new-tab-customize .weather-city-search { width: 100%; }
+.new-tab-customize .weather-city-search {
+  width: 100%;
+}

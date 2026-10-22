@@ -6,24 +6,34 @@
  *
  * The shim never fakes paid/pro state: it only fills in browser APIs Electron lacks.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, posix, relative, resolve, sep } from 'node:path'
-import type { ExtensionSourceFile } from '../shared/extension-compat'
-import { EXTENSION_PAGE_TABS_SHIM } from './extension-tabs-shim.ts'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, posix, relative, resolve, sep } from "node:path";
+import type { ExtensionSourceFile } from "../shared/extension-compat";
+import { EXTENSION_PAGE_TABS_SHIM } from "./extension-tabs-shim.ts";
 
-export const EXTENSION_SHIM_FILE = 'surffish-extension-shim.js'
-export const EXTENSION_BACKGROUND_WRAPPER_FILE = 'surffish-extension-background.js'
+export const EXTENSION_SHIM_FILE = "surffish-extension-shim.js";
+export const EXTENSION_BACKGROUND_WRAPPER_FILE =
+  "surffish-extension-background.js";
 /** Hidden relay page between Surffish and the extension's worker (see main/extension-bridge.ts). */
-export const EXTENSION_BRIDGE_PAGE = 'surffish-bridge.html'
-export const EXTENSION_BRIDGE_SCRIPT = 'surffish-bridge.js'
-const SHIM_MARKER = 'data-surffish-extension-shim'
+export const EXTENSION_BRIDGE_PAGE = "surffish-bridge.html";
+export const EXTENSION_BRIDGE_SCRIPT = "surffish-bridge.js";
+const SHIM_MARKER = "data-surffish-extension-shim";
 /** Messages between Surffish's bridge page and its worker shim carry this key; the extension never sees them. */
-export const EXTENSION_BRIDGE_KEY = '__surffishBridge'
+export const EXTENSION_BRIDGE_KEY = "__surffishBridge";
 
-type JsonRecord = Record<string, unknown>
+type JsonRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -429,14 +439,14 @@ export const EXTENSION_SHIM_SOURCE = `(() => {
     }
   }
 })();
-`
+`;
 
 /** The bridge page: no shim (it must see the bridge messages the shim hides). */
 export const EXTENSION_BRIDGE_HTML = `<!doctype html>
 <!-- Surffish extension bridge (${SHIM_MARKER}: not injected here) -->
 <meta charset="utf-8">
 <script src="/${EXTENSION_BRIDGE_SCRIPT}"></script>
-`
+`;
 
 /**
  * Runs in the hidden bridge page (extension origin, Surffish preload). Relays webNavigation events
@@ -504,34 +514,41 @@ export const EXTENSION_BRIDGE_SOURCE = `(() => {
   });
   host.send({ type: 'ready' });
 })();
-`
+`;
 
 /** Insert the shim as the first script of an extension HTML page. */
 export function injectExtensionShim(html: string): string {
-  if (html.includes(SHIM_MARKER)) return html
-  const script = `<script src="/${EXTENSION_SHIM_FILE}" ${SHIM_MARKER}></script>`
-  if (/<head\b[^>]*>/i.test(html)) return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n  ${script}`)
-  if (/<html\b[^>]*>/i.test(html)) return html.replace(/<html\b[^>]*>/i, (tag) => `${tag}\n${script}`)
-  return `${script}\n${html}`
+  if (html.includes(SHIM_MARKER)) return html;
+  const script = `<script src="/${EXTENSION_SHIM_FILE}" ${SHIM_MARKER}></script>`;
+  if (/<head\b[^>]*>/i.test(html))
+    return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n  ${script}`);
+  if (/<html\b[^>]*>/i.test(html))
+    return html.replace(/<html\b[^>]*>/i, (tag) => `${tag}\n${script}`);
+  return `${script}\n${html}`;
 }
 
 function backgroundWrapperSource(original: string, isModule: boolean): string {
-  const base = posix.basename(original)
+  const base = posix.basename(original);
   return isModule
     ? `import '/${EXTENSION_SHIM_FILE}';\nimport './${base}';\n`
-    : `importScripts('/${EXTENSION_SHIM_FILE}', './${base}');\n`
+    : `importScripts('/${EXTENSION_SHIM_FILE}', './${base}');\n`;
 }
 
 export interface AdaptedWebStoreManifest {
-  manifest: JsonRecord
-  worker: { original: string; wrapper: string; module: boolean } | null
+  manifest: JsonRecord;
+  worker: { original: string; wrapper: string; module: boolean } | null;
 }
 
 function safeRelativePath(value: unknown): string | null {
-  if (typeof value !== 'string' || !value) return null
-  const normalized = posix.normalize(value.replace(/^\/+/, ''))
-  if (normalized.startsWith('..') || normalized.includes('\0') || /^[a-z]:/i.test(normalized)) return null
-  return normalized
+  if (typeof value !== "string" || !value) return null;
+  const normalized = posix.normalize(value.replace(/^\/+/, ""));
+  if (
+    normalized.startsWith("..") ||
+    normalized.includes("\0") ||
+    /^[a-z]:/i.test(normalized)
+  )
+    return null;
+  return normalized;
 }
 
 /**
@@ -539,213 +556,362 @@ function safeRelativePath(value: unknown): string | null {
  * identity with the publisher key, run the shim before the background worker, and prepend it to
  * isolated-world content scripts.
  */
-export function adaptWebStoreManifest(input: unknown, publicKeyBase64: string | null): AdaptedWebStoreManifest {
-  if (!isRecord(input)) throw new Error('The extension manifest is not a JSON object.')
-  const manifest = structuredClone(input) as JsonRecord
-  delete manifest.update_url
-  if (publicKeyBase64) manifest.key = publicKeyBase64
+export function adaptWebStoreManifest(
+  input: unknown,
+  publicKeyBase64: string | null,
+): AdaptedWebStoreManifest {
+  if (!isRecord(input))
+    throw new Error("The extension manifest is not a JSON object.");
+  const manifest = structuredClone(input) as JsonRecord;
+  delete manifest.update_url;
+  if (publicKeyBase64) manifest.key = publicKeyBase64;
 
-  let worker: AdaptedWebStoreManifest['worker'] = null
-  const background = isRecord(manifest.background) ? { ...manifest.background } : null
-  const serviceWorker = background ? safeRelativePath(background.service_worker) : null
+  let worker: AdaptedWebStoreManifest["worker"] = null;
+  const background = isRecord(manifest.background)
+    ? { ...manifest.background }
+    : null;
+  const serviceWorker = background
+    ? safeRelativePath(background.service_worker)
+    : null;
   if (background && serviceWorker) {
-    const directory = posix.dirname(serviceWorker)
-    const wrapper = directory === '.' ? EXTENSION_BACKGROUND_WRAPPER_FILE : `${directory}/${EXTENSION_BACKGROUND_WRAPPER_FILE}`
-    const module = background.type === 'module'
-    background.service_worker = wrapper
-    manifest.background = background
-    worker = { original: serviceWorker, wrapper, module }
+    const directory = posix.dirname(serviceWorker);
+    const wrapper =
+      directory === "."
+        ? EXTENSION_BACKGROUND_WRAPPER_FILE
+        : `${directory}/${EXTENSION_BACKGROUND_WRAPPER_FILE}`;
+    const module = background.type === "module";
+    background.service_worker = wrapper;
+    manifest.background = background;
+    worker = { original: serviceWorker, wrapper, module };
   }
 
   if (Array.isArray(manifest.content_scripts)) {
     manifest.content_scripts = manifest.content_scripts.map((entry) => {
-      if (!isRecord(entry) || entry.world === 'MAIN' || !Array.isArray(entry.js) || entry.js.length === 0) return entry
-      const js = entry.js.filter((file): file is string => typeof file === 'string')
-      return { ...entry, js: js.includes(EXTENSION_SHIM_FILE) ? js : [EXTENSION_SHIM_FILE, ...js] }
-    })
+      if (
+        !isRecord(entry) ||
+        entry.world === "MAIN" ||
+        !Array.isArray(entry.js) ||
+        entry.js.length === 0
+      )
+        return entry;
+      const js = entry.js.filter(
+        (file): file is string => typeof file === "string",
+      );
+      return {
+        ...entry,
+        js: js.includes(EXTENSION_SHIM_FILE)
+          ? js
+          : [EXTENSION_SHIM_FILE, ...js],
+      };
+    });
   }
-  return { manifest, worker }
+  return { manifest, worker };
 }
 
-function listFiles(directory: string, predicate: (name: string) => boolean, limit = 5000): string[] {
-  const results: string[] = []
+function listFiles(
+  directory: string,
+  predicate: (name: string) => boolean,
+  limit = 5000,
+): string[] {
+  const results: string[] = [];
   const walk = (current: string): void => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
-      if (results.length >= limit) return
-      const path = join(current, entry.name)
-      if (entry.isDirectory()) walk(path)
-      else if (entry.isFile() && predicate(entry.name)) results.push(path)
+      if (results.length >= limit) return;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && predicate(entry.name)) results.push(path);
     }
-  }
-  walk(directory)
-  return results
+  };
+  walk(directory);
+  return results;
 }
 
-const MAX_SCANNED_SOURCE_BYTES = 24 * 1024 * 1024
+const MAX_SCANNED_SOURCE_BYTES = 24 * 1024 * 1024;
 
 /** The extension's JS files for the static API scan (bounded; never executed). */
-export function collectExtensionSources(directory: string): ExtensionSourceFile[] {
-  const root = resolve(directory)
-  const files: ExtensionSourceFile[] = []
-  let total = 0
-  for (const path of listFiles(root, (name) => /\.(m?js)$/i.test(name) && name !== EXTENSION_SHIM_FILE && name !== EXTENSION_BACKGROUND_WRAPPER_FILE && name !== EXTENSION_BRIDGE_SCRIPT)) {
-    const size = statSync(path).size
-    if (total + size > MAX_SCANNED_SOURCE_BYTES) break
-    total += size
-    files.push({ path: relative(root, path).split(sep).join('/'), content: readFileSync(path, 'utf8') })
+export function collectExtensionSources(
+  directory: string,
+): ExtensionSourceFile[] {
+  const root = resolve(directory);
+  const files: ExtensionSourceFile[] = [];
+  let total = 0;
+  for (const path of listFiles(
+    root,
+    (name) =>
+      /\.(m?js)$/i.test(name) &&
+      name !== EXTENSION_SHIM_FILE &&
+      name !== EXTENSION_BACKGROUND_WRAPPER_FILE &&
+      name !== EXTENSION_BRIDGE_SCRIPT,
+  )) {
+    const size = statSync(path).size;
+    if (total + size > MAX_SCANNED_SOURCE_BYTES) break;
+    total += size;
+    files.push({
+      path: relative(root, path).split(sep).join("/"),
+      content: readFileSync(path, "utf8"),
+    });
   }
-  return files
+  return files;
 }
 
 /** The extension's static declarativeNetRequest rulesets, for the install compatibility check (bounded). */
-export function collectDnrRulesets(directory: string, manifest: unknown): Array<{ id: string; rules: unknown }> {
-  const root = resolve(directory)
-  const result: Array<{ id: string; rules: unknown }> = []
-  const dnr = isRecord(manifest) && isRecord(manifest.declarative_net_request) ? manifest.declarative_net_request : {}
-  const declarations = (Array.isArray(dnr.rule_resources) ? dnr.rule_resources : []).filter(isRecord)
-    .filter((entry): entry is { id: string; path: string } => typeof entry.id === 'string' && typeof entry.path === 'string')
+export function collectDnrRulesets(
+  directory: string,
+  manifest: unknown,
+): Array<{ id: string; rules: unknown }> {
+  const root = resolve(directory);
+  const result: Array<{ id: string; rules: unknown }> = [];
+  const dnr =
+    isRecord(manifest) && isRecord(manifest.declarative_net_request)
+      ? manifest.declarative_net_request
+      : {};
+  const declarations = (
+    Array.isArray(dnr.rule_resources) ? dnr.rule_resources : []
+  )
+    .filter(isRecord)
+    .filter(
+      (entry): entry is { id: string; path: string } =>
+        typeof entry.id === "string" && typeof entry.path === "string",
+    );
   for (const declaration of declarations) {
-    const relativePath = safeRelativePath(declaration.path)
-    if (!relativePath) continue
-    const file = resolve(root, relativePath)
-    if (!file.startsWith(`${root}${sep}`) || !existsSync(file) || statSync(file).size > MAX_SCANNED_SOURCE_BYTES) continue
+    const relativePath = safeRelativePath(declaration.path);
+    if (!relativePath) continue;
+    const file = resolve(root, relativePath);
+    if (
+      !file.startsWith(`${root}${sep}`) ||
+      !existsSync(file) ||
+      statSync(file).size > MAX_SCANNED_SOURCE_BYTES
+    )
+      continue;
     try {
-      result.push({ id: declaration.id, rules: JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) as unknown })
+      result.push({
+        id: declaration.id,
+        rules: JSON.parse(
+          readFileSync(file, "utf8").replace(/^\uFEFF/, ""),
+        ) as unknown,
+      });
     } catch {
-      result.push({ id: declaration.id, rules: null })
+      result.push({ id: declaration.id, rules: null });
     }
   }
-  return result
+  return result;
 }
 
-export const EXTENSION_SIDECAR_FILE = 'surffish-extension.json'
+export const EXTENSION_SIDECAR_FILE = "surffish-extension.json";
 
 /** Write (or refresh) the shim and background wrapper inside a staged extension directory. */
 export function writeExtensionShimFiles(directory: string): void {
-  writeFileSync(join(directory, EXTENSION_SHIM_FILE), EXTENSION_SHIM_SOURCE)
-  writeFileSync(join(directory, EXTENSION_BRIDGE_PAGE), EXTENSION_BRIDGE_HTML)
-  writeFileSync(join(directory, EXTENSION_BRIDGE_SCRIPT), EXTENSION_BRIDGE_SOURCE)
-  const sidecarPath = join(directory, EXTENSION_SIDECAR_FILE)
-  if (!existsSync(sidecarPath)) return
-  const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8')) as unknown
-  if (!isRecord(sidecar) || !isRecord(sidecar.worker)) return
-  const original = safeRelativePath(sidecar.worker.original)
-  const wrapper = safeRelativePath(sidecar.worker.wrapper)
-  if (!original || !wrapper || posix.basename(wrapper) !== EXTENSION_BACKGROUND_WRAPPER_FILE) return
-  writeFileSync(join(directory, ...wrapper.split('/')), backgroundWrapperSource(original, sidecar.worker.module === true))
+  writeFileSync(join(directory, EXTENSION_SHIM_FILE), EXTENSION_SHIM_SOURCE);
+  writeFileSync(join(directory, EXTENSION_BRIDGE_PAGE), EXTENSION_BRIDGE_HTML);
+  writeFileSync(
+    join(directory, EXTENSION_BRIDGE_SCRIPT),
+    EXTENSION_BRIDGE_SOURCE,
+  );
+  const sidecarPath = join(directory, EXTENSION_SIDECAR_FILE);
+  if (!existsSync(sidecarPath)) return;
+  const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as unknown;
+  if (!isRecord(sidecar) || !isRecord(sidecar.worker)) return;
+  const original = safeRelativePath(sidecar.worker.original);
+  const wrapper = safeRelativePath(sidecar.worker.wrapper);
+  if (
+    !original ||
+    !wrapper ||
+    posix.basename(wrapper) !== EXTENSION_BACKGROUND_WRAPPER_FILE
+  )
+    return;
+  writeFileSync(
+    join(directory, ...wrapper.split("/")),
+    backgroundWrapperSource(original, sidecar.worker.module === true),
+  );
 }
 
 export interface StagedWebStoreExtension {
-  stagedDirectory: string
-  version: string
-  manifest: JsonRecord
+  stagedDirectory: string;
+  version: string;
+  manifest: JsonRecord;
 }
 
 /**
  * Copy `sourceDirectory` (an unpacked Web Store package) to `targetDirectory`, adapting only the copy.
  * `_metadata/` (Web Store verified contents, which Chromium refuses to load unpacked) is never copied.
  */
-export function stageWebStoreExtension(sourceDirectory: string, targetDirectory: string, publicKeyBase64: string | null): StagedWebStoreExtension {
-  const source = resolve(sourceDirectory)
-  const manifestPath = join(source, 'manifest.json')
-  if (!existsSync(manifestPath)) throw new Error('The extension package has no manifest.json.')
-  let sourceManifest: unknown
+export function stageWebStoreExtension(
+  sourceDirectory: string,
+  targetDirectory: string,
+  publicKeyBase64: string | null,
+): StagedWebStoreExtension {
+  const source = resolve(sourceDirectory);
+  const manifestPath = join(source, "manifest.json");
+  if (!existsSync(manifestPath))
+    throw new Error("The extension package has no manifest.json.");
+  let sourceManifest: unknown;
   try {
-    sourceManifest = JSON.parse(readFileSync(manifestPath, 'utf8').replace(/^\uFEFF/, ''))
+    sourceManifest = JSON.parse(
+      readFileSync(manifestPath, "utf8").replace(/^\uFEFF/, ""),
+    );
   } catch (error) {
-    throw new Error(`The extension manifest could not be parsed: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(
+      `The extension manifest could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  const { manifest, worker } = adaptWebStoreManifest(sourceManifest, publicKeyBase64)
-  const version = typeof manifest.version === 'string' ? manifest.version : ''
-  if (!/^\d+(\.\d+){0,3}$/.test(version)) throw new Error('The extension manifest has no valid version.')
-  if (worker && !existsSync(join(source, ...worker.original.split('/')))) throw new Error(`The extension is missing its background worker ${worker.original}.`)
+  const { manifest, worker } = adaptWebStoreManifest(
+    sourceManifest,
+    publicKeyBase64,
+  );
+  const version = typeof manifest.version === "string" ? manifest.version : "";
+  if (!/^\d+(\.\d+){0,3}$/.test(version))
+    throw new Error("The extension manifest has no valid version.");
+  if (worker && !existsSync(join(source, ...worker.original.split("/"))))
+    throw new Error(
+      `The extension is missing its background worker ${worker.original}.`,
+    );
 
-  const staged = resolve(targetDirectory)
-  rmSync(staged, { recursive: true, force: true })
-  mkdirSync(staged, { recursive: true })
+  const staged = resolve(targetDirectory);
+  rmSync(staged, { recursive: true, force: true });
+  mkdirSync(staged, { recursive: true });
   cpSync(source, staged, {
     recursive: true,
     dereference: false,
     filter: (path) => {
-      const rel = relative(source, path).split(sep)
-      return rel[0] !== '_metadata'
-    }
-  })
-  writeFileSync(join(staged, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-  writeFileSync(join(staged, EXTENSION_SIDECAR_FILE), `${JSON.stringify({ worker }, null, 2)}\n`)
-  if (worker) mkdirSync(dirname(join(staged, ...worker.wrapper.split('/'))), { recursive: true })
-  writeExtensionShimFiles(staged)
-  for (const htmlPath of listFiles(staged, (name) => name.toLowerCase().endsWith('.html'))) {
-    const html = readFileSync(htmlPath, 'utf8')
-    const adapted = injectExtensionShim(html)
-    if (adapted !== html) writeFileSync(htmlPath, adapted)
+      const rel = relative(source, path).split(sep);
+      return rel[0] !== "_metadata";
+    },
+  });
+  writeFileSync(
+    join(staged, "manifest.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(staged, EXTENSION_SIDECAR_FILE),
+    `${JSON.stringify({ worker }, null, 2)}\n`,
+  );
+  if (worker)
+    mkdirSync(dirname(join(staged, ...worker.wrapper.split("/"))), {
+      recursive: true,
+    });
+  writeExtensionShimFiles(staged);
+  for (const htmlPath of listFiles(staged, (name) =>
+    name.toLowerCase().endsWith(".html"),
+  )) {
+    const html = readFileSync(htmlPath, "utf8");
+    const adapted = injectExtensionShim(html);
+    if (adapted !== html) writeFileSync(htmlPath, adapted);
   }
-  return { stagedDirectory: staged, version, manifest }
+  return { stagedDirectory: staged, version, manifest };
 }
 
 /** Resolve a __MSG_name__ manifest string from the default locale. */
-export function resolveManifestMessage(directory: string, manifest: JsonRecord, value: unknown): string {
-  if (typeof value !== 'string') return ''
-  const match = /^__MSG_(.+)__$/.exec(value)
-  if (!match) return value
-  const locale = typeof manifest.default_locale === 'string' ? manifest.default_locale : 'en'
-  for (const candidate of [locale, locale.split('_')[0], 'en', 'en_US']) {
-    if (!candidate || !/^[\w-]+$/.test(candidate)) continue
-    const path = join(directory, '_locales', candidate, 'messages.json')
-    if (!existsSync(path)) continue
+export function resolveManifestMessage(
+  directory: string,
+  manifest: JsonRecord,
+  value: unknown,
+): string {
+  if (typeof value !== "string") return "";
+  const match = /^__MSG_(.+)__$/.exec(value);
+  if (!match) return value;
+  const locale =
+    typeof manifest.default_locale === "string"
+      ? manifest.default_locale
+      : "en";
+  for (const candidate of [locale, locale.split("_")[0], "en", "en_US"]) {
+    if (!candidate || !/^[\w-]+$/.test(candidate)) continue;
+    const path = join(directory, "_locales", candidate, "messages.json");
+    if (!existsSync(path)) continue;
     try {
-      const messages = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) as unknown
-      if (!isRecord(messages)) continue
-      const key = Object.keys(messages).find((name) => name.toLowerCase() === (match[1] as string).toLowerCase())
-      const entry = key ? messages[key] : undefined
-      if (isRecord(entry) && typeof entry.message === 'string') return entry.message
+      const messages = JSON.parse(
+        readFileSync(path, "utf8").replace(/^\uFEFF/, ""),
+      ) as unknown;
+      if (!isRecord(messages)) continue;
+      const key = Object.keys(messages).find(
+        (name) => name.toLowerCase() === (match[1] as string).toLowerCase(),
+      );
+      const entry = key ? messages[key] : undefined;
+      if (isRecord(entry) && typeof entry.message === "string")
+        return entry.message;
     } catch {
       // Fall through to the next locale.
     }
   }
-  return value
+  return value;
 }
 
 /** A small data: URL for the extension's toolbar icon, or null. */
-export function readExtensionIconDataUrl(directory: string, manifest: JsonRecord, preferredSizes = ['32', '48', '38', '24', '16', '64', '96', '128']): string | null {
-  const action = isRecord(manifest.action) ? manifest.action : isRecord(manifest.browser_action) ? manifest.browser_action : {}
-  const actionIcons = isRecord(action.default_icon) ? action.default_icon : typeof action.default_icon === 'string' ? { 32: action.default_icon } : {}
-  const icons = isRecord(manifest.icons) ? manifest.icons : {}
-  const candidates = [...preferredSizes.map((size) => actionIcons[size]), ...preferredSizes.map((size) => icons[size])]
-  const root = resolve(directory)
+export function readExtensionIconDataUrl(
+  directory: string,
+  manifest: JsonRecord,
+  preferredSizes = ["32", "48", "38", "24", "16", "64", "96", "128"],
+): string | null {
+  const action = isRecord(manifest.action)
+    ? manifest.action
+    : isRecord(manifest.browser_action)
+      ? manifest.browser_action
+      : {};
+  const actionIcons = isRecord(action.default_icon)
+    ? action.default_icon
+    : typeof action.default_icon === "string"
+      ? { 32: action.default_icon }
+      : {};
+  const icons = isRecord(manifest.icons) ? manifest.icons : {};
+  const candidates = [
+    ...preferredSizes.map((size) => actionIcons[size]),
+    ...preferredSizes.map((size) => icons[size]),
+  ];
+  const root = resolve(directory);
   for (const iconPath of candidates) {
-    const relativePath = safeRelativePath(iconPath)
-    if (!relativePath) continue
-    const candidate = resolve(root, relativePath)
-    if (!candidate.startsWith(`${root}${sep}`) || !existsSync(candidate)) continue
-    const extension = candidate.toLowerCase().split('.').at(-1)
-    const mime = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg' : extension === 'svg' ? 'image/svg+xml' : null
-    const stats = statSync(candidate)
-    if (mime && stats.isFile() && stats.size <= 256 * 1024) return `data:${mime};base64,${readFileSync(candidate).toString('base64')}`
+    const relativePath = safeRelativePath(iconPath);
+    if (!relativePath) continue;
+    const candidate = resolve(root, relativePath);
+    if (!candidate.startsWith(`${root}${sep}`) || !existsSync(candidate))
+      continue;
+    const extension = candidate.toLowerCase().split(".").at(-1);
+    const mime =
+      extension === "png"
+        ? "image/png"
+        : extension === "webp"
+          ? "image/webp"
+          : extension === "jpg" || extension === "jpeg"
+            ? "image/jpeg"
+            : extension === "svg"
+              ? "image/svg+xml"
+              : null;
+    const stats = statSync(candidate);
+    if (mime && stats.isFile() && stats.size <= 256 * 1024)
+      return `data:${mime};base64,${readFileSync(candidate).toString("base64")}`;
   }
-  return null
+  return null;
 }
 
 export function manifestPopupPath(manifest: JsonRecord): string | null {
-  const action = isRecord(manifest.action) ? manifest.action : isRecord(manifest.browser_action) ? manifest.browser_action : {}
-  return safeRelativePath(action.default_popup)
+  const action = isRecord(manifest.action)
+    ? manifest.action
+    : isRecord(manifest.browser_action)
+      ? manifest.browser_action
+      : {};
+  return safeRelativePath(action.default_popup);
 }
 
 export function manifestOptionsPath(manifest: JsonRecord): string | null {
-  const optionsUi = isRecord(manifest.options_ui) ? manifest.options_ui : {}
-  return safeRelativePath(optionsUi.page) ?? safeRelativePath(manifest.options_page)
+  const optionsUi = isRecord(manifest.options_ui) ? manifest.options_ui : {};
+  return (
+    safeRelativePath(optionsUi.page) ?? safeRelativePath(manifest.options_page)
+  );
 }
 
 /** Scripts the staged background worker loads (wrapper, shim, original), for the fresh-worker stamp. */
 export function extensionWorkerFiles(directory: string): string[] {
-  const sidecarPath = join(directory, EXTENSION_SIDECAR_FILE)
-  if (!existsSync(sidecarPath)) return [EXTENSION_SHIM_FILE]
+  const sidecarPath = join(directory, EXTENSION_SIDECAR_FILE);
+  if (!existsSync(sidecarPath)) return [EXTENSION_SHIM_FILE];
   try {
-    const sidecar = JSON.parse(readFileSync(sidecarPath, 'utf8')) as unknown
-    if (!isRecord(sidecar) || !isRecord(sidecar.worker)) return [EXTENSION_SHIM_FILE]
-    const files = [safeRelativePath(sidecar.worker.wrapper), EXTENSION_SHIM_FILE, safeRelativePath(sidecar.worker.original)]
-    return files.filter((file): file is string => typeof file === 'string')
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as unknown;
+    if (!isRecord(sidecar) || !isRecord(sidecar.worker))
+      return [EXTENSION_SHIM_FILE];
+    const files = [
+      safeRelativePath(sidecar.worker.wrapper),
+      EXTENSION_SHIM_FILE,
+      safeRelativePath(sidecar.worker.original),
+    ];
+    return files.filter((file): file is string => typeof file === "string");
   } catch {
-    return [EXTENSION_SHIM_FILE]
+    return [EXTENSION_SHIM_FILE];
   }
 }

@@ -8,7 +8,7 @@
  * preload, like any page. Popups are plain BrowserWindows outside the browser-window list: no
  * toolbar, never restored, closed with their opener.
  */
-import { BrowserWindow, type WebContents } from 'electron'
+import { BrowserWindow, type WebContents } from "electron";
 import {
   isActivatingKeyInput,
   isActivatingMouseInput,
@@ -16,27 +16,27 @@ import {
   isPopupNavigationUrl,
   isPopupStartUrl,
   isScriptPopupRequest,
-  PopupActivation
-} from '../shared/page-popups'
+  PopupActivation,
+} from "../shared/page-popups";
 
 export interface PagePopupHost {
   /** Open a link (target=_blank, window.open without features) from a popup as a browser tab. */
-  openTab(url: string, activate: boolean): void
+  openTab(url: string, activate: boolean): void;
   /** Google's sign-in can't run in Electron: hand it to the native sign-in (true = handled). */
-  handOffSignIn?(contents: WebContents, url: string): boolean
+  handOffSignIn?(contents: WebContents, url: string): boolean;
 }
 
-const activations = new WeakMap<WebContents, PopupActivation>()
+const activations = new WeakMap<WebContents, PopupActivation>();
 /** Popups allowed but not created yet (did-create-window only configures windows we allowed). */
-const pendingPopups = new WeakMap<WebContents, number>()
+const pendingPopups = new WeakMap<WebContents, number>();
 
 function activationFor(contents: WebContents): PopupActivation {
-  let activation = activations.get(contents)
+  let activation = activations.get(contents);
   if (!activation) {
-    activation = new PopupActivation()
-    activations.set(contents, activation)
+    activation = new PopupActivation();
+    activations.set(contents, activation);
   }
-  return activation
+  return activation;
 }
 
 const POPUP_WEB_PREFERENCES: Electron.WebPreferences = {
@@ -47,27 +47,30 @@ const POPUP_WEB_PREFERENCES: Electron.WebPreferences = {
   allowRunningInsecureContent: false,
   // The session's ad-filter frame preload runs in the popup's iframes too, as in tabs.
   nodeIntegrationInSubFrames: true,
-  spellcheck: true
-}
+  spellcheck: true,
+};
 
 /**
  * Track user activation in `contents` and turn the popups it allows into configured windows.
  * Clicks inside cross-site iframes reach before-mouse-event too (input-event only sees the main
  * frame's widget), which is what Disqus's login button is.
  */
-export function attachPagePopups(contents: WebContents, host: PagePopupHost): void {
-  contents.on('before-mouse-event', (_event, input) => {
-    if (isActivatingMouseInput(input)) activationFor(contents).note(Date.now())
-  })
-  contents.on('before-input-event', (_event, input) => {
-    if (isActivatingKeyInput(input)) activationFor(contents).note(Date.now())
-  })
-  contents.on('did-create-window', (window) => {
-    const pending = pendingPopups.get(contents) ?? 0
-    if (pending <= 0 || !(window instanceof BrowserWindow)) return
-    pendingPopups.set(contents, pending - 1)
-    configurePagePopup(window, host)
-  })
+export function attachPagePopups(
+  contents: WebContents,
+  host: PagePopupHost,
+): void {
+  contents.on("before-mouse-event", (_event, input) => {
+    if (isActivatingMouseInput(input)) activationFor(contents).note(Date.now());
+  });
+  contents.on("before-input-event", (_event, input) => {
+    if (isActivatingKeyInput(input)) activationFor(contents).note(Date.now());
+  });
+  contents.on("did-create-window", (window) => {
+    const pending = pendingPopups.get(contents) ?? 0;
+    if (pending <= 0 || !(window instanceof BrowserWindow)) return;
+    pendingPopups.set(contents, pending - 1);
+    configurePagePopup(window, host);
+  });
 }
 
 /**
@@ -75,45 +78,51 @@ export function attachPagePopups(contents: WebContents, host: PagePopupHost): vo
  * the last 5 s, consumed here), or null when this request is not one: the caller then applies its
  * usual rules (tabs for links, deny for unrequested popups).
  */
-export function userPopupResponse(contents: WebContents, details: Electron.HandlerDetails): Electron.WindowOpenHandlerResponse | null {
-  if (!isScriptPopupRequest(details) || !isPopupStartUrl(details.url)) return null
-  if (!activationFor(contents).consume(Date.now())) return null
-  pendingPopups.set(contents, (pendingPopups.get(contents) ?? 0) + 1)
+export function userPopupResponse(
+  contents: WebContents,
+  details: Electron.HandlerDetails,
+): Electron.WindowOpenHandlerResponse | null {
+  if (!isScriptPopupRequest(details) || !isPopupStartUrl(details.url))
+    return null;
+  if (!activationFor(contents).consume(Date.now())) return null;
+  pendingPopups.set(contents, (pendingPopups.get(contents) ?? 0) + 1);
   return {
-    action: 'allow',
+    action: "allow",
     outlivesOpener: false,
     overrideBrowserWindowOptions: {
       autoHideMenuBar: true,
       fullscreenable: false,
       show: true,
-      webPreferences: POPUP_WEB_PREFERENCES
-    }
-  }
+      webPreferences: POPUP_WEB_PREFERENCES,
+    },
+  };
 }
 
 function configurePagePopup(window: BrowserWindow, host: PagePopupHost): void {
-  const contents = window.webContents
-  window.setMenuBarVisibility(false)
-  attachPagePopups(contents, host)
+  const contents = window.webContents;
+  window.setMenuBarVisibility(false);
+  attachPagePopups(contents, host);
   contents.setWindowOpenHandler((details) => {
-    const popup = userPopupResponse(contents, details)
-    if (popup) return popup
+    const popup = userPopupResponse(contents, details);
+    if (popup) return popup;
     // Links out of a popup (terms, help) open as tabs in the opener's window.
-    if (isPopupNavigationUrl(details.url) && !isScriptPopupRequest(details)) host.openTab(details.url, details.disposition !== 'background-tab')
-    return { action: 'deny' }
-  })
-  contents.on('will-navigate', (event, url) => {
-    if (!isPopupNavigationUrl(url)) return event.preventDefault()
-    if (host.handOffSignIn?.(contents, url)) event.preventDefault()
-  })
-  contents.on('will-redirect', (event, url, _isInPlace, isMainFrame) => {
-    if (!isPopupNavigationUrl(url)) return event.preventDefault()
-    if (isMainFrame && host.handOffSignIn?.(contents, url)) event.preventDefault()
-  })
-  contents.on('before-input-event', (event, input) => {
+    if (isPopupNavigationUrl(details.url) && !isScriptPopupRequest(details))
+      host.openTab(details.url, details.disposition !== "background-tab");
+    return { action: "deny" };
+  });
+  contents.on("will-navigate", (event, url) => {
+    if (!isPopupNavigationUrl(url)) return event.preventDefault();
+    if (host.handOffSignIn?.(contents, url)) event.preventDefault();
+  });
+  contents.on("will-redirect", (event, url, _isInPlace, isMainFrame) => {
+    if (!isPopupNavigationUrl(url)) return event.preventDefault();
+    if (isMainFrame && host.handOffSignIn?.(contents, url))
+      event.preventDefault();
+  });
+  contents.on("before-input-event", (event, input) => {
     // The app menu's Cmd/Ctrl+W closes the browser window's tab; in a popup it closes the popup.
-    if (!isClosePopupShortcut(input, process.platform)) return
-    event.preventDefault()
-    if (!window.isDestroyed()) window.close()
-  })
+    if (!isClosePopupShortcut(input, process.platform)) return;
+    event.preventDefault();
+    if (!window.isDestroyed()) window.close();
+  });
 }

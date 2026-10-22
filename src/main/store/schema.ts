@@ -20,47 +20,199 @@
  */
 
 export interface Migration {
-  version: number
-  name: string
-  sql: string
+  version: number;
+  name: string;
+  sql: string;
 }
 
 const SYNC_COLUMNS = `
   device_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  hlc TEXT NOT NULL`
+  hlc TEXT NOT NULL`;
 
 /** Columns copied into the oplog payload, per synced table. */
-export const SYNCED_TABLES: Record<string, { entity: string; columns: readonly string[] }> = {
-  history_visits: { entity: 'history_visit', columns: ['id', 'url', 'title', 'visited_at', 'favicon_url', 'transition', 'device_id', 'created_at', 'updated_at', 'hlc'] },
-  bookmarks: { entity: 'bookmark', columns: ['id', 'parent_id', 'kind', 'title', 'url', 'position', 'favicon_url', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  settings: { entity: 'setting', columns: ['key', 'value', 'scope', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  spaces: { entity: 'space', columns: ['id', 'name', 'icon', 'color', 'position', 'separate_storage', 'proxy', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_windows: { entity: 'session_window', columns: ['id', 'position', 'focused', 'geometry', 'active_space_id', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_tabs: { entity: 'session_tab', columns: ['id', 'window_id', 'position', 'url', 'title', 'favicon_url', 'pinned', 'active', 'space_id', 'group_id', 'last_active_at', 'extra', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  tab_groups: { entity: 'tab_group', columns: ['id', 'window_id', 'name', 'color', 'collapsed', 'position', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
-  session_splits: { entity: 'session_split', columns: ['id', 'window_id', 'tab_ids', 'sizes', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] },
+export const SYNCED_TABLES: Record<
+  string,
+  { entity: string; columns: readonly string[] }
+> = {
+  history_visits: {
+    entity: "history_visit",
+    columns: [
+      "id",
+      "url",
+      "title",
+      "visited_at",
+      "favicon_url",
+      "transition",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+    ],
+  },
+  bookmarks: {
+    entity: "bookmark",
+    columns: [
+      "id",
+      "parent_id",
+      "kind",
+      "title",
+      "url",
+      "position",
+      "favicon_url",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  settings: {
+    entity: "setting",
+    columns: [
+      "key",
+      "value",
+      "scope",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  spaces: {
+    entity: "space",
+    columns: [
+      "id",
+      "name",
+      "icon",
+      "color",
+      "position",
+      "separate_storage",
+      "proxy",
+      "extra",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  session_windows: {
+    entity: "session_window",
+    columns: [
+      "id",
+      "position",
+      "focused",
+      "geometry",
+      "active_space_id",
+      "extra",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  session_tabs: {
+    entity: "session_tab",
+    columns: [
+      "id",
+      "window_id",
+      "position",
+      "url",
+      "title",
+      "favicon_url",
+      "pinned",
+      "active",
+      "space_id",
+      "group_id",
+      "last_active_at",
+      "extra",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  tab_groups: {
+    entity: "tab_group",
+    columns: [
+      "id",
+      "window_id",
+      "name",
+      "color",
+      "collapsed",
+      "position",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+  session_splits: {
+    entity: "session_split",
+    columns: [
+      "id",
+      "window_id",
+      "tab_ids",
+      "sizes",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
   // v2. `snapshot`/`snapshot_at` are left out on purpose: the saved Reader copy is a per-device cache
   // (it can be large), so it never rides the change log; a peer re-captures its own.
-  reading_list: { entity: 'reading_item', columns: ['id', 'url', 'title', 'favicon_url', 'site_name', 'excerpt', 'added_at', 'read_at', 'device_id', 'created_at', 'updated_at', 'hlc', 'deleted_at'] }
-}
+  reading_list: {
+    entity: "reading_item",
+    columns: [
+      "id",
+      "url",
+      "title",
+      "favicon_url",
+      "site_name",
+      "excerpt",
+      "added_at",
+      "read_at",
+      "device_id",
+      "created_at",
+      "updated_at",
+      "hlc",
+      "deleted_at",
+    ],
+  },
+};
 
 /** Tables whose change-log triggers v1 created (a later table's triggers ship with its own migration). */
-const V1_SYNCED_TABLES = ['history_visits', 'bookmarks', 'settings', 'spaces', 'session_windows', 'session_tabs', 'tab_groups', 'session_splits'] as const
+const V1_SYNCED_TABLES = [
+  "history_visits",
+  "bookmarks",
+  "settings",
+  "spaces",
+  "session_windows",
+  "session_tabs",
+  "tab_groups",
+  "session_splits",
+] as const;
 
 function oplogTriggers(table: string): string {
-  const spec = SYNCED_TABLES[table]!
-  const key = table === 'settings' ? 'key' : 'id'
-  const payload = `json_object(${spec.columns.map((column) => `'${column}', NEW.${column}`).join(', ')})`
-  const body = (event: 'INSERT' | 'UPDATE'): string => `
+  const spec = SYNCED_TABLES[table]!;
+  const key = table === "settings" ? "key" : "id";
+  const payload = `json_object(${spec.columns.map((column) => `'${column}', NEW.${column}`).join(", ")})`;
+  const body = (event: "INSERT" | "UPDATE"): string => `
 CREATE TRIGGER ${table}_oplog_${event.toLowerCase()} AFTER ${event} ON ${table}
 BEGIN
   DELETE FROM oplog WHERE entity = '${spec.entity}' AND entity_id = NEW.${key};
   INSERT INTO oplog (entity, entity_id, op, hlc, device_id, payload, created_at)
   VALUES ('${spec.entity}', NEW.${key}, 'upsert', NEW.hlc, NEW.device_id, ${payload}, NEW.updated_at);
-END;`
-  return body('INSERT') + body('UPDATE')
+END;`;
+  return body("INSERT") + body("UPDATE");
 }
 
 const V1 = `
@@ -212,8 +364,8 @@ CREATE TRIGGER history_visits_oplog_purge AFTER DELETE ON history_visits
 BEGIN
   DELETE FROM oplog WHERE entity = 'history_visit' AND entity_id = OLD.id;
 END;
-${V1_SYNCED_TABLES.map(oplogTriggers).join('\n')}
-`
+${V1_SYNCED_TABLES.map(oplogTriggers).join("\n")}
+`;
 
 /**
  * v2: the Reading List (save for later; not bookmarks). One row per saved page, keyed by a UUIDv7.
@@ -239,8 +391,8 @@ CREATE TABLE reading_list (
 ) WITHOUT ROWID;
 CREATE INDEX reading_list_added ON reading_list (added_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX reading_list_url ON reading_list (url) WHERE deleted_at IS NULL;
-${oplogTriggers('reading_list')}
-`
+${oplogTriggers("reading_list")}
+`;
 
 /**
  * v3: each open tab's back/forward list (shared/tab-history.ts), one row per session_tabs row that
@@ -255,12 +407,16 @@ CREATE TABLE session_tab_history (
   active_index INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) WITHOUT ROWID;
-`
+`;
 
 export const MIGRATIONS: readonly Migration[] = [
-  { version: 1, name: 'initial schema: meta, devices, oplog, settings, history, bookmarks, spaces, session', sql: V1 },
-  { version: 2, name: 'reading list', sql: V2 },
-  { version: 3, name: 'session tab back/forward history', sql: V3 }
-]
+  {
+    version: 1,
+    name: "initial schema: meta, devices, oplog, settings, history, bookmarks, spaces, session",
+    sql: V1,
+  },
+  { version: 2, name: "reading list", sql: V2 },
+  { version: 3, name: "session tab back/forward history", sql: V3 },
+];
 
-export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version
+export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

@@ -778,4 +778,4 @@ export const MINI_WINDOW_PAGE_HTML = `<!doctype html>
   }
   if (window.miniWindow.onDebug) window.miniWindow.onDebug((on) => { if (on) startDebugTrace(); else stopDebugTrace() })
 </script>
-</body></html>`
+</body></html>`;

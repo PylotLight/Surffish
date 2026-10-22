@@ -1,5 +1,5 @@
-import { nativeImage, type WebContents } from 'electron'
-import { regionToImagePixels, type Rect } from '../shared/screenshot'
+import { nativeImage, type WebContents } from "electron";
+import { regionToImagePixels, type Rect } from "../shared/screenshot";
 import {
   captureBand,
   clampScrollRange,
@@ -8,8 +8,8 @@ import {
   scrollingClip,
   sliceRowsInPixels,
   stitchSlice,
-  stitchTargetScroll
-} from '../shared/screenshot-scrolling'
+  stitchTargetScroll,
+} from "../shared/screenshot-scrolling";
 
 /**
  * Scrolling screenshot: the user marks where the capture starts (the top of the view, or a dragged
@@ -29,59 +29,67 @@ import {
  * The user's own scroll position is put back afterwards.
  */
 
-export const SCROLL_SHOT_WORLD_ID = 2027
-const SETTLE_MS = 90
-const KEY = '__surffishScrollShot'
+export const SCROLL_SHOT_WORLD_ID = 2027;
+const SETTLE_MS = 90;
+const KEY = "__surffishScrollShot";
 
 export interface PixelImage {
-  png: Buffer
-  width: number
-  height: number
+  png: Buffer;
+  width: number;
+  height: number;
 }
 
 export interface ScrollShotDeps {
-  captureVisible(contents: WebContents): Promise<PixelImage | null>
-  pixelImageFromPng(png: Buffer): PixelImage | null
-  withPageDebugger<T>(contents: WebContents, task: (send: (method: string, params?: Record<string, unknown>) => Promise<unknown>) => Promise<T>): Promise<T | null>
+  captureVisible(contents: WebContents): Promise<PixelImage | null>;
+  pixelImageFromPng(png: Buffer): PixelImage | null;
+  withPageDebugger<T>(
+    contents: WebContents,
+    task: (
+      send: (
+        method: string,
+        params?: Record<string, unknown>,
+      ) => Promise<unknown>,
+    ) => Promise<T>,
+  ): Promise<T | null>;
 }
 
 /** Live readout while the user scrolls (polled by main for the control bar). */
 export interface ScrollShotState {
   /** Capture size so far, CSS px. */
-  width: number
-  height: number
-  dpr: number
-  maxCss: number
-  auto: boolean
+  width: number;
+  height: number;
+  dpr: number;
+  maxCss: number;
+  auto: boolean;
   /** Viewport row the user clicked to end the capture, once they have. */
-  clickY: number | null
+  clickY: number | null;
   /** Capturing an inner scroll container rather than the document. */
-  inner: boolean
+  inner: boolean;
 }
 
 /** Everything the capture needs, read from the page when the user stops. */
 export interface ScrollShotGeometry {
-  doc: boolean
+  doc: boolean;
   /** Content row the capture starts at. */
-  start: number
-  scrollTop: number
-  maxScroll: number
-  contentHeight: number
+  start: number;
+  scrollTop: number;
+  maxScroll: number;
+  contentHeight: number;
   /** Scroller's content box top in viewport CSS px (negative when it starts above the view). */
-  contentTop: number
+  contentTop: number;
   /** Visible part of that box, viewport CSS px. */
-  visTop: number
-  visBottom: number
-  visLeft: number
-  visRight: number
-  region: { x: number; width: number } | null
-  clickY: number | null
-  viewportWidth: number
-  viewportHeight: number
-  dpr: number
-  scrollX: number
+  visTop: number;
+  visBottom: number;
+  visLeft: number;
+  visRight: number;
+  region: { x: number; width: number } | null;
+  clickY: number | null;
+  viewportWidth: number;
+  viewportHeight: number;
+  dpr: number;
+  scrollX: number;
   /** Document scroll when the capture started (fixed headers sit where they were then). */
-  startDocScroll: number
+  startDocScroll: number;
 }
 
 // Runs in the page's isolated world. Only DOM APIs; nothing is shared with page scripts except the
@@ -384,108 +392,196 @@ const PAGE_SCRIPT = String.raw`(() => {
   }
   window[KEY] = api
   return true
-})()`
+})()`;
 
 async function run(contents: WebContents, code: string): Promise<unknown> {
-  if (contents.isDestroyed()) return null
-  return contents.executeJavaScriptInIsolatedWorld(SCROLL_SHOT_WORLD_ID, [{ code }])
+  if (contents.isDestroyed()) return null;
+  return contents.executeJavaScriptInIsolatedWorld(SCROLL_SHOT_WORLD_ID, [
+    { code },
+  ]);
 }
 
 const call = (method: string, ...args: unknown[]): string =>
-  `(window.${KEY} ? window.${KEY}.${method}(${args.map((arg) => JSON.stringify(arg)).join(', ')}) : null)`
+  `(window.${KEY} ? window.${KEY}.${method}(${args.map((arg) => JSON.stringify(arg)).join(", ")}) : null)`;
 
 /** Put the start line and guides on the page and start tracking the scroll. False if the page refused. */
-export async function startScrollShot(contents: WebContents, rect: Rect | null, viewWidth: number, maxSidePx: number): Promise<boolean> {
+export async function startScrollShot(
+  contents: WebContents,
+  rect: Rect | null,
+  viewWidth: number,
+  maxSidePx: number,
+): Promise<boolean> {
   try {
-    await run(contents, PAGE_SCRIPT)
-    return (await run(contents, call('start', { rect, viewWidth, maxSidePx }))) === true
+    await run(contents, PAGE_SCRIPT);
+    return (
+      (await run(contents, call("start", { rect, viewWidth, maxSidePx }))) ===
+      true
+    );
   } catch (error) {
-    console.warn('[screenshot] scrolling capture could not start:', error instanceof Error ? error.message : error)
-    return false
+    console.warn(
+      "[screenshot] scrolling capture could not start:",
+      error instanceof Error ? error.message : error,
+    );
+    return false;
   }
 }
 
 function asState(value: unknown): ScrollShotState | null {
-  if (!value || typeof value !== 'object') return null
-  const v = value as Record<string, unknown>
-  const n = (key: string): number => (typeof v[key] === 'number' && Number.isFinite(v[key]) ? v[key] as number : 0)
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const n = (key: string): number =>
+    typeof v[key] === "number" && Number.isFinite(v[key])
+      ? (v[key] as number)
+      : 0;
   return {
-    width: n('width'),
-    height: n('height'),
-    dpr: n('dpr') || 1,
-    maxCss: n('maxCss') || 1,
+    width: n("width"),
+    height: n("height"),
+    dpr: n("dpr") || 1,
+    maxCss: n("maxCss") || 1,
     auto: v.auto === true,
-    clickY: typeof v.clickY === 'number' && Number.isFinite(v.clickY) ? v.clickY : null,
-    inner: v.inner === true
+    clickY:
+      typeof v.clickY === "number" && Number.isFinite(v.clickY)
+        ? v.clickY
+        : null,
+    inner: v.inner === true,
+  };
+}
+
+export async function readScrollShotState(
+  contents: WebContents,
+): Promise<ScrollShotState | null> {
+  try {
+    return asState(await run(contents, call("state")));
+  } catch {
+    return null;
   }
 }
 
-export async function readScrollShotState(contents: WebContents): Promise<ScrollShotState | null> {
+export async function setScrollShotAuto(
+  contents: WebContents,
+  on: boolean,
+): Promise<boolean> {
   try {
-    return asState(await run(contents, call('state')))
+    return (await run(contents, call("auto", on))) === true;
   } catch {
-    return null
-  }
-}
-
-export async function setScrollShotAuto(contents: WebContents, on: boolean): Promise<boolean> {
-  try {
-    return (await run(contents, call('auto', on))) === true
-  } catch {
-    return false
+    return false;
   }
 }
 
 /** Remove the layer and listeners and put the scroll back. Safe to call on a page that navigated. */
 export async function teardownScrollShot(contents: WebContents): Promise<void> {
-  await run(contents, call('teardown')).catch(() => undefined)
+  await run(contents, call("teardown")).catch(() => undefined);
 }
 
 function asGeometry(value: unknown): ScrollShotGeometry | null {
-  if (!value || typeof value !== 'object') return null
-  const v = value as Record<string, unknown>
-  const numbers = ['start', 'scrollTop', 'maxScroll', 'contentHeight', 'contentTop', 'visTop', 'visBottom', 'visLeft', 'visRight', 'viewportWidth', 'viewportHeight', 'dpr', 'scrollX', 'startDocScroll']
-  if (!numbers.every((key) => typeof v[key] === 'number' && Number.isFinite(v[key]))) return null
-  const region = v.region && typeof v.region === 'object' ? v.region as Record<string, unknown> : null
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const numbers = [
+    "start",
+    "scrollTop",
+    "maxScroll",
+    "contentHeight",
+    "contentTop",
+    "visTop",
+    "visBottom",
+    "visLeft",
+    "visRight",
+    "viewportWidth",
+    "viewportHeight",
+    "dpr",
+    "scrollX",
+    "startDocScroll",
+  ];
+  if (
+    !numbers.every(
+      (key) => typeof v[key] === "number" && Number.isFinite(v[key]),
+    )
+  )
+    return null;
+  const region =
+    v.region && typeof v.region === "object"
+      ? (v.region as Record<string, unknown>)
+      : null;
   return {
-    ...(Object.fromEntries(numbers.map((key) => [key, v[key] as number])) as Omit<ScrollShotGeometry, 'doc' | 'region' | 'clickY'>),
+    ...(Object.fromEntries(
+      numbers.map((key) => [key, v[key] as number]),
+    ) as Omit<ScrollShotGeometry, "doc" | "region" | "clickY">),
     doc: v.doc === true,
-    region: region && typeof region.x === 'number' && typeof region.width === 'number' ? { x: region.x, width: region.width } : null,
-    clickY: typeof v.clickY === 'number' && Number.isFinite(v.clickY) ? v.clickY : null
-  }
+    region:
+      region && typeof region.x === "number" && typeof region.width === "number"
+        ? { x: region.x, width: region.width }
+        : null,
+    clickY:
+      typeof v.clickY === "number" && Number.isFinite(v.clickY)
+        ? v.clickY
+        : null,
+  };
 }
 
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface ScrollShotResult {
-  image: PixelImage
-  truncated: boolean
+  image: PixelImage;
+  truncated: boolean;
 }
 
 /**
  * The user stopped: read where, take the capture, put the page back. `forceStitch` (smoke tests)
  * skips CDP for document scrollers.
  */
-export async function finishScrollShot(contents: WebContents, deps: ScrollShotDeps, maxSidePx: number, forceStitch = false): Promise<ScrollShotResult | null> {
-  let geometry: ScrollShotGeometry | null = null
+export async function finishScrollShot(
+  contents: WebContents,
+  deps: ScrollShotDeps,
+  maxSidePx: number,
+  forceStitch = false,
+): Promise<ScrollShotResult | null> {
+  let geometry: ScrollShotGeometry | null = null;
   try {
-    geometry = asGeometry(await run(contents, call('finish')))
-    if (!geometry) return null
-    const end = Math.min(scrollEndAt(geometry.scrollTop, geometry.contentTop, geometry.visBottom, geometry.clickY), geometry.contentHeight)
-    const range = clampScrollRange(geometry.start, end, maxCaptureCssHeight(geometry.dpr, maxSidePx))
-    const band = captureBand({ x: geometry.visLeft, width: geometry.visRight - geometry.visLeft }, geometry.region)
-    if (!band) return null
+    geometry = asGeometry(await run(contents, call("finish")));
+    if (!geometry) return null;
+    const end = Math.min(
+      scrollEndAt(
+        geometry.scrollTop,
+        geometry.contentTop,
+        geometry.visBottom,
+        geometry.clickY,
+      ),
+      geometry.contentHeight,
+    );
+    const range = clampScrollRange(
+      geometry.start,
+      end,
+      maxCaptureCssHeight(geometry.dpr, maxSidePx),
+    );
+    const band = captureBand(
+      { x: geometry.visLeft, width: geometry.visRight - geometry.visLeft },
+      geometry.region,
+    );
+    if (!band) return null;
     if (geometry.doc && !forceStitch) {
-      const viaCdp = await captureWithCdp(contents, deps, geometry, range, band, maxSidePx)
-      if (viaCdp) return viaCdp
-      console.info('[screenshot] CDP scrolling capture unavailable; scrolling and stitching instead')
+      const viaCdp = await captureWithCdp(
+        contents,
+        deps,
+        geometry,
+        range,
+        band,
+        maxSidePx,
+      );
+      if (viaCdp) return viaCdp;
+      console.info(
+        "[screenshot] CDP scrolling capture unavailable; scrolling and stitching instead",
+      );
     }
-    return await captureByStitching(contents, deps, geometry, range, band)
+    return await captureByStitching(contents, deps, geometry, range, band);
   } catch (error) {
-    console.warn('[screenshot] scrolling capture failed:', error instanceof Error ? error.message : error)
-    return null
+    console.warn(
+      "[screenshot] scrolling capture failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
   } finally {
-    await teardownScrollShot(contents)
+    await teardownScrollShot(contents);
   }
 }
 
@@ -495,20 +591,33 @@ async function captureWithCdp(
   geometry: ScrollShotGeometry,
   range: { start: number; end: number; truncated: boolean },
   band: { x: number; width: number },
-  maxSidePx: number
+  maxSidePx: number,
 ): Promise<ScrollShotResult | null> {
-  const plan = scrollingClip(range, band, geometry.scrollX, geometry.dpr, maxSidePx)
-  if (!plan) return null
+  const plan = scrollingClip(
+    range,
+    band,
+    geometry.scrollX,
+    geometry.dpr,
+    maxSidePx,
+  );
+  if (!plan) return null;
   // Fixed and sticky headers are laid out against the scroll position; put it back where the
   // capture started so they show once at the top rather than in the middle of the image.
-  await run(contents, call('scrollTo', Math.round(geometry.startDocScroll)))
-  await delay(SETTLE_MS)
+  await run(contents, call("scrollTo", Math.round(geometry.startDocScroll)));
+  await delay(SETTLE_MS);
   return deps.withPageDebugger(contents, async (send) => {
-    const result = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, fromSurface: true, clip: plan.clip }) as { data?: string }
-    if (typeof result?.data !== 'string') return null
-    const image = deps.pixelImageFromPng(Buffer.from(result.data, 'base64'))
-    return image ? { image, truncated: plan.truncated || range.truncated } : null
-  })
+    const result = (await send("Page.captureScreenshot", {
+      format: "png",
+      captureBeyondViewport: true,
+      fromSurface: true,
+      clip: plan.clip,
+    })) as { data?: string };
+    if (typeof result?.data !== "string") return null;
+    const image = deps.pixelImageFromPng(Buffer.from(result.data, "base64"));
+    return image
+      ? { image, truncated: plan.truncated || range.truncated }
+      : null;
+  });
 }
 
 async function captureByStitching(
@@ -516,56 +625,81 @@ async function captureByStitching(
   deps: ScrollShotDeps,
   geometry: ScrollShotGeometry,
   range: { start: number; end: number; truncated: boolean },
-  band: { x: number; width: number }
+  band: { x: number; width: number },
 ): Promise<ScrollShotResult | null> {
   // Content rows hidden above the view when an inner scroller starts above the viewport top.
-  const offset = geometry.visTop - geometry.contentTop
-  const boxHeight = geometry.visBottom - geometry.visTop
-  if (!(boxHeight >= 1)) return null
-  const viewport = { width: geometry.viewportWidth, height: geometry.viewportHeight }
-  const chunks: Buffer[] = []
-  let width = 0
-  let height = 0
-  let columns: Rect | null = null
-  let position = range.start
-  let truncated = range.truncated
-  let floatingHidden = false
-  const guard = Math.ceil((range.end - range.start) / boxHeight) + 3
+  const offset = geometry.visTop - geometry.contentTop;
+  const boxHeight = geometry.visBottom - geometry.visTop;
+  if (!(boxHeight >= 1)) return null;
+  const viewport = {
+    width: geometry.viewportWidth,
+    height: geometry.viewportHeight,
+  };
+  const chunks: Buffer[] = [];
+  let width = 0;
+  let height = 0;
+  let columns: Rect | null = null;
+  let position = range.start;
+  let truncated = range.truncated;
+  let floatingHidden = false;
+  const guard = Math.ceil((range.end - range.start) / boxHeight) + 3;
   for (let step = 0; position < range.end; step += 1) {
-    if (step > guard || contents.isDestroyed()) { truncated = true; break }
-    const asked = stitchTargetScroll(position - offset, geometry.maxScroll)
-    const actual = await run(contents, call('scrollTo', asked))
-    if (typeof actual !== 'number') return null
-    await delay(SETTLE_MS)
-    const slice = stitchSlice(position, range.end, actual + offset, boxHeight)
-    if (!slice) { truncated = true; break }
-    const frame = await deps.captureVisible(contents)
-    if (!frame) return null
+    if (step > guard || contents.isDestroyed()) {
+      truncated = true;
+      break;
+    }
+    const asked = stitchTargetScroll(position - offset, geometry.maxScroll);
+    const actual = await run(contents, call("scrollTo", asked));
+    if (typeof actual !== "number") return null;
+    await delay(SETTLE_MS);
+    const slice = stitchSlice(position, range.end, actual + offset, boxHeight);
+    if (!slice) {
+      truncated = true;
+      break;
+    }
+    const frame = await deps.captureVisible(contents);
+    if (!frame) return null;
     if (!columns) {
-      columns = regionToImagePixels({ x: band.x, y: 0, width: band.width, height: viewport.height }, viewport, frame)
-      if (!columns) return null
-      width = columns.width
+      columns = regionToImagePixels(
+        { x: band.x, y: 0, width: band.width, height: viewport.height },
+        viewport,
+        frame,
+      );
+      if (!columns) return null;
+      width = columns.width;
     }
-    const bitmap = nativeImage.createFromBuffer(frame.png).toBitmap()
-    const stride = frame.width * 4
-    if (bitmap.length < stride * frame.height || columns.x + width > frame.width) return null
-    const rows = sliceRowsInPixels(geometry.visTop, slice, viewport.height, frame.height)
-    const chunk = Buffer.allocUnsafe(rows.height * width * 4)
+    const bitmap = nativeImage.createFromBuffer(frame.png).toBitmap();
+    const stride = frame.width * 4;
+    if (
+      bitmap.length < stride * frame.height ||
+      columns.x + width > frame.width
+    )
+      return null;
+    const rows = sliceRowsInPixels(
+      geometry.visTop,
+      slice,
+      viewport.height,
+      frame.height,
+    );
+    const chunk = Buffer.allocUnsafe(rows.height * width * 4);
     for (let row = 0; row < rows.height; row += 1) {
-      const from = (rows.top + row) * stride + columns.x * 4
-      bitmap.copy(chunk, row * width * 4, from, from + width * 4)
+      const from = (rows.top + row) * stride + columns.x * 4;
+      bitmap.copy(chunk, row * width * 4, from, from + width * 4);
     }
-    chunks.push(chunk)
-    height += rows.height
-    position += slice.height
+    chunks.push(chunk);
+    height += rows.height;
+    position += slice.height;
     if (!floatingHidden && position < range.end) {
       // Headers and other fixed / sticky bits stay in the first frame only.
-      await run(contents, call('hideFloating')).catch(() => 0)
-      floatingHidden = true
+      await run(contents, call("hideFloating")).catch(() => 0);
+      floatingHidden = true;
     }
   }
-  if (height < 1 || width < 1) return null
-  const stitched = nativeImage.createFromBitmap(Buffer.concat(chunks), { width, height })
-  const image = deps.pixelImageFromPng(stitched.toPNG())
-  return image ? { image, truncated } : null
+  if (height < 1 || width < 1) return null;
+  const stitched = nativeImage.createFromBitmap(Buffer.concat(chunks), {
+    width,
+    height,
+  });
+  const image = deps.pixelImageFromPng(stitched.toPNG());
+  return image ? { image, truncated } : null;
 }

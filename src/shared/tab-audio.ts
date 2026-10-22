@@ -22,56 +22,83 @@
  */
 
 /** How long the speaker keeps showing after the page goes quiet. */
-export const AUDIBLE_RELEASE_MS = 1000
+export const AUDIBLE_RELEASE_MS = 1000;
 
 export interface TabAudioActivity {
   /** Chromium reports the page audible. */
-  audible: boolean
+  audible: boolean;
   /** When it last went from audible to quiet (ms epoch); null while audible or never heard. */
-  quietSince: number | null
+  quietSince: number | null;
   /** The page has been audible since its document loaded. */
-  heard: boolean
+  heard: boolean;
 }
 
-export type TabAudioEvent = { type: 'audible'; audible: boolean } | { type: 'reset' }
+export type TabAudioEvent =
+  { type: "audible"; audible: boolean } | { type: "reset" };
 
-export const NO_TAB_AUDIO: TabAudioActivity = Object.freeze({ audible: false, quietSince: null, heard: false })
+export const NO_TAB_AUDIO: TabAudioActivity = Object.freeze({
+  audible: false,
+  quietSince: null,
+  heard: false,
+});
 
-export function nextTabAudio(state: TabAudioActivity, event: TabAudioEvent, now: number): TabAudioActivity {
-  if (event.type === 'reset') return NO_TAB_AUDIO
-  if (event.audible) return state.audible ? state : { audible: true, quietSince: null, heard: true }
-  return state.audible ? { audible: false, quietSince: now, heard: state.heard } : state
+export function nextTabAudio(
+  state: TabAudioActivity,
+  event: TabAudioEvent,
+  now: number,
+): TabAudioActivity {
+  if (event.type === "reset") return NO_TAB_AUDIO;
+  if (event.audible)
+    return state.audible
+      ? state
+      : { audible: true, quietSince: null, heard: true };
+  return state.audible
+    ? { audible: false, quietSince: now, heard: state.heard }
+    : state;
 }
 
 /** Audible, or quiet for less than the release hold. */
-export function isShownAudible(state: TabAudioActivity, now: number, releaseMs = AUDIBLE_RELEASE_MS): boolean {
-  if (state.audible) return true
-  return state.quietSince !== null && now - state.quietSince < releaseMs
+export function isShownAudible(
+  state: TabAudioActivity,
+  now: number,
+  releaseMs = AUDIBLE_RELEASE_MS,
+): boolean {
+  if (state.audible) return true;
+  return state.quietSince !== null && now - state.quietSince < releaseMs;
 }
 
 /** When the release hold of a just-quiet tab ends (ms from now), or null when nothing is pending. */
-export function audibleReleaseInMs(state: TabAudioActivity, now: number, releaseMs = AUDIBLE_RELEASE_MS): number | null {
-  if (state.audible || state.quietSince === null) return null
-  const left = state.quietSince + releaseMs - now
-  return left > 0 ? left : null
+export function audibleReleaseInMs(
+  state: TabAudioActivity,
+  now: number,
+  releaseMs = AUDIBLE_RELEASE_MS,
+): number | null {
+  if (state.audible || state.quietSince === null) return null;
+  const left = state.quietSince + releaseMs - now;
+  return left > 0 ? left : null;
 }
 
-export type TabAudioIndicator = 'playing' | 'muted' | 'idle' | 'none'
+export type TabAudioIndicator = "playing" | "muted" | "idle" | "none";
 
 export interface TabAudioInput {
   /** Held audible (isShownAudible). */
-  audible: boolean
+  audible: boolean;
   /** The user muted the tab. */
-  muted: boolean
+  muted: boolean;
   /** The page has been audible since it loaded. */
-  heard?: boolean
+  heard?: boolean;
   /** Tab volume 0..1; anything but 1 keeps the slider reachable. */
-  volume?: number
+  volume?: number;
 }
 
-export function tabAudioIndicator({ audible, muted, heard = false, volume = 1 }: TabAudioInput): TabAudioIndicator {
-  if (muted) return 'muted'
-  if (audible) return 'playing'
-  if (heard || Math.abs(volume - 1) >= 0.005) return 'idle'
-  return 'none'
+export function tabAudioIndicator({
+  audible,
+  muted,
+  heard = false,
+  volume = 1,
+}: TabAudioInput): TabAudioIndicator {
+  if (muted) return "muted";
+  if (audible) return "playing";
+  if (heard || Math.abs(volume - 1) >= 0.005) return "idle";
+  return "none";
 }

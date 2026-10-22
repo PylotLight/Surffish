@@ -3,18 +3,18 @@
  * to block it, or null to allow. Set by the proxy kill switch, like the update checker's guard. A
  * blocked request is skipped and retried later; it never falls back to a direct connection.
  */
-type BackgroundNetworkGuard = () => string | null
+type BackgroundNetworkGuard = () => string | null;
 
-let guard: BackgroundNetworkGuard = () => null
+let guard: BackgroundNetworkGuard = () => null;
 
 export function setBackgroundNetworkGuard(next: BackgroundNetworkGuard): void {
-  guard = next
+  guard = next;
 }
 
 export function backgroundNetworkBlockedReason(): string | null {
   try {
-    return guard()
+    return guard();
   } catch {
-    return 'The network is unavailable.'
+    return "The network is unavailable.";
   }
 }

@@ -1,11 +1,23 @@
-import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
-import { brotliDecompress as brotliDecompressCallback } from 'node:zlib'
-import { app, dialog, ipcMain, net, protocol, session, type BaseWindow, type CustomScheme, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { brotliDecompress as brotliDecompressCallback } from "node:zlib";
+import {
+  app,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  session,
+  type BaseWindow,
+  type CustomScheme,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  type WebContents,
+} from "electron";
 import {
   decodePdfDataUrl,
   editedPdfFilename,
@@ -16,10 +28,14 @@ import {
   MAX_PDF_EDITOR_BYTES,
   PDF_EDITOR_SCHEME,
   pdfEditorAssetPath,
-  withPdfExtension
-} from '../shared/pdf-editor'
-import { recordSavedFile } from './downloads'
-import { addSignature, listSavedSignatures, removeSignature } from './pdf-signatures'
+  withPdfExtension,
+} from "../shared/pdf-editor";
+import { recordSavedFile } from "./downloads";
+import {
+  addSignature,
+  listSavedSignatures,
+  removeSignature,
+} from "./pdf-signatures";
 
 /**
  * Built-in PDF editor (pdf.js editor layers + pdf-lib page tools). The page is served from the
@@ -28,9 +44,9 @@ import { addSignature, listSavedSignatures, removeSignature } from './pdf-signat
  * all. The PDF itself is fetched here in main with the tab's own session (cookies, proxy) or read
  * from the local file the tab showed, and handed over through a narrow preload API.
  */
-export const PDF_EDITOR_PARTITION = 'surffish-pdf-editor'
+export const PDF_EDITOR_PARTITION = "surffish-pdf-editor";
 
-const brotliDecompress = promisify(brotliDecompressCallback)
+const brotliDecompress = promisify(brotliDecompressCallback);
 
 const PAGE_CSP = [
   "default-src 'none'",
@@ -43,194 +59,243 @@ const PAGE_CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "frame-src 'none'"
-].join('; ')
+  "frame-src 'none'",
+].join("; ");
 
 const CONTENT_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.wasm': 'application/wasm',
-  '.woff2': 'font/woff2',
-  '.json': 'application/json'
-}
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".wasm": "application/wasm",
+  ".woff2": "font/woff2",
+  ".json": "application/json",
+};
 
 export interface PdfEditorDocument {
-  sourceUrl: string
-  name: string
-  isPrivate: boolean
+  sourceUrl: string;
+  name: string;
+  isPrivate: boolean;
   /** Session the tab browsed with, so the editor's fetch carries the same cookies and proxy. */
-  sourceSession: Electron.Session
+  sourceSession: Electron.Session;
   /**
    * For a page-made blob:/data: PDF: the tab's original contents, kept alive (hidden) while the editor
    * is open. A blob: URL only resolves inside the page that made it, so the bytes are read there.
    */
-  sourceContents?: WebContents | null
+  sourceContents?: WebContents | null;
 }
 
 export interface PdfEditorHost {
   /** The editor tab state for a WebContents, or null when it isn't a PDF editor tab. */
-  documentFor(contents: WebContents): PdfEditorDocument | null
-  setDirty(contents: WebContents, dirty: boolean): void
-  backToViewer(contents: WebContents): void
-  window(): BaseWindow | null
+  documentFor(contents: WebContents): PdfEditorDocument | null;
+  setDirty(contents: WebContents, dirty: boolean): void;
+  backToViewer(contents: WebContents): void;
+  window(): BaseWindow | null;
 }
 
-let host: PdfEditorHost | null = null
-let editorSession: Electron.Session | null = null
-let ipcRegistered = false
+let host: PdfEditorHost | null = null;
+let editorSession: Electron.Session | null = null;
+let ipcRegistered = false;
 
 /**
  * Must run before app ready: the scheme needs fetch, a secure origin and module workers (pdf.js).
  * Electron takes one registerSchemesAsPrivileged call, so other internal schemes ride along here.
  */
-export function registerPdfEditorScheme(otherSchemes: CustomScheme[] = []): void {
-  protocol.registerSchemesAsPrivileged([{
-    scheme: PDF_EDITOR_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true }
-  }, ...otherSchemes])
+export function registerPdfEditorScheme(
+  otherSchemes: CustomScheme[] = [],
+): void {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: PDF_EDITOR_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        codeCache: true,
+      },
+    },
+    ...otherSchemes,
+  ]);
 }
 
-const mainDirectory = dirname(fileURLToPath(import.meta.url))
+const mainDirectory = dirname(fileURLToPath(import.meta.url));
 
 function rendererDirectory(): string {
-  return resolve(mainDirectory, '../renderer')
+  return resolve(mainDirectory, "../renderer");
 }
 
 function devServerUrl(): string | null {
-  return !app.isPackaged && process.env['ELECTRON_RENDERER_URL'] ? process.env['ELECTRON_RENDERER_URL'] : null
+  return !app.isPackaged && process.env["ELECTRON_RENDERER_URL"]
+    ? process.env["ELECTRON_RENDERER_URL"]
+    : null;
 }
 
 /** pdf.js cmaps/fonts/wasm: copied into out/renderer/pdfjs by the build, read from node_modules in dev. */
 function pdfjsDataDirectory(): string {
-  const built = join(rendererDirectory(), 'pdfjs')
-  if (existsSync(built)) return built
-  return join(app.getAppPath(), 'node_modules/pdfjs-dist')
+  const built = join(rendererDirectory(), "pdfjs");
+  if (existsSync(built)) return built;
+  return join(app.getAppPath(), "node_modules/pdfjs-dist");
 }
 
 function contentType(path: string): string {
-  return CONTENT_TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream'
+  return (
+    CONTENT_TYPES[extname(path).toLowerCase()] ?? "application/octet-stream"
+  );
 }
 
 /** The file, or its build-time brotli copy (`<file>.br`, the pdf.js wasm and sandbox) inflated. */
-async function readServedFile(target: string): Promise<Uint8Array<ArrayBuffer>> {
+async function readServedFile(
+  target: string,
+): Promise<Uint8Array<ArrayBuffer>> {
   try {
-    return new Uint8Array(await readFile(target))
+    return new Uint8Array(await readFile(target));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    return new Uint8Array(await brotliDecompress(await readFile(`${target}.br`)))
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return new Uint8Array(
+      await brotliDecompress(await readFile(`${target}.br`)),
+    );
   }
 }
 
 async function serveFile(root: string, relative: string): Promise<Response> {
-  const target = resolve(root, relative)
-  if (target !== root && !target.startsWith(root + sep)) return new Response('Not found', { status: 404 })
+  const target = resolve(root, relative);
+  if (target !== root && !target.startsWith(root + sep))
+    return new Response("Not found", { status: 404 });
   try {
-    const body = await readServedFile(target)
-    const headers: Record<string, string> = { 'Content-Type': contentType(target), 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' }
-    if (target.endsWith('.html')) headers['Content-Security-Policy'] = PAGE_CSP
-    return new Response(body, { status: 200, headers })
+    const body = await readServedFile(target);
+    const headers: Record<string, string> = {
+      "Content-Type": contentType(target),
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "no-cache",
+    };
+    if (target.endsWith(".html")) headers["Content-Security-Policy"] = PAGE_CSP;
+    return new Response(body, { status: 200, headers });
   } catch {
-    return new Response('Not found', { status: 404 })
+    return new Response("Not found", { status: 404 });
   }
 }
 
 async function handleEditorRequest(request: Request): Promise<Response> {
-  const url = new URL(request.url)
-  const devServer = devServerUrl()
-  if (url.pathname.startsWith('/pdfjs/')) {
-    const relative = pdfEditorAssetPath(request.url)
-    if (!relative) return new Response('Not found', { status: 404 })
-    let inner = relative.slice('pdfjs/'.length)
-    const directory = pdfjsDataDirectory()
+  const url = new URL(request.url);
+  const devServer = devServerUrl();
+  if (url.pathname.startsWith("/pdfjs/")) {
+    const relative = pdfEditorAssetPath(request.url);
+    if (!relative) return new Response("Not found", { status: 404 });
+    let inner = relative.slice("pdfjs/".length);
+    const directory = pdfjsDataDirectory();
     // node_modules layout (dev) keeps the annotation icons under web/images.
-    if (inner.startsWith('images/') && !directory.endsWith(`${sep}pdfjs`)) inner = `web/${inner}`
-    return serveFile(directory, inner)
+    if (inner.startsWith("images/") && !directory.endsWith(`${sep}pdfjs`))
+      inner = `web/${inner}`;
+    return serveFile(directory, inner);
   }
   if (devServer) {
     // Dev: proxy the Vite dev server (it serves /src, /@vite and /node_modules paths too).
-    const response = await net.fetch(new URL(`${url.pathname}${url.search}`, devServer).toString())
-    const headers = new Headers(response.headers)
-    if ((headers.get('content-type') ?? '').includes('text/html')) headers.set('Content-Security-Policy', PAGE_CSP.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"))
-    return new Response(await response.arrayBuffer(), { status: response.status, headers })
+    const response = await net.fetch(
+      new URL(`${url.pathname}${url.search}`, devServer).toString(),
+    );
+    const headers = new Headers(response.headers);
+    if ((headers.get("content-type") ?? "").includes("text/html"))
+      headers.set(
+        "Content-Security-Policy",
+        PAGE_CSP.replace(
+          "script-src 'self'",
+          "script-src 'self' 'unsafe-inline'",
+        ),
+      );
+    return new Response(await response.arrayBuffer(), {
+      status: response.status,
+      headers,
+    });
   }
-  const relative = pdfEditorAssetPath(request.url)
-  return relative ? serveFile(rendererDirectory(), relative) : new Response('Not found', { status: 404 })
+  const relative = pdfEditorAssetPath(request.url);
+  return relative
+    ? serveFile(rendererDirectory(), relative)
+    : new Response("Not found", { status: 404 });
 }
 
 function isAllowedEditorRequest(url: string): boolean {
-  return url.startsWith(`${PDF_EDITOR_SCHEME}:`) || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('devtools:')
+  return (
+    url.startsWith(`${PDF_EDITOR_SCHEME}:`) ||
+    url.startsWith("data:") ||
+    url.startsWith("blob:") ||
+    url.startsWith("devtools:")
+  );
 }
 
 /** Isolated, in-memory session for editor tabs: no cookies, no cache on disk, no network. */
 export function getPdfEditorSession(): Electron.Session {
-  if (editorSession) return editorSession
-  const created = session.fromPartition(PDF_EDITOR_PARTITION, { cache: false })
-  created.protocol.handle(PDF_EDITOR_SCHEME, handleEditorRequest)
+  if (editorSession) return editorSession;
+  const created = session.fromPartition(PDF_EDITOR_PARTITION, { cache: false });
+  created.protocol.handle(PDF_EDITOR_SCHEME, handleEditorRequest);
   created.webRequest.onBeforeRequest((details, callback) => {
-    const allowed = isAllowedEditorRequest(details.url)
-    if (!allowed) console.warn('[pdf editor] blocked a network request from the editor page')
-    callback({ cancel: !allowed })
-  })
-  created.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-  created.setPermissionCheckHandler(() => false)
+    const allowed = isAllowedEditorRequest(details.url);
+    if (!allowed)
+      console.warn(
+        "[pdf editor] blocked a network request from the editor page",
+      );
+    callback({ cancel: !allowed });
+  });
+  created.setPermissionRequestHandler((_contents, _permission, callback) =>
+    callback(false),
+  );
+  created.setPermissionCheckHandler(() => false);
   // Nothing the editor does should download; Save goes through main.
-  created.on('will-download', (event) => event.preventDefault())
-  editorSession = created
-  return created
+  created.on("will-download", (event) => event.preventDefault());
+  editorSession = created;
+  return created;
 }
 
 export function pdfEditorPreloadPath(): string | null {
   const candidates = [
-    join(mainDirectory, '../preload/pdf-editor.cjs'),
-    join(app.getAppPath(), 'out/preload/pdf-editor.cjs'),
-    join(app.getAppPath(), 'src/preload/pdf-editor.cjs')
-  ]
-  return candidates.find((candidate) => existsSync(candidate)) ?? null
+    join(mainDirectory, "../preload/pdf-editor.cjs"),
+    join(app.getAppPath(), "out/preload/pdf-editor.cjs"),
+    join(app.getAppPath(), "src/preload/pdf-editor.cjs"),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
 }
 
 /** Local path of a file:// source, or null for web sources. */
 export function localPdfPath(sourceUrl: string): string | null {
   try {
-    const url = new URL(sourceUrl)
-    return url.protocol === 'file:' ? fileURLToPath(url) : null
+    const url = new URL(sourceUrl);
+    return url.protocol === "file:" ? fileURLToPath(url) : null;
   } catch {
-    return null
+    return null;
   }
 }
 
 async function readBounded(response: Response): Promise<Uint8Array> {
-  const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
-  const reader = response.body?.getReader()
-  if (!reader) return new Uint8Array()
-  const chunks: Uint8Array[] = []
-  let total = 0
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_PDF_EDITOR_BYTES)
+    throw new Error("This PDF is too large to edit here.");
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
     if (total > MAX_PDF_EDITOR_BYTES) {
-      await reader.cancel().catch(() => undefined)
-      throw new Error('This PDF is too large to edit here.')
+      await reader.cancel().catch(() => undefined);
+      throw new Error("This PDF is too large to edit here.");
     }
-    chunks.push(value)
+    chunks.push(value);
   }
-  const bytes = new Uint8Array(total)
-  let offset = 0
+  const bytes = new Uint8Array(total);
+  let offset = 0;
   for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
-  return bytes
+  return bytes;
 }
 
 // Own isolated world: the page can't swap out fetch/FileReader under us.
-const BLOB_READ_WORLD_ID = 1984
+const BLOB_READ_WORLD_ID = 1984;
 // First party with the tab's own cookies (SameSite ones too), UA and HTTP cache: a signed-in or
 // one-shot link (Gmail attachments) loads here when a refetch from the main process gets a 401.
 const BLOB_READ_SCRIPT = `(async () => {
@@ -249,23 +314,39 @@ const BLOB_READ_SCRIPT = `(async () => {
   } catch (error) {
     return { error: 'gone' }
   }
-})()`
+})()`;
 
 /** Bytes of the PDF read from inside the tab that shows it (blob:/data:, or a web PDF kept behind the editor). */
-async function readInMemoryPdf(document: PdfEditorDocument): Promise<Uint8Array> {
+async function readInMemoryPdf(
+  document: PdfEditorDocument,
+): Promise<Uint8Array> {
   if (/^data:/i.test(document.sourceUrl)) {
-    const bytes = decodePdfDataUrl(document.sourceUrl)
-    if (!bytes) throw new Error('This PDF could not be read.')
-    return bytes
+    const bytes = decodePdfDataUrl(document.sourceUrl);
+    if (!bytes) throw new Error("This PDF could not be read.");
+    return bytes;
   }
-  const contents = document.sourceContents
-  if (!contents || contents.isDestroyed()) throw new Error('The page that made this PDF is gone. Download it and open the file to edit it.')
-  const result: unknown = await contents.executeJavaScriptInIsolatedWorld(BLOB_READ_WORLD_ID, [{ code: BLOB_READ_SCRIPT }]).catch(() => ({ error: 'gone' }))
-  const { dataUrl, error } = (result ?? {}) as { dataUrl?: unknown; error?: unknown }
-  if (error === 'too-large') throw new Error('This PDF is too large to edit here.')
-  const bytes = typeof dataUrl === 'string' ? decodePdfDataUrl(dataUrl) : null
-  if (!bytes) throw new Error('The page released this PDF, so it can only be viewed. Download it and open the file to edit it.')
-  return bytes
+  const contents = document.sourceContents;
+  if (!contents || contents.isDestroyed())
+    throw new Error(
+      "The page that made this PDF is gone. Download it and open the file to edit it.",
+    );
+  const result: unknown = await contents
+    .executeJavaScriptInIsolatedWorld(BLOB_READ_WORLD_ID, [
+      { code: BLOB_READ_SCRIPT },
+    ])
+    .catch(() => ({ error: "gone" }));
+  const { dataUrl, error } = (result ?? {}) as {
+    dataUrl?: unknown;
+    error?: unknown;
+  };
+  if (error === "too-large")
+    throw new Error("This PDF is too large to edit here.");
+  const bytes = typeof dataUrl === "string" ? decodePdfDataUrl(dataUrl) : null;
+  if (!bytes)
+    throw new Error(
+      "The page released this PDF, so it can only be viewed. Download it and open the file to edit it.",
+    );
+  return bytes;
 }
 
 /**
@@ -273,69 +354,92 @@ async function readInMemoryPdf(document: PdfEditorDocument): Promise<Uint8Array>
  * HTTP cache apply), then a refetch with the tab's session as a fallback.
  */
 async function loadWebPdf(document: PdfEditorDocument): Promise<Uint8Array> {
-  const contents = document.sourceContents
+  const contents = document.sourceContents;
   if (contents && !contents.isDestroyed()) {
     try {
-      const bytes = await readInMemoryPdf(document)
-      if (bytes.byteLength > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
-      if (looksLikePdf(bytes)) return bytes
+      const bytes = await readInMemoryPdf(document);
+      if (bytes.byteLength > MAX_PDF_EDITOR_BYTES)
+        throw new Error("This PDF is too large to edit here.");
+      if (looksLikePdf(bytes)) return bytes;
     } catch (error) {
       // Anything else (a view mid-teardown, a page that refuses): fall back to a refetch.
-      if (error instanceof Error && error.message === 'This PDF is too large to edit here.') throw error
+      if (
+        error instanceof Error &&
+        error.message === "This PDF is too large to edit here."
+      )
+        throw error;
     }
   }
   const response = await document.sourceSession.fetch(document.sourceUrl, {
-    redirect: 'follow',
-    credentials: 'include',
+    redirect: "follow",
+    credentials: "include",
     signal: AbortSignal.timeout(60_000),
-    headers: { Accept: 'application/pdf,*/*;q=0.8' }
-  })
+    headers: { Accept: "application/pdf,*/*;q=0.8" },
+  });
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) throw new Error(`Could not download the PDF (HTTP ${response.status}). The link may have expired: reload the PDF, then Edit again.`)
-    throw new Error(`Could not download the PDF (HTTP ${response.status}).`)
+    if (response.status === 401 || response.status === 403)
+      throw new Error(
+        `Could not download the PDF (HTTP ${response.status}). The link may have expired: reload the PDF, then Edit again.`,
+      );
+    throw new Error(`Could not download the PDF (HTTP ${response.status}).`);
   }
-  return readBounded(response)
+  return readBounded(response);
 }
 
 /** Fetch the document the tab was showing: from the tab (or its session) for the web, from disk for file://. */
-export async function loadPdfBytes(document: PdfEditorDocument): Promise<Uint8Array> {
-  const inMemory = isInMemoryPdfSource(document.sourceUrl)
-  if (!inMemory && !isEditablePdfSource(document.sourceUrl)) throw new Error('This PDF cannot be opened in the editor.')
-  const path = inMemory ? null : localPdfPath(document.sourceUrl)
-  let bytes: Uint8Array
+export async function loadPdfBytes(
+  document: PdfEditorDocument,
+): Promise<Uint8Array> {
+  const inMemory = isInMemoryPdfSource(document.sourceUrl);
+  if (!inMemory && !isEditablePdfSource(document.sourceUrl))
+    throw new Error("This PDF cannot be opened in the editor.");
+  const path = inMemory ? null : localPdfPath(document.sourceUrl);
+  let bytes: Uint8Array;
   if (inMemory) {
-    bytes = await readInMemoryPdf(document)
-    if (bytes.byteLength > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
+    bytes = await readInMemoryPdf(document);
+    if (bytes.byteLength > MAX_PDF_EDITOR_BYTES)
+      throw new Error("This PDF is too large to edit here.");
   } else if (path) {
-    const info = await stat(path)
-    if (!info.isFile()) throw new Error('This PDF file is no longer available.')
-    if (info.size > MAX_PDF_EDITOR_BYTES) throw new Error('This PDF is too large to edit here.')
-    bytes = new Uint8Array(await readFile(path))
+    const info = await stat(path);
+    if (!info.isFile())
+      throw new Error("This PDF file is no longer available.");
+    if (info.size > MAX_PDF_EDITOR_BYTES)
+      throw new Error("This PDF is too large to edit here.");
+    bytes = new Uint8Array(await readFile(path));
   } else {
-    bytes = await loadWebPdf(document)
+    bytes = await loadWebPdf(document);
   }
-  if (!looksLikePdf(bytes)) throw new Error('The downloaded file is not a PDF (the site may need you to sign in again).')
-  return bytes
+  if (!looksLikePdf(bytes))
+    throw new Error(
+      "The downloaded file is not a PDF (the site may need you to sign in again).",
+    );
+  return bytes;
 }
 
-async function writeFileAtomically(target: string, bytes: Uint8Array): Promise<void> {
-  const temporary = join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`)
+async function writeFileAtomically(
+  target: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  const temporary = join(
+    dirname(target),
+    `.${basename(target)}.${randomUUID()}.tmp`,
+  );
   try {
-    await writeFile(temporary, bytes, { flag: 'wx' })
-    await rename(temporary, target)
+    await writeFile(temporary, bytes, { flag: "wx" });
+    await rename(temporary, target);
   } catch (error) {
-    await rm(temporary, { force: true }).catch(() => undefined)
-    throw error
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 
 export interface PdfSaveResult {
-  saved: boolean
-  filename?: string
+  saved: boolean;
+  filename?: string;
 }
 
 /** Where each editor tab last saved: a plain Save writes there again (Save As always asks). */
-const lastSavePaths = new WeakMap<WebContents, string>()
+const lastSavePaths = new WeakMap<WebContents, string>();
 
 /**
  * Native Save dialog. Defaults to `<name>-edited.pdf` next to a local source (or in Downloads for web
@@ -343,117 +447,189 @@ const lastSavePaths = new WeakMap<WebContents, string>()
  * first save, Save (not Save As) writes to that same file again without asking; the original is only
  * ever replaced when the user picked it in the dialog.
  */
-export async function savePdfWithDialog(window: BaseWindow | null, document: PdfEditorDocument, bytes: Uint8Array, previousPath: string | null = null): Promise<PdfSaveResult & { filePath?: string }> {
+export async function savePdfWithDialog(
+  window: BaseWindow | null,
+  document: PdfEditorDocument,
+  bytes: Uint8Array,
+  previousPath: string | null = null,
+): Promise<PdfSaveResult & { filePath?: string }> {
   if (previousPath) {
-    await writeFileAtomically(previousPath, bytes)
-    recordSavedFile({ filePath: previousPath, sourceUrl: document.sourceUrl, bytes: bytes.byteLength, isPrivate: document.isPrivate })
-    return { saved: true, filename: basename(previousPath), filePath: previousPath }
+    await writeFileAtomically(previousPath, bytes);
+    recordSavedFile({
+      filePath: previousPath,
+      sourceUrl: document.sourceUrl,
+      bytes: bytes.byteLength,
+      isPrivate: document.isPrivate,
+    });
+    return {
+      saved: true,
+      filename: basename(previousPath),
+      filePath: previousPath,
+    };
   }
-  const localPath = localPdfPath(document.sourceUrl)
-  const directory = localPath ? dirname(localPath) : app.getPath('downloads')
+  const localPath = localPdfPath(document.sourceUrl);
+  const directory = localPath ? dirname(localPath) : app.getPath("downloads");
   const options: Electron.SaveDialogOptions = {
-    title: 'Save PDF',
+    title: "Save PDF",
     defaultPath: join(directory, editedPdfFilename(document.name)),
-    filters: [{ name: 'PDF document', extensions: ['pdf'] }],
-    properties: ['createDirectory', 'showOverwriteConfirmation']
-  }
+    filters: [{ name: "PDF document", extensions: ["pdf"] }],
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+  };
   // Smoke tests (unpackaged builds only) save without the native dialog.
-  const smokePath = !app.isPackaged ? process.env['SURFFISH_PDF_EDITOR_SMOKE_SAVE_PATH'] : undefined
+  const smokePath = !app.isPackaged
+    ? process.env["SURFFISH_PDF_EDITOR_SMOKE_SAVE_PATH"]
+    : undefined;
   const result = smokePath
     ? { canceled: false, filePath: smokePath }
-    : window && !window.isDestroyed() ? await dialog.showSaveDialog(window, options) : await dialog.showSaveDialog(options)
-  if (result.canceled || !result.filePath) return { saved: false }
-  const target = withPdfExtension(result.filePath)
-  await writeFileAtomically(target, bytes)
-  recordSavedFile({ filePath: target, sourceUrl: document.sourceUrl, bytes: bytes.byteLength, isPrivate: document.isPrivate })
-  return { saved: true, filename: basename(target), filePath: target }
+    : window && !window.isDestroyed()
+      ? await dialog.showSaveDialog(window, options)
+      : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) return { saved: false };
+  const target = withPdfExtension(result.filePath);
+  await writeFileAtomically(target, bytes);
+  recordSavedFile({
+    filePath: target,
+    sourceUrl: document.sourceUrl,
+    bytes: bytes.byteLength,
+    isPrivate: document.isPrivate,
+  });
+  return { saved: true, filename: basename(target), filePath: target };
 }
 
 /** Unsaved edits: ask before they are thrown away. Returns true to go ahead. */
-export function confirmDiscardPdfEdits(window: BaseWindow | null, name: string, action: string): boolean {
+export function confirmDiscardPdfEdits(
+  window: BaseWindow | null,
+  name: string,
+  action: string,
+): boolean {
   const options: Electron.MessageBoxSyncOptions = {
-    type: 'warning',
-    buttons: [action, 'Cancel'],
+    type: "warning",
+    buttons: [action, "Cancel"],
     defaultId: 1,
     cancelId: 1,
     message: `Discard your changes to ${name}?`,
-    detail: 'Your edits have not been saved. Use Save in the editor to keep them.'
-  }
-  const response = window && !window.isDestroyed() ? dialog.showMessageBoxSync(window, options) : dialog.showMessageBoxSync(options)
-  return response === 0
+    detail:
+      "Your edits have not been saved. Use Save in the editor to keep them.",
+  };
+  const response =
+    window && !window.isDestroyed()
+      ? dialog.showMessageBoxSync(window, options)
+      : dialog.showMessageBoxSync(options);
+  return response === 0;
 }
 
-function editorDocument(event: IpcMainEvent | IpcMainInvokeEvent): PdfEditorDocument | null {
-  const frame = event.senderFrame
-  if (!host || !frame || frame !== event.sender.mainFrame || !isPdfEditorUrl(frame.url)) return null
-  return host.documentFor(event.sender)
+function editorDocument(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+): PdfEditorDocument | null {
+  const frame = event.senderFrame;
+  if (
+    !host ||
+    !frame ||
+    frame !== event.sender.mainFrame ||
+    !isPdfEditorUrl(frame.url)
+  )
+    return null;
+  return host.documentFor(event.sender);
 }
 
 function requireEditorDocument(event: IpcMainInvokeEvent): PdfEditorDocument {
-  const document = editorDocument(event)
-  if (!document) throw new Error('This operation is only available to the PDF editor.')
-  return document
+  const document = editorDocument(event);
+  if (!document)
+    throw new Error("This operation is only available to the PDF editor.");
+  return document;
 }
 
 function toBytes(value: unknown): Uint8Array | null {
-  if (value instanceof Uint8Array) return value
-  if (value instanceof ArrayBuffer) return new Uint8Array(value)
-  return null
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  return null;
 }
 
 /** The document a PDF editor tab has open (Read Aloud reads its text), or null for any other contents. */
-export function pdfEditorDocumentFor(contents: WebContents): PdfEditorDocument | null {
-  return host?.documentFor(contents) ?? null
+export function pdfEditorDocumentFor(
+  contents: WebContents,
+): PdfEditorDocument | null {
+  return host?.documentFor(contents) ?? null;
 }
 
 export function attachPdfEditor(editorHost: PdfEditorHost): void {
-  host = editorHost
-  if (ipcRegistered) return
-  ipcRegistered = true
-  ipcMain.handle('pdf-editor:load', async (event) => {
-    const document = requireEditorDocument(event)
+  host = editorHost;
+  if (ipcRegistered) return;
+  ipcRegistered = true;
+  ipcMain.handle("pdf-editor:load", async (event) => {
+    const document = requireEditorDocument(event);
     try {
-      const bytes = await loadPdfBytes(document)
-      return { ok: true, name: document.name, sourceUrl: document.sourceUrl, local: localPdfPath(document.sourceUrl) !== null, bytes }
+      const bytes = await loadPdfBytes(document);
+      return {
+        ok: true,
+        name: document.name,
+        sourceUrl: document.sourceUrl,
+        local: localPdfPath(document.sourceUrl) !== null,
+        bytes,
+      };
     } catch (error) {
-      return { ok: false, name: document.name, sourceUrl: document.sourceUrl, error: error instanceof Error ? error.message : String(error) }
+      return {
+        ok: false,
+        name: document.name,
+        sourceUrl: document.sourceUrl,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
-  })
-  ipcMain.handle('pdf-editor:save', async (event, value: unknown, options: unknown) => {
-    const document = requireEditorDocument(event)
-    const bytes = toBytes(value)
-    if (!bytes || bytes.byteLength > MAX_PDF_EDITOR_BYTES || !looksLikePdf(bytes)) throw new Error('The editor produced an invalid PDF.')
-    const saveAs = (options as { saveAs?: unknown } | null)?.saveAs === true
-    const previous = saveAs ? null : lastSavePaths.get(event.sender) ?? null
-    const { filePath, ...result } = await savePdfWithDialog(host?.window() ?? null, document, bytes, previous)
-    if (result.saved && filePath) {
-      lastSavePaths.set(event.sender, filePath)
-      host?.setDirty(event.sender, false)
-    }
-    return result
-  })
+  });
+  ipcMain.handle(
+    "pdf-editor:save",
+    async (event, value: unknown, options: unknown) => {
+      const document = requireEditorDocument(event);
+      const bytes = toBytes(value);
+      if (
+        !bytes ||
+        bytes.byteLength > MAX_PDF_EDITOR_BYTES ||
+        !looksLikePdf(bytes)
+      )
+        throw new Error("The editor produced an invalid PDF.");
+      const saveAs = (options as { saveAs?: unknown } | null)?.saveAs === true;
+      const previous = saveAs
+        ? null
+        : (lastSavePaths.get(event.sender) ?? null);
+      const { filePath, ...result } = await savePdfWithDialog(
+        host?.window() ?? null,
+        document,
+        bytes,
+        previous,
+      );
+      if (result.saved && filePath) {
+        lastSavePaths.set(event.sender, filePath);
+        host?.setDirty(event.sender, false);
+      }
+      return result;
+    },
+  );
   // Saved signatures are the user's own (not per site), so private tabs see them too.
-  ipcMain.handle('pdf-editor:signatures:list', (event) => {
-    requireEditorDocument(event)
-    return listSavedSignatures()
-  })
-  ipcMain.handle('pdf-editor:signatures:add', (event, value: unknown) => {
-    requireEditorDocument(event)
-    return addSignature(value)
-  })
-  ipcMain.handle('pdf-editor:signatures:remove', (event, id: unknown) => {
-    requireEditorDocument(event)
-    return removeSignature(id)
-  })
-  ipcMain.on('pdf-editor:dirty', (event, dirty: unknown) => {
-    if (editorDocument(event)) host?.setDirty(event.sender, dirty === true)
-  })
-  ipcMain.on('pdf-editor:back', (event) => {
-    if (editorDocument(event)) host?.backToViewer(event.sender)
-  })
+  ipcMain.handle("pdf-editor:signatures:list", (event) => {
+    requireEditorDocument(event);
+    return listSavedSignatures();
+  });
+  ipcMain.handle("pdf-editor:signatures:add", (event, value: unknown) => {
+    requireEditorDocument(event);
+    return addSignature(value);
+  });
+  ipcMain.handle("pdf-editor:signatures:remove", (event, id: unknown) => {
+    requireEditorDocument(event);
+    return removeSignature(id);
+  });
+  ipcMain.on("pdf-editor:dirty", (event, dirty: unknown) => {
+    if (editorDocument(event)) host?.setDirty(event.sender, dirty === true);
+  });
+  ipcMain.on("pdf-editor:back", (event) => {
+    if (editorDocument(event)) host?.backToViewer(event.sender);
+  });
 }
 
 /** Ask the editor page to run one of its commands (from the app menu or the context menu). */
-export function sendPdfEditorCommand(contents: WebContents, command: 'save' | 'undo' | 'redo'): void {
-  if (!contents.isDestroyed() && isPdfEditorUrl(contents.getURL())) contents.send('pdf-editor:command', command)
+export function sendPdfEditorCommand(
+  contents: WebContents,
+  command: "save" | "undo" | "redo",
+): void {
+  if (!contents.isDestroyed() && isPdfEditorUrl(contents.getURL()))
+    contents.send("pdf-editor:command", command);
 }

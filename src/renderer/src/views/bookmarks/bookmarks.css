@@ -47,8 +47,14 @@
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 14px;
-  background: linear-gradient(145deg, rgba(42, 50, 59, 0.98), rgba(17, 21, 26, 0.99));
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    145deg,
+    rgba(42, 50, 59, 0.98),
+    rgba(17, 21, 26, 0.99)
+  );
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.07);
   color: #f2f4f6;
   -webkit-app-region: no-drag;
 }
@@ -303,7 +309,7 @@
   height: 2px;
   border-radius: 2px;
   background: #83dba5;
-  content: '';
+  content: "";
   pointer-events: none;
 }
 .bookmark-row.is-drop-before::before,
@@ -651,8 +657,14 @@
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
-  background: linear-gradient(145deg, rgba(42, 50, 59, 0.985), rgba(17, 21, 26, 0.99));
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px rgba(255, 255, 255, 0.07);
+  background: linear-gradient(
+    145deg,
+    rgba(42, 50, 59, 0.985),
+    rgba(17, 21, 26, 0.99)
+  );
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px rgba(255, 255, 255, 0.07);
   color: #f2f4f6;
   font-size: 12.5px;
   text-align: left;

@@ -81,3 +81,7 @@ Each feature has a `test:electron-<feature>` script in `package.json` (feeds, re
 After `bun run build`, run `xvfb-run -a bun run test:electron-translation` on headless Linux (omit `xvfb-run -a` on macOS). The isolated-profile check covers language persistence and cross-surface updates, input validation, toolbar popover bounds, in-place page/selection translation, original text restoration, field exclusions, provider failure handling, original-tab preservation, and right-click actions. HTTPS responses are synthetic fixtures; no text is sent to a live translation service.
 
 In-place translation uses an isolated JavaScript world and a bounded, on-demand snapshot (200 text nodes / 50,000 characters; individual page nodes over 4,000 characters are skipped). Four requests run at most concurrently, repeated text is deduplicated, and navigation or a new translation cancels stale work. Provider output is validated and applied only as text, never HTML. Restoration skips nodes changed by the website. No observer uploads dynamic content automatically.
+
+## Formatting
+
+Use Bun 1.4.4 or newer. Run `bun run format` to format tracked project files and `bun run format:check` to verify formatting.

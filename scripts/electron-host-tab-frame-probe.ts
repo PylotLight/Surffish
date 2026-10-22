@@ -1,138 +1,195 @@
-import { createServer, type Server } from 'node:http'
-import { cpSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { app, BrowserWindow, ipcMain, session, webContents } from 'electron'
-import type { AddressInfo } from 'node:net'
+import { createServer, type Server } from "node:http";
+import {
+  cpSync,
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { app, BrowserWindow, ipcMain, session, webContents } from "electron";
+import type { AddressInfo } from "node:net";
 import {
   activateBrowserTab,
   attachBrowserView,
   getExperimentalExtensionFrames,
   getBrowserTabs,
-  setBrowserBounds
-} from '../src/main/browser'
-import { BROWSER_SESSION_PARTITION } from '../src/main/browser-session'
+  setBrowserBounds,
+} from "../src/main/browser";
+import { BROWSER_SESSION_PARTITION } from "../src/main/browser-session";
 
 interface ProbeTab {
-  id: number
-  url?: string
-  title?: string
-  windowId?: number
-  active?: boolean
-  index?: number
+  id: number;
+  url?: string;
+  title?: string;
+  windowId?: number;
+  active?: boolean;
+  index?: number;
 }
 
-const root = mkdtempSync(join(tmpdir(), 'surffish-host-tab-frame-probe-'))
-const sourceExtensionDirectory = process.env.SURFFISH_PROBE_EXTENSION_DIR ? resolve(process.env.SURFFISH_PROBE_EXTENSION_DIR) : null
-const officialExtensionMode = sourceExtensionDirectory !== null
-const profileDirectory = join(root, 'profile')
-mkdirSync(profileDirectory, { recursive: true })
-app.setPath('userData', profileDirectory)
+const root = mkdtempSync(join(tmpdir(), "surffish-host-tab-frame-probe-"));
+const sourceExtensionDirectory = process.env.SURFFISH_PROBE_EXTENSION_DIR
+  ? resolve(process.env.SURFFISH_PROBE_EXTENSION_DIR)
+  : null;
+const officialExtensionMode = sourceExtensionDirectory !== null;
+const profileDirectory = join(root, "profile");
+mkdirSync(profileDirectory, { recursive: true });
+app.setPath("userData", profileDirectory);
 
 const report: Record<string, unknown> = {
-  probe: 'surffish-webcontentsview-tab-frame-mapping',
-  experimentalFlag: 'SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1',
+  probe: "surffish-webcontentsview-tab-frame-mapping",
+  experimentalFlag: "SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1",
   fixtureOnly: !officialExtensionMode,
   officialExtensionMode,
-  userDataProfile: 'temporary',
-  networkPolicy: 'Only chrome-extension internal resources and loopback 127.0.0.1 fixture requests are allowed.',
+  userDataProfile: "temporary",
+  networkPolicy:
+    "Only chrome-extension internal resources and loopback 127.0.0.1 fixture requests are allowed.",
   accountUsed: false,
   vaultDataUsed: false,
   hostSessionPartition: BROWSER_SESSION_PARTITION,
   blockedRequests: [],
-  assertions: []
-}
-const blockedRequests: Array<{ url: string; resourceType: string }> = []
-let mainServer: Server | null = null
-let childServer: Server | null = null
-let hostWindow: BrowserWindow | null = null
-let popupWindow: BrowserWindow | null = null
-let officialPopupWindow: BrowserWindow | null = null
-let officialPopupDebuggerAttached = false
-let bridgeWindow: BrowserWindow | null = null
-let browserSession: Electron.Session | null = null
-let loadedExtensionId: string | null = null
-let hostTabId: string | null = null
-let probePageUrl = ''
-const bridgeIpcChannel = 'surffish-experimental-extension-get-frames'
-let exitCode = 0
-const probeTimeoutMs = Number(process.env.SMOKE_WAIT_MS || 10000)
+  assertions: [],
+};
+const blockedRequests: Array<{ url: string; resourceType: string }> = [];
+let mainServer: Server | null = null;
+let childServer: Server | null = null;
+let hostWindow: BrowserWindow | null = null;
+let popupWindow: BrowserWindow | null = null;
+let officialPopupWindow: BrowserWindow | null = null;
+let officialPopupDebuggerAttached = false;
+let bridgeWindow: BrowserWindow | null = null;
+let browserSession: Electron.Session | null = null;
+let loadedExtensionId: string | null = null;
+let hostTabId: string | null = null;
+let probePageUrl = "";
+const bridgeIpcChannel = "surffish-experimental-extension-get-frames";
+let exitCode = 0;
+const probeTimeoutMs = Number(process.env.SMOKE_WAIT_MS || 10000);
 
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
-      })
-    ])
+        timeout = setTimeout(
+          () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
   } finally {
-    if (timeout) clearTimeout(timeout)
+    if (timeout) clearTimeout(timeout);
   }
 }
 
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  return (server.address() as AddressInfo).port
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  return (server.address() as AddressInfo).port;
 }
 
-async function waitFor<T>(read: () => T | null | undefined | Promise<T | null | undefined>, timeoutMs: number, label: string): Promise<T> {
-  const deadline = Date.now() + timeoutMs
+async function waitFor<T>(
+  read: () => T | null | undefined | Promise<T | null | undefined>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const value = await read()
-    if (value !== null && value !== undefined) return value
-    await delay(100)
+    const value = await read();
+    if (value !== null && value !== undefined) return value;
+    await delay(100);
   }
-  throw new Error(`${label} timed out after ${timeoutMs}ms`)
+  throw new Error(`${label} timed out after ${timeoutMs}ms`);
 }
 
-function createLocalFixtures(): { main: Server; child: Server; setChildOrigin: (origin: string) => void } {
-  let childOrigin = ''
+function createLocalFixtures(): {
+  main: Server;
+  child: Server;
+  setChildOrigin: (origin: string) => void;
+} {
+  let childOrigin = "";
   const child = createServer((request, response) => {
-    const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
-    if (path === '/frame.html') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(`<!doctype html><html><head><title>Inert child frame</title></head><body><form id="child-login"><input name="username" autocomplete="username"><input name="password" type="password" autocomplete="current-password"></form><iframe name="grandchild" src="${childOrigin}/grandchild.html"></iframe></body></html>`)
-    } else if (path === '/grandchild.html') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end('<!doctype html><html><head><title>Inert grandchild frame</title></head><body>Inert nested frame</body></html>')
+    const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+    if (path === "/frame.html") {
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(
+        `<!doctype html><html><head><title>Inert child frame</title></head><body><form id="child-login"><input name="username" autocomplete="username"><input name="password" type="password" autocomplete="current-password"></form><iframe name="grandchild" src="${childOrigin}/grandchild.html"></iframe></body></html>`,
+      );
+    } else if (path === "/grandchild.html") {
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(
+        "<!doctype html><html><head><title>Inert grandchild frame</title></head><body>Inert nested frame</body></html>",
+      );
     } else {
-      response.writeHead(404)
-      response.end('not found')
+      response.writeHead(404);
+      response.end("not found");
     }
-  })
+  });
   const main = createServer((request, response) => {
-    const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname
-    if (path === '/login') {
-      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
-      response.end(`<!doctype html><html><head><title>Surffish inert login</title></head><body><main><h1>Inert compatibility login</h1><form id="login"><label>Username <input name="username" autocomplete="username"></label><label>Password <input name="password" type="password" autocomplete="current-password"></label><button type="button">No-op sign-in</button></form><iframe name="child" src="${childOrigin}/frame.html"></iframe></main></body></html>`)
+    const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+    if (path === "/login") {
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(
+        `<!doctype html><html><head><title>Surffish inert login</title></head><body><main><h1>Inert compatibility login</h1><form id="login"><label>Username <input name="username" autocomplete="username"></label><label>Password <input name="password" type="password" autocomplete="current-password"></label><button type="button">No-op sign-in</button></form><iframe name="child" src="${childOrigin}/frame.html"></iframe></main></body></html>`,
+      );
     } else {
-      response.writeHead(404)
-      response.end('not found')
+      response.writeHead(404);
+      response.end("not found");
     }
-  })
-  return { main, child, setChildOrigin: (origin) => { childOrigin = origin } }
+  });
+  return {
+    main,
+    child,
+    setChildOrigin: (origin) => {
+      childOrigin = origin;
+    },
+  };
 }
 
 function writeProbeExtension(directory: string): void {
-  mkdirSync(directory, { recursive: true })
-  writeFileSync(join(directory, 'manifest.json'), `${JSON.stringify({
-    manifest_version: 3,
-    name: 'Surffish Local Tab and Frame Probe',
-    version: '1.0.0',
-    permissions: ['tabs', 'scripting'],
-    host_permissions: ['http://127.0.0.1/*'],
-    background: { service_worker: 'background.js' }
-  }, null, 2)}\n`)
-  writeFileSync(join(directory, 'get-current-shim.js'), `function installSurffishGetCurrent() {
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "manifest.json"),
+    `${JSON.stringify(
+      {
+        manifest_version: 3,
+        name: "Surffish Local Tab and Frame Probe",
+        version: "1.0.0",
+        permissions: ["tabs", "scripting"],
+        host_permissions: ["http://127.0.0.1/*"],
+        background: { service_worker: "background.js" },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(
+    join(directory, "get-current-shim.js"),
+    `function installSurffishGetCurrent() {
   if (typeof chrome.tabs.getCurrent === 'function') return;
   Object.defineProperty(chrome.tabs, 'getCurrent', {
     configurable: true,
@@ -148,8 +205,11 @@ function writeProbeExtension(directory: string): void {
     }
   });
 }
-installSurffishGetCurrent();\n`)
-  writeFileSync(join(directory, 'background.js'), `importScripts('get-current-shim.js');
+installSurffishGetCurrent();\n`,
+  );
+  writeFileSync(
+    join(directory, "background.js"),
+    `importScripts('get-current-shim.js');
 function installSurffishGetAllFrames() {
   if (chrome.webNavigation?.getAllFrames) return;
   const getAllFrames = (details, callback) => {
@@ -188,18 +248,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     };
   })().then(sendResponse, (error) => sendResponse({ error: String(error) }));
   return true;
-});\n`)
-  writeFileSync(join(directory, 'host-bridge.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Experimental host bridge</title></head><body><script src="get-current-shim.js"></script><script src="host-bridge.js"></script></body></html>\n')
-  writeFileSync(join(directory, 'host-bridge.js'), `chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+});\n`,
+  );
+  writeFileSync(
+    join(directory, "host-bridge.html"),
+    '<!doctype html><html><head><meta charset="utf-8"><title>Experimental host bridge</title></head><body><script src="get-current-shim.js"></script><script src="host-bridge.js"></script></body></html>\n',
+  );
+  writeFileSync(
+    join(directory, "host-bridge.js"),
+    `chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.command !== 'surffish-experimental-get-all-frames' || sender.id !== chrome.runtime.id) return;
   globalThis.surffishExperimentalHost.getAllFrames(message.tabId)
     .then((frames) => sendResponse({ ok: Array.isArray(frames), frames }))
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
 });
-globalThis.__surffishHostBridgeReady = true;\n`)
-  writeFileSync(join(directory, 'probe.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Local extension probe</title></head><body>Local extension API probe<script src="get-current-shim.js"></script><script src="probe.js"></script></body></html>\n')
-  writeFileSync(join(directory, 'probe.js'), `const pageUrl = new URL(location.href).searchParams.get('target');
+globalThis.__surffishHostBridgeReady = true;\n`,
+  );
+  writeFileSync(
+    join(directory, "probe.html"),
+    '<!doctype html><html><head><meta charset="utf-8"><title>Local extension probe</title></head><body>Local extension API probe<script src="get-current-shim.js"></script><script src="probe.js"></script></body></html>\n',
+  );
+  writeFileSync(
+    join(directory, "probe.js"),
+    `const pageUrl = new URL(location.href).searchParams.get('target');
 Promise.all([
   chrome.tabs.getCurrent(),
   new Promise((resolve) => chrome.tabs.getCurrent((tab) => resolve(tab)))
@@ -213,40 +285,76 @@ Promise.all([
     };
     document.body.dataset.probeReady = 'true';
   }))
-  .catch((error) => { globalThis.__surffishProbeResult = { error: String(error) }; document.body.dataset.probeReady = 'true'; });\n`)
-  writeFileSync(join(directory, 'host-preload.cjs'), `const { contextBridge, ipcRenderer } = require('electron');
+  .catch((error) => { globalThis.__surffishProbeResult = { error: String(error) }; document.body.dataset.probeReady = 'true'; });\n`,
+  );
+  writeFileSync(
+    join(directory, "host-preload.cjs"),
+    `const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('surffishExperimentalHost', {
   getAllFrames: (tabId) => ipcRenderer.invoke('${bridgeIpcChannel}', tabId)
-});\n`)
+});\n`,
+  );
 }
 
-function prepareOfficialExtensionCopy(sourceDirectory: string, directory: string): Record<string, unknown> {
-  const sourceManifestPath = join(sourceDirectory, 'manifest.json')
-  if (!existsSync(sourceManifestPath)) throw new Error(`No manifest.json found in ${sourceDirectory}`)
-  cpSync(sourceDirectory, directory, { recursive: true, errorOnExist: true })
-  const manifestPath = join(directory, 'manifest.json')
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, any>
-  if (manifest.manifest_version !== 3 || typeof manifest.background?.service_worker !== 'string') {
-    throw new Error('The official-build host probe requires an MV3 package with a background service worker.')
+function prepareOfficialExtensionCopy(
+  sourceDirectory: string,
+  directory: string,
+): Record<string, unknown> {
+  const sourceManifestPath = join(sourceDirectory, "manifest.json");
+  if (!existsSync(sourceManifestPath))
+    throw new Error(`No manifest.json found in ${sourceDirectory}`);
+  cpSync(sourceDirectory, directory, { recursive: true, errorOnExist: true });
+  const manifestPath = join(directory, "manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<
+    string,
+    any
+  >;
+  if (
+    manifest.manifest_version !== 3 ||
+    typeof manifest.background?.service_worker !== "string"
+  ) {
+    throw new Error(
+      "The official-build host probe requires an MV3 package with a background service worker.",
+    );
   }
-  if (manifest.background.type === 'module') throw new Error('This test-only wrapper does not alter module service workers.')
+  if (manifest.background.type === "module")
+    throw new Error(
+      "This test-only wrapper does not alter module service workers.",
+    );
 
-  const originalWorker = manifest.background.service_worker as string
-  const originalWorkerPath = join(directory, originalWorker)
-  if (!existsSync(originalWorkerPath)) throw new Error(`Background worker file not found: ${originalWorker}`)
-  copyFileSync(originalWorkerPath, join(directory, 'surffish-original-background.js'))
+  const originalWorker = manifest.background.service_worker as string;
+  const originalWorkerPath = join(directory, originalWorker);
+  if (!existsSync(originalWorkerPath))
+    throw new Error(`Background worker file not found: ${originalWorker}`);
+  copyFileSync(
+    originalWorkerPath,
+    join(directory, "surffish-original-background.js"),
+  );
 
-  const assetsDirectory = join(root, 'probe-assets')
-  writeProbeExtension(assetsDirectory)
-  for (const file of ['get-current-shim.js', 'host-bridge.html', 'host-bridge.js', 'probe.html', 'probe.js', 'host-preload.cjs']) {
-    copyFileSync(join(assetsDirectory, file), join(directory, file))
+  const assetsDirectory = join(root, "probe-assets");
+  writeProbeExtension(assetsDirectory);
+  for (const file of [
+    "get-current-shim.js",
+    "host-bridge.html",
+    "host-bridge.js",
+    "probe.html",
+    "probe.js",
+    "host-preload.cjs",
+  ]) {
+    copyFileSync(join(assetsDirectory, file), join(directory, file));
   }
 
   const webNavigationEventNames = [
-    'onBeforeNavigate', 'onCommitted', 'onDOMContentLoaded', 'onCompleted',
-    'onErrorOccurred', 'onCreatedNavigationTarget', 'onReferenceFragmentUpdated',
-    'onTabReplaced', 'onHistoryStateUpdated'
-  ]
+    "onBeforeNavigate",
+    "onCommitted",
+    "onDOMContentLoaded",
+    "onCompleted",
+    "onErrorOccurred",
+    "onCreatedNavigationTarget",
+    "onReferenceFragmentUpdated",
+    "onTabReplaced",
+    "onHistoryStateUpdated",
+  ];
   const workerWrapper = `importScripts('get-current-shim.js');
 const eventNames = ${JSON.stringify(webNavigationEventNames)};
 const webNavigation = Object.create(null);
@@ -292,12 +400,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   })().then(sendResponse, (error) => sendResponse({ error: String(error) }));
   return true;
 });
-importScripts('surffish-original-background.js');\n`
-  writeFileSync(join(directory, 'surffish-test-worker.js'), workerWrapper)
-  manifest.background.service_worker = 'surffish-test-worker.js'
+importScripts('surffish-original-background.js');\n`;
+  writeFileSync(join(directory, "surffish-test-worker.js"), workerWrapper);
+  manifest.background.service_worker = "surffish-test-worker.js";
 
-  const actionPopup = manifest.action?.default_popup ?? manifest.browser_action?.default_popup ?? null
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  const actionPopup =
+    manifest.action?.default_popup ??
+    manifest.browser_action?.default_popup ??
+    null;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return {
     version: manifest.version ?? null,
     manifestVersion: manifest.manifest_version,
@@ -305,161 +416,267 @@ importScripts('surffish-original-background.js');\n`
     actionPopup,
     optionsPage: manifest.options_ui?.page ?? manifest.options_page ?? null,
     staticContentScriptFiles: Array.isArray(manifest.content_scripts)
-      ? manifest.content_scripts.flatMap((entry: { js?: string[]; css?: string[] }) => [...(entry.js ?? []), ...(entry.css ?? [])])
+      ? manifest.content_scripts.flatMap(
+          (entry: { js?: string[]; css?: string[] }) => [
+            ...(entry.js ?? []),
+            ...(entry.css ?? []),
+          ],
+        )
       : [],
     permissions: manifest.permissions ?? [],
     popupHtmlModified: false,
-    popupShimMethod: actionPopup ? 'CDP Page.addScriptToEvaluateOnNewDocument' : null,
+    popupShimMethod: actionPopup
+      ? "CDP Page.addScriptToEvaluateOnNewDocument"
+      : null,
     sourceBuildModified: false,
     loadedTemporaryCopy: true,
     temporaryManifestWrapped: true,
     listenerOnlyWebNavigationStubs: true,
-    navigationEventsEmitted: false
-  }
+    navigationEventsEmitted: false,
+  };
 }
 
-function summarizeFrames(frames: Electron.WebFrameMain[], mainFrame: Electron.WebFrameMain) {
-  return frames.filter((frame) => !frame.detached).map((frame) => ({
-    url: frame.url,
-    frameTreeNodeId: frame.frameTreeNodeId,
-    routingId: frame.routingId,
-    processId: frame.processId,
-    osProcessId: frame.osProcessId,
-    parentFrameTreeNodeId: frame.parent?.frameTreeNodeId ?? null,
-    isMainFrame: frame.frameTreeNodeId === mainFrame.frameTreeNodeId
-  }))
+function summarizeFrames(
+  frames: Electron.WebFrameMain[],
+  mainFrame: Electron.WebFrameMain,
+) {
+  return frames
+    .filter((frame) => !frame.detached)
+    .map((frame) => ({
+      url: frame.url,
+      frameTreeNodeId: frame.frameTreeNodeId,
+      routingId: frame.routingId,
+      processId: frame.processId,
+      osProcessId: frame.osProcessId,
+      parentFrameTreeNodeId: frame.parent?.frameTreeNodeId ?? null,
+      isMainFrame: frame.frameTreeNodeId === mainFrame.frameTreeNodeId,
+    }));
 }
 
-async function inspectExtensionWorlds(contents: Electron.WebContents, extensionId: string): Promise<Record<string, unknown>> {
-  const debuggerSession = contents.debugger
-  const attachedHere = !debuggerSession.isAttached()
-  const contexts: Array<{ id: number; origin: string; name: string; isDefault: boolean; frameId: string | null }> = []
-  const listener = (_event: Electron.Event, method: string, params: any): void => {
-    if (method !== 'Runtime.executionContextCreated' || !params?.context) return
-    const context = params.context
+async function inspectExtensionWorlds(
+  contents: Electron.WebContents,
+  extensionId: string,
+): Promise<Record<string, unknown>> {
+  const debuggerSession = contents.debugger;
+  const attachedHere = !debuggerSession.isAttached();
+  const contexts: Array<{
+    id: number;
+    origin: string;
+    name: string;
+    isDefault: boolean;
+    frameId: string | null;
+  }> = [];
+  const listener = (
+    _event: Electron.Event,
+    method: string,
+    params: any,
+  ): void => {
+    if (method !== "Runtime.executionContextCreated" || !params?.context)
+      return;
+    const context = params.context;
     contexts.push({
       id: context.id,
-      origin: context.origin ?? '',
-      name: context.name ?? '',
+      origin: context.origin ?? "",
+      name: context.name ?? "",
       isDefault: context.auxData?.isDefault === true,
-      frameId: context.auxData?.frameId ?? null
-    })
-  }
+      frameId: context.auxData?.frameId ?? null,
+    });
+  };
   try {
-    if (attachedHere) debuggerSession.attach('1.3')
-    debuggerSession.on('message', listener)
-    await withTimeout(debuggerSession.sendCommand('Runtime.enable'), 5000, 'enable CDP runtime for content-script inspection')
-    await delay(500)
-    const worlds = []
-    for (const context of contexts.filter((candidate) => candidate.origin.includes(extensionId) || candidate.name.includes(extensionId))) {
-      let apis: unknown = null
+    if (attachedHere) debuggerSession.attach("1.3");
+    debuggerSession.on("message", listener);
+    await withTimeout(
+      debuggerSession.sendCommand("Runtime.enable"),
+      5000,
+      "enable CDP runtime for content-script inspection",
+    );
+    await delay(500);
+    const worlds = [];
+    for (const context of contexts.filter(
+      (candidate) =>
+        candidate.origin.includes(extensionId) ||
+        candidate.name.includes(extensionId),
+    )) {
+      let apis: unknown = null;
       try {
-        const result = await debuggerSession.sendCommand('Runtime.evaluate', {
+        const result = await debuggerSession.sendCommand("Runtime.evaluate", {
           expression: `(() => ({ runtimeId: globalThis.chrome?.runtime?.id ?? null, hasRuntimeMessaging: typeof globalThis.chrome?.runtime?.sendMessage === 'function', hasTabsGetCurrent: typeof globalThis.chrome?.tabs?.getCurrent === 'function' }))()`,
           contextId: context.id,
-          returnByValue: true
-        })
-        apis = result.result?.value ?? null
+          returnByValue: true,
+        });
+        apis = result.result?.value ?? null;
       } catch (error) {
-        apis = { error: error instanceof Error ? error.message : String(error) }
+        apis = {
+          error: error instanceof Error ? error.message : String(error),
+        };
       }
-      worlds.push({ ...context, apis })
+      worlds.push({ ...context, apis });
     }
-    return { inspected: true, worlds }
+    return { inspected: true, worlds };
   } catch (error) {
-    return { inspected: false, error: error instanceof Error ? error.message : String(error), worlds: [] }
+    return {
+      inspected: false,
+      error: error instanceof Error ? error.message : String(error),
+      worlds: [],
+    };
   } finally {
-    debuggerSession.removeListener('message', listener)
-    if (attachedHere && debuggerSession.isAttached()) debuggerSession.detach()
+    debuggerSession.removeListener("message", listener);
+    if (attachedHere && debuggerSession.isAttached()) debuggerSession.detach();
   }
 }
 
 async function run(): Promise<void> {
-  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== '1') {
-    throw new Error('This partial bridge is disabled by default. Set SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1 to run the disposable probe.')
+  if (process.env.SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE !== "1") {
+    throw new Error(
+      "This partial bridge is disabled by default. Set SURFFISH_EXPERIMENTAL_EXTENSION_HOST_BRIDGE=1 to run the disposable probe.",
+    );
   }
-  const fixtures = createLocalFixtures()
-  childServer = fixtures.child
-  mainServer = fixtures.main
-  const childPort = await listen(fixtures.child)
-  const childOrigin = `http://127.0.0.1:${childPort}`
-  fixtures.setChildOrigin(childOrigin)
+  const fixtures = createLocalFixtures();
+  childServer = fixtures.child;
+  mainServer = fixtures.main;
+  const childPort = await listen(fixtures.child);
+  const childOrigin = `http://127.0.0.1:${childPort}`;
+  fixtures.setChildOrigin(childOrigin);
   // Distinct ports make the nested child frame cross-origin to the login form; every request remains loopback-only.
-  const port = await listen(fixtures.main)
-  const mainOrigin = `http://127.0.0.1:${port}`
-  probePageUrl = `${mainOrigin}/login`
+  const port = await listen(fixtures.main);
+  const mainOrigin = `http://127.0.0.1:${port}`;
+  probePageUrl = `${mainOrigin}/login`;
 
-  await app.whenReady()
-  browserSession = session.fromPartition(BROWSER_SESSION_PARTITION)
-  browserSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
-    let allowed = false
-    try {
-      const url = new URL(details.url)
-      allowed = url.protocol === 'chrome-extension:' || (url.protocol === 'http:' && url.hostname === '127.0.0.1')
-    } catch {}
-    if (!allowed && blockedRequests.length < 100) blockedRequests.push({ url: details.url, resourceType: String(details.resourceType) })
-    callback({ cancel: !allowed })
-  })
+  await app.whenReady();
+  browserSession = session.fromPartition(BROWSER_SESSION_PARTITION);
+  browserSession.webRequest.onBeforeRequest(
+    { urls: ["<all_urls>"] },
+    (details, callback) => {
+      let allowed = false;
+      try {
+        const url = new URL(details.url);
+        allowed =
+          url.protocol === "chrome-extension:" ||
+          (url.protocol === "http:" && url.hostname === "127.0.0.1");
+      } catch {}
+      if (!allowed && blockedRequests.length < 100)
+        blockedRequests.push({
+          url: details.url,
+          resourceType: String(details.resourceType),
+        });
+      callback({ cancel: !allowed });
+    },
+  );
 
-  const extensionDirectory = join(root, 'unpacked-probe-extension')
-  let officialSetup: Record<string, unknown> | null = null
+  const extensionDirectory = join(root, "unpacked-probe-extension");
+  let officialSetup: Record<string, unknown> | null = null;
   if (sourceExtensionDirectory) {
-    officialSetup = prepareOfficialExtensionCopy(sourceExtensionDirectory, extensionDirectory)
-    report.officialExtension = { ...officialSetup, sourcePath: sourceExtensionDirectory }
+    officialSetup = prepareOfficialExtensionCopy(
+      sourceExtensionDirectory,
+      extensionDirectory,
+    );
+    report.officialExtension = {
+      ...officialSetup,
+      sourcePath: sourceExtensionDirectory,
+    };
   } else {
-    writeProbeExtension(extensionDirectory)
+    writeProbeExtension(extensionDirectory);
   }
-  const readyExtensionIds = new Set<string>()
-  const recordReadyExtension = (_event: Electron.Event, readyExtension: Electron.Extension): void => {
-    readyExtensionIds.add(readyExtension.id)
-  }
-  browserSession.extensions.on('extension-ready', recordReadyExtension)
-  const extension = await browserSession.extensions.loadExtension(extensionDirectory)
-  loadedExtensionId = extension.id
+  const readyExtensionIds = new Set<string>();
+  const recordReadyExtension = (
+    _event: Electron.Event,
+    readyExtension: Electron.Extension,
+  ): void => {
+    readyExtensionIds.add(readyExtension.id);
+  };
+  browserSession.extensions.on("extension-ready", recordReadyExtension);
+  const extension =
+    await browserSession.extensions.loadExtension(extensionDirectory);
+  loadedExtensionId = extension.id;
   if (!readyExtensionIds.has(extension.id)) {
-    await withTimeout(new Promise<void>((resolve) => {
-      const listener = (_event: Electron.Event, readyExtension: Electron.Extension): void => {
-        if (readyExtension.id !== extension.id) return
-        browserSession?.extensions.removeListener('extension-ready', listener)
-        resolve()
-      }
-      browserSession?.extensions.on('extension-ready', listener)
-    }), probeTimeoutMs, 'extension-ready')
+    await withTimeout(
+      new Promise<void>((resolve) => {
+        const listener = (
+          _event: Electron.Event,
+          readyExtension: Electron.Extension,
+        ): void => {
+          if (readyExtension.id !== extension.id) return;
+          browserSession?.extensions.removeListener(
+            "extension-ready",
+            listener,
+          );
+          resolve();
+        };
+        browserSession?.extensions.on("extension-ready", listener);
+      }),
+      probeTimeoutMs,
+      "extension-ready",
+    );
   }
-  browserSession.extensions.removeListener('extension-ready', recordReadyExtension)
+  browserSession.extensions.removeListener(
+    "extension-ready",
+    recordReadyExtension,
+  );
 
   ipcMain.handle(bridgeIpcChannel, (event, tabId: unknown) => {
-    if (!bridgeWindow || bridgeWindow.isDestroyed() || event.sender !== bridgeWindow.webContents) {
-      throw new Error('Only the isolated extension bridge page may request frame details.')
+    if (
+      !bridgeWindow ||
+      bridgeWindow.isDestroyed() ||
+      event.sender !== bridgeWindow.webContents
+    ) {
+      throw new Error(
+        "Only the isolated extension bridge page may request frame details.",
+      );
     }
-    if (typeof tabId !== 'number') return null
-    return getExperimentalExtensionFrames(tabId)
-  })
+    if (typeof tabId !== "number") return null;
+    return getExperimentalExtensionFrames(tabId);
+  });
 
   hostWindow = new BrowserWindow({
     show: false,
     width: 1100,
     height: 800,
-    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
-  })
-  attachBrowserView(hostWindow, { session: { urls: [probePageUrl], activeIndex: 0, pinnedIndexes: [] } })
-  setBrowserBounds({ x: 0, y: 0, width: 1000, height: 700 })
-  const registryTab = getBrowserTabs()[0]
-  hostTabId = registryTab?.id ?? null
-  if (!hostTabId || !activateBrowserTab(hostTabId)) throw new Error('Surffish could not activate its local WebContentsView tab.')
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  attachBrowserView(hostWindow, {
+    session: { urls: [probePageUrl], activeIndex: 0, pinnedIndexes: [] },
+  });
+  setBrowserBounds({ x: 0, y: 0, width: 1000, height: 700 });
+  const registryTab = getBrowserTabs()[0];
+  hostTabId = registryTab?.id ?? null;
+  if (!hostTabId || !activateBrowserTab(hostTabId))
+    throw new Error(
+      "Surffish could not activate its local WebContentsView tab.",
+    );
 
   const pageContents = await waitFor(
-    () => webContents.getAllWebContents().find((contents) => !contents.isDestroyed() && contents.getURL().startsWith(probePageUrl)) ?? null,
+    () =>
+      webContents
+        .getAllWebContents()
+        .find(
+          (contents) =>
+            !contents.isDestroyed() &&
+            contents.getURL().startsWith(probePageUrl),
+        ) ?? null,
     probeTimeoutMs,
-    'Surffish WebContentsView'
-  )
+    "Surffish WebContentsView",
+  );
   await waitFor(
-    () => !pageContents.isLoading() && pageContents.mainFrame.framesInSubtree.filter((frame) => !frame.detached).length >= 3 ? true : null,
+    () =>
+      !pageContents.isLoading() &&
+      pageContents.mainFrame.framesInSubtree.filter((frame) => !frame.detached)
+        .length >= 3
+        ? true
+        : null,
     15000,
-    'nested loopback frame tree'
-  )
-  const currentRegistryTab = getBrowserTabs().find((tab) => tab.id === hostTabId)
-  const hostFrameDetails = summarizeFrames(pageContents.mainFrame.framesInSubtree, pageContents.mainFrame)
+    "nested loopback frame tree",
+  );
+  const currentRegistryTab = getBrowserTabs().find(
+    (tab) => tab.id === hostTabId,
+  );
+  const hostFrameDetails = summarizeFrames(
+    pageContents.mainFrame.framesInSubtree,
+    pageContents.mainFrame,
+  );
 
   bridgeWindow = new BrowserWindow({
     show: false,
@@ -467,19 +684,27 @@ async function run(): Promise<void> {
     height: 200,
     webPreferences: {
       partition: BROWSER_SESSION_PARTITION,
-      preload: join(extensionDirectory, 'host-preload.cjs'),
+      preload: join(extensionDirectory, "host-preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      backgroundThrottling: false
-    }
-  })
-  await withTimeout(bridgeWindow.loadURL(`chrome-extension://${extension.id}/host-bridge.html`), probeTimeoutMs, 'load isolated extension host bridge')
-  await waitFor(
-    () => bridgeWindow?.webContents.executeJavaScript('globalThis.__surffishHostBridgeReady === true', true),
+      backgroundThrottling: false,
+    },
+  });
+  await withTimeout(
+    bridgeWindow.loadURL(`chrome-extension://${extension.id}/host-bridge.html`),
     probeTimeoutMs,
-    'extension host bridge listener'
-  )
+    "load isolated extension host bridge",
+  );
+  await waitFor(
+    () =>
+      bridgeWindow?.webContents.executeJavaScript(
+        "globalThis.__surffishHostBridgeReady === true",
+        true,
+      ),
+    probeTimeoutMs,
+    "extension host bridge listener",
+  );
 
   popupWindow = new BrowserWindow({
     show: false,
@@ -489,23 +714,31 @@ async function run(): Promise<void> {
       partition: BROWSER_SESSION_PARTITION,
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true
-    }
-  })
-  const probeUrl = `chrome-extension://${extension.id}/probe.html?target=${encodeURIComponent(probePageUrl)}`
-  await withTimeout(popupWindow.loadURL(probeUrl), probeTimeoutMs, 'load extension API probe page')
+      sandbox: true,
+    },
+  });
+  const probeUrl = `chrome-extension://${extension.id}/probe.html?target=${encodeURIComponent(probePageUrl)}`;
+  await withTimeout(
+    popupWindow.loadURL(probeUrl),
+    probeTimeoutMs,
+    "load extension API probe page",
+  );
   const extensionProbe = await waitFor(
-    () => popupWindow?.webContents.executeJavaScript('globalThis.__surffishProbeResult ?? null', true) as Promise<Record<string, unknown> | null>,
+    () =>
+      popupWindow?.webContents.executeJavaScript(
+        "globalThis.__surffishProbeResult ?? null",
+        true,
+      ) as Promise<Record<string, unknown> | null>,
     15000,
-    'extension tab/frame query'
-  )
-  await delay(100)
+    "extension tab/frame query",
+  );
+  await delay(100);
 
-  let officialPopupSnapshot: unknown = null
-  let officialPopupContext: unknown = null
-  let officialPopupError: string | null = null
-  const actionPopup = officialSetup?.actionPopup
-  if (officialExtensionMode && typeof actionPopup === 'string') {
+  let officialPopupSnapshot: unknown = null;
+  let officialPopupContext: unknown = null;
+  let officialPopupError: string | null = null;
+  const actionPopup = officialSetup?.actionPopup;
+  if (officialExtensionMode && typeof actionPopup === "string") {
     try {
       officialPopupWindow = new BrowserWindow({
         show: false,
@@ -515,14 +748,22 @@ async function run(): Promise<void> {
           partition: BROWSER_SESSION_PARTITION,
           nodeIntegration: false,
           contextIsolation: true,
-          sandbox: true
-        }
-      })
-      await withTimeout(officialPopupWindow.loadURL(probePageUrl), probeTimeoutMs, 'initialize popup CDP target on loopback')
-      const popupDebugger = officialPopupWindow.webContents.debugger
-      popupDebugger.attach('1.3')
-      officialPopupDebuggerAttached = true
-      await withTimeout(popupDebugger.sendCommand('Page.enable'), 5000, 'enable popup CDP instrumentation')
+          sandbox: true,
+        },
+      });
+      await withTimeout(
+        officialPopupWindow.loadURL(probePageUrl),
+        probeTimeoutMs,
+        "initialize popup CDP target on loopback",
+      );
+      const popupDebugger = officialPopupWindow.webContents.debugger;
+      popupDebugger.attach("1.3");
+      officialPopupDebuggerAttached = true;
+      await withTimeout(
+        popupDebugger.sendCommand("Page.enable"),
+        5000,
+        "enable popup CDP instrumentation",
+      );
       const popupShimSource = `(() => {
         const tabs = globalThis.chrome?.tabs;
         if (!tabs) return;
@@ -536,19 +777,40 @@ async function run(): Promise<void> {
           });
         }
         globalThis.__surffishExperimentalPopupGetCurrentInstalled = typeof tabs.getCurrent === 'function';
-      })();`
-      await withTimeout(popupDebugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: popupShimSource }), 5000, 'install pre-document popup API instrumentation')
-      await withTimeout(officialPopupWindow.loadURL(`chrome-extension://${extension.id}/${actionPopup}`), probeTimeoutMs, 'load official action popup')
-      await delay(2500)
-      officialPopupSnapshot = await withTimeout(officialPopupWindow.webContents.executeJavaScript(`(() => ({
+      })();`;
+      await withTimeout(
+        popupDebugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", {
+          source: popupShimSource,
+        }),
+        5000,
+        "install pre-document popup API instrumentation",
+      );
+      await withTimeout(
+        officialPopupWindow.loadURL(
+          `chrome-extension://${extension.id}/${actionPopup}`,
+        ),
+        probeTimeoutMs,
+        "load official action popup",
+      );
+      await delay(2500);
+      officialPopupSnapshot = await withTimeout(
+        officialPopupWindow.webContents.executeJavaScript(
+          `(() => ({
         title: document.title,
         readyState: document.readyState,
         bodyText: (document.body?.innerText ?? '').trim().slice(0, 1600),
         roots: ['app-root', '#app', '#root', 'main', 'form'].map((selector) => ({ selector, count: document.querySelectorAll(selector).length })),
         scriptCount: document.querySelectorAll('script[src]').length,
         visibleInputs: [...document.querySelectorAll('input')].map((field) => ({ type: field.type, name: field.name || null, autocomplete: field.autocomplete || null, valuePresent: field.value.length > 0 }))
-      }))()`, true), 8000, 'read official action popup snapshot')
-      officialPopupContext = await withTimeout(officialPopupWindow.webContents.executeJavaScript(`(async () => {
+      }))()`,
+          true,
+        ),
+        8000,
+        "read official action popup snapshot",
+      );
+      officialPopupContext = await withTimeout(
+        officialPopupWindow.webContents.executeJavaScript(
+          `(async () => {
         const present = typeof chrome?.tabs?.getCurrent === 'function';
         const current = present ? await chrome.tabs.getCurrent() : undefined;
         return {
@@ -556,23 +818,54 @@ async function run(): Promise<void> {
           actionPopupReturnsUndefined: current === undefined,
           experimentalShimApplied: globalThis.__surffishExperimentalPopupGetCurrentInstalled === true
         };
-      })()`, true), 8000, 'check action-popup tabs.getCurrent semantics')
+      })()`,
+          true,
+        ),
+        8000,
+        "check action-popup tabs.getCurrent semantics",
+      );
     } catch (error) {
-      officialPopupError = error instanceof Error ? error.message : String(error)
+      officialPopupError =
+        error instanceof Error ? error.message : String(error);
     }
   }
-  const contentScriptWorldReport = officialExtensionMode ? await inspectExtensionWorlds(pageContents, extension.id) : null
+  const contentScriptWorldReport = officialExtensionMode
+    ? await inspectExtensionWorlds(pageContents, extension.id)
+    : null;
 
-  const targetTab = extensionProbe.targetTab as ProbeTab | null | undefined
-  const injectedFrames = Array.isArray(extensionProbe.injectedFrames) ? extensionProbe.injectedFrames as Array<{ frameId: number; result?: { url?: string; top?: boolean; name?: string } }> : []
-  const bridgedFrames = Array.isArray(extensionProbe.bridgedFrames) ? extensionProbe.bridgedFrames as Array<{ frameId: number; parentFrameId: number; processId: number; url: string }> : []
-  const hostApiFrames = typeof targetTab?.id === 'number' ? getExperimentalExtensionFrames(targetTab.id) : null
-  const pageGetCurrent = extensionProbe.pageGetCurrent as ProbeTab | null | undefined
-  const pageGetCurrentCallback = extensionProbe.pageGetCurrentCallback as ProbeTab | null | undefined
-  const workerGetCurrent = extensionProbe.workerGetCurrent as ProbeTab | null | undefined
-  const bridgeFramesMatchHostApi = Boolean(hostApiFrames && JSON.stringify(bridgedFrames) === JSON.stringify(hostApiFrames))
+  const targetTab = extensionProbe.targetTab as ProbeTab | null | undefined;
+  const injectedFrames = Array.isArray(extensionProbe.injectedFrames)
+    ? (extensionProbe.injectedFrames as Array<{
+        frameId: number;
+        result?: { url?: string; top?: boolean; name?: string };
+      }>)
+    : [];
+  const bridgedFrames = Array.isArray(extensionProbe.bridgedFrames)
+    ? (extensionProbe.bridgedFrames as Array<{
+        frameId: number;
+        parentFrameId: number;
+        processId: number;
+        url: string;
+      }>)
+    : [];
+  const hostApiFrames =
+    typeof targetTab?.id === "number"
+      ? getExperimentalExtensionFrames(targetTab.id)
+      : null;
+  const pageGetCurrent = extensionProbe.pageGetCurrent as
+    ProbeTab | null | undefined;
+  const pageGetCurrentCallback = extensionProbe.pageGetCurrentCallback as
+    ProbeTab | null | undefined;
+  const workerGetCurrent = extensionProbe.workerGetCurrent as
+    ProbeTab | null | undefined;
+  const bridgeFramesMatchHostApi = Boolean(
+    hostApiFrames &&
+    JSON.stringify(bridgedFrames) === JSON.stringify(hostApiFrames),
+  );
   const frameIdComparisons = injectedFrames.map((injected) => {
-    const hostFrame = hostFrameDetails.find((frame) => frame.url === injected.result?.url)
+    const hostFrame = hostFrameDetails.find(
+      (frame) => frame.url === injected.result?.url,
+    );
     return {
       url: injected.result?.url ?? null,
       extensionFrameId: injected.frameId,
@@ -580,27 +873,51 @@ async function run(): Promise<void> {
       hostRoutingId: hostFrame?.routingId ?? null,
       hostParentFrameTreeNodeId: hostFrame?.parentFrameTreeNodeId ?? null,
       extensionIdMatchesMappedFrameTreeNode: hostFrame
-        ? injected.frameId === (hostFrame.isMainFrame ? 0 : hostFrame.frameTreeNodeId)
+        ? injected.frameId ===
+          (hostFrame.isMainFrame ? 0 : hostFrame.frameTreeNodeId)
         : false,
       extensionIdMatchesRoutingId: hostFrame
         ? injected.frameId === (hostFrame.isMainFrame ? 0 : hostFrame.routingId)
-        : false
-    }
-  })
-  const popupSnapshotData = officialPopupSnapshot as { title?: string; readyState?: string; roots?: Array<{ selector?: string; count?: number }> } | null
+        : false,
+    };
+  });
+  const popupSnapshotData = officialPopupSnapshot as {
+    title?: string;
+    readyState?: string;
+    roots?: Array<{ selector?: string; count?: number }>;
+  } | null;
   const officialPopupRendered = officialExtensionMode
-    ? Boolean(popupSnapshotData?.title === 'Bitwarden' && popupSnapshotData.readyState === 'complete' && popupSnapshotData.roots?.some((root) => root.selector === 'app-root' && (root.count ?? 0) > 0))
-    : null
-  const contentScriptWorlds = (contentScriptWorldReport as { worlds?: unknown[] } | null)?.worlds ?? []
-  const officialContentWorldCount = officialExtensionMode ? contentScriptWorlds.length : null
-  const workerRespondedToDiagnostic = Boolean(targetTab && Array.isArray(extensionProbe.injectedFrames) && Array.isArray(extensionProbe.bridgedFrames))
+    ? Boolean(
+        popupSnapshotData?.title === "Bitwarden" &&
+        popupSnapshotData.readyState === "complete" &&
+        popupSnapshotData.roots?.some(
+          (root) => root.selector === "app-root" && (root.count ?? 0) > 0,
+        ),
+      )
+    : null;
+  const contentScriptWorlds =
+    (contentScriptWorldReport as { worlds?: unknown[] } | null)?.worlds ?? [];
+  const officialContentWorldCount = officialExtensionMode
+    ? contentScriptWorlds.length
+    : null;
+  const workerRespondedToDiagnostic = Boolean(
+    targetTab &&
+    Array.isArray(extensionProbe.injectedFrames) &&
+    Array.isArray(extensionProbe.bridgedFrames),
+  );
   const reportResult = {
-    runtime: { electronVersion: process.versions.electron, chromiumVersion: process.versions.chrome },
+    runtime: {
+      electronVersion: process.versions.electron,
+      chromiumVersion: process.versions.chrome,
+    },
     stockElectronMeasurements: {
       tabsQueryExposedHostTab: Boolean(targetTab),
       scriptingAllFramesResultCount: injectedFrames.length,
-      tabIdMatchesWebContentsId: typeof targetTab?.id === 'number' && targetTab.id === pageContents.id,
-      childFrameIdsMatchFrameTreeNodes: frameIdComparisons.filter((item) => item.url !== pageContents.getURL()).every((item) => item.extensionIdMatchesMappedFrameTreeNode)
+      tabIdMatchesWebContentsId:
+        typeof targetTab?.id === "number" && targetTab.id === pageContents.id,
+      childFrameIdsMatchFrameTreeNodes: frameIdComparisons
+        .filter((item) => item.url !== pageContents.getURL())
+        .every((item) => item.extensionIdMatchesMappedFrameTreeNode),
     },
     experimentalOverrides: {
       sourceExtensionFilesModified: false,
@@ -609,94 +926,206 @@ async function run(): Promise<void> {
       listenerOnlyWebNavigationEvents: officialExtensionMode,
       webNavigationGetAllFramesRelayedToHost: true,
       popupTabsGetCurrentPreDocumentShim: officialExtensionMode,
-      navigationEventsEmitted: false
+      navigationEventsEmitted: false,
     },
-    wrappedWorkerRespondedToDiagnostic: officialExtensionMode ? workerRespondedToDiagnostic : null,
+    wrappedWorkerRespondedToDiagnostic: officialExtensionMode
+      ? workerRespondedToDiagnostic
+      : null,
     officialPopupRendered,
     officialContentWorldCount,
-    extension: { name: extension.name, version: extension.version, id: extension.id },
-    hostTab: currentRegistryTab ? { id: currentRegistryTab.id, url: currentRegistryTab.url, active: currentRegistryTab.active, sleeping: currentRegistryTab.sleeping } : null,
-    hostWebContents: { id: pageContents.id, url: pageContents.getURL(), sessionPartition: BROWSER_SESSION_PARTITION },
-    hostBridge: { ipcChannel: bridgeIpcChannel, hiddenExtensionOriginPage: true, rendererNodeIntegration: false, contextIsolation: true },
+    extension: {
+      name: extension.name,
+      version: extension.version,
+      id: extension.id,
+    },
+    hostTab: currentRegistryTab
+      ? {
+          id: currentRegistryTab.id,
+          url: currentRegistryTab.url,
+          active: currentRegistryTab.active,
+          sleeping: currentRegistryTab.sleeping,
+        }
+      : null,
+    hostWebContents: {
+      id: pageContents.id,
+      url: pageContents.getURL(),
+      sessionPartition: BROWSER_SESSION_PARTITION,
+    },
+    hostBridge: {
+      ipcChannel: bridgeIpcChannel,
+      hiddenExtensionOriginPage: true,
+      rendererNodeIntegration: false,
+      contextIsolation: true,
+    },
     extensionProbe,
-    officialPopup: officialExtensionMode ? { snapshot: officialPopupSnapshot, context: officialPopupContext, error: officialPopupError } : null,
+    officialPopup: officialExtensionMode
+      ? {
+          snapshot: officialPopupSnapshot,
+          context: officialPopupContext,
+          error: officialPopupError,
+        }
+      : null,
     contentScriptWorlds: contentScriptWorldReport,
     extensionOptionsPage: officialSetup?.optionsPage ?? null,
-    tabIdMatchesWebContentsId: typeof targetTab?.id === 'number' && targetTab.id === pageContents.id,
-    pageGetCurrentMatchesExtensionTab: typeof pageGetCurrent?.id === 'number' && pageGetCurrent.id === popupWindow.webContents.id,
-    callbackGetCurrentMatchesExtensionTab: typeof pageGetCurrentCallback?.id === 'number' && pageGetCurrentCallback.id === popupWindow.webContents.id,
-    workerGetCurrentReturnsUndefined: workerGetCurrent === null || workerGetCurrent === undefined,
+    tabIdMatchesWebContentsId:
+      typeof targetTab?.id === "number" && targetTab.id === pageContents.id,
+    pageGetCurrentMatchesExtensionTab:
+      typeof pageGetCurrent?.id === "number" &&
+      pageGetCurrent.id === popupWindow.webContents.id,
+    callbackGetCurrentMatchesExtensionTab:
+      typeof pageGetCurrentCallback?.id === "number" &&
+      pageGetCurrentCallback.id === popupWindow.webContents.id,
+    workerGetCurrentReturnsUndefined:
+      workerGetCurrent === null || workerGetCurrent === undefined,
     bridgeFramesMatchHostApi,
-    tabAppearsInSurffishRegistry: Boolean(currentRegistryTab && currentRegistryTab.url.startsWith(probePageUrl)),
+    tabAppearsInSurffishRegistry: Boolean(
+      currentRegistryTab && currentRegistryTab.url.startsWith(probePageUrl),
+    ),
     hostFrames: hostFrameDetails,
     frameIdComparisons,
-    allInjectedFramesMatchedHostTree: frameIdComparisons.length === hostFrameDetails.length && frameIdComparisons.every((item) => item.extensionIdMatchesMappedFrameTreeNode),
-    blockedRequests
-  }
-  Object.assign(report, reportResult)
-  const assertions = report.assertions as string[]
-  if (!currentRegistryTab || !currentRegistryTab.url.startsWith(probePageUrl)) assertions.push('FAILED: the local page was not present in Surffish’s own BrowserTab registry')
-  if (!targetTab) assertions.push('FAILED: Electron chrome.tabs.query did not expose the real Surffish WebContentsView tab')
-  if (!injectedFrames.length) assertions.push('FAILED: chrome.scripting.executeScript(allFrames) returned no frame results')
-  if (targetTab && targetTab.id !== pageContents.id) assertions.push('OBSERVED: extension tab.id differs from Electron webContents.id; host needs an explicit mapping')
-  if (frameIdComparisons.some((item) => !item.extensionIdMatchesMappedFrameTreeNode)) assertions.push('OBSERVED: extension frameId does not directly match the proposed WebFrameMain frameTreeNodeId mapping')
-  if (!bridgeFramesMatchHostApi) assertions.push('FAILED: the extension-worker getAllFrames bridge did not return the exact host frame-tree result')
-  if (typeof pageGetCurrent?.id !== 'number' || pageGetCurrent.id !== popupWindow.webContents.id) assertions.push('FAILED: getCurrent did not resolve to the extension page tab in Promise form')
-  if (typeof pageGetCurrentCallback?.id !== 'number' || pageGetCurrentCallback.id !== popupWindow.webContents.id) assertions.push('FAILED: getCurrent did not resolve to the extension page tab in callback form')
-  if (workerGetCurrent !== null && workerGetCurrent !== undefined) assertions.push('FAILED: getCurrent returned a tab in the background service-worker context')
-  if (officialExtensionMode && !workerRespondedToDiagnostic) assertions.push('FAILED: the wrapped official worker did not answer the diagnostic; no compatibility conclusion is available from this run')
-  if (officialExtensionMode && !officialContentWorldCount) assertions.push('FAILED: no official extension isolated content-script worlds were observed on the local host page')
-  if (officialExtensionMode && actionPopup && !officialPopupRendered) assertions.push('FAILED: the official action popup did not render under the documented pre-document test instrumentation')
-  const hostBridgePassed = Boolean(currentRegistryTab && targetTab && injectedFrames.length === hostFrameDetails.length && bridgeFramesMatchHostApi)
-  const officialSurfacesPassed = !officialExtensionMode || Boolean(workerRespondedToDiagnostic && officialContentWorldCount && (!actionPopup || officialPopupRendered))
-  report.ok = hostBridgePassed && officialSurfacesPassed
-  exitCode = report.ok ? 0 : 1
+    allInjectedFramesMatchedHostTree:
+      frameIdComparisons.length === hostFrameDetails.length &&
+      frameIdComparisons.every(
+        (item) => item.extensionIdMatchesMappedFrameTreeNode,
+      ),
+    blockedRequests,
+  };
+  Object.assign(report, reportResult);
+  const assertions = report.assertions as string[];
+  if (!currentRegistryTab || !currentRegistryTab.url.startsWith(probePageUrl))
+    assertions.push(
+      "FAILED: the local page was not present in Surffish’s own BrowserTab registry",
+    );
+  if (!targetTab)
+    assertions.push(
+      "FAILED: Electron chrome.tabs.query did not expose the real Surffish WebContentsView tab",
+    );
+  if (!injectedFrames.length)
+    assertions.push(
+      "FAILED: chrome.scripting.executeScript(allFrames) returned no frame results",
+    );
+  if (targetTab && targetTab.id !== pageContents.id)
+    assertions.push(
+      "OBSERVED: extension tab.id differs from Electron webContents.id; host needs an explicit mapping",
+    );
+  if (
+    frameIdComparisons.some(
+      (item) => !item.extensionIdMatchesMappedFrameTreeNode,
+    )
+  )
+    assertions.push(
+      "OBSERVED: extension frameId does not directly match the proposed WebFrameMain frameTreeNodeId mapping",
+    );
+  if (!bridgeFramesMatchHostApi)
+    assertions.push(
+      "FAILED: the extension-worker getAllFrames bridge did not return the exact host frame-tree result",
+    );
+  if (
+    typeof pageGetCurrent?.id !== "number" ||
+    pageGetCurrent.id !== popupWindow.webContents.id
+  )
+    assertions.push(
+      "FAILED: getCurrent did not resolve to the extension page tab in Promise form",
+    );
+  if (
+    typeof pageGetCurrentCallback?.id !== "number" ||
+    pageGetCurrentCallback.id !== popupWindow.webContents.id
+  )
+    assertions.push(
+      "FAILED: getCurrent did not resolve to the extension page tab in callback form",
+    );
+  if (workerGetCurrent !== null && workerGetCurrent !== undefined)
+    assertions.push(
+      "FAILED: getCurrent returned a tab in the background service-worker context",
+    );
+  if (officialExtensionMode && !workerRespondedToDiagnostic)
+    assertions.push(
+      "FAILED: the wrapped official worker did not answer the diagnostic; no compatibility conclusion is available from this run",
+    );
+  if (officialExtensionMode && !officialContentWorldCount)
+    assertions.push(
+      "FAILED: no official extension isolated content-script worlds were observed on the local host page",
+    );
+  if (officialExtensionMode && actionPopup && !officialPopupRendered)
+    assertions.push(
+      "FAILED: the official action popup did not render under the documented pre-document test instrumentation",
+    );
+  const hostBridgePassed = Boolean(
+    currentRegistryTab &&
+    targetTab &&
+    injectedFrames.length === hostFrameDetails.length &&
+    bridgeFramesMatchHostApi,
+  );
+  const officialSurfacesPassed =
+    !officialExtensionMode ||
+    Boolean(
+      workerRespondedToDiagnostic &&
+      officialContentWorldCount &&
+      (!actionPopup || officialPopupRendered),
+    );
+  report.ok = hostBridgePassed && officialSurfacesPassed;
+  exitCode = report.ok ? 0 : 1;
 }
 
 async function stopServer(server: Server | null): Promise<void> {
-  if (!server?.listening) return
-  server.closeAllConnections?.()
-  await new Promise<void>((resolve) => server.close(() => resolve()))
+  if (!server?.listening) return;
+  server.closeAllConnections?.();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
 async function main(): Promise<void> {
   try {
-    await run()
+    await run();
   } catch (error) {
-    report.error = error instanceof Error ? error.stack ?? error.message : String(error)
-    report.ok = false
-    exitCode = 1
+    report.error =
+      error instanceof Error ? (error.stack ?? error.message) : String(error);
+    report.ok = false;
+    exitCode = 1;
   } finally {
     try {
       if (officialPopupWindow && !officialPopupWindow.isDestroyed()) {
-        if (officialPopupDebuggerAttached && officialPopupWindow.webContents.debugger.isAttached()) officialPopupWindow.webContents.debugger.detach()
-        officialPopupWindow.destroy()
+        if (
+          officialPopupDebuggerAttached &&
+          officialPopupWindow.webContents.debugger.isAttached()
+        )
+          officialPopupWindow.webContents.debugger.detach();
+        officialPopupWindow.destroy();
       }
-      if (popupWindow && !popupWindow.isDestroyed()) popupWindow.destroy()
-      if (bridgeWindow && !bridgeWindow.isDestroyed()) bridgeWindow.destroy()
-      if (hostWindow && !hostWindow.isDestroyed()) hostWindow.destroy()
-      ipcMain.removeHandler(bridgeIpcChannel)
-      if (browserSession && loadedExtensionId) browserSession.extensions.removeExtension(loadedExtensionId)
-      await Promise.all([stopServer(mainServer), stopServer(childServer)])
+      if (popupWindow && !popupWindow.isDestroyed()) popupWindow.destroy();
+      if (bridgeWindow && !bridgeWindow.isDestroyed()) bridgeWindow.destroy();
+      if (hostWindow && !hostWindow.isDestroyed()) hostWindow.destroy();
+      ipcMain.removeHandler(bridgeIpcChannel);
+      if (browserSession && loadedExtensionId)
+        browserSession.extensions.removeExtension(loadedExtensionId);
+      await Promise.all([stopServer(mainServer), stopServer(childServer)]);
     } catch (error) {
-      report.cleanupError = error instanceof Error ? error.message : String(error)
-      exitCode = 1
+      report.cleanupError =
+        error instanceof Error ? error.message : String(error);
+      exitCode = 1;
     }
     // Chromium and the app can still be writing into the profile here, so a plain rm races them
     // (ENOTEMPTY failed this probe on CI after every check passed). Retry like scripts/smoke-profile.cjs,
     // and report a leftover temp profile without failing the probe for it.
     try {
-      rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-      report.temporaryProfileRemoved = true
+      rmSync(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 100,
+      });
+      report.temporaryProfileRemoved = true;
     } catch (error) {
-      report.temporaryProfileRemoved = false
-      report.profileCleanupWarning = error instanceof Error ? error.message : String(error)
+      report.temporaryProfileRemoved = false;
+      report.profileCleanupWarning =
+        error instanceof Error ? error.message : String(error);
     }
-    report.exitCode = exitCode
-    console.log(`SURFFISH_HOST_TAB_FRAME_PROBE_REPORT=${JSON.stringify(report)}`)
-    process.exitCode = exitCode
-    if (app.isReady()) app.exit(exitCode)
+    report.exitCode = exitCode;
+    console.log(
+      `SURFFISH_HOST_TAB_FRAME_PROBE_REPORT=${JSON.stringify(report)}`,
+    );
+    process.exitCode = exitCode;
+    if (app.isReady()) app.exit(exitCode);
   }
 }
 
-void main()
+void main();
