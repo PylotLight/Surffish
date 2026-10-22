@@ -17,7 +17,9 @@ const browserSource = readFileSync(
 );
 
 function handlerBody(channel: string): string {
-  const start = ipcSource.indexOf(`ipcMain.handle('${channel}'`);
+  const start = ipcSource.search(
+    new RegExp(`ipcMain\\.handle\\(\\s*["']${channel}["']`),
+  );
   assert.ok(start >= 0, `${channel} is registered`);
   const next = ipcSource.indexOf("ipcMain.", start + 10);
   return ipcSource.slice(start, next < 0 ? undefined : next);
@@ -90,7 +92,7 @@ test("the Settings tab never gets a page view, so no web content ever runs at it
   );
   assert.match(
     ensure,
-    /target === SURFFISH_SETTINGS_URL\) \{\s*tab\.pendingUrl = ''\s*return/,
+    /target\s*===\s*SURFFISH_SETTINGS_URL\s*\)\s*\{\s*tab\.pendingUrl\s*=\s*(?:""|'');?\s*return\b/,
   );
   // Tab views only ever get an extension's own preload or the page-level one, never the shell preload.
   const preloadAt = browserSource.indexOf(
