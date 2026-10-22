@@ -210,7 +210,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "dompurify": "^3.4.17",
-    "electron": "45.0.0-beta.6",
+    "electron": "45.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^6.0.0",
     "jsqr": "1.4.0",
