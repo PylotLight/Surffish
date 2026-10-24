@@ -29,7 +29,7 @@ export interface SshTunnelStatus {
   error: string | null;
 }
 
-/** The helper forwards managed SSH clients through OpenSSH's private SOCKS listener. */
+/** The helper forwards managed SSH clients through the in-app private SOCKS listener. */
 export function networkHelperUpstreamSettings(
   settings: BrowserProxySettings,
   tunnel: SshTunnelStatus,
@@ -95,7 +95,7 @@ export function describeSshTunnelStatus(
     return {
       state: "connecting",
       title: "Connecting to SSH server…",
-      detail: `OpenSSH is establishing a session to ${status.target}.`,
+      detail: `Surffish is establishing an SSH session to ${status.target}.`,
     };
   }
   if (status.running) {
@@ -109,13 +109,13 @@ export function describeSshTunnelStatus(
     return {
       state: "error",
       title: "SSH tunnel unavailable",
-      detail: `OpenSSH could not establish a session to ${status.target}: ${status.error}`,
+      detail: `Surffish could not establish an SSH session to ${status.target}: ${status.error}`,
     };
   }
   return {
     state: "idle",
     title: "Not connected",
-    detail: `There is no active OpenSSH session to ${status.target}. Save settings to retry.`,
+    detail: `There is no active SSH session to ${status.target}. Save settings to retry.`,
   };
 }
 

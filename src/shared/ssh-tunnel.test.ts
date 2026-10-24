@@ -7,11 +7,7 @@ import {
   type SshTunnelStatus,
 } from "./network-helper";
 import type { BrowserProxySettings } from "./types";
-import {
-  buildOpenSshDynamicForwardArgs,
-  parseSshTarget,
-  validateSshTarget,
-} from "./ssh-tunnel";
+import { parseSshTarget, validateSshTarget } from "./ssh-tunnel";
 
 const connected: SshTunnelStatus = {
   configured: true,
@@ -32,40 +28,17 @@ const settings: BrowserProxySettings = {
   bypassLocalNetwork: true,
 };
 
-describe("managed OpenSSH SOCKS tunnel config", () => {
-  test("uses a host alias as one argument with a loopback-only dynamic forward", () => {
-    expect(buildOpenSshDynamicForwardArgs("work-vpn", 1080)).toEqual([
-      "-N",
-      "-D",
-      "127.0.0.1:1080",
-      "-o",
-      "ExitOnForwardFailure=yes",
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "ServerAliveInterval=30",
-      "-o",
-      "ServerAliveCountMax=3",
-      "work-vpn",
-    ]);
-  });
-
-  test("accepts an explicit user@host destination and trims it", () => {
+describe("managed SSH target validation", () => {
+  test("accepts and trims one alias or explicit user@host", () => {
     expect(validateSshTarget("  alice@example.net ")).toBe("alice@example.net");
+    expect(parseSshTarget("  nas ")).toBe("nas");
     expect(parseSshTarget("  alice@example.net ")).toBe("alice@example.net");
   });
 
-  test("rejects options, whitespace, shell fragments, and invalid ports", () => {
-    for (const value of [
-      "-oProxyCommand=bad",
-      "host with spaces",
-      "host;id",
-      "",
-    ]) {
-      expect(() => buildOpenSshDynamicForwardArgs(value, 1080)).toThrow();
+  test("rejects options, whitespace, and shell fragments", () => {
+    for (const value of ["-oProxyCommand=bad", "host with spaces", "host;id"]) {
+      expect(() => validateSshTarget(value)).toThrow();
     }
-    expect(() => buildOpenSshDynamicForwardArgs("work", 0)).toThrow();
-    expect(() => buildOpenSshDynamicForwardArgs("work", 65536)).toThrow();
     expect(parseSshTarget("-oProxyCommand=bad")).toBe("");
   });
 });
@@ -81,7 +54,7 @@ describe("managed SSH endpoint selection", () => {
     expect(browserProxyEndpoint({ ...settings, port: 1088 }).port).toBe(1088);
   });
 
-  test("keeps the OpenSSH-selected port internal to the helper", () => {
+  test("keeps the private in-app SOCKS port internal to the helper", () => {
     expect(networkHelperUpstreamSettings(settings, connected)).toMatchObject({
       enabled: true,
       host: "127.0.0.1",
@@ -116,7 +89,7 @@ describe("managed SSH endpoint selection", () => {
   });
 });
 
-describe("managed OpenSSH status summary", () => {
+describe("managed SSH status summary", () => {
   test("confirms the SSH session and shared public endpoint", () => {
     expect(
       describeSshTunnelStatus({ ...connected, port: settings.port }),
@@ -161,7 +134,7 @@ describe("managed OpenSSH status summary", () => {
     ).toMatchObject({
       state: "error",
       detail:
-        "OpenSSH could not establish a session to work-vpn: Permission denied.",
+        "Surffish could not establish an SSH session to work-vpn: Permission denied.",
     });
   });
 });

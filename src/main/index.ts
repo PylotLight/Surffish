@@ -163,7 +163,7 @@ async function startNetworkServices(): Promise<void> {
   if (managedSshEnabled)
     await startNetworkHelper(settings.port, getNetworkHelperUpstreamSettings);
   else await stopNetworkHelper();
-  // Bind the user-facing port first so OpenSSH's private port allocator cannot select it.
+  // Bind the user-facing port first so the private in-app SSH listener cannot select it.
   await syncManagedSshTunnel(settings);
   const status = getNetworkHelperStatus(settings);
   if (managedSshEnabled && !status.listening)
@@ -194,7 +194,7 @@ app
       initializeSpacesStore();
       // Set the browser session's proxy before any remote page is created.
       await initializeBrowserProxy();
-      // Start an optional OpenSSH dynamic forward before the helper and browser windows.
+      // Start the optional in-app SSH tunnel before the helper and browser windows.
       await startNetworkServices();
       void initializeScreenSharing();
       // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.

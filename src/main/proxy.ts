@@ -467,7 +467,7 @@ export function getBrowserProxySettings(): BrowserProxySettings {
   return { ...currentSettings };
 }
 
-/** The Network Helper forwards through OpenSSH's auto-selected private SOCKS listener. */
+/** The Network Helper forwards through the in-app SSH client's private SOCKS listener. */
 export function getNetworkHelperUpstreamSettings(
   settings: BrowserProxySettings = currentSettings,
 ): BrowserProxySettings {
