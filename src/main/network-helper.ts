@@ -30,6 +30,12 @@ function recordTraffic(direction: "upload" | "download", bytes: number): void {
   if (direction === "upload") uploadedBytes += bytes;
   else downloadedBytes += bytes;
   const second = Math.floor(Date.now() / 1_000) * 1_000;
+  if (!trafficHistory.has(second)) {
+    for (const recordedSecond of trafficHistory.keys()) {
+      if (second - recordedSecond > 10_000)
+        trafficHistory.delete(recordedSecond);
+    }
+  }
   const sample = trafficHistory.get(second) ?? {
     uploadedBytes: 0,
     downloadedBytes: 0,
