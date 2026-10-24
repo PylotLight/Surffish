@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { planSetupTabClose } from "../shared/bramble-setup-close";
-import { capturePageWithin } from "./capture-page";
+import {
+  capturePageWithin,
+  nativeImagePixelSize,
+  nativeImagePixelWidthToDip,
+} from "./capture-page";
 import {
   shouldHandOffSignIn,
   signInContinueUrl,
@@ -7046,10 +7050,13 @@ function openSettingsSectionFromChrome(
 setSettingsSectionOpener(openSettingsSectionFromChrome);
 
 function thumbnailDataUrl(image: Electron.NativeImage): string {
-  const size = image.getSize();
+  const { width } = nativeImagePixelSize(image);
   const scaled =
-    size.width > THUMBNAIL_WIDTH
-      ? image.resize({ width: THUMBNAIL_WIDTH, quality: "good" })
+    width > THUMBNAIL_WIDTH
+      ? image.resize({
+          width: nativeImagePixelWidthToDip(image, THUMBNAIL_WIDTH),
+          quality: "good",
+        })
       : image;
   return `data:image/jpeg;base64,${scaled.toJPEG(72).toString("base64")}`;
 }

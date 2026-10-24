@@ -12,12 +12,13 @@
  */
 
 /**
- * Snapshots keep the capture's own device pixels (capturePage returns the page area at the
- * display's scale, 2x on Retina) so text stays readable while the page reloads; only a capture
- * wider than this (a 5K/6K display) is scaled down. The overview thumbnail is made separately.
+ * Snapshots keep the capture's physical bitmap resolution (the NativeImage carries the display's
+ * scale, e.g. 2x on Retina; getSize() itself reports DIPs in Electron 46) so text stays readable
+ * while the page reloads. Only bitmaps wider than this (e.g. a 5K/6K display) are scaled down.
+ * The overview thumbnail is made separately.
  */
 export const WAKE_SNAPSHOT_MAX_WIDTH = 3840;
-/** JPEG quality: 80 at device pixels keeps small grey text crisp (60 and a 1280 px cap blurred it). */
+/** JPEG quality: 80 at bitmap-pixel resolution keeps small text crisp (60 and a 1280 px cap blurred it). */
 export const WAKE_SNAPSHOT_JPEG_QUALITY = 80;
 /** Every snapshot together never holds more than this (least recently taken go first). */
 export const WAKE_SNAPSHOT_MAX_TOTAL_BYTES = 32 * 1024 * 1024;

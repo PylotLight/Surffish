@@ -3,6 +3,35 @@ import type { NativeImage, Rectangle, WebContents } from "electron";
 /** Long enough for a busy page on a loaded machine; a capture that takes longer is stale anyway. */
 const CAPTURE_TIMEOUT_MS = 4_000;
 
+/** Electron 46 NativeImage dimensions are DIPs by default; use its largest representation for bitmap pixels. */
+export function nativeImagePixelScaleFactor(
+  image: Pick<NativeImage, "getScaleFactors">,
+): number {
+  const factors = image
+    .getScaleFactors()
+    .filter((factor) => Number.isFinite(factor) && factor > 0);
+  return factors.length > 0 ? Math.max(...factors) : 1;
+}
+
+/** Bitmap dimensions in pixels, rather than the default DIP dimensions returned by getSize(). */
+export function nativeImagePixelSize(
+  image: Pick<NativeImage, "getSize" | "getScaleFactors">,
+): { width: number; height: number } {
+  return image.getSize(nativeImagePixelScaleFactor(image));
+}
+
+/** Convert a desired bitmap width back to the DIP width accepted by NativeImage.resize(). */
+export function nativeImagePixelWidthToDip(
+  image: Pick<NativeImage, "getScaleFactors">,
+  pixelWidth: number,
+): number {
+  if (!(pixelWidth > 0) || !Number.isFinite(pixelWidth)) return 0;
+  return Math.max(
+    1,
+    Math.round(pixelWidth / nativeImagePixelScaleFactor(image)),
+  );
+}
+
 /**
  * `contents.capturePage()` that always settles: null when the page is destroyed, the capture fails,
  * comes back empty, or takes longer than `timeoutMs`.
