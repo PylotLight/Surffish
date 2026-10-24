@@ -217,7 +217,6 @@ import {
   notifyBrowserWindowsChanged,
   runInWindow,
 } from "./window-scope";
-import { guardPageDragRegions } from "./page-drag-guard";
 import { handleCommandPaletteShortcut } from "./command-palette";
 import { getCustomSearchEngines, resolveAddressInput } from "./search-keywords";
 import {
@@ -2378,7 +2377,6 @@ function createTabView(
     });
   });
   if (!tab.extensionPageOrigin) attachPagePopups(contents, pagePopupHost(tab));
-  guardPageDragRegions(contents);
   trackTabMediaSession(contents);
   trackTabAudio(contents, () => {
     if (isCurrentContents()) publishTabs(tab.win);

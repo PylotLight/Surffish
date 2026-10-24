@@ -28,7 +28,6 @@ import {
   type GlanceSource,
 } from "./glance-entry";
 import { GLANCE_PAGE_HTML } from "./glance-page";
-import { guardPageDragRegions } from "./page-drag-guard";
 import { showBrowserContextMenu } from "./context-menu";
 import { recordBrowsingVisit, updateLatestVisitTitle } from "./history";
 import {
@@ -222,8 +221,6 @@ function wirePage(glance: Glance): void {
       if (action) zoomGlance(glance, action);
     },
   );
-  // A site's app-region: drag CSS must not turn parts of the window into a drag handle.
-  guardPageDragRegions(contents);
   contents.setWindowOpenHandler((details) => {
     const action = glanceWindowOpenAction(details);
     if (action === "navigate")
