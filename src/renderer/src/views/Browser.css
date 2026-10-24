@@ -3933,6 +3933,13 @@
   display: flex;
   gap: 10px;
 }
+.ssh-host-row {
+  align-items: flex-end;
+}
+.ssh-host-row > .settings-action {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .settings-field-grow {
   flex: 1 1 auto;
 }

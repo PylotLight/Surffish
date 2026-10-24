@@ -56,6 +56,7 @@ import {
   getNetworkHelperStatus,
   getNetworkHelperUsage,
 } from "./network-helper";
+import { listSshHostAliases } from "./ssh-config";
 import { getDefaultBrowserStatus, makeDefaultBrowser } from "./external-links";
 import { forgetArchivedTabsSince } from "./tab-archive-store";
 import {
@@ -835,6 +836,10 @@ export function registerIpc(): void {
   ipcMain.handle("browser:proxy:test", (event, settings: unknown) => {
     assertMainRenderer(event);
     return testLocalProxy(settings);
+  });
+  ipcMain.handle("browser:proxy:ssh-hosts", (event) => {
+    assertMainRenderer(event);
+    return listSshHostAliases();
   });
   ipcMain.handle("browser:proxy:helper", (event) => {
     assertMainRenderer(event);

@@ -1046,6 +1046,9 @@ export default function Browser({
     useState<NetworkHelperStatus | null>(null);
   const [networkHelperUsage, setNetworkHelperUsage] =
     useState<NetworkHelperUsage | null>(null);
+  const [sshHostAliases, setSshHostAliases] = useState<string[]>([]);
+  const [sshHostAliasesMessage, setSshHostAliasesMessage] = useState("");
+  const [searchingSshHosts, setSearchingSshHosts] = useState(false);
   const sshTunnelStatus = describeSshTunnelStatus(
     networkHelper?.sshTunnel ?? null,
   );
@@ -2822,6 +2825,28 @@ export default function Browser({
       setProxyMessageIsError(true);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function searchSshHostAliases(): Promise<void> {
+    setSearchingSshHosts(true);
+    setSshHostAliasesMessage("Searching your SSH config…");
+    try {
+      const aliases = await window.api.browser.proxy.sshHostAliases();
+      setSshHostAliases(aliases);
+      setSshHostAliasesMessage(
+        aliases.length
+          ? `Found ${aliases.length} saved SSH ${aliases.length === 1 ? "host" : "hosts"}. Choose one below or keep typing manually.`
+          : "No saved Host aliases found in ~/.ssh/config. You can still enter user@host manually.",
+      );
+    } catch (error) {
+      setSshHostAliasesMessage(
+        error instanceof Error
+          ? `Could not search the SSH config: ${error.message}`
+          : "Could not search the SSH config.",
+      );
+    } finally {
+      setSearchingSshHosts(false);
     }
   }
 
@@ -4985,26 +5010,72 @@ export default function Browser({
                             />
                           </label>
                         </div>
-                        <label className="settings-field settings-field-grow">
-                          <span>SSH host alias</span>
-                          <input
-                            type="text"
-                            value={proxy.sshHost ?? ""}
-                            spellCheck={false}
-                            placeholder="e.g. work-vpn"
-                            onChange={(event) =>
-                              setProxy((current) => ({
-                                ...current,
-                                sshHost: event.target.value,
-                              }))
-                            }
-                            aria-label="SSH host alias for managed SOCKS tunnel"
-                          />
-                        </label>
+                        <div className="settings-inline-fields ssh-host-row">
+                          <label className="settings-field settings-field-grow">
+                            <span>SSH host alias</span>
+                            <input
+                              type="text"
+                              value={proxy.sshHost ?? ""}
+                              spellCheck={false}
+                              placeholder="e.g. work-vpn"
+                              onChange={(event) =>
+                                setProxy((current) => ({
+                                  ...current,
+                                  sshHost: event.target.value,
+                                }))
+                              }
+                              aria-label="SSH host alias for managed SOCKS tunnel"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="settings-action secondary"
+                            disabled={searchingSshHosts}
+                            onClick={() => void searchSshHostAliases()}
+                          >
+                            {searchingSshHosts
+                              ? "Searching…"
+                              : "Search SSH config"}
+                          </button>
+                        </div>
+                        {sshHostAliases.length > 0 && (
+                          <label className="settings-field settings-field-grow">
+                            <span>Saved SSH hosts</span>
+                            <select
+                              className="settings-select"
+                              value={
+                                sshHostAliases.includes(proxy.sshHost ?? "")
+                                  ? proxy.sshHost
+                                  : ""
+                              }
+                              onChange={(event) =>
+                                setProxy((current) => ({
+                                  ...current,
+                                  sshHost: event.target.value,
+                                }))
+                              }
+                              aria-label="Choose a saved SSH host alias"
+                            >
+                              <option value="">Choose a host…</option>
+                              {sshHostAliases.map((alias) => (
+                                <option key={alias} value={alias}>
+                                  {alias}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {sshHostAliasesMessage && (
+                          <p className="settings-help" role="status">
+                            {sshHostAliasesMessage}
+                          </p>
+                        )}
                         <p className="settings-help">
-                          Required for Surffish to start a managed SSH tunnel.
-                          Leave blank only if a SOCKS5 proxy is already running
-                          at {proxy.host}:{proxy.port}.
+                          Search reads Host names from your local ~/.ssh/config
+                          (including included config files). Select one to fill
+                          this field, or enter an SSH alias or user@host
+                          manually. Leave blank only if a SOCKS5 proxy is
+                          already running at {proxy.host}:{proxy.port}.
                         </p>
                         <div
                           className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}

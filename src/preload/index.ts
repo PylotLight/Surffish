@@ -569,6 +569,8 @@ const api = {
         ipcRenderer.invoke("browser:proxy:set", settings),
       test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> =>
         ipcRenderer.invoke("browser:proxy:test", settings),
+      sshHostAliases: (): Promise<string[]> =>
+        ipcRenderer.invoke("browser:proxy:ssh-hosts"),
       helper: (): Promise<NetworkHelperStatus> =>
         ipcRenderer.invoke("browser:proxy:helper"),
       helperUsage: (): Promise<NetworkHelperUsage> =>
