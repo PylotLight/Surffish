@@ -188,6 +188,8 @@ export interface BrowserProxySettings {
   enabled: boolean;
   host: string;
   port: number;
+  /** Optional single OpenSSH host alias or user@host; uses the OS SSH config and agent. */
+  sshHost?: string;
   /** Local-network addresses (192.168.x, 10.x, `*.local`, …) skip the proxy. Default on. */
   bypassLocalNetwork: boolean;
 }

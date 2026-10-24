@@ -27,6 +27,7 @@ import {
   startNetworkHelper,
   stopNetworkHelper,
 } from "./network-helper";
+import { syncManagedSshTunnel, stopManagedSshTunnel } from "./ssh-tunnel";
 import { initializeScreenSharing } from "./screen-share";
 import { initializeSpacesStore } from "./spaces-store";
 import { restoreWindows, setMainWindowCloseHandler } from "./window";
@@ -150,6 +151,28 @@ const hasInstanceLock = app.requestSingleInstanceLock();
 if (!hasInstanceLock) app.quit();
 // Default-browser links and opened files can arrive before ready; they queue until tabs exist.
 else registerExternalOpenHandlers();
+
+async function startNetworkServices(): Promise<void> {
+  await syncManagedSshTunnel(getBrowserProxySettings());
+  await startNetworkHelper(getBrowserProxySettings);
+  const status = getNetworkHelperStatus();
+  if (!status.listening)
+    console.warn("[network helper] unavailable:", status.error);
+  if (
+    status.sshTunnel.configured &&
+    status.sshTunnel.enabled &&
+    !status.sshTunnel.running &&
+    !status.sshTunnel.starting
+  )
+    console.warn("[ssh tunnel] unavailable:", status.sshTunnel.error);
+}
+
+function stopNetworkServices(): Promise<void> {
+  return Promise.all([stopNetworkHelper(), stopManagedSshTunnel()]).then(
+    () => undefined,
+  );
+}
+
 app
   .whenReady()
   .then(async () => {
@@ -161,13 +184,8 @@ app
       initializeSpacesStore();
       // Set the browser session's proxy before any remote page is created.
       await initializeBrowserProxy();
-      // Other local apps can use this loopback-only SOCKS5 endpoint.
-      await startNetworkHelper(getBrowserProxySettings);
-      if (!getNetworkHelperStatus().listening)
-        console.warn(
-          "[network helper] unavailable:",
-          getNetworkHelperStatus().error,
-        );
+      // Start an optional OpenSSH dynamic forward before the helper and browser windows.
+      await startNetworkServices();
       void initializeScreenSharing();
       // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
       initializeBrowserSafety();
@@ -249,12 +267,7 @@ app
     // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
     app.on("activate", () => {
       if (browserWindows().length === 0) {
-        void startNetworkHelper(getBrowserProxySettings).then(() => {
-          const status = getNetworkHelperStatus();
-          if (!status.listening)
-            console.warn("[network helper] unavailable:", status.error);
-        });
-        restoreWindows();
+        void startNetworkServices().then(restoreWindows);
       }
     });
     await afterFirstWindowPaint(windows.at(-1));
@@ -321,13 +334,13 @@ app
     app.quit();
   });
 app.on("window-all-closed", () => {
-  stopNetworkHelper();
+  void stopNetworkServices();
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", () => {
   // Windows close one by one while quitting; keep all of them in the saved session.
   freezeBrowserSession();
-  stopNetworkHelper();
+  void stopNetworkServices();
   disposeUpdates();
   disposePageWatchersFeature();
   disposeReadAloudFeature();

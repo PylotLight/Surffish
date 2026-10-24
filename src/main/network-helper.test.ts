@@ -8,7 +8,10 @@ import {
 import type { BrowserProxySettings } from "../shared/types";
 import {
   createSocks5RelayServer,
+  getNetworkHelperStatus,
   getNetworkHelperUsage,
+  startNetworkHelper,
+  stopNetworkHelper,
 } from "./network-helper";
 
 const sockets = new Set<Socket>();
@@ -231,6 +234,23 @@ describe("Surffish Network Helper SOCKS5 relay", () => {
     } finally {
       client.destroy();
       await closeServer(relay);
+    }
+  });
+
+  test("waits for the old listener to close before a quick restart", async () => {
+    const getUpstream = () => socksSettings(1080, false);
+    try {
+      await startNetworkHelper(getUpstream);
+      expect(getNetworkHelperStatus().listening).toBe(true);
+
+      const stopping = stopNetworkHelper();
+      const restarting = startNetworkHelper(getUpstream);
+      await Promise.all([stopping, restarting]);
+
+      expect(getNetworkHelperStatus().listening).toBe(true);
+      expect(getNetworkHelperStatus().error).toBeNull();
+    } finally {
+      await stopNetworkHelper();
     }
   });
 });

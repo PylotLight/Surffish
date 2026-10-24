@@ -10,6 +10,7 @@ import {
   type NetworkHelperStatus,
   type NetworkHelperUsage,
 } from "../shared/network-helper";
+import { getManagedSshTunnelStatus } from "./ssh-tunnel";
 
 const MAX_CONNECTIONS = 128;
 const MAX_HANDSHAKE_BUFFER = 64 * 1024;
@@ -17,6 +18,8 @@ const HANDSHAKE_TIMEOUT_MS = 10_000;
 const FAILURE_REPLY = Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
 const activeClients = new Set<Socket>();
 let helperServer: Server | null = null;
+let helperStarting: Promise<void> | null = null;
+let helperStopping: Promise<void> | null = null;
 let helperError: string | null = null;
 let uploadedBytes = 0;
 let downloadedBytes = 0;
@@ -280,6 +283,8 @@ export function createSocks5RelayServer(
 export async function startNetworkHelper(
   getUpstream: () => BrowserProxySettings,
 ): Promise<void> {
+  if (helperStopping) await helperStopping;
+  if (helperStarting) return helperStarting;
   if (helperServer) return;
   helperError = null;
   uploadedBytes = 0;
@@ -287,7 +292,7 @@ export async function startNetworkHelper(
   trafficHistory.clear();
   const server = createSocks5RelayServer(getUpstream);
   helperServer = server;
-  await new Promise<void>((resolve) => {
+  const starting = new Promise<void>((resolve) => {
     let settled = false;
     const finish = (): void => {
       if (settled) return;
@@ -318,6 +323,12 @@ export async function startNetworkHelper(
       finish();
     }
   });
+  helperStarting = starting;
+  try {
+    await starting;
+  } finally {
+    if (helperStarting === starting) helperStarting = null;
+  }
 }
 
 export function getNetworkHelperStatus(): NetworkHelperStatus {
@@ -325,6 +336,7 @@ export function getNetworkHelperStatus(): NetworkHelperStatus {
     ...SURFFISH_NETWORK_HELPER,
     listening: helperServer?.listening === true,
     error: helperError,
+    sshTunnel: getManagedSshTunnelStatus(),
   };
 }
 
@@ -352,11 +364,28 @@ export function getNetworkHelperUsage(): NetworkHelperUsage {
   };
 }
 
-/** Synchronously stop accepting new clients and destroy active relays during app shutdown. */
-export function stopNetworkHelper(): void {
+/** Stop accepting clients and wait until the listener releases its port. */
+export function stopNetworkHelper(): Promise<void> {
+  if (helperStopping) return helperStopping;
   const server = helperServer;
   helperServer = null;
   helperError = null;
   for (const client of activeClients) client.destroy();
-  if (server?.listening) server.close();
+  const starting = helperStarting;
+  const stopping = (async (): Promise<void> => {
+    if (starting) await starting;
+    if (!server?.listening) return;
+    await new Promise<void>((resolve) => {
+      try {
+        server.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+  })();
+  helperStopping = stopping;
+  void stopping.finally(() => {
+    if (helperStopping === stopping) helperStopping = null;
+  });
+  return stopping;
 }

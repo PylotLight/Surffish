@@ -287,6 +287,7 @@ const DEFAULT_PROXY: BrowserProxySettings = {
   enabled: true,
   host: "127.0.0.1",
   port: 1080,
+  sshHost: "",
   bypassLocalNetwork: true,
 };
 const BONJOURR_START_PAGE = "https://online.bonjourr.fr/";
@@ -2207,6 +2208,16 @@ export default function Browser({
   useEffect(() => {
     if (!settingsOnScreen || settingsMode !== "settings") return;
     let mounted = true;
+    const refreshStatus = (): void => {
+      void window.api.browser.proxy
+        .helper()
+        .then((status) => {
+          if (mounted) setNetworkHelper(status);
+        })
+        .catch(() => {
+          if (mounted) setNetworkHelper(null);
+        });
+    };
     const refreshUsage = (): void => {
       void window.api.browser.proxy
         .helperUsage()
@@ -2217,8 +2228,12 @@ export default function Browser({
           if (mounted) setNetworkHelperUsage(null);
         });
     };
+    refreshStatus();
     refreshUsage();
-    const timer = window.setInterval(refreshUsage, 1_000);
+    const timer = window.setInterval(() => {
+      refreshStatus();
+      refreshUsage();
+    }, 1_000);
     return () => {
       mounted = false;
       window.clearInterval(timer);
@@ -2746,13 +2761,19 @@ export default function Browser({
     setProxyMessageIsError(false);
     try {
       const saved = await window.api.browser.proxy.set(proxy);
+      const helperStatus = await window.api.browser.proxy.helper();
       setProxy(saved);
       setAppliedProxy(saved);
+      setNetworkHelper(helperStatus);
       await window.api.browser.reload();
       setProxyMessage(
-        saved.enabled
-          ? `SOCKS5 is on for this browser via ${saved.host}:${saved.port}.`
-          : "Proxy is off; this browser will connect directly.",
+        saved.sshHost && helperStatus.sshTunnel.running
+          ? `SOCKS5 is on through the SSH tunnel ${saved.sshHost}.`
+          : saved.sshHost && helperStatus.sshTunnel.error
+            ? `Settings saved, but the SSH tunnel is unavailable: ${helperStatus.sshTunnel.error}`
+            : saved.enabled
+              ? `SOCKS5 is on for this browser via ${saved.host}:${saved.port}.`
+              : "Proxy is off; this browser will connect directly.",
       );
     } catch (error) {
       setProxyMessage(error instanceof Error ? error.message : String(error));
@@ -4960,6 +4981,29 @@ export default function Browser({
                             />
                           </label>
                         </div>
+                        <label className="settings-field settings-field-grow">
+                          <span>SSH host alias (optional)</span>
+                          <input
+                            type="text"
+                            value={proxy.sshHost ?? ""}
+                            spellCheck={false}
+                            placeholder="e.g. work-vpn"
+                            onChange={(event) =>
+                              setProxy((current) => ({
+                                ...current,
+                                sshHost: event.target.value,
+                              }))
+                            }
+                            aria-label="SSH host alias for managed SOCKS tunnel"
+                          />
+                        </label>
+                        <p className="settings-help">
+                          With SOCKS5 enabled, Save starts OpenSSH dynamic
+                          forwarding to this alias and stops it when the last
+                          browser window closes. It uses your SSH config and
+                          agent; if this is a new host, verify its host key once
+                          in Terminal first.
+                        </p>
                         <SettingsRow
                           label="Local network goes direct"
                           hint="Your router, NAS, printer and .local names skip the proxy."
@@ -4990,6 +5034,21 @@ export default function Browser({
                               ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port} while a Surffish browser window is open.`
                               : "Checking listener…"}
                         </p>
+                        {networkHelper?.sshTunnel.configured && (
+                          <p
+                            className={`settings-help${networkHelper.sshTunnel.error ? " is-error" : ""}`}
+                            role="status"
+                          >
+                            <strong>Managed SSH tunnel</strong>:{" "}
+                            {networkHelper.sshTunnel.running
+                              ? `Connected to ${networkHelper.sshTunnel.target} at ${networkHelper.sshTunnel.host}:${networkHelper.sshTunnel.port}.`
+                              : networkHelper.sshTunnel.starting
+                                ? `Starting OpenSSH for ${networkHelper.sshTunnel.target}…`
+                                : !networkHelper.sshTunnel.enabled
+                                  ? "Configured; enable SOCKS5 to start it."
+                                  : `Unavailable — ${networkHelper.sshTunnel.error ?? "not running"}`}
+                          </p>
+                        )}
                         <p className="settings-help">
                           Configure other apps to use SOCKS5 at{" "}
                           <code>
@@ -4998,8 +5057,9 @@ export default function Browser({
                           </code>
                           . TCP CONNECT traffic is forwarded through the main
                           proxy above; requests fail closed if it is off or
-                          unreachable. Site rules and the local-network bypass
-                          do not apply.
+                          unreachable. If no SSH alias is set, that SOCKS5
+                          service must already be running. Site rules and the
+                          local-network bypass do not apply.
                         </p>
                         <section
                           className="network-helper-activity"
@@ -5053,10 +5113,6 @@ export default function Browser({
                           </p>
                         </section>
                         <div className="settings-actions">
-                          <p className="settings-help">
-                            Start a tunnel first:{" "}
-                            <code>ssh -N -D 127.0.0.1:1080 user@host</code>
-                          </p>
                           <button
                             className="settings-action secondary"
                             type="button"

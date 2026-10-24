@@ -183,6 +183,7 @@ test("defaults fresh profiles to direct browsing while preserving valid saved SO
     enabled: false,
     host: "127.0.0.1",
     port: 1080,
+    sshHost: "",
     bypassLocalNetwork: true,
   });
   assert.deepEqual(
@@ -195,8 +196,27 @@ test("defaults fresh profiles to direct browsing while preserving valid saved SO
       enabled: true,
       host: "localhost",
       port: 1080,
+      sshHost: "",
       bypassLocalNetwork: true,
     },
+  );
+  assert.equal(
+    parseBrowserProxySettings({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 1080,
+      sshHost: "work-vpn",
+    }).sshHost,
+    "work-vpn",
+  );
+  assert.equal(
+    parseBrowserProxySettings({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 1080,
+      sshHost: "-oProxyCommand=bad",
+    }).sshHost,
+    "",
   );
   // The local-network bypass defaults on for older files and keeps an explicit off.
   assert.equal(

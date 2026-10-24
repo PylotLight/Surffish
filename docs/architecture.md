@@ -24,7 +24,7 @@ BaseWindow view tree ├── transparent toolbar renderer (live-site overlay)
 - `src/main/session-cookies.ts` — encrypted snapshot/restore of session-only cookies using Electron safeStorage when OS-backed encryption is available.
 - `src/main/history.ts` — validated, bounded browsing history, stored in `surffish.db` (falls back to `browsing-history.json`).
 - `src/main/proxy.ts` — validates loopback-only SOCKS5 settings, persists them, and configures the persistent site session.
-- `src/main/network-helper.ts` — serves a loopback-only SOCKS5 TCP relay at `127.0.0.1:1088` for other local apps; CONNECT requests go through the configured main proxy, fail closed, stops when the last browser window closes, and restarts before windows return from the Dock.
+- `src/main/network-helper.ts` — serves a loopback-only SOCKS5 TCP relay at `127.0.0.1:1088` for other local apps; CONNECT requests go through the configured main proxy and fail closed. An optional OpenSSH `-D` tunnel uses a configured host alias, starts before browser windows, and stops with the relay when the last window closes; both restart before windows return from the Dock.
 - `src/main/ipc.ts` — browser IPC guarded to the three trusted local renderer views; toolbar geometry reports are accepted only from the toolbar surface.
 - `src/preload/index.ts` — narrow, typed browser API exposed through `contextBridge` to the local renderers only.
 - `src/shared/navigation.ts` — HTTP(S)-only address parsing and selected-search-engine routing.

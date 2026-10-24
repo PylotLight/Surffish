@@ -20,6 +20,7 @@ import {
   DEFAULT_WEATHER_SCALE,
   isWeatherForecastView,
 } from "./weather-forecast.ts";
+import { parseSshTarget } from "./ssh-tunnel.ts";
 import {
   CLOCK_SCALE_STEP,
   clockScaleFromLegacySize,
@@ -149,6 +150,7 @@ export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = {
   enabled: false,
   host: "127.0.0.1",
   port: 1080,
+  sshHost: "",
   bypassLocalNetwork: true,
 };
 
@@ -404,6 +406,7 @@ export function parseBrowserProxySettings(
     enabled: record.enabled,
     host,
     port,
+    sshHost: parseSshTarget(record.sshHost),
     bypassLocalNetwork: record.bypassLocalNetwork !== false,
   };
 }

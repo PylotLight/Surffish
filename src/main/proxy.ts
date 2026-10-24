@@ -42,6 +42,9 @@ import {
 } from "../shared/proxy-routing";
 import { getDomain } from "tldts-experimental";
 import { readUserJson, writeSettingsFile } from "./user-json";
+import { validateSshTarget } from "../shared/ssh-tunnel";
+import { SURFFISH_NETWORK_HELPER } from "../shared/network-helper";
+import { syncManagedSshTunnel } from "./ssh-tunnel";
 import {
   brambleCameraCheckDecision,
   brambleCameraRequestDecision,
@@ -81,6 +84,7 @@ function validateSettings(input: unknown): BrowserProxySettings {
   if (typeof input !== "object" || input === null)
     throw new Error("Proxy settings must be an object.");
   const candidate = input as Partial<BrowserProxySettings>;
+  const sshHost = validateSshTarget(candidate.sshHost);
   const host =
     typeof candidate.host === "string"
       ? candidate.host.trim().toLowerCase()
@@ -94,10 +98,19 @@ function validateSettings(input: unknown): BrowserProxySettings {
     );
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("Enter a port between 1 and 65535.");
+  if (sshHost && host !== "127.0.0.1")
+    throw new Error(
+      "Managed SSH tunnels bind to 127.0.0.1; set that as the SOCKS host.",
+    );
+  if (sshHost && port === SURFFISH_NETWORK_HELPER.port)
+    throw new Error(
+      `Choose a tunnel port other than ${SURFFISH_NETWORK_HELPER.port}; that port is reserved for the Surffish helper.`,
+    );
   return {
     enabled: candidate.enabled,
     host,
     port,
+    sshHost,
     bypassLocalNetwork: candidate.bypassLocalNetwork !== false,
   };
 }
@@ -453,7 +466,13 @@ export async function setBrowserProxySettings(
   input: unknown,
 ): Promise<BrowserProxySettings> {
   const settings = validateSettings(input);
-  await applyRouting(routingInput(settings, currentRouting));
+  await syncManagedSshTunnel(settings);
+  try {
+    await applyRouting(routingInput(settings, currentRouting));
+  } catch (error) {
+    await syncManagedSshTunnel(currentSettings);
+    throw error;
+  }
   persistSettings(settings);
   currentSettings = settings;
   applyWebRTCPolicyToAll(routingInput());
