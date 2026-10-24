@@ -14,6 +14,8 @@ export interface ResolvedSshConnection {
   port: number;
   username: string;
   identityFiles: string[];
+  /** Path to the user's ssh-agent socket, or null when agent authentication is off. */
+  identityAgent: string | null;
   hostKeyNames: string[];
   knownHostsFiles: string[];
 }
@@ -70,6 +72,32 @@ function tokenizeConfigLine(line: string): string[] {
   }
   if (escaped) token += "\\";
   if (started) tokens.push(token);
+  return tokens;
+}
+
+/**
+ * OpenSSH accepts `Keyword value` and `Keyword=value` (with optional spaces around the `=`), so
+ * fold the assignment form back into a keyword and its arguments before anyone reads the line.
+ */
+function normalizeConfigTokens(tokens: string[]): string[] {
+  if (tokens.length === 0) return tokens;
+  const keyword = tokens[0]!;
+  const separator = keyword.indexOf("=");
+  if (separator === 0) return tokens;
+  if (separator > 0) {
+    const name = keyword.slice(0, separator);
+    const value = keyword.slice(separator + 1);
+    return value
+      ? [name, value, ...tokens.slice(1)]
+      : [name, ...tokens.slice(1)];
+  }
+  const next = tokens[1];
+  if (next !== undefined && next.startsWith("=")) {
+    const value = next.slice(1);
+    return value
+      ? [keyword, value, ...tokens.slice(2)]
+      : [keyword, ...tokens.slice(2)];
+  }
   return tokens;
 }
 
@@ -214,7 +242,7 @@ async function visitConfigInOrder(
       onFileBoundary?.(true);
       try {
         for (const line of contents.split(/\r?\n/)) {
-          const tokens = tokenizeConfigLine(line);
+          const tokens = normalizeConfigTokens(tokenizeConfigLine(line));
           if (tokens.length === 0) continue;
           if (tokens[0]!.toLowerCase() !== "include") {
             await onLine(tokens);
@@ -254,9 +282,16 @@ function defaultLocalUsername(): string {
   }
 }
 
+function expandEnvironment(value: string): string {
+  return value.replace(
+    /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+    (match, name: string) => process.env[name] ?? match,
+  );
+}
+
 function resolveConfigPath(value: string, context: ConfigContext): string {
   const expanded = expandTokens(
-    value.replace(/^~(?=\/|$)/, context.homeDirectory),
+    expandEnvironment(value).replace(/^~(?=\/|$)/, context.homeDirectory),
     context,
   );
   return isAbsolute(expanded)
@@ -269,6 +304,7 @@ export async function resolveSshConnection(
   value: string,
   homeDirectory = homedir(),
   localUsername = defaultLocalUsername(),
+  sshAuthSock: string | null = process.env["SSH_AUTH_SOCK"] ?? null,
 ): Promise<ResolvedSshConnection> {
   const target = parseSshTarget(value);
   if (!target) throw new Error("Enter one SSH host alias or user@host.");
@@ -289,6 +325,8 @@ export async function resolveSshConnection(
   const knownHostsValues: string[] = [];
   const globalKnownHostsValues: string[] = [];
   let identityFilesDisabled = false;
+  let identityAgentValue = "";
+  let identityAgentDisabled = false;
   let hostKeyAlias = "";
   let configuredHost = alias;
   let activeHostBlock = true;
@@ -376,6 +414,16 @@ export async function resolveSshConnection(
         }
         return;
       }
+      if (key === "identityagent") {
+        const agent = args[0]!;
+        if (agent.toLowerCase() === "none") {
+          identityAgentDisabled = true;
+          identityAgentValue = "";
+        } else if (!identityAgentDisabled && !identityAgentValue) {
+          identityAgentValue = agent;
+        }
+        return;
+      }
       if (key === "userknownhostsfile") {
         if (args.some((item) => item.toLowerCase() === "none"))
           knownHostsValues.push("none");
@@ -446,6 +494,11 @@ export async function resolveSshConnection(
     port,
     remoteUser: username,
   };
+  const agentSource = identityAgentValue || sshAuthSock;
+  const identityAgent =
+    identityAgentDisabled || !agentSource
+      ? null
+      : resolveConfigPath(agentSource, finalContext);
   let identityFiles: string[];
   if (identityFilesDisabled) {
     identityFiles = [];
@@ -469,9 +522,9 @@ export async function resolveSshConnection(
     }
     identityFiles = existing;
   }
-  if (identityFiles.length === 0)
+  if (identityFiles.length === 0 && !identityAgent)
     throw new Error(
-      `No SSH IdentityFile is configured or available for ${target}.`,
+      `No SSH IdentityFile or SSH agent is configured or available for ${target}.`,
     );
 
   const hostNames = hostKeyAlias
@@ -508,6 +561,7 @@ export async function resolveSshConnection(
     port,
     username,
     identityFiles: [...new Set(identityFiles)],
+    identityAgent,
     hostKeyNames,
     knownHostsFiles: [...new Set(knownHostsFiles)],
   };

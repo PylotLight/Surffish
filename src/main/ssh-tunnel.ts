@@ -1,9 +1,15 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createConnection, createServer, type Server } from "node:net";
 // ssh2 is CommonJS and Electron's ESM loader does not synthesize its named exports (`utils` is an
 // object literal that Node's static analysis cannot see either), so take the default export.
 import ssh2 from "ssh2";
-import type { Client, ConnectConfig, ParsedKey } from "ssh2";
+import type {
+  AgentAuthMethod,
+  AuthMethod,
+  Client,
+  ConnectConfig,
+  ParsedKey,
+} from "ssh2";
 import type { BrowserProxySettings } from "../shared/types";
 import { parseSshTarget } from "../shared/ssh-tunnel";
 import type { SshTunnelStatus } from "../shared/network-helper";
@@ -109,6 +115,15 @@ function listenOnLoopback(server: Server, port: number): Promise<void> {
   });
 }
 
+async function isAgentSocket(path: string): Promise<boolean> {
+  try {
+    const info = await stat(path);
+    return info.isSocket() || info.isFile() || info.isFIFO();
+  } catch {
+    return false;
+  }
+}
+
 async function prepareSshConnection(
   target: string,
   timeoutMs: number,
@@ -131,20 +146,36 @@ async function prepareSshConnection(
     if (!parsed.isPrivateKey()) continue;
     parsedKeys.push(parsed);
   }
-  if (parsedKeys.length === 0)
+  const agentPath = resolved.identityAgent;
+  const agentAvailable = agentPath ? await isAgentSocket(agentPath) : false;
+  if (parsedKeys.length === 0 && !agentAvailable) {
+    if (agentPath)
+      throw new Error(
+        `Could not reach the SSH agent at ${agentPath}, and no usable SSH IdentityFile was found for ${target}.`,
+      );
     throw new Error(
       `No usable private key was found in the SSH IdentityFile for ${target}.`,
     );
+  }
 
   const knownHosts = await loadKnownHostVerifier(
     resolved.hostKeyNames,
     resolved.knownHostsFiles,
   );
-  const authHandler = parsedKeys.map((key) => ({
-    type: "publickey" as const,
+  const authHandler: AuthMethod[] = parsedKeys.map((key) => ({
+    type: "publickey",
     username: resolved.username,
     key,
   }));
+  // Agent keys come last, matching OpenSSH's order after the configured key files.
+  if (agentAvailable && agentPath) {
+    const agentMethod: AgentAuthMethod = {
+      type: "agent",
+      username: resolved.username,
+      agent: agentPath,
+    };
+    authHandler.push(agentMethod);
+  }
   return {
     config: {
       host: resolved.host,
