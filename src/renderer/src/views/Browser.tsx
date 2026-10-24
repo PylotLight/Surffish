@@ -30,6 +30,7 @@ import type {
 import {
   SURFFISH_NETWORK_HELPER,
   type NetworkHelperStatus,
+  type NetworkHelperUsage,
 } from "../../../shared/network-helper";
 import {
   DEFAULT_SEARCH_ENGINE,
@@ -67,6 +68,7 @@ import {
   typedInputQualifies,
 } from "../../../shared/preconnect";
 import { addressDisplayValue } from "../../../shared/address-bar-sync";
+import { formatDownloadSize } from "../../../shared/downloads";
 import { describeTabSleep, isRestoredSleep } from "../../../shared/tab-sleep";
 import { useAddressBarSync } from "./useAddressBarSync";
 import { FAVOURITES_FOLDER_ID } from "../../../shared/bookmarks";
@@ -1040,6 +1042,8 @@ export default function Browser({
     useState<BrowserProxySettings>(DEFAULT_PROXY);
   const [networkHelper, setNetworkHelper] =
     useState<NetworkHelperStatus | null>(null);
+  const [networkHelperUsage, setNetworkHelperUsage] =
+    useState<NetworkHelperUsage | null>(null);
   const [busy, setBusy] = useState(false);
   const [proxyMessage, setProxyMessage] = useState("");
   const [sessionMessage, setSessionMessage] = useState("");
@@ -2199,6 +2203,27 @@ export default function Browser({
       unsubscribeFocusAddress();
     };
   }, [surface]);
+
+  useEffect(() => {
+    if (settingsMode !== "network") return;
+    let mounted = true;
+    const refreshUsage = (): void => {
+      void window.api.browser.proxy
+        .helperUsage()
+        .then((usage) => {
+          if (mounted) setNetworkHelperUsage(usage);
+        })
+        .catch(() => {
+          if (mounted) setNetworkHelperUsage(null);
+        });
+    };
+    refreshUsage();
+    const timer = window.setInterval(refreshUsage, 1_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [settingsMode]);
 
   useEffect(() => {
     if (settingsMode === "network" && !networkToolEnabled)
@@ -4976,6 +5001,57 @@ export default function Browser({
                           unreachable. Site rules and the local-network bypass
                           do not apply.
                         </p>
+                        <section
+                          className="network-helper-activity"
+                          aria-label="Network Helper live activity"
+                        >
+                          <div className="network-helper-activity-heading">
+                            <strong>Live activity</strong>
+                            <span>
+                              {networkHelperUsage === null
+                                ? "Checking…"
+                                : `${networkHelperUsage.activeConnections} active ${networkHelperUsage.activeConnections === 1 ? "connection" : "connections"}`}
+                            </span>
+                          </div>
+                          <div className="network-helper-activity-grid">
+                            <div className="network-helper-activity-metric">
+                              <span>Upload</span>
+                              <strong>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.uploadBytesPerSecond ?? 0,
+                                )}
+                                /s
+                              </strong>
+                              <small>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.uploadedBytes ?? 0,
+                                )}{" "}
+                                sent since helper start
+                              </small>
+                            </div>
+                            <div className="network-helper-activity-metric">
+                              <span>Download</span>
+                              <strong>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.downloadBytesPerSecond ??
+                                    0,
+                                )}
+                                /s
+                              </strong>
+                              <small>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.downloadedBytes ?? 0,
+                                )}{" "}
+                                received since helper start
+                              </small>
+                            </div>
+                          </div>
+                          <p className="settings-help">
+                            Counts SOCKS connections, not app names. Speeds are
+                            averaged over the last 3 seconds; totals reset when
+                            the helper restarts.
+                          </p>
+                        </section>
                         <div className="settings-actions">
                           <p className="settings-help">
                             Start a tunnel first:{" "}

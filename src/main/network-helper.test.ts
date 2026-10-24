@@ -6,7 +6,10 @@ import {
   type Socket,
 } from "node:net";
 import type { BrowserProxySettings } from "../shared/types";
-import { createSocks5RelayServer } from "./network-helper";
+import {
+  createSocks5RelayServer,
+  getNetworkHelperUsage,
+} from "./network-helper";
 
 const sockets = new Set<Socket>();
 
@@ -91,6 +94,7 @@ afterEach(() => {
 
 describe("Surffish Network Helper SOCKS5 relay", () => {
   test("forwards a domain CONNECT through the upstream SOCKS5 server and relays TCP data", async () => {
+    const beforeUsage = getNetworkHelperUsage();
     const capture: { forwardedRequest: Buffer | null } = {
       forwardedRequest: null,
     };
@@ -150,6 +154,16 @@ describe("Surffish Network Helper SOCKS5 relay", () => {
       const tunnelReply = nextData(client);
       client.write(Buffer.from("ping"));
       expect((await tunnelReply).toString()).toBe("pong");
+      const usage = getNetworkHelperUsage();
+      expect(usage.activeConnections).toBeGreaterThanOrEqual(
+        beforeUsage.activeConnections + 1,
+      );
+      expect(
+        usage.uploadedBytes - beforeUsage.uploadedBytes,
+      ).toBeGreaterThanOrEqual(4);
+      expect(
+        usage.downloadedBytes - beforeUsage.downloadedBytes,
+      ).toBeGreaterThanOrEqual(4);
     } finally {
       client.destroy();
       await closeServer(relay);

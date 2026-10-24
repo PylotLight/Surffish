@@ -11,3 +11,11 @@ export interface NetworkHelperStatus {
   listening: boolean;
   error: string | null;
 }
+
+export interface NetworkHelperUsage {
+  activeConnections: number;
+  uploadedBytes: number;
+  downloadedBytes: number;
+  uploadBytesPerSecond: number;
+  downloadBytesPerSecond: number;
+}

@@ -52,7 +52,10 @@ import {
   setBrowserProxySettings,
   testLocalProxy,
 } from "./proxy";
-import { getNetworkHelperStatus } from "./network-helper";
+import {
+  getNetworkHelperStatus,
+  getNetworkHelperUsage,
+} from "./network-helper";
 import { getDefaultBrowserStatus, makeDefaultBrowser } from "./external-links";
 import { forgetArchivedTabsSince } from "./tab-archive-store";
 import {
@@ -836,6 +839,10 @@ export function registerIpc(): void {
   ipcMain.handle("browser:proxy:helper", (event) => {
     assertMainRenderer(event);
     return getNetworkHelperStatus();
+  });
+  ipcMain.handle("browser:proxy:helper-usage", (event) => {
+    assertMainRenderer(event);
+    return getNetworkHelperUsage();
   });
   ipcMain.handle("browser:network:get", (event) => {
     assertMainRenderer(event);

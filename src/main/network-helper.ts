@@ -8,6 +8,7 @@ import type { BrowserProxySettings } from "../shared/types";
 import {
   SURFFISH_NETWORK_HELPER,
   type NetworkHelperStatus,
+  type NetworkHelperUsage,
 } from "../shared/network-helper";
 
 const MAX_CONNECTIONS = 128;
@@ -17,6 +18,26 @@ const FAILURE_REPLY = Buffer.from([0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
 const activeClients = new Set<Socket>();
 let helperServer: Server | null = null;
 let helperError: string | null = null;
+let uploadedBytes = 0;
+let downloadedBytes = 0;
+const trafficHistory = new Map<
+  number,
+  { uploadedBytes: number; downloadedBytes: number }
+>();
+
+function recordTraffic(direction: "upload" | "download", bytes: number): void {
+  if (bytes <= 0) return;
+  if (direction === "upload") uploadedBytes += bytes;
+  else downloadedBytes += bytes;
+  const second = Math.floor(Date.now() / 1_000) * 1_000;
+  const sample = trafficHistory.get(second) ?? {
+    uploadedBytes: 0,
+    downloadedBytes: 0,
+  };
+  if (direction === "upload") sample.uploadedBytes += bytes;
+  else sample.downloadedBytes += bytes;
+  trafficHistory.set(second, sample);
+}
 
 function appendBuffer(current: Buffer, next: Buffer): Buffer {
   return current.length === 0 ? next : Buffer.concat([current, next]);
@@ -107,15 +128,23 @@ export function createSocks5RelayServer(
     };
     const enterTunnel = (response: Buffer, trailing: Buffer): void => {
       client.write(response);
-      if (trailing.length) client.write(trailing);
+      if (trailing.length) {
+        client.write(trailing);
+        recordTraffic("download", trailing.length);
+      }
       phase = "tunnel";
       client.setTimeout(0);
       upstream?.setTimeout(0);
       client.removeListener("data", onClientData);
       if (upstream) upstream.removeListener("data", onUpstreamData);
+      client.on("data", (chunk) => recordTraffic("upload", chunk.length));
+      upstream?.on("data", (chunk) => recordTraffic("download", chunk.length));
       const pending = earlyClientData;
       earlyClientData = Buffer.alloc(0);
-      if (pending.length) upstream?.write(pending);
+      if (pending.length) {
+        recordTraffic("upload", pending.length);
+        upstream?.write(pending);
+      }
       if (upstream) {
         client.pipe(upstream);
         upstream.pipe(client);
@@ -247,6 +276,9 @@ export async function startNetworkHelper(
 ): Promise<void> {
   if (helperServer) return;
   helperError = null;
+  uploadedBytes = 0;
+  downloadedBytes = 0;
+  trafficHistory.clear();
   const server = createSocks5RelayServer(getUpstream);
   helperServer = server;
   await new Promise<void>((resolve) => {
@@ -287,6 +319,30 @@ export function getNetworkHelperStatus(): NetworkHelperStatus {
     ...SURFFISH_NETWORK_HELPER,
     listening: helperServer?.listening === true,
     error: helperError,
+  };
+}
+
+/** Byte totals exclude SOCKS negotiation and count only bytes relayed after CONNECT succeeds. */
+export function getNetworkHelperUsage(): NetworkHelperUsage {
+  const now = Date.now();
+  let recentUploadedBytes = 0;
+  let recentDownloadedBytes = 0;
+  for (const [second, sample] of trafficHistory) {
+    if (now - second > 10_000) {
+      trafficHistory.delete(second);
+      continue;
+    }
+    if (now - second <= 3_000) {
+      recentUploadedBytes += sample.uploadedBytes;
+      recentDownloadedBytes += sample.downloadedBytes;
+    }
+  }
+  return {
+    activeConnections: activeClients.size,
+    uploadedBytes,
+    downloadedBytes,
+    uploadBytesPerSecond: Math.round(recentUploadedBytes / 3),
+    downloadBytesPerSecond: Math.round(recentDownloadedBytes / 3),
   };
 }
 
