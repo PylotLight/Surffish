@@ -2205,7 +2205,7 @@ export default function Browser({
   }, [surface]);
 
   useEffect(() => {
-    if (settingsMode !== "network") return;
+    if (!settingsOnScreen || settingsMode !== "settings") return;
     let mounted = true;
     const refreshUsage = (): void => {
       void window.api.browser.proxy
@@ -2223,7 +2223,7 @@ export default function Browser({
       mounted = false;
       window.clearInterval(timer);
     };
-  }, [settingsMode]);
+  }, [settingsOnScreen, settingsMode]);
 
   useEffect(() => {
     if (settingsMode === "network" && !networkToolEnabled)

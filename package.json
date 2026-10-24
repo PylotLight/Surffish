@@ -45,6 +45,7 @@
     "test:electron-perceived-perf": "electron scripts/electron-perceived-perf-smoke.cjs",
     "test:electron-screenshot": "electron scripts/electron-screenshot-smoke.cjs",
     "test:electron-network-tools": "electron scripts/electron-network-tools-smoke.cjs",
+    "test:electron-network-helper": "electron scripts/electron-network-helper-smoke.cjs",
     "test:electron-reader-watchers": "electron scripts/electron-reader-watchers-smoke.cjs",
     "test:electron-watchers-toggle": "electron scripts/electron-watchers-toggle-smoke.cjs",
     "test:electron-feeds": "electron scripts/electron-feeds-smoke.cjs",
