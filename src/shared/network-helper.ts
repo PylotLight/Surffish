@@ -1,8 +1,23 @@
+import type { BrowserProxySettings } from "./types";
+
 export const SURFFISH_NETWORK_HELPER = {
   name: "Surffish Network Helper",
   host: "127.0.0.1",
   port: 1088,
 } as const;
+
+/** Managed SSH always uses the same public SOCKS endpoint as the Network Helper. */
+export function browserProxyEndpoint(
+  settings: BrowserProxySettings,
+): BrowserProxySettings {
+  return settings.enabled && settings.sshHost?.trim()
+    ? {
+        ...settings,
+        host: SURFFISH_NETWORK_HELPER.host,
+        port: SURFFISH_NETWORK_HELPER.port,
+      }
+    : { ...settings };
+}
 
 export interface SshTunnelStatus {
   configured: boolean;
@@ -13,6 +28,27 @@ export interface SshTunnelStatus {
   starting: boolean;
   running: boolean;
   error: string | null;
+}
+
+/** Keep the OpenSSH-selected local port internal; the helper is the client-facing endpoint. */
+export function networkHelperUpstreamSettings(
+  settings: BrowserProxySettings,
+  tunnel: SshTunnelStatus,
+): BrowserProxySettings {
+  if (!settings.sshHost?.trim() && !tunnel.configured) return { ...settings };
+  if (
+    !tunnel.configured ||
+    !tunnel.enabled ||
+    !tunnel.running ||
+    tunnel.port === null
+  )
+    return { ...settings, enabled: false };
+  return {
+    ...settings,
+    enabled: true,
+    host: tunnel.host,
+    port: tunnel.port,
+  };
 }
 
 export type SshTunnelConnectionState =
@@ -67,7 +103,7 @@ export function describeSshTunnelStatus(
     return {
       state: "connected",
       title: "SSH session connected",
-      detail: `Connected to ${status.target}; local SOCKS5 forwarding is available at ${status.host}:${status.port}.`,
+      detail: `Connected to ${status.target}; Surffish and other apps can use SOCKS5 at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port}.`,
     };
   }
   if (status.error) {

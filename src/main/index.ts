@@ -21,7 +21,11 @@ import {
 } from "./memory-saver";
 import { registerPreconnectIpc } from "./preconnect";
 import { registerWakeSnapshotIpc } from "./wake-snapshot";
-import { getBrowserProxySettings, initializeBrowserProxy } from "./proxy";
+import {
+  getBrowserProxySettings,
+  getNetworkHelperUpstreamSettings,
+  initializeBrowserProxy,
+} from "./proxy";
 import {
   getNetworkHelperStatus,
   startNetworkHelper,
@@ -154,7 +158,7 @@ else registerExternalOpenHandlers();
 
 async function startNetworkServices(): Promise<void> {
   await syncManagedSshTunnel(getBrowserProxySettings());
-  await startNetworkHelper(getBrowserProxySettings);
+  await startNetworkHelper(getNetworkHelperUpstreamSettings);
   const status = getNetworkHelperStatus();
   if (!status.listening)
     console.warn("[network helper] unavailable:", status.error);

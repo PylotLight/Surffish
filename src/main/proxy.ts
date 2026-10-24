@@ -43,8 +43,15 @@ import {
 import { getDomain } from "tldts-experimental";
 import { readUserJson, writeSettingsFile } from "./user-json";
 import { validateSshTarget } from "../shared/ssh-tunnel";
-import { SURFFISH_NETWORK_HELPER } from "../shared/network-helper";
-import { syncManagedSshTunnel } from "./ssh-tunnel";
+import {
+  browserProxyEndpoint,
+  networkHelperUpstreamSettings,
+  SURFFISH_NETWORK_HELPER,
+} from "../shared/network-helper";
+import {
+  getManagedSshTunnelStatus,
+  syncManagedSshTunnel,
+} from "./ssh-tunnel";
 import {
   brambleCameraCheckDecision,
   brambleCameraRequestDecision,
@@ -98,14 +105,6 @@ function validateSettings(input: unknown): BrowserProxySettings {
     );
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("Enter a port between 1 and 65535.");
-  if (sshHost && host !== "127.0.0.1")
-    throw new Error(
-      "Managed SSH tunnels bind to 127.0.0.1; set that as the SOCKS host.",
-    );
-  if (sshHost && port === SURFFISH_NETWORK_HELPER.port)
-    throw new Error(
-      `Choose a tunnel port other than ${SURFFISH_NETWORK_HELPER.port}; that port is reserved for the Surffish helper.`,
-    );
   return {
     enabled: candidate.enabled,
     host,
@@ -138,7 +137,7 @@ function routingInput(
   routing: ProxyRoutingSettings = currentRouting,
 ): ProxyRoutingInput {
   return {
-    primary: { ...settings },
+    primary: browserProxyEndpoint(settings),
     proxies: routing.proxies.map((proxy) => ({ ...proxy })),
     rules: routing.rules.map((rule) => ({ ...rule })),
   };
@@ -462,6 +461,14 @@ export function getBrowserProxySettings(): BrowserProxySettings {
   return { ...currentSettings };
 }
 
+/** The Network Helper forwards through OpenSSH's auto-selected private SOCKS listener. */
+export function getNetworkHelperUpstreamSettings(): BrowserProxySettings {
+  return networkHelperUpstreamSettings(
+    currentSettings,
+    getManagedSshTunnelStatus(),
+  );
+}
+
 export async function setBrowserProxySettings(
   input: unknown,
 ): Promise<BrowserProxySettings> {
@@ -545,6 +552,14 @@ export function testLocalProxy(
       reachable: false,
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+
+  if (settings.sshHost) {
+    settings = {
+      ...settings,
+      host: SURFFISH_NETWORK_HELPER.host,
+      port: SURFFISH_NETWORK_HELPER.port,
+    };
   }
 
   return new Promise((resolve) => {

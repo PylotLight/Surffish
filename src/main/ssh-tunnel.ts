@@ -3,7 +3,7 @@ import {
   type ChildProcess,
   type SpawnOptions,
 } from "node:child_process";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import type { BrowserProxySettings } from "../shared/types";
 import {
   buildOpenSshDynamicForwardArgs,
@@ -17,10 +17,7 @@ const PORT_PROBE_TIMEOUT_MS = 300;
 const STDERR_LIMIT = 2_000;
 const LOOPBACK = "127.0.0.1";
 
-type TunnelSettings = Pick<
-  BrowserProxySettings,
-  "enabled" | "port" | "sshHost"
->;
+type TunnelSettings = Pick<BrowserProxySettings, "enabled" | "sshHost">;
 type SpawnProcess = (
   command: string,
   args: string[],
@@ -31,6 +28,7 @@ export interface SshTunnelRuntime {
   executable?: string;
   startupTimeoutMs?: number;
   spawnProcess?: SpawnProcess;
+  allocatePort?: () => Promise<number>;
   portIsListening?: (port: number) => Promise<boolean>;
 }
 
@@ -59,6 +57,29 @@ function isPortListening(port: number): Promise<boolean> {
     const timer = setTimeout(() => finish(false), PORT_PROBE_TIMEOUT_MS);
     socket.once("connect", () => finish(true));
     socket.once("error", () => finish(false));
+  });
+}
+
+/** Ask the OS for a free loopback port; OpenSSH's listener is internal to Surffish. */
+function allocateEphemeralLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    const onError = (error: Error): void => reject(error);
+    server.once("error", onError);
+    server.listen({ host: LOOPBACK, port: 0, exclusive: true }, () => {
+      server.removeListener("error", onError);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close();
+        reject(new Error("Could not allocate an internal SSH tunnel port."));
+        return;
+      }
+      const port = address.port;
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(port);
+      });
+    });
   });
 }
 
@@ -169,6 +190,7 @@ export function createSshTunnelManager(
 ): SshTunnelManager {
   const executable = runtime.executable ?? defaultSshExecutable();
   const spawnProcess: SpawnProcess = runtime.spawnProcess ?? spawn;
+  const allocatePort = runtime.allocatePort ?? allocateEphemeralLoopbackPort;
   const portIsListening = runtime.portIsListening ?? isPortListening;
   const startupTimeoutMs = runtime.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
   let child: ChildProcess | null = null;
@@ -191,6 +213,7 @@ export function createSshTunnelManager(
     child = null;
     runningTarget = null;
     runningPort = null;
+    port = null;
     starting = false;
     running = false;
     startup = null;
@@ -206,7 +229,7 @@ export function createSshTunnelManager(
     configured = nextTarget.length > 0;
     enabled = settings.enabled;
     target = nextTarget || null;
-    port = nextTarget ? settings.port : null;
+    port = nextTarget ? (runningPort ?? port) : null;
 
     if (!nextTarget || !settings.enabled) {
       await stop();
@@ -215,7 +238,6 @@ export function createSshTunnelManager(
     if (
       child &&
       runningTarget === nextTarget &&
-      runningPort === settings.port &&
       child.exitCode === null &&
       child.signalCode === null
     ) {
@@ -225,9 +247,18 @@ export function createSshTunnelManager(
 
     await stop();
     const runId = ++generation;
+    let selectedPort: number;
+    try {
+      selectedPort = await allocatePort();
+    } catch (portError) {
+      if (runId === generation)
+        error = portError instanceof Error ? portError.message : String(portError);
+      return;
+    }
+    if (runId !== generation) return;
     let alreadyListening: boolean;
     try {
-      alreadyListening = await portIsListening(settings.port);
+      alreadyListening = await portIsListening(selectedPort);
     } catch (probeError) {
       if (runId === generation)
         error =
@@ -236,15 +267,16 @@ export function createSshTunnelManager(
     }
     if (runId !== generation) return;
     if (alreadyListening) {
-      error = `Port ${settings.port} is already in use by another local service. Stop it or choose a different port.`;
+      error = `Automatically selected SSH tunnel port ${selectedPort} is already in use. Save again to retry.`;
       return;
     }
+    port = selectedPort;
 
     let nextChild: ChildProcess;
     try {
       nextChild = spawnProcess(
         executable,
-        buildOpenSshDynamicForwardArgs(nextTarget, settings.port),
+        buildOpenSshDynamicForwardArgs(nextTarget, selectedPort),
         {
           stdio: ["ignore", "ignore", "pipe"],
           windowsHide: true,
@@ -258,7 +290,7 @@ export function createSshTunnelManager(
     }
     child = nextChild;
     runningTarget = nextTarget;
-    runningPort = settings.port;
+    runningPort = selectedPort;
     starting = true;
     running = false;
     error = null;
@@ -283,7 +315,7 @@ export function createSshTunnelManager(
 
     const pending = waitForListener(
       nextChild,
-      settings.port,
+      selectedPort,
       startupTimeoutMs,
       () => capturedStderr,
     );

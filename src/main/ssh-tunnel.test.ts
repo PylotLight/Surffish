@@ -73,7 +73,7 @@ afterEach(async () => {
 });
 
 describe("managed OpenSSH tunnel lifecycle", () => {
-  test("starts a local SOCKS forward for one SSH alias and stops its process", async () => {
+  test("auto-allocates a private SOCKS port and stops its process", async () => {
     const argsSeen: string[][] = [];
     const manager = createSshTunnelManager({
       executable: "fake-ssh",
@@ -83,11 +83,11 @@ describe("managed OpenSSH tunnel lifecycle", () => {
       },
     });
     managers.add(manager);
-    const probe = createServer();
-    const port = await listen(probe);
-    await close(probe);
 
-    await manager.sync({ enabled: true, port, sshHost: "work-vpn" });
+    await manager.sync({ enabled: true, sshHost: "work-vpn" });
+    const port = dynamicForwardPort(argsSeen[0] ?? []);
+    expect(port).toBeGreaterThan(1024);
+    expect(port).not.toBe(1088);
     expect(manager.getStatus()).toMatchObject({
       configured: true,
       enabled: true,
@@ -102,16 +102,21 @@ describe("managed OpenSSH tunnel lifecycle", () => {
     expect(argsSeen[0]?.at(-1)).toBe("work-vpn");
     expect(argsSeen[0]?.slice(0, 3)).toEqual(["-N", "-D", `127.0.0.1:${port}`]);
 
+    await manager.sync({ enabled: true, sshHost: "work-vpn" });
+    expect(manager.getStatus().port).toBe(port);
+    expect(argsSeen).toHaveLength(1);
+
     await manager.stop();
     expect(manager.getStatus().running).toBe(false);
   });
 
-  test("does not start OpenSSH over an already-listening local service", async () => {
+  test("does not start OpenSSH over an already-listening selected port", async () => {
     const occupied = createServer();
     servers.add(occupied);
     const port = await listen(occupied);
     let spawnCount = 0;
     const manager = createSshTunnelManager({
+      allocatePort: async () => port,
       spawnProcess: () => {
         spawnCount += 1;
         throw new Error("should not spawn");
@@ -119,7 +124,7 @@ describe("managed OpenSSH tunnel lifecycle", () => {
     });
     managers.add(manager);
 
-    await manager.sync({ enabled: true, port, sshHost: "work-vpn" });
+    await manager.sync({ enabled: true, sshHost: "work-vpn" });
     expect(spawnCount).toBe(0);
     expect(manager.getStatus().error).toContain("already in use");
     expect(manager.getStatus().running).toBe(false);
@@ -135,7 +140,7 @@ describe("managed OpenSSH tunnel lifecycle", () => {
     });
     managers.add(manager);
 
-    await manager.sync({ enabled: true, port: 1080, sshHost: "" });
+    await manager.sync({ enabled: true, sshHost: "" });
     expect(spawnCount).toBe(0);
     expect(manager.getStatus()).toMatchObject({
       configured: false,

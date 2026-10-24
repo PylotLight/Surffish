@@ -332,11 +332,16 @@ export async function startNetworkHelper(
 }
 
 export function getNetworkHelperStatus(): NetworkHelperStatus {
+  const sshTunnel = getManagedSshTunnelStatus();
   return {
     ...SURFFISH_NETWORK_HELPER,
     listening: helperServer?.listening === true,
     error: helperError,
-    sshTunnel: getManagedSshTunnelStatus(),
+    sshTunnel: {
+      ...sshTunnel,
+      host: SURFFISH_NETWORK_HELPER.host,
+      port: sshTunnel.running ? SURFFISH_NETWORK_HELPER.port : null,
+    },
   };
 }
 

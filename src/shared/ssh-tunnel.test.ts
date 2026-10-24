@@ -1,13 +1,36 @@
 import { describe, expect, test } from "bun:test";
 import {
+  browserProxyEndpoint,
   describeSshTunnelStatus,
+  networkHelperUpstreamSettings,
+  SURFFISH_NETWORK_HELPER,
   type SshTunnelStatus,
 } from "./network-helper";
+import type { BrowserProxySettings } from "./types";
 import {
   buildOpenSshDynamicForwardArgs,
   parseSshTarget,
   validateSshTarget,
 } from "./ssh-tunnel";
+
+const connected: SshTunnelStatus = {
+  configured: true,
+  enabled: true,
+  target: "work-vpn",
+  host: "127.0.0.1",
+  port: 54321,
+  starting: false,
+  running: true,
+  error: null,
+};
+
+const settings: BrowserProxySettings = {
+  enabled: true,
+  host: "127.0.0.1",
+  port: 1085,
+  sshHost: "work-vpn",
+  bypassLocalNetwork: true,
+};
 
 describe("managed OpenSSH SOCKS tunnel config", () => {
   test("uses a host alias as one argument with a loopback-only dynamic forward", () => {
@@ -47,24 +70,59 @@ describe("managed OpenSSH SOCKS tunnel config", () => {
   });
 });
 
-describe("managed OpenSSH status summary", () => {
-  const connected: SshTunnelStatus = {
-    configured: true,
-    enabled: true,
-    target: "work-vpn",
-    host: "127.0.0.1",
-    port: 1080,
-    starting: false,
-    running: true,
-    error: null,
-  };
+describe("managed SSH endpoint selection", () => {
+  test("routes Surffish through the same stable endpoint that other apps use", () => {
+    expect(browserProxyEndpoint(settings)).toMatchObject({
+      enabled: true,
+      host: SURFFISH_NETWORK_HELPER.host,
+      port: SURFFISH_NETWORK_HELPER.port,
+      sshHost: "work-vpn",
+    });
+    expect(browserProxyEndpoint({ ...settings, port: 1088 }).port).toBe(1088);
+  });
 
-  test("confirms the SSH session and local forwarding endpoint separately", () => {
+  test("keeps the OpenSSH-selected port internal to the helper", () => {
+    expect(networkHelperUpstreamSettings(settings, connected)).toMatchObject({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 54321,
+    });
+    expect(browserProxyEndpoint(settings).port).toBe(1088);
+  });
+
+  test("fails closed until a configured SSH tunnel is ready", () => {
+    expect(
+      networkHelperUpstreamSettings(settings, {
+        ...connected,
+        running: false,
+        port: null,
+      }),
+    ).toMatchObject({ enabled: false });
+  });
+
+  test("leaves manual proxy settings unchanged without a managed SSH host", () => {
+    const manual = { ...settings, sshHost: "" };
+    expect(browserProxyEndpoint(manual)).toEqual(manual);
+    expect(
+      networkHelperUpstreamSettings(manual, {
+        ...connected,
+        configured: false,
+        enabled: false,
+        target: null,
+        running: false,
+        port: null,
+      }),
+    ).toEqual(manual);
+  });
+});
+
+describe("managed OpenSSH status summary", () => {
+  test("confirms the SSH session and shared public endpoint", () => {
     expect(describeSshTunnelStatus(connected)).toEqual({
       state: "connected",
       title: "SSH session connected",
       detail:
-        "Connected to work-vpn; local SOCKS5 forwarding is available at 127.0.0.1:1080.",
+        "Connected to work-vpn; Surffish and other apps can use SOCKS5 at 127.0.0.1:1088.",
     });
   });
 

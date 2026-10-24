@@ -2775,7 +2775,7 @@ export default function Browser({
       await window.api.browser.reload();
       setProxyMessage(
         saved.sshHost && helperStatus.sshTunnel.running
-          ? `SOCKS5 is on through the SSH tunnel ${saved.sshHost}.`
+          ? `SOCKS5 is on through the SSH tunnel ${saved.sshHost} at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port}.`
           : saved.sshHost && helperStatus.sshTunnel.error
             ? `Settings saved, but the SSH tunnel is unavailable: ${helperStatus.sshTunnel.error}`
             : saved.enabled
@@ -2814,7 +2814,11 @@ export default function Browser({
   }
   async function testProxy(): Promise<void> {
     setBusy(true);
-    setProxyMessage("Checking the local SOCKS5 port…");
+    setProxyMessage(
+      proxy.sshHost?.trim()
+        ? "Checking the shared SOCKS5 endpoint…"
+        : "Checking the local SOCKS5 port…",
+    );
     setProxyMessageIsError(false);
     try {
       const result = await window.api.browser.proxy.test(proxy);
@@ -4957,7 +4961,9 @@ export default function Browser({
                         title="SOCKS5 proxy"
                         status={
                           appliedProxy.enabled
-                            ? `${appliedProxy.host}:${appliedProxy.port}`
+                            ? appliedProxy.sshHost
+                              ? `${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port}`
+                              : `${appliedProxy.host}:${appliedProxy.port}`
                             : "Direct connection"
                         }
                         statusOn={appliedProxy.enabled}
@@ -4977,39 +4983,52 @@ export default function Browser({
                           />
                         }
                       >
-                        <div className="settings-inline-fields">
-                          <label className="settings-field settings-field-grow">
-                            <span>Host</span>
-                            <input
-                              type="text"
-                              value={proxy.host}
-                              spellCheck={false}
-                              onChange={(event) =>
-                                setProxy((current) => ({
-                                  ...current,
-                                  host: event.target.value,
-                                }))
-                              }
-                              aria-label="Local SOCKS5 host"
-                            />
-                          </label>
-                          <label className="settings-field settings-field-port">
-                            <span>Port</span>
-                            <input
-                              type="number"
-                              value={proxy.port}
-                              min={1}
-                              max={65535}
-                              onChange={(event) =>
-                                setProxy((current) => ({
-                                  ...current,
-                                  port: Number(event.target.value),
-                                }))
-                              }
-                              aria-label="Local SOCKS5 port"
-                            />
-                          </label>
-                        </div>
+                        {proxy.sshHost?.trim() ? (
+                          <p className="settings-help">
+                            Shared SOCKS5 endpoint: {" "}
+                            <code>
+                              {SURFFISH_NETWORK_HELPER.host}:
+                              {SURFFISH_NETWORK_HELPER.port}
+                            </code>
+                            . Surffish and your other apps use this same
+                            connection; the SSH-side port is selected
+                            automatically.
+                          </p>
+                        ) : (
+                          <div className="settings-inline-fields">
+                            <label className="settings-field settings-field-grow">
+                              <span>Host</span>
+                              <input
+                                type="text"
+                                value={proxy.host}
+                                spellCheck={false}
+                                onChange={(event) =>
+                                  setProxy((current) => ({
+                                    ...current,
+                                    host: event.target.value,
+                                  }))
+                                }
+                                aria-label="Local SOCKS5 host"
+                              />
+                            </label>
+                            <label className="settings-field settings-field-port">
+                              <span>Port</span>
+                              <input
+                                type="number"
+                                value={proxy.port}
+                                min={1}
+                                max={65535}
+                                onChange={(event) =>
+                                  setProxy((current) => ({
+                                    ...current,
+                                    port: Number(event.target.value),
+                                  }))
+                                }
+                                aria-label="Local SOCKS5 port"
+                              />
+                            </label>
+                          </div>
+                        )}
                         <div className="settings-inline-fields ssh-host-row">
                           <label className="settings-field settings-field-grow">
                             <span>SSH host alias</span>
@@ -5074,8 +5093,9 @@ export default function Browser({
                           Search reads Host names from your local ~/.ssh/config
                           (including included config files). Select one to fill
                           this field, or enter an SSH alias or user@host
-                          manually. Leave blank only if a SOCKS5 proxy is
-                          already running at {proxy.host}:{proxy.port}.
+                          manually. {proxy.sshHost?.trim()
+                            ? "With an SSH alias, the app and other apps use the shared endpoint above; no second port needs to be set."
+                            : `Leave blank only if a SOCKS5 proxy is already running at ${proxy.host}:${proxy.port}.`}
                         </p>
                         <div
                           className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}
@@ -5129,16 +5149,16 @@ export default function Browser({
                               : "Checking listener…"}
                         </p>
                         <p className="settings-help">
-                          Configure other apps to use SOCKS5 at{" "}
+                          {proxy.sshHost?.trim()
+                            ? "Surffish and other apps use the same SOCKS5 connection at "
+                            : "Configure other apps to use SOCKS5 at "}
                           <code>
                             {SURFFISH_NETWORK_HELPER.host}:
                             {SURFFISH_NETWORK_HELPER.port}
                           </code>
-                          . TCP CONNECT traffic is forwarded through the main
-                          proxy above; requests fail closed if it is off or
-                          unreachable. If no SSH alias is set, that SOCKS5
-                          service must already be running. Site rules and the
-                          local-network bypass do not apply.
+                          . {proxy.sshHost?.trim()
+                            ? "The SSH-side listener is chosen automatically and stays internal. TCP CONNECT traffic fails closed if the tunnel is off or unreachable. Site rules and the local-network bypass do not apply."
+                            : "TCP CONNECT traffic is forwarded through the main proxy above; requests fail closed if it is off or unreachable. If no SSH alias is set, that SOCKS5 service must already be running. Site rules and the local-network bypass do not apply."}
                         </p>
                         <section
                           className="network-helper-activity"
@@ -5198,7 +5218,9 @@ export default function Browser({
                             disabled={busy}
                             onClick={() => void testProxy()}
                           >
-                            Test port
+                            {proxy.sshHost?.trim()
+                              ? "Test endpoint"
+                              : "Test port"}
                           </button>
                           <button
                             className="settings-action primary"

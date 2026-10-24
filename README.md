@@ -164,13 +164,15 @@ You can also Control-click the app and choose **Open** on first launch. Clearing
 
 <br>
 
-Surffish doesn't start SSH for you. Open a dynamic forward in a terminal and leave it running:
+Surffish can start an SSH tunnel for you. In **Settings → Connection → SOCKS5 proxy**, enter a host alias from `~/.ssh/config` (or `user@host`) and Save. Surffish and other local apps then share the SOCKS5 endpoint `127.0.0.1:1088`; Surffish selects the SSH-side port automatically.
+
+To use an SSH tunnel you already started yourself, open a dynamic forward in a terminal and leave it running:
 
 ```bash
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host
 ```
 
-Then go to **Settings → General → SOCKS5 proxy**, check the host and port (`127.0.0.1` and `1080` by default), and turn the switch on. **Test port** only checks that something is listening on that port. It doesn't test the SSH connection behind it.
+Then go to **Settings → Connection → SOCKS5 proxy**, leave the SSH host field blank, set the host and port (`127.0.0.1` and `1080` by default), and turn the switch on. Other apps can use the helper at `127.0.0.1:1088`. **Test port** only checks that something is listening; it doesn't test the SOCKS handshake or the SSH destination.
 
 To send only some sites through the tunnel, leave the main switch off and add **Network rules** instead, or open the **This site** panel on a page and pick a route. Turn on **Kill switch** if a proxied site should fail closed when the tunnel drops.
 
