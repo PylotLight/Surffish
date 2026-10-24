@@ -1,33 +1,33 @@
-import {
-  spawn,
-  type ChildProcess,
-  type SpawnOptions,
-} from "node:child_process";
-import { createConnection, createServer } from "node:net";
+import { readFile } from "node:fs/promises";
+import { createConnection, createServer, type Server } from "node:net";
+import { Client, utils, type ConnectConfig, type ParsedKey } from "ssh2";
 import type { BrowserProxySettings } from "../shared/types";
-import {
-  buildOpenSshDynamicForwardArgs,
-  parseSshTarget,
-} from "../shared/ssh-tunnel";
+import { parseSshTarget } from "../shared/ssh-tunnel";
 import type { SshTunnelStatus } from "../shared/network-helper";
+import { loadKnownHostVerifier } from "./ssh-known-hosts";
+import { resolveSshConnection } from "./ssh-config";
+import { createSshSocksListener, type SshSocksListener } from "./ssh-socks";
 
 const STARTUP_TIMEOUT_MS = 8_000;
 const STOP_TIMEOUT_MS = 1_000;
 const PORT_PROBE_TIMEOUT_MS = 300;
-const STDERR_LIMIT = 2_000;
 const LOOPBACK = "127.0.0.1";
 
 type TunnelSettings = Pick<BrowserProxySettings, "enabled" | "sshHost">;
-type SpawnProcess = (
-  command: string,
-  args: string[],
-  options: SpawnOptions,
-) => ChildProcess;
+
+interface PreparedSshConnection {
+  config: ConnectConfig;
+  verificationError: () => string | null;
+}
 
 export interface SshTunnelRuntime {
-  executable?: string;
   startupTimeoutMs?: number;
-  spawnProcess?: SpawnProcess;
+  clientFactory?: () => Client;
+  prepareConnection?: (
+    target: string,
+    timeoutMs: number,
+  ) => Promise<PreparedSshConnection>;
+  createSocksListener?: (client: Client) => SshSocksListener;
   allocatePort?: () => Promise<number>;
   portIsListening?: (port: number) => Promise<boolean>;
 }
@@ -36,11 +36,6 @@ export interface SshTunnelManager {
   sync(settings: TunnelSettings): Promise<void>;
   stop(): Promise<void>;
   getStatus(): SshTunnelStatus;
-}
-
-function defaultSshExecutable(): string {
-  if (process.platform === "darwin") return "/usr/bin/ssh";
-  return process.platform === "win32" ? "ssh.exe" : "ssh";
 }
 
 function isPortListening(port: number): Promise<boolean> {
@@ -60,7 +55,7 @@ function isPortListening(port: number): Promise<boolean> {
   });
 }
 
-/** Ask the OS for a free loopback port; OpenSSH's listener is internal to Surffish. */
+/** Ask the OS for a free loopback port; the in-app SOCKS listener stays internal to Surffish. */
 function allocateEphemeralLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -83,117 +78,176 @@ function allocateEphemeralLoopbackPort(): Promise<number> {
   });
 }
 
-function waitForListener(
-  child: ChildProcess,
-  port: number,
+function listenOnLoopback(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: NodeJS.ErrnoException): void => {
+      server.removeListener("listening", onListening);
+      reject(
+        error.code === "EADDRINUSE"
+          ? new Error(
+              `Automatically selected SSH tunnel port ${port} is already in use. Save again to retry.`,
+            )
+          : error,
+      );
+    };
+    const onListening = (): void => {
+      server.removeListener("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    try {
+      server.listen({ host: LOOPBACK, port, exclusive: true });
+    } catch (error) {
+      server.removeListener("error", onError);
+      server.removeListener("listening", onListening);
+      reject(error);
+    }
+  });
+}
+
+async function prepareSshConnection(
+  target: string,
   timeoutMs: number,
-  stderr: () => string,
+): Promise<PreparedSshConnection> {
+  const resolved = await resolveSshConnection(target);
+  const parsedKeys: ParsedKey[] = [];
+  for (const identityFile of resolved.identityFiles) {
+    let contents: Buffer;
+    try {
+      contents = await readFile(identityFile);
+    } catch {
+      throw new Error(`Could not read SSH IdentityFile ${identityFile}.`);
+    }
+    const parsed = utils.parseKey(contents);
+    if (parsed instanceof Error) {
+      throw new Error(
+        `Could not load SSH IdentityFile ${identityFile}. Password-protected keys are not supported for this background tunnel.`,
+      );
+    }
+    if (!parsed.isPrivateKey()) continue;
+    parsedKeys.push(parsed);
+  }
+  if (parsedKeys.length === 0)
+    throw new Error(
+      `No usable private key was found in the SSH IdentityFile for ${target}.`,
+    );
+
+  const knownHosts = await loadKnownHostVerifier(
+    resolved.hostKeyNames,
+    resolved.knownHostsFiles,
+  );
+  const authHandler = parsedKeys.map((key) => ({
+    type: "publickey" as const,
+    username: resolved.username,
+    key,
+  }));
+  return {
+    config: {
+      host: resolved.host,
+      port: resolved.port,
+      username: resolved.username,
+      authHandler,
+      hostVerifier: (key: Buffer) => knownHosts.verify(key),
+      readyTimeout: timeoutMs,
+      keepaliveInterval: 30_000,
+      keepaliveCountMax: 3,
+      tryKeyboard: false,
+    },
+    verificationError: knownHosts.error,
+  };
+}
+
+function waitForReady(
+  client: Client,
+  connection: PreparedSshConnection,
+  timeoutMs: number,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
-    let probeTimer: ReturnType<typeof setTimeout> | null = null;
     const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeoutTimer);
-      if (probeTimer) clearTimeout(probeTimer);
-      child.removeListener("error", onError);
-      child.removeListener("exit", onExit);
+      clearTimeout(timer);
+      client.removeListener("ready", onReady);
+      client.removeListener("error", onError);
+      client.removeListener("close", onClose);
       if (error) reject(error);
       else resolve();
     };
-    const message = (reason: string): Error => {
-      const detail = stderr().trim().split(/\r?\n/).slice(-2).join(" ");
-      return new Error(detail ? `${reason} ${detail}` : reason);
+    const onReady = (): void => finish();
+    const onError = (error: Error): void => {
+      finish(new Error(connection.verificationError() ?? error.message));
     };
-    const onError = (error: Error): void =>
-      finish(message(`Could not launch OpenSSH: ${error.message}`));
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void =>
+    const onClose = (): void => {
       finish(
-        message(
-          `OpenSSH exited before the tunnel became ready (${signal ?? `code ${code ?? "unknown"}`}).`,
-        ),
+        new Error("SSH connection closed before authentication completed."),
       );
-    const timeoutTimer = setTimeout(
+    };
+    const timer = setTimeout(
       () =>
         finish(
-          message(
-            `OpenSSH did not open the SOCKS port within ${Math.ceil(timeoutMs / 1_000)} seconds.`,
+          new Error(
+            `SSH connection did not become ready within ${Math.ceil(timeoutMs / 1_000)} seconds.`,
           ),
         ),
       timeoutMs,
     );
-    child.once("error", onError);
-    child.once("exit", onExit);
-
-    const probe = (): void => {
-      if (settled) return;
-      if (child.exitCode !== null || child.signalCode !== null) {
-        onExit(child.exitCode, child.signalCode);
-        return;
-      }
-      const socket = createConnection({ host: LOOPBACK, port });
-      socket.once("connect", () => {
-        socket.destroy();
-        if (child.exitCode !== null || child.signalCode !== null) {
-          onExit(child.exitCode, child.signalCode);
-          return;
-        }
-        finish();
-      });
-      socket.once("error", () => {
-        socket.destroy();
-        if (!settled) probeTimer = setTimeout(probe, 100);
-      });
-    };
-    probe();
+    client.once("ready", onReady);
+    client.once("error", onError);
+    client.once("close", onClose);
+    try {
+      client.connect(connection.config);
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
-function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null)
-    return Promise.resolve();
-  return new Promise((resolve) => {
+async function endClient(client: Client): Promise<void> {
+  await new Promise<void>((resolve) => {
     let settled = false;
     const finish = (): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.removeListener("exit", finish);
+      client.removeListener("close", finish);
       resolve();
     };
     const timer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // The process may have exited between the state check and kill.
-        }
+      try {
+        client.destroy();
+      } catch {
+        // The socket may have already closed.
       }
       finish();
     }, STOP_TIMEOUT_MS);
-    child.once("exit", finish);
+    client.once("close", finish);
     try {
-      child.kill("SIGTERM");
+      client.end();
     } catch {
       finish();
     }
   });
 }
 
-/**
- * Creates an isolated manager so its child-process lifecycle can be tested with a local fake SSH process.
- * The default instance below always runs the OS OpenSSH client and never invokes a shell.
- */
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Creates an isolated in-process manager so client, config, and listener lifecycles can be tested. */
 export function createSshTunnelManager(
   runtime: SshTunnelRuntime = {},
 ): SshTunnelManager {
-  const executable = runtime.executable ?? defaultSshExecutable();
-  const spawnProcess: SpawnProcess = runtime.spawnProcess ?? spawn;
+  const clientFactory = runtime.clientFactory ?? (() => new Client());
+  const prepareConnection = runtime.prepareConnection ?? prepareSshConnection;
+  const makeSocksListener =
+    runtime.createSocksListener ?? createSshSocksListener;
   const allocatePort = runtime.allocatePort ?? allocateEphemeralLoopbackPort;
   const portIsListening = runtime.portIsListening ?? isPortListening;
   const startupTimeoutMs = runtime.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
-  let child: ChildProcess | null = null;
+  let client: Client | null = null;
+  let listener: SshSocksListener | null = null;
   let runningTarget: string | null = null;
   let runningPort: number | null = null;
   let configured = false;
@@ -209,8 +263,10 @@ export function createSshTunnelManager(
 
   const stop = async (): Promise<void> => {
     generation += 1;
-    const previous = child;
-    child = null;
+    const previousClient = client;
+    const previousListener = listener;
+    client = null;
+    listener = null;
     runningTarget = null;
     runningPort = null;
     port = null;
@@ -218,9 +274,12 @@ export function createSshTunnelManager(
     running = false;
     startup = null;
     error = null;
-    const pendingStop = previous ? stopChild(previous) : stopping;
-    if (previous && pendingStop) stopping = pendingStop;
-    if (pendingStop) await pendingStop;
+    const pendingStop = (async (): Promise<void> => {
+      if (previousListener) await previousListener.close();
+      if (previousClient) await endClient(previousClient);
+    })();
+    stopping = pendingStop;
+    await pendingStop;
     if (stopping === pendingStop) stopping = null;
   };
 
@@ -235,112 +294,114 @@ export function createSshTunnelManager(
       await stop();
       return;
     }
-    if (
-      child &&
-      runningTarget === nextTarget &&
-      child.exitCode === null &&
-      child.signalCode === null
-    ) {
+    if (startup) {
+      const currentStartup = startup;
+      await currentStartup;
+      if (client && runningTarget === nextTarget && runningPort !== null)
+        return;
+    }
+    if (client && runningTarget === nextTarget && runningPort !== null) {
       if (startup) await startup;
       return;
     }
 
     await stop();
     const runId = ++generation;
-    let selectedPort: number;
-    try {
-      selectedPort = await allocatePort();
-    } catch (portError) {
-      if (runId === generation)
-        error =
-          portError instanceof Error ? portError.message : String(portError);
-      return;
-    }
-    if (runId !== generation) return;
-    let alreadyListening: boolean;
-    try {
-      alreadyListening = await portIsListening(selectedPort);
-    } catch (probeError) {
-      if (runId === generation)
-        error =
-          probeError instanceof Error ? probeError.message : String(probeError);
-      return;
-    }
-    if (runId !== generation) return;
-    if (alreadyListening) {
-      error = `Automatically selected SSH tunnel port ${selectedPort} is already in use. Save again to retry.`;
-      return;
-    }
-    port = selectedPort;
-
-    let nextChild: ChildProcess;
-    try {
-      nextChild = spawnProcess(
-        executable,
-        buildOpenSshDynamicForwardArgs(nextTarget, selectedPort),
-        {
-          stdio: ["ignore", "ignore", "pipe"],
-          windowsHide: true,
-          env: process.env,
-        },
-      );
-    } catch (spawnError) {
-      error =
-        spawnError instanceof Error ? spawnError.message : String(spawnError);
-      return;
-    }
-    child = nextChild;
-    runningTarget = nextTarget;
-    runningPort = selectedPort;
-    starting = true;
-    running = false;
-    error = null;
-    let capturedStderr = "";
-    nextChild.stderr?.on("data", (chunk: Buffer | string) => {
-      capturedStderr = `${capturedStderr}${chunk.toString()}`.slice(
-        -STDERR_LIMIT,
-      );
+    let resolveStartup: () => void = () => {};
+    const startupCompletion = new Promise<void>((resolve) => {
+      resolveStartup = resolve;
     });
-    nextChild.once("exit", (code, signal) => {
-      if (child !== nextChild || generation !== runId) return;
-      child = null;
-      runningTarget = null;
-      runningPort = null;
-      starting = false;
-      running = false;
-      startup = null;
-      const exit = signal ?? `code ${code ?? "unknown"}`;
-      const detail = capturedStderr.trim().split(/\r?\n/).slice(-2).join(" ");
-      error = `SSH tunnel exited unexpectedly (${exit})${detail ? `: ${detail}` : "."}`;
-    });
-
-    const pending = waitForListener(
-      nextChild,
-      selectedPort,
-      startupTimeoutMs,
-      () => capturedStderr,
-    );
-    startup = pending;
+    startup = startupCompletion;
+    let nextClient: Client | null = null;
+    let nextListener: SshSocksListener | null = null;
     try {
-      await pending;
-      if (child === nextChild && generation === runId) {
-        starting = false;
-        running = true;
-        error = null;
+      let selectedPort: number;
+      try {
+        selectedPort = await allocatePort();
+      } catch (portError) {
+        throw new Error(errorMessage(portError));
       }
-    } catch (startError) {
-      if (child === nextChild && generation === runId) {
-        starting = false;
-        running = false;
-        child = null;
+      if (runId !== generation) return;
+      let alreadyListening: boolean;
+      try {
+        alreadyListening = await portIsListening(selectedPort);
+      } catch (probeError) {
+        throw new Error(errorMessage(probeError));
+      }
+      if (runId !== generation) return;
+      if (alreadyListening)
+        throw new Error(
+          `Automatically selected SSH tunnel port ${selectedPort} is already in use. Save again to retry.`,
+        );
+      port = selectedPort;
+
+      const prepared = await prepareConnection(nextTarget, startupTimeoutMs);
+      if (runId !== generation) return;
+      nextClient = clientFactory();
+      client = nextClient;
+      runningTarget = nextTarget;
+      runningPort = selectedPort;
+      starting = true;
+      running = false;
+      error = null;
+      let authenticated = false;
+      nextClient.once("ready", () => {
+        authenticated = true;
+      });
+
+      const handleUnexpectedClose = (message: string): void => {
+        if (client !== nextClient || generation !== runId) return;
+        generation += 1;
+        client = null;
         runningTarget = null;
         runningPort = null;
-        error =
-          startError instanceof Error ? startError.message : String(startError);
-        await stopChild(nextChild);
+        starting = false;
+        running = false;
+        startup = null;
+        error = message;
+        const abandonedListener = listener;
+        listener = null;
+        if (abandonedListener) void abandonedListener.close();
+      };
+      nextClient.on("error", (connectionError) => {
+        if (client !== nextClient || generation !== runId) return;
+        if (!authenticated) return;
+        handleUnexpectedClose(
+          `SSH tunnel connection failed: ${connectionError.message}`,
+        );
+      });
+      nextClient.once("close", () => {
+        if (client !== nextClient || generation !== runId) return;
+        handleUnexpectedClose("SSH tunnel connection closed unexpectedly.");
+      });
+
+      await waitForReady(nextClient, prepared, startupTimeoutMs);
+      if (runId !== generation || client !== nextClient) return;
+
+      nextListener = makeSocksListener(nextClient);
+      await listenOnLoopback(nextListener.server, selectedPort);
+      if (runId !== generation || client !== nextClient) {
+        await nextListener.close();
+        return;
       }
+      listener = nextListener;
+      starting = false;
+      running = true;
+      error = null;
+    } catch (startError) {
+      if (runId === generation) {
+        starting = false;
+        running = false;
+        runningTarget = null;
+        runningPort = null;
+        if (client === nextClient) client = null;
+        error = errorMessage(startError);
+      }
+      if (nextListener && listener !== nextListener) await nextListener.close();
+      if (nextClient) await endClient(nextClient);
     } finally {
-      if (startup === pending) startup = null;
+      if (startup === startupCompletion) startup = null;
+      resolveStartup();
     }
   };
 
