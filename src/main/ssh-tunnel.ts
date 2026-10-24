@@ -157,12 +157,17 @@ async function prepareSshConnection(
   timeoutMs: number,
 ): Promise<PreparedSshConnection> {
   const sshAuthSock = process.env["SSH_AUTH_SOCK"] || (await launchdAuthSock());
-  const resolved = await resolveSshConnection(
-    target,
-    undefined,
-    undefined,
-    sshAuthSock,
-  );
+  const debug = process.env["SURFFISH_SSH_DEBUG"] === "1";
+  const resolved = await resolveSshConnection(target, undefined, undefined, {
+    authSock: sshAuthSock,
+    trace: debug
+      ? (message: string) => console.info(`[ssh] ${message}`)
+      : undefined,
+  });
+  const configSource =
+    resolved.configFiles.length > 0
+      ? `config ${resolved.configFiles.join(", ")}`
+      : "no SSH config read";
   const parsedKeys: ParsedKey[] = [];
   for (const identityFile of resolved.identityFiles) {
     let contents: Buffer;
@@ -185,10 +190,10 @@ async function prepareSshConnection(
   if (parsedKeys.length === 0 && !agentAvailable) {
     if (agentPath)
       throw new Error(
-        `Could not reach the SSH agent at ${agentPath}, and no usable SSH IdentityFile was found for ${target}.`,
+        `Could not reach the SSH agent at ${agentPath}, and no usable SSH IdentityFile was found for ${target} (${configSource}).`,
       );
     throw new Error(
-      `No usable private key was found in the SSH IdentityFile for ${target}.`,
+      `No usable private key was found in the SSH IdentityFile for ${target} (${configSource}).`,
     );
   }
 
@@ -235,7 +240,7 @@ async function prepareSshConnection(
     },
     verificationError: knownHosts.error,
     debugLines,
-    authSummary: `${resolved.username}@${resolved.host}:${resolved.port} with ${keyCount} and ${agentSummary}`,
+    authSummary: `${resolved.username}@${resolved.host}:${resolved.port} with ${keyCount} (${configSource}) and ${agentSummary}`,
   };
 }
 

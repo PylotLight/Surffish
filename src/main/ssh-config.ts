@@ -18,6 +18,15 @@ export interface ResolvedSshConnection {
   identityAgent: string | null;
   hostKeyNames: string[];
   knownHostsFiles: string[];
+  /** Config files that were actually read, in the order OpenSSH would read them. */
+  configFiles: string[];
+}
+
+export interface ResolveSshOptions {
+  /** Overrides the SSH_AUTH_SOCK lookup; null disables the environment fallback. */
+  authSock?: string | null;
+  /** Receives the resolution steps, for the SURFFISH_SSH_DEBUG trail. */
+  trace?: (message: string) => void;
 }
 
 interface ConfigContext {
@@ -216,6 +225,7 @@ async function visitConfigInOrder(
   context: ConfigContext,
   onLine: (tokens: string[]) => Promise<boolean | void>,
   onFileBoundary?: (entering: boolean) => void,
+  onFileVisited?: (canonicalPath: string) => void,
 ): Promise<void> {
   const activeFiles = new Set<string>();
   let filesVisited = 0;
@@ -230,6 +240,7 @@ async function visitConfigInOrder(
     if (activeFiles.has(canonicalPath)) return;
     activeFiles.add(canonicalPath);
     filesVisited += 1;
+    onFileVisited?.(canonicalPath);
 
     try {
       let contents: string;
@@ -304,8 +315,13 @@ export async function resolveSshConnection(
   value: string,
   homeDirectory = homedir(),
   localUsername = defaultLocalUsername(),
-  sshAuthSock: string | null = process.env["SSH_AUTH_SOCK"] ?? null,
+  options: ResolveSshOptions = {},
 ): Promise<ResolvedSshConnection> {
+  const trace = options.trace;
+  const authSock =
+    options.authSock === undefined
+      ? (process.env["SSH_AUTH_SOCK"] ?? null)
+      : options.authSock;
   const target = parseSshTarget(value);
   if (!target) throw new Error("Enter one SSH host alias or user@host.");
   const at = target.lastIndexOf("@");
@@ -331,6 +347,8 @@ export async function resolveSshConnection(
   let configuredHost = alias;
   let activeHostBlock = true;
   const parentHostBlocks: boolean[] = [];
+  const configFiles: string[] = [];
+  trace?.(`config: home ${homeDirectory}, alias ${alias}`);
 
   await visitConfigInOrder(
     homeDirectory,
@@ -478,7 +496,15 @@ export async function resolveSshConnection(
       if (entering) parentHostBlocks.push(activeHostBlock);
       else activeHostBlock = parentHostBlocks.pop() ?? true;
     },
+    (canonicalPath) => {
+      configFiles.push(canonicalPath);
+      trace?.(`config: reading ${canonicalPath}`);
+    },
   );
+  if (configFiles.length === 0)
+    trace?.(
+      `config: no readable OpenSSH config under ${join(homeDirectory, ".ssh")}`,
+    );
 
   const host = values.get("hostname") || alias;
   const portValue = values.get("port") || "22";
@@ -487,6 +513,7 @@ export async function resolveSshConnection(
     throw new Error(`Invalid SSH port in ~/.ssh/config for ${target}.`);
   const username = explicitUser || values.get("user") || localUsername;
   if (!username) throw new Error("Could not determine the SSH username.");
+  trace?.(`target: ${username}@${host}:${port}`);
 
   const finalContext: ConfigContext = {
     ...context,
@@ -494,22 +521,33 @@ export async function resolveSshConnection(
     port,
     remoteUser: username,
   };
-  const agentSource = identityAgentValue || sshAuthSock;
+  const agentSource = identityAgentValue || authSock;
   const identityAgent =
     identityAgentDisabled || !agentSource
       ? null
       : resolveConfigPath(agentSource, finalContext);
+  trace?.(
+    `agent: ${identityAgent ?? "none"}${
+      identityAgentValue
+        ? " (IdentityAgent)"
+        : authSock
+          ? " (SSH_AUTH_SOCK)"
+          : ""
+    }${identityAgentDisabled ? " (IdentityAgent none)" : ""}`,
+  );
   let identityFiles: string[];
   if (identityFilesDisabled) {
     identityFiles = [];
+    trace?.("identity: disabled by IdentityFile none");
   } else if (identityValues.length > 0) {
     identityFiles = identityValues.map((path) =>
       resolveConfigPath(path, finalContext),
     );
+    trace?.(`identity: config lists ${identityFiles.join(", ")}`);
   } else {
     identityFiles = await Promise.all(
       DEFAULT_IDENTITY_FILES.map((name) =>
-        resolveConfigPath(name, finalContext),
+        resolveConfigPath(join(".ssh", name), finalContext),
       ),
     );
     const existing: string[] = [];
@@ -520,6 +558,11 @@ export async function resolveSshConnection(
         // Match OpenSSH's default behavior by considering only keys that exist.
       }
     }
+    trace?.(
+      `identity: no IdentityFile in config; default candidates ${identityFiles.join(", ")} -> ${
+        existing.length > 0 ? existing.join(", ") : "none exist"
+      }`,
+    );
     identityFiles = existing;
   }
   if (identityFiles.length === 0 && !identityAgent)
@@ -564,6 +607,7 @@ export async function resolveSshConnection(
     identityAgent,
     hostKeyNames,
     knownHostsFiles: [...new Set(knownHostsFiles)],
+    configFiles,
   };
 }
 

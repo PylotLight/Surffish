@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -89,12 +95,9 @@ test("resolves HostName, User, Port, IdentityFile, known_hosts, and first-value 
   );
 
   try {
-    const resolved = await resolveSshConnection(
-      "nas",
-      home,
-      "local-user",
-      null,
-    );
+    const resolved = await resolveSshConnection("nas", home, "local-user", {
+      authSock: null,
+    });
     assert.deepEqual(resolved, {
       target: "nas",
       host: "192.0.2.55",
@@ -107,6 +110,10 @@ test("resolves HostName, User, Port, IdentityFile, known_hosts, and first-value 
         join(ssh, "nas-known-hosts"),
         "/etc/ssh/ssh_known_hosts",
         "/etc/ssh/ssh_known_hosts2",
+      ],
+      configFiles: [
+        realpathSync(join(ssh, "config")),
+        realpathSync(join(includeDirectory, "nas.conf")),
       ],
     });
   } finally {
@@ -179,7 +186,9 @@ test("reads the OpenSSH Keyword=value form of config lines", async () => {
     "Host nas\n  HostName=nas.local\n  User=backup\n  IdentityFile=~/.ssh/id_ed25519\n",
   );
   try {
-    const resolved = await resolveSshConnection("nas", home, "tester", null);
+    const resolved = await resolveSshConnection("nas", home, "tester", {
+      authSock: null,
+    });
     assert.equal(resolved.host, "nas.local");
     assert.equal(resolved.username, "backup");
     assert.deepEqual(resolved.identityFiles, [join(ssh, "id_ed25519")]);
@@ -196,7 +205,9 @@ test("accepts spaces around the = in Keyword = value lines", async () => {
     "Host nas\n  IdentityFile = ~/.ssh/id_ed25519\n",
   );
   try {
-    const resolved = await resolveSshConnection("nas", home, "tester", null);
+    const resolved = await resolveSshConnection("nas", home, "tester", {
+      authSock: null,
+    });
     assert.deepEqual(resolved.identityFiles, [join(ssh, "id_ed25519")]);
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -210,7 +221,9 @@ test("resolves IdentityAgent so agent-only setups can connect", async () => {
     "Host nas\n  IdentityFile none\n  IdentityAgent ~/agent.sock\n",
   );
   try {
-    const resolved = await resolveSshConnection("nas", home, "tester", null);
+    const resolved = await resolveSshConnection("nas", home, "tester", {
+      authSock: null,
+    });
     assert.deepEqual(resolved.identityFiles, []);
     assert.equal(resolved.identityAgent, join(home, "agent.sock"));
   } finally {
@@ -229,22 +242,65 @@ test("falls back to SSH_AUTH_SOCK and lets IdentityAgent none disable it", async
   try {
     assert.equal(
       (
-        await resolveSshConnection(
-          "nas",
-          first.home,
-          "tester",
-          "/tmp/agent.sock",
-        )
+        await resolveSshConnection("nas", first.home, "tester", {
+          authSock: "/tmp/agent.sock",
+        })
       ).identityAgent,
       "/tmp/agent.sock",
     );
     await assert.rejects(
-      resolveSshConnection("nas", second.home, "tester", "/tmp/agent.sock"),
+      resolveSshConnection("nas", second.home, "tester", {
+        authSock: "/tmp/agent.sock",
+      }),
       /No SSH IdentityFile or SSH agent/,
     );
   } finally {
     rmSync(first.home, { recursive: true, force: true });
     rmSync(second.home, { recursive: true, force: true });
+  }
+});
+
+test("traces the config files, target, identities and agent it resolved", async () => {
+  const { home, ssh } = createHome();
+  writeFileSync(join(ssh, "id_ed25519"), "test-key");
+  writeFileSync(
+    join(ssh, "config"),
+    "Host nas\n  HostName nas.local\n  User backup\n  IdentityFile ~/.ssh/id_ed25519\n",
+  );
+  const lines: string[] = [];
+  let configPath = "";
+  try {
+    configPath = realpathSync(join(ssh, "config"));
+    await resolveSshConnection("nas", home, "tester", {
+      authSock: null,
+      trace: (line) => lines.push(line),
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+  assert.ok(lines.includes(`config: reading ${configPath}`));
+  assert.ok(lines.includes("target: backup@nas.local:22"));
+  assert.ok(
+    lines.includes(`identity: config lists ${join(ssh, "id_ed25519")}`),
+  );
+  assert.ok(lines.includes("agent: none"));
+});
+
+test("looks for the OpenSSH default keys in ~/.ssh", async () => {
+  const { home, ssh } = createHome();
+  writeFileSync(join(ssh, "id_ed25519"), "test-key");
+  writeFileSync(join(home, "id_rsa"), "not-a-default-location");
+  writeFileSync(
+    join(ssh, "config"),
+    "Host nas\n  HostName nas.local\n  User backup\n",
+  );
+  try {
+    const resolved = await resolveSshConnection("nas", home, "tester", {
+      authSock: null,
+    });
+    assert.deepEqual(resolved.identityFiles, [join(ssh, "id_ed25519")]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
