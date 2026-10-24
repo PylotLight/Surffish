@@ -188,7 +188,7 @@ busy laptop are only good for spotting big changes.
 
 - `PERF_RUNS` (job env, default 3): runs per side. Each run is ~20–30 s on the Linux pods.
 - `PERF_WARM_STARTS` (default `warmStarts` in the config, 2): warm-profile start-up launches per side; 0 turns them off.
-- `SURFFISH_GH_PROXY` (Mac runner `.env`, optional), e.g. `socks5h://127.0.0.1:1080`. The Mac
+- `SURFFISH_GH_PROXY` (Mac runner `.env`, optional), e.g. `socks5h://127.0.0.1:1088`. The Mac
   runner's network blocks non-enterprise GitHub API calls, so by default its results only go to
   the step summary. With this set, the job passes it to `curl --proxy` for the comment calls only
   (nothing else in the job uses the proxy) and posts a separate sticky "Perf check (macOS)" comment.

@@ -39,10 +39,10 @@ The release workflow's `npm` job runs after the `mac` job (release + Cask) succe
 
 ## Mac runner: GitHub route and failure reasons
 
-The self-hosted Mac's network refuses GitHub token writes on the direct route (`git push` gets `Permission to PylotLight/Surffish.git denied to github-actions[bot]`, 403), so git has to go through the local SOCKS proxy. Put this in the runner's `.env` (`~/.actions-runner/.env`) and restart the runner:
+The self-hosted Mac's network refuses GitHub token writes on the direct route (`git push` gets `Permission to PylotLight/Surffish.git denied to github-actions[bot]`, 403), so git has to go through the local SOCKS proxy. The release workflow pins this endpoint in its `mac` job. Set the same value in the runner's `.env` (`~/.actions-runner/.env`) for CI, screenshots and local release runs, then restart the runner:
 
 ```
-SURFFISH_GH_PROXY=socks5h://127.0.0.1:1080
+SURFFISH_GH_PROXY=socks5h://127.0.0.1:1088
 ```
 
 With it set, every Mac checkout (release, CI, screenshots) sets `http.https://github.com/.proxy` in the work dir, and `release.ts` passes it to its own git calls and REST calls, so it no longer matters whether the runner was started with `HTTP(S)_PROXY` in its env (v0.1.29's first two runs failed at the push because a restart dropped it). Without `SURFFISH_GH_PROXY`, git uses `HTTPS_PROXY` from the env if there, else goes direct.
@@ -70,7 +70,7 @@ fish, from the runner dir:
 
 ```fish
 cd ~/.actions-runner
-set -x SURFFISH_GH_PROXY socks5h://127.0.0.1:1080   # optional: API calls through the proxy
+set -x SURFFISH_GH_PROXY socks5h://127.0.0.1:1088   # optional: API calls through the proxy
 ./run.sh &| bun ~/path/to/Surffish/scripts/runner-watch.ts
 ```
 
