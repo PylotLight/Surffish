@@ -1,0 +1,115 @@
+name: macOS UUID test build
+
+# Build-only validation for the LC_UUID packaging hook. Pushes to the isolated
+# test branch never bump versions, create tags/releases, or publish packages.
+on:
+  push:
+    branches:
+      - test/uuid-macos-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-uuid-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    name: "Surffish · macOS UUID test · ${{ github.ref_name }}"
+    if: github.ref == 'refs/heads/test/uuid-macos-build'
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout UUID-only test branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+          BRANCH_REF: refs/heads/test/uuid-macos-build
+          # main with the in-app SSH client merged (07873d3), so the UUID build can test native SSH.
+          EXPECTED_BASE: 07873d39d720b387e21cf0694f4894cff63fcf1b
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/test/uuid-macos-build"
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git config --unset-all http.https://github.com/.proxy || true
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          fetch_once() {
+            mode="$1"
+            if [ "$mode" = direct ]; then
+              env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+                GIT_CONFIG_COUNT=2 \
+                GIT_CONFIG_KEY_0=credential.helper \
+                GIT_CONFIG_VALUE_0= \
+                GIT_CONFIG_KEY_1=http.https://github.com/.extraheader \
+                GIT_CONFIG_VALUE_1="$auth_header" \
+                GIT_TERMINAL_PROMPT=0 git -c http.proxy= -c http.https://github.com/.proxy= fetch -q --no-tags --depth 64 origin "$BRANCH_REF"
+            else
+              GIT_CONFIG_COUNT=2 \
+              GIT_CONFIG_KEY_0=credential.helper \
+              GIT_CONFIG_VALUE_0= \
+              GIT_CONFIG_KEY_1=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_1="$auth_header" \
+              GIT_TERMINAL_PROMPT=0 git -c http.proxy= -c "http.https://github.com/.proxy=$SURFFISH_GH_PROXY" fetch -q --no-tags --depth 64 origin "$BRANCH_REF"
+            fi
+          }
+          fetch() {
+            if [ -n "${SURFFISH_GH_PROXY:-}" ]; then
+              if fetch_once proxy; then return 0; fi
+              echo "Configured proxy unavailable; retrying public read directly."
+            fi
+            fetch_once direct
+          }
+          fetch
+          git checkout -q --force --detach "$SHA"
+          test "$(git rev-parse HEAD)" = "$SHA"
+          git merge-base --is-ancestor "$EXPECTED_BASE" HEAD
+          git clean -qffdx -e node_modules -e out/native
+          unset GH_TOKEN auth_header
+          echo "Testing commit $SHA (base $EXPECTED_BASE incl. in-app SSH; no release tag)"
+      - name: Bun (pinned to .bun-version)
+        run: |
+          want="$(tr -d ' \nv' < .bun-version)"
+          export PATH="$HOME/.bun/bin:$PATH"
+          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+          "$HOME/.bun/bin/bun" --version
+      - name: Bun only, no Node.js
+        run: bash scripts/ci/bun-as-node.sh
+      - name: Install locked dependencies and Mac Electron binary
+        run: bash scripts/ci/bun-install-mac.sh
+      - name: Typecheck and tests
+        run: |
+          bun run typecheck
+          bun run test
+      - name: Build and package (no publish)
+        run: |
+          bun run dist:mac
+          app="release/mac-arm64/Surffish.app"
+          executable="$app/Contents/MacOS/Surffish"
+          zip="release/Surffish-$(bun -p 'require("./package.json").version')-mac-arm64.zip"
+          test -x "$executable"
+          test -f "$zip"
+          unzip -tq "$zip"
+          actual="$(dwarfdump --uuid "$executable" | sed -E 's/^.*UUID: ([^ ]+).*$/\1/')"
+          expected="$(bun -e 'console.log(require("./scripts/patch-macos-uuid.cjs").deriveUuid("com.pylotlight.surffish", "arm64"))')"
+          echo "Packaged app UUID: $actual"
+          echo "Expected Surffish UUID: $expected"
+          test "$actual" = "$expected"
+          test "$actual" != "4C4C4474-5555-3144-A1C3-E7F42163428D"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          rm -rf /tmp/sf-uuid-launch && mkdir -p /tmp/sf-uuid-launch
+          ditto -x -k "$zip" /tmp/sf-uuid-launch
+          codesign --verify --deep --strict "/tmp/sf-uuid-launch/Surffish.app"
+          # dyld kills an invalid page before main(); a clean --version exit proves it loads.
+          ELECTRON_RUN_AS_NODE=1 "/tmp/sf-uuid-launch/Surffish.app/Contents/MacOS/Surffish" --version
+          shasum -a 256 "$zip"
+      - name: Upload test ZIP (14 days; no release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Surffish-mac-arm64-uuid-test
+          path: release/Surffish-*-mac-arm64.zip
+          if-no-files-found: error
+          retention-days: 14

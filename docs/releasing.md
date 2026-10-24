@@ -80,6 +80,8 @@ set -x SURFFISH_GH_PROXY socks5h://127.0.0.1:1080   # optional: API calls throug
 
 Build on an Apple-silicon Mac with Xcode Command Line Tools installed. Surffish's Electron 44 runtime requires macOS Ventura (13) or later. Set `package.json` to the approved version before building. The build also compiles the AppKit trackpad addon and needs Apple's `xcrun`/Clang toolchain.
 
+To test a packaging change without cutting a release, run `bun run dist:mac` on the branch. It builds locally with `--publish never` and does not need or create a Git tag. The packaged app is at `release/mac-arm64/Surffish.app`; `bun run dev` does not run `afterPack` hooks and cannot verify packaged Mach-O changes.
+
 ```bash
 bun install
 bun run typecheck
