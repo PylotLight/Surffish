@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { createConnection, createServer, type Server } from "node:net";
-import { Client, utils, type ConnectConfig, type ParsedKey } from "ssh2";
+// ssh2 is CommonJS and Electron's ESM loader does not synthesize its named exports (`utils` is an
+// object literal that Node's static analysis cannot see either), so take the default export.
+import ssh2 from "ssh2";
+import type { Client, ConnectConfig, ParsedKey } from "ssh2";
 import type { BrowserProxySettings } from "../shared/types";
 import { parseSshTarget } from "../shared/ssh-tunnel";
 import type { SshTunnelStatus } from "../shared/network-helper";
@@ -119,7 +122,7 @@ async function prepareSshConnection(
     } catch {
       throw new Error(`Could not read SSH IdentityFile ${identityFile}.`);
     }
-    const parsed = utils.parseKey(contents);
+    const parsed = ssh2.utils.parseKey(contents);
     if (parsed instanceof Error) {
       throw new Error(
         `Could not load SSH IdentityFile ${identityFile}. Password-protected keys are not supported for this background tunnel.`,
@@ -239,7 +242,7 @@ function errorMessage(error: unknown): string {
 export function createSshTunnelManager(
   runtime: SshTunnelRuntime = {},
 ): SshTunnelManager {
-  const clientFactory = runtime.clientFactory ?? (() => new Client());
+  const clientFactory = runtime.clientFactory ?? (() => new ssh2.Client());
   const prepareConnection = runtime.prepareConnection ?? prepareSshConnection;
   const makeSocksListener =
     runtime.createSocksListener ?? createSshSocksListener;
