@@ -20,7 +20,7 @@ import {
   DEFAULT_WEATHER_SCALE,
   isWeatherForecastView,
 } from "./weather-forecast.ts";
-import { parseSshTarget } from "./ssh-tunnel.ts";
+import { parseSshClient, parseSshTarget } from "./ssh-tunnel.ts";
 import {
   CLOCK_SCALE_STEP,
   clockScaleFromLegacySize,
@@ -151,6 +151,7 @@ export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = {
   host: "127.0.0.1",
   port: 1080,
   sshHost: "",
+  sshClient: "builtin",
   bypassLocalNetwork: true,
 };
 
@@ -407,6 +408,8 @@ export function parseBrowserProxySettings(
     host,
     port,
     sshHost: parseSshTarget(record.sshHost),
+    // Saved before the choice existed: the in-app client, which was the only one.
+    sshClient: parseSshClient(record.sshClient),
     bypassLocalNetwork: record.bypassLocalNetwork !== false,
   };
 }

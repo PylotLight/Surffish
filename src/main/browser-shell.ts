@@ -39,6 +39,7 @@ const SIDEBAR_MODES: ReadonlySet<BrowserSidebarMode> = new Set([
   "tabs",
   "history",
   "settings",
+  "connection",
   "newtab",
   "integrations",
   "network",
@@ -543,6 +544,7 @@ export function getBrowserChromeState(
  */
 const SETTINGS_TAB_MODES: ReadonlySet<BrowserSidebarMode> = new Set([
   "settings",
+  "connection",
   "newtab",
   "integrations",
   "network",

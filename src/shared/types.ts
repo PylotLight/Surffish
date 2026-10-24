@@ -190,6 +190,11 @@ export interface BrowserProxySettings {
   port: number;
   /** Optional SSH host alias or user@host; uses ~/.ssh/config IdentityFile and known_hosts. */
   sshHost?: string;
+  /**
+   * Which SSH client runs the managed tunnel: the in-app client (default) or the OS OpenSSH, which
+   * reads the full ssh config (ProxyJump, ProxyCommand, Match exec, security keys).
+   */
+  sshClient?: "builtin" | "system";
   /** Local-network addresses (192.168.x, 10.x, `*.local`, …) skip the proxy. Default on. */
   bypassLocalNetwork: boolean;
 }
@@ -245,6 +250,7 @@ export interface BrowserSettingsTarget {
 export interface BrowserSettingsTabState {
   section:
     | "settings"
+    | "connection"
     | "newtab"
     | "integrations"
     | "feeds"
@@ -339,6 +345,7 @@ export type BrowserSidebarMode =
   | "tabs"
   | "history"
   | "settings"
+  | "connection"
   | "newtab"
   | "integrations"
   | "network"

@@ -7,6 +7,8 @@
 //   4. Segmented controls are radiogroups with a roving tabindex: arrow keys change the setting.
 //   5. Long hints: first sentence shown, the rest behind an ⓘ toggle (aria-expanded).
 //   6. No CSS backdrop-filter on settings surfaces; Reduce Transparency gets solid fills.
+//   7. Connection is its own section (proxy, SSH client toggle, kill switch); old General →
+//      Connection links land there, and the SSH client choice persists on Save.
 // `bun run build && bun run test:electron-settings` (headless Linux: xvfb-run -a electron --no-sandbox ...).
 const smoke = require("./smoke-harness.cjs");
 const assert = require("node:assert/strict");
@@ -67,15 +69,20 @@ const GENERAL_CONTROLS = [
   "Check spelling while typing",
   "Check spelling in private tabs",
   "Add a spellcheck language",
-  "Use local SOCKS5 proxy",
-  "Local SOCKS5 host",
-  "Local SOCKS5 port",
-  "Connect to local network addresses directly",
-  "Proxy kill switch",
   "Enable network inspector",
   "Offer pre-release updates",
   "Release feed URL",
   "Search keywords",
+];
+/** Settings → Connection (moved out of General, Oct 2026). */
+const CONNECTION_CONTROLS = [
+  "Use local SOCKS5 proxy",
+  "Local SOCKS5 host",
+  "Local SOCKS5 port",
+  "SSH host alias for managed SOCKS tunnel",
+  "SSH client for the managed tunnel",
+  "Connect to local network addresses directly",
+  "Proxy kill switch",
 ];
 const CATEGORIES = [
   "Browsing",
@@ -83,7 +90,6 @@ const CATEGORIES = [
   "Tabs & windows",
   "Mini window",
   "Features",
-  "Connection",
   "Advanced",
 ];
 
@@ -177,30 +183,30 @@ async function run() {
 
   smoke.step("Jump list scrolls to a category and marks it current");
   await ev(
-    '[...document.querySelectorAll(".settings-toc button")].find((b) => b.textContent === "Connection").click()',
+    '[...document.querySelectorAll(".settings-toc button")].find((b) => b.textContent === "Tabs & windows").click()',
   );
   await waitFor(
     () =>
       ev(`(() => {
-    const view = document.querySelector('.settings-view'); const category = document.querySelector('[data-category="connection"]')
-    return Math.abs(category.getBoundingClientRect().top - view.getBoundingClientRect().top) < 40 && document.querySelector('.settings-toc .is-current')?.textContent === 'Connection'
+    const view = document.querySelector('.settings-view'); const category = document.querySelector('[data-category="tabs"]')
+    return Math.abs(category.getBoundingClientRect().top - view.getBoundingClientRect().top) < 40 && document.querySelector('.settings-toc .is-current')?.textContent === 'Tabs & windows'
   })()`),
-    "Connection at the top of the page and current in the jump list",
+    "Tabs & windows at the top of the page and current in the jump list",
   );
   assert.equal(
     await ev("document.activeElement?.textContent"),
-    "Connection",
+    "Tabs & windows",
     "focus moves to the category heading",
   );
   // The heading stays pinned while its category scrolls under it.
   await ev('document.querySelector(".settings-view").scrollBy(0, 160)');
   await delay(120);
   const pinned = await ev(
-    `(() => { const view = document.querySelector('.settings-view').getBoundingClientRect(); const title = document.querySelector('[data-category="connection"] .settings-category-title').getBoundingClientRect(); return title.top - view.top })()`,
+    `(() => { const view = document.querySelector('.settings-view').getBoundingClientRect(); const title = document.querySelector('[data-category="tabs"] .settings-category-title').getBoundingClientRect(); return title.top - view.top })()`,
   );
   assert.ok(
     Math.abs(pinned) <= 2,
-    `Connection heading pinned to the top (${pinned}px)`,
+    `Tabs & windows heading pinned to the top (${pinned}px)`,
   );
 
   smoke.step(
@@ -238,6 +244,115 @@ async function run() {
         'localStorage.getItem("surffish.settings.open.mini-window-windows") === "1"',
       ),
     "the open state remembered",
+  );
+
+  smoke.step(
+    "Connection: its own section with the proxy, SSH client and kill switch",
+  );
+  const sectionNow = async () =>
+    (await smoke.evaluate(toolbar, "window.api.browser.state()")).settings
+      ?.section;
+  // Old General → Connection links land on the new section.
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.settings.open({ section: "settings", focus: "connection" })',
+  );
+  await waitFor(
+    async () => (await sectionNow()) === "connection",
+    "the old General focus=connection link to open Connection",
+  );
+  await waitFor(
+    () =>
+      ev(
+        "Boolean(document.querySelector('[aria-label=\"SSH client for the managed tunnel\"]'))",
+      ),
+    "Connection with the SSH client toggle",
+  );
+  assert.equal(
+    await ev('document.querySelector(".settings-page-header h1").textContent'),
+    "Connection",
+  );
+  assert.equal(
+    await ev(
+      'document.querySelector(".settings-subnav .is-current")?.textContent',
+    ),
+    "Connection",
+    "Connection is current in the section nav",
+  );
+  const connectionGone = () =>
+    ev(
+      `${JSON.stringify(CONNECTION_CONTROLS)}.filter((label) => !document.querySelector('.settings-view [aria-label="' + label + '"]'))`,
+    );
+  // The kill switch row draws once its state has loaded.
+  await waitFor(
+    async () => (await connectionGone()).length === 0,
+    "every Connection control",
+  ).catch(async (error) => {
+    throw new Error(
+      `${error.message} Missing: ${(await connectionGone()).join(", ")}`,
+    );
+  });
+  assert.equal(
+    await ev("Boolean(document.querySelector('.settings-toc'))"),
+    false,
+    "Connection has no General jump list",
+  );
+  const sshRadios = `[...document.querySelectorAll('[aria-label="SSH client for the managed tunnel"] [role=radio]')]`;
+  assert.deepEqual(
+    await ev(
+      `${sshRadios}.map((b) => [b.textContent, b.getAttribute("aria-checked")])`,
+    ),
+    [
+      ["Built-in", "true"],
+      ["System OpenSSH", "false"],
+    ],
+    "built-in SSH client is the default",
+  );
+  assert.equal(
+    (await ev("window.api.browser.proxy.get()")).sshClient,
+    "builtin",
+  );
+  await ev(
+    `${sshRadios}.find((b) => b.textContent === "System OpenSSH").click()`,
+  );
+  await waitFor(
+    () =>
+      ev(
+        "document.querySelector('[aria-label=\"SSH client for the managed tunnel\"]').closest('.settings-row').querySelector('.settings-row-hint').textContent.includes('System OpenSSH')",
+      ),
+    "the hint to follow the choice",
+  );
+  // With SOCKS5 off nothing starts; Save only persists the choice.
+  await ev(
+    '[...document.querySelectorAll(".settings-connection-page .settings-action.primary")].find((b) => b.textContent === "Save").click()',
+  );
+  await waitFor(
+    async () =>
+      (await ev("window.api.browser.proxy.get()")).sshClient === "system",
+    "Save to persist System OpenSSH",
+  );
+  assert.equal(
+    (
+      await ev(
+        'window.api.browser.proxy.set({ enabled: false, host: "127.0.0.1", port: 1080, sshClient: "builtin", bypassLocalNetwork: true })',
+      )
+    ).sshClient,
+    "builtin",
+  );
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+  );
+  await waitFor(
+    async () => (await sectionNow()) === "settings",
+    "back to General",
+  );
+  await waitFor(
+    () =>
+      ev(
+        "Boolean(document.querySelector('[aria-label=\"Mini window grouping\"] [role=radio]'))",
+      ),
+    "General drawn again",
   );
 
   smoke.step("Segmented control: roving tabindex, arrows change the setting");

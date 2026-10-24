@@ -182,3 +182,28 @@ test("translation deep links open Languages, not General", () => {
     section: "languages",
   });
 });
+
+test("proxy and SSH settings have their own Connection section", () => {
+  assert.deepEqual(parseSettingsUrl("surffish://settings?section=connection"), {
+    section: "connection",
+  });
+  assert.deepEqual(parseSettingsUrl("surffish://settings#proxy"), {
+    section: "connection",
+  });
+  assert.deepEqual(parseSettingsUrl("surffish://settings?section=ssh"), {
+    section: "connection",
+  });
+  assert.equal(
+    settingsUrl({ section: "connection" }),
+    "surffish://settings?section=connection",
+  );
+  // Links from when Connection was a General category land on the new section.
+  assert.deepEqual(
+    parseSettingsUrl("surffish://settings?section=general&focus=connection"),
+    { section: "connection" },
+  );
+  assert.deepEqual(
+    normalizeSettingsTarget({ section: "settings", focus: "connection" }),
+    { section: "connection" },
+  );
+});

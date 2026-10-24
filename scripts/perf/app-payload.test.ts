@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,6 +95,25 @@ function bareEntry(specifier: string): string | null {
     : null;
 }
 
+/**
+ * A relative require as Node resolves it: the exact file, then `.js`/`.json`, then `index.js`
+ * (ssh2 and asn1 require `./ber/index`, `./node-fs-compat`). Null when nothing is on disk, like
+ * ssh2's optional `sshcrypto.node` addon that it loads in a try/catch and that may not be built:
+ * a file that doesn't exist can't be packed either way.
+ */
+function resolveRelative(from: string, specifier: string): string | null {
+  const base = resolvePath(repo, dirname(from), specifier);
+  for (const candidate of [
+    base,
+    `${base}.js`,
+    `${base}.json`,
+    join(base, "index.js"),
+  ])
+    if (existsSync(candidate) && statSync(candidate).isFile())
+      return relative(repo, candidate).replaceAll("\\", "/");
+  return null;
+}
+
 test("every file main loads from production node_modules is packed", () => {
   if (
     !existsSync(
@@ -131,14 +151,10 @@ test("every file main loads from production node_modules is packed", () => {
       SPECIFIER,
     )) {
       const specifier = match[1] ?? match[2]!;
-      if (specifier.startsWith("."))
-        queue.push(
-          relative(
-            repo,
-            resolvePath(repo, dirname(file), specifier),
-          ).replaceAll("\\", "/"),
-        );
-      else {
+      if (specifier.startsWith(".")) {
+        const resolved = resolveRelative(file, specifier);
+        if (resolved) queue.push(resolved);
+      } else {
         const entry = bareEntry(specifier);
         if (entry) queue.push(entry);
       }

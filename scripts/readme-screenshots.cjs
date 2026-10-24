@@ -488,7 +488,7 @@ const scenes = {
   },
   async settings(win) {
     await activate(win, "gh");
-    await setChrome(win, { sidebarMode: "settings" });
+    await setChrome(win, { sidebarMode: "connection" });
     const content = surface(win, "content");
     await waitFor(
       () =>

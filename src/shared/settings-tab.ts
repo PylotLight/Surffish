@@ -8,7 +8,9 @@
  *
  * Deep links pick a section and, for Sites, a site: `surffish://settings#privacy`,
  * `surffish://settings?section=sites&host=https://example.com`. A section may also name a General
- * category to scroll to (`?section=general&focus=mini-window`).
+ * category to scroll to (`?section=general&focus=mini-window`). Proxy and SSH tunnel settings live
+ * in their own Connection section (`?section=connection`); the old General → Connection link
+ * (`?section=general&focus=connection`) still lands there.
  */
 
 export const SURFFISH_SETTINGS_URL = "surffish://settings";
@@ -16,6 +18,7 @@ export const SURFFISH_SETTINGS_URL = "surffish://settings";
 /** The settings pages (they match the renderer's settings modes). */
 export type SettingsSection =
   | "settings"
+  | "connection"
   | "newtab"
   | "integrations"
   | "feeds"
@@ -29,6 +32,7 @@ export type SettingsSection =
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   "settings",
+  "connection",
   "newtab",
   "integrations",
   "feeds",
@@ -45,6 +49,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
   general: "settings",
   settings: "settings",
+  connection: "connection",
+  proxy: "connection",
+  ssh: "connection",
   newtab: "newtab",
   "new-tab": "newtab",
   integrations: "integrations",
@@ -65,6 +72,7 @@ const SECTION_ALIASES: Readonly<Record<string, SettingsSection>> = {
 /** What the URL calls a section (the inverse of SECTION_ALIASES' friendly names). */
 const SECTION_SLUGS: Readonly<Record<SettingsSection, string>> = {
   settings: "general",
+  connection: "connection",
   newtab: "newtab",
   integrations: "integrations",
   feeds: "feeds",
@@ -169,9 +177,12 @@ export function normalizeSettingsTarget(value: unknown): SettingsTarget {
     typeof value === "object" && value !== null
       ? (value as Record<string, unknown>)
       : {};
-  const section = isSettingsSection(input.section)
+  let section = isSettingsSection(input.section)
     ? input.section
     : (settingsSectionFromName(input.section) ?? "settings");
+  // Connection used to be a General category; old links to it open the Connection section.
+  if (section === "settings" && input.focus === "connection")
+    section = "connection";
   const target: SettingsTarget = { section };
   if (section === "site") {
     const host = settingsSiteOrigin(input.host);

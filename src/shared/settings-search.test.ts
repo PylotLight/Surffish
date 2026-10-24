@@ -120,6 +120,17 @@ describe("settingsMatchesElsewhere", () => {
     ).toEqual(["readaloud"]);
     expect(settingsMatchesElsewhere("phonon", "feeds")).toEqual([]);
   });
+  test("proxy and SSH searches from General point at Connection", () => {
+    for (const query of ["proxy", "ssh", "openssh", "proxyjump", "kill switch"])
+      expect(
+        settingsMatchesElsewhere(query, "settings").map((hit) => hit.mode),
+      ).toContain("connection");
+    expect(
+      settingsMatchesElsewhere("ssh", "connection").some(
+        (hit) => hit.mode === "connection",
+      ),
+    ).toBe(false);
+  });
   test("caps labels at three and sorts by count", () => {
     const hits = settingsMatchesElsewhere("show", "settings");
     expect(hits[0]).toMatchObject({ mode: "newtab" });

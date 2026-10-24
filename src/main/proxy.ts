@@ -42,7 +42,7 @@ import {
 } from "../shared/proxy-routing";
 import { getDomain } from "tldts-experimental";
 import { readUserJson, writeSettingsFile } from "./user-json";
-import { validateSshTarget } from "../shared/ssh-tunnel";
+import { validateSshClient, validateSshTarget } from "../shared/ssh-tunnel";
 import {
   browserProxyEndpoint,
   networkHelperUpstreamSettings,
@@ -98,6 +98,7 @@ function validateSettings(input: unknown): BrowserProxySettings {
     throw new Error("Proxy settings must be an object.");
   const candidate = input as Partial<BrowserProxySettings>;
   const sshHost = validateSshTarget(candidate.sshHost);
+  const sshClient = validateSshClient(candidate.sshClient);
   const host =
     typeof candidate.host === "string"
       ? candidate.host.trim().toLowerCase()
@@ -116,6 +117,7 @@ function validateSettings(input: unknown): BrowserProxySettings {
     host,
     port,
     sshHost,
+    sshClient,
     bypassLocalNetwork: candidate.bypassLocalNetwork !== false,
   };
 }
@@ -502,6 +504,7 @@ export async function setBrowserProxySettings(
     nextManagedSsh !== previousManagedSsh ||
     (nextManagedSsh &&
       (settings.sshHost !== previousSettings.sshHost ||
+        settings.sshClient !== previousSettings.sshClient ||
         settings.port !== previousSettings.port)) ||
     (nextManagedSsh && !getNetworkHelperStatus(previousSettings).listening);
   if (servicesChanged) {
@@ -611,6 +614,7 @@ export function testLocalProxy(
     const savedEndpointMatches =
       usesManagedSsh(currentSettings) &&
       settings.sshHost === currentSettings.sshHost &&
+      settings.sshClient === currentSettings.sshClient &&
       settings.port === currentSettings.port;
     if (!savedEndpointMatches)
       return Promise.resolve({

@@ -184,6 +184,7 @@ test("defaults fresh profiles to direct browsing while preserving valid saved SO
     host: "127.0.0.1",
     port: 1080,
     sshHost: "",
+    sshClient: "builtin",
     bypassLocalNetwork: true,
   });
   assert.deepEqual(
@@ -197,8 +198,28 @@ test("defaults fresh profiles to direct browsing while preserving valid saved SO
       host: "localhost",
       port: 1080,
       sshHost: "",
+      sshClient: "builtin",
       bypassLocalNetwork: true,
     },
+  );
+  // The SSH client choice survives a reload; older files and unknown values get the in-app client.
+  assert.equal(
+    parseBrowserProxySettings({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 1080,
+      sshClient: "system",
+    }).sshClient,
+    "system",
+  );
+  assert.equal(
+    parseBrowserProxySettings({
+      enabled: true,
+      host: "127.0.0.1",
+      port: 1080,
+      sshClient: "/usr/bin/ssh",
+    }).sshClient,
+    "builtin",
   );
   assert.equal(
     parseBrowserProxySettings({

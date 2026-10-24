@@ -1,7 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { createConnection, createServer, type Server } from "node:net";
+import type { Server } from "node:net";
 // ssh2 is CommonJS and Electron's ESM loader does not synthesize its named exports (`utils` is an
 // object literal that Node's static analysis cannot see either), so take the default export.
 import ssh2 from "ssh2";
@@ -13,18 +11,26 @@ import type {
   ParsedKey,
 } from "ssh2";
 import type { BrowserProxySettings } from "../shared/types";
-import { parseSshTarget } from "../shared/ssh-tunnel";
+import { parseSshClient, parseSshTarget } from "../shared/ssh-tunnel";
 import type { SshTunnelStatus } from "../shared/network-helper";
 import { loadKnownHostVerifier } from "./ssh-known-hosts";
 import { resolveSshConnection } from "./ssh-config";
 import { createSshSocksListener, type SshSocksListener } from "./ssh-socks";
+import {
+  allocateEphemeralLoopbackPort,
+  errorMessage,
+  isPortListening,
+  launchdAuthSock,
+  LOOPBACK,
+  sshDebugEnabled,
+  STARTUP_TIMEOUT_MS,
+  STOP_TIMEOUT_MS,
+  type SshTunnelManager,
+  type TunnelSettings,
+} from "./ssh-tunnel-support";
+import { createSystemSshTunnelManager } from "./ssh-tunnel-system";
 
-const STARTUP_TIMEOUT_MS = 8_000;
-const STOP_TIMEOUT_MS = 1_000;
-const PORT_PROBE_TIMEOUT_MS = 300;
-const LOOPBACK = "127.0.0.1";
-
-type TunnelSettings = Pick<BrowserProxySettings, "enabled" | "sshHost">;
+export type { SshTunnelManager } from "./ssh-tunnel-support";
 
 interface PreparedSshConnection {
   config: ConnectConfig;
@@ -45,52 +51,6 @@ export interface SshTunnelRuntime {
   createSocksListener?: (client: Client) => SshSocksListener;
   allocatePort?: () => Promise<number>;
   portIsListening?: (port: number) => Promise<boolean>;
-}
-
-export interface SshTunnelManager {
-  sync(settings: TunnelSettings): Promise<void>;
-  stop(): Promise<void>;
-  getStatus(): SshTunnelStatus;
-}
-
-function isPortListening(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: LOOPBACK, port });
-    let settled = false;
-    const finish = (listening: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(listening);
-    };
-    const timer = setTimeout(() => finish(false), PORT_PROBE_TIMEOUT_MS);
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
-}
-
-/** Ask the OS for a free loopback port; the in-app SOCKS listener stays internal to Surffish. */
-function allocateEphemeralLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    const onError = (error: Error): void => reject(error);
-    server.once("error", onError);
-    server.listen({ host: LOOPBACK, port: 0, exclusive: true }, () => {
-      server.removeListener("error", onError);
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Could not allocate an internal SSH tunnel port."));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve(port);
-      });
-    });
-  });
 }
 
 function listenOnLoopback(server: Server, port: number): Promise<void> {
@@ -130,34 +90,12 @@ async function isAgentSocket(path: string): Promise<boolean> {
   }
 }
 
-const execFileAsync = promisify(execFile);
-
-/**
- * A packaged app launched from Finder/Dock inherits none of the shell environment, so ask launchd
- * for the agent socket macOS sets up system-wide.
- */
-async function launchdAuthSock(): Promise<string | null> {
-  if (process.platform !== "darwin") return null;
-  try {
-    const { stdout } = await execFileAsync(
-      "launchctl",
-      ["getenv", "SSH_AUTH_SOCK"],
-      {
-        timeout: 1_000,
-      },
-    );
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
 async function prepareSshConnection(
   target: string,
   timeoutMs: number,
 ): Promise<PreparedSshConnection> {
   const sshAuthSock = process.env["SSH_AUTH_SOCK"] || (await launchdAuthSock());
-  const debug = process.env["SURFFISH_SSH_DEBUG"] === "1";
+  const debug = sshDebugEnabled();
   const resolved = await resolveSshConnection(target, undefined, undefined, {
     authSock: sshAuthSock,
     trace: debug
@@ -258,7 +196,7 @@ function describeConnectionError(
 
 /** ssh2's own account of the attempt, opt-in because it is long and only useful when debugging. */
 function debugTrail(connection: PreparedSshConnection): string {
-  if (process.env["SURFFISH_SSH_DEBUG"] !== "1") return "";
+  if (!sshDebugEnabled()) return "";
   const lines = connection.debugLines ?? [];
   if (lines.length === 0) return "";
   return ` Debug: ${lines.slice(-10).join(" | ")}`;
@@ -340,10 +278,6 @@ async function endClient(client: Client): Promise<void> {
       finish();
     }
   });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Creates an isolated in-process manager so client, config, and listener lifecycles can be tested. */
@@ -525,12 +459,47 @@ export function createSshTunnelManager(
     starting,
     running,
     error,
+    client: "builtin",
   });
 
   return { sync, stop, getStatus };
 }
 
-export const managedSshTunnel = createSshTunnelManager();
+/**
+ * Runs the tunnel with whichever client the settings choose. Switching clients stops the other
+ * engine first, so only one tunnel (and one private SOCKS listener) exists at a time.
+ */
+export function createRoutedSshTunnelManager(engines: {
+  builtin: SshTunnelManager;
+  system: SshTunnelManager;
+}): SshTunnelManager {
+  let active: SshTunnelManager = engines.builtin;
+  return {
+    async sync(settings: TunnelSettings): Promise<void> {
+      const next =
+        parseSshClient(settings.sshClient) === "system"
+          ? engines.system
+          : engines.builtin;
+      if (next !== active) {
+        const previous = active;
+        active = next;
+        await previous.stop();
+      }
+      await next.sync(settings);
+    },
+    async stop(): Promise<void> {
+      await Promise.all([engines.builtin.stop(), engines.system.stop()]);
+    },
+    getStatus(): SshTunnelStatus {
+      return active.getStatus();
+    },
+  };
+}
+
+export const managedSshTunnel = createRoutedSshTunnelManager({
+  builtin: createSshTunnelManager(),
+  system: createSystemSshTunnelManager(),
+});
 
 export function syncManagedSshTunnel(
   settings: BrowserProxySettings,
