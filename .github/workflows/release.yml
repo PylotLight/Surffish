@@ -33,8 +33,6 @@ jobs:
   mac:
     name: "Surffish · Release · mac build · ${{ inputs.from_tag && format('v{0} from tag', inputs.version) || (inputs.version && (startsWith(inputs.version, '0') || startsWith(inputs.version, '1') || startsWith(inputs.version, '2')) && format('v{0}', inputs.version)) || inputs.version || 'patch' }}${{ inputs.resume && ' · resume' || '' }}${{ inputs.dry_run && ' · dry run' || '' }}"
     runs-on: [self-hosted, macOS, ARM64]
-    env:
-      SURFFISH_GH_PROXY: socks5h://127.0.0.1:1088
     timeout-minutes: 60
     outputs:
       version: ${{ steps.released.outputs.version }}
@@ -43,9 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        # The mac job pins SURFFISH_GH_PROXY to the shared listener at 127.0.0.1:1088,
-        # overriding stale runner .env state. The Mac's direct route 403s token writes, and
-        # HTTP(S)_PROXY isn't always in the runner's env; release.ts uses the same proxy.
+        # git goes through SURFFISH_GH_PROXY (runner .env, e.g. socks5h://127.0.0.1:1080) when it's set:
+        # the Mac's direct route 403s token writes, and HTTP(S)_PROXY isn't always in the runner's env
+        # (a restart without it broke v0.1.29's push). The repo-local setting also covers release.ts's
+        # pushes. Unset: git uses HTTPS_PROXY from the env if there, else direct.
         run: |
           trap 'echo "::error title=Checkout main::git fetch from GitHub failed (route: $([ -n "${SURFFISH_GH_PROXY:-}" ] && echo SURFFISH_GH_PROXY || { [ -n "${HTTPS_PROXY:-}" ] && echo HTTPS_PROXY || echo direct; })), see the log above"' ERR
           url="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
@@ -81,9 +80,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Check the GitHub API route (SURFFISH_GH_PROXY, else fish ghp)
-        # The Mac's network blocks non-enterprise GitHub API tokens on the direct route. The mac
-        # job pins SURFFISH_GH_PROXY to the shared listener at 127.0.0.1:1088; release.ts makes
-        # REST calls through it with the workflow token.
+        # The Mac's network blocks non-enterprise GitHub API tokens on the direct route. With
+        # SURFFISH_GH_PROXY in the runner's .env (e.g. socks5h://127.0.0.1:1080) release.ts makes its
+        # REST calls with curl --proxy and the workflow token; otherwise it falls back to fish `ghp`.
         run: |
           if [ -n "${SURFFISH_GH_PROXY:-}" ]; then echo "SURFFISH_GH_PROXY present: yes (release.ts checks the API through it)"; exit 0; fi
           echo "SURFFISH_GH_PROXY not set, falling back to fish ghp"
