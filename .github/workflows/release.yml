@@ -57,6 +57,8 @@ jobs:
             if [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ]; then echo "git -> github.com via HTTPS_PROXY from the runner env"; else echo "git -> github.com direct (no SURFFISH_GH_PROXY / HTTPS_PROXY)"; fi
           fi
           git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"
+          # The self-hosted work dir persists; discard stale local tags before syncing from origin.
+          git tag -l | xargs -r git tag -d >/dev/null
           git fetch -q --tags origin main
           # the work dir persists between runs; an old shallow checkout breaks --resume's ancestry check
           if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow --tags origin main; fi
