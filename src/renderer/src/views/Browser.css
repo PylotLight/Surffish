@@ -3958,6 +3958,62 @@
   background: rgba(0, 0, 0, 0.3);
   font-size: 12px;
 }
+.ssh-tunnel-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+.ssh-tunnel-status-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: rgba(235, 240, 245, 0.38);
+}
+.ssh-tunnel-status-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.ssh-tunnel-status-copy > strong {
+  color: rgba(245, 248, 250, 0.92);
+  font-size: 12.5px;
+}
+.ssh-tunnel-status-copy > span {
+  color: rgba(235, 240, 245, 0.58);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.ssh-tunnel-status.is-connected {
+  border-color: rgba(94, 210, 143, 0.28);
+  background: rgba(55, 180, 110, 0.08);
+}
+.ssh-tunnel-status.is-connected .ssh-tunnel-status-dot {
+  background: #67d89b;
+  box-shadow: 0 0 8px rgba(103, 216, 155, 0.45);
+}
+.ssh-tunnel-status.is-connecting,
+.ssh-tunnel-status.is-checking {
+  border-color: rgba(120, 177, 255, 0.2);
+}
+.ssh-tunnel-status.is-connecting .ssh-tunnel-status-dot,
+.ssh-tunnel-status.is-checking .ssh-tunnel-status-dot {
+  background: #83b7ff;
+}
+.ssh-tunnel-status.is-error {
+  border-color: rgba(255, 104, 104, 0.3);
+  background: rgba(190, 55, 55, 0.08);
+}
+.ssh-tunnel-status.is-error .ssh-tunnel-status-dot {
+  background: #ff7777;
+}
 .network-helper-activity {
   margin: 10px 0;
   padding: 11px;

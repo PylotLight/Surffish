@@ -73,6 +73,15 @@ async function run() {
   );
   const countText =
     'document.querySelector(".network-helper-activity-heading > span")?.textContent';
+  const tunnelStatusText =
+    'document.querySelector(".ssh-tunnel-status")?.textContent ?? ""';
+  smoke.step(
+    "Connection settings show SSH session status separately from the helper listener",
+  );
+  await waitFor(
+    async () => (await ev(tunnelStatusText)).includes("Not configured"),
+    "the unconfigured SSH tunnel status",
+  );
   smoke.step(
     "General Settings shows the live helper activity without the Network inspector",
   );

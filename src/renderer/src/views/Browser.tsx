@@ -29,6 +29,7 @@ import type {
 } from "../../../shared/types";
 import {
   SURFFISH_NETWORK_HELPER,
+  describeSshTunnelStatus,
   type NetworkHelperStatus,
   type NetworkHelperUsage,
 } from "../../../shared/network-helper";
@@ -1045,6 +1046,9 @@ export default function Browser({
     useState<NetworkHelperStatus | null>(null);
   const [networkHelperUsage, setNetworkHelperUsage] =
     useState<NetworkHelperUsage | null>(null);
+  const sshTunnelStatus = describeSshTunnelStatus(
+    networkHelper?.sshTunnel ?? null,
+  );
   const [busy, setBusy] = useState(false);
   const [proxyMessage, setProxyMessage] = useState("");
   const [sessionMessage, setSessionMessage] = useState("");
@@ -4997,6 +5001,20 @@ export default function Browser({
                             aria-label="SSH host alias for managed SOCKS tunnel"
                           />
                         </label>
+                        <div
+                          className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <span
+                            className="ssh-tunnel-status-dot"
+                            aria-hidden="true"
+                          />
+                          <div className="ssh-tunnel-status-copy">
+                            <strong>{sshTunnelStatus.title}</strong>
+                            <span>{sshTunnelStatus.detail}</span>
+                          </div>
+                        </div>
                         <p className="settings-help">
                           With SOCKS5 enabled, Save starts OpenSSH dynamic
                           forwarding to this alias and stops it when the last
@@ -5034,21 +5052,6 @@ export default function Browser({
                               ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port} while a Surffish browser window is open.`
                               : "Checking listener…"}
                         </p>
-                        {networkHelper?.sshTunnel.configured && (
-                          <p
-                            className={`settings-help${networkHelper.sshTunnel.error ? " is-error" : ""}`}
-                            role="status"
-                          >
-                            <strong>Managed SSH tunnel</strong>:{" "}
-                            {networkHelper.sshTunnel.running
-                              ? `Connected to ${networkHelper.sshTunnel.target} at ${networkHelper.sshTunnel.host}:${networkHelper.sshTunnel.port}.`
-                              : networkHelper.sshTunnel.starting
-                                ? `Starting OpenSSH for ${networkHelper.sshTunnel.target}…`
-                                : !networkHelper.sshTunnel.enabled
-                                  ? "Configured; enable SOCKS5 to start it."
-                                  : `Unavailable — ${networkHelper.sshTunnel.error ?? "not running"}`}
-                          </p>
-                        )}
                         <p className="settings-help">
                           Configure other apps to use SOCKS5 at{" "}
                           <code>
