@@ -59,7 +59,6 @@ const STORAGE_TYPES = [
   "indexedDB",
   "localStorage",
   "serviceWorkers",
-  "webSQL",
 ] as const;
 
 function originOf(url: string): string {

@@ -17,6 +17,7 @@ import { createInterface } from "node:readline/promises";
 import {
   dependencyDifferences,
   draftReleaseNotes,
+  isPrereleaseVersion,
   latestVersionTag,
   plistString,
   resolveFromTagVersion,
@@ -42,12 +43,13 @@ const fromTag = flag("--from-tag");
 const resume = flag("--resume") || fromTag;
 
 if (flag("--help") || flag("-h")) {
-  console.log(`usage: bun run release [patch|minor|major|current|X.Y.Z] [--yes] [--dry-run] [--skip-checks] [--resume]
+  console.log(`usage: bun run release [patch|minor|major|current|X.Y.Z[-prerelease]] [--yes] [--dry-run] [--skip-checks] [--resume]
 
   patch (default)  bump X.Y.Z -> X.Y.(Z+1) from the latest tag / package.json
   minor, major     the usual
   current          release package.json's version as-is (already bumped, not tagged yet)
   X.Y.Z            release exactly this version
+  X.Y.Z-prerelease  release a pre-release such as 0.2.0-beta.1 (GitHub marks it prerelease)
 
   --dry-run        bump + build + verify locally, publish nothing, then undo the bump commit
   --yes            don't ask before publishing
@@ -360,6 +362,7 @@ if (githubApi) {
       notes,
       assetPath: artifact,
       log,
+      prerelease: isPrereleaseVersion(version),
     });
     log(
       `github release published: ${created.url} (assets: ${created.assets.join(", ")})`,
@@ -382,6 +385,7 @@ if (githubApi) {
     "--notes-file",
     notesPath,
     "--verify-tag",
+    ...(isPrereleaseVersion(version) ? ["--prerelease"] : []),
   ]);
   log("github release created");
 }

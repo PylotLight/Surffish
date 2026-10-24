@@ -2,26 +2,87 @@
 
 export type Bump = "patch" | "minor" | "major";
 
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+const PLAIN_SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
+/** A full semver: X.Y.Z, optionally with a -prerelease or +build suffix (e.g. 0.2.0-beta.1). */
+const FULL_SEMVER =
+  /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
 export function parseVersion(version: string): [number, number, number] {
-  const match = SEMVER.exec(version.trim());
+  const match = PLAIN_SEMVER.exec(version.trim());
   if (!match) throw new Error(`not a plain X.Y.Z version: '${version}'`);
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
+export interface ReleaseVersion {
+  major: number;
+  minor: number;
+  patch: number;
+  /** Prerelease identifiers, semver-ordered (numeric identifiers sort below alphanumeric). */
+  prerelease: Array<string | number>;
+}
+
+function parseRelease(version: string): ReleaseVersion {
+  const raw = version.trim();
+  const match = FULL_SEMVER.exec(raw);
+  if (!match)
+    throw new Error(
+      `not a semver version (X.Y.Z or X.Y.Z-prerelease): '${version}'`,
+    );
+  const prerelease = match[4]
+    ? match[4]!
+        .split(".")
+        .map((part) => (/^\d+$/.test(part) ? Number(part) : part))
+    : [];
+  if (prerelease.some((part) => part === "")) {
+    throw new Error(
+      `not a semver version (X.Y.Z or X.Y.Z-prerelease): '${version}'`,
+    );
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    prerelease,
+  };
+}
+
+/** SemVer precedence: -1 if a < b, 0 if equal, 1 if a > b. A plain version outranks the same
+ *  version with a prerelease; an unparseable version sorts lowest. */
 export function compareVersions(a: string, b: string): number {
-  const left = parseVersion(a);
-  const right = parseVersion(b);
-  for (let i = 0; i < 3; i++)
-    if (left[i] !== right[i]) return (left[i] ?? 0) - (right[i] ?? 0);
+  const left = parseRelease(a);
+  const right = parseRelease(b);
+  const order =
+    (left.major > right.major ? 1 : left.major < right.major ? -1 : 0) ||
+    (left.minor > right.minor ? 1 : left.minor < right.minor ? -1 : 0) ||
+    (left.patch > right.patch ? 1 : left.patch < right.patch ? -1 : 0);
+  if (order !== 0) return order;
+  if (left.prerelease.length === 0 && right.prerelease.length === 0) return 0;
+  if (left.prerelease.length === 0) return 1;
+  if (right.prerelease.length === 0) return -1;
+  const length = Math.max(left.prerelease.length, right.prerelease.length);
+  for (let index = 0; index < length; index += 1) {
+    const x = left.prerelease[index];
+    const y = right.prerelease[index];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    if (x === y) continue;
+    if (typeof x === "number" && typeof y === "number") return x > y ? 1 : -1;
+    if (typeof x === "number") return -1;
+    if (typeof y === "number") return 1;
+    return x > y ? 1 : -1;
+  }
   return 0;
+}
+
+/** True when a release version carries a prerelease suffix (e.g. 0.2.0-beta.1). */
+export function isPrereleaseVersion(version: string): boolean {
+  return parseRelease(version).prerelease.length > 0;
 }
 
 /**
  * Work out the version to release.
  * - `patch` / `minor` / `major` bump from the newest of package.json and the latest tag.
- * - An explicit X.Y.Z must be newer than the latest tag.
+ * - An explicit X.Y.Z or X.Y.Z-prerelease (e.g. `0.2.0-beta.1`) must be newer than the latest tag.
  * - `current` re-uses package.json's version when it hasn't been tagged yet (already bumped by hand).
  */
 export function resolveReleaseVersion(
@@ -46,8 +107,9 @@ export function resolveReleaseVersion(
           ? `${major}.${minor + 1}.0`
           : `${major}.${minor}.${patch + 1}`;
   } else {
-    parseVersion(spec);
-    next = spec.trim();
+    // An explicit release version, plain (0.3.0) or a pre-release (0.2.0-beta.1).
+    next = spec.trim().replace(/^v/, "");
+    parseRelease(next);
   }
   if (tagged && compareVersions(next, tagged) <= 0) {
     throw new Error(`v${next} isn't newer than the latest tag v${tagged}`);

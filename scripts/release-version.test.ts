@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   dependencyDifferences,
   draftReleaseNotes,
+  isPrereleaseVersion,
   latestVersionTag,
   plistString,
   resolveFromTagVersion,
@@ -39,6 +40,29 @@ test("explicit versions must be newer than the latest tag and plain semver", () 
   assert.throws(
     () => resolveReleaseVersion("banana", "0.1.1", "v0.1.1"),
     /X\.Y\.Z/,
+  );
+});
+
+test("explicit pre-releases resolve and must be newer than the latest tag", () => {
+  assert.equal(
+    resolveReleaseVersion("0.2.0-beta.1", "0.1.35", "v0.1.35"),
+    "0.2.0-beta.1",
+  );
+  assert.equal(
+    resolveReleaseVersion("v0.2.0-beta.1", "0.1.35", "v0.1.35"),
+    "0.2.0-beta.1",
+  );
+  assert.equal(
+    resolveReleaseVersion("0.2.0-beta.2", "0.2.0-beta.1", "v0.2.0-beta.1"),
+    "0.2.0-beta.2",
+  );
+  assert.equal(isPrereleaseVersion("0.2.0-beta.1"), true);
+  assert.equal(isPrereleaseVersion("v0.2.0-beta.1"), true);
+  assert.equal(isPrereleaseVersion("0.2.0"), false);
+  assert.equal(isPrereleaseVersion("0.1.35"), false);
+  assert.throws(
+    () => resolveReleaseVersion("0.2.0-beta", "0.2.0-beta.1", "v0.2.0-beta.1"),
+    /isn't newer/,
   );
 });
 

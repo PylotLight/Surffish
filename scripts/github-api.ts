@@ -217,6 +217,8 @@ export interface CreateReleaseInput {
   notes: string;
   assetPath: string;
   log?: (message: string) => void;
+  /** Mark the release as a pre-release (for tags like vX.Y.Z-beta.N). */
+  prerelease?: boolean;
 }
 
 /**
@@ -263,7 +265,7 @@ export function createGitHubRelease(
         name: input.title,
         body: input.notes,
         draft: true,
-        prerelease: false,
+        prerelease: input.prerelease ?? false,
       },
     });
     if (created.status !== 201)
@@ -308,7 +310,9 @@ export function createGitHubRelease(
     const patch = githubRequest(config, {
       method: "PATCH",
       url: api(config, `/releases/${release.id}`),
-      body: { draft: false, make_latest: "true" },
+      body: input.prerelease
+        ? { draft: false, prerelease: true }
+        : { draft: false, make_latest: "true" },
     });
     if (patch.status !== 200)
       throw new Error(
