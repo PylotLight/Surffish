@@ -175,6 +175,35 @@ describe("managed in-process SSH tunnel lifecycle", () => {
     });
   });
 
+  test("names the identities it offered when the server refuses all of them", async () => {
+    const clients: FakeSshClient[] = [];
+    const manager = makeManager(clients, {
+      prepareConnection: async () => ({
+        config: { host: "nas.local", username: "nas" },
+        verificationError: () => null,
+        authSummary:
+          "nas@nas.local:22 with 1 IdentityFile key and the SSH agent at /tmp/agent.sock",
+      }),
+      clientFactory: () => {
+        const client = new FakeSshClient();
+        const failure = new Error(
+          "All configured authentication methods failed",
+        );
+        client.connect = () => {
+          client.connectCalls += 1;
+          queueMicrotask(() => client.emit("error", failure));
+        };
+        clients.push(client);
+        return client as unknown as Client;
+      },
+    });
+
+    await manager.sync({ enabled: true, sshHost: "nas" });
+    expect(manager.getStatus().error).toBe(
+      "Authentication failed: offered nas@nas.local:22 with 1 IdentityFile key and the SSH agent at /tmp/agent.sock, and every method was refused.",
+    );
+  });
+
   test("the private listener accepts SOCKS5 CONNECT and forwards the requested host and port", async () => {
     const clients: FakeSshClient[] = [];
     const manager = makeManager(clients);

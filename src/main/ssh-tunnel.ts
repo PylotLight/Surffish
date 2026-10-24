@@ -1,4 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createConnection, createServer, type Server } from "node:net";
 // ssh2 is CommonJS and Electron's ESM loader does not synthesize its named exports (`utils` is an
 // object literal that Node's static analysis cannot see either), so take the default export.
@@ -27,6 +29,10 @@ type TunnelSettings = Pick<BrowserProxySettings, "enabled" | "sshHost">;
 interface PreparedSshConnection {
   config: ConnectConfig;
   verificationError: () => string | null;
+  /** Bounded ssh2 debug trail, used to explain authentication failures. */
+  debugLines?: string[];
+  /** What the client offered to the server, e.g. "user@host:22 (2 IdentityFile keys, agent /path)". */
+  authSummary?: string;
 }
 
 export interface SshTunnelRuntime {
@@ -124,11 +130,39 @@ async function isAgentSocket(path: string): Promise<boolean> {
   }
 }
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * A packaged app launched from Finder/Dock inherits none of the shell environment, so ask launchd
+ * for the agent socket macOS sets up system-wide.
+ */
+async function launchdAuthSock(): Promise<string | null> {
+  if (process.platform !== "darwin") return null;
+  try {
+    const { stdout } = await execFileAsync(
+      "launchctl",
+      ["getenv", "SSH_AUTH_SOCK"],
+      {
+        timeout: 1_000,
+      },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function prepareSshConnection(
   target: string,
   timeoutMs: number,
 ): Promise<PreparedSshConnection> {
-  const resolved = await resolveSshConnection(target);
+  const sshAuthSock = process.env["SSH_AUTH_SOCK"] || (await launchdAuthSock());
+  const resolved = await resolveSshConnection(
+    target,
+    undefined,
+    undefined,
+    sshAuthSock,
+  );
   const parsedKeys: ParsedKey[] = [];
   for (const identityFile of resolved.identityFiles) {
     let contents: Buffer;
@@ -176,6 +210,13 @@ async function prepareSshConnection(
     };
     authHandler.push(agentMethod);
   }
+  const debugLines: string[] = [];
+  const keyCount = `${parsedKeys.length} IdentityFile key${parsedKeys.length === 1 ? "" : "s"}`;
+  const agentSummary = agentPath
+    ? agentAvailable
+      ? `the SSH agent at ${agentPath}`
+      : `no reachable SSH agent (${agentPath})`
+    : "no SSH agent (no IdentityAgent or SSH_AUTH_SOCK)";
   return {
     config: {
       host: resolved.host,
@@ -187,9 +228,35 @@ async function prepareSshConnection(
       keepaliveInterval: 30_000,
       keepaliveCountMax: 3,
       tryKeyboard: false,
+      debug: (message: string) => {
+        debugLines.push(message);
+        if (debugLines.length > 200) debugLines.shift();
+      },
     },
     verificationError: knownHosts.error,
+    debugLines,
+    authSummary: `${resolved.username}@${resolved.host}:${resolved.port} with ${keyCount} and ${agentSummary}`,
   };
+}
+
+function describeConnectionError(
+  error: Error,
+  connection: PreparedSshConnection,
+): string {
+  if (error.message !== "All configured authentication methods failed")
+    return error.message;
+  const offered = connection.authSummary
+    ? `offered ${connection.authSummary}, and every method was refused.`
+    : "All configured authentication methods failed.";
+  return `Authentication failed: ${offered}${debugTrail(connection)}`;
+}
+
+/** ssh2's own account of the attempt, opt-in because it is long and only useful when debugging. */
+function debugTrail(connection: PreparedSshConnection): string {
+  if (process.env["SURFFISH_SSH_DEBUG"] !== "1") return "";
+  const lines = connection.debugLines ?? [];
+  if (lines.length === 0) return "";
+  return ` Debug: ${lines.slice(-10).join(" | ")}`;
 }
 
 function waitForReady(
@@ -211,7 +278,12 @@ function waitForReady(
     };
     const onReady = (): void => finish();
     const onError = (error: Error): void => {
-      finish(new Error(connection.verificationError() ?? error.message));
+      finish(
+        new Error(
+          connection.verificationError() ??
+            describeConnectionError(error, connection),
+        ),
+      );
     };
     const onClose = (): void => {
       finish(
