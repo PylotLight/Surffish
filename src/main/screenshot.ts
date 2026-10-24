@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { capturePageWithin } from "./capture-page";
+import { capturePageWithin, nativeImagePixelScaleFactor } from "./capture-page";
 import { writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -168,12 +168,12 @@ function fromOverlay(event: IpcMainEvent): boolean {
 }
 
 /**
- * capturePage() hands back an image whose representation may be at the screen's scale factor.
- * Re-decode its PNG at the highest scale so every later size and crop is in real bitmap pixels.
+ * Electron 46 reports capture dimensions in DIPs, while the selected NativeImage representation
+ * still contains the high-resolution bitmap. Re-decode that representation so later crops use px.
  */
 function toPixelImage(image: NativeImage): PixelImage | null {
   if (image.isEmpty()) return null;
-  const scale = Math.max(1, ...image.getScaleFactors());
+  const scale = nativeImagePixelScaleFactor(image);
   const png = image.toPNG({ scaleFactor: scale });
   return pixelImageFromPng(png);
 }

@@ -5,6 +5,10 @@ import {
   type WebContents,
 } from "electron";
 import {
+  nativeImagePixelSize,
+  nativeImagePixelWidthToDip,
+} from "./capture-page";
+import {
   nextWakeSnapshotPhase,
   parseWakeSnapshotInput,
   WAKE_SNAPSHOT_FADE_CHANNEL,
@@ -89,18 +93,21 @@ const FIRST_PAINT_SCRIPT = `new Promise((resolve) => {
   setTimeout(() => done(false), ${WAKE_SNAPSHOT_MAX_SHOW_MS})
 })`;
 const PAINT_WORLD_ID = 1907;
-/** A capture at the width snapshots are stored at: device pixels, only scaled down past WAKE_SNAPSHOT_MAX_WIDTH. */
+/** Keep the physical bitmap below the cap; resize() takes DIPs, unlike this pixel-width limit. */
 function scaleForWakeSnapshot(image: NativeImage): NativeImage {
-  const size = image.getSize();
-  const width = wakeSnapshotWidth(size.width);
-  return width > 0 && width < size.width
-    ? image.resize({ width, quality: "good" })
+  const { width } = nativeImagePixelSize(image);
+  const pixelWidth = wakeSnapshotWidth(width);
+  return pixelWidth > 0 && pixelWidth < width
+    ? image.resize({
+        width: nativeImagePixelWidthToDip(image, pixelWidth),
+        quality: "good",
+      })
     : image;
 }
 
 /**
  * Keep the picture a tab had when it left the screen: `capture` is the capture the overview
- * thumbnail is made from (no extra capture), kept at its device pixels. The caller defers this past
+ * thumbnail is made from (no extra capture), kept at its physical pixel resolution. The caller defers this past
  * the switch so the tab coming on screen gets its frames first (browser.ts, encodeTabPicture).
  */
 export function keepWakeSnapshot(
@@ -130,7 +137,7 @@ export function keepWakeSnapshot(
       saveWakeSnapshotToDisk(url, partition, jpeg, pageSize);
     if (DEBUG)
       console.info(
-        `[wake-snapshot] ${kept ? "kept" : "dropped"} ${tabId} ${scaled.getSize().width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`,
+        `[wake-snapshot] ${kept ? "kept" : "dropped"} ${tabId} ${nativeImagePixelSize(scaled).width}px ${Math.round(jpeg.length / 1024)} KB encode ${(performance.now() - started).toFixed(1)} ms (total ${Math.round(store.totalBytes / 1024)} KB)`,
       );
   } catch (error) {
     console.warn("[wake-snapshot] could not keep a snapshot:", error);

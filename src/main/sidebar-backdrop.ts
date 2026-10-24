@@ -4,7 +4,11 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from "electron";
-import { capturePageWithin } from "./capture-page";
+import {
+  capturePageWithin,
+  nativeImagePixelSize,
+  nativeImagePixelWidthToDip,
+} from "./capture-page";
 import {
   DEFAULT_SIDEBAR_BACKDROP_SETTINGS,
   normalizeSidebarBackdropSettings,
@@ -230,9 +234,13 @@ async function capture(window: BaseWindow): Promise<void> {
       // leaving `capturing` set and the backdrop frozen for the rest of the window's life.
       const image = await capturePageWithin(page.contents, region.capture);
       if (!image) continue;
-      const size = image.getSize();
+      const { width: pixelWidth } = nativeImagePixelSize(image);
+      const smallPixelWidth = Math.max(
+        8,
+        Math.round(pixelWidth * SIDEBAR_SNAPSHOT_SCALE),
+      );
       const small = image.resize({
-        width: Math.max(8, Math.round(size.width * SIDEBAR_SNAPSHOT_SCALE)),
+        width: nativeImagePixelWidthToDip(image, smallPixelWidth),
         quality: "good",
       });
       images.push({

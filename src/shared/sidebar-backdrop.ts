@@ -35,7 +35,7 @@ export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
 export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
-  /** Only in 'snapshot' mode: page pieces under the sidebar view, in sidebar-view coordinates. */
+  /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
   /** The sidebar view is inset + rounded to the card (it has used the native blur in this window). */
   framed: boolean;
@@ -65,7 +65,7 @@ export const SIDEBAR_FRAMED_SOLID_TINT = "#F2131619";
 /** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
 export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
 export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;
-/** Snapshots are downscaled this much before the one-off canvas blur (cheap to send and draw). */
+/** Fraction of the captured bitmap's physical width kept before the one-off canvas blur. */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25;
 /** At most one snapshot per this many ms while the sidebar stays open. */
 export const SIDEBAR_SNAPSHOT_THROTTLE_MS = 900;
@@ -123,9 +123,9 @@ export function intersectRects(a: Rect, b: Rect): Rect | null {
 }
 
 /**
- * The strips of each page view that sit under the sidebar. `capture` is in the page view's own
- * coordinates (for webContents.capturePage), `target` in sidebar-view coordinates (where the
- * renderer draws it). Views are given bottom-most first; later ones cover earlier ones.
+ * The strips of each page view that sit under the sidebar. `capture` is in page-view DIPs (for
+ * webContents.capturePage), `target` in sidebar-view DIPs (where the renderer draws it). Views are
+ * given bottom-most first; later ones cover earlier ones.
  */
 export function sidebarCaptureRegions(
   sidebar: Rect,
