@@ -71,11 +71,11 @@ describe("managed OpenSSH SOCKS tunnel config", () => {
 });
 
 describe("managed SSH endpoint selection", () => {
-  test("routes Surffish through the same stable endpoint that other apps use", () => {
+  test("routes Surffish and other apps through the configured endpoint", () => {
     expect(browserProxyEndpoint(settings)).toMatchObject({
       enabled: true,
       host: SURFFISH_NETWORK_HELPER.host,
-      port: SURFFISH_NETWORK_HELPER.port,
+      port: settings.port,
       sshHost: "work-vpn",
     });
     expect(browserProxyEndpoint({ ...settings, port: 1088 }).port).toBe(1088);
@@ -87,7 +87,7 @@ describe("managed SSH endpoint selection", () => {
       host: "127.0.0.1",
       port: 54321,
     });
-    expect(browserProxyEndpoint(settings).port).toBe(1088);
+    expect(browserProxyEndpoint(settings).port).toBe(settings.port);
   });
 
   test("fails closed until a configured SSH tunnel is ready", () => {
@@ -118,11 +118,13 @@ describe("managed SSH endpoint selection", () => {
 
 describe("managed OpenSSH status summary", () => {
   test("confirms the SSH session and shared public endpoint", () => {
-    expect(describeSshTunnelStatus(connected)).toEqual({
+    expect(
+      describeSshTunnelStatus({ ...connected, port: settings.port }),
+    ).toEqual({
       state: "connected",
       title: "SSH session connected",
       detail:
-        "Connected to work-vpn; Surffish and other apps can use SOCKS5 at 127.0.0.1:1088.",
+        "Connected to work-vpn; Surffish and other apps use SOCKS5 at 127.0.0.1:1085.",
     });
   });
 

@@ -2,13 +2,15 @@
 
 ## The proxy is on but pages do not load
 
-If **SSH host alias** is set in **Settings → Connection → SOCKS5 proxy**, Surffish starts the tunnel and shares `127.0.0.1:1088` between the browser and other local apps. The SSH-side listener port is selected automatically. Check that the alias exists in `~/.ssh/config` (or use `user@host`) and that its host key has been accepted.
+If **SSH host alias** is set in **Settings → Connection → SOCKS5 proxy**, choose a free **Shared SOCKS5 port**. Surffish and other apps use `127.0.0.1:<port>`; the SSH-side port is selected automatically and stays internal. If the chosen port is already in use, choose another free port. Check that the alias exists in `~/.ssh/config` (or use `user@host`) and that its host key has been accepted.
 
 If you manage the SSH tunnel yourself, start a local SOCKS5 endpoint such as:
 
 ```bash
 ssh -N -D 127.0.0.1:1080 user@your-ssh-host
 ```
+
+Leave **SSH host alias** blank and set the host and port to that endpoint. Surffish and other apps can use the same SOCKS5 service directly; Surffish does not reserve a second local port.
 
 Make sure the SSH dynamic-forwarding command is still running on the same computer, then enter its host and port in **SOCKS5 proxy** settings with the SSH alias left blank. **Test port** checks only whether a TCP service is listening; it does not test the SOCKS handshake or SSH destination. Turn the **SOCKS5 proxy** switch off to test a direct connection.
 

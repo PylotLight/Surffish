@@ -49,8 +49,14 @@ import {
   SURFFISH_NETWORK_HELPER,
 } from "../shared/network-helper";
 import {
+  getNetworkHelperStatus,
+  startNetworkHelper,
+  stopNetworkHelper,
+} from "./network-helper";
+import {
   getManagedSshTunnelStatus,
   syncManagedSshTunnel,
+  stopManagedSshTunnel,
 } from "./ssh-tunnel";
 import {
   brambleCameraCheckDecision,
@@ -462,22 +468,69 @@ export function getBrowserProxySettings(): BrowserProxySettings {
 }
 
 /** The Network Helper forwards through OpenSSH's auto-selected private SOCKS listener. */
-export function getNetworkHelperUpstreamSettings(): BrowserProxySettings {
-  return networkHelperUpstreamSettings(
-    currentSettings,
-    getManagedSshTunnelStatus(),
-  );
+export function getNetworkHelperUpstreamSettings(
+  settings: BrowserProxySettings = currentSettings,
+): BrowserProxySettings {
+  return networkHelperUpstreamSettings(settings, getManagedSshTunnelStatus());
+}
+
+function usesManagedSsh(settings: BrowserProxySettings): boolean {
+  return settings.enabled && Boolean(settings.sshHost?.trim());
+}
+
+async function restoreNetworkServices(
+  settings: BrowserProxySettings,
+): Promise<void> {
+  await stopNetworkHelper();
+  await stopManagedSshTunnel();
+  if (usesManagedSsh(settings)) {
+    await startNetworkHelper(settings.port, () =>
+      getNetworkHelperUpstreamSettings(settings),
+    );
+  }
+  await syncManagedSshTunnel(settings);
 }
 
 export async function setBrowserProxySettings(
   input: unknown,
 ): Promise<BrowserProxySettings> {
   const settings = validateSettings(input);
-  await syncManagedSshTunnel(settings);
+  const previousSettings = currentSettings;
+  const nextManagedSsh = usesManagedSsh(settings);
+  const previousManagedSsh = usesManagedSsh(previousSettings);
+  const servicesChanged =
+    nextManagedSsh !== previousManagedSsh ||
+    (nextManagedSsh &&
+      (settings.sshHost !== previousSettings.sshHost ||
+        settings.port !== previousSettings.port)) ||
+    (nextManagedSsh && !getNetworkHelperStatus(previousSettings).listening);
+  if (servicesChanged) {
+    await stopNetworkHelper();
+    await stopManagedSshTunnel();
+    try {
+      if (nextManagedSsh) {
+        await startNetworkHelper(settings.port, () =>
+          getNetworkHelperUpstreamSettings(settings),
+        );
+        const helper = getNetworkHelperStatus(settings);
+        if (!helper.listening)
+          throw new Error(
+            helper.error ??
+              `Could not start the SOCKS listener on port ${settings.port}.`,
+          );
+      }
+      await syncManagedSshTunnel(settings);
+    } catch (error) {
+      await restoreNetworkServices(previousSettings);
+      throw error;
+    }
+  } else {
+    await syncManagedSshTunnel(settings);
+  }
   try {
     await applyRouting(routingInput(settings, currentRouting));
   } catch (error) {
-    await syncManagedSshTunnel(currentSettings);
+    if (servicesChanged) await restoreNetworkServices(previousSettings);
     throw error;
   }
   persistSettings(settings);
@@ -554,11 +607,26 @@ export function testLocalProxy(
     });
   }
 
-  if (settings.sshHost) {
+  if (settings.sshHost?.trim()) {
+    const savedEndpointMatches =
+      usesManagedSsh(currentSettings) &&
+      settings.sshHost === currentSettings.sshHost &&
+      settings.port === currentSettings.port;
+    if (!savedEndpointMatches)
+      return Promise.resolve({
+        reachable: false,
+        message: `Save first to open the shared SOCKS listener at ${SURFFISH_NETWORK_HELPER.host}:${settings.port}.`,
+      });
+    const helper = getNetworkHelperStatus(currentSettings);
+    if (!helper.listening)
+      return Promise.resolve({
+        reachable: false,
+        message:
+          helper.error ?? "The shared SOCKS listener is not running yet.",
+      });
     settings = {
       ...settings,
       host: SURFFISH_NETWORK_HELPER.host,
-      port: SURFFISH_NETWORK_HELPER.port,
     };
   }
 

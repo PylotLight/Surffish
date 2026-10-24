@@ -239,16 +239,24 @@ describe("Surffish Network Helper SOCKS5 relay", () => {
 
   test("waits for the old listener to close before a quick restart", async () => {
     const getUpstream = () => socksSettings(1080, false);
+    const probe = createServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    const endpoint = socksSettings(port);
     try {
-      await startNetworkHelper(getUpstream);
-      expect(getNetworkHelperStatus().listening).toBe(true);
+      await startNetworkHelper(port, getUpstream);
+      expect(getNetworkHelperStatus(endpoint)).toMatchObject({
+        host: "127.0.0.1",
+        port,
+        listening: true,
+      });
 
       const stopping = stopNetworkHelper();
-      const restarting = startNetworkHelper(getUpstream);
+      const restarting = startNetworkHelper(port, getUpstream);
       await Promise.all([stopping, restarting]);
 
-      expect(getNetworkHelperStatus().listening).toBe(true);
-      expect(getNetworkHelperStatus().error).toBeNull();
+      expect(getNetworkHelperStatus(endpoint).listening).toBe(true);
+      expect(getNetworkHelperStatus(endpoint).error).toBeNull();
     } finally {
       await stopNetworkHelper();
     }

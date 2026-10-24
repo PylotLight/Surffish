@@ -87,7 +87,6 @@ describe("managed OpenSSH tunnel lifecycle", () => {
     await manager.sync({ enabled: true, sshHost: "work-vpn" });
     const port = dynamicForwardPort(argsSeen[0] ?? []);
     expect(port).toBeGreaterThan(1024);
-    expect(port).not.toBe(1088);
     expect(manager.getStatus()).toMatchObject({
       configured: true,
       enabled: true,

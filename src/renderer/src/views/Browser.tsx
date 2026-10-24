@@ -2774,13 +2774,22 @@ export default function Browser({
       setNetworkHelper(helperStatus);
       await window.api.browser.reload();
       setProxyMessage(
-        saved.sshHost && helperStatus.sshTunnel.running
-          ? `SOCKS5 is on through the SSH tunnel ${saved.sshHost} at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port}.`
-          : saved.sshHost && helperStatus.sshTunnel.error
+        saved.sshHost?.trim() && saved.enabled && helperStatus.error
+          ? `Settings saved, but the shared SOCKS endpoint is unavailable: ${helperStatus.error}`
+          : saved.sshHost?.trim() &&
+              saved.enabled &&
+              helperStatus.sshTunnel.error
             ? `Settings saved, but the SSH tunnel is unavailable: ${helperStatus.sshTunnel.error}`
-            : saved.enabled
-              ? `SOCKS5 is on for this browser via ${saved.host}:${saved.port}.`
-              : "Proxy is off; this browser will connect directly.",
+            : saved.sshHost?.trim() &&
+                saved.enabled &&
+                helperStatus.listening &&
+                helperStatus.sshTunnel.running
+              ? `SOCKS5 is on through the SSH tunnel ${saved.sshHost} at ${SURFFISH_NETWORK_HELPER.host}:${saved.port}.`
+              : saved.sshHost?.trim() && saved.enabled
+                ? "Settings saved; waiting for the shared SOCKS5 endpoint to become ready."
+                : saved.enabled
+                  ? `SOCKS5 is on for this browser via ${saved.host}:${saved.port}; other apps can use the same endpoint.`
+                  : "Proxy is off; this browser will connect directly.",
       );
     } catch (error) {
       setProxyMessage(error instanceof Error ? error.message : String(error));
@@ -4962,7 +4971,7 @@ export default function Browser({
                         status={
                           appliedProxy.enabled
                             ? appliedProxy.sshHost
-                              ? `${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port}`
+                              ? `${SURFFISH_NETWORK_HELPER.host}:${appliedProxy.port}`
                               : `${appliedProxy.host}:${appliedProxy.port}`
                             : "Direct connection"
                         }
@@ -4983,19 +4992,8 @@ export default function Browser({
                           />
                         }
                       >
-                        {proxy.sshHost?.trim() ? (
-                          <p className="settings-help">
-                            Shared SOCKS5 endpoint: {" "}
-                            <code>
-                              {SURFFISH_NETWORK_HELPER.host}:
-                              {SURFFISH_NETWORK_HELPER.port}
-                            </code>
-                            . Surffish and your other apps use this same
-                            connection; the SSH-side port is selected
-                            automatically.
-                          </p>
-                        ) : (
-                          <div className="settings-inline-fields">
+                        <div className="settings-inline-fields">
+                          {!proxy.sshHost?.trim() && (
                             <label className="settings-field settings-field-grow">
                               <span>Host</span>
                               <input
@@ -5011,23 +5009,41 @@ export default function Browser({
                                 aria-label="Local SOCKS5 host"
                               />
                             </label>
-                            <label className="settings-field settings-field-port">
-                              <span>Port</span>
-                              <input
-                                type="number"
-                                value={proxy.port}
-                                min={1}
-                                max={65535}
-                                onChange={(event) =>
-                                  setProxy((current) => ({
-                                    ...current,
-                                    port: Number(event.target.value),
-                                  }))
-                                }
-                                aria-label="Local SOCKS5 port"
-                              />
-                            </label>
-                          </div>
+                          )}
+                          <label className="settings-field settings-field-port">
+                            <span>
+                              {proxy.sshHost?.trim()
+                                ? "Shared SOCKS5 port"
+                                : "Port"}
+                            </span>
+                            <input
+                              type="number"
+                              value={proxy.port}
+                              min={1}
+                              max={65535}
+                              onChange={(event) =>
+                                setProxy((current) => ({
+                                  ...current,
+                                  port: Number(event.target.value),
+                                }))
+                              }
+                              aria-label={
+                                proxy.sshHost?.trim()
+                                  ? "Shared SOCKS5 port"
+                                  : "Local SOCKS5 port"
+                              }
+                            />
+                          </label>
+                        </div>
+                        {proxy.sshHost?.trim() && (
+                          <p className="settings-help">
+                            Surffish and other apps share{" "}
+                            <code>
+                              {SURFFISH_NETWORK_HELPER.host}:{proxy.port}
+                            </code>
+                            . Choose a free port; the SSH-side listener is
+                            private and selected automatically.
+                          </p>
                         )}
                         <div className="settings-inline-fields ssh-host-row">
                           <label className="settings-field settings-field-grow">
@@ -5093,8 +5109,9 @@ export default function Browser({
                           Search reads Host names from your local ~/.ssh/config
                           (including included config files). Select one to fill
                           this field, or enter an SSH alias or user@host
-                          manually. {proxy.sshHost?.trim()
-                            ? "With an SSH alias, the app and other apps use the shared endpoint above; no second port needs to be set."
+                          manually.{" "}
+                          {proxy.sshHost?.trim()
+                            ? "With an SSH alias, the shared port above is used by Surffish and other apps."
                             : `Leave blank only if a SOCKS5 proxy is already running at ${proxy.host}:${proxy.port}.`}
                         </p>
                         <div
@@ -5112,11 +5129,23 @@ export default function Browser({
                           </div>
                         </div>
                         <p className="settings-help">
-                          With SOCKS5 enabled, Save starts OpenSSH dynamic
-                          forwarding to this alias and stops it when the last
-                          browser window closes. It uses your SSH config and
-                          agent; if this is a new host, verify its host key once
-                          in Terminal first.
+                          {proxy.sshHost?.trim() ? (
+                            <>
+                              With SOCKS5 enabled, Save starts OpenSSH dynamic
+                              forwarding to this alias and opens the shared
+                              listener at the port above. Both stop when the
+                              last browser window closes. It uses your SSH
+                              config and agent; if this is a new host, verify
+                              its host key once in Terminal first.
+                            </>
+                          ) : (
+                            <>
+                              Without an SSH host alias, Surffish uses the
+                              existing SOCKS5 service at {proxy.host}:
+                              {proxy.port} directly. It does not open a second
+                              listener or manage an SSH tunnel.
+                            </>
+                          )}
                         </p>
                         <SettingsRow
                           label="Local network goes direct"
@@ -5138,79 +5167,91 @@ export default function Browser({
                         </SettingsRow>
                         <ProxyKillSwitchSetting />
                         <p
-                          className={`settings-help${networkHelper?.error ? " is-error" : ""}`}
+                          className={`settings-help${proxy.sshHost?.trim() && proxy.enabled && networkHelper?.error ? " is-error" : ""}`}
                           role="status"
                         >
                           <strong>{SURFFISH_NETWORK_HELPER.name}</strong>:{" "}
-                          {networkHelper?.error
-                            ? `Unavailable — ${networkHelper.error}`
-                            : networkHelper?.listening
-                              ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port} while a Surffish browser window is open.`
-                              : "Checking listener…"}
+                          {proxy.sshHost?.trim() && proxy.enabled
+                            ? networkHelper?.error
+                              ? `Unavailable — ${networkHelper.error}`
+                              : networkHelper?.listening
+                                ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${proxy.port} while a Surffish browser window is open.`
+                                : "Starting the shared listener…"
+                            : proxy.sshHost?.trim()
+                              ? "Off. Enable SOCKS5 and Save to open the shared listener."
+                              : proxy.enabled
+                                ? `No extra listener is needed; use the existing SOCKS5 service at ${proxy.host}:${proxy.port}.`
+                                : "No extra port is reserved. With managed SSH enabled, Surffish opens the shared listener at the port above."}
                         </p>
                         <p className="settings-help">
                           {proxy.sshHost?.trim()
-                            ? "Surffish and other apps use the same SOCKS5 connection at "
-                            : "Configure other apps to use SOCKS5 at "}
+                            ? "Configure other apps to use the same SOCKS5 endpoint at "
+                            : "Surffish and other apps can use the existing SOCKS5 service at "}
                           <code>
-                            {SURFFISH_NETWORK_HELPER.host}:
-                            {SURFFISH_NETWORK_HELPER.port}
+                            {proxy.sshHost?.trim()
+                              ? SURFFISH_NETWORK_HELPER.host
+                              : proxy.host}
+                            :{proxy.port}
                           </code>
-                          . {proxy.sshHost?.trim()
-                            ? "The SSH-side listener is chosen automatically and stays internal. TCP CONNECT traffic fails closed if the tunnel is off or unreachable. Site rules and the local-network bypass do not apply."
-                            : "TCP CONNECT traffic is forwarded through the main proxy above; requests fail closed if it is off or unreachable. If no SSH alias is set, that SOCKS5 service must already be running. Site rules and the local-network bypass do not apply."}
+                          .{" "}
+                          {proxy.sshHost?.trim()
+                            ? "The SSH-side port is selected automatically and stays internal. TCP CONNECT traffic fails closed if the tunnel is off or unreachable. Site rules and the local-network bypass do not apply to other apps."
+                            : "No extra Surffish port is opened; the selected local SOCKS5 service must already be running. Browser site rules and local-network bypass apply only inside Surffish."}
                         </p>
-                        <section
-                          className="network-helper-activity"
-                          aria-label="Network Helper live activity"
-                        >
-                          <div className="network-helper-activity-heading">
-                            <strong>Live activity</strong>
-                            <span>
-                              {networkHelperUsage === null
-                                ? "Checking…"
-                                : `${networkHelperUsage.activeConnections} active ${networkHelperUsage.activeConnections === 1 ? "connection" : "connections"}`}
-                            </span>
-                          </div>
-                          <div className="network-helper-activity-grid">
-                            <div className="network-helper-activity-metric">
-                              <span>Upload</span>
-                              <strong>
-                                {formatDownloadSize(
-                                  networkHelperUsage?.uploadBytesPerSecond ?? 0,
-                                )}
-                                /s
-                              </strong>
-                              <small>
-                                {formatDownloadSize(
-                                  networkHelperUsage?.uploadedBytes ?? 0,
-                                )}{" "}
-                                sent since helper start
-                              </small>
+                        {proxy.sshHost?.trim() && proxy.enabled && (
+                          <section
+                            className="network-helper-activity"
+                            aria-label="Shared SOCKS endpoint live activity"
+                          >
+                            <div className="network-helper-activity-heading">
+                              <strong>Live activity</strong>
+                              <span>
+                                {networkHelperUsage === null
+                                  ? "Checking…"
+                                  : `${networkHelperUsage.activeConnections} active ${networkHelperUsage.activeConnections === 1 ? "connection" : "connections"}`}
+                              </span>
                             </div>
-                            <div className="network-helper-activity-metric">
-                              <span>Download</span>
-                              <strong>
-                                {formatDownloadSize(
-                                  networkHelperUsage?.downloadBytesPerSecond ??
-                                    0,
-                                )}
-                                /s
-                              </strong>
-                              <small>
-                                {formatDownloadSize(
-                                  networkHelperUsage?.downloadedBytes ?? 0,
-                                )}{" "}
-                                received since helper start
-                              </small>
+                            <div className="network-helper-activity-grid">
+                              <div className="network-helper-activity-metric">
+                                <span>Upload</span>
+                                <strong>
+                                  {formatDownloadSize(
+                                    networkHelperUsage?.uploadBytesPerSecond ??
+                                      0,
+                                  )}
+                                  /s
+                                </strong>
+                                <small>
+                                  {formatDownloadSize(
+                                    networkHelperUsage?.uploadedBytes ?? 0,
+                                  )}{" "}
+                                  sent since helper start
+                                </small>
+                              </div>
+                              <div className="network-helper-activity-metric">
+                                <span>Download</span>
+                                <strong>
+                                  {formatDownloadSize(
+                                    networkHelperUsage?.downloadBytesPerSecond ??
+                                      0,
+                                  )}
+                                  /s
+                                </strong>
+                                <small>
+                                  {formatDownloadSize(
+                                    networkHelperUsage?.downloadedBytes ?? 0,
+                                  )}{" "}
+                                  received since helper start
+                                </small>
+                              </div>
                             </div>
-                          </div>
-                          <p className="settings-help">
-                            Counts SOCKS connections, not app names. Speeds are
-                            averaged over the last 3 seconds; totals reset when
-                            the helper restarts.
-                          </p>
-                        </section>
+                            <p className="settings-help">
+                              Counts SOCKS connections, not app names. Speeds
+                              are averaged over the last 3 seconds; totals reset
+                              when the helper restarts.
+                            </p>
+                          </section>
+                        )}
                         <div className="settings-actions">
                           <button
                             className="settings-action secondary"

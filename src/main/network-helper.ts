@@ -238,8 +238,11 @@ export function createSocks5RelayServer(
           fail();
           return;
         }
+        const address = server.address();
+        const helperPort =
+          address && typeof address !== "string" ? address.port : null;
         const upstreamIsHelper =
-          settings.port === SURFFISH_NETWORK_HELPER.port &&
+          settings.port === helperPort &&
           ["127.0.0.1", "localhost", "::1"].includes(
             settings.host.toLowerCase(),
           );
@@ -281,6 +284,7 @@ export function createSocks5RelayServer(
 
 /** Start on loopback before browser windows are created. An occupied port is reported, not fatal to browser startup. */
 export async function startNetworkHelper(
+  port: number,
   getUpstream: () => BrowserProxySettings,
 ): Promise<void> {
   if (helperStopping) await helperStopping;
@@ -302,7 +306,7 @@ export async function startNetworkHelper(
     server.on("error", (error: NodeJS.ErrnoException) => {
       helperError =
         error.code === "EADDRINUSE"
-          ? `Port ${SURFFISH_NETWORK_HELPER.port} is already in use.`
+          ? `Port ${port} is already in use.`
           : error.message;
       if (!server.listening && helperServer === server) helperServer = null;
       finish();
@@ -314,7 +318,7 @@ export async function startNetworkHelper(
     try {
       server.listen({
         host: SURFFISH_NETWORK_HELPER.host,
-        port: SURFFISH_NETWORK_HELPER.port,
+        port,
         exclusive: true,
       });
     } catch (error) {
@@ -331,16 +335,22 @@ export async function startNetworkHelper(
   }
 }
 
-export function getNetworkHelperStatus(): NetworkHelperStatus {
+export function getNetworkHelperStatus(
+  settings: BrowserProxySettings,
+): NetworkHelperStatus {
   const sshTunnel = getManagedSshTunnelStatus();
   return {
-    ...SURFFISH_NETWORK_HELPER,
+    name: SURFFISH_NETWORK_HELPER.name,
+    host: settings.sshHost?.trim()
+      ? SURFFISH_NETWORK_HELPER.host
+      : settings.host,
+    port: settings.port,
     listening: helperServer?.listening === true,
     error: helperError,
     sshTunnel: {
       ...sshTunnel,
       host: SURFFISH_NETWORK_HELPER.host,
-      port: sshTunnel.running ? SURFFISH_NETWORK_HELPER.port : null,
+      port: sshTunnel.running && helperServer?.listening ? settings.port : null,
     },
   };
 }

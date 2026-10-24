@@ -252,7 +252,8 @@ export function createSshTunnelManager(
       selectedPort = await allocatePort();
     } catch (portError) {
       if (runId === generation)
-        error = portError instanceof Error ? portError.message : String(portError);
+        error =
+          portError instanceof Error ? portError.message : String(portError);
       return;
     }
     if (runId !== generation) return;

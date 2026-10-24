@@ -157,10 +157,16 @@ if (!hasInstanceLock) app.quit();
 else registerExternalOpenHandlers();
 
 async function startNetworkServices(): Promise<void> {
-  await syncManagedSshTunnel(getBrowserProxySettings());
-  await startNetworkHelper(getNetworkHelperUpstreamSettings);
-  const status = getNetworkHelperStatus();
-  if (!status.listening)
+  const settings = getBrowserProxySettings();
+  const managedSshEnabled =
+    settings.enabled && Boolean(settings.sshHost?.trim());
+  if (managedSshEnabled)
+    await startNetworkHelper(settings.port, getNetworkHelperUpstreamSettings);
+  else await stopNetworkHelper();
+  // Bind the user-facing port first so OpenSSH's private port allocator cannot select it.
+  await syncManagedSshTunnel(settings);
+  const status = getNetworkHelperStatus(settings);
+  if (managedSshEnabled && !status.listening)
     console.warn("[network helper] unavailable:", status.error);
   if (
     status.sshTunnel.configured &&

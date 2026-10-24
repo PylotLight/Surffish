@@ -843,7 +843,7 @@ export function registerIpc(): void {
   });
   ipcMain.handle("browser:proxy:helper", (event) => {
     assertMainRenderer(event);
-    return getNetworkHelperStatus();
+    return getNetworkHelperStatus(getBrowserProxySettings());
   });
   ipcMain.handle("browser:proxy:helper-usage", (event) => {
     assertMainRenderer(event);
