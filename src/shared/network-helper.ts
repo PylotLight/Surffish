@@ -44,9 +44,9 @@ export function describeSshTunnelStatus(
   if (!status.configured || !status.target) {
     return {
       state: "unconfigured",
-      title: "Not configured",
+      title: "No managed SSH tunnel",
       detail:
-        "Enter an SSH host alias above and Save to start a managed tunnel.",
+        "Enter an SSH host alias above to have Surffish start a tunnel. Without one, the SOCKS5 proxy setting expects an existing service at the configured host and port.",
     };
   }
   if (!status.enabled) {

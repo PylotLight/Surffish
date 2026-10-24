@@ -4986,7 +4986,7 @@ export default function Browser({
                           </label>
                         </div>
                         <label className="settings-field settings-field-grow">
-                          <span>SSH host alias (optional)</span>
+                          <span>SSH host alias</span>
                           <input
                             type="text"
                             value={proxy.sshHost ?? ""}
@@ -5001,6 +5001,11 @@ export default function Browser({
                             aria-label="SSH host alias for managed SOCKS tunnel"
                           />
                         </label>
+                        <p className="settings-help">
+                          Required for Surffish to start a managed SSH tunnel.
+                          Leave blank only if a SOCKS5 proxy is already running
+                          at {proxy.host}:{proxy.port}.
+                        </p>
                         <div
                           className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}
                           role="status"

@@ -77,8 +77,13 @@ describe("managed OpenSSH status summary", () => {
         target: null,
         enabled: false,
         running: false,
-      }).state,
-    ).toBe("unconfigured");
+      }),
+    ).toMatchObject({
+      state: "unconfigured",
+      title: "No managed SSH tunnel",
+      detail:
+        "Enter an SSH host alias above to have Surffish start a tunnel. Without one, the SOCKS5 proxy setting expects an existing service at the configured host and port.",
+    });
     expect(
       describeSshTunnelStatus({ ...connected, enabled: false, running: false })
         .state,
