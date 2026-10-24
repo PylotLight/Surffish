@@ -78,16 +78,19 @@ test("afterPack patches the packaged macOS app before signing", async () => {
     writeFileSync(executable, fakeMachO("arm64"));
     const signed = [];
 
-    await afterPack({
-      electronPlatformName: "darwin",
-      appOutDir,
-      packager: {
-        appInfo: {
-          id: "com.pylotlight.surffish",
-          productFilename: "Surffish",
+    await afterPack(
+      {
+        electronPlatformName: "darwin",
+        appOutDir,
+        packager: {
+          appInfo: {
+            id: "com.pylotlight.surffish",
+            productFilename: "Surffish",
+          },
         },
       },
-    }, { sign: (appPath) => signed.push(appPath) });
+      { sign: (appPath) => signed.push(appPath) },
+    );
 
     assert.equal(
       readUuid(readFileSync(executable)),
