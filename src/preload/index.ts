@@ -34,6 +34,7 @@ import type {
   TabSleepMinutes,
   WebStoreExtensionsState,
 } from "../shared/types";
+import type { NetworkHelperStatus } from "../shared/network-helper";
 import type { DownloadEntry } from "../shared/downloads";
 import type {
   BrambleQuickUnlockEnrolInput,
@@ -565,6 +566,8 @@ const api = {
         ipcRenderer.invoke("browser:proxy:set", settings),
       test: (settings: BrowserProxySettings): Promise<BrowserProxyTestResult> =>
         ipcRenderer.invoke("browser:proxy:test", settings),
+      helper: (): Promise<NetworkHelperStatus> =>
+        ipcRenderer.invoke("browser:proxy:helper"),
       ...proxyRoutingApi,
     },
     downloads: {

@@ -21,7 +21,12 @@ import {
 } from "./memory-saver";
 import { registerPreconnectIpc } from "./preconnect";
 import { registerWakeSnapshotIpc } from "./wake-snapshot";
-import { initializeBrowserProxy } from "./proxy";
+import { getBrowserProxySettings, initializeBrowserProxy } from "./proxy";
+import {
+  getNetworkHelperStatus,
+  startNetworkHelper,
+  stopNetworkHelper,
+} from "./network-helper";
 import { initializeScreenSharing } from "./screen-share";
 import { initializeSpacesStore } from "./spaces-store";
 import { restoreWindows, setMainWindowCloseHandler } from "./window";
@@ -156,6 +161,13 @@ app
       initializeSpacesStore();
       // Set the browser session's proxy before any remote page is created.
       await initializeBrowserProxy();
+      // Other local apps can use this loopback-only SOCKS5 endpoint.
+      await startNetworkHelper(getBrowserProxySettings);
+      if (!getNetworkHelperStatus().listening)
+        console.warn(
+          "[network helper] unavailable:",
+          getNetworkHelperStatus().error,
+        );
       void initializeScreenSharing();
       // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
       initializeBrowserSafety();
@@ -236,7 +248,14 @@ app
     initializePageWatchersFeature();
     // macOS keeps running with no windows open; the Dock icon brings the saved windows back.
     app.on("activate", () => {
-      if (browserWindows().length === 0) restoreWindows();
+      if (browserWindows().length === 0) {
+        void startNetworkHelper(getBrowserProxySettings).then(() => {
+          const status = getNetworkHelperStatus();
+          if (!status.listening)
+            console.warn("[network helper] unavailable:", status.error);
+        });
+        restoreWindows();
+      }
     });
     await afterFirstWindowPaint(windows.at(-1));
     traceStartup("first window painted");
@@ -302,11 +321,13 @@ app
     app.quit();
   });
 app.on("window-all-closed", () => {
+  stopNetworkHelper();
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", () => {
   // Windows close one by one while quitting; keep all of them in the saved session.
   freezeBrowserSession();
+  stopNetworkHelper();
   disposeUpdates();
   disposePageWatchersFeature();
   disposeReadAloudFeature();

@@ -28,6 +28,10 @@ import type {
   TabSleepMinutes,
 } from "../../../shared/types";
 import {
+  SURFFISH_NETWORK_HELPER,
+  type NetworkHelperStatus,
+} from "../../../shared/network-helper";
+import {
   DEFAULT_SEARCH_ENGINE,
   getSearchHomepage,
   SEARCH_ENGINES,
@@ -1034,6 +1038,8 @@ export default function Browser({
   const [proxy, setProxy] = useState<BrowserProxySettings>(DEFAULT_PROXY);
   const [appliedProxy, setAppliedProxy] =
     useState<BrowserProxySettings>(DEFAULT_PROXY);
+  const [networkHelper, setNetworkHelper] =
+    useState<NetworkHelperStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [proxyMessage, setProxyMessage] = useState("");
   const [sessionMessage, setSessionMessage] = useState("");
@@ -2180,6 +2186,10 @@ export default function Browser({
       setProxy(settings);
       setAppliedProxy(settings);
     });
+    void window.api.browser.proxy
+      .helper()
+      .then(setNetworkHelper)
+      .catch(() => setNetworkHelper(null));
     return () => {
       unsubscribeState();
       unsubscribeTabs();
@@ -4944,6 +4954,28 @@ export default function Browser({
                           />
                         </SettingsRow>
                         <ProxyKillSwitchSetting />
+                        <p
+                          className={`settings-help${networkHelper?.error ? " is-error" : ""}`}
+                          role="status"
+                        >
+                          <strong>{SURFFISH_NETWORK_HELPER.name}</strong>:{" "}
+                          {networkHelper?.error
+                            ? `Unavailable — ${networkHelper.error}`
+                            : networkHelper?.listening
+                              ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${SURFFISH_NETWORK_HELPER.port} while a Surffish browser window is open.`
+                              : "Checking listener…"}
+                        </p>
+                        <p className="settings-help">
+                          Configure other apps to use SOCKS5 at{" "}
+                          <code>
+                            {SURFFISH_NETWORK_HELPER.host}:
+                            {SURFFISH_NETWORK_HELPER.port}
+                          </code>
+                          . TCP CONNECT traffic is forwarded through the main
+                          proxy above; requests fail closed if it is off or
+                          unreachable. Site rules and the local-network bypass
+                          do not apply.
+                        </p>
                         <div className="settings-actions">
                           <p className="settings-help">
                             Start a tunnel first:{" "}
