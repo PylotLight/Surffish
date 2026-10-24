@@ -7,7 +7,14 @@ import {
   type SshTunnelStatus,
 } from "./network-helper";
 import type { BrowserProxySettings } from "./types";
-import { parseSshTarget, validateSshTarget } from "./ssh-tunnel";
+import {
+  buildOpenSshDynamicForwardArgs,
+  DEFAULT_SSH_CLIENT,
+  parseSshClient,
+  parseSshTarget,
+  validateSshClient,
+  validateSshTarget,
+} from "./ssh-tunnel";
 
 const connected: SshTunnelStatus = {
   configured: true,
@@ -40,6 +47,61 @@ describe("managed SSH target validation", () => {
       expect(() => validateSshTarget(value)).toThrow();
     }
     expect(parseSshTarget("-oProxyCommand=bad")).toBe("");
+  });
+});
+
+describe("system OpenSSH dynamic forward args", () => {
+  test("passes the alias as one argument after -- with a loopback-only dynamic forward", () => {
+    expect(buildOpenSshDynamicForwardArgs("work-vpn", 1080)).toEqual([
+      "-N",
+      "-D",
+      "127.0.0.1:1080",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ServerAliveCountMax=3",
+      "--",
+      "work-vpn",
+    ]);
+  });
+
+  test("adds -v only for SURFFISH_SSH_DEBUG tracing", () => {
+    const args = buildOpenSshDynamicForwardArgs(" alice@example.net ", 2000, {
+      verbose: true,
+    });
+    expect(args[0]).toBe("-v");
+    expect(args.at(-1)).toBe("alice@example.net");
+  });
+
+  test("rejects options, whitespace, shell fragments, blanks and bad ports", () => {
+    for (const value of [
+      "-oProxyCommand=bad",
+      "host with spaces",
+      "host;id",
+      "",
+    ])
+      expect(() => buildOpenSshDynamicForwardArgs(value, 1080)).toThrow();
+    expect(() => buildOpenSshDynamicForwardArgs("work", 0)).toThrow();
+    expect(() => buildOpenSshDynamicForwardArgs("work", 65536)).toThrow();
+  });
+});
+
+describe("SSH client choice", () => {
+  test("defaults to the built-in client for missing or unknown saved values", () => {
+    expect(DEFAULT_SSH_CLIENT).toBe("builtin");
+    expect(parseSshClient(undefined)).toBe("builtin");
+    expect(parseSshClient("openssh")).toBe("builtin");
+    expect(parseSshClient("system")).toBe("system");
+  });
+
+  test("validates renderer input", () => {
+    expect(validateSshClient(undefined)).toBe("builtin");
+    expect(validateSshClient("system")).toBe("system");
+    expect(() => validateSshClient("bash")).toThrow();
   });
 });
 

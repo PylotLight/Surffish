@@ -281,6 +281,15 @@ async function run() {
     1,
     "still one Settings tab after ⌘K",
   );
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.commands.run("settings.connection")',
+  );
+  await waitFor(
+    () => contentShowsSettings("Connection"),
+    "the Connection command opens the Connection section",
+  );
+  assert.equal((await settingsTabs()).length, 1, "still one Settings tab");
   // A section picked in the tab's own nav shows at once.
   await ev(
     '[...document.querySelectorAll(".settings-subnav button")].find((b) => b.textContent.startsWith("Integrations")).click()',

@@ -27,6 +27,8 @@ export interface SshTunnelStatus {
   starting: boolean;
   running: boolean;
   error: string | null;
+  /** Which client runs the tunnel (missing: the in-app client). */
+  client?: "builtin" | "system";
 }
 
 /** The helper forwards managed SSH clients through the in-app private SOCKS listener. */
@@ -102,7 +104,7 @@ export function describeSshTunnelStatus(
     return {
       state: "connected",
       title: "SSH session connected",
-      detail: `Connected to ${status.target}; Surffish and other apps use SOCKS5 at ${SURFFISH_NETWORK_HELPER.host}:${status.port ?? "the configured port"}.`,
+      detail: `Connected to ${status.target}${status.client === "system" ? " with system OpenSSH" : ""}; Surffish and other apps use SOCKS5 at ${SURFFISH_NETWORK_HELPER.host}:${status.port ?? "the configured port"}.`,
     };
   }
   if (status.error) {

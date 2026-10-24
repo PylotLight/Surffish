@@ -49,9 +49,10 @@ function readIndex() {
   );
   const index = {};
   for (const match of source.matchAll(
-    /\.\.\.entries\('(\w+)', \[([\s\S]*?)\]\)(?:,|\n)/g,
+    /\.\.\.entries\(["'](\w+)["'], \[([\s\S]*?)\]\)(?:,|\n)/g,
   )) {
-    index[match[1]] = [...match[2].matchAll(/\['([^']+)'/g)].map(
+    // Either quote style (bun fmt rewrote the index to double quotes).
+    index[match[1]] = [...match[2].matchAll(/\[\s*["']([^"']+)["']/g)].map(
       (label) => label[1],
     );
   }
@@ -138,6 +139,7 @@ async function run() {
   );
   for (const page of [
     "settings",
+    "connection",
     "newtab",
     "integrations",
     "feeds",
@@ -334,6 +336,43 @@ async function run() {
     "query kept across pages",
   );
 
+  smoke.step(
+    'Proxy and SSH moved to Connection: "ssh" on General offers Connection',
+  );
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+  );
+  await waitFor(async () => (await mode()) === "settings", "back on General");
+  await type("ssh");
+  await waitFor(async () => (await status()) !== null, "the ssh search status");
+  const generalRows = await visibleRows();
+  assert.ok(
+    !generalRows.includes("SSH client") &&
+      !generalRows.includes("Local network goes direct"),
+    `General no longer has the proxy rows (${generalRows.join(", ")})`,
+  );
+  await waitFor(
+    async () =>
+      (
+        await ev(
+          '[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)',
+        )
+      ).some((chip) => chip.startsWith("Connection")),
+    "a Connection chip for “ssh”",
+  );
+  await ev(
+    '[...document.querySelectorAll(".settings-search-chip")].find((chip) => chip.textContent.startsWith("Connection")).click()',
+  );
+  await waitFor(
+    async () => (await mode()) === "connection",
+    "the chip to open Connection",
+  );
+  await waitFor(
+    async () => (await visibleRows()).includes("SSH client"),
+    "Connection filtered to the SSH client row",
+  );
+
   smoke.step("Esc clears the query; Settings is a tab, so Esc never closes it");
   await key('document.querySelector(".settings-search input")', "Escape");
   await waitFor(
@@ -343,12 +382,16 @@ async function run() {
       ),
     "Esc to clear the query",
   );
-  assert.equal(await mode(), "newtab", "still in settings after the first Esc");
+  assert.equal(
+    await mode(),
+    "connection",
+    "still in settings after the first Esc",
+  );
   await key('document.querySelector(".settings-search input")', "Escape");
   await delay(300);
   assert.equal(
     await mode(),
-    "newtab",
+    "connection",
     "a second Esc keeps the Settings tab open (it closes like any tab)",
   );
   console.log("Electron settings search smoke passed.");

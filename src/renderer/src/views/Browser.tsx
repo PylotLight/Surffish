@@ -110,6 +110,7 @@ import {
   SettingsCategory,
   SettingsGroup,
   SettingsRow,
+  SettingsSegmented,
 } from "./settings/SettingsControls";
 import {
   SettingsSearchField,
@@ -289,6 +290,7 @@ const DEFAULT_PROXY: BrowserProxySettings = {
   host: "127.0.0.1",
   port: 1080,
   sshHost: "",
+  sshClient: "builtin",
   bypassLocalNetwork: true,
 };
 const BONJOURR_START_PAGE = "https://online.bonjourr.fr/";
@@ -359,6 +361,7 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
 function isSettingsSection(mode: SidebarMode): boolean {
   return (
     mode === "settings" ||
+    mode === "connection" ||
     mode === "newtab" ||
     mode === "integrations" ||
     mode === "site" ||
@@ -375,6 +378,7 @@ function isSettingsSection(mode: SidebarMode): boolean {
 type SettingsSectionMode = Extract<
   SidebarMode,
   | "settings"
+  | "connection"
   | "newtab"
   | "integrations"
   | "site"
@@ -411,6 +415,7 @@ const SETTINGS_SECTIONS: ReadonlyArray<{
   label: string;
 }> = [
   { mode: "settings", label: "General" },
+  { mode: "connection", label: "Connection" },
   { mode: "newtab", label: "New Tab" },
   { mode: "integrations", label: "Integrations" },
   { mode: "languages", label: "Languages" },
@@ -428,7 +433,6 @@ const GENERAL_CATEGORIES: ReadonlyArray<{ id: string; label: string }> = [
   { id: "tabs", label: "Tabs & windows" },
   { id: "mini-window", label: "Mini window" },
   { id: "features", label: "Features" },
-  { id: "connection", label: "Connection" },
   { id: "advanced", label: "Advanced" },
 ];
 
@@ -2213,7 +2217,7 @@ export default function Browser({
   }, [surface]);
 
   useEffect(() => {
-    if (!settingsOnScreen || settingsMode !== "settings") return;
+    if (!settingsOnScreen || settingsMode !== "connection") return;
     let mounted = true;
     const refreshStatus = (): void => {
       void window.api.browser.proxy
@@ -4758,6 +4762,7 @@ export default function Browser({
             />
           )}
           {(pageMode === "settings" ||
+            pageMode === "connection" ||
             pageMode === "newtab" ||
             pageMode === "languages" ||
             isIntegrationsMode(pageMode)) && (
@@ -4771,7 +4776,9 @@ export default function Browser({
                         ? "New Tab"
                         : pageMode === "languages"
                           ? "Languages"
-                          : "General"}
+                          : pageMode === "connection"
+                            ? "Connection"
+                            : "General"}
                   </h1>
                   <p>
                     {isIntegrationsMode(pageMode)
@@ -4780,7 +4787,9 @@ export default function Browser({
                         ? "Layout, clocks, weather and background for new tabs."
                         : pageMode === "languages"
                           ? "Choose the language for on-demand in-page translation."
-                          : "Search, default browser, tabs, privacy and connection."}
+                          : pageMode === "connection"
+                            ? "SOCKS5 proxy, managed SSH tunnel, kill switch and per-site network rules."
+                            : "Search, default browser, tabs, windows and features."}
                   </p>
                 </div>
                 {isIntegrationsMode(pageMode) && (
@@ -4965,332 +4974,6 @@ export default function Browser({
                       <PageWatchersToggle />
                       <SpellcheckSettings />
                     </SettingsCategory>
-                    <SettingsCategory id="connection" title="Connection">
-                      <SettingsGroup
-                        title="SOCKS5 proxy"
-                        status={
-                          appliedProxy.enabled
-                            ? appliedProxy.sshHost
-                              ? `${SURFFISH_NETWORK_HELPER.host}:${appliedProxy.port}`
-                              : `${appliedProxy.host}:${appliedProxy.port}`
-                            : "Direct connection"
-                        }
-                        statusOn={appliedProxy.enabled}
-                        className="settings-connection"
-                        aside={
-                          <input
-                            type="checkbox"
-                            className="settings-switch"
-                            checked={proxy.enabled}
-                            onChange={(event) =>
-                              setProxy((current) => ({
-                                ...current,
-                                enabled: event.target.checked,
-                              }))
-                            }
-                            aria-label="Use local SOCKS5 proxy"
-                          />
-                        }
-                      >
-                        <div className="settings-inline-fields">
-                          {!proxy.sshHost?.trim() && (
-                            <label className="settings-field settings-field-grow">
-                              <span>Host</span>
-                              <input
-                                type="text"
-                                value={proxy.host}
-                                spellCheck={false}
-                                onChange={(event) =>
-                                  setProxy((current) => ({
-                                    ...current,
-                                    host: event.target.value,
-                                  }))
-                                }
-                                aria-label="Local SOCKS5 host"
-                              />
-                            </label>
-                          )}
-                          <label className="settings-field settings-field-port">
-                            <span>
-                              {proxy.sshHost?.trim()
-                                ? "Shared SOCKS5 port"
-                                : "Port"}
-                            </span>
-                            <input
-                              type="number"
-                              value={proxy.port}
-                              min={1}
-                              max={65535}
-                              onChange={(event) =>
-                                setProxy((current) => ({
-                                  ...current,
-                                  port: Number(event.target.value),
-                                }))
-                              }
-                              aria-label={
-                                proxy.sshHost?.trim()
-                                  ? "Shared SOCKS5 port"
-                                  : "Local SOCKS5 port"
-                              }
-                            />
-                          </label>
-                        </div>
-                        {proxy.sshHost?.trim() && (
-                          <p className="settings-help">
-                            Surffish and other apps share{" "}
-                            <code>
-                              {SURFFISH_NETWORK_HELPER.host}:{proxy.port}
-                            </code>
-                            . Choose a free port; the SSH-side listener is
-                            private and selected automatically.
-                          </p>
-                        )}
-                        <div className="settings-inline-fields ssh-host-row">
-                          <label className="settings-field settings-field-grow">
-                            <span>SSH host alias</span>
-                            <input
-                              type="text"
-                              value={proxy.sshHost ?? ""}
-                              spellCheck={false}
-                              placeholder="e.g. work-vpn"
-                              onChange={(event) =>
-                                setProxy((current) => ({
-                                  ...current,
-                                  sshHost: event.target.value,
-                                }))
-                              }
-                              aria-label="SSH host alias for managed SOCKS tunnel"
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="settings-action secondary"
-                            disabled={searchingSshHosts}
-                            onClick={() => void searchSshHostAliases()}
-                          >
-                            {searchingSshHosts
-                              ? "Searching…"
-                              : "Search SSH config"}
-                          </button>
-                        </div>
-                        {sshHostAliases.length > 0 && (
-                          <label className="settings-field settings-field-grow">
-                            <span>Saved SSH hosts</span>
-                            <select
-                              className="settings-select"
-                              value={
-                                sshHostAliases.includes(proxy.sshHost ?? "")
-                                  ? proxy.sshHost
-                                  : ""
-                              }
-                              onChange={(event) =>
-                                setProxy((current) => ({
-                                  ...current,
-                                  sshHost: event.target.value,
-                                }))
-                              }
-                              aria-label="Choose a saved SSH host alias"
-                            >
-                              <option value="">Choose a host…</option>
-                              {sshHostAliases.map((alias) => (
-                                <option key={alias} value={alias}>
-                                  {alias}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                        {sshHostAliasesMessage && (
-                          <p className="settings-help" role="status">
-                            {sshHostAliasesMessage}
-                          </p>
-                        )}
-                        <p className="settings-help">
-                          Search reads Host names from your local ~/.ssh/config
-                          (including included config files). Select one to fill
-                          this field, or enter an SSH alias or user@host
-                          manually.{" "}
-                          {proxy.sshHost?.trim()
-                            ? "With an SSH alias, the shared port above is used by Surffish and other apps."
-                            : `Leave blank only if a SOCKS5 proxy is already running at ${proxy.host}:${proxy.port}.`}
-                        </p>
-                        <div
-                          className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}
-                          role="status"
-                          aria-live="polite"
-                        >
-                          <span
-                            className="ssh-tunnel-status-dot"
-                            aria-hidden="true"
-                          />
-                          <div className="ssh-tunnel-status-copy">
-                            <strong>{sshTunnelStatus.title}</strong>
-                            <span>{sshTunnelStatus.detail}</span>
-                          </div>
-                        </div>
-                        <p className="settings-help">
-                          {proxy.sshHost?.trim() ? (
-                            <>
-                              With SOCKS5 enabled, Save starts OpenSSH dynamic
-                              forwarding to this alias and opens the shared
-                              listener at the port above. Both stop when the
-                              last browser window closes. It uses your SSH
-                              config and agent; if this is a new host, verify
-                              its host key once in Terminal first.
-                            </>
-                          ) : (
-                            <>
-                              Without an SSH host alias, Surffish uses the
-                              existing SOCKS5 service at {proxy.host}:
-                              {proxy.port} directly. It does not open a second
-                              listener or manage an SSH tunnel.
-                            </>
-                          )}
-                        </p>
-                        <SettingsRow
-                          label="Local network goes direct"
-                          hint="Your router, NAS, printer and .local names skip the proxy."
-                          info="Private addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, link-local) and .local names skip the proxy, so your router, NAS or printer opens like in other browsers. Turn off to send them through the tunnel too. Applies when you Save."
-                        >
-                          <input
-                            type="checkbox"
-                            className="settings-switch"
-                            checked={proxy.bypassLocalNetwork !== false}
-                            onChange={(event) =>
-                              setProxy((current) => ({
-                                ...current,
-                                bypassLocalNetwork: event.target.checked,
-                              }))
-                            }
-                            aria-label="Connect to local network addresses directly"
-                          />
-                        </SettingsRow>
-                        <ProxyKillSwitchSetting />
-                        <p
-                          className={`settings-help${proxy.sshHost?.trim() && proxy.enabled && networkHelper?.error ? " is-error" : ""}`}
-                          role="status"
-                        >
-                          <strong>{SURFFISH_NETWORK_HELPER.name}</strong>:{" "}
-                          {proxy.sshHost?.trim() && proxy.enabled
-                            ? networkHelper?.error
-                              ? `Unavailable — ${networkHelper.error}`
-                              : networkHelper?.listening
-                                ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${proxy.port} while a Surffish browser window is open.`
-                                : "Starting the shared listener…"
-                            : proxy.sshHost?.trim()
-                              ? "Off. Enable SOCKS5 and Save to open the shared listener."
-                              : proxy.enabled
-                                ? `No extra listener is needed; use the existing SOCKS5 service at ${proxy.host}:${proxy.port}.`
-                                : "No extra port is reserved. With managed SSH enabled, Surffish opens the shared listener at the port above."}
-                        </p>
-                        <p className="settings-help">
-                          {proxy.sshHost?.trim()
-                            ? "Configure other apps to use the same SOCKS5 endpoint at "
-                            : "Surffish and other apps can use the existing SOCKS5 service at "}
-                          <code>
-                            {proxy.sshHost?.trim()
-                              ? SURFFISH_NETWORK_HELPER.host
-                              : proxy.host}
-                            :{proxy.port}
-                          </code>
-                          .{" "}
-                          {proxy.sshHost?.trim()
-                            ? "The SSH-side port is selected automatically and stays internal. TCP CONNECT traffic fails closed if the tunnel is off or unreachable. Site rules and the local-network bypass do not apply to other apps."
-                            : "No extra Surffish port is opened; the selected local SOCKS5 service must already be running. Browser site rules and local-network bypass apply only inside Surffish."}
-                        </p>
-                        {proxy.sshHost?.trim() && proxy.enabled && (
-                          <section
-                            className="network-helper-activity"
-                            aria-label="Shared SOCKS endpoint live activity"
-                          >
-                            <div className="network-helper-activity-heading">
-                              <strong>Live activity</strong>
-                              <span>
-                                {networkHelperUsage === null
-                                  ? "Checking…"
-                                  : `${networkHelperUsage.activeConnections} active ${networkHelperUsage.activeConnections === 1 ? "connection" : "connections"}`}
-                              </span>
-                            </div>
-                            <div className="network-helper-activity-grid">
-                              <div className="network-helper-activity-metric">
-                                <span>Upload</span>
-                                <strong>
-                                  {formatDownloadSize(
-                                    networkHelperUsage?.uploadBytesPerSecond ??
-                                      0,
-                                  )}
-                                  /s
-                                </strong>
-                                <small>
-                                  {formatDownloadSize(
-                                    networkHelperUsage?.uploadedBytes ?? 0,
-                                  )}{" "}
-                                  sent since helper start
-                                </small>
-                              </div>
-                              <div className="network-helper-activity-metric">
-                                <span>Download</span>
-                                <strong>
-                                  {formatDownloadSize(
-                                    networkHelperUsage?.downloadBytesPerSecond ??
-                                      0,
-                                  )}
-                                  /s
-                                </strong>
-                                <small>
-                                  {formatDownloadSize(
-                                    networkHelperUsage?.downloadedBytes ?? 0,
-                                  )}{" "}
-                                  received since helper start
-                                </small>
-                              </div>
-                            </div>
-                            <p className="settings-help">
-                              Counts SOCKS connections, not app names. Speeds
-                              are averaged over the last 3 seconds; totals reset
-                              when the helper restarts.
-                            </p>
-                          </section>
-                        )}
-                        <div className="settings-actions">
-                          <button
-                            className="settings-action secondary"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void testProxy()}
-                          >
-                            {proxy.sshHost?.trim()
-                              ? "Test endpoint"
-                              : "Test port"}
-                          </button>
-                          <button
-                            className="settings-action primary"
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void saveProxy()}
-                          >
-                            {busy ? "Working…" : "Save"}
-                          </button>
-                        </div>
-                        {(proxyMessage || browser.error) && (
-                          <p
-                            className={`settings-message${proxyMessageIsError || browser.error ? " is-error" : ""}`}
-                            role="status"
-                          >
-                            {browser.error
-                              ? (() => {
-                                  const copy = describeLoadError({
-                                    ...browser.loadError,
-                                    message: browser.error,
-                                  });
-                                  return `${copy.title}. ${copy.detail}`;
-                                })()
-                              : proxyMessage}
-                          </p>
-                        )}
-                      </SettingsGroup>
-                      <NetworkRulesSettings />
-                    </SettingsCategory>
                     <SettingsCategory id="advanced" title="Advanced">
                       <SettingsGroup title="Developer">
                         <SettingsRow
@@ -5315,6 +4998,356 @@ export default function Browser({
                       cookies are saved with OS-backed encryption when
                       available.
                     </p>
+                  </div>
+                )}
+                {pageMode === "connection" && (
+                  <div className="settings-connection-page">
+                    <SettingsGroup
+                      title="SOCKS5 proxy"
+                      status={
+                        appliedProxy.enabled
+                          ? appliedProxy.sshHost
+                            ? `${SURFFISH_NETWORK_HELPER.host}:${appliedProxy.port}`
+                            : `${appliedProxy.host}:${appliedProxy.port}`
+                          : "Direct connection"
+                      }
+                      statusOn={appliedProxy.enabled}
+                      className="settings-connection"
+                      aside={
+                        <input
+                          type="checkbox"
+                          className="settings-switch"
+                          checked={proxy.enabled}
+                          onChange={(event) =>
+                            setProxy((current) => ({
+                              ...current,
+                              enabled: event.target.checked,
+                            }))
+                          }
+                          aria-label="Use local SOCKS5 proxy"
+                        />
+                      }
+                    >
+                      <div className="settings-inline-fields">
+                        {!proxy.sshHost?.trim() && (
+                          <label className="settings-field settings-field-grow">
+                            <span>Host</span>
+                            <input
+                              type="text"
+                              value={proxy.host}
+                              spellCheck={false}
+                              onChange={(event) =>
+                                setProxy((current) => ({
+                                  ...current,
+                                  host: event.target.value,
+                                }))
+                              }
+                              aria-label="Local SOCKS5 host"
+                            />
+                          </label>
+                        )}
+                        <label className="settings-field settings-field-port">
+                          <span>
+                            {proxy.sshHost?.trim()
+                              ? "Shared SOCKS5 port"
+                              : "Port"}
+                          </span>
+                          <input
+                            type="number"
+                            value={proxy.port}
+                            min={1}
+                            max={65535}
+                            onChange={(event) =>
+                              setProxy((current) => ({
+                                ...current,
+                                port: Number(event.target.value),
+                              }))
+                            }
+                            aria-label={
+                              proxy.sshHost?.trim()
+                                ? "Shared SOCKS5 port"
+                                : "Local SOCKS5 port"
+                            }
+                          />
+                        </label>
+                      </div>
+                      {proxy.sshHost?.trim() && (
+                        <p className="settings-help">
+                          Surffish and other apps share{" "}
+                          <code>
+                            {SURFFISH_NETWORK_HELPER.host}:{proxy.port}
+                          </code>
+                          . Choose a free port; the SSH-side listener is private
+                          and selected automatically.
+                        </p>
+                      )}
+                      <div className="settings-inline-fields ssh-host-row">
+                        <label className="settings-field settings-field-grow">
+                          <span>SSH host alias</span>
+                          <input
+                            type="text"
+                            value={proxy.sshHost ?? ""}
+                            spellCheck={false}
+                            placeholder="e.g. work-vpn"
+                            onChange={(event) =>
+                              setProxy((current) => ({
+                                ...current,
+                                sshHost: event.target.value,
+                              }))
+                            }
+                            aria-label="SSH host alias for managed SOCKS tunnel"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="settings-action secondary"
+                          disabled={searchingSshHosts}
+                          onClick={() => void searchSshHostAliases()}
+                        >
+                          {searchingSshHosts
+                            ? "Searching…"
+                            : "Search SSH config"}
+                        </button>
+                      </div>
+                      {sshHostAliases.length > 0 && (
+                        <label className="settings-field settings-field-grow">
+                          <span>Saved SSH hosts</span>
+                          <select
+                            className="settings-select"
+                            value={
+                              sshHostAliases.includes(proxy.sshHost ?? "")
+                                ? proxy.sshHost
+                                : ""
+                            }
+                            onChange={(event) =>
+                              setProxy((current) => ({
+                                ...current,
+                                sshHost: event.target.value,
+                              }))
+                            }
+                            aria-label="Choose a saved SSH host alias"
+                          >
+                            <option value="">Choose a host…</option>
+                            {sshHostAliases.map((alias) => (
+                              <option key={alias} value={alias}>
+                                {alias}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      {sshHostAliasesMessage && (
+                        <p className="settings-help" role="status">
+                          {sshHostAliasesMessage}
+                        </p>
+                      )}
+                      <p className="settings-help">
+                        Search reads Host names from your local ~/.ssh/config
+                        (including included config files). Select one to fill
+                        this field, or enter an SSH alias or user@host manually.{" "}
+                        {proxy.sshHost?.trim()
+                          ? "With an SSH alias, the shared port above is used by Surffish and other apps."
+                          : `Leave blank only if a SOCKS5 proxy is already running at ${proxy.host}:${proxy.port}.`}
+                      </p>
+                      <SettingsRow
+                        label="SSH client"
+                        hint={
+                          (proxy.sshClient ?? "builtin") === "system"
+                            ? "System OpenSSH runs your OS ssh (/usr/bin/ssh on macOS) with your full ~/.ssh/config and agent."
+                            : "Built-in runs inside Surffish and needs no ssh binary or Terminal setup."
+                        }
+                        info="Pick System OpenSSH when the host needs ProxyJump or a jump host, ProxyCommand (cloudflared, AWS SSM, gcloud), Match exec blocks, certificates or a security key (FIDO/YubiKey). The built-in client reads IdentityFile, IdentityAgent, User, Port and known_hosts but not those. Applies when you Save."
+                      >
+                        <SettingsSegmented
+                          value={proxy.sshClient ?? "builtin"}
+                          options={[
+                            { value: "builtin", label: "Built-in" },
+                            { value: "system", label: "System OpenSSH" },
+                          ]}
+                          ariaLabel="SSH client for the managed tunnel"
+                          onChange={(sshClient) =>
+                            setProxy((current) => ({ ...current, sshClient }))
+                          }
+                        />
+                      </SettingsRow>
+                      <div
+                        className={`ssh-tunnel-status is-${sshTunnelStatus.state}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <span
+                          className="ssh-tunnel-status-dot"
+                          aria-hidden="true"
+                        />
+                        <div className="ssh-tunnel-status-copy">
+                          <strong>{sshTunnelStatus.title}</strong>
+                          <span>{sshTunnelStatus.detail}</span>
+                        </div>
+                      </div>
+                      <p className="settings-help">
+                        {proxy.sshHost?.trim() ? (
+                          <>
+                            With SOCKS5 enabled, Save starts{" "}
+                            {(proxy.sshClient ?? "builtin") === "system"
+                              ? "system OpenSSH (ssh -D)"
+                              : "the built-in SSH client"}{" "}
+                            to this alias and opens the shared listener at the
+                            port above. Both stop when the last browser window
+                            closes. It uses your SSH config and agent; if this
+                            is a new host, verify its host key once in Terminal
+                            first.
+                          </>
+                        ) : (
+                          <>
+                            Without an SSH host alias, Surffish uses the
+                            existing SOCKS5 service at {proxy.host}:{proxy.port}{" "}
+                            directly. It does not open a second listener or
+                            manage an SSH tunnel.
+                          </>
+                        )}
+                      </p>
+                      <SettingsRow
+                        label="Local network goes direct"
+                        hint="Your router, NAS, printer and .local names skip the proxy."
+                        info="Private addresses (192.168.x.x, 10.x.x.x, 172.16–31.x.x, link-local) and .local names skip the proxy, so your router, NAS or printer opens like in other browsers. Turn off to send them through the tunnel too. Applies when you Save."
+                      >
+                        <input
+                          type="checkbox"
+                          className="settings-switch"
+                          checked={proxy.bypassLocalNetwork !== false}
+                          onChange={(event) =>
+                            setProxy((current) => ({
+                              ...current,
+                              bypassLocalNetwork: event.target.checked,
+                            }))
+                          }
+                          aria-label="Connect to local network addresses directly"
+                        />
+                      </SettingsRow>
+                      <ProxyKillSwitchSetting />
+                      <p
+                        className={`settings-help${proxy.sshHost?.trim() && proxy.enabled && networkHelper?.error ? " is-error" : ""}`}
+                        role="status"
+                      >
+                        <strong>{SURFFISH_NETWORK_HELPER.name}</strong>:{" "}
+                        {proxy.sshHost?.trim() && proxy.enabled
+                          ? networkHelper?.error
+                            ? `Unavailable — ${networkHelper.error}`
+                            : networkHelper?.listening
+                              ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${proxy.port} while a Surffish browser window is open.`
+                              : "Starting the shared listener…"
+                          : proxy.sshHost?.trim()
+                            ? "Off. Enable SOCKS5 and Save to open the shared listener."
+                            : proxy.enabled
+                              ? `No extra listener is needed; use the existing SOCKS5 service at ${proxy.host}:${proxy.port}.`
+                              : "No extra port is reserved. With managed SSH enabled, Surffish opens the shared listener at the port above."}
+                      </p>
+                      <p className="settings-help">
+                        {proxy.sshHost?.trim()
+                          ? "Configure other apps to use the same SOCKS5 endpoint at "
+                          : "Surffish and other apps can use the existing SOCKS5 service at "}
+                        <code>
+                          {proxy.sshHost?.trim()
+                            ? SURFFISH_NETWORK_HELPER.host
+                            : proxy.host}
+                          :{proxy.port}
+                        </code>
+                        .{" "}
+                        {proxy.sshHost?.trim()
+                          ? "The SSH-side port is selected automatically and stays internal. TCP CONNECT traffic fails closed if the tunnel is off or unreachable. Site rules and the local-network bypass do not apply to other apps."
+                          : "No extra Surffish port is opened; the selected local SOCKS5 service must already be running. Browser site rules and local-network bypass apply only inside Surffish."}
+                      </p>
+                      {proxy.sshHost?.trim() && proxy.enabled && (
+                        <section
+                          className="network-helper-activity"
+                          aria-label="Shared SOCKS endpoint live activity"
+                        >
+                          <div className="network-helper-activity-heading">
+                            <strong>Live activity</strong>
+                            <span>
+                              {networkHelperUsage === null
+                                ? "Checking…"
+                                : `${networkHelperUsage.activeConnections} active ${networkHelperUsage.activeConnections === 1 ? "connection" : "connections"}`}
+                            </span>
+                          </div>
+                          <div className="network-helper-activity-grid">
+                            <div className="network-helper-activity-metric">
+                              <span>Upload</span>
+                              <strong>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.uploadBytesPerSecond ?? 0,
+                                )}
+                                /s
+                              </strong>
+                              <small>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.uploadedBytes ?? 0,
+                                )}{" "}
+                                sent since helper start
+                              </small>
+                            </div>
+                            <div className="network-helper-activity-metric">
+                              <span>Download</span>
+                              <strong>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.downloadBytesPerSecond ??
+                                    0,
+                                )}
+                                /s
+                              </strong>
+                              <small>
+                                {formatDownloadSize(
+                                  networkHelperUsage?.downloadedBytes ?? 0,
+                                )}{" "}
+                                received since helper start
+                              </small>
+                            </div>
+                          </div>
+                          <p className="settings-help">
+                            Counts SOCKS connections, not app names. Speeds are
+                            averaged over the last 3 seconds; totals reset when
+                            the helper restarts.
+                          </p>
+                        </section>
+                      )}
+                      <div className="settings-actions">
+                        <button
+                          className="settings-action secondary"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void testProxy()}
+                        >
+                          {proxy.sshHost?.trim()
+                            ? "Test endpoint"
+                            : "Test port"}
+                        </button>
+                        <button
+                          className="settings-action primary"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void saveProxy()}
+                        >
+                          {busy ? "Working…" : "Save"}
+                        </button>
+                      </div>
+                      {(proxyMessage || browser.error) && (
+                        <p
+                          className={`settings-message${proxyMessageIsError || browser.error ? " is-error" : ""}`}
+                          role="status"
+                        >
+                          {browser.error
+                            ? (() => {
+                                const copy = describeLoadError({
+                                  ...browser.loadError,
+                                  message: browser.error,
+                                });
+                                return `${copy.title}. ${copy.detail}`;
+                              })()
+                            : proxyMessage}
+                        </p>
+                      )}
+                    </SettingsGroup>
+                    <NetworkRulesSettings />
                   </div>
                 )}
                 {pageMode === "languages" && (

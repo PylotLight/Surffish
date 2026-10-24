@@ -69,7 +69,7 @@ async function run() {
   );
   await smoke.evaluate(
     toolbar,
-    'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+    'window.api.browser.chrome.set({ sidebarMode: "connection" })',
   );
   const countText =
     'document.querySelector(".network-helper-activity-heading > span")?.textContent';
@@ -79,11 +79,11 @@ async function run() {
     "Connection settings show SSH session status separately from the helper listener",
   );
   await waitFor(
-    async () => (await ev(tunnelStatusText)).includes("Not configured"),
+    async () => (await ev(tunnelStatusText)).includes("No managed SSH tunnel"),
     "the unconfigured SSH tunnel status",
   );
   smoke.step(
-    "General Settings shows the live helper activity without the Network inspector",
+    "Settings → Connection shows the live helper activity without the Network inspector",
   );
   await waitFor(
     async () => (await ev(countText)) === "0 active connections",

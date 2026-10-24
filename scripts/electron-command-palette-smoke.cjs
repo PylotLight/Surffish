@@ -175,6 +175,7 @@ async function run() {
     "view.history",
     "view.downloads",
     "settings.general",
+    "settings.connection",
     "tools.network",
     "tab.copyCleanLink",
     "pdf.toggleEditor",

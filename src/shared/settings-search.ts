@@ -8,6 +8,7 @@
 
 export type SettingsSearchMode =
   | "settings"
+  | "connection"
   | "newtab"
   | "integrations"
   | "feeds"
@@ -43,7 +44,10 @@ const SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   socks: ["socks5", "proxy"],
   vpn: ["proxy", "kill switch"],
   tunnel: ["proxy"],
-  ssh: ["proxy"],
+  ssh: ["proxy", "ssh client"],
+  openssh: ["ssh client"],
+  proxyjump: ["ssh client"],
+  bastion: ["ssh client"],
   password: ["bramble", "quick unlock"],
   passwords: ["bramble", "quick unlock"],
   pin: ["quick unlock"],
@@ -209,13 +213,19 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
     ["Cast to Chromecast", "cast tv google cast mirror screen"],
     ["Page Watchers", "watch changes"],
     ["Spellcheck", "languages spelling"],
-    ["SOCKS5 proxy", "host port tunnel"],
-    ["Local network goes direct", "bypass"],
-    ["Kill switch", "block"],
-    ["Network rules", "route override"],
     ["Developer"],
     ["Network inspector", "requests"],
     ["About & updates", "version check"],
+  ]),
+  ...entries("connection", [
+    ["SOCKS5 proxy", "host port tunnel"],
+    [
+      "SSH client",
+      "openssh system built-in proxyjump proxycommand jump host bastion match security key yubikey fido",
+    ],
+    ["Local network goes direct", "bypass"],
+    ["Kill switch", "block"],
+    ["Network rules", "route override"],
   ]),
   ...entries("newtab", [
     ["New tab opens", "page"],

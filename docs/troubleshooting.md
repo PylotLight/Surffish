@@ -4,6 +4,8 @@
 
 If **SSH host alias** is set in **Settings → Connection → SOCKS5 proxy**, choose a free **Shared SOCKS5 port**. Surffish and other apps use `127.0.0.1:<port>`; the SSH-side port is selected automatically and stays internal. If the chosen port is already in use, choose another free port. Check that the alias exists in `~/.ssh/config` (or use `user@host`) and that its host key has been accepted.
 
+If `ssh <alias>` works in Terminal but the tunnel doesn't, the host probably needs something the built-in client doesn't read (`ProxyJump`, `ProxyCommand`, `Match exec`, certificates or a security key). Switch **SSH client** to **System OpenSSH** in **Settings → Connection** and Save. Launch Surffish with `SURFFISH_SSH_DEBUG=1` to log the connection trace (system OpenSSH runs with `-v`).
+
 If you manage the SSH tunnel yourself, start a local SOCKS5 endpoint such as:
 
 ```bash
