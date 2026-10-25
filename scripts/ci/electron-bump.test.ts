@@ -15,6 +15,11 @@ describe("electron bump policy", () => {
     expect(pickTarget("45.0.0-beta.2", pub, "beta")).toBe("45.0.0-beta.3");
     expect(pickTarget("45.0.0-beta.3", pub, "beta")).toBeNull();
   });
+  test("beta: accepts an alpha pin but never selects alpha or nightly releases", () => {
+    const p = ["46.0.0-alpha.2", "46.0.0-beta.1", "46.0.0-nightly.20261014"];
+    expect(pickTarget("46.0.0-alpha.1", p, "beta")).toBe("46.0.0-beta.1");
+    expect(pickTarget("46.0.0-alpha.1", ["46.0.0-alpha.2"], "beta")).toBeNull();
+  });
   test("beta: moves from 44 stable to the 45 beta, never alpha or nightly", () => {
     expect(pickTarget("44.7.2", pub, "beta")).toBe("45.0.0-beta.3");
   });
@@ -43,7 +48,23 @@ describe("electron bump policy", () => {
       "45.0.0",
     );
   });
+  test("stable: accepts an alpha pin but selects only stable releases", () => {
+    expect(
+      pickTarget(
+        "46.0.0-alpha.1",
+        ["46.0.0-alpha.2", "46.0.0-beta.1"],
+        "stable",
+      ),
+    ).toBeNull();
+    expect(
+      pickTarget("46.0.0-alpha.1", ["46.0.0-beta.1", "46.0.0"], "stable"),
+    ).toBe("46.0.0");
+  });
   test("rejects a range pin", () => {
     expect(() => pickTarget("^45.0.0", pub, "beta")).toThrow();
+  });
+  test("rejects malformed alpha pins and nightly pins", () => {
+    expect(() => pickTarget("46.0.0-alpha", pub, "beta")).toThrow();
+    expect(() => pickTarget("46.0.0-nightly.20261014", pub, "beta")).toThrow();
   });
 });

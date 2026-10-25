@@ -29,7 +29,7 @@ on:
         options: [beta, stable-after-ga, stable]
         default: beta
       version:
-        description: Exact Electron version to pin instead (optional, e.g. 45.0.0-beta.4)
+        description: Exact Electron version to pin instead (optional, e.g. 45.0.0-beta.4 or 46.0.0-alpha.1)
         type: string
         default: ""
       dry_run:
