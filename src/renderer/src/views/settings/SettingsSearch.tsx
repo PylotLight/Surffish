@@ -159,12 +159,18 @@ export function SettingsToc({
     const update = (): void => {
       frame = 0;
       const top = scroller.getBoundingClientRect().top;
-      let active = categories[0]?.id ?? "";
-      for (const category of categories) {
+      const visible = categories.filter((category) => {
         const element = scroller.querySelector<HTMLElement>(
           `[data-category="${category.id}"]`,
         );
-        if (!element || element.hasAttribute("data-search-miss")) continue;
+        return element && !element.hasAttribute("data-search-miss");
+      });
+      let active = visible[0]?.id ?? "";
+      for (const category of visible) {
+        const element = scroller.querySelector<HTMLElement>(
+          `[data-category="${category.id}"]`,
+        );
+        if (!element) continue;
         if (element.getBoundingClientRect().top - top <= 96)
           active = category.id;
       }
@@ -173,12 +179,6 @@ export function SettingsToc({
         scroller.scrollTop + scroller.clientHeight >=
         scroller.scrollHeight - 4
       ) {
-        const visible = categories.filter(
-          (category) =>
-            !scroller
-              .querySelector(`[data-category="${category.id}"]`)
-              ?.hasAttribute("data-search-miss"),
-        );
         active = visible[visible.length - 1]?.id ?? active;
       }
       setCurrent(active);

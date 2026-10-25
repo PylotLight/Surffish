@@ -144,13 +144,21 @@ async function run() {
     "integrations",
     "feeds",
     "readaloud",
+    "languages",
     "privacy",
     "watchers",
   ]) {
-    await smoke.evaluate(
-      toolbar,
-      `window.api.browser.chrome.set({ sidebarMode: ${JSON.stringify(page)} })`,
-    );
+    if (page === "languages") {
+      await smoke.evaluate(
+        toolbar,
+        'window.api.browser.settings.open({ section: "languages" })',
+      );
+    } else {
+      await smoke.evaluate(
+        toolbar,
+        `window.api.browser.chrome.set({ sidebarMode: ${JSON.stringify(page)} })`,
+      );
+    }
     const missing = await waitFor(
       async () => {
         const gone = await ev(
@@ -393,6 +401,92 @@ async function run() {
     await mode(),
     "connection",
     "a second Esc keeps the Settings tab open (it closes like any tab)",
+  );
+  smoke.step('"translate" and "translation" find the separate Languages page');
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+  );
+  await waitFor(async () => (await mode()) === "settings", "back on General");
+  for (const query of ["translate", "translation"]) {
+    await type(query);
+    await waitFor(
+      async () =>
+        (await status()) === `Nothing on this page matches “${query}”`,
+      `General has no local match for “${query}”`,
+    );
+    await waitFor(
+      async () =>
+        (
+          await ev(
+            '[...document.querySelectorAll(".settings-search-chip")].map((chip) => chip.textContent)',
+          )
+        ).some((chip) => chip.startsWith("Languages")),
+      `a Languages chip for “${query}”`,
+    );
+    await ev(
+      '[...document.querySelectorAll(".settings-search-chip")].find((chip) => chip.textContent.startsWith("Languages")).click()',
+    );
+    await waitFor(async () => (await mode()) === "languages", "Languages page");
+    await waitFor(
+      async () => (await visibleRows()).includes("Target language"),
+      `the Target language row for “${query}”`,
+    );
+    assert.equal(
+      await ev('document.querySelector(".settings-search input").value'),
+      query,
+      `the “${query}” query remains active on Languages`,
+    );
+    await smoke.evaluate(
+      toolbar,
+      'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+    );
+    await waitFor(async () => (await mode()) === "settings", "back on General");
+  }
+  smoke.step(
+    "Narrow settings navigation wraps and keeps General jumps visible",
+  );
+  await smoke.evaluate(
+    toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "settings" })',
+  );
+  await waitFor(async () => (await mode()) === "settings", "back on General");
+  await type("");
+  await waitFor(
+    () =>
+      ev(
+        'document.querySelector(".settings-search input").value === "" && document.querySelectorAll(".settings-toc button").length === 6',
+      ),
+    "all General categories restored",
+  );
+  mainWindow.setBounds({ x: 0, y: 0, width: 760, height: 860 });
+  const narrowNavigation = await waitFor(
+    async () =>
+      ev(
+        '(() => { const nav = document.querySelector(".settings-subnav"); const search = nav?.querySelector(".settings-search"); const buttons = [...(nav?.querySelectorAll(":scope > button") ?? [])]; const toc = document.querySelector(".settings-toc"); if (window.innerWidth > 800 || !nav || !search || !toc || !buttons.length) return null; return { viewportWidth: window.innerWidth, navWidth: nav.clientWidth, navFits: nav.scrollWidth <= nav.clientWidth + 1, searchBelowButtons: search.getBoundingClientRect().top >= Math.max(...buttons.map((button) => button.getBoundingClientRect().bottom)) - 1, tocLayout: getComputedStyle(toc).display, tocButtons: toc.querySelectorAll("button").length, tocFits: toc.scrollWidth <= toc.clientWidth + 1 } })()',
+      ),
+    "compact settings navigation",
+  );
+  assert.equal(
+    narrowNavigation.navFits,
+    true,
+    "section navigation does not overflow",
+  );
+  assert.equal(
+    narrowNavigation.searchBelowButtons,
+    true,
+    "search gets its own row below the section buttons",
+  );
+  assert.equal(narrowNavigation.tocLayout, "grid", "General jumps use a grid");
+  assert.equal(
+    narrowNavigation.tocButtons,
+    6,
+    "all General categories stay visible",
+  );
+  assert.equal(
+    narrowNavigation.tocFits,
+    true,
+    "General jumps do not scroll sideways",
   );
   console.log("Electron settings search smoke passed.");
 }

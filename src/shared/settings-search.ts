@@ -59,6 +59,8 @@ const SYNONYMS: Readonly<Record<string, readonly string[]>> = {
   ollama: ["built-in ai", "server"],
   spelling: ["spellcheck"],
   dictionary: ["spellcheck"],
+  translate: ["translation", "target language", "in-page translation"],
+  translating: ["translation", "translate"],
   update: ["updates"],
   version: ["about & updates"],
   history: ["clear browsing data"],
@@ -275,6 +277,9 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
       "Read Aloud (experimental)",
       "text to speech tts listen voice voices accent british american phonon narrate model download voice tester speed 2x 3x sample realtime expressiveness temperature numbers dates times webgpu threads read from here shortcut recommended",
     ],
+  ]),
+  ...entries("languages", [
+    ["Target language", "translate translation in-page page text Google"],
   ]),
   ...entries("privacy", [
     ["Clear browsing data", "history cache"],

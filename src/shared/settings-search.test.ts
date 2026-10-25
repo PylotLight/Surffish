@@ -120,6 +120,20 @@ describe("settingsMatchesElsewhere", () => {
     ).toEqual(["readaloud"]);
     expect(settingsMatchesElsewhere("phonon", "feeds")).toEqual([]);
   });
+  test("translate and translation find the separate Languages page", () => {
+    for (const query of ["translate", "translation"]) {
+      expect(settingsMatchesElsewhere(query, "settings")).toEqual([
+        {
+          mode: "languages",
+          count: 1,
+          labels: ["Target language"],
+        },
+      ]);
+    }
+    expect(
+      matchesSettingsQuery("Translation", parseSettingsQuery("translate")),
+    ).toBe(true);
+  });
   test("proxy and SSH searches from General point at Connection", () => {
     for (const query of ["proxy", "ssh", "openssh", "proxyjump", "kill switch"])
       expect(
