@@ -15,36 +15,32 @@ interface V {
   major: number;
   minor: number;
   patch: number;
-  beta: number | null;
+  prerelease: { channel: "alpha" | "beta"; number: number } | null;
   raw: string;
 }
 
 function parse(raw: string): V | null {
-  const m = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/.exec(raw.trim());
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta)\.(\d+))?$/.exec(raw.trim());
   if (!m) return null;
+  const channel = m[4] as "alpha" | "beta" | undefined;
   return {
     major: +m[1]!,
     minor: +m[2]!,
     patch: +m[3]!,
-    beta: m[4] === undefined ? null : +m[4],
+    prerelease: channel === undefined ? null : { channel, number: +m[5]! },
     raw: raw.trim(),
   };
 }
 
 function compare(a: V, b: V): number {
-  return (
-    a.major - b.major ||
-    a.minor - b.minor ||
-    a.patch - b.patch ||
-    // a stable x.y.z is newer than any x.y.z-beta.N
-    (a.beta === b.beta
-      ? 0
-      : a.beta === null
-        ? 1
-        : b.beta === null
-          ? -1
-          : a.beta - b.beta)
-  );
+  const core = a.major - b.major || a.minor - b.minor || a.patch - b.patch;
+  if (core !== 0) return core;
+  // Stable is newer than any pre-release; beta is newer than alpha.
+  if (a.prerelease === null) return b.prerelease === null ? 0 : 1;
+  if (b.prerelease === null) return -1;
+  if (a.prerelease.channel !== b.prerelease.channel)
+    return a.prerelease.channel === "alpha" ? -1 : 1;
+  return a.prerelease.number - b.prerelease.number;
 }
 
 /** The version to pin, or null when the current pin is already the policy's choice. */
@@ -56,24 +52,28 @@ export function pickTarget(
   const cur = parse(current);
   if (!cur)
     throw new Error(
-      `current electron pin "${current}" is not an exact x.y.z or x.y.z-beta.N`,
+      `current electron pin "${current}" is not an exact x.y.z, x.y.z-alpha.N, or x.y.z-beta.N`,
     );
   const all = published
     .map(parse)
     .filter((v): v is V => v !== null)
     .sort(compare);
   const stableOf = (major: number) =>
-    all.filter((v) => v.major === major && v.beta === null);
+    all.filter((v) => v.major === major && v.prerelease === null);
   let pool: V[];
   if (policy === "beta") {
-    pool = all.filter((v) => v.major >= cur.major);
+    pool = all.filter(
+      (v) => v.major >= cur.major && v.prerelease?.channel !== "alpha",
+    );
   } else if (policy === "stable-after-ga") {
     const curMajorIsGa = stableOf(cur.major).length > 0;
     pool = curMajorIsGa
-      ? all.filter((v) => v.beta === null && v.major >= cur.major)
-      : all.filter((v) => v.major === cur.major);
+      ? all.filter((v) => v.prerelease === null && v.major >= cur.major)
+      : all.filter(
+          (v) => v.major === cur.major && v.prerelease?.channel !== "alpha",
+        );
   } else {
-    pool = all.filter((v) => v.beta === null && v.major >= cur.major);
+    pool = all.filter((v) => v.prerelease === null && v.major >= cur.major);
   }
   const best = pool.at(-1);
   if (!best || compare(best, cur) <= 0) return null;
@@ -93,7 +93,7 @@ if (import.meta.main) {
   if (override) {
     if (!parse(override))
       throw new Error(
-        `version "${override}" is not an exact x.y.z or x.y.z-beta.N`,
+        `version "${override}" is not an exact x.y.z, x.y.z-alpha.N, or x.y.z-beta.N`,
       );
     target = override === current ? null : override;
   } else {
