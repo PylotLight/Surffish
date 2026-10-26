@@ -30,6 +30,7 @@
     "test:electron-ui-font": "electron scripts/electron-ui-font-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
     "test:electron-sidebar-backdrop": "electron scripts/electron-sidebar-backdrop-smoke.cjs",
+    "test:browser-chrome-helpers": "bun test src/renderer/src/views/browser/chrome-helpers.test.ts",
     "test:electron-table-stakes": "electron scripts/electron-table-stakes-smoke.cjs",
     "test:electron-safety": "electron scripts/electron-safety-smoke.cjs",
     "test:electron-sqlite-store": "electron scripts/electron-sqlite-store-smoke.cjs",

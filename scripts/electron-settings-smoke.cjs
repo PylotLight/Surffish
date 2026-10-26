@@ -367,21 +367,65 @@ async function run() {
     ],
   );
   await ev(
-    '(() => { const b = document.querySelector(\'[aria-label="Mini window grouping"] [aria-checked=true]\'); b.focus(); b.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })) })()',
+    '(() => { window.__settingsSmokeArrowKey = null; document.addEventListener("keydown", (event) => { if (event.key === "ArrowRight" || event.key === "Right") window.__settingsSmokeArrowKey = { key: event.key, trusted: event.isTrusted, target: event.target instanceof Element ? event.target.textContent.trim() : null }; }, { capture: true }) })()',
   );
-  await waitFor(
-    async () =>
-      (await ev("window.api.browser.miniWindow.getSettings()")).settings
-        .grouping === "stack",
-    "ArrowRight to select Stack",
+  // Send the key through WebContents so Chromium exercises the real keyboard path.
+  content.focus();
+  await ev(
+    "document.querySelector('[aria-label=\"Mini window grouping\"] [aria-checked=true]').focus()",
   );
   await waitFor(
     () =>
       ev(
-        'document.activeElement?.textContent === "Stack" && document.activeElement.getAttribute("aria-checked") === "true"',
+        "document.activeElement === document.querySelector('[aria-label=\"Mini window grouping\"] [aria-checked=true]')",
       ),
-    "focus following the selection",
+    "Tabs radio focused before ArrowRight",
   );
+  content.sendInputEvent({ type: "keyDown", keyCode: "Right" });
+  content.sendInputEvent({ type: "keyUp", keyCode: "Right" });
+  await waitFor(
+    () => ev("window.__settingsSmokeArrowKey !== null"),
+    "a keyboard event delivered to the focused Tabs radio",
+  );
+  assert.deepEqual(
+    await ev(
+      "({ key: window.__settingsSmokeArrowKey.key, target: window.__settingsSmokeArrowKey.target })",
+    ),
+    { key: "ArrowRight", target: "Tabs" },
+    "ArrowRight reaches the focused Tabs radio",
+  );
+  let lastGroupingState;
+  try {
+    await waitFor(async () => {
+      lastGroupingState = await ev(`(async () => {
+          const snapshot = await window.api.browser.miniWindow.getSettings();
+          const radios = [...document.querySelectorAll('[aria-label="Mini window grouping"] [role=radio]')].map((radio) => ({
+            label: radio.textContent.trim(),
+            checked: radio.getAttribute("aria-checked"),
+            focused: document.activeElement === radio,
+          }));
+          return { grouping: snapshot.settings.grouping, activeText: document.activeElement?.textContent?.trim() ?? null, key: window.__settingsSmokeArrowKey, radios };
+        })()`);
+      return lastGroupingState.grouping === "stack";
+    }, "ArrowRight to select Stack");
+  } catch (error) {
+    throw new Error(
+      `${error.message} Last observed state: ${JSON.stringify(lastGroupingState)}`,
+    );
+  }
+  let lastStackState;
+  try {
+    await waitFor(async () => {
+      lastStackState = await ev(
+        '(() => { const stack = [...document.querySelectorAll(\'[aria-label="Mini window grouping"] [role=radio]\')].find((radio) => radio.textContent.trim() === "Stack"); return { checked: stack?.getAttribute("aria-checked"), focused: document.activeElement === stack, activeText: document.activeElement?.textContent?.trim() ?? null } })()',
+      );
+      return lastStackState.checked === "true" && lastStackState.focused;
+    }, "Stack radio to be selected and focused");
+  } catch (error) {
+    throw new Error(
+      `${error.message} Last observed state: ${JSON.stringify(lastStackState)}`,
+    );
+  }
   assert.match(
     await ev(
       `${mini}.querySelector('details[data-disclosure="mini-window-windows"] .settings-disclosure-value').textContent`,

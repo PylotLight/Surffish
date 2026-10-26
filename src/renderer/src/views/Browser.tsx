@@ -13,7 +13,6 @@ import type {
   BrambleExtensionState,
   BrowserChromeState,
   BrowserPreferencesSnapshot,
-  BrowserSidebarMode,
   BrowserProxySettings,
   BrowserState,
   BrowserTabSummary,
@@ -56,7 +55,6 @@ import { omniboxSuggestions } from "../../../shared/autocomplete";
 import {
   arrowSuggestion,
   escapeOmnibox,
-  highlightMatches,
   keywordSuggestionText,
   omniboxQuery,
   suggestionUrlParts,
@@ -70,19 +68,15 @@ import {
 } from "../../../shared/preconnect";
 import { addressDisplayValue } from "../../../shared/address-bar-sync";
 import { formatDownloadSize } from "../../../shared/downloads";
-import { describeTabSleep, isRestoredSleep } from "../../../shared/tab-sleep";
 import { useAddressBarSync } from "./useAddressBarSync";
+import { Sidebar } from "./browser/Sidebar";
 import { FAVOURITES_FOLDER_ID } from "../../../shared/bookmarks";
 import { formatZoomPercent, isDefaultZoom } from "../../../shared/zoom";
 import {
   dispatchBrambleToolbarAction,
   resolveBrambleToolbarAction,
 } from "../../../shared/bramble-toolbar";
-import {
-  buildFrequentSites,
-  toQuickLinkSite,
-  type QuickLinkSite,
-} from "../../../shared/quick-links";
+import { buildFrequentSites } from "../../../shared/quick-links";
 import {
   getQuickLinkBackgroundIndex,
   nextQuickLinkBackgroundIndex,
@@ -94,16 +88,33 @@ import { NEW_TAB_PHOTO_REFRESH_INTERVAL_MS } from "../../../shared/new-tab-photo
 import forestLake from "../assets/quick-links-backgrounds/forest-lake.webp";
 import mountainLake from "../assets/quick-links-backgrounds/tranquil-mountain-lake.webp";
 import brambleExtensionIcon from "../assets/bramble-extension-icon.png";
+import {
+  GENERAL_CATEGORIES,
+  INTEGRATIONS_TABS,
+  SETTINGS_SECTIONS,
+  httpOrigin,
+  isIntegrationsMode,
+  isSettingsSection,
+  settingsNavMode,
+  type SettingsSectionMode,
+  type SidebarMode,
+  type BrowserSurface,
+} from "./browser/chrome-helpers";
+import {
+  toQuickLinkSite,
+  type QuickLinkSite,
+} from "../../../shared/quick-links";
+import {
+  NewTabSiteIcon,
+  HighlightedText,
+  SuggestionFavicon,
+  DownloadsToolbarProgress,
+} from "./browser/icons";
 import { FindBar } from "./FindBar";
 import { CommandPalette } from "./CommandPalette";
 import { useSearchKeywords } from "./useSearchKeywords";
 import { parseKeywordSearch } from "../../../shared/search-keywords";
-import {
-  PinnedTabIcon,
-  PrivateGlyph,
-  TabAudioButton,
-  TabFavicon,
-} from "./TabIndicators";
+import { PrivateGlyph } from "./TabIndicators";
 import { usePinnedDragSort, usePinReorderModifier } from "./usePinnedDragSort";
 import { NavHistoryButtons } from "./NavHistoryButtons";
 import {
@@ -125,9 +136,7 @@ import {
   isInsecurePageUrl,
   pageTransportSecurity,
 } from "../../../shared/https-only";
-import { UpdateBadge } from "./settings/UpdateBadge";
 import { SiteSettingsQuick } from "./sites/SiteSettingsQuick";
-import { formatVisitedAt } from "../lib/format";
 import { dismissPopovers, usePopoverDismiss } from "../lib/popover-dismiss";
 import {
   useDismissOnTabSwitch,
@@ -139,15 +148,9 @@ import {
   useBrandTripleClick,
 } from "./easter-egg/BrandEasterEgg";
 import { useTabDragSort } from "./useTabDragSort";
-import { SplitTabEntry } from "./SplitTabEntry";
 import { groupTabEntries } from "../../../shared/split-view";
-import {
-  dropTargetGroup,
-  TAB_GROUP_COLOR_VALUES,
-  withGroupHeaders,
-} from "../../../shared/tab-groups";
+import { dropTargetGroup, withGroupHeaders } from "../../../shared/tab-groups";
 import { useTabSelection } from "./tab-groups/useTabSelection";
-import { TabGroupHeader } from "./tab-groups/TabGroupHeader";
 import { useGroupReveal } from "./tab-groups/useGroupReveal";
 import {
   BRAMBLE_TOOLBAR_ID,
@@ -168,7 +171,6 @@ import { requestToolbarOpen } from "./toolbar/toolbar-slot";
 import {
   DOWNLOADS_SEEN_STORAGE_KEY,
   useDownloadsAttention,
-  useDownloadsProgress,
   useToolbarLayout,
   useToolbarOverflow,
 } from "./toolbar/useToolbarLayout";
@@ -208,10 +210,9 @@ import { BookmarksMenuButton } from "./bookmarks/BookmarksMenu";
 import { ReadingListButton } from "./reading-list/ReadingListButton";
 import { ReadAloudSlot } from "./read-aloud/ReadAloudSlot";
 import { AdblockButton } from "./adblock/AdblockButton";
-import { CastButton, TabCastBadge, useCastTabId } from "./cast/CastButton";
+import { CastButton, useCastTabId } from "./cast/CastButton";
 import { BookmarksBar } from "./bookmarks/BookmarksBar";
-import { SpacesSwitcher, useSpaces } from "./spaces/SpacesSwitcher";
-import { SPACE_COLOR_VALUES } from "../../../shared/spaces";
+import { useSpaces } from "./spaces/SpacesSwitcher";
 import { BrowserNotice, LoadErrorNotice, LoadErrorPage } from "./BrowserNotice";
 import {
   describeLoadError,
@@ -221,7 +222,6 @@ import {
 import {
   AppearanceSettings,
   ToolbarSettings,
-  ArchivedTabsSidebar,
   BookmarkImportPanel,
   BookmarksManager,
   CommandPaletteSettings,
@@ -262,7 +262,7 @@ import {
   type SiteCertificateInfo,
 } from "../../../shared/certificates";
 import { useNetworkToolEnabled } from "./useNetworkToolEnabled";
-import { useTabUsageHints, withTabUsageHint } from "./tabUsageHints";
+import { useTabUsageHints } from "./tabUsageHints";
 import {
   usePageWatchersEnabled,
   useUnseenWatcherCount,
@@ -277,11 +277,7 @@ import "./bookmarks/bookmarks.css";
 import "./toolbar-popovers.css";
 import "./toolbar-icons.css";
 import "./toolbar/toolbar.css";
-import {
-  SidebarBackdropLayer,
-  sidebarBackdropClass,
-  useSidebarBackdrop,
-} from "./SidebarBackdrop";
+import { useSidebarBackdrop } from "./SidebarBackdrop";
 import "./SidebarBackdrop.css";
 import "./motion.css";
 
@@ -346,9 +342,6 @@ const EMPTY_BRAMBLE_POC: BrambleExtensionState = {
   iconDataUrl: null,
 };
 
-type SidebarMode = BrowserSidebarMode;
-type BrowserSurface = "content" | "toolbar" | "sidebar";
-
 const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarMode: "tabs",
   sidebarPinned: false,
@@ -357,319 +350,6 @@ const DEFAULT_CHROME_STATE: BrowserChromeState = {
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   sidebarResizing: false,
 };
-
-function isSettingsSection(mode: SidebarMode): boolean {
-  return (
-    mode === "settings" ||
-    mode === "connection" ||
-    mode === "newtab" ||
-    mode === "integrations" ||
-    mode === "site" ||
-    mode === "network" ||
-    mode === "privacy" ||
-    mode === "diagnostics" ||
-    mode === "watchers" ||
-    mode === "feeds" ||
-    mode === "readaloud" ||
-    mode === "languages"
-  );
-}
-
-type SettingsSectionMode = Extract<
-  SidebarMode,
-  | "settings"
-  | "connection"
-  | "newtab"
-  | "integrations"
-  | "site"
-  | "network"
-  | "privacy"
-  | "diagnostics"
-  | "watchers"
-  | "feeds"
-  | "readaloud"
-  | "languages"
->;
-
-/** Settings → Integrations has sub-areas; each is its own sidebar mode so links can land on one directly. */
-const INTEGRATIONS_TABS: ReadonlyArray<{
-  mode: Extract<SettingsSectionMode, "integrations" | "feeds" | "readaloud">;
-  label: string;
-}> = [
-  { mode: "integrations", label: "Extensions" },
-  { mode: "feeds", label: "Feeds" },
-  { mode: "readaloud", label: "Read Aloud" },
-];
-
-function isIntegrationsMode(mode: SidebarMode): boolean {
-  return mode === "integrations" || mode === "feeds" || mode === "readaloud";
-}
-
-/** The top-level settings nav entry a mode belongs to (Feeds and Read Aloud live under Integrations). */
-function settingsNavMode(mode: SidebarMode): SidebarMode {
-  return isIntegrationsMode(mode) ? "integrations" : mode;
-}
-
-const SETTINGS_SECTIONS: ReadonlyArray<{
-  mode: SettingsSectionMode;
-  label: string;
-}> = [
-  { mode: "settings", label: "General" },
-  { mode: "connection", label: "Connection" },
-  { mode: "newtab", label: "New Tab" },
-  { mode: "integrations", label: "Integrations" },
-  { mode: "languages", label: "Languages" },
-  { mode: "privacy", label: "Privacy" },
-  { mode: "watchers", label: "Watchers" },
-  { mode: "site", label: "Sites" },
-  { mode: "network", label: "Network" },
-  { mode: "diagnostics", label: "Diagnostics" },
-];
-
-/** General is long: its groups sit in these categories (sticky headings + the jump list beside them). */
-const GENERAL_CATEGORIES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "browsing", label: "Browsing" },
-  { id: "appearance", label: "Appearance" },
-  { id: "tabs", label: "Tabs & windows" },
-  { id: "mini-window", label: "Mini window" },
-  { id: "features", label: "Features" },
-  { id: "advanced", label: "Advanced" },
-];
-
-function httpOrigin(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.origin
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function historyHost(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
-
-function NewTabSiteIcon({
-  site,
-  faviconUrl,
-  showLabel,
-  iconSize,
-  onOpen,
-}: {
-  site: QuickLinkSite;
-  faviconUrl?: string | null;
-  showLabel: boolean;
-  iconSize: number;
-  onOpen: () => void;
-}): React.JSX.Element {
-  const fallbackFaviconUrl = `${site.origin}/favicon.ico`;
-  const preferredFaviconUrl =
-    faviconUrl ?? site.faviconUrl ?? fallbackFaviconUrl;
-  const [iconFailed, setIconFailed] = useState(false);
-  const [iconSource, setIconSource] = useState(preferredFaviconUrl);
-  useEffect(() => {
-    setIconFailed(false);
-    setIconSource(preferredFaviconUrl);
-  }, [preferredFaviconUrl]);
-  const hostname = new URL(site.origin).hostname.replace(/^www\./i, "");
-  return (
-    <button
-      className={`new-tab-icon-tile${showLabel ? " has-label" : ""}`}
-      style={{ width: iconSize, minHeight: iconSize }}
-      type="button"
-      onClick={onOpen}
-      title={`Open ${site.title} · ${site.origin}`}
-      aria-label={`Open ${site.title}, ${hostname}`}
-    >
-      <span className="new-tab-site-icon" aria-hidden="true">
-        {!iconFailed && (
-          <img
-            src={iconSource}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => {
-              const nextSource =
-                iconSource === faviconUrl
-                  ? (site.faviconUrl ?? fallbackFaviconUrl)
-                  : fallbackFaviconUrl;
-              if (nextSource && iconSource !== nextSource)
-                setIconSource(nextSource);
-              else setIconFailed(true);
-            }}
-          />
-        )}
-        {iconFailed && (
-          <span>
-            {site.title.trim().slice(0, 1).toUpperCase() ||
-              hostname.slice(0, 1).toUpperCase() ||
-              "↗"}
-          </span>
-        )}
-      </span>
-      {showLabel && <span className="new-tab-link-label">{site.title}</span>}
-    </button>
-  );
-}
-
-function PinnedSiteIcon({
-  site,
-  cachedFaviconUrl,
-  onOpen,
-  onUnpin,
-  dragProps,
-}: {
-  site: PinnedSite;
-  cachedFaviconUrl?: string | null;
-  onOpen: () => void;
-  onUnpin: () => void;
-  dragProps?: React.ButtonHTMLAttributes<HTMLButtonElement> &
-    Record<`data-${string}`, string>;
-}): React.JSX.Element {
-  const quickLink = toQuickLinkSite(site);
-  const fallbackFaviconUrl = quickLink
-    ? `${quickLink.origin}/favicon.ico`
-    : null;
-  const preferredFaviconUrl = quickLink
-    ? (cachedFaviconUrl ?? site.faviconUrl ?? fallbackFaviconUrl)
-    : null;
-  const [iconFailed, setIconFailed] = useState(false);
-  const [iconSource, setIconSource] = useState(preferredFaviconUrl);
-  useEffect(() => {
-    setIconFailed(false);
-    setIconSource(preferredFaviconUrl);
-  }, [preferredFaviconUrl]);
-  const hostname = quickLink
-    ? new URL(quickLink.origin).hostname.replace(/^www\./i, "")
-    : historyHost(site.url);
-  return (
-    <button
-      {...dragProps}
-      className="pinned-site-icon-button"
-      type="button"
-      title={`${site.title} · ${hostname} (right-click to remove bookmark)`}
-      aria-label={`Open bookmark ${site.title}`}
-      onClick={onOpen}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        onUnpin();
-      }}
-    >
-      <span className="pinned-site-mark" aria-hidden="true">
-        {quickLink && iconSource && !iconFailed && (
-          <img
-            src={iconSource}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => {
-              const nextSource =
-                iconSource === cachedFaviconUrl
-                  ? (site.faviconUrl ?? fallbackFaviconUrl)
-                  : fallbackFaviconUrl;
-              if (nextSource && iconSource !== nextSource)
-                setIconSource(nextSource);
-              else setIconFailed(true);
-            }}
-          />
-        )}
-        {(!quickLink || iconFailed) && (
-          <span>
-            {site.title.trim().slice(0, 1).toUpperCase() ||
-              hostname.slice(0, 1).toUpperCase() ||
-              "↗"}
-          </span>
-        )}
-      </span>
-    </button>
-  );
-}
-
-/** Text with each occurrence of the typed query marked (suggestion titles). */
-function HighlightedText({
-  text,
-  query,
-}: {
-  text: string;
-  query: string;
-}): React.JSX.Element {
-  return (
-    <>
-      {highlightMatches(text, query).map((part, index) =>
-        part.match ? (
-          <mark key={index} className="suggestion-match">
-            {part.text}
-          </mark>
-        ) : (
-          <span key={index}>{part.text}</span>
-        ),
-      )}
-    </>
-  );
-}
-
-function SuggestionFavicon({
-  url,
-  title,
-  faviconUrl,
-}: {
-  url: string;
-  title: string;
-  faviconUrl?: string | null;
-}): React.JSX.Element {
-  const origin = httpOrigin(url);
-  const candidates = useMemo(
-    () => [
-      ...new Set(
-        [faviconUrl, origin ? `${origin}/favicon.ico` : null].filter(
-          (value): value is string => Boolean(value),
-        ),
-      ),
-    ],
-    [faviconUrl, origin],
-  );
-  const [candidateIndex, setCandidateIndex] = useState(0);
-  useEffect(() => setCandidateIndex(0), [candidates]);
-  const source = candidates[candidateIndex];
-  const host = origin ? new URL(origin).hostname.replace(/^www\./i, "") : "";
-  const letter =
-    title.trim().slice(0, 1).toUpperCase() ||
-    host.slice(0, 1).toUpperCase() ||
-    "↗";
-  return source ? (
-    <img
-      src={source}
-      alt=""
-      referrerPolicy="no-referrer"
-      onError={() => setCandidateIndex((index) => index + 1)}
-    />
-  ) : (
-    <span>{letter}</span>
-  );
-}
-
-/** Thin progress line on the Downloads button; its own component so progress never re-renders the shell. */
-function DownloadsToolbarProgress(): React.JSX.Element {
-  const progress = useDownloadsProgress(true);
-  return (
-    <span
-      className={`downloads-toolbar-progress${progress === null ? " is-indeterminate" : ""}`}
-      aria-hidden="true"
-    >
-      <span
-        style={
-          progress === null ? undefined : { transform: `scaleX(${progress})` }
-        }
-      />
-    </span>
-  );
-}
 
 export default function Browser({
   surface,
@@ -2924,497 +2604,59 @@ export default function Browser({
         surface === "sidebar" ? handleSidebarPointerLeave : undefined
       }
     >
-      <aside
-        ref={sidebarRef}
-        className={`browser-sidebar${activeSpace ? " has-spaces" : ""}${sidebarBackdropClass(surface, sidebarBackdrop)}${browser.private ? " is-private-window" : ""}`}
-        style={
-          activeSpace
-            ? ({
-                "--active-space-color": SPACE_COLOR_VALUES[activeSpace.color],
-              } as React.CSSProperties)
-            : undefined
-        }
-        data-space-id={activeSpace?.id}
-        aria-label="Browser sidebar"
-        onMouseEnter={handleSidebarPointerEnter}
-        onMouseLeave={handleSidebarPointerLeave}
-        onFocusCapture={keepSidebarVisibleForFocus}
-        onBlurCapture={releaseSidebarFocus}
-      >
-        {surface === "sidebar" && (
-          <SidebarBackdropLayer state={sidebarBackdrop} cardRef={sidebarRef} />
-        )}
-        {window.api.platform === "darwin" && (
-          <div className="sidebar-window-controls" aria-label="Window controls">
-            <button
-              className="sidebar-window-control is-close"
-              type="button"
-              aria-label="Close window"
-              title="Close window"
-              onClick={() => void window.api.browser.windowControl("close")}
-            />
-            <button
-              className="sidebar-window-control is-minimize"
-              type="button"
-              aria-label="Minimize window"
-              title="Minimize window"
-              onClick={() => void window.api.browser.windowControl("minimize")}
-            />
-            <button
-              className="sidebar-window-control is-zoom"
-              type="button"
-              aria-label="Toggle window zoom"
-              title="Toggle window zoom"
-              onClick={() =>
-                void window.api.browser.windowControl("toggle-zoom")
-              }
-            />
-          </div>
-        )}
-        {sidebarMode !== "tabs" && !isSettingsSection(sidebarMode) && (
-          <div className="sidebar-heading">
-            <strong>
-              {sidebarMode === "history"
-                ? "History"
-                : sidebarMode === "downloads"
-                  ? "Downloads"
-                  : sidebarMode === "bookmarks"
-                    ? "Bookmarks"
-                    : sidebarMode === "network"
-                      ? "Network"
-                      : "This site"}
-            </strong>
-            {sidebarMode === "history" && (
-              <button
-                className="sidebar-icon-button"
-                type="button"
-                aria-label="Clear browsing history"
-                title="Clear history"
-                disabled={history.length === 0}
-                onClick={() => void clearHistory()}
-              >
-                <span aria-hidden="true">⌫</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        {sidebarMode === "tabs" && (
-          <section
-            className="sidebar-pinned-sites"
-            aria-label="Pinned tabs and bookmarks"
-          >
-            {/* Cmd+drag (Ctrl+drag off macOS) reorders pins; a plain drag does nothing. */}
-            <div
-              ref={pinnedListRef}
-              className={`sidebar-pinned-list${pinReorder.armed ? " is-reorder-armed" : ""}${pinnedTabDrag.draggingId || pinnedSiteDrag.draggingId ? " is-reordering" : ""}`}
-              onPointerEnter={pinReorder.track}
-              onPointerMove={pinReorder.track}
-              onPointerDown={pinReorder.track}
-              onPointerLeave={() => {
-                if (!pinnedTabDrag.draggingId && !pinnedSiteDrag.draggingId)
-                  pinReorder.disarm();
-              }}
-            >
-              {pinnedTabDrag.orderedIds
-                .map((id) => pinnedTabsById.get(id))
-                .filter((tab): tab is BrowserTabSummary => Boolean(tab))
-                .map((tab) => (
-                  <PinnedTabIcon
-                    key={`tab:${tab.id}`}
-                    tab={tab}
-                    dragProps={{
-                      ...pinnedTabDrag.itemProps,
-                      "data-pin-kind": "tab",
-                      "data-pin-id": tab.id,
-                      onPointerDown: (event) =>
-                        pinnedTabDrag.onPointerDown(event, tab.id),
-                    }}
-                  />
-                ))}
-              {pinnedSiteDrag.orderedIds
-                .map((url) => pinnedSites.find((site) => site.url === url))
-                .filter((site): site is PinnedSite => Boolean(site))
-                .map((site) => (
-                  <PinnedSiteIcon
-                    key={`bookmark:${site.url}`}
-                    site={site}
-                    cachedFaviconUrl={
-                      cachedSiteIcons[httpOrigin(site.url) ?? ""]
-                    }
-                    onOpen={() => void openPinnedSite(site)}
-                    onUnpin={() =>
-                      void savePinnedSites(
-                        pinnedSites.filter((pinned) => pinned.url !== site.url),
-                      )
-                    }
-                    dragProps={{
-                      ...pinnedSiteDrag.itemProps,
-                      "data-pin-kind": "site",
-                      "data-pin-id": site.url,
-                      onPointerDown: (event) =>
-                        pinnedSiteDrag.onPointerDown(event, site.url),
-                    }}
-                  />
-                ))}
-            </div>
-          </section>
-        )}
-
-        {sidebarMode === "history" ? (
-          <div className="history-sidebar">
-            <label className="history-search">
-              <span aria-hidden="true">⌕</span>
-              <input
-                type="search"
-                value={historyQuery}
-                onChange={(event) => setHistoryQuery(event.target.value)}
-                placeholder="Search history"
-                aria-label="Search browsing history"
-              />
-            </label>
-            <div className="history-list" aria-label="Recent browsing history">
-              {filteredHistory
-                .slice(0, historyQuery ? 400 : 250)
-                .map((entry) => (
-                  <button
-                    className="history-item"
-                    key={entry.id}
-                    type="button"
-                    onClick={() => void openHistoryEntry(entry)}
-                    title={entry.url}
-                  >
-                    <strong>{entry.title}</strong>
-                    <span className="history-host">
-                      {historyHost(entry.url)}
-                    </span>
-                    <time dateTime={new Date(entry.visitedAt).toISOString()}>
-                      {formatVisitedAt(entry.visitedAt)}
-                    </time>
-                  </button>
-                ))}
-              {filteredHistory.length === 0 && (
-                <p className="sidebar-empty">
-                  {historyQuery
-                    ? "No matching history"
-                    : "No browsing history yet"}
-                </p>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div
-            ref={tabDrag.listRef}
-            className={`tab-list${tabDrag.draggingId ? " is-drag-sorting" : ""}`}
-            role="tablist"
-            aria-label="Open tabs"
-            onClickCapture={tabDrag.onClickCapture}
-          >
-            {tabSelection.count >= 2 && (
-              <div
-                className="tab-selection-bar"
-                role="toolbar"
-                aria-label="Selected tabs"
-              >
-                <span className="tab-selection-count">
-                  {tabSelection.count} tabs selected
-                </span>
-                <button
-                  type="button"
-                  title={`Group the selected tabs (${window.api.platform === "darwin" ? "⌘G" : "Ctrl+G"})`}
-                  onClick={tabSelection.group}
-                >
-                  Group
-                </button>
-                <button
-                  className="tab-selection-clear"
-                  type="button"
-                  aria-label="Clear selection"
-                  title="Clear selection (Esc)"
-                  onClick={tabSelection.clear}
-                >
-                  ×
-                </button>
-              </div>
-            )}
-            {tabDrag.orderedIds
-              .map((id) => tabEntriesByKey.get(id))
-              .filter((entry) => entry !== undefined)
-              .map((entry) =>
-                entry.kind === "group" ? (
-                  <TabGroupHeader
-                    key={entry.key}
-                    entryKey={entry.key}
-                    group={entry.group}
-                    dragging={tabDrag.draggingId === entry.key}
-                    handlers={tabDrag.itemHandlers(entry.key)}
-                  />
-                ) : entry.kind === "split" ? (
-                  <SplitTabEntry
-                    groupColor={
-                      entry.tabs[0]?.group
-                        ? TAB_GROUP_COLOR_VALUES[entry.tabs[0].group.color]
-                        : undefined
-                    }
-                    key={entry.key}
-                    entryId={entry.key}
-                    tabs={entry.tabs}
-                    dragging={tabDrag.draggingId === entry.key}
-                    animate={sidebarOnScreen}
-                    handlers={tabDrag.itemHandlers(entry.key)}
-                    selected={tabSelection.selectedKeys.has(entry.key)}
-                    onSelectClick={(event) =>
-                      tabSelection.handleClick(event, entry.key)
-                    }
-                    onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
-                    titleFor={(tab) =>
-                      withTabUsageHint(
-                        tab.sleeping
-                          ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
-                          : tab.title,
-                        tabUsage[tab.id],
-                      )
-                    }
-                    onActivate={(id) => {
-                      void window.api.browser.tabs.activate(id);
-                      if (
-                        sidebarMode === "downloads" ||
-                        sidebarMode === "bookmarks"
-                      )
-                        exitPanel();
-                    }}
-                  />
-                ) : (
-                  (({ tab }) => (
-                    <div
-                      className={`tab-item${tab.active ? " is-active" : ""}${tab.private ? " is-private" : ""}${tab.sleeping ? " is-sleeping" : ""}${tabDrag.draggingId === tab.id ? " is-dragging" : ""}${tab.group ? " is-grouped" : ""}${tab.group && revealingGroups.has(tab.group.id) ? " is-group-revealing" : ""}${tabSelection.selectedKeys.has(tab.id) ? " is-multi-selected" : ""}`}
-                      style={
-                        tab.group
-                          ? ({
-                              "--group-color":
-                                TAB_GROUP_COLOR_VALUES[tab.group.color],
-                            } as React.CSSProperties)
-                          : undefined
-                      }
-                      key={tab.id}
-                      data-browser-tab-id={tab.id}
-                      role="tab"
-                      aria-selected={tab.active}
-                      aria-grabbed={
-                        tabDrag.draggingId === tab.id ? true : undefined
-                      }
-                      tabIndex={0}
-                      title={withTabUsageHint(
-                        tab.sleeping
-                          ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
-                          : tab.title,
-                        tabUsage[tab.id],
-                      )}
-                      onMouseEnter={
-                        tab.sleeping
-                          ? () => sleepingTabHoverRef.current?.push(tab.id)
-                          : undefined
-                      }
-                      onMouseLeave={
-                        tab.sleeping
-                          ? () => sleepingTabHoverRef.current?.cancel()
-                          : undefined
-                      }
-                      onClick={(event) => {
-                        if (tabSelection.handleClick(event, tab.id)) return;
-                        void window.api.browser.tabs.activate(tab.id);
-                        if (
-                          sidebarMode === "downloads" ||
-                          sidebarMode === "bookmarks"
-                        )
-                          exitPanel();
-                      }}
-                      // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
-                      onMouseDown={(event) => {
-                        if (event.button === 1) event.preventDefault();
-                      }}
-                      onAuxClick={(event) => {
-                        if (event.button !== 1) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void window.api.browser.tabs.close(tab.id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (
-                          event.altKey &&
-                          event.shiftKey &&
-                          (event.key === "ArrowUp" || event.key === "ArrowDown")
-                        ) {
-                          event.preventDefault();
-                          tabDrag.moveBy(
-                            tab.id,
-                            event.key === "ArrowUp" ? -1 : 1,
-                          );
-                          return;
-                        }
-                        selectTabOnKeyboard(event, tab.id);
-                      }}
-                      {...tabDrag.itemHandlers(tab.id)}
-                    >
-                      <TabFavicon tab={tab} animate={sidebarOnScreen} />
-                      <span className="tab-title">{tab.title}</span>
-                      {tab.private && (
-                        <span
-                          className="tab-private-badge"
-                          title="Private tab"
-                          aria-label="Private tab"
-                        >
-                          <PrivateGlyph />
-                        </span>
-                      )}
-                      {tab.crashed && (
-                        <span
-                          className="tab-crashed-badge"
-                          title="This tab crashed · it reloads when you open it"
-                          aria-label="Crashed tab"
-                        >
-                          <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="M12 3 2.5 20h19L12 3Z" />
-                            <path d="M12 10v4" />
-                            <path d="M12 17h.01" />
-                          </svg>
-                        </span>
-                      )}
-                      <TabAudioButton tab={tab} />
-                      {castTabId === tab.id && <TabCastBadge />}
-                      {tab.sleeping && (
-                        <span
-                          className={`tab-sleep-indicator${isRestoredSleep(tab.sleep) ? " is-restored" : ""}`}
-                          title={describeTabSleep(tab.sleep)}
-                          aria-label={`Sleeping tab: ${describeTabSleep(tab.sleep)}`}
-                        >
-                          ☾
-                        </span>
-                      )}
-                      <button
-                        className="tab-close"
-                        type="button"
-                        aria-label={`Close ${tab.title}`}
-                        title="Close tab"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void window.api.browser.tabs.close(tab.id);
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))(entry)
-                ),
-              )}
-            {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
-            <div className="sidebar-new-tab-actions">
-              <button
-                className="sidebar-new-tab-row"
-                type="button"
-                aria-label="New tab"
-                title="New tab (Ctrl/⌘+T)"
-                onClick={createNewTab}
-              >
-                <span className="sidebar-new-tab-row-icon" aria-hidden="true">
-                  ＋
-                </span>
-                <span className="sidebar-new-tab-row-label">New Tab</span>
-              </button>
-              <button
-                className="sidebar-new-private-tab"
-                type="button"
-                aria-label="New private tab"
-                title="New private tab (Ctrl/⌘+Alt+N)"
-                onClick={() => void window.api.browser.tabs.createPrivate()}
-              >
-                <PrivateGlyph />
-              </button>
-            </div>
-          </div>
-        )}
-        {sidebarMode === "tabs" && (
-          <ArchivedTabsSidebar
-            cachedIcons={cachedSiteIcons}
-            onOpened={() => setSidebarMode("tabs")}
-          />
-        )}
-
-        {sidebarMode === "tabs" && spaces?.enabled && (
-          <SpacesSwitcher snapshot={spaces} />
-        )}
-        <div className="sidebar-footer">
-          {sidebarMode === "tabs" && (
-            <button
-              className={`sidebar-footer-icon-button sidebar-pin-button${sidebarPinned ? " is-current" : ""}`}
-              type="button"
-              aria-label={
-                sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"
-              }
-              aria-pressed={sidebarPinned}
-              title={sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"}
-              onClick={() => setSidebarPinned((pinned) => !pinned)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <rect x="3.5" y="5" width="17" height="14" rx="3" />
-                <path d="M9 5v14" />
-                {sidebarPinned ? (
-                  <path d="m15.5 10-2 2 2 2" />
-                ) : (
-                  <path d="m13.5 10 2 2-2 2" />
-                )}
-              </svg>
-            </button>
-          )}
-          <UpdateBadge />
-          <button
-            className={`sidebar-footer-icon-button${settingsTab ? " is-current" : ""}`}
-            type="button"
-            aria-label="Settings"
-            aria-current={settingsTab ? "page" : undefined}
-            title={`Settings (${window.api.platform === "darwin" ? "⌘," : "Ctrl+,"})`}
-            onClick={openSettings}
-          >
-            <span aria-hidden="true">⚙</span>
-          </button>
-          <button
-            className="sidebar-footer-icon-button sidebar-quit-button"
-            type="button"
-            aria-label="Quit Surffish"
-            title="Quit Surffish"
-            onClick={() => void window.api.browser.quit()}
-          >
-            <span aria-hidden="true">⏻</span>
-          </button>
-        </div>
-        <div
-          className="sidebar-resize-handle"
-          role="separator"
-          aria-label="Resize sidebar"
-          aria-orientation="vertical"
-          aria-valuemin={MIN_SIDEBAR_WIDTH}
-          aria-valuemax={MAX_SIDEBAR_WIDTH}
-          aria-valuenow={sidebarWidth}
-          tabIndex={0}
-          onPointerDown={beginSidebarResize}
-          onPointerMove={moveSidebarResize}
-          onPointerUp={finishSidebarResize}
-          onPointerCancel={finishSidebarResize}
-          onLostPointerCapture={finishSidebarResize}
-          onKeyDown={handleSidebarResizeKeyDown}
-        />
-      </aside>
+      <Sidebar
+        activeSpace={activeSpace}
+        beginSidebarResize={beginSidebarResize}
+        clearHistory={clearHistory}
+        createNewTab={createNewTab}
+        exitPanel={exitPanel}
+        finishSidebarResize={finishSidebarResize}
+        handleSidebarPointerEnter={handleSidebarPointerEnter}
+        handleSidebarPointerLeave={handleSidebarPointerLeave}
+        handleSidebarResizeKeyDown={handleSidebarResizeKeyDown}
+        keepSidebarVisibleForFocus={keepSidebarVisibleForFocus}
+        moveSidebarResize={moveSidebarResize}
+        openHistoryEntry={openHistoryEntry}
+        openPinnedSite={openPinnedSite}
+        openSettings={openSettings}
+        pinnedListRef={pinnedListRef}
+        releaseSidebarFocus={releaseSidebarFocus}
+        savePinnedSites={savePinnedSites}
+        selectTabOnKeyboard={selectTabOnKeyboard}
+        setSidebarMode={setSidebarMode}
+        setSidebarPinned={setSidebarPinned}
+        sidebarOnScreen={sidebarOnScreen}
+        spaces={spaces}
+        tabUsage={tabUsage}
+        settingsTab={settingsTab}
+        sidebarBackdrop={sidebarBackdrop}
+        sidebarMode={sidebarMode}
+        sidebarPinned={sidebarPinned}
+        sidebarWidth={sidebarWidth}
+        cachedSiteIcons={cachedSiteIcons}
+        historyQuery={historyQuery}
+        setHistoryQuery={setHistoryQuery}
+        surface={surface}
+        browser={browser}
+        history={history}
+        pinReorder={pinReorder}
+        pinnedTabDrag={pinnedTabDrag}
+        pinnedSiteDrag={pinnedSiteDrag}
+        pinnedTabsById={pinnedTabsById}
+        pinnedSites={pinnedSites}
+        filteredHistory={filteredHistory}
+        tabDrag={tabDrag}
+        tabSelection={tabSelection}
+        tabEntriesByKey={tabEntriesByKey}
+        revealingGroups={revealingGroups}
+        sleepingTabHoverRef={sleepingTabHoverRef}
+        castTabId={castTabId}
+        tabs={tabs}
+        sidebarRef={sidebarRef}
+      />
 
       <div className="browser-main">
-        <header className="browser-chrome" ref={browserChromeRef}>
+        <header ref={browserChromeRef} className="browser-chrome">
           <form
             ref={toolbarFormRef}
             className={`browser-toolbar${browser.private ? " is-private" : ""}`}
