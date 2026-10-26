@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   BaseWindow,
-  Menu,
   WebContentsView,
   app,
   globalShortcut,
@@ -147,6 +146,10 @@ import {
   type PanelNativeState,
 } from "./mac-panel";
 import {
+  createMiniWindowMenus,
+  type MiniMenuTarget,
+} from "./mini-window/menus";
+import {
   headerDebug,
   miniHeaderDebugEnabled,
   onMiniHeaderDebugChange,
@@ -191,7 +194,7 @@ import {
  * tabs after a restart.
  */
 
-interface Mini {
+interface Mini extends MiniMenuTarget {
   window: BaseWindow;
   /** Which remembered spot/dock it uses (the lowest free when it opened). */
   slot: number;
@@ -408,6 +411,31 @@ function live(
 ): contents is WebContents {
   return Boolean(contents && !contents.isDestroyed());
 }
+const miniWindowMenus = createMiniWindowMenus({
+  settings: getMiniWindowSettings,
+  pageContents: (window) => host().pageContents(window),
+  tabCount: (target) =>
+    miniOf(target.window) ? tabsOf(miniOf(target.window)!).length : 0,
+  togglePin: (target) => {
+    const mini = miniOf(target.window);
+    if (mini) togglePin(mini);
+  },
+  leaveMenuBar: (target, how) => {
+    const mini = miniOf(target.window);
+    if (mini) leaveMenuBar(mini, how);
+  },
+  sendToMenuBar: (target) => {
+    const mini = miniOf(target.window);
+    return mini ? sendToMenuBar(mini) : false;
+  },
+  returnAll: (target) => {
+    const mini = miniOf(target.window);
+    return mini ? returnAllOf(mini) : false;
+  },
+  closeTab: (window) => host().closeTab(window),
+  openSettings: openMiniWindowSettings,
+  setGrouping: setMiniWindowGrouping,
+});
 
 // ---------------------------------------------------------------------------
 // SURFFISH_DEBUG_HEADER / ⌘K "Start Logging Mini Window Header Events" (mini-header-debug.ts).
@@ -1019,7 +1047,7 @@ function ensureHeader(m: Mini): Promise<void> {
       m.menuBar &&
       isEscape(input) &&
       !m.address &&
-      !popoutMenuJustClosed(m)
+      !miniWindowMenus.popoutMenuJustClosed(m)
     )
       hidePopout(m);
   });
@@ -1429,7 +1457,11 @@ function rewirePage(m: Mini): void {
     contents,
     "before-input-event",
     (_event: Electron.Event, input: Electron.Input) => {
-      if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m))
+      if (
+        m.menuBar &&
+        isEscape(input) &&
+        !miniWindowMenus.popoutMenuJustClosed(m)
+      )
         hidePopout(m);
     },
   );
@@ -1666,7 +1698,11 @@ function syncNewTabView(
         host().handleShortcut(m.window, input)
       )
         event.preventDefault();
-      else if (m.menuBar && isEscape(input) && !popoutMenuJustClosed(m))
+      else if (
+        m.menuBar &&
+        isEscape(input) &&
+        !miniWindowMenus.popoutMenuJustClosed(m)
+      )
         hidePopout(m);
     });
     // The pointer near the top reveals the header, as over a page.
@@ -2201,7 +2237,7 @@ function registerIpc(): void {
       Number.isFinite(y)
         ? { x: Math.round(x), y: Math.round(y) }
         : null;
-    showPopoutMenu(m, at);
+    miniWindowMenus.showPopoutMenu(m, at);
   });
   ipcMain.on("mini-window:pin", (event) => {
     const m = fromHeader(event);
@@ -2209,7 +2245,7 @@ function registerIpc(): void {
   });
   ipcMain.on("mini-window:menu", (event) => {
     const m = fromHeader(event);
-    if (m) showMiniMenu(m, event.sender);
+    if (m) miniWindowMenus.showMiniMenu(m, event.sender);
   });
   // + in the header: a New Tab in this mini window.
   ipcMain.on("mini-window:new-tab", (event) => {
@@ -2450,7 +2486,7 @@ function createMini(
         liveMinis().some(
           (other) => other.headerDrag !== null || other.glide !== null,
         ),
-      menu: () => showMiniMenu(m, null),
+      menu: () => miniWindowMenus.showMiniMenu(m, null),
     },
     savedDock ? { dock: savedDock, display } : null,
   );
@@ -3980,184 +4016,4 @@ export async function startMenuBar(): Promise<void> {
       await popOutTabToMenuBar(tabId, { show: false });
   }
   syncTray();
-}
-
-/** The Esc that closed the popout's ⋯ menu (or one right after it) closes only the menu, never the popout. */
-function popoutMenuJustClosed(m: Mini): boolean {
-  return Boolean(
-    m.menuBar &&
-    (m.menuBar.menuOpen ||
-      Date.now() - m.menuBar.menuClosedAt < POPOUT_MENU_ESC_GRACE_MS),
-  );
-}
-const POPOUT_MENU_ESC_GRACE_MS = 250;
-
-/** The popout strip's ⋯ menu: everything the strip has no room for (a native menu: arrow keys, Esc closes it). */
-function popoutMenuTemplate(m: Mini): Electron.MenuItemConstructorOptions[] {
-  const page = host().pageContents(m.window);
-  const many = tabsOf(m).length > 1;
-  const settings = getMiniWindowSettings();
-  return [
-    {
-      label: "Back",
-      enabled: Boolean(page?.navigationHistory.canGoBack()),
-      click: () => {
-        if (page && !page.isDestroyed() && page.navigationHistory.canGoBack())
-          page.navigationHistory.goBack();
-      },
-    },
-    {
-      label: "Reload",
-      click: () => {
-        if (page && !page.isDestroyed()) page.reload();
-      },
-    },
-    { type: "separator" },
-    {
-      label: "Pin",
-      type: "checkbox",
-      checked: m.menuBar?.pinned === true,
-      click: () => togglePin(m),
-    },
-    { label: "Float as Mini Window", click: () => leaveMenuBar(m, "float") },
-    {
-      label: "Move to Edge",
-      enabled: settings.tuckToEdge,
-      click: () => leaveMenuBar(m, "edge"),
-    },
-    {
-      label: many ? "Return All to Window" : "Return to Window",
-      click: () => {
-        returnAllOf(m);
-      },
-    },
-    {
-      label: "Grouping",
-      submenu: (
-        [
-          ["tabs", "Tabs"],
-          ["stack", "Stack"],
-          ["separate", "Separate"],
-        ] as const
-      ).map(([value, label]): Electron.MenuItemConstructorOptions => ({
-        label,
-        type: "radio",
-        checked: settings.grouping === value,
-        click: () => {
-          setMiniWindowGrouping(value);
-        },
-      })),
-    },
-    { type: "separator" },
-    { label: "Mini Window Settings…", click: () => openMiniWindowSettings() },
-  ];
-}
-
-let lastPopoutMenu: {
-  template: Electron.MenuItemConstructorOptions[];
-  menu: Menu;
-} | null = null;
-
-/** The ⋯ menu (or a right-click on the strip) at `at` in the window (the strip sits at its top left), else at the pointer. */
-function showPopoutMenu(m: Mini, at: { x: number; y: number } | null): void {
-  const bar = m.menuBar;
-  if (!bar || m.closed || m.window.isDestroyed()) return;
-  const template = popoutMenuTemplate(m);
-  const menu = Menu.buildFromTemplate(template);
-  lastPopoutMenu = { template, menu };
-  bar.menuOpen = true;
-  const closed = (): void => {
-    bar.menuOpen = false;
-    bar.menuClosedAt = Date.now();
-    if (lastPopoutMenu?.menu === menu) lastPopoutMenu = null;
-    if (live(m.header?.webContents))
-      m.header?.webContents.send("mini-window:menu-closed");
-  };
-  menu.popup({
-    window: m.window,
-    ...(at ? { x: at.x, y: at.y } : {}),
-    callback: closed,
-  });
-}
-
-// Smokes can't drive a native menu under Xvfb: the ⋯ menu as it was built, and its items by label.
-(
-  globalThis as { __surffishMiniPopoutMenu?: unknown }
-).__surffishMiniPopoutMenu = {
-  open: () => lastPopoutMenu !== null,
-  items: () =>
-    (lastPopoutMenu?.template ?? []).map((item) => ({
-      label: item.label ?? "",
-      type: item.type ?? "normal",
-      checked: item.checked === true,
-      enabled: item.enabled !== false,
-      submenu: Array.isArray(item.submenu)
-        ? item.submenu.map((sub) => sub.label ?? "")
-        : [],
-    })),
-  click: (label: string): boolean => {
-    const item = lastPopoutMenu?.template.find(
-      (candidate) => candidate.label === label,
-    );
-    const menu = lastPopoutMenu?.menu;
-    if (!item?.click || item.enabled === false) return false;
-    menu?.closePopup();
-    (item.click as () => void)();
-    return true;
-  },
-  close: (): void => {
-    lastPopoutMenu?.menu.closePopup();
-  },
-};
-
-/** The mini window's menu (right-click on its header or handle). */
-function showMiniMenu(m: Mini, contents: WebContents | null): void {
-  if (m.closed || m.window.isDestroyed()) return;
-  // In the menu bar popout, the strip's right-click is its ⋯ menu.
-  if (m.menuBar && contents) return showPopoutMenu(m, null);
-  const menuBarOn = getMiniWindowSettings().menuBarIcon !== "never";
-  const menu = Menu.buildFromTemplate([
-    m.menuBar
-      ? { label: "Float as Mini Window", click: () => leaveMenuBar(m, "float") }
-      : {
-          label: "Send to Menu Bar",
-          enabled: menuBarOn,
-          click: () => {
-            sendToMenuBar(m);
-          },
-        },
-    ...(m.menuBar
-      ? [
-          {
-            label: "Pin",
-            type: "checkbox" as const,
-            checked: m.menuBar.pinned,
-            click: () => togglePin(m),
-          },
-          {
-            label: "Move to Edge",
-            enabled: getMiniWindowSettings().tuckToEdge,
-            click: () => leaveMenuBar(m, "edge"),
-          },
-        ]
-      : []),
-    { type: "separator" },
-    {
-      label:
-        tabsOf(m).length > 1 ? "Return All to Browser" : "Return to Browser",
-      click: () => {
-        returnAllOf(m);
-      },
-    },
-    {
-      label: tabsOf(m).length > 1 ? "Close Tab" : "Close",
-      click: () => host().closeTab(m.window),
-    },
-  ]);
-  const window = contents
-    ? m.mount === "panel" && m.panel
-      ? m.panel
-      : m.window
-    : undefined;
-  menu.popup(window && !window.isDestroyed() ? { window } : {});
 }
