@@ -44,7 +44,7 @@ import {
 import { SplitTabEntry } from "../SplitTabEntry";
 import { TabGroupHeader } from "../tab-groups/TabGroupHeader";
 import { UpdateBadge } from "../settings/UpdateBadge";
-import { ArchivedTabsSidebar } from "../tab-archive/ArchivedTabsSidebar";
+import { ArchivedTabsSidebar } from "../lazy-views";
 import { SpacesSwitcher } from "../spaces/SpacesSwitcher";
 import { TabCastBadge } from "../cast/CastButton";
 import type { BrowserSurface, SidebarMode } from "./chrome-helpers";
