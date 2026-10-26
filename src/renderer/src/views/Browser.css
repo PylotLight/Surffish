@@ -4877,12 +4877,13 @@
   }
   .settings-toc {
     z-index: 3;
-    flex-direction: row;
-    overflow-x: auto;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 132px), 1fr));
+    overflow: visible;
   }
   .settings-toc button {
-    flex: 0 0 auto;
+    min-width: 0;
+    justify-content: flex-start;
   }
   .settings-category-title {
     top: 22px;
@@ -5011,8 +5012,10 @@
   padding: 4px 0 6px;
 }
 .settings-subnav {
-  flex-wrap: nowrap;
-  gap: 4px;
+  container-name: settings-nav;
+  container-type: inline-size;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   padding-right: 14px;
   padding-left: 18px;
 }
@@ -5027,6 +5030,13 @@
   .settings-subnav button {
     padding: 0 8px;
     font-size: 13px;
+  }
+}
+@container settings-nav (max-width: 1120px) {
+  .settings-subnav .settings-search {
+    flex: 0 0 100%;
+    min-width: 0;
+    margin-left: 0;
   }
 }
 ::highlight(settings-search) {
