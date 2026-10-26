@@ -252,6 +252,9 @@ main/
    `test:electron-spaces`, `test:electron-tab-groups`). Record the `bun test`
    pass/fail counts before starting; a new failure is a regression, the same
    set is not.
+   Known flake (pre-existing, not a regression): `test:electron-address-bar-sync`
+   has timed out intermittently on the `linux A` CI runner ("Timed out waiting
+   for the typed text …"); a re-run of the failed job passes.
 3. **One commit per task**, conventional prefix by area:
    `refactor(browser): …`, `refactor(chrome): …`, `refactor(mini-window): …`.
 4. **Move code verbatim.** Only imports, prop types and wiring are new. Rename
