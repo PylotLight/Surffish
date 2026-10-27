@@ -81,7 +81,11 @@ import {
   normalizeHttpOrigin,
 } from "../shared/persistence";
 import { cleanLinkUrl } from "../shared/clean-link";
-import { zoomActionForWheel, type PageZoomAction } from "../shared/zoom";
+import {
+  isPinchZoomed,
+  zoomActionForWheel,
+  type PageZoomAction,
+} from "../shared/zoom";
 import {
   getBrowsingHistory,
   recordBrowsingVisit,
@@ -6449,6 +6453,9 @@ function beginMacTrackpadSwipe(
   const contents = tab?.view?.webContents;
   if (!tab || !contents || contents.isDestroyed())
     return refuse("no active tab");
+  // A pinch-zoomed page pans with two fingers, so a sideways gesture over it is moving around
+  // the page rather than asking for history. Pinching back out to 1x brings swipes back.
+  if (isPinchZoomed(tab.pageScale)) return refuse("page is pinch-zoomed");
   const canPageConsume =
     request.direction === "back"
       ? tab.pageScrollEdges.canScrollLeft
@@ -7208,7 +7215,7 @@ function handleMacTrackpadPinch(
     if (!isLiveWindow(w) || !w.window.isFocused()) return false;
     const tab = activeTabOf(w);
     // Pinching in on a zoomed-in page should zoom it back out, not open the overview.
-    if (!tab || tab.pageScale > 1.01) return false;
+    if (!tab || isPinchZoomed(tab.pageScale)) return false;
     pinchMode = "open";
     void openTabOverview({ interactive: true }, w.window);
     trackPinchProgress(magnification);

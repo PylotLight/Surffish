@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   formatZoomPercent,
   isDefaultZoom,
+  isPinchZoomed,
   normalizeZoomFactor,
   PINCH_ZOOM_MAX_SCALE,
   stepZoomFactor,
@@ -42,4 +43,13 @@ test("Ctrl+wheel zoom directions map to zoom steps; anything else is ignored", (
 
 test("pinch zoom allows magnifying past 1x (Electron defaults the visual zoom limits to 1,1)", () => {
   assert.ok(PINCH_ZOOM_MAX_SCALE > 1);
+});
+
+test("only a page actually pinch-zoomed past 1x counts as zoomed", () => {
+  assert.equal(isPinchZoomed(1), false);
+  assert.equal(isPinchZoomed(1.005), false);
+  assert.equal(isPinchZoomed(1.02), true);
+  assert.equal(isPinchZoomed(PINCH_ZOOM_MAX_SCALE), true);
+  assert.equal(isPinchZoomed(undefined), false);
+  assert.equal(isPinchZoomed(Number.NaN), false);
 });
