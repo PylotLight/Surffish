@@ -52,6 +52,18 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline)
+      throw new Error("Timed out waiting for the tunnel state.");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 class FakeSshClient extends EventEmitter {
   connectCalls = 0;
   endCalls = 0;
@@ -202,6 +214,10 @@ describe("managed in-process SSH tunnel lifecycle", () => {
     expect(manager.getStatus().error).toBe(
       "Authentication failed: offered nas@nas.local:22 with 1 IdentityFile key and the SSH agent at /tmp/agent.sock, and every method was refused.",
     );
+    // A refused key needs the user; retrying would only hide the error.
+    expect(manager.getStatus().retrying).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(clients).toHaveLength(1);
   });
 
   test("the private listener accepts SOCKS5 CONNECT and forwards the requested host and port", async () => {
@@ -250,6 +266,95 @@ describe("managed in-process SSH tunnel lifecycle", () => {
     expect(data.includes(Buffer.from("ping"))).toBe(true);
     expect(clients[0]?.forwarded).toEqual([{ host: "nas.local", port: 80 }]);
     socket.destroy();
+  });
+
+  test("reconnects on its own after the session drops, such as after sleep", async () => {
+    const clients: FakeSshClient[] = [];
+    const manager = makeManager(clients, { reconnectDelayMs: () => 5 });
+    await manager.sync({ enabled: true, sshHost: "nas" });
+    expect(manager.getStatus()).toMatchObject({
+      running: true,
+      retrying: false,
+      error: null,
+    });
+    expect(clients).toHaveLength(1);
+
+    clients[0]?.emit("error", new Error("read ECONNRESET"));
+    expect(manager.getStatus()).toMatchObject({
+      running: false,
+      starting: false,
+      retrying: true,
+    });
+    expect(manager.getStatus().error).toContain("read ECONNRESET");
+
+    await waitFor(() => manager.getStatus().running);
+    expect(clients).toHaveLength(2);
+    expect(clients[1]?.connectCalls).toBe(1);
+    expect(manager.getStatus()).toMatchObject({
+      running: true,
+      starting: false,
+      retrying: false,
+      error: null,
+    });
+    expect(manager.getStatus().port).toBeGreaterThan(1024);
+  });
+
+  test("stops retrying once the tunnel is turned off", async () => {
+    const clients: FakeSshClient[] = [];
+    const manager = makeManager(clients, { reconnectDelayMs: () => 5 });
+    await manager.sync({ enabled: true, sshHost: "nas" });
+    clients[0]?.emit("error", new Error("read ECONNRESET"));
+    expect(manager.getStatus().retrying).toBe(true);
+
+    await manager.stop();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(clients).toHaveLength(1);
+    expect(manager.getStatus()).toMatchObject({
+      running: false,
+      retrying: false,
+      error: null,
+    });
+  });
+
+  test("retries a session that never came up, such as a host that is still waking", async () => {
+    const clients: FakeSshClient[] = [];
+    let attempts = 0;
+    const manager = createSshTunnelManager({
+      reconnectDelayMs: () => 5,
+      clientFactory: () => {
+        const client = new FakeSshClient();
+        attempts += 1;
+        if (attempts === 1)
+          client.connect = () => {
+            client.connectCalls += 1;
+            queueMicrotask(() =>
+              client.emit("error", new Error("connect ETIMEDOUT")),
+            );
+          };
+        clients.push(client);
+        return client as unknown as Client;
+      },
+      prepareConnection: async (target) => ({
+        config: { host: `${target}.example.test`, username: "tester" },
+        verificationError: () => null,
+      }),
+    });
+    managers.add(manager);
+
+    await manager.sync({ enabled: true, sshHost: "nas" });
+    expect(manager.getStatus()).toMatchObject({
+      running: false,
+      retrying: true,
+    });
+    expect(manager.getStatus().error).toContain("ETIMEDOUT");
+
+    await waitFor(() => manager.getStatus().running);
+    expect(clients).toHaveLength(2);
+    expect(manager.getStatus()).toMatchObject({
+      running: true,
+      retrying: false,
+      error: null,
+    });
   });
 
   test("authenticates to an SSH2 server with a key, checks known_hosts, and relays SOCKS traffic", async () => {

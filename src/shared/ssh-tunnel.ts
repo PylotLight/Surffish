@@ -41,6 +41,38 @@ export function validateSshClient(value: unknown): SshClientEngine {
   throw new Error("Choose the built-in SSH client or system OpenSSH.");
 }
 
+/** Delay before automatic reconnect `attempt` (1-based): quick after a blip, then every 30 s. */
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000];
+
+export function sshReconnectDelayMs(attempt: number): number {
+  const index =
+    Math.min(
+      Math.max(Number.isFinite(attempt) ? Math.trunc(attempt) : 1, 1),
+      RECONNECT_DELAYS_MS.length,
+    ) - 1;
+  return RECONNECT_DELAYS_MS[index]!;
+}
+
+/**
+ * Whether a failed or dropped SSH session can recover by itself. Sleep/wake, a dropped Wi-Fi link
+ * or a rebooting host fails at the network layer and clears up on its own; a refused key or a
+ * changed host key needs the user, so retrying would only hide the error.
+ */
+export function isTransientSshFailure(
+  message: string | null | undefined,
+): boolean {
+  if (!message) return false;
+  if (
+    /\b(ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EHOSTDOWN|EPIPE|EAI_AGAIN|ENOTFOUND)\b/.test(
+      message,
+    )
+  )
+    return true;
+  return /keepalive timeout|timed out|timeout|socket hang up|broken pipe|not responding|connection (?:to \S+ )?(?:closed|lost|reset)|closed unexpectedly|closed before authentication|could not reach the ssh agent/i.test(
+    message,
+  );
+}
+
 /**
  * OpenSSH arguments for a loopback-only SOCKS5 dynamic forward. The target is one argv item (no
  * shell), validated so it can never be read as an option.

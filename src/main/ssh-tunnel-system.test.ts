@@ -31,6 +31,18 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline)
+      throw new Error("Timed out waiting for the tunnel state.");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function fakeChild(): ChildProcess & { stderr: PassThrough } {
   const child = new EventEmitter() as ChildProcess & { stderr: PassThrough };
   Object.defineProperties(child, {
@@ -57,7 +69,7 @@ function exitChild(
 }
 
 /** A stand-in for `ssh -D`: listens on the forwarded port until killed. */
-function fakeSshProcess(port: number): ChildProcess {
+function fakeSshProcess(port: number): ChildProcess & { stderr: PassThrough } {
   const server = createServer((socket) => socket.end());
   servers.add(server);
   void listen(server, port);
@@ -173,24 +185,39 @@ describe("system OpenSSH tunnel engine", () => {
     expect(status.error).not.toContain("debug1");
   });
 
-  test("reports an unexpected exit after the tunnel was up", async () => {
-    let spawned: ChildProcess | null = null;
+  test("reports an unexpected exit after the tunnel was up and starts it again", async () => {
+    const spawned: Array<ChildProcess & { stderr: PassThrough }> = [];
     const manager = createSystemSshTunnelManager({
       environment: env,
+      reconnectDelayMs: () => 5,
       spawnProcess: (_command, args) => {
-        spawned = fakeSshProcess(dynamicForwardPort(args));
-        return spawned;
+        const child = fakeSshProcess(dynamicForwardPort(args));
+        spawned.push(child);
+        return child;
       },
     });
     managers.add(manager);
     await manager.sync({ enabled: true, sshHost: "work-vpn" });
     expect(manager.getStatus().running).toBe(true);
-    exitChild(spawned as unknown as ChildProcess, 255, null);
+    expect(spawned).toHaveLength(1);
+
+    spawned[0]?.stderr.write("Connection to work-vpn closed by remote host.\n");
+    exitChild(spawned[0] as ChildProcess, 255, null);
     expect(manager.getStatus()).toMatchObject({
       running: false,
       starting: false,
+      retrying: true,
     });
     expect(manager.getStatus().error).toContain("exited unexpectedly");
+
+    // ssh exits when sleep kills the connection; the engine starts it again without a Save.
+    await waitFor(() => manager.getStatus().running);
+    expect(spawned).toHaveLength(2);
+    expect(manager.getStatus()).toMatchObject({
+      running: true,
+      retrying: false,
+      error: null,
+    });
   });
 
   test("reports a missing ssh binary", async () => {

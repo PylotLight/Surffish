@@ -27,6 +27,8 @@ export interface SshTunnelStatus {
   starting: boolean;
   running: boolean;
   error: string | null;
+  /** A dropped session is waiting for its next automatic reconnect attempt. */
+  retrying?: boolean;
   /** Which client runs the tunnel (missing: the in-app client). */
   client?: "builtin" | "system";
 }
@@ -108,6 +110,13 @@ export function describeSshTunnelStatus(
     };
   }
   if (status.error) {
+    if (status.retrying) {
+      return {
+        state: "connecting",
+        title: "Reconnecting to SSH server…",
+        detail: `The session to ${status.target} dropped. Surffish retries automatically. Last error: ${status.error}`,
+      };
+    }
     return {
       state: "error",
       title: "SSH tunnel unavailable",

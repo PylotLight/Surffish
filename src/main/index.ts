@@ -2,7 +2,7 @@
 import "./crash-guard";
 // Then: scopes every IPC handler registered after it to the sender's window (multi-window).
 import { installIpcWindowScope } from "./ipc-window-scope";
-import { app } from "electron";
+import { app, powerMonitor } from "electron";
 import { dirname, join } from "node:path";
 import { APP_ID, APP_NAME } from "../shared/config";
 import {
@@ -25,6 +25,7 @@ import {
   getBrowserProxySettings,
   getNetworkHelperUpstreamSettings,
   initializeBrowserProxy,
+  restartManagedSshTunnel,
 } from "./proxy";
 import {
   getNetworkHelperStatus,
@@ -196,6 +197,17 @@ app
       await initializeBrowserProxy();
       // Start the optional in-app SSH tunnel before the helper and browser windows.
       await startNetworkServices();
+      // Sleep leaves the SSH socket half-open; rebuild the tunnel as soon as the Mac wakes.
+      powerMonitor.on("resume", () => {
+        // Closing the last window stops the tunnel; do not bring it back behind the user's back.
+        if (browserWindows().length === 0) return;
+        void restartManagedSshTunnel().catch((error: unknown) => {
+          console.warn(
+            "Could not restart the managed SSH tunnel after resume:",
+            error,
+          );
+        });
+      });
       void initializeScreenSharing();
       // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
       initializeBrowserSafety();

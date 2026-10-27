@@ -493,6 +493,18 @@ async function restoreNetworkServices(
   await syncManagedSshTunnel(settings);
 }
 
+/**
+ * Rebuild the managed SSH tunnel with the settings on screen. After the Mac wakes, the SSH socket
+ * is usually dead but not closed yet, so keepalive can take a minute to notice; the built-in client
+ * and system OpenSSH also retry on their own, this just makes the recovery immediate.
+ */
+export async function restartManagedSshTunnel(): Promise<void> {
+  const settings = currentSettings;
+  if (!usesManagedSsh(settings)) return;
+  await stopManagedSshTunnel();
+  await syncManagedSshTunnel(settings);
+}
+
 export async function setBrowserProxySettings(
   input: unknown,
 ): Promise<BrowserProxySettings> {
