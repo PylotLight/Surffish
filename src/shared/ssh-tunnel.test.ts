@@ -10,8 +10,10 @@ import type { BrowserProxySettings } from "./types";
 import {
   buildOpenSshDynamicForwardArgs,
   DEFAULT_SSH_CLIENT,
+  isTransientSshFailure,
   parseSshClient,
   parseSshTarget,
+  sshReconnectDelayMs,
   validateSshClient,
   validateSshTarget,
 } from "./ssh-tunnel";
@@ -87,6 +89,48 @@ describe("system OpenSSH dynamic forward args", () => {
       expect(() => buildOpenSshDynamicForwardArgs(value, 1080)).toThrow();
     expect(() => buildOpenSshDynamicForwardArgs("work", 0)).toThrow();
     expect(() => buildOpenSshDynamicForwardArgs("work", 65536)).toThrow();
+  });
+});
+
+describe("automatic SSH tunnel retries", () => {
+  test("backs off from one second to half a minute and stays there", () => {
+    expect(sshReconnectDelayMs(1)).toBe(1_000);
+    expect(sshReconnectDelayMs(2)).toBe(2_000);
+    expect(sshReconnectDelayMs(3)).toBe(5_000);
+    expect(sshReconnectDelayMs(6)).toBe(30_000);
+    expect(sshReconnectDelayMs(7)).toBe(30_000);
+    expect(sshReconnectDelayMs(0)).toBe(1_000);
+    expect(sshReconnectDelayMs(Number.NaN)).toBe(1_000);
+  });
+
+  test("retries network failures such as sleep, a dropped link, or a silent session", () => {
+    for (const message of [
+      "SSH tunnel connection failed: read ECONNRESET",
+      "SSH tunnel connection failed: connect ETIMEDOUT 192.0.2.10:22",
+      "SSH tunnel connection failed: getaddrinfo ENOTFOUND nas.local",
+      "SSH tunnel connection failed: Keepalive timeout",
+      "SSH tunnel connection closed unexpectedly.",
+      "SSH connection closed before authentication completed.",
+      "System OpenSSH exited unexpectedly (code 255): Connection to nas closed by remote host.",
+      "System OpenSSH exited unexpectedly (code 255): Timeout, server nas not responding.",
+      "Could not reach the SSH agent at /var/run/agent.sock, and no usable SSH IdentityFile was found for nas.",
+    ])
+      expect(isTransientSshFailure(message)).toBe(true);
+  });
+
+  test("leaves failures that need the user alone", () => {
+    for (const message of [
+      null,
+      undefined,
+      "",
+      "Authentication failed: offered nas@nas.local:22 with 1 IdentityFile key, and every method was refused.",
+      "All configured authentication methods failed",
+      "Host key for nas has changed from the key in known_hosts.",
+      "Could not read SSH IdentityFile /Users/me/.ssh/id_ed25519.",
+      "Could not launch system OpenSSH: spawn ssh ENOENT",
+      "Automatically selected SSH tunnel port 41234 is already in use. Save again to retry.",
+    ])
+      expect(isTransientSshFailure(message)).toBe(false);
   });
 });
 
@@ -197,6 +241,23 @@ describe("managed SSH status summary", () => {
       state: "error",
       detail:
         "Surffish could not establish an SSH session to work-vpn: Permission denied.",
+    });
+  });
+
+  test("says it is reconnecting while a dropped session waits for its next attempt", () => {
+    expect(
+      describeSshTunnelStatus({
+        ...connected,
+        running: false,
+        port: null,
+        error: "SSH tunnel connection failed: read ECONNRESET",
+        retrying: true,
+      }),
+    ).toEqual({
+      state: "connecting",
+      title: "Reconnecting to SSH server…",
+      detail:
+        "The session to work-vpn dropped. Surffish retries automatically. Last error: SSH tunnel connection failed: read ECONNRESET",
     });
   });
 });

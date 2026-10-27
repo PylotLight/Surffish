@@ -6,6 +6,8 @@ If **SSH host alias** is set in **Settings → Connection → SOCKS5 proxy**, ch
 
 If `ssh <alias>` works in Terminal but the tunnel doesn't, the host probably needs something the built-in client doesn't read (`ProxyJump`, `ProxyCommand`, `Match exec`, certificates or a security key). Switch **SSH client** to **System OpenSSH** in **Settings → Connection** and Save. Launch Surffish with `SURFFISH_SSH_DEBUG=1` to log the connection trace (system OpenSSH runs with `-v`).
 
+A dropped session recovers on its own. When the Mac wakes or the network changes, Surffish rebuilds the tunnel immediately, and a session that fails at the network layer (connection reset, timeout, unreachable host, agent not ready yet) is retried with a backoff of up to 30 seconds while **Settings → Connection** shows **Reconnecting to SSH server…**. A refused key or a changed host key is not retried, because only a settings fix clears it.
+
 If you manage the SSH tunnel yourself, start a local SOCKS5 endpoint such as:
 
 ```bash
