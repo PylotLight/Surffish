@@ -40,6 +40,35 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: "Surffish · CI · lint · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: k3s-runners-surffish
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (plain git, no third-party actions needed)
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          SHA: ${{ github.sha }}
+        run: |
+          git init -q .
+          git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$REPO_URL" || git remote add origin "$REPO_URL"
+          git fetch -q --no-tags --depth 1 origin "$SHA"
+          git checkout -q --force FETCH_HEAD
+          git clean -qffdx -e node_modules
+      - name: Bun canary (built-in linter)
+        run: |
+          export BUN_INSTALL="$RUNNER_TEMP/bun-canary"
+          mkdir -p "$BUN_INSTALL"
+          want="$(tr -d ' \nv' < .bun-version)"
+          curl -fsSL https://bun.sh/install | bash -s "bun-v$want"
+          export PATH="$BUN_INSTALL/bin:$PATH"
+          bun upgrade --canary
+          echo "$BUN_INSTALL/bin" >> "$GITHUB_PATH"
+          bun --version
+      - name: Built-in lint
+        run: bun lint
+
   # One Linux job per lane (was quick + overlay + 6 electron lanes = 8 pods). Each lane pays for
   # checkout + bun + install + build once, then runs its smoke suites two at a time on separate
   # Xvfb displays (every smoke uses its own temp profile and port 0, so they don't collide).

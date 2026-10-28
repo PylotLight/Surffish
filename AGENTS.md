@@ -2,7 +2,7 @@
 
 Bun + Electron + React desktop browser. Setup, scripts and architecture: [docs/development.md](docs/development.md).
 
-- Before opening a PR: `bun run typecheck` and `bun run test` must pass.
+- Before opening a PR: `bun lint` (requires Bun canary), `bun run format:check`, `bun run typecheck`, and `bun run test` must pass.
 - Pure logic goes in `src/shared` with a unit test added to the `test` script in `package.json`.
 - Never cut a release (`bun run release`) without the maintainer's approval.
 
