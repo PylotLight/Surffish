@@ -61,11 +61,20 @@ describe("start-up request hold", () => {
       false,
     );
     const ran: string[] = [];
-    afterStartupHold(
-      { url: "https://easylist.to/list.txt", webContentsId: undefined },
-      () => ran.push("fetch"),
-    );
-    expect(ran).toEqual(["fetch"]);
+    for (const [name, request] of [
+      [
+        "fetch",
+        { url: "https://easylist.to/list.txt", webContentsId: undefined },
+      ],
+      [
+        "extension",
+        { url: "chrome-extension://abc/popup.js", webContentsId: 4 },
+      ],
+      ["data URL", { url: "data:text/plain,x", webContentsId: 4 }],
+    ] as const) {
+      afterStartupHold(request, () => ran.push(name));
+    }
+    expect(ran).toEqual(["fetch", "extension", "data URL"]);
     finish();
     await released;
     expect(isHeldRequest(page)).toBe(false);

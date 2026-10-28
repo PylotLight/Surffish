@@ -42,7 +42,7 @@ test("clock is monotonic when the wall clock stalls or goes backwards", () => {
 });
 
 test("clock follows a remote stamp ahead of it, ignores absurd drift, and resumes from a saved stamp", () => {
-  let now = 1000;
+  const now = 1000;
   const clock = new HybridLogicalClock("a", () => now);
   assert.equal(
     clock.receive(formatHlc({ wall: 5000, counter: 3, deviceId: "b" })),
@@ -62,5 +62,40 @@ test("clock follows a remote stamp ahead of it, ignores absurd drift, and resume
   );
   const resumed = new HybridLogicalClock("a", () => 10, clock.last());
   assert.ok(resumed.tick() > clock.last());
-  now = 1;
+});
+
+test("clock advances past a higher remote counter on the same wall time", () => {
+  const clock = new HybridLogicalClock("local", () => 1000);
+  assert.equal(
+    clock.receive(formatHlc({ wall: 1000, counter: 8, deviceId: "remote" })),
+    true,
+  );
+
+  const next = parseHlc(clock.tick());
+  assert.deepEqual(next, { wall: 1000, counter: 9, deviceId: "local" });
+
+  // Receiving an older counter at the same wall time must not move the clock back.
+  assert.equal(
+    clock.receive(formatHlc({ wall: 1000, counter: 4, deviceId: "other" })),
+    true,
+  );
+  assert.deepEqual(parseHlc(clock.tick()), {
+    wall: 1000,
+    counter: 10,
+    deviceId: "local",
+  });
+});
+
+test("counter exhaustion borrows the next wall millisecond", () => {
+  const clock = new HybridLogicalClock(
+    "local",
+    () => 1000,
+    formatHlc({ wall: 1000, counter: 0xffff, deviceId: "local" }),
+  );
+
+  assert.deepEqual(parseHlc(clock.tick()), {
+    wall: 1001,
+    counter: 0,
+    deviceId: "local",
+  });
 });

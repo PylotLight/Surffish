@@ -82,7 +82,10 @@ const REQUIRE_RESOLVED = ["@ghostery/adblocker-electron-preload"];
 const SPECIFIER =
   /(?:^|[\s;}])(?:import|export)\s*(?:[^'"()]*?\sfrom\s*)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)/g;
 
-function bareEntry(specifier: string): string | null {
+function bareEntry(
+  specifier: string,
+  condition: "import" | "require",
+): string | null {
   if (specifier.startsWith("node:") || specifier === "electron") return null;
   const parts = specifier.split("/");
   const name = specifier.startsWith("@")
@@ -91,7 +94,7 @@ function bareEntry(specifier: string): string | null {
   if (name !== specifier)
     throw new Error(`subpath import ${specifier} isn't handled by this check`);
   return existsSync(join(repo, "node_modules", name, "package.json"))
-    ? runtimeEntry(repo, name)
+    ? resolvedRuntimeEntry(name, condition)
     : null;
 }
 
@@ -112,6 +115,42 @@ function resolveRelative(from: string, specifier: string): string | null {
     if (existsSync(candidate) && statSync(candidate).isFile())
       return relative(repo, candidate).replaceAll("\\", "/");
   return null;
+}
+
+function resolvedRuntimeEntry(
+  name: string,
+  condition: "import" | "require" = "import",
+): string {
+  const pkg = JSON.parse(
+    readFileSync(join(repo, "node_modules", name, "package.json"), "utf8"),
+  );
+  const entry = runtimeEntry(repo, name, condition);
+  const exportsField = pkg.exports;
+  const hasRootExport =
+    typeof exportsField === "string" ||
+    (!!exportsField &&
+      typeof exportsField === "object" &&
+      !Array.isArray(exportsField) &&
+      (Object.keys(exportsField).some((key) => key.startsWith("."))
+        ? Object.hasOwn(exportsField, ".")
+        : true));
+  const candidates = hasRootExport
+    ? [entry]
+    : [
+        entry,
+        `${entry}.js`,
+        `${entry}.json`,
+        `${entry}.node`,
+        `${entry}/index.js`,
+        `${entry}/index.json`,
+        `${entry}/index.node`,
+      ];
+  return (
+    candidates.find((candidate) => {
+      const absolute = join(repo, candidate);
+      return existsSync(absolute) && statSync(absolute).isFile();
+    }) ?? entry
+  );
 }
 
 test("every file main loads from production node_modules is packed", () => {
@@ -135,7 +174,7 @@ test("every file main loads from production node_modules is packed", () => {
       {},
   );
   expect(productionDependencies(repo)).toEqual(expect.arrayContaining(direct));
-  const queue = direct.map((name) => runtimeEntry(repo, name));
+  const queue = direct.map((name) => resolvedRuntimeEntry(name));
   const seen = new Set<string>();
   const missing: string[] = [];
   while (queue.length) {
@@ -150,19 +189,21 @@ test("every file main loads from production node_modules is packed", () => {
     for (const match of readFileSync(join(repo, file), "utf8").matchAll(
       SPECIFIER,
     )) {
+      const condition = match[1] ? "import" : "require";
       const specifier = match[1] ?? match[2]!;
       if (specifier.startsWith(".")) {
         const resolved = resolveRelative(file, specifier);
         if (resolved) queue.push(resolved);
       } else {
-        const entry = bareEntry(specifier);
+        const entry = bareEntry(specifier, condition);
         if (entry) queue.push(entry);
       }
     }
   }
-  for (const name of REQUIRE_RESOLVED)
-    if (!kept.has(runtimeEntry(repo, name, "require")))
-      missing.push(runtimeEntry(repo, name, "require"));
+  for (const name of REQUIRE_RESOLVED) {
+    const entry = resolvedRuntimeEntry(name, "require");
+    if (!kept.has(entry)) missing.push(entry);
+  }
   expect(missing).toEqual([]);
   expect(seen.size).toBeGreaterThan(50);
 });

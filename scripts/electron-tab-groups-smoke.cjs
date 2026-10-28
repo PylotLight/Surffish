@@ -513,7 +513,7 @@ async function mainPhase() {
     tabs.some((tab) => pathOf(tab) === "/keep") &&
       tabs.every((tab) => !tab.group),
   );
-  assert.ok(remaining >= 3);
+  assert.equal(remaining, 3, "the three original group tabs were in window 2");
 
   // --- groups inside a Space; moving a tab to another Space leaves its group
   await api(win, "spaces.setEnabled(true)");

@@ -14,6 +14,8 @@ describe("tab drag sort helpers", () => {
   });
   test("passes a neighbour once its midpoint is crossed", () => {
     expect(dragTargetIndex(slots, 0, 30)).toBe(0);
+    expect(dragTargetIndex(slots, 0, 44)).toBe(0);
+    expect(dragTargetIndex(slots, 0, 44.01)).toBe(1);
     expect(dragTargetIndex(slots, 0, 50)).toBe(1);
     expect(dragTargetIndex(slots, 0, 200)).toBe(3);
     expect(dragTargetIndex(slots, 3, -200)).toBe(0);

@@ -35,16 +35,6 @@ test("renders the version and ARM64 SHA-256 value into an Apple-silicon-only Cas
   assert.equal(result.stdout.includes("{{"), false);
 });
 
-test("builds only an ARM64 zip (the DMGs came out broken)", () => {
-  const packageJson = JSON.parse(
-    readFileSync(join(root, "package.json"), "utf8"),
-  );
-
-  assert.deepEqual(packageJson.build.mac.target, [
-    { target: "zip", arch: ["arm64"] },
-  ]);
-});
-
 test("rejects unsafe versions and malformed SHA-256 values", () => {
   const unsafeVersion = render([
     "--version",

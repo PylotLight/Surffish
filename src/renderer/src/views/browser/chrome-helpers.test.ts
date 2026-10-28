@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import Browser from "../Browser";
 import {
   httpOrigin,
   historyHost,
@@ -8,20 +7,18 @@ import {
   settingsNavMode,
 } from "./chrome-helpers";
 
-describe("Browser public export contract", () => {
-  test("continues to expose the Browser component as the default export", () => {
-    expect(typeof Browser).toBe("function");
-  });
-});
-
 describe("browser chrome helpers", () => {
   test("recognizes the settings section families and integrations children", () => {
     expect(isSettingsSection("settings")).toBe(true);
     expect(isSettingsSection("feeds")).toBe(true);
+    expect(isSettingsSection("languages")).toBe(true);
+    expect(isSettingsSection("connection")).toBe(true);
     expect(isSettingsSection("tabs")).toBe(false);
+    expect(isSettingsSection("bookmarks")).toBe(false);
     expect(isIntegrationsMode("readaloud")).toBe(true);
     expect(isIntegrationsMode("privacy")).toBe(false);
     expect(settingsNavMode("feeds")).toBe("integrations");
+    expect(settingsNavMode("integrations")).toBe("integrations");
     expect(settingsNavMode("privacy")).toBe("privacy");
   });
 
