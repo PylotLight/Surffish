@@ -65,12 +65,13 @@ export function useToolbarExtent(
   deps: readonly unknown[],
 ): void {
   const windowHeightRef = useRef<number | undefined>(undefined);
+  const lastSentRef = useRef<string | null>(null);
+  const forceNextRef = useRef(true);
   useEffect(() => {
     const element = chromeRef.current;
     if (!element || !active) return;
     let frame = 0;
-    let lastSent = "";
-    let force = true;
+    let force = forceNextRef.current;
     const update = (): void => {
       frame = 0;
       const toolbarHeight = element.getBoundingClientRect().height;
@@ -95,9 +96,10 @@ export function useToolbarExtent(
         popovers.some((popover) => popover.matches(LIGHT_DISMISS_SELECTOR));
       // Toolbar DOM changes all the time (loading state, typing); only talk to main when it matters.
       const key = `${toolbarHeight}|${toolbarExtent}|${popoverOpen}`;
-      if (key === lastSent && !force) return;
-      lastSent = key;
+      if (key === lastSentRef.current && !force) return;
+      lastSentRef.current = key;
       force = false;
+      forceNextRef.current = false;
       void window.api.browser.chrome
         .reportMetrics({ toolbarHeight, toolbarExtent, popoverOpen })
         .then((metrics) => {
@@ -114,6 +116,7 @@ export function useToolbarExtent(
           // The first answer can shrink a popover that ran past the window: measure again.
           if (grew && popovers.length > 0) {
             force = true;
+            forceNextRef.current = true;
             schedule();
           }
         })
@@ -143,6 +146,7 @@ export function useToolbarExtent(
     });
     const onResize = (): void => {
       force = true;
+      forceNextRef.current = true;
       schedule();
     };
     element.addEventListener("animationend", schedule, true);

@@ -179,10 +179,48 @@ const surfaceFor = (view) => {
 
 // Every setBounds on a window or view (main's layout, the strip, the page).
 let setBoundsCalls = [];
+let nextBoundsTargetId = 1;
+const boundsTargetIds = new WeakMap();
+const describeBoundsTarget = (target) => {
+  if (!boundsTargetIds.has(target))
+    boundsTargetIds.set(target, nextBoundsTargetId++);
+  let contents;
+  let title;
+  try {
+    contents = target.webContents;
+  } catch {
+    // A native view can be destroyed while the smoke is collecting diagnostics.
+  }
+  try {
+    if (typeof target.getTitle === "function") title = target.getTitle();
+  } catch {
+    // A native window can be destroyed while the smoke is collecting diagnostics.
+  }
+  let url;
+  try {
+    if (contents && !contents.isDestroyed()) url = contents.getURL();
+  } catch {
+    // A view's webContents can be destroyed while the smoke is collecting diagnostics.
+  }
+  return {
+    type: target.constructor?.name ?? "view",
+    id: boundsTargetIds.get(target),
+    webContentsId: contents?.id ?? null,
+    title: title ?? null,
+    url: url || null,
+  };
+};
 for (const proto of [View.prototype, BaseWindow.prototype]) {
   const original = proto.setBounds;
   proto.setBounds = function (...args) {
-    setBoundsCalls.push(this.constructor?.name ?? "view");
+    setBoundsCalls.push({
+      target: describeBoundsTarget(this),
+      bounds: args[0],
+      callsite: new Error().stack
+        ?.split("\n")
+        .slice(2, 6)
+        .map((line) => line.trim()),
+    });
     return original.apply(this, args);
   };
 }
@@ -360,7 +398,13 @@ async function run() {
       const out = { mutations: l.mutations, srcWrites: l.srcWrites, chipsReplaced: replaced, detail: l.detail }
       window.__log = { mutations: 0, srcWrites: 0, chipsReplaced: 0, detail: [] }; window.__chips = new Map(chips.map((el) => [el.dataset.tabId, el])); return out })()`,
     );
-    const out = { ...strip, setBounds: setBoundsCalls.length, sends };
+    const boundsCalls = setBoundsCalls;
+    const out = {
+      ...strip,
+      setBounds: boundsCalls.length,
+      ...(boundsCalls.length ? { setBoundsDetails: boundsCalls } : {}),
+      sends,
+    };
     setBoundsCalls = [];
     sends = 0;
     return out;

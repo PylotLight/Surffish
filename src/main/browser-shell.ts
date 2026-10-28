@@ -259,6 +259,21 @@ function currentContentSize(shell: ShellState): {
   return { width: Math.max(0, width), height: Math.max(0, height) };
 }
 
+function setViewBoundsIfChanged(
+  view: WebContentsView,
+  bounds: ReturnType<WebContentsView["getBounds"]>,
+): void {
+  const current = view.getBounds();
+  if (
+    current.x === bounds.x &&
+    current.y === bounds.y &&
+    current.width === bounds.width &&
+    current.height === bounds.height
+  )
+    return;
+  view.setBounds(bounds);
+}
+
 function applyShellLayout(shell: ShellState): void {
   if (shell.window.isDestroyed() || shells.get(shell.window) !== shell) return;
   const { views: shellViews, toolbarMetrics } = shell;
@@ -273,7 +288,7 @@ function applyShellLayout(shell: ShellState): void {
 
   // Keep the full React renderer alive and correctly sized for New Tab and local panels.
   // When native overlays are active it is hidden, so its full-window bounds cannot steal page input.
-  shellViews.content.setBounds({ x: 0, y: 0, width, height });
+  setViewBoundsIfChanged(shellViews.content, { x: 0, y: 0, width, height });
   shellViews.content.setVisible(!overlayMode);
 
   // A wake snapshot (wake-snapshot.ts) is drawn by the toolbar surface over the page area, so the
@@ -283,7 +298,7 @@ function applyShellLayout(shell: ShellState): void {
     pageCoverLostListener?.(shell.window);
   }
   const coversPage = overlayMode && pageCovers.has(shell.window);
-  shellViews.toolbar.setBounds({
+  setViewBoundsIfChanged(shellViews.toolbar, {
     x: 0,
     y: 0,
     width,

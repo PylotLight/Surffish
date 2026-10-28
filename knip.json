@@ -20,7 +20,7 @@
   "project": ["src/**/*.{ts,tsx,cjs,mjs,js}", "scripts/**/*.{ts,cjs,mjs,js}"],
   "ignoreExportsUsedInFile": true,
   "ignoreDependencies": ["node-api-headers", "lightningcss", "jsqr"],
-  "ignoreBinaries": ["check", "fmt"],
+  "ignoreBinaries": ["check", "fmt", "lint"],
   "ignoreIssues": {
     "src/main/certificate-inspect.ts": ["exports"],
     "src/main/extension-runtime-support.ts": ["exports"],
