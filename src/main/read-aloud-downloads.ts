@@ -420,7 +420,7 @@ export function createReadAloudDownloads(deps: ReadAloudDownloadDeps) {
           ? error.message
           : String(error);
       publish({ status: "error", label: "", error: message });
-      throw new Error(message);
+      throw new Error(message, { cause: error });
     } finally {
       if (timeout) clearTimeout(timeout);
       if (modelAbort === abort) modelAbort = null;

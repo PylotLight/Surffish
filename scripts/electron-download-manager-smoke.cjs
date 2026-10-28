@@ -328,14 +328,14 @@ async function seedNewTabDemo(siteBases) {
       async () =>
         evaluateIn(
           rendererViews.toolbar,
-          'Boolean(document.querySelector("[aria-label=\\\"Bookmark this page\\\"]") && !document.querySelector("[aria-label=\\\"Bookmark this page\\\"]").disabled)',
+          `Boolean(document.querySelector('[aria-label="Bookmark this page"]') && !document.querySelector('[aria-label="Bookmark this page"]').disabled)`,
         ),
       "the Bookmark this page control in the toolbar renderer",
     );
     assert.equal(
       await evaluateIn(
         rendererViews.toolbar,
-        '(() => { const button = document.querySelector("[aria-label=\\\"Bookmark this page\\\"]"); if (!button || button.disabled) return false; button.click(); return true })()',
+        `(() => { const button = document.querySelector('[aria-label="Bookmark this page"]'); if (!button || button.disabled) return false; button.click(); return true })()`,
       ),
       true,
       "the current synthetic site should be bookmarkable",
@@ -441,7 +441,7 @@ async function seedNewTabDemo(siteBases) {
   await waitFor(
     async () =>
       evaluate(
-        'Boolean(document.querySelector("[aria-label=\\"Auto-hide sidebar\\"]"))',
+        `Boolean(document.querySelector('[aria-label="Auto-hide sidebar"]'))`,
       ),
     "the sidebar to stay pinned open",
   );
@@ -832,7 +832,9 @@ async function cleanup() {
   if (app.isReady()) app.quit();
   try {
     rmSync(userData, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    /* Profile removal is best-effort and must not mask the test result. */
+  }
 }
 
 run()

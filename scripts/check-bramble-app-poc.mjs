@@ -45,7 +45,7 @@ let setupConnection;
 let browserConnection;
 let rpConnection;
 let rpServer;
-let autofillResults = null;
+let autofillResults;
 
 function capture(stream, label) {
   stream?.on("data", (chunk) => {
@@ -210,7 +210,9 @@ async function connectCdp(webSocketUrl) {
       pending.clear();
       try {
         socket.close();
-      } catch {}
+      } catch {
+        /* Socket may already be closed during teardown. */
+      }
     },
   };
 }
@@ -416,7 +418,9 @@ async function stopChild() {
     if (process.platform === "linux" && child.pid)
       process.kill(-child.pid, "SIGTERM");
     else child.kill("SIGTERM");
-  } catch {}
+  } catch {
+    /* Child may already have exited; preserve the primary result. */
+  }
   await Promise.race([
     new Promise((resolveExit) => child.once("exit", resolveExit)),
     delay(5000),
@@ -426,7 +430,9 @@ async function stopChild() {
       if (process.platform === "linux" && child.pid)
         process.kill(-child.pid, "SIGKILL");
       else child.kill("SIGKILL");
-    } catch {}
+    } catch {
+      /* Child may already have exited; preserve the primary result. */
+    }
   }
 }
 
@@ -720,6 +726,7 @@ try {
     }
     throw new Error(
       `Create your vault did not open a Surffish Setup/Restore tab. Bridge: ${JSON.stringify(popupBridge)}; popup: ${JSON.stringify(popupState)}; extension targets: ${JSON.stringify(targets)}; ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   assert.notEqual(
@@ -896,6 +903,7 @@ try {
     }
     throw new Error(
       `${error instanceof Error ? error.message : String(error)} Safe diagnostics: ${JSON.stringify(diagnostic)}`,
+      { cause: error },
     );
   }
   assert.equal(recoveryScreen.recoveryScreen, true);
@@ -1331,7 +1339,9 @@ try {
           ),
         5_000,
       );
-    } catch {}
+    } catch {
+      /* Autofill suggestion lookup is optional; fall back to the DOM. */
+    }
     if (!suggestion) {
       const dom = await autofillConnection.send("DOM.getDocument", {
         depth: -1,
@@ -1483,7 +1493,9 @@ try {
         },
         15_000,
       );
-    } catch {}
+    } catch {
+      /* Optional picker diagnostics may time out; continue with the collected state. */
+    }
     if (
       !selectedLoginFilled.usernameMatches ||
       !selectedLoginFilled.passwordMatches
@@ -1596,7 +1608,9 @@ try {
           pickerDiagnostics.keyboardHintPresent ||=
             uiState.result?.value?.keyboardHintPresent === true;
         }
-      } catch {}
+      } catch {
+        /* Optional keyboard hint diagnostics may be unavailable. */
+      }
       throw new Error(
         `Bramble autofill field result: username=${selectedLoginFilled.usernameMatches}, password=${selectedLoginFilled.passwordMatches}; picker diagnostics=${JSON.stringify(pickerDiagnostics)}.`,
       );
@@ -1914,7 +1928,9 @@ try {
         signatureVerified = true;
         break;
       }
-    } catch {}
+    } catch {
+      /* Unrelated candidate frames may not expose the expected protocol; try the next. */
+    }
   }
   assert.equal(
     signatureVerified,
@@ -2010,6 +2026,7 @@ try {
     };
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}; Bramble state: ${JSON.stringify(safeState)}`,
+      { cause: error },
     );
   }
   setupConnection = await connectCdp(restoreSetupTarget.webSocketDebuggerUrl);

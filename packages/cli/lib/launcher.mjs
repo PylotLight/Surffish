@@ -45,7 +45,7 @@ export function isCached(config, version, env = process.env) {
 /** Newest fully cached version (semver-ish sort), or null. */
 export function newestCached(config, env = process.env) {
   const root = cacheRoot(config, env);
-  let names = [];
+  let names;
   try {
     names = readdirSync(root);
   } catch {

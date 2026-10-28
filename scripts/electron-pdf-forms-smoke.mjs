@@ -101,8 +101,8 @@ async function makeFormPdf() {
   };
   // Created bottom-up on purpose: /Tabs /R must still tab top-down.
   const total = text("total", 260, { x: 280, width: 120 });
-  const price = text("price", 260, { x: 160, width: 100 });
-  const qty = text("qty", 260, { x: 40, width: 100 });
+  text("price", 260, { x: 160, width: 100 });
+  text("qty", 260, { x: 40, width: 100 });
   const zip = text("zip", 520, { width: 120 });
   zip.setMaxLength(5);
   zip.enableCombing();

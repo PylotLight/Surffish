@@ -21,7 +21,6 @@ const dirArg = process.argv.find((arg) => arg.startsWith("--user-data="));
 const userData = dirArg
   ? dirArg.slice("--user-data=".length)
   : join(tmpdir(), `surffish-split-view-smoke-${process.pid}`);
-const originArg = process.argv.find((arg) => arg.startsWith("--origin="));
 const delay = (ms) =>
   new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 
@@ -83,7 +82,9 @@ async function evaluate(view, expression) {
   try {
     return await view.webContents.executeJavaScript(expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 

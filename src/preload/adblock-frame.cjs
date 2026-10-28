@@ -152,7 +152,7 @@ function startDomObserver() {
 (function main() {
   const protocol = window.location.protocol;
   if (protocol !== "http:" && protocol !== "https:") return;
-  let payload = null;
+  let payload;
   try {
     payload = ipcRenderer.sendSync(FRAME_START_CHANNEL, window.location.href);
   } catch {

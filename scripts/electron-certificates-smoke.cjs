@@ -121,25 +121,6 @@ const surface = (name) => views().find((view) => surfaceFor(view) === name);
 const evaluate = (view, expression) =>
   smoke.evaluate(view.webContents, expression);
 
-async function screenshot(view, name, rect) {
-  if (!screenshots) return;
-  mkdirSync(screenshots, { recursive: true });
-  await delay(450);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const image = await view.webContents.capturePage(rect);
-      writeFileSync(join(screenshots, name), image.toPNG());
-      return;
-    } catch (error) {
-      if (attempt === 2)
-        console.warn(
-          `[certificates] could not capture ${name}: ${error.message}`,
-        );
-      await delay(400);
-    }
-  }
-}
-
 /** The whole window (toolbar + page area), composed from the surfaces. */
 async function windowShot(name) {
   if (!screenshots) return;

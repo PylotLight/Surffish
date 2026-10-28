@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SidebarBackdropState } from "../../../shared/sidebar-backdrop";
 
 /**
@@ -57,7 +57,10 @@ export function SidebarBackdropLayer({
 }): React.JSX.Element | null {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [ready, setReady] = useState(false);
-  const images = state?.mode === "snapshot" ? state.images : [];
+  const images = useMemo(
+    () => (state?.mode === "snapshot" ? state.images : []),
+    [state],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;

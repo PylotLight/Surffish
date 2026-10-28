@@ -415,7 +415,7 @@ export class BrambleQuickUnlockVault {
     }
     const counted = beginPinAttempt(this.stored);
     this.writeCounter(counted.failedAttempts);
-    let secret: Buffer | null = null;
+    let secret: Buffer | null;
     try {
       secret = await unwrapWithPin(this.pinBlob, pin, this.deviceKey);
     } catch {

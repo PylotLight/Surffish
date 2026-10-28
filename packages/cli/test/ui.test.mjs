@@ -18,7 +18,7 @@ const sink = (isTTY) => {
   };
   return out;
 };
-const ANSI = /\x1b\[/;
+const ANSI = new RegExp(`${String.fromCharCode(27)}\\[`);
 
 describe("mode detection", () => {
   test("TTY is interactive with colour", () => {
@@ -108,7 +108,10 @@ describe("interactive output", () => {
       .split(/[\r\n]/)
       .find((l) => l.includes("› "));
     expect(
-      tipLine.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").length,
+      tipLine.replace(
+        new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"),
+        "",
+      ).length,
     ).toBeLessThanOrEqual(50);
     expect(tipLine).toContain("…");
   });

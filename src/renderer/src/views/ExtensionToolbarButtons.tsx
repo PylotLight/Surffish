@@ -92,7 +92,7 @@ export function ExtensionToolbarButtons({
 
   useEffect(() => {
     onMenuOpenChange?.(menuOpen);
-  }, [menuOpen]);
+  }, [menuOpen, onMenuOpenChange]);
 
   const { folded } = useToolbarSlot();
   const returnFocusRef = useReturnFocusRef(menuButtonRef);

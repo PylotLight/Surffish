@@ -752,6 +752,7 @@ export function stageWebStoreExtension(
   } catch (error) {
     throw new Error(
       `The extension manifest could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const { manifest, worker } = adaptWebStoreManifest(

@@ -110,7 +110,9 @@ async function evaluate(target, expression, userGesture = false) {
   try {
     return await contents.executeJavaScript(expression, userGesture);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 

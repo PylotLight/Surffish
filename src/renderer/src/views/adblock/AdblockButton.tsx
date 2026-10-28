@@ -111,7 +111,7 @@ export function AdblockButton({
   const enabled = useSiteBlocking(origin);
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
   const { folded } = useToolbarSlot();
   const returnFocusRef = useReturnFocusRef(buttonRef);
   useToolbarOpenRequest("adblock", () => setOpen(true));

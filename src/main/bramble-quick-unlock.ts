@@ -373,7 +373,7 @@ class PopupSession {
   private async observeMasterPassword(): Promise<void> {
     const contents = this.popup.webContents;
     if (contents.isDestroyed() || contents.isLoading()) return;
-    let taken: unknown = null;
+    let taken: unknown;
     try {
       taken = await contents.executeJavaScriptInIsolatedWorld(
         ISOLATED_WORLD_ID,

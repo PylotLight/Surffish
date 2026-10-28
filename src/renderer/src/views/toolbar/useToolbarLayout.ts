@@ -212,6 +212,6 @@ export function useToolbarOverflow(
     observer.observe(items);
     measure();
     return () => observer.disconnect();
-  }, [active, wantedKey]);
+  }, [active, wantedKey, itemsRef, toolbarRef]);
   return folded;
 }

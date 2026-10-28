@@ -433,6 +433,7 @@ export function stageBrambleFirefoxBuild(
   } catch (error) {
     throw new Error(
       `Bramble manifest could not be parsed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const adaptedManifest = adaptBrambleFirefoxManifest(sourceManifest);

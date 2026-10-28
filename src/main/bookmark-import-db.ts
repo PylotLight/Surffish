@@ -27,11 +27,11 @@ export type ImportDatabase = DatabaseSync;
 export function openSqliteCopy(path: string): ImportDatabase {
   const sqlite = loadSqlite();
   if (!sqlite) throw new Error("node:sqlite is not available in this runtime");
-  useLegacyJournalHeader(path);
+  rewriteLegacyJournalHeader(path);
   return new sqlite.DatabaseSync(path, { readOnly: true });
 }
 
-function useLegacyJournalHeader(path: string): void {
+function rewriteLegacyJournalHeader(path: string): void {
   const fd = openSync(path, "r+");
   try {
     const header = Buffer.alloc(20);

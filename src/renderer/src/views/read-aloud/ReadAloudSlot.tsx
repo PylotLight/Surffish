@@ -23,7 +23,7 @@ export function ReadAloudSlot({
   // The control unmounts with its popover when the reading ends; tell the toolbar it closed.
   useEffect(() => {
     if (!visible) onOpenChange?.(false);
-  }, [visible]);
+  }, [visible, onOpenChange]);
   if (!visible) return null;
   return (
     <Suspense fallback={null}>

@@ -364,11 +364,15 @@
         current.stream.getTracks().forEach(function (track) {
           try {
             track.stop();
-          } catch (_error) {}
+          } catch (_error) {
+            /* A stopped media track is already released; continue teardown. */
+          }
         });
       try {
         video.pause();
-      } catch (_error) {}
+      } catch (_error) {
+        /* Video may already be paused or unavailable during teardown. */
+      }
       video.srcObject = null;
       panel.hidden = true;
       scanButton.disabled = false;
@@ -572,7 +576,9 @@
               if (password && !password.value) {
                 try {
                   password.focus();
-                } catch (_error) {}
+                } catch (_error) {
+                  /* Focus is best-effort; keep the password submission flow intact. */
+                }
               }
             };
           })(textarea),

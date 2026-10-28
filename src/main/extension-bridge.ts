@@ -362,7 +362,7 @@ function attachRunningWorker(
   transport: WorkerTransport,
 ): boolean {
   const scope = scopeOf(bridge);
-  let running: Record<number, Electron.ServiceWorkerInfo> = {};
+  let running: Record<number, Electron.ServiceWorkerInfo>;
   try {
     running = bridge.session.serviceWorkers.getAllRunning();
   } catch {

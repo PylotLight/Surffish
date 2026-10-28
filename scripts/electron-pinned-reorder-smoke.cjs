@@ -58,7 +58,9 @@ async function evaluate(view, expression) {
   try {
     return await view.webContents.executeJavaScript(expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 const json = (value) => JSON.stringify(value);

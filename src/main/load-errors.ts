@@ -38,7 +38,7 @@ export function tabLoadError(
   const matching = note && note.message === error ? note : null;
   const url = matching?.url || fallbackUrl;
   const { code, name } = parseLoadError(error);
-  let viaProxy = false;
+  let viaProxy: boolean;
   try {
     viaProxy = getEffectiveRoute(url, contents?.session)?.kind === "proxy";
   } catch {

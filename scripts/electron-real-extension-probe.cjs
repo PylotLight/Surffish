@@ -725,7 +725,9 @@ async function inspectBackgroundTargets() {
         await debuggerSession.sendCommand("Target.detachFromTarget", {
           sessionId: attachedSessionId,
         });
-      } catch {}
+      } catch {
+        /* Target may already be detached; cleanup must preserve the probe result. */
+      }
     }
   }
 }
@@ -879,7 +881,9 @@ async function run() {
       let origin = "unparseable-url";
       try {
         origin = new URL(details.url).origin;
-      } catch {}
+      } catch {
+        /* Malformed request URLs remain unparseable and are rejected below. */
+      }
       const allowed = origin === allowedOrigin;
       if (!allowed) {
         externalOrigins.add(origin);
@@ -972,7 +976,9 @@ async function cleanup() {
   if (pageDebuggerAttached && pageWindow && !pageWindow.isDestroyed()) {
     try {
       pageWindow.webContents.debugger.detach();
-    } catch {}
+    } catch {
+      /* Debugger may already be detached during best-effort cleanup. */
+    }
   }
   for (const window of [popupWindow, optionsWindow, pageWindow]) {
     if (window && !window.isDestroyed()) window.destroy();
@@ -1006,7 +1012,9 @@ async function cleanup() {
   try {
     rmSync(userDataDirectory, { recursive: true, force: true });
     userDataRemoved = true;
-  } catch {}
+  } catch {
+    /* Profile removal is best-effort and must not mask the probe result. */
+  }
   if (report.cleanup) report.cleanup.temporaryUserDataRemoved = userDataRemoved;
 }
 

@@ -118,7 +118,9 @@ async function evaluate(view, expression) {
   try {
     return await view.webContents.executeJavaScript(expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 160)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 160)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 function freePort() {

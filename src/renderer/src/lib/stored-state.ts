@@ -16,7 +16,7 @@ export function useStoredState<T>(
     } catch {
       return fallback;
     }
-  }, [key]);
+  }, [key, fallback]);
   const [value, setValue] = useState<T>(read);
   useEffect(() => {
     const onStorage = (event: StorageEvent): void => {

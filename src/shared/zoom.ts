@@ -42,6 +42,22 @@ export function formatZoomPercent(factor: number): string {
 /** Largest trackpad pinch (visual zoom) scale on a page: tabs and Glance alike. */
 export const PINCH_ZOOM_MAX_SCALE = 3;
 
+/** Above this `visualViewport.scale` (float noise allowed) the page counts as pinch-zoomed. */
+const PINCH_ZOOMED_SCALE = 1.01;
+
+/**
+ * Whether a page is pinch-zoomed in. Two-finger sideways movement then pans the magnified page,
+ * so a history swipe would take the gesture away from the pan; swipes wait until the page is
+ * back at 1x.
+ */
+export function isPinchZoomed(pageScale: number | undefined): boolean {
+  return (
+    typeof pageScale === "number" &&
+    Number.isFinite(pageScale) &&
+    pageScale > PINCH_ZOOMED_SCALE
+  );
+}
+
 export type PageZoomAction = "in" | "out" | "reset";
 
 /** Electron's zoom-changed direction (Ctrl+wheel, precision-touchpad zoom) as a zoom step. */

@@ -23,7 +23,7 @@ export function useMenuKeyboard(
       menuRef.current
         ?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')
         ?.focus();
-  }, [open]);
+  }, [open, menuRef]);
   return (event) => {
     const items = Array.from(
       menuRef.current?.querySelectorAll<HTMLElement>(
@@ -200,7 +200,7 @@ export function SurffishMenu({
   const controlRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
   usePopoverDismiss(open, controlRef, () => setOpen(false), {
     returnFocusRef: menuButtonRef,
     preventEscapeDefault: true,

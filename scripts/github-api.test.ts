@@ -115,8 +115,10 @@ test("auth config, output parsing, upload url, tag lookup", () => {
     "https://uploads.github.com/repos/o/r/releases/7/assets?name=Surffish%200.1.3.zip",
   );
   assert.equal(
-    findReleaseByTag<any>([{ tag_name: "v1" }, { tag_name: "v2", id: 2 }], "v2")
-      ?.id,
+    findReleaseByTag<{ tag_name?: string; id?: number }>(
+      [{ tag_name: "v1" }, { tag_name: "v2", id: 2 }],
+      "v2",
+    )?.id,
     2,
   );
   assert.equal(findReleaseByTag({ message: "nope" }, "v2"), undefined);

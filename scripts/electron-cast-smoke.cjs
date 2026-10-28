@@ -1494,17 +1494,25 @@ async function run() {
 function cleanup() {
   try {
     site.close();
-  } catch {}
+  } catch {
+    /* Fixture may already be closed during best-effort cleanup. */
+  }
   try {
     fakeCast.close();
-  } catch {}
+  } catch {
+    /* Fixture may already be closed during best-effort cleanup. */
+  }
   for (const socket of receiver.sockets) socket.destroy();
   try {
     mdns.close();
-  } catch {}
+  } catch {
+    /* Fixture may already be closed during best-effort cleanup. */
+  }
   try {
     mirror.socket?.close();
-  } catch {}
+  } catch {
+    /* Fixture socket may already be closed during best-effort cleanup. */
+  }
 }
 
 run()

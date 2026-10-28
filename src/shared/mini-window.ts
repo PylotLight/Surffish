@@ -336,7 +336,7 @@ export function acceleratorFromKeyEvent(
   },
   isMac: boolean,
 ): string | null {
-  let key: string | null = null;
+  let key: string | null;
   if (event.code === "Space") key = "Space";
   else if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3);
   else if (/^Digit[0-9]$/.test(event.code)) key = event.code.slice(5);

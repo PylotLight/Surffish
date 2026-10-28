@@ -114,7 +114,9 @@ export async function loadKnownHostVerifier(
       entries.push(...parseKnownHosts(await readFile(file, "utf8")));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw new Error(`Could not read SSH known_hosts file ${file}.`);
+      throw new Error(`Could not read SSH known_hosts file ${file}.`, {
+        cause: error,
+      });
     }
   }
 

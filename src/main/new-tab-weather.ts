@@ -192,6 +192,7 @@ export async function locateWeatherPlace(): Promise<WeatherPlace> {
       (failure?.status ? `HTTP ${failure.status}` : "");
     throw new Error(
       `Couldn’t look up your approximate location${reason ? ` (${reason})` : ""}. Search for your city instead.`,
+      { cause: error },
     );
   }
   const place = parseIpLocation(json);

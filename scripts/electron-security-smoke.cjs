@@ -357,8 +357,7 @@ async function run() {
   const legacySessionUrl = `${fixtureUrl}/page?q=prelaunch+restore&filter=recent&code=LEGACY-OAUTH-CODE&refresh_token=LEGACY-REFRESH-TOKEN#LEGACY-FRAGMENT`;
   seedProfile(legacySessionUrl);
 
-  const { server: tlsFixture, fixture: releaseFixture } =
-    startTlsReleaseFixture(userData);
+  const { server: tlsFixture } = startTlsReleaseFixture(userData);
   const tlsPort = await listen(tlsFixture);
   const socksProxy = startSocksForwarder(tlsPort);
   const socksPort = await listen(socksProxy);

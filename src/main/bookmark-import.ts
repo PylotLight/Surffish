@@ -169,7 +169,7 @@ function scanChromium(
     const names = parseChromiumProfileNames(
       readJson(join(userData, "Local State")),
     );
-    let directories: string[] = [];
+    let directories: string[];
     try {
       directories = readdirSync(userData).filter(
         (name) =>
@@ -219,8 +219,7 @@ function firefoxRoots(): string[] {
 function scanFirefox(): ResolvedSource[] {
   const sources: ResolvedSource[] = [];
   for (const root of firefoxRoots()) {
-    let profiles: Array<{ name: string; path: string; isDefault: boolean }> =
-      [];
+    let profiles: Array<{ name: string; path: string; isDefault: boolean }>;
     try {
       profiles = parseFirefoxProfilesIni(
         readFileSync(join(root, "profiles.ini"), "utf8"),

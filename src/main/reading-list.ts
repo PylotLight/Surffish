@@ -504,7 +504,7 @@ export async function openReadingListItem(
     record.target === "new-tab" ? "new-tab" : "current";
   const listen = record.listen === true && readAloudEnabled();
   const reader = record.reader === true || listen;
-  let tabId: string | null = null;
+  let tabId: string | null;
   if (target === "new-tab") {
     tabId = newBrowserTab(item.url);
   } else {

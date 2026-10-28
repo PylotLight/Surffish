@@ -35,6 +35,22 @@ export interface Annotation {
   message?: string | null;
 }
 
+function isAnnotation(value: unknown): value is Annotation {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    (candidate.annotation_level === undefined ||
+      typeof candidate.annotation_level === "string") &&
+    (candidate.title === undefined ||
+      candidate.title === null ||
+      typeof candidate.title === "string") &&
+    (candidate.message === undefined ||
+      candidate.message === null ||
+      typeof candidate.message === "string")
+  );
+}
+
 export interface JobStep {
   name: string;
   conclusion?: string | null;
@@ -90,7 +106,7 @@ function token(): string | null {
   return cachedToken;
 }
 
-function api(path: string): Promise<any> {
+function api(path: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const args = [
       "-sS",
@@ -156,16 +172,42 @@ async function repos(owner: string): Promise<string[]> {
     .filter(Boolean);
   if (fixed?.length)
     return fixed.map((r) => (r.includes("/") ? r : `${owner}/${r}`));
-  const list: any[] = token()
+  const response = token()
     ? await api("/user/repos?affiliation=owner&sort=pushed&per_page=15").catch(
         () => api(`/users/${owner}/repos?sort=pushed&per_page=15`),
       )
     : await api(`/users/${owner}/repos?sort=pushed&per_page=15`);
+  const list = Array.isArray(response) ? (response as RepoRecord[]) : [];
   return list
-    .filter((r) => r.owner?.login?.toLowerCase() === owner.toLowerCase())
-    .map((r) => r.full_name as string);
+    .filter(
+      (r): r is RepoRecord & { full_name: string } =>
+        r.owner?.login?.toLowerCase() === owner.toLowerCase() &&
+        typeof r.full_name === "string",
+    )
+    .map((r) => r.full_name);
 }
 
+interface RepoRecord {
+  owner?: { login?: string };
+  full_name?: string;
+}
+interface WorkflowRun {
+  id: number;
+}
+interface WorkflowRuns {
+  workflow_runs?: WorkflowRun[];
+}
+interface WorkflowJob extends JobStep {
+  id: number;
+  name: string;
+  conclusion?: string | null;
+  html_url: string;
+  completed_at?: string | null;
+  steps?: JobStep[];
+}
+interface WorkflowJobs {
+  jobs?: WorkflowJob[];
+}
 interface FoundJob {
   repo: string;
   id: number;
@@ -183,25 +225,23 @@ async function findFailedJob(
   const perRepo = await Promise.all(
     (await repos(owner)).map(async (repo) => {
       try {
-        const runs = await api(
+        const runs = (await api(
           `/repos/${repo}/actions/runs?status=failure&per_page=5&created=%3E%3D${since}`,
-        );
+        )) as WorkflowRuns;
         const jobs = await Promise.all(
-          (runs.workflow_runs ?? []).map((run: any) =>
+          (runs.workflow_runs ?? []).map((run) =>
             api(
               `/repos/${repo}/actions/runs/${run.id}/jobs?filter=latest&per_page=100`,
             ).then(
-              (j) => j.jobs ?? [],
+              (j) => (j as WorkflowJobs).jobs ?? [],
               () => [],
             ),
           ),
         );
         return jobs
           .flat()
-          .filter(
-            (job: any) => job.name === name && job.conclusion === "failure",
-          )
-          .map((job: any): FoundJob => ({
+          .filter((job) => job.name === name && job.conclusion === "failure")
+          .map((job): FoundJob => ({
             repo,
             id: job.id,
             url: job.html_url,
@@ -232,9 +272,12 @@ async function explain(name: string): Promise<string> {
     try {
       const job = await findFailedJob(name, owner);
       if (!job) continue;
-      const annotations: Annotation[] = await api(
+      const annotationResponse = await api(
         `/repos/${job.repo}/check-runs/${job.id}/annotations?per_page=50`,
       ).catch(() => []);
+      const annotations = Array.isArray(annotationResponse)
+        ? annotationResponse.filter(isAnnotation)
+        : [];
       const reason = pickReason(annotations, job.steps);
       if (reason) return `${reason}  ${job.url}`;
       lastError = "job found, no annotations yet";

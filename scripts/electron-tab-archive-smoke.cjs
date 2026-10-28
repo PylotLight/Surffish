@@ -14,7 +14,6 @@ const { app, BaseWindow } = require("electron");
 const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 
 const userData = join(tmpdir(), `surffish-tab-archive-smoke-${process.pid}`);
-const primary = process.platform === "darwin" ? "meta" : "control";
 const server = createServer((request, response) => {
   response.writeHead(200, {
     "Content-Type": "text/html; charset=utf-8",
@@ -69,7 +68,9 @@ async function evaluate(view, expression) {
   try {
     return await view.webContents.executeJavaScript(expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 

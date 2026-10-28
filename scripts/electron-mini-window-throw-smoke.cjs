@@ -145,10 +145,6 @@ const handlePage = (win) =>
   win.contentView.children.find(
     (view) => view.webContents && isHandlePage(view.webContents),
   )?.webContents;
-const centre = (r) => ({
-  x: r.x + Math.floor(r.width / 2),
-  y: r.y + Math.floor(r.height / 2),
-});
 
 /** For each step of `lead` after `from`, how far (ms) the nearest step of `other` was (same tick ≈ 0). */
 function skew(events, lead, other) {

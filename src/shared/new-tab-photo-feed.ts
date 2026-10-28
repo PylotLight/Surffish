@@ -45,7 +45,18 @@ function plainText(value: unknown, maxLength = 160): string {
     },
   );
   return decoded
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(
+      new RegExp(
+        "[" +
+          String.fromCharCode(0) +
+          "-" +
+          String.fromCharCode(31) +
+          String.fromCharCode(127) +
+          "]",
+        "g",
+      ),
+      " ",
+    )
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);

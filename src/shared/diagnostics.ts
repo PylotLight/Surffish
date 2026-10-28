@@ -324,7 +324,7 @@ export function describeTabOccupant(
   title: string,
   url: string,
 ): { label: string; detail: string } {
-  let origin = "";
+  let origin: string;
   try {
     const parsed = new URL(url);
     origin =

@@ -27,7 +27,7 @@ export function ReadAloudControl({
   const visible = state.status !== "idle";
   useEffect(() => {
     onOpenChange?.(open && visible);
-  }, [open, visible]);
+  }, [open, visible, onOpenChange]);
   useEffect(() => {
     if (!visible) setOpen(false);
   }, [visible]);

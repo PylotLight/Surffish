@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Formats staged files with bun fmt before the commit lands, so the CI "Format check"
+# (bun fmt --check in ci.yml) cannot fail on a commit made from this clone.
+#
+# Install with `bun run hooks:install` (sets core.hooksPath to this directory).
+#
+# Only file types bun fmt parses are passed to it, matched against .bun-version
+# (1.4.4): ts tsx js jsx mjs cjs json jsonc css md html yml yaml. Everything else
+# is left alone: bun fmt never checks those in its repo-wide traversal, and it
+# errors on unknown extensions in explicit-path mode. A staged file that bun fmt
+# cannot parse (a known extension with broken contents) blocks the commit, exactly
+# like the CI check would.
+set -u
+
+bun_bin=$(command -v bun || printf '%s' "$HOME/.bun/bin/bun")
+if [ ! -x "$bun_bin" ]; then
+  echo "pre-commit: bun not found ($bun_bin); skipping format check. Install bun (bun.sh) to use the Surffish hooks." >&2
+  exit 0
+fi
+
+staged=()
+while IFS= read -r -d '' file; do
+  case $file in
+    *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | *.json | *.jsonc | *.css | *.md | *.html | *.yml | *.yaml)
+      staged+=("$file")
+      ;;
+  esac
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+[ "${#staged[@]}" -eq 0 ] && exit 0
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+# Already clean? Then say nothing and commit.
+if "$bun_bin" fmt --check "${staged[@]}" >"$tmp" 2>&1; then
+  exit 0
+fi
+
+# Format what bun fmt can, re-stage it, then re-check: the commit must be
+# formatted and parseable, or the CI format check would fail on it.
+"$bun_bin" fmt "${staged[@]}" >>"$tmp" 2>&1
+
+to_add=()
+for file in "${staged[@]}"; do
+  [ -f "$file" ] && to_add+=("$file")
+done
+[ "${#to_add[@]}" -gt 0 ] && git add -- "${to_add[@]}"
+
+if "$bun_bin" fmt --check "${staged[@]}" >>"$tmp" 2>&1; then
+  cat "$tmp"
+  echo "pre-commit: formatted staged files with bun fmt (now staged; the commit includes the formatting)"
+else
+  cat "$tmp"
+  echo "pre-commit: bun fmt could not leave the staged files formatted (run 'bun run format', then re-stage). Commit blocked; amend with --no-verify to override." >&2
+  exit 1
+fi

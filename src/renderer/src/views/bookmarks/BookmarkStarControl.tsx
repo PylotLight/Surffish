@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FAVOURITES_FOLDER_ID,
   normalizeBookmarkUrl,
@@ -47,7 +47,7 @@ export function BookmarkStarControl({
 
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
 
   useEffect(
     () =>
@@ -59,32 +59,35 @@ export function BookmarkStarControl({
     [],
   );
 
+  const close = useCallback(
+    async (save: boolean): Promise<void> => {
+      const id = editingId;
+      setEditingId(null);
+      if (!save || !id || !editing) return;
+      const draft = draftRef.current;
+      draftRef.current = null;
+      if (!draft) return;
+      const patch: { title?: string; parentId?: string } = {};
+      if (draft.title.trim() && draft.title.trim() !== editing.title)
+        patch.title = draft.title;
+      if (draft.parentId && draft.parentId !== editing.parentId)
+        patch.parentId = draft.parentId;
+      if (Object.keys(patch).length === 0) return;
+      try {
+        await window.api.browser.bookmarks.update(id, patch);
+      } catch {
+        // The bookmark may have been deleted elsewhere; nothing to save then.
+      }
+    },
+    [editing, editingId],
+  );
+
   // Navigating away closes the popover (saving what was typed).
   const urlRef = useRef(url);
   useEffect(() => {
     if (urlRef.current !== url && editingId) void close(true);
     urlRef.current = url;
-  }, [url]);
-
-  async function close(save: boolean): Promise<void> {
-    const id = editingId;
-    setEditingId(null);
-    if (!save || !id || !editing) return;
-    const draft = draftRef.current;
-    draftRef.current = null;
-    if (!draft) return;
-    const patch: { title?: string; parentId?: string } = {};
-    if (draft.title.trim() && draft.title.trim() !== editing.title)
-      patch.title = draft.title;
-    if (draft.parentId && draft.parentId !== editing.parentId)
-      patch.parentId = draft.parentId;
-    if (Object.keys(patch).length === 0) return;
-    try {
-      await window.api.browser.bookmarks.update(id, patch);
-    } catch {
-      // The bookmark may have been deleted elsewhere; nothing to save then.
-    }
-  }
+  }, [url, editingId, close]);
 
   usePopoverDismiss(open, controlRef, () => void close(true), {
     returnFocusRef: buttonRef,
@@ -223,7 +226,7 @@ function BookmarkPopoverFields({
   const [draftFolder, setDraftFolder] = useState(parentId);
   useEffect(() => {
     onChange({ title: draftTitle, parentId: draftFolder });
-  }, [draftTitle, draftFolder]);
+  }, [draftTitle, draftFolder, onChange]);
   return (
     <>
       <label className="bookmark-popover-field">

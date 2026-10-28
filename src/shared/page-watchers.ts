@@ -108,7 +108,9 @@ export function normalizeWatchSelector(value: unknown): string | null {
   if (
     !selector ||
     selector.length > MAX_SELECTOR_CHARS ||
-    /[{}\u0000-\u001f]/.test(selector)
+    new RegExp(
+      "[{}" + String.fromCharCode(0) + "-" + String.fromCharCode(31) + "]",
+    ).test(selector)
   )
     return null;
   return selector;

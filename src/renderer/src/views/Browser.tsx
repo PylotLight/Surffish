@@ -761,10 +761,13 @@ export default function Browser({
       setUiFontSaving(false);
     }
   }
-  function updateChromeState(patch: Partial<BrowserChromeState>): void {
-    setChromeState((current) => ({ ...current, ...patch }));
-    void window.api.browser.chrome.set(patch).catch(() => undefined);
-  }
+  const updateChromeState = useCallback(
+    (patch: Partial<BrowserChromeState>): void => {
+      setChromeState((current) => ({ ...current, ...patch }));
+      void window.api.browser.chrome.set(patch).catch(() => undefined);
+    },
+    [],
+  );
 
   function persistSidebarWidth(value: number): void {
     const width = normalizeSidebarWidth(value);
@@ -837,7 +840,7 @@ export default function Browser({
   // main is coalesced, and main's broadcasts of our own (older) values are ignored while we edit, so
   // the icons never jump back mid-drag (NEW_TAB_ECHO_GUARD_MS).
   newTabPreferencesRef.current = newTabPreferences;
-  function saveNewTabPreferences(next: NewTabPreferences): void {
+  const saveNewTabPreferences = useCallback((next: NewTabPreferences): void => {
     newTabPreferencesRef.current = next;
     newTabLocalEditAtRef.current = performance.now();
     setNewTabPreferences(next);
@@ -847,20 +850,24 @@ export default function Browser({
         .set(newTabPreferencesRef.current)
         .catch(() => undefined);
     }, NEW_TAB_SAVE_COALESCE_MS);
-  }
+  }, []);
 
-  function patchNewTabPreferences(patch: Partial<NewTabPreferences>): void {
-    saveNewTabPreferences({ ...newTabPreferencesRef.current, ...patch });
-  }
+  const patchNewTabPreferences = useCallback(
+    (patch: Partial<NewTabPreferences>): void => {
+      saveNewTabPreferences({ ...newTabPreferencesRef.current, ...patch });
+    },
+    [saveNewTabPreferences],
+  );
 
-  function setSidebarMode(
-    next: SidebarMode | ((current: SidebarMode) => SidebarMode),
-  ): void {
-    updateChromeState({
-      sidebarMode:
-        typeof next === "function" ? next(chromeState.sidebarMode) : next,
-    });
-  }
+  const setSidebarMode = useCallback(
+    (next: SidebarMode | ((current: SidebarMode) => SidebarMode)): void => {
+      updateChromeState({
+        sidebarMode:
+          typeof next === "function" ? next(chromeState.sidebarMode) : next,
+      });
+    },
+    [chromeState.sidebarMode, updateChromeState],
+  );
 
   function setSidebarPinned(
     next: boolean | ((current: boolean) => boolean),
@@ -1388,12 +1395,13 @@ export default function Browser({
     newTabPreferences.showGreeting,
   ]);
 
+  const weatherPlace = newTabPreferences.weatherPlace;
+  const weatherLocation = newTabPreferences.weatherLocation;
+  const legacyWeatherLocation = weatherPlace ? "" : weatherLocation;
   useEffect(() => {
-    const place = newTabPreferences.weatherPlace;
+    const place = weatherPlace;
     // Settings saved before city search hold free text only: main looks it up once, we save the place.
-    const legacyLocation = place
-      ? ""
-      : newTabPreferences.weatherLocation.trim();
+    const legacyLocation = place ? "" : weatherLocation.trim();
     if (
       surface !== "content" ||
       !isLocalNewTab ||
@@ -1471,9 +1479,12 @@ export default function Browser({
     newTabPreferences.weatherEnabled,
     newTabPreferences.weatherProvider,
     newTabPreferences.openMeteoModel,
-    newTabPreferences.weatherPlace?.latitude,
-    newTabPreferences.weatherPlace?.longitude,
-    newTabPreferences.weatherPlace ? "" : newTabPreferences.weatherLocation,
+    weatherPlace?.latitude,
+    weatherPlace?.longitude,
+    legacyWeatherLocation,
+    weatherPlace,
+    weatherLocation,
+    patchNewTabPreferences,
   ]);
 
   const activeOrigin = httpOrigin(browser.url);
@@ -1643,18 +1654,21 @@ export default function Browser({
    * Show a settings page: in the Settings tab when it is the one on screen, else main focuses the
    * window's Settings tab (or opens one next to this tab). `host` deep-links Sites to that site.
    */
-  function selectSettingsSection(
-    mode: SettingsSectionMode,
-    host?: string | null,
-  ): void {
-    if (settingsTab && !host)
-      setSettingsSectionPick({ section: mode, revision: settingsTab.revision });
-    if (sidebarMode === "downloads" || sidebarMode === "bookmarks")
-      setSidebarMode("tabs");
-    void window.api.browser.settings
-      .open({ section: mode, ...(host ? { host } : {}) })
-      .catch(() => undefined);
-  }
+  const selectSettingsSection = useCallback(
+    (mode: SettingsSectionMode, host?: string | null): void => {
+      if (settingsTab && !host)
+        setSettingsSectionPick({
+          section: mode,
+          revision: settingsTab.revision,
+        });
+      if (sidebarMode === "downloads" || sidebarMode === "bookmarks")
+        setSidebarMode("tabs");
+      void window.api.browser.settings
+        .open({ section: mode, ...(host ? { host } : {}) })
+        .catch(() => undefined);
+    },
+    [settingsTab, sidebarMode, setSidebarMode],
+  );
 
   const closeNewTabCustomize = useCallback(
     () => setNewTabCustomizeOpen(false),
@@ -1711,9 +1725,9 @@ export default function Browser({
   }, [settingsFocus, settingsTab?.revision]);
 
   /** Leave a full-page panel (Downloads, Bookmarks) for the tab under it. */
-  function exitPanel(): void {
+  const exitPanel = useCallback((): void => {
     if (sidebarMode !== "tabs") setSidebarMode("tabs");
-  }
+  }, [sidebarMode, setSidebarMode]);
 
   /** The sidebar gear opens (or focuses) the Settings tab; it closes like any tab. */
   function openSettings(): void {
@@ -1934,7 +1948,7 @@ export default function Browser({
   useEffect(() => {
     if (settingsMode === "network" && !networkToolEnabled)
       selectSettingsSection("settings");
-  }, [settingsMode, networkToolEnabled]);
+  }, [settingsMode, networkToolEnabled, selectSettingsSection]);
 
   useEffect(() => {
     if (
@@ -1944,7 +1958,7 @@ export default function Browser({
       sidebarModeForWatchers(settingsMode, false) !== settingsMode
     )
       selectSettingsSection("settings");
-  }, [surface, settingsMode, watchersEnabled]);
+  }, [surface, settingsMode, watchersEnabled, selectSettingsSection]);
 
   useEffect(() => {
     const unsubscribe = window.api.browser.bramble.onChange(setBramblePoc);
@@ -2017,6 +2031,7 @@ export default function Browser({
     downloadsPopupOpen,
     siteActionsOpen,
     extensionsMenuOpen,
+    exitPanel,
   ]);
 
   // Closes on any press outside it, the page view included (see usePopoverDismiss), not only the globe.
@@ -2152,7 +2167,7 @@ export default function Browser({
   const downloadsAttentionFlags = useDownloadsAttention(downloadsSeenAt);
   useEffect(() => {
     if (downloadsPopupOpen) setDownloadsSeenAt(Date.now());
-  }, [downloadsPopupOpen]);
+  }, [downloadsPopupOpen, setDownloadsSeenAt]);
   const toolbarContext: ToolbarContext = {
     castEnabled: castToolbar.enabled,
     castLive: castToolbar.live,

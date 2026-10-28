@@ -37,7 +37,7 @@ function useReadingList(wanted: boolean): ReadingListSnapshot | null {
     return () => {
       cancelled = true;
     };
-  }, [wanted, snapshot !== null]);
+  }, [wanted, snapshot]);
   return snapshot;
 }
 
@@ -64,7 +64,7 @@ export function ReadingListButton({
   const snapshot = useReadingList(open || badgeReady);
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
   useEffect(
     () => window.api.browser.readingList.onShow(() => setOpen(true)),
     [],

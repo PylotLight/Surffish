@@ -85,7 +85,18 @@ function finite(value: unknown, min: number, max: number): number | null {
 function cleanText(value: unknown, max: number): string {
   return typeof value === "string"
     ? value
-        .replace(/[\u0000-\u001f\u007f]/g, " ")
+        .replace(
+          new RegExp(
+            "[" +
+              String.fromCharCode(0) +
+              "-" +
+              String.fromCharCode(31) +
+              String.fromCharCode(127) +
+              "]",
+            "g",
+          ),
+          " ",
+        )
         .trim()
         .slice(0, max)
     : "";

@@ -682,9 +682,8 @@ async function run() {
   );
   await waitFor(
     async () =>
-      [g1, g3].every((entry) => true) &&
       (await tabs()).filter((tab) => [g1.id, g3.id].includes(tab.id)).length ===
-        2,
+      2,
     "both back in the browser",
   );
   await waitFor(

@@ -126,7 +126,6 @@ const allWindows = () =>
   BaseWindow.getAllWindows().filter((win) => !win.isDestroyed());
 const panelWindows = () =>
   allWindows().filter((win) => win.getTitle() === "Mini Window Header");
-const visiblePanels = () => panelWindows().filter((win) => win.isVisible());
 const miniWindows = () =>
   allWindows().filter((win) => /(^| — )Mini Window$/.test(win.getTitle()));
 const handleWindows = () =>

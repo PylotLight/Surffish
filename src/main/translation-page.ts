@@ -1,8 +1,33 @@
 // Runs in an isolated Electron world: websites cannot access translation state or callbacks.
 // Never insert provider text as HTML or change form values / editable content.
-export function translationPage(action: string, payload: any): any {
-  const scope = globalThis as any;
-  const key = "__surffishTranslation";
+interface TranslationPageState {
+  id: string;
+  originals: Map<Text, { original: string; translated: string }>;
+  nodes: Text[];
+  cancelled: boolean;
+  status: HTMLElement;
+  result: HTMLElement;
+  restore(): void;
+}
+
+interface TranslationPagePayload {
+  id: string;
+  selection?: string | boolean;
+  text?: string;
+  index?: number;
+  original?: string;
+}
+
+type TranslationPageScope = typeof globalThis & {
+  __surffishTranslation?: TranslationPageState;
+};
+
+export function translationPage(
+  action: string,
+  payload: TranslationPagePayload,
+): unknown {
+  const scope = globalThis as TranslationPageScope;
+  const key = "__surffishTranslation" as const;
   if (action === "begin") {
     scope[key]?.restore();
     const originals = new Map<Text, { original: string; translated: string }>();
@@ -54,7 +79,7 @@ export function translationPage(action: string, payload: any): any {
     shadow.append(panel);
     document.documentElement.append(host);
     scope[key] = state;
-    if (payload.selection)
+    if (typeof payload.selection === "string")
       return { id: payload.id, texts: [payload.selection], limited: false };
     if (!document.body) return { id: payload.id, texts: [], limited: false };
     const walker = document.createTreeWalker(
@@ -103,9 +128,15 @@ export function translationPage(action: string, payload: any): any {
   const state = scope[key];
   if (!state || state.id !== payload.id || state.cancelled) return false;
   if (action === "apply") {
-    if (payload.selection) state.result.textContent = payload.text;
+    if (payload.selection) state.result.textContent = payload.text ?? "";
     else {
-      const node = state.nodes[payload.index] as Text | undefined;
+      if (
+        typeof payload.index !== "number" ||
+        typeof payload.original !== "string" ||
+        typeof payload.text !== "string"
+      )
+        return false;
+      const node = state.nodes[payload.index];
       if (node?.isConnected && node.data === payload.original) {
         state.originals.set(node, {
           original: node.data,
@@ -117,7 +148,8 @@ export function translationPage(action: string, payload: any): any {
     return true;
   }
   if (action === "status") {
-    state.status.textContent = payload.text;
+    if (typeof payload.text === "string")
+      state.status.textContent = payload.text;
     return true;
   }
   return action === "active";

@@ -11,7 +11,12 @@ import type {
   ParsedKey,
 } from "ssh2";
 import type { BrowserProxySettings } from "../shared/types";
-import { parseSshClient, parseSshTarget } from "../shared/ssh-tunnel";
+import {
+  isTransientSshFailure,
+  parseSshClient,
+  parseSshTarget,
+  sshReconnectDelayMs,
+} from "../shared/ssh-tunnel";
 import type { SshTunnelStatus } from "../shared/network-helper";
 import { loadKnownHostVerifier } from "./ssh-known-hosts";
 import { resolveSshConnection } from "./ssh-config";
@@ -51,6 +56,8 @@ export interface SshTunnelRuntime {
   createSocksListener?: (client: Client) => SshSocksListener;
   allocatePort?: () => Promise<number>;
   portIsListening?: (port: number) => Promise<boolean>;
+  /** Delay before automatic reconnect `attempt` (1-based); tests shorten it. */
+  reconnectDelayMs?: (attempt: number) => number;
 }
 
 function listenOnLoopback(server: Server, port: number): Promise<void> {
@@ -291,6 +298,7 @@ export function createSshTunnelManager(
   const allocatePort = runtime.allocatePort ?? allocateEphemeralLoopbackPort;
   const portIsListening = runtime.portIsListening ?? isPortListening;
   const startupTimeoutMs = runtime.startupTimeoutMs ?? STARTUP_TIMEOUT_MS;
+  const reconnectDelay = runtime.reconnectDelayMs ?? sshReconnectDelayMs;
   let client: Client | null = null;
   let listener: SshSocksListener | null = null;
   let runningTarget: string | null = null;
@@ -305,8 +313,43 @@ export function createSshTunnelManager(
   let generation = 0;
   let startup: Promise<void> | null = null;
   let stopping: Promise<void> | null = null;
+  let lastSettings: TunnelSettings | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempt = 0;
+  let retrying = false;
 
-  const stop = async (): Promise<void> => {
+  const cancelReconnect = (resetAttempts: boolean): void => {
+    if (reconnectTimer !== null) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    retrying = false;
+    if (resetAttempts) reconnectAttempt = 0;
+  };
+
+  /**
+   * A sleep/wake or network drop leaves the tunnel down without the user touching settings, so
+   * rebuild it here on a backoff instead of waiting for a Save.
+   */
+  const scheduleReconnect = (): void => {
+    if (reconnectTimer !== null || !lastSettings) return;
+    retrying = true;
+    reconnectTimer = setTimeout(
+      () => {
+        reconnectTimer = null;
+        retrying = false;
+        const settings = lastSettings;
+        if (!settings) return;
+        reconnectAttempt += 1;
+        void run(settings, true).catch((reconnectError: unknown) => {
+          error = errorMessage(reconnectError);
+          if (isTransientSshFailure(error)) scheduleReconnect();
+        });
+      },
+      reconnectDelay(reconnectAttempt + 1),
+    );
+  };
+
+  /** Release the client and listener without touching the configured target or reconnect state. */
+  const teardown = async (): Promise<void> => {
     generation += 1;
     const previousClient = client;
     const previousListener = listener;
@@ -328,17 +371,34 @@ export function createSshTunnelManager(
     if (stopping === pendingStop) stopping = null;
   };
 
-  const sync = async (settings: TunnelSettings): Promise<void> => {
+  const stop = async (): Promise<void> => {
+    lastSettings = null;
+    cancelReconnect(true);
+    await teardown();
+  };
+
+  const run = async (
+    settings: TunnelSettings,
+    retry: boolean,
+  ): Promise<void> => {
     const nextTarget = parseSshTarget(settings.sshHost);
+    if (!retry) cancelReconnect(true);
     configured = nextTarget.length > 0;
     enabled = settings.enabled;
     target = nextTarget || null;
     port = nextTarget ? (runningPort ?? port) : null;
 
     if (!nextTarget || !settings.enabled) {
-      await stop();
+      lastSettings = null;
+      cancelReconnect(true);
+      await teardown();
       return;
     }
+    lastSettings = {
+      enabled: settings.enabled,
+      sshHost: settings.sshHost,
+      sshClient: settings.sshClient,
+    };
     if (startup) {
       const currentStartup = startup;
       await currentStartup;
@@ -350,7 +410,8 @@ export function createSshTunnelManager(
       return;
     }
 
-    await stop();
+    await teardown();
+    if (retry) starting = true;
     const runId = ++generation;
     let resolveStartup: () => void = () => {};
     const startupCompletion = new Promise<void>((resolve) => {
@@ -364,14 +425,14 @@ export function createSshTunnelManager(
       try {
         selectedPort = await allocatePort();
       } catch (portError) {
-        throw new Error(errorMessage(portError));
+        throw new Error(errorMessage(portError), { cause: portError });
       }
       if (runId !== generation) return;
       let alreadyListening: boolean;
       try {
         alreadyListening = await portIsListening(selectedPort);
       } catch (probeError) {
-        throw new Error(errorMessage(probeError));
+        throw new Error(errorMessage(probeError), { cause: probeError });
       }
       if (runId !== generation) return;
       if (alreadyListening)
@@ -407,6 +468,7 @@ export function createSshTunnelManager(
         const abandonedListener = listener;
         listener = null;
         if (abandonedListener) void abandonedListener.close();
+        if (isTransientSshFailure(message)) scheduleReconnect();
       };
       nextClient.on("error", (connectionError) => {
         if (client !== nextClient || generation !== runId) return;
@@ -433,6 +495,8 @@ export function createSshTunnelManager(
       starting = false;
       running = true;
       error = null;
+      retrying = false;
+      reconnectAttempt = 0;
     } catch (startError) {
       if (runId === generation) {
         starting = false;
@@ -441,6 +505,8 @@ export function createSshTunnelManager(
         runningPort = null;
         if (client === nextClient) client = null;
         error = errorMessage(startError);
+        // The host is unreachable (still waking, Wi-Fi reconnecting): keep trying quietly.
+        if (isTransientSshFailure(error)) scheduleReconnect();
       }
       if (nextListener && listener !== nextListener) await nextListener.close();
       if (nextClient) await endClient(nextClient);
@@ -459,10 +525,11 @@ export function createSshTunnelManager(
     starting,
     running,
     error,
+    retrying,
     client: "builtin",
   });
 
-  return { sync, stop, getStatus };
+  return { sync: (settings) => run(settings, false), stop, getStatus };
 }
 
 /**

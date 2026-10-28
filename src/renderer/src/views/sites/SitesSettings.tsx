@@ -97,13 +97,14 @@ export function SitesSettings({
     ? origins.filter((origin) => origin.toLowerCase().includes(query))
     : origins;
 
+  const focusSiteAvailable = !!focusHost && byOrigin.has(focusHost);
   useEffect(() => {
-    if (!focusHost || !byOrigin.has(focusHost)) return;
+    if (!focusHost || !focusSiteAvailable) return;
     const element = focusRef.current;
     if (!element) return;
     element.scrollIntoView({ block: "nearest" });
     element.focus({ preventScroll: true });
-  }, [focusHost, revision, byOrigin.has(focusHost ?? "")]);
+  }, [focusHost, revision, focusSiteAvailable, byOrigin]);
 
   async function update(
     origin: string,

@@ -85,7 +85,7 @@ export function BookmarksMenuPanel({
   );
   useLayoutEffect(() => {
     onLayout?.();
-  }, [openFolder?.id, rows.length]);
+  }, [openFolder?.id, rows.length, onLayout]);
 
   function showFolder(node: BookmarkNode, row: HTMLElement): void {
     const rect = row.getBoundingClientRect();
@@ -314,7 +314,7 @@ export function BookmarksMenuButton({
   const buttonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
   const { folded } = useToolbarSlot();
   const returnFocusRef = useReturnFocusRef(buttonRef);
   useToolbarOpenRequest("bookmarks", () => setOpen(true));

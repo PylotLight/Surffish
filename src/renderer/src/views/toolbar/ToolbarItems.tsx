@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   moveToolbarItem,
   togglePinned,
@@ -91,13 +91,15 @@ export function ToolbarItems({
     id: ToolbarItemId;
     drop: { id: ToolbarItemId; after: boolean } | null;
   } | null>(null);
+  const dragActive = drag !== null;
   const dragRef = useRef<DragState | null>(null);
   const latest = useRef({ layout, onLayoutChange });
   latest.current = { layout, onLayoutChange };
 
+  const menuOpen = menu !== null;
   useEffect(() => {
-    onMenuOpenChange?.(menu !== null);
-  }, [menu !== null]);
+    onMenuOpenChange?.(menuOpen);
+  }, [menu, menuOpen, onMenuOpenChange]);
   const menuTarget = useRef<ToolbarItemId | null>(null);
   menuTarget.current = menu?.id ?? null;
   const menuReturnFocus = useMemo(
@@ -112,7 +114,7 @@ export function ToolbarItems({
             : null;
         },
       }) as React.RefObject<HTMLElement | null>,
-    [],
+    [itemsRef, menuButtonRef],
   );
   usePopoverDismiss(menu !== null, menuRef, () => setMenu(null), {
     returnFocusRef: menuReturnFocus,
@@ -134,13 +136,13 @@ export function ToolbarItems({
     });
   };
 
-  const endDrag = (): void => {
+  const endDrag = useCallback((): void => {
     dragRef.current = null;
     setDrag(null);
-  };
+  }, []);
 
   useEffect(() => {
-    if (!drag) return;
+    if (!dragActive) return;
     const onMove = (event: PointerEvent): void => {
       const state = dragRef.current;
       if (!state || event.pointerId !== state.pointerId) return;
@@ -187,7 +189,7 @@ export function ToolbarItems({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("blur", endDrag);
     };
-  }, [drag !== null]);
+  }, [dragActive, endDrag]);
 
   const onPointerDown = (
     id: ToolbarItemId,

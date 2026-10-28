@@ -2,10 +2,10 @@ import { ipcMain } from "electron";
 import { runInWindow, windowForContents } from "./window-scope";
 import { reportMainError } from "./crash-guard";
 
-type IpcListener = (event: Electron.IpcMainEvent, ...args: any[]) => void;
+type IpcListener = (event: Electron.IpcMainEvent, ...args: unknown[]) => void;
 type IpcHandler = (
   event: Electron.IpcMainInvokeEvent,
-  ...args: any[]
+  ...args: unknown[]
 ) => unknown;
 let installed = false;
 
@@ -17,10 +17,7 @@ let installed = false;
 export function installIpcWindowScope(): void {
   if (installed) return;
   installed = true;
-  const wrapped = new WeakMap<
-    (...args: any[]) => unknown,
-    (...args: any[]) => unknown
-  >();
+  const wrapped = new WeakMap<object, unknown>();
   const wrapListener = (
     listener: IpcListener,
     channel: string,

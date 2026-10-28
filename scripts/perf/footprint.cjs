@@ -82,7 +82,9 @@ async function waitFor(pred, what, timeout = 30000) {
     try {
       const v = await pred();
       if (v) return v;
-    } catch {}
+    } catch {
+      /* A transient predicate failure is retried on the next poll. */
+    }
     await delay(20);
   }
   throw new Error(`timeout: ${what}`);

@@ -268,7 +268,7 @@ test("traces the config files, target, identities and agent it resolved", async 
     "Host nas\n  HostName nas.local\n  User backup\n  IdentityFile ~/.ssh/id_ed25519\n",
   );
   const lines: string[] = [];
-  let configPath = "";
+  let configPath: string;
   try {
     configPath = realpathSync(join(ssh, "config"));
     await resolveSshConnection("nas", home, "tester", {

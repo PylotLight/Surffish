@@ -31,6 +31,27 @@ interface ProbeTab {
   index?: number;
 }
 
+interface ExtensionManifest {
+  manifest_version?: number;
+  version?: string;
+  background?: { service_worker?: string; type?: string };
+  action?: { default_popup?: string };
+  browser_action?: { default_popup?: string };
+  options_ui?: { page?: string };
+  options_page?: string;
+  content_scripts?: Array<{ js?: string[]; css?: string[] }>;
+  permissions?: unknown[];
+}
+
+interface ExecutionContextCreatedParams {
+  context?: {
+    id?: number;
+    origin?: string;
+    name?: string;
+    auxData?: { isDefault?: boolean; frameId?: string };
+  };
+}
+
 const root = mkdtempSync(join(tmpdir(), "surffish-host-tab-frame-probe-"));
 const sourceExtensionDirectory = process.env.SURFFISH_PROBE_EXTENSION_DIR
   ? resolve(process.env.SURFFISH_PROBE_EXTENSION_DIR)
@@ -305,24 +326,25 @@ function prepareOfficialExtensionCopy(
     throw new Error(`No manifest.json found in ${sourceDirectory}`);
   cpSync(sourceDirectory, directory, { recursive: true, errorOnExist: true });
   const manifestPath = join(directory, "manifest.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<
-    string,
-    any
-  >;
+  const manifest = JSON.parse(
+    readFileSync(manifestPath, "utf8"),
+  ) as ExtensionManifest;
+  const background = manifest.background;
   if (
     manifest.manifest_version !== 3 ||
-    typeof manifest.background?.service_worker !== "string"
+    !background ||
+    typeof background.service_worker !== "string"
   ) {
     throw new Error(
       "The official-build host probe requires an MV3 package with a background service worker.",
     );
   }
-  if (manifest.background.type === "module")
+  if (background.type === "module")
     throw new Error(
       "This test-only wrapper does not alter module service workers.",
     );
 
-  const originalWorker = manifest.background.service_worker as string;
+  const originalWorker = background.service_worker;
   const originalWorkerPath = join(directory, originalWorker);
   if (!existsSync(originalWorkerPath))
     throw new Error(`Background worker file not found: ${originalWorker}`);
@@ -402,7 +424,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 importScripts('surffish-original-background.js');\n`;
   writeFileSync(join(directory, "surffish-test-worker.js"), workerWrapper);
-  manifest.background.service_worker = "surffish-test-worker.js";
+  background.service_worker = "surffish-test-worker.js";
 
   const actionPopup =
     manifest.action?.default_popup ??
@@ -469,11 +491,19 @@ async function inspectExtensionWorlds(
   const listener = (
     _event: Electron.Event,
     method: string,
-    params: any,
+    params: unknown,
   ): void => {
-    if (method !== "Runtime.executionContextCreated" || !params?.context)
+    const eventParams =
+      params !== null && typeof params === "object"
+        ? (params as ExecutionContextCreatedParams)
+        : undefined;
+    const context = eventParams?.context;
+    if (
+      method !== "Runtime.executionContextCreated" ||
+      !context ||
+      typeof context.id !== "number"
+    )
       return;
-    const context = params.context;
     contexts.push({
       id: context.id,
       origin: context.origin ?? "",
@@ -553,7 +583,9 @@ async function run(): Promise<void> {
         allowed =
           url.protocol === "chrome-extension:" ||
           (url.protocol === "http:" && url.hostname === "127.0.0.1");
-      } catch {}
+      } catch {
+        /* Malformed request URLs are treated as not allowed. */
+      }
       if (!allowed && blockedRequests.length < 100)
         blockedRequests.push({
           url: details.url,

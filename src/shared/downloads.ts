@@ -48,7 +48,18 @@ export function safeDownloadFilename(value: string): string {
     .filter((part) => part && part !== "." && part !== "..")
     .at(-1)
     ?.replace(/[\\/]/g, "")
-    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(
+      new RegExp(
+        "[" +
+          String.fromCharCode(0) +
+          "-" +
+          String.fromCharCode(31) +
+          String.fromCharCode(127) +
+          "]",
+        "g",
+      ),
+      "",
+    )
     .trim()
     .slice(0, 240);
   return safe || "Download";

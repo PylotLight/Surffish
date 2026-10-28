@@ -57,7 +57,15 @@ export function isPdfEditorUrl(value: string): boolean {
   }
 }
 
-const UNSAFE_FILENAME = /[\\/:*?"<>|\u0000-\u001f\u007f]/g;
+const UNSAFE_FILENAME = new RegExp(
+  '[\\/:*?"<>|' +
+    String.fromCharCode(0) +
+    "-" +
+    String.fromCharCode(31) +
+    String.fromCharCode(127) +
+    "]",
+  "g",
+);
 
 function cleanFilename(value: string): string {
   return value
@@ -72,7 +80,7 @@ export function pdfNameFromUrl(
   sourceUrl: string,
   fallback = "document",
 ): string {
-  let name = "";
+  let name: string;
   try {
     const url = new URL(sourceUrl);
     name =

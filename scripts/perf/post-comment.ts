@@ -14,6 +14,15 @@ const {
   PR_NUMBER: pr,
   GH_PROXY: proxy,
 } = process.env;
+type JsonObject = Record<string, unknown>;
+interface Comment {
+  body?: unknown;
+  id?: number;
+}
+const asObject = (value: unknown): JsonObject | undefined =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : undefined;
 const api = process.env.GITHUB_API_URL || "https://api.github.com";
 const warn = (m: string) => {
   console.log(`::warning::perf comment not posted: ${m}`);
@@ -27,7 +36,7 @@ function curl(
   method: string,
   url: string,
   body?: unknown,
-): { status: number; json: any } {
+): { status: number; json: unknown } {
   const args = [
     "-sS",
     "--max-time",
@@ -55,7 +64,7 @@ function curl(
   const out = r.stdout ?? "";
   const cut = out.lastIndexOf("\n");
   const status = Number(out.slice(cut + 1)) || 0;
-  let json: any = null;
+  let json: unknown = null;
   try {
     json = JSON.parse(out.slice(0, cut));
   } catch {
@@ -78,18 +87,20 @@ for (let page = 1; page <= 5 && existing === undefined; page++) {
   );
   if (r.status !== 200 || !Array.isArray(r.json))
     warn(`listing comments returned HTTP ${r.status}`);
-  existing = r.json.find(
-    (c: any) => typeof c.body === "string" && c.body.startsWith(tag),
+  const comments = r.json as Comment[];
+  existing = comments.find(
+    (comment) =>
+      typeof comment.body === "string" && comment.body.startsWith(tag),
   )?.id;
-  if (r.json.length < 100) break;
+  if (comments.length < 100) break;
 }
 const r = existing
   ? curl("PATCH", `${api}/repos/${repo}/issues/comments/${existing}`, { body })
   : curl("POST", `${api}/repos/${repo}/issues/${pr}/comments`, { body });
 if (r.status !== 200 && r.status !== 201)
   warn(
-    `${existing ? "update" : "create"} returned HTTP ${r.status} ${r.json?.message ?? ""}`,
+    `${existing ? "update" : "create"} returned HTTP ${r.status} ${asObject(r.json)?.message ?? ""}`,
   );
 console.log(
-  `perf comment ${existing ? "updated" : "created"}: ${r.json?.html_url ?? ""}`,
+  `perf comment ${existing ? "updated" : "created"}: ${asObject(r.json)?.html_url ?? ""}`,
 );

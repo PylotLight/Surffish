@@ -1,3 +1,4 @@
+/* global chrome */
 function hasPath(root, path) {
   return (
     path

@@ -1,13 +1,4 @@
-function hasPath(root, path) {
-  return (
-    path
-      .split(".")
-      .reduce(
-        (value, key) => (value == null ? undefined : value[key]),
-        root,
-      ) !== undefined
-  );
-}
+/* global chrome */
 
 let observedLocalStorageChange = false;
 const observedLocalStorageChangeKeys = [];
@@ -140,7 +131,9 @@ async function offscreenCreateClose() {
     if (created) {
       try {
         await chrome.offscreen.closeDocument();
-      } catch {}
+      } catch {
+        /* The offscreen document may already be closed. */
+      }
     }
     return { available: true, createClose: false, error: String(error) };
   }

@@ -536,7 +536,7 @@ export async function finishScrollShot(
   maxSidePx: number,
   forceStitch = false,
 ): Promise<ScrollShotResult | null> {
-  let geometry: ScrollShotGeometry | null = null;
+  let geometry: ScrollShotGeometry | null;
   try {
     geometry = asGeometry(await run(contents, call("finish")));
     if (!geometry) return null;

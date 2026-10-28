@@ -1,3 +1,4 @@
+/* global chrome */
 function alarmsCreateGet() {
   return new Promise((resolve) => {
     if (

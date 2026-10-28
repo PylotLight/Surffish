@@ -411,6 +411,7 @@ async function run() {
   } catch (error) {
     throw new Error(
       `${error.message} Last observed state: ${JSON.stringify(lastGroupingState)}`,
+      { cause: error },
     );
   }
   let lastStackState;
@@ -424,6 +425,7 @@ async function run() {
   } catch (error) {
     throw new Error(
       `${error.message} Last observed state: ${JSON.stringify(lastStackState)}`,
+      { cause: error },
     );
   }
   assert.match(

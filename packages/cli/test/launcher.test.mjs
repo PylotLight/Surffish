@@ -117,7 +117,7 @@ describe("launcher", () => {
       expect(text).toContain("ok: downloaded");
       expect(text).toMatch(/ok: verified sha256 [0-9a-f]{12}…/);
       expect(text).toContain("ok: unpacked with unzip");
-      expect(text).not.toMatch(/\x1b\[/);
+      expect(text).not.toMatch(new RegExp(`${String.fromCharCode(27)}\\[`));
       expect(
         existsSync(
           join(cacheDir, "0.1.22", "Surffish.app", "Contents", "Info.plist"),

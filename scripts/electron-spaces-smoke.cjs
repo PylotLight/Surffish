@@ -92,7 +92,9 @@ async function evaluate(view, expression) {
   try {
     return await smoke.evaluate(view.webContents, expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 const step = (message) => smoke.step(`${phase}: ${message}`);
@@ -115,7 +117,9 @@ async function waitForWindow(win, predicate, description, timeout) {
   try {
     return await waitFor(predicate, description, timeout);
   } catch (error) {
-    throw new Error(`${error.message} Window: ${await describeWindow(win)}`);
+    throw new Error(`${error.message} Window: ${await describeWindow(win)}`, {
+      cause: error,
+    });
   }
 }
 
@@ -291,7 +295,7 @@ async function mainPhase() {
     'spaces.create({ name: "Work", icon: "💼", partitioned: true })',
   );
   assert.ok(workId, "Work created");
-  spaces = await waitFor(async () => {
+  await waitFor(async () => {
     const value = await spacesOf(win);
     return value.activeSpaceId === workId ? value : null;
   }, "Work active");
@@ -385,7 +389,7 @@ async function mainPhase() {
     "you stay in Default",
   );
   await api(win, `tabs.activate(${JSON.stringify(movedId)})`);
-  spaces = await waitFor(async () => {
+  await waitFor(async () => {
     const value = await spacesOf(win);
     return value.activeSpaceId === workId ? value : null;
   }, "activating a tab in another Space switches to it");

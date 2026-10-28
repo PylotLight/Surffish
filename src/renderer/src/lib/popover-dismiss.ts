@@ -91,5 +91,5 @@ export function usePopoverDismiss(
       window.removeEventListener("blur", onBlur);
       window.removeEventListener(POPOVER_DISMISS_EVENT, onRequest);
     };
-  }, [open]);
+  }, [open, containerRef]);
 }

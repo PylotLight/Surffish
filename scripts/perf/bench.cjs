@@ -1053,7 +1053,9 @@ async function run() {
       } finally {
         try {
           c.debugger.detach();
-        } catch {}
+        } catch {
+          /* Debugger may already be detached during best-effort cleanup. */
+        }
       }
     }
     await delay(300);

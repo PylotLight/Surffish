@@ -613,7 +613,7 @@ export async function resolveSshConnection(
 
 function concreteHostAlias(value: string): string | null {
   const alias = parseSshTarget(value);
-  if (!alias || /[*?\[\]!]/.test(alias)) return null;
+  if (!alias || /[*?\x5b\x5d!]/.test(alias)) return null;
   return alias;
 }
 

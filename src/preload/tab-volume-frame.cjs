@@ -301,7 +301,7 @@ function installTabVolume(eventName) {
       AudioNodeProto,
       "connect",
       () => (target, node, args) => {
-        let gain = null;
+        let gain;
         try {
           gain = args.length > 0 ? gainFor(args[0]) : null;
         } catch {

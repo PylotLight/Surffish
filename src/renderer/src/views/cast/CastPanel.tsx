@@ -213,6 +213,7 @@ export function CastPanel({
       void window.api.browser.cast.setPickerOpen(false).catch(() => undefined);
     };
   }, []);
+  const sessionPlaying = snapshot.session?.status === "playing";
   useEffect(() => {
     let live = true;
     setProbed(false);
@@ -235,7 +236,7 @@ export function CastPanel({
     return () => {
       live = false;
     };
-  }, [tabId, pageUrl, snapshot.session?.status === "playing"]);
+  }, [tabId, pageUrl, sessionPlaying]);
 
   async function castTo(
     deviceId: string,

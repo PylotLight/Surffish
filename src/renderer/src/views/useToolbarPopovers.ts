@@ -155,7 +155,7 @@ export function useToolbarExtent(
       element.removeEventListener("animationend", schedule, true);
       window.removeEventListener("resize", onResize);
     };
-  }, [active, extraOpen, ...deps]);
+  }, [active, extraOpen, chromeRef, deps]);
 }
 
 /**

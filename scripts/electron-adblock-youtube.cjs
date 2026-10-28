@@ -375,7 +375,9 @@ async function run() {
 async function cleanup() {
   try {
     detach?.();
-  } catch {}
+  } catch {
+    /* Debugger may already be detached during cleanup. */
+  }
   if (window && !window.isDestroyed()) window.destroy();
   if (app.isReady()) app.quit();
 }

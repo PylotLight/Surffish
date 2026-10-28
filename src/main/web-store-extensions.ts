@@ -712,7 +712,7 @@ async function activatePrepared(prepared: PreparedPackage): Promise<void> {
         rollbackNote = ` The previous version could not be reloaded: ${errorMessage(restoreError)}`;
       }
     }
-    throw new Error(`${message}${rollbackNote}`);
+    throw new Error(`${message}${rollbackNote}`, { cause: error });
   }
 }
 

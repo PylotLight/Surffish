@@ -16,7 +16,7 @@ const CALL = "surffish:extension-worker:call";
 const DOWN = "surffish:extension-worker:down";
 const MAX_EARLY = 200;
 
-let href = "";
+let href;
 try {
   href = String(
     contextBridge.executeInMainWorld({

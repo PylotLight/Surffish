@@ -828,7 +828,7 @@ export function detachScreenshots(win?: BaseWindow): void {
 }
 
 /** Point the overlay at `win` (the window taking the screenshot), moving the view over if it exists. */
-function useWindow(win: BaseWindow | null): void {
+function moveOverlayToWindow(win: BaseWindow | null): void {
   if (!win || win === ownerWindow || win.isDestroyed()) return;
   const entry = hosts.get(win);
   if (!entry) return;
@@ -865,7 +865,7 @@ export function getScreenshotContentsIds(): number[] {
 export async function takeScreenshot(
   mode: ScreenshotMode = "choose",
 ): Promise<boolean> {
-  useWindow(currentBrowserWindow());
+  moveOverlayToWindow(currentBrowserWindow());
   if (!host || !ownerWindow || ownerWindow.isDestroyed()) return false;
   if (session) {
     const wasSelecting =

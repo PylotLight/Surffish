@@ -200,6 +200,7 @@ async function run() {
     } catch (error) {
       throw new Error(
         `${error.message} Got ${JSON.stringify(await field(key)())}, want ${JSON.stringify(expected)}`,
+        { cause: error },
       );
     }
   };

@@ -187,8 +187,9 @@ export function pdfFilename(pageURL: string): string {
 }
 
 export function safeFilename(value: string, fallback: string): string {
+  const controlCharacters = `${String.fromCharCode(0)}-${String.fromCharCode(31)}`;
   const cleaned = value
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
+    .replace(new RegExp(`[\\\\/:*?"<>|${controlCharacters}]`, "g"), "_")
     .trim()
     .replace(/[. ]+$/g, "");
   return (cleaned || fallback).slice(0, 180);

@@ -227,7 +227,7 @@ export function collectDiagnosticsOccupants(): {
   for (const contents of allWebContents.getAllWebContents())
     if (!contents.isDestroyed()) sessions.add(contents.session);
   for (const ses of sessions) {
-    let running: Record<number, Electron.ServiceWorkerInfo> = {};
+    let running: Record<number, Electron.ServiceWorkerInfo>;
     try {
       running = ses.serviceWorkers.getAllRunning();
     } catch {

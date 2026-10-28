@@ -39,6 +39,7 @@ for (const name of caseNames) {
       if (name === "chromium-mv2") {
         throw new Error(
           `The required MV2 probe emitted malformed JSON: ${String(error)}\n${stdout}\n${stderr}`,
+          { cause: error },
         );
       }
     }

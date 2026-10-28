@@ -164,9 +164,8 @@ export function SettingsSegmented<T extends string | number>({
     const next = options[wrapped];
     if (!next) return;
     onChange(next.value);
-    ref.current
-      ?.querySelectorAll<HTMLButtonElement>("button")
-      [wrapped]?.focus();
+    const buttons = ref.current?.querySelectorAll<HTMLButtonElement>("button");
+    buttons?.[wrapped]?.focus();
   };
   return (
     <div

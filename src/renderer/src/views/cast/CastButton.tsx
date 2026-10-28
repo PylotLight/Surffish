@@ -71,7 +71,7 @@ export function CastButton({
   const snapshot = useCastSnapshot();
   useEffect(() => {
     onOpenChange?.(open);
-  }, [open]);
+  }, [open, onOpenChange]);
   useEffect(() => window.api.browser.cast.onShow(() => setOpen(true)), []);
   useEffect(() => {
     if (!snapshot.enabled) setOpen(false);
@@ -93,7 +93,7 @@ export function CastButton({
       live: active,
       devices: deviceCount,
     });
-  }, [snapshot.enabled, active, deviceCount]);
+  }, [snapshot.enabled, active, deviceCount, onContext]);
   if (!snapshot.enabled) return null;
   const label = castButtonLabel(snapshot);
   return (

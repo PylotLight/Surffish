@@ -69,7 +69,9 @@ async function evaluate(view, expression) {
   try {
     return await view.webContents.executeJavaScript(expression);
   } catch (error) {
-    throw new Error(`${expression.slice(0, 120)}: ${error.message}`);
+    throw new Error(`${expression.slice(0, 120)}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -341,7 +343,7 @@ async function mainPhase() {
     await api(win, `tabGroups.move(${json(groupId)}, ${json(id.d)})`),
     true,
   );
-  paths = await order(win);
+  await order(win);
   assert.equal((await tabsOf(win))[0].group?.id, groupId, "group first");
 
   // Optional: SURFFISH_SMOKE_SHOT=/path.png saves the sidebar (for eyeballing).

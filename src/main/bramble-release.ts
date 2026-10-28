@@ -619,6 +619,7 @@ export function extractExtensionZip(
     } catch (error) {
       throw new Error(
         `Could not unpack ${label} file ${entry.name}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
     if (

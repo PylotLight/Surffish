@@ -43,7 +43,7 @@ interface Line {
 /** Header/footer band: lines this close to the page's top or bottom edge (fraction of its height). */
 const EDGE_BAND = 0.12;
 const PAGE_NUMBER =
-  /^(?:page\s+)?[-–—(\[]?\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*[-–—)\]]?(?:\s*(?:of|\/)\s*\d{1,4})?$/i;
+  /^(?:page\s+)?[-–—([]?\s*(?:\d{1,4}|[ivxlcdm]{1,7})\s*[-–—)\]]?(?:\s*(?:of|\/)\s*\d{1,4})?$/i;
 const DOT_LEADER = /\s*(?:\.\s*){4,}\s*(?:\d{1,4}|[ivxlcdm]{1,7})?\s*$/i;
 const TERMINAL = /[.!?…:;]["'”’)\]]*$/;
 const HYPHEN_END = /[\p{L}][-\u2010\u00ad]$/u;

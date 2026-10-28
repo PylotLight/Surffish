@@ -1,6 +1,6 @@
 const smoke = require("./smoke-harness.cjs");
 const assert = require("node:assert/strict");
-const { mkdirSync, writeFileSync, readFileSync, rmSync } = require("node:fs");
+const { mkdirSync, writeFileSync, readFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");

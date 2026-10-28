@@ -21,7 +21,7 @@ export interface GitHubApiConfig {
 
 export interface ApiResponse {
   status: number;
-  json: any;
+  json: unknown;
   error?: string;
 }
 
@@ -36,6 +36,22 @@ export interface CurlRequest {
   maxTimeSeconds?: number;
 }
 
+type JsonObject = Record<string, unknown>;
+interface ReleaseAsset {
+  name?: string;
+  state?: string;
+}
+interface Release {
+  tag_name?: string;
+  draft?: boolean;
+  id: number;
+  assets?: ReleaseAsset[];
+  html_url?: string;
+}
+const asObject = (value: unknown): JsonObject | undefined =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : undefined;
 const DEFAULT_API = "https://api.github.com";
 const DEFAULT_UPLOADS = "https://uploads.github.com";
 
@@ -116,10 +132,13 @@ export function curlAuthConfig(token: string): string {
 }
 
 /** Splits `-w '\n%{http_code}'` output into status + parsed JSON. */
-export function parseCurlOutput(stdout: string): { status: number; json: any } {
+export function parseCurlOutput(stdout: string): {
+  status: number;
+  json: unknown;
+} {
   const cut = stdout.lastIndexOf("\n");
   const status = Number(stdout.slice(cut + 1).trim()) || 0;
-  let json: any = null;
+  let json: unknown = null;
   try {
     json = JSON.parse(stdout.slice(0, Math.max(cut, 0)));
   } catch {
@@ -147,7 +166,8 @@ export function findReleaseByTag<T extends { tag_name?: string }>(
 }
 
 export function describeFailure(what: string, response: ApiResponse): string {
-  const message = response.json?.message ? ` ${response.json.message}` : "";
+  const messageValue = asObject(response.json)?.message;
+  const message = typeof messageValue === "string" ? ` ${messageValue}` : "";
   return `${what}: HTTP ${response.status || "no response"}${message}${response.error ? ` (${response.error})` : ""}`;
 }
 
@@ -203,7 +223,10 @@ export function checkGitHubApi(config: GitHubApiConfig): string[] {
       describeFailure(`GET /repos/${config.repo}/releases`, releases),
     );
   const latest = Array.isArray(releases.json)
-    ? releases.json.map((release: any) => release.tag_name).join(", ")
+    ? releases.json
+        .map((release) => asObject(release)?.tag_name)
+        .filter((tag): tag is string => typeof tag === "string")
+        .join(", ")
     : "";
   lines.push(
     `GET /repos/${config.repo}/releases: HTTP 200 (${latest || "none"})`,
@@ -251,7 +274,10 @@ export function createGitHubRelease(
   });
   if (list.status !== 200)
     throw new Error(describeFailure("listing releases", list));
-  let release: any = findReleaseByTag(list.json, input.tag);
+  let release: Release | undefined = findReleaseByTag<Release>(
+    list.json,
+    input.tag,
+  );
   if (release) {
     log(
       `reusing the existing ${release.draft ? "draft " : ""}release for ${input.tag} (id ${release.id})`,
@@ -272,14 +298,16 @@ export function createGitHubRelease(
       throw new Error(
         describeFailure(`creating the ${input.tag} release`, created),
       );
-    release = created.json;
+    release = asObject(created.json) as Release | undefined;
+    if (!release)
+      throw new Error(
+        `creating the ${input.tag} release returned invalid JSON`,
+      );
     log(`created draft release ${input.tag} (id ${release.id})`);
   }
 
   const name = basename(input.assetPath);
-  const existing = (release.assets ?? []).find(
-    (asset: any) => asset.name === name,
-  );
+  const existing = (release.assets ?? []).find((asset) => asset.name === name);
   if (existing && existing.state === "uploaded") {
     log(`${name} is already on the release, not uploading again`);
   } else if (existing) {
@@ -302,10 +330,11 @@ export function createGitHubRelease(
     });
     if (upload.status !== 201)
       throw new Error(describeFailure(`uploading ${name}`, upload));
-    log(`uploaded ${name} (${upload.json?.size ?? "?"} bytes)`);
+    const size = asObject(upload.json)?.size ?? "?";
+    log(`uploaded ${name} (${size} bytes)`);
   }
 
-  let published = release;
+  let published: Release = release;
   if (release.draft) {
     const patch = githubRequest(config, {
       method: "PATCH",
@@ -318,7 +347,7 @@ export function createGitHubRelease(
       throw new Error(
         describeFailure(`publishing the ${input.tag} release`, patch),
       );
-    published = patch.json;
+    published = (asObject(patch.json) as Release | undefined) ?? published;
   }
   const final = githubRequest(config, {
     method: "GET",
@@ -327,7 +356,11 @@ export function createGitHubRelease(
   });
   const assets =
     final.status === 200
-      ? (final.json?.assets ?? []).map((asset: any) => asset.name)
+      ? ((asObject(final.json)?.assets as ReleaseAsset[] | undefined) ?? [])
+          .map((asset) => asset.name)
+          .filter(
+            (assetName): assetName is string => typeof assetName === "string",
+          )
       : [name];
   return {
     url:

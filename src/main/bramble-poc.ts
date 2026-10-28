@@ -431,6 +431,7 @@ async function ensureOffscreenDocument(): Promise<void> {
     if (!host.isDestroyed()) host.close();
     throw new Error(
       `Could not start Bramble's offscreen crypto host: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }
@@ -504,7 +505,9 @@ async function replaceStagedBrambleBuild(
       try {
         const restored = await loadBrambleExtension(finalDirectory);
         if (restored.id !== previousExtension.id)
-          throw new Error("the restored extension identity did not match");
+          throw new Error("the restored extension identity did not match", {
+            cause: error,
+          });
         loadedExtension = {
           id: restored.id,
           name: restored.name,
@@ -529,7 +532,7 @@ async function replaceStagedBrambleBuild(
       iconDataUrl: loadedExtension ? previousState.iconDataUrl : null,
       error: `${originalMessage}${rollbackError}`,
     });
-    throw new Error(`${originalMessage}${rollbackError}`);
+    throw new Error(`${originalMessage}${rollbackError}`, { cause: error });
   }
 }
 
@@ -754,7 +757,9 @@ async function loadExistingStagedBuild(directory: string): Promise<void> {
     if (loadedExtension) {
       try {
         getBrowserSession().extensions.removeExtension(loadedExtension.id);
-      } catch {}
+      } catch {
+        /* Extension may already be removed; preserve the primary operation result. */
+      }
       loadedExtension = null;
     }
     throw error;
@@ -1083,7 +1088,7 @@ export async function closeBrambleSetupTab(
     !isBrambleExtensionTab(sender)
   )
     return false;
-  let vault: ReturnType<typeof classifyBrambleVaultProbe> = "unknown";
+  let vault: ReturnType<typeof classifyBrambleVaultProbe>;
   try {
     vault = classifyBrambleVaultProbe(
       await evaluateInBrambleExtensionPage(BRAMBLE_VAULT_PROBE_SCRIPT),

@@ -298,7 +298,23 @@ export function releaseNotesToText(html: string): string {
     .replace(/<[^>]*>/g, "");
   text = decodeXmlEntities(text)
     .replace(/\r\n?/g, "\n")
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(
+      new RegExp(
+        "[" +
+          String.fromCharCode(0) +
+          "-" +
+          String.fromCharCode(8) +
+          String.fromCharCode(11) +
+          String.fromCharCode(12) +
+          String.fromCharCode(14) +
+          "-" +
+          String.fromCharCode(31) +
+          String.fromCharCode(127) +
+          "]",
+        "g",
+      ),
+      "",
+    )
     .split("\n")
     .map((line) => line.replace(/[ \t\u00a0]+/g, " ").trim())
     .join("\n")

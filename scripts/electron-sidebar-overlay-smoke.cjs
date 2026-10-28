@@ -1222,7 +1222,9 @@ async function cleanup() {
   if (app.isReady()) app.quit();
   try {
     rmSync(userData, { recursive: true, force: true });
-  } catch {}
+  } catch {
+    /* Profile removal is best-effort and must not mask the test result. */
+  }
 }
 
 run()

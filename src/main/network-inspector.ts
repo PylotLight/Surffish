@@ -332,7 +332,7 @@ function handleMessage(
   const protocolRequestId = stringValue(params.requestId);
   if (!protocolRequestId) return;
   const key = requestKey(tracker.tabId, protocolRequestId);
-  let record = getRecord(tracker.activeRequests.get(key));
+  const record = getRecord(tracker.activeRequests.get(key));
 
   if (method === "Network.requestWillBeSent") {
     const redirectResponse = params.redirectResponse as CdpResponse | undefined;
@@ -346,7 +346,7 @@ function handleMessage(
         redirectResponse.encodedDataLength,
       );
     }
-    record = createRecord(tracker, protocolRequestId, params);
+    createRecord(tracker, protocolRequestId, params);
   } else if (method === "Network.requestWillBeSentExtraInfo") {
     if (record) {
       record.requestHeaders = headersFrom(params.headers);

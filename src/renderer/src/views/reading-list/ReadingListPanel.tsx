@@ -64,7 +64,7 @@ export function ReadingListPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
-  const items = snapshot?.items ?? [];
+  const items = useMemo(() => snapshot?.items ?? [], [snapshot]);
   const visible = useMemo(
     () => filterReadingList(items, filter, query),
     [items, filter, query],

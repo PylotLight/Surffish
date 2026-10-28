@@ -368,7 +368,9 @@ async function tidy(win) {
     let host = "";
     try {
       host = new URL(view.webContents.getURL()).hostname;
-    } catch {}
+    } catch {
+      /* Unparseable page URLs simply have no matching host-specific CSS. */
+    }
     for (const [domain, css] of Object.entries(TIDY_CSS)) {
       if (host === domain || host.endsWith(`.${domain}`))
         await view.webContents.insertCSS(css).catch(() => {});
