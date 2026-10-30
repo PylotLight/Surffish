@@ -16,6 +16,7 @@ import {
   isFullFilterConfig,
   isWebPageUrl,
 } from "./adblock-policy.ts";
+import { firstRefreshDelayMs } from "../shared/adblock-refresh.ts";
 import { getExtensionAdblockExemptHosts } from "./extension-adblock-exemptions";
 import {
   applyFilterEnvironment,
@@ -47,6 +48,7 @@ const mainDirectory = dirname(fileURLToPath(import.meta.url));
 let initialization: Promise<void> | null = null;
 let refreshInProgress: Promise<void> | null = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let firstRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
 let activeBlocker: ElectronBlocker | null = null;
 let sessionAttached = false;
 
@@ -81,10 +83,12 @@ function resolveFramePreload(): string {
 async function readCache(): Promise<{
   blocker: ElectronBlocker;
   fresh: boolean;
+  ageMs: number;
 } | null> {
   try {
     const file = cachePath();
     const modifiedAt = (await stat(file)).mtimeMs;
+    const ageMs = Date.now() - modifiedAt;
     // zstd-compressed (~3.8 MB, adblock-cache-codec.ts): the read runs off the main thread, the
     // decode adds ~15 ms to the deserialize. Older uncompressed caches load as before.
     const blocker = ElectronBlocker.deserialize(
@@ -94,7 +98,8 @@ async function readCache(): Promise<{
     applyFilterEnvironment(blocker);
     return {
       blocker,
-      fresh: Date.now() - modifiedAt < FILTER_REFRESH_INTERVAL_MS,
+      fresh: ageMs < FILTER_REFRESH_INTERVAL_MS,
+      ageMs,
     };
   } catch {
     return null;
@@ -308,13 +313,24 @@ async function refreshFilters(): Promise<void> {
   }
 }
 
-function startRefreshTimer(): void {
-  if (refreshTimer) return;
+function startRefreshTimer(firstDelayMs: number | null): void {
+  if (refreshTimer || firstRefreshTimeout) return;
   // uBO quick-fixes (where YouTube fixes land) expire every 8 hours.
-  refreshTimer = setInterval(() => {
+  if (firstDelayMs === null) {
+    refreshTimer = setInterval(() => {
+      void refreshNetworkAdblock().catch(() => {});
+    }, FILTER_REFRESH_INTERVAL_MS);
+    refreshTimer.unref?.();
+    return;
+  }
+  // A fresh cache was just loaded: refresh when it reaches the 8h expiry, not
+  // 8h after launch (which could leave the lists up to ~16h stale).
+  firstRefreshTimeout = setTimeout(() => {
+    firstRefreshTimeout = null;
     void refreshNetworkAdblock().catch(() => {});
-  }, FILTER_REFRESH_INTERVAL_MS);
-  refreshTimer.unref?.();
+    startRefreshTimer(null);
+  }, firstDelayMs);
+  firstRefreshTimeout.unref?.();
 }
 
 async function initialize(): Promise<void> {
@@ -326,7 +342,12 @@ async function initialize(): Promise<void> {
       console.warn("Could not enable the cached ad-filter engine:", error);
     }
   }
-  startRefreshTimer();
+  startRefreshTimer(
+    firstRefreshDelayMs(
+      cached ? cached.ageMs : null,
+      FILTER_REFRESH_INTERVAL_MS,
+    ),
+  );
 
   if (cached && activeBlocker) {
     // A stale cache keeps blocking while fresh lists download in the background.
