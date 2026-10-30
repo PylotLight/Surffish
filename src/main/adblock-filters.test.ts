@@ -295,3 +295,13 @@ test("$generichide frames with nothing specific are inactive (no DOM observer)",
     /\.generic-promo/,
   );
 });
+
+test("scriptlet resources come from a pinned release tag, not a moving branch", () => {
+  const url = new URL(SCRIPTLET_RESOURCES_URL);
+  assert.equal(url.hostname, "raw.githubusercontent.com");
+  // …/ghostery/adblocker/<tag>/packages/adblocker/assets/ublock-origin/resources.json
+  const segments = url.pathname.split("/");
+  assert.equal(segments[1], "ghostery");
+  assert.equal(segments[2], "adblocker");
+  assert.equal(segments[3], "v2.20.3");
+});

@@ -94,9 +94,15 @@ export const REQUIRED_FILTER_LIST_IDS: readonly string[] = [
   "easylist",
 ];
 
-/** Scriptlet + redirect resources (uBO's scriptlets packaged by Ghostery). */
+/**
+ * Scriptlet + redirect resources (uBO's scriptlets packaged by Ghostery). Pinned to a release
+ * tag, not `master`: this file is code executed in the main world of every page, so upstream
+ * drift would silently change what runs for all users. Bump the tag along with the
+ * @ghostery/adblocker dependency. (At the time of pinning the file was byte-identical across
+ * master and the recent release tags.)
+ */
 export const SCRIPTLET_RESOURCES_URL =
-  "https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json";
+  "https://raw.githubusercontent.com/ghostery/adblocker/v2.20.3/packages/adblocker/assets/ublock-origin/resources.json";
 
 /** uBO's quick-fixes list declares an 8 hour expiry; YouTube fixes ship there. */
 export const FILTER_REFRESH_INTERVAL_MS = 8 * 60 * 60 * 1000;
