@@ -99,8 +99,6 @@ import { chromeUserAgent } from "./adblock-policy";
 
 installIpcWindowScope();
 app.setName(APP_NAME);
-// Dev builds get their own profile, so they can run beside the installed release app.
-// The single-instance lock is per profile (userData), so each profile still has one window owner.
 // SURFFISH_PROFILE=<name> picks another isolated profile (e.g. a second dev instance).
 const profileOverride = process.env["SURFFISH_PROFILE"]
   ?.trim()
@@ -108,23 +106,33 @@ const profileOverride = process.env["SURFFISH_PROFILE"]
 // Leave an explicitly chosen profile alone (smoke tests and --user-data-dir set userData outside appData).
 const usesDefaultProfileDir =
   dirname(app.getPath("userData")) === app.getPath("appData");
-if (usesDefaultProfileDir && (profileOverride || !app.isPackaged)) {
-  const profileName = profileOverride
-    ? `${APP_NAME} ${profileOverride}`
-    : `${APP_NAME} Dev`;
-  app.setName(profileName);
-  app.setPath("userData", join(app.getPath("appData"), profileName));
-  // macOS Keychain ACLs pin to the requesting binary's code signature. A dev run is the ad-hoc
-  // signed Electron in node_modules, which changes on every Electron bump, so "Always Allow" never
-  // sticks and every launch asks for the login password. Dev profiles use Chromium's mock keychain
-  // instead (a fixed, non-secret key: fine for throwaway dev data). SURFFISH_REAL_KEYCHAIN=1 opts out.
-  if (
-    process.platform === "darwin" &&
-    !app.isPackaged &&
-    process.env["SURFFISH_REAL_KEYCHAIN"] !== "1"
-  )
-    app.commandLine.appendSwitch("use-mock-keychain");
-}
+// Dev builds get their own identity and profile, so they can run beside the installed release app.
+// The single-instance lock is per profile (userData), so each profile still has one window owner.
+const devProfileName = profileOverride
+  ? `${APP_NAME} ${profileOverride}`
+  : `${APP_NAME} Dev`;
+// The dev/override identity applies to every unpacked run, and (as before) to a release run
+// that picks the default profile directory with SURFFISH_PROFILE.
+if (!app.isPackaged || (profileOverride && usesDefaultProfileDir))
+  app.setName(devProfileName);
+// macOS keychain ACLs pin to the requesting binary's code signature. Every dev/test run is the
+// ad-hoc signed Electron in node_modules, whose launcher stub drifts across Electron versions;
+// the keychain item is looked up by name, so a run with an explicit userData (smoke tests,
+// probes) was reading the release app's "Surffish Safe Storage" item and re-prompting for the
+// login password whenever the signatures no longer matched. Use Chromium's mock keychain
+// instead: an in-memory key that never touches the login keychain, so nothing can prompt and
+// the release app's keychain item is left alone. Trade-off: the key is fresh on each launch, so
+// a dev profile's stored cookies and logins don't survive a restart (throwaway dev data).
+// SURFFISH_REAL_KEYCHAIN=1 opts back into the real keychain — expect a prompt when the
+// binary's signature drifts from the item's ACL.
+if (
+  !app.isPackaged &&
+  process.platform === "darwin" &&
+  process.env["SURFFISH_REAL_KEYCHAIN"] !== "1"
+)
+  app.commandLine.appendSwitch("use-mock-keychain");
+if (usesDefaultProfileDir && (profileOverride || !app.isPackaged))
+  app.setPath("userData", join(app.getPath("appData"), devProfileName));
 // One user agent everywhere, before any session or page exists. Sessions get theirs from
 // browser-session.ts, but service workers and the workers inside cross-site iframes (Cloudflare
 // Turnstile's challenges.cloudflare.com frame) use this app-wide fallback, which otherwise still says
