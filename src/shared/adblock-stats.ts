@@ -75,6 +75,20 @@ export class BlockedRequestTally {
   }
 }
 
+/**
+ * Drop tallies for webContents whose tab reference is gone. A block recorded just after the
+ * tab was destroyed races with the destruction: `fromId` is already null, so the
+ * `destroyed` cleanup listener in main/adblock-stats.ts never attached and the tally would
+ * otherwise linger forever.
+ */
+export function pruneTalliesWithoutRefs(
+  tallies: Map<number, BlockedRequestTally>,
+  dirty: ReadonlySet<number>,
+  hasTabRef: (webContentsId: number) => boolean,
+): void {
+  for (const id of dirty) if (!hasTabRef(id)) tallies.delete(id);
+}
+
 /** Toolbar badge text: nothing for 0, the number up to 999, then 999+. */
 export function adblockBadge(count: number): string {
   if (!Number.isFinite(count) || count <= 0) return "";
