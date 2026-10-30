@@ -39,7 +39,8 @@
   pointer-events: none;
   -webkit-app-region: no-drag;
 }
-.browser-layout.is-sidebar-visible .browser-sidebar {
+.browser-layout.is-sidebar-visible .browser-sidebar,
+.browser-sidebar.has-rail {
   transform: translateX(0);
   visibility: visible;
   pointer-events: auto;
@@ -1062,21 +1063,31 @@
   --sidebar-width: min(320px, calc(100% - 48px));
 }
 .browser-sidebar {
-  background: linear-gradient(
-    145deg,
-    rgba(36, 40, 46, 0.7),
-    rgba(23, 27, 32, 0.76) 38%,
-    rgba(10, 13, 16, 0.82)
-  );
+  background:
+    radial-gradient(
+      130% 60% at 6% -10%,
+      rgba(150, 196, 255, 0.17),
+      rgba(150, 196, 255, 0) 62%
+    ),
+    linear-gradient(
+      150deg,
+      rgba(62, 74, 92, 0.64),
+      rgba(28, 34, 43, 0.74) 44%,
+      rgba(11, 14, 18, 0.84)
+    );
   backdrop-filter: blur(38px) saturate(185%);
   /* Open and close share one duration + curve (shared/sidebar-motion.ts, also driving the overlay view). */
   transition:
+    width var(--sidebar-motion-duration, 200ms)
+      var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
     transform var(--sidebar-motion-duration, 200ms)
       var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
     visibility 0s linear var(--sidebar-motion-duration, 200ms);
 }
 .browser-layout.is-sidebar-visible .browser-sidebar {
   transition:
+    width var(--sidebar-motion-duration, 200ms)
+      var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
     transform var(--sidebar-motion-duration, 200ms)
       var(--sidebar-motion-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
     visibility 0s;
@@ -2187,9 +2198,10 @@
   display: none !important;
 }
 .app-shell[data-surface="sidebar"] .browser-sidebar {
-  /* Same card as in-page (top/bottom/radius/border from the base rule); main already caps the
-   * view at the window width minus the gutter, so the card just fills the view's width. */
-  width: min(var(--sidebar-width, 320px), 100%);
+  /* Same card as in-page (top/bottom/radius/border from the base rule); main already sizes the
+   * view to the card (the icon rail while collapsed, the full width while open), so the card just
+   * fills the view. */
+  width: 100%;
   max-width: none;
   min-width: 0;
   max-height: 100%;
@@ -4460,9 +4472,10 @@
 .settings-content > .settings-section {
   backdrop-filter: none;
 }
-/* Nothing in a collapsed or off-screen sidebar may keep animating (audio pulse, spinners). */
-.browser-layout.is-sidebar-motion-paused .browser-sidebar *,
-.browser-layout:not(.is-sidebar-visible) .browser-sidebar * {
+/* Nothing in a collapsed panel or off-screen sidebar may keep animating (audio pulse, spinners).
+ * The icon rail stays on screen while the panel is collapsed, so it keeps its own animations. */
+.browser-layout.is-sidebar-motion-paused .sidebar-panel *,
+.browser-layout:not(.is-sidebar-visible) .sidebar-panel * {
   animation-play-state: paused !important;
 }
 /* One compositor layer per tab row (30+ layers over the glass sidebar) only pays off while a drag
@@ -5157,4 +5170,219 @@
   margin-top: 3px;
   color: rgba(245, 247, 250, 0.55);
   font-size: 10px;
+}
+
+/* ---- Sidebar rail ----
+ * The tab-list sidebar is a glass card with two columns: a fixed icon rail (pins, open tabs, the
+ * actions that would otherwise live in the footer) and the panel beside it. Collapsed, the card
+ * shrinks to the rail instead of sliding away, so the sidebar is never an empty edge; opening grows
+ * the card to the right and reveals the panel. The panel keeps its full width in both states, so
+ * nothing re-flows mid-animation — the card just clips it. */
+.sidebar-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.sidebar-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.sidebar-body.has-rail .sidebar-panel {
+  flex: 0 0 auto;
+  width: calc(var(--sidebar-width, 320px) - var(--sidebar-rail-width, 76px));
+}
+.app-shell[data-surface="content"]
+  .browser-layout:not(.is-sidebar-visible)
+  .browser-sidebar.has-rail {
+  width: min(
+    var(--sidebar-rail-width, 76px),
+    calc(100% - var(--sidebar-card-gutter, 48px))
+  );
+}
+.browser-sidebar.is-collapsed .sidebar-resize-handle {
+  display: none;
+}
+
+.sidebar-rail {
+  display: flex;
+  flex: 0 0 var(--sidebar-rail-width, 76px);
+  width: var(--sidebar-rail-width, 76px);
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.075);
+  background:
+    radial-gradient(
+      90% 40% at 50% 0%,
+      rgba(255, 255, 255, 0.07),
+      rgba(255, 255, 255, 0) 70%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.045),
+      rgba(255, 255, 255, 0.008) 55%,
+      rgba(255, 255, 255, 0.03)
+    );
+}
+.sidebar-rail-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px 0;
+  scrollbar-width: none;
+}
+.sidebar-rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+.sidebar-rail-item,
+.sidebar-rail .pinned-site-icon-button {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.72);
+  cursor: pointer;
+  outline: 0;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    box-shadow 130ms ease;
+}
+.sidebar-rail-item:hover,
+.sidebar-rail-item:focus-visible,
+.sidebar-rail .pinned-site-icon-button:hover,
+.sidebar-rail .pinned-site-icon-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.085);
+  outline: 0;
+}
+.sidebar-rail-item.is-active {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(
+    150deg,
+    rgba(255, 255, 255, 0.24),
+    rgba(255, 255, 255, 0.09)
+  );
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.24),
+    0 4px 14px rgba(0, 0, 0, 0.2);
+}
+.sidebar-rail-item .tab-favicon {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+.sidebar-rail .pinned-site-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.sidebar-rail .pinned-site-mark img {
+  width: 18px;
+  height: 18px;
+}
+.sidebar-rail-badge {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: grid;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+  border: 1px solid rgba(30, 37, 47, 0.9);
+  border-radius: 50%;
+  background: rgba(32, 39, 50, 0.95);
+  color: rgba(202, 220, 245, 0.9);
+  font-size: 9px;
+  line-height: 1;
+}
+.sidebar-rail-badge.is-audio {
+  color: #b9ecd0;
+}
+.sidebar-rail-badge.is-audio.is-muted {
+  color: rgba(245, 247, 250, 0.55);
+}
+.sidebar-rail-divider {
+  width: 30px;
+  height: 1px;
+  flex: 0 0 1px;
+  margin: 3px 0;
+  background: rgba(255, 255, 255, 0.11);
+}
+.sidebar-rail-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.075);
+}
+.sidebar-rail-action {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  color: rgba(245, 247, 250, 0.6);
+  cursor: pointer;
+  outline: 0;
+  -webkit-app-region: no-drag;
+  transition:
+    background-color 130ms ease,
+    color 130ms ease;
+}
+.sidebar-rail-action svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sidebar-rail-action:hover,
+.sidebar-rail-action:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
+}
+.sidebar-rail-action.is-current {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+/* A private window keeps its violet cast on the rail too. */
+.browser-sidebar.is-private-window .sidebar-rail {
+  background:
+    radial-gradient(
+      90% 40% at 50% 0%,
+      rgba(160, 130, 255, 0.16),
+      rgba(160, 130, 255, 0) 70%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(160, 130, 255, 0.06),
+      rgba(160, 130, 255, 0) 55%
+    );
 }

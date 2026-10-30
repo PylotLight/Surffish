@@ -136,6 +136,20 @@ export function sidebarSlideX(progress: number, width: number): number {
 }
 
 /**
+ * The card's width at a point of the open/close timeline when a collapsed sidebar keeps its icon
+ * rail on screen: the rail at progress 0, the full sidebar at 1. The rail edge stays put and the
+ * card grows to the right, so the panel is revealed instead of sliding in from off-window.
+ */
+export function sidebarRevealWidth(
+  progress: number,
+  { railWidth, width }: { railWidth: number; width: number },
+): number {
+  const full = Math.max(0, width);
+  const rail = Math.max(0, Math.min(railWidth, full));
+  return Math.round(rail + (full - rail) * clamp01(progress));
+}
+
+/**
  * Scale the alpha of an ARGB hex colour (`#AARRGGBB`, Electron's View.setBackgroundColor format)
  * by `factor`, so the native tint fades with the slide instead of popping in at full strength.
  * Anything that isn't `#AARRGGBB` comes back unchanged.

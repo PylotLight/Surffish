@@ -5,6 +5,7 @@ import {
   scaleArgbAlpha,
   sidebarMotionAt,
   sidebarMotionCssVars,
+  sidebarRevealWidth,
   sidebarSlideX,
   SIDEBAR_MOTION_MS,
   startSidebarMotion,
@@ -86,6 +87,16 @@ describe("frames", () => {
     expect(sidebarSlideX(0.5, 320)).toBe(-160);
     expect(sidebarSlideX(2, 320)).toBe(0);
     expect(sidebarSlideX(0.5, -10)).toBe(0);
+  });
+
+  test("reveal width grows from the rail to the full sidebar", () => {
+    expect(sidebarRevealWidth(0, { railWidth: 76, width: 320 })).toBe(76);
+    expect(sidebarRevealWidth(1, { railWidth: 76, width: 320 })).toBe(320);
+    expect(sidebarRevealWidth(0.5, { railWidth: 76, width: 320 })).toBe(198);
+    // Out of range progress clamps; a card narrower than the rail is the card.
+    expect(sidebarRevealWidth(2, { railWidth: 76, width: 320 })).toBe(320);
+    expect(sidebarRevealWidth(-1, { railWidth: 76, width: 320 })).toBe(76);
+    expect(sidebarRevealWidth(0.5, { railWidth: 76, width: 60 })).toBe(60);
   });
 
   test("tint alpha scales with progress, colour untouched", () => {

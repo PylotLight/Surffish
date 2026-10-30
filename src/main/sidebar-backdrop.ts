@@ -147,16 +147,17 @@ function paintNativeLayer(window: BaseWindow, progress: number): void {
   if (!view || !layered.has(window)) return;
   const native = getSidebarBackdropMode() === "native";
   // Never fully transparent: a layered view with a 0-alpha background stops drawing its web
-  // contents at all (see applyNativeLayer), so the ramp bottoms out at a near-invisible tint.
-  progress = Math.max(0.02, Math.min(1, progress));
+  // contents at all (see applyNativeLayer), and a collapsed sidebar keeps its icon rail on screen,
+  // which needs its own glass even at progress 0.
+  const ramp = Math.max(0.02, Math.min(1, 0.55 + 0.45 * progress));
   view.setBackgroundColor(
     scaleArgbAlpha(
       native ? SIDEBAR_NATIVE_TINT : SIDEBAR_FRAMED_SOLID_TINT,
-      progress,
+      ramp,
     ),
   );
   view.setBackgroundBlur(
-    native ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * progress) : 0,
+    native ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * ramp) : 0,
   );
 }
 
@@ -209,11 +210,10 @@ async function capture(window: BaseWindow): Promise<void> {
   const generation = ++state.generation;
   try {
     const sidebarBounds = sidebar.getBounds();
-    // The sidebar is zero-width while collapsed (prefetch): capture the width it will open at.
-    const width =
-      sidebarBounds.width > 0
-        ? sidebarBounds.width
-        : getBrowserChromeState(window).sidebarWidth;
+    // The view rests at the icon-rail width while collapsed (prefetch): capture the width the
+    // panel will open at, not just the rail strip.
+    const chromeWidth = getBrowserChromeState(window).sidebarWidth;
+    const width = Math.max(sidebarBounds.width, chromeWidth);
     const [, height = 0] = window.getContentSize();
     const sidebarRect = {
       x: 0,

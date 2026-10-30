@@ -18,6 +18,12 @@ export interface SidebarCardGeometry {
   borderWidth: number;
   /** Top of the macOS window-control row, measured from the top of the window (px). */
   controlsTop: number;
+  /**
+   * Width of the collapsed sidebar's icon rail (px). The card never gets narrower than this, so a
+   * collapsed sidebar still shows its icons (the panel is clipped beside the rail). Wide enough
+   * for the macOS window-control row, which sits at the top of the card.
+   */
+  railWidth: number;
 }
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
@@ -26,6 +32,7 @@ export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
   windowGutter: 48,
   borderWidth: 1,
   controlsTop: 13,
+  railWidth: 76,
 });
 
 /** Paint that both surfaces share. Only inset shadows: an outer shadow would be clipped away at the overlay view's edge. */
@@ -59,6 +66,17 @@ export function sidebarCardMaxWidth(
   return Math.max(0, windowWidth - geometry.windowGutter);
 }
 
+/** Width of the card when the panel is collapsed to its icon rail (never wider than the card may get). */
+export function sidebarRailWidth(
+  windowWidth: number,
+  geometry: SidebarCardGeometry = SIDEBAR_CARD,
+): number {
+  return Math.min(
+    geometry.railWidth,
+    sidebarCardMaxWidth(windowWidth, geometry),
+  );
+}
+
 /** Where the card sits in window coordinates (border box), for a given window size and sidebar width. */
 export function sidebarCardRect(
   {
@@ -88,6 +106,7 @@ export function sidebarCardCssVars(
     "--sidebar-card-inset": `${geometry.inset}px`,
     "--sidebar-card-radius": `${geometry.radius}px`,
     "--sidebar-card-gutter": `${geometry.windowGutter}px`,
+    "--sidebar-rail-width": `${geometry.railWidth}px`,
     "--sidebar-card-border-width": `${geometry.borderWidth}px`,
     "--sidebar-card-border-color": SIDEBAR_CARD_BORDER_COLOR,
     "--sidebar-card-shadow": SIDEBAR_CARD_SHADOW,
