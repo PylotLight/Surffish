@@ -16,37 +16,38 @@ describe("sidebar card geometry", () => {
     expect(SIDEBAR_CARD_RADIUS).toBe(SIDEBAR_CARD.radius);
   });
 
-  test("card rect: inset top/bottom, capped by the window gutter", () => {
+  test("card rect: attached to the top and bottom, capped by the window gutter", () => {
     expect(
       sidebarCardRect({
         windowWidth: 1280,
         windowHeight: 800,
         sidebarWidth: 320,
       }),
-    ).toEqual({ x: 0, y: 10, width: 320, height: 780 });
+    ).toEqual({ x: 0, y: 0, width: 320, height: 800 });
     expect(
       sidebarCardRect({
         windowWidth: 300,
         windowHeight: 800,
         sidebarWidth: 320,
       }),
-    ).toEqual({ x: 0, y: 10, width: 252, height: 780 });
+    ).toEqual({ x: 0, y: 0, width: 252, height: 800 });
     expect(sidebarCardMaxWidth(20)).toBe(0);
   });
 
-  test("tiny windows shrink the inset instead of the card vanishing", () => {
-    expect(sidebarCardInset(800)).toBe(10);
-    expect(sidebarCardInset(30)).toBe(7);
+  test("small windows keep the full-height card attached", () => {
+    expect(sidebarCardInset(800)).toBe(0);
+    expect(sidebarCardInset(30)).toBe(0);
     expect(sidebarCardInset(-5)).toBe(0);
   });
 
   test("css vars carry every number", () => {
     const vars = sidebarCardCssVars();
-    expect(vars["--sidebar-card-inset"]).toBe("10px");
-    expect(vars["--sidebar-card-radius"]).toBe("28px");
+    expect(vars["--sidebar-card-inset"]).toBe("0px");
+    expect(vars["--sidebar-card-radius"]).toBe("0px");
     expect(vars["--sidebar-card-gutter"]).toBe("48px");
     expect(vars["--sidebar-card-border-width"]).toBe("1px");
-    expect(vars["--sidebar-controls-top"]).toBe("13px");
+    expect(vars["--sidebar-controls-left"]).toBe("16px");
+    expect(vars["--sidebar-controls-top"]).toBe("16px");
     // Inset shadows only: an outer one would be cut off at the overlay view's edge.
     expect(
       (vars["--sidebar-card-shadow"] ?? "")

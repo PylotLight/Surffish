@@ -11,9 +11,9 @@
   z-index: 4;
   /* Card geometry: the --sidebar-card-* vars come from shared/sidebar-card.ts (set on .app-shell),
    * the same numbers main uses for the overlay view, so in-page and overlay cards line up. */
-  top: min(var(--sidebar-card-inset, 10px), 25%);
+  top: min(var(--sidebar-card-inset, 0px), 25%);
   right: auto;
-  bottom: min(var(--sidebar-card-inset, 10px), 25%);
+  bottom: min(var(--sidebar-card-inset, 0px), 25%);
   left: 0;
   display: flex;
   flex-direction: column;
@@ -25,7 +25,7 @@
   overflow: hidden;
   border: var(--sidebar-card-border-width, 1px) solid
     var(--sidebar-card-border-color, rgba(255, 255, 255, 0.18));
-  border-radius: var(--sidebar-card-radius, 28px);
+  border-radius: var(--sidebar-card-radius, 0px);
   background: linear-gradient(
     150deg,
     rgba(240, 247, 255, 0.24),
@@ -2219,19 +2219,28 @@
 }
 .sidebar-window-controls {
   position: relative;
-  top: -16px;
-  /* Dots sit --sidebar-controls-top from the top of the window, whichever surface draws the card. */
+  top: calc(0px - var(--sidebar-controls-top, 16px));
+  /* Dot origin follows the native window controls on either sidebar surface. */
   margin-top: calc(
-    var(--sidebar-controls-top, 13px) + 16px - var(--sidebar-card-inset, 10px) -
-      var(--sidebar-card-border-width, 1px)
+    var(--sidebar-controls-top, 16px) + var(--sidebar-controls-top, 16px) -
+      var(--sidebar-card-inset, 0px) - var(--sidebar-card-border-width, 1px) -
+      4.5px
   );
   display: flex;
+  align-self: flex-start;
   flex: 0 0 auto;
   align-items: center;
   /* 9.5px gap + 13px dots matches the native macOS traffic light spacing. */
   gap: 9.5px;
+  width: calc(
+    var(--sidebar-controls-left, 16px) - var(--sidebar-card-border-width, 1px) +
+      58px
+  );
   height: 22px;
-  padding: 0 17px;
+  padding: 0 0 0
+    calc(
+      var(--sidebar-controls-left, 16px) - var(--sidebar-card-border-width, 1px)
+    );
   -webkit-app-region: no-drag;
 }
 .sidebar-window-control {

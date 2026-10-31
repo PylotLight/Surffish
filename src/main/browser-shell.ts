@@ -92,7 +92,7 @@ interface ShellState {
   /** Slides the overlay sidebar view along one open/close timeline (sidebar-motion.ts). */
   sidebarMotion: SidebarOverlayMotion;
   lastOverlayMode: boolean | null;
-  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
+  /** Native-blur backdrop: the sidebar view frames the full-height card (sidebar-backdrop.ts). */
   sidebarFrame: { inset: number; radius: number } | null;
   sidebarOverlayShown: boolean;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */

@@ -16,7 +16,9 @@ export interface SidebarCardGeometry {
   windowGutter: number;
   /** Card border width (px). */
   borderWidth: number;
-  /** Top of the macOS window-control row, measured from the top of the window (px). */
+  /** Left position of the macOS traffic-light dots, measured from the window edge (px). */
+  controlsLeft: number;
+  /** Top position of the macOS traffic-light dots, measured from the window edge (px). */
   controlsTop: number;
   /**
    * Width of the collapsed sidebar's icon rail (px). The card never gets narrower than this, so a
@@ -27,11 +29,12 @@ export interface SidebarCardGeometry {
 }
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
-  inset: 10,
-  radius: 28,
+  inset: 0,
+  radius: 0,
   windowGutter: 48,
   borderWidth: 1,
-  controlsTop: 13,
+  controlsLeft: 16,
+  controlsTop: 16,
   railWidth: 76,
 });
 
@@ -110,6 +113,7 @@ export function sidebarCardCssVars(
     "--sidebar-card-border-width": `${geometry.borderWidth}px`,
     "--sidebar-card-border-color": SIDEBAR_CARD_BORDER_COLOR,
     "--sidebar-card-shadow": SIDEBAR_CARD_SHADOW,
+    "--sidebar-controls-left": `${geometry.controlsLeft}px`,
     "--sidebar-controls-top": `${geometry.controlsTop}px`,
   };
 }

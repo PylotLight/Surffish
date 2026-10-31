@@ -134,6 +134,8 @@ const MEASURE = `(() => {
     shadow: s.boxShadow,
     controls: rect(card.querySelector('.sidebar-window-controls')),
     firstDot: rect(card.querySelector('.sidebar-window-control')),
+    rail: rect(card.querySelector('.sidebar-rail')),
+    railActions: rect(card.querySelector('.sidebar-rail-actions')),
     pinned: rect(card.querySelector('.sidebar-pinned-sites')),
     tabList: rect(card.querySelector('.tab-list')),
     firstTab: rect(card.querySelector('.tab-item')),
@@ -163,6 +165,8 @@ async function measure(win, which) {
     card: shift(raw.card),
     controls: shift(raw.controls),
     firstDot: shift(raw.firstDot),
+    rail: shift(raw.rail),
+    railActions: shift(raw.railActions),
     pinned: shift(raw.pinned),
     tabList: shift(raw.tabList),
     firstTab: shift(raw.firstTab),
@@ -175,6 +179,8 @@ function assertSame(inPage, overlay, context) {
     "card",
     "controls",
     "firstDot",
+    "rail",
+    "railActions",
     "pinned",
     "tabList",
     "firstTab",
@@ -260,19 +266,25 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
   await settle();
   let overlay = await measure(win, "sidebar");
   // Hover mode under Xvfb: the real X pointer sits over the page, so main's page-exit timer can
-  // un-hover the sidebar before we measure. Re-hover with the pointer inside the card, like a user.
+  // un-hover the sidebar before we measure. Re-hover inside the rail, which is only 76px wide when
+  // collapsed; a point farther right misses the view and cannot open the panel.
+  const { sidebarWidth: targetSidebarWidth } = await api(win, "chrome.get()");
+  const [windowWidth] = win.getContentSize();
+  const openWidth = Math.min(targetSidebarWidth, windowWidth - 48);
   for (
     let attempt = 0;
     attempt < 3 &&
     chrome.sidebarHovered &&
-    Math.abs(overlay.card.x) > TOLERANCE;
+    overlay.view.width < openWidth - TOLERANCE;
     attempt++
   ) {
     await api(win, reveal);
-    sidebar.webContents.sendInputEvent({ type: "mouseMove", x: 100, y: 300 });
+    sidebar.webContents.sendInputEvent({ type: "mouseMove", x: 30, y: 300 });
     await waitFor(
-      () => sidebar.getVisible() && sidebar.getBounds().width > 0,
-      `the overlay sidebar again (${context})`,
+      () =>
+        sidebar.getVisible() &&
+        sidebar.getBounds().width >= openWidth - TOLERANCE,
+      `the expanded overlay sidebar again (${context})`,
     );
     await settle();
     overlay = await measure(win, "sidebar");
@@ -287,21 +299,46 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     framed: overlay.className.includes("is-view-framed"),
   });
   assertSame(inPage, overlay, `${label} / ${context}`);
-  // And both are where shared/sidebar-card.ts says.
+  // Both cards reach the window's top and bottom, and the traffic lights match the native origin.
   const [width, height] = win.getContentSize();
   const { sidebarWidth } = await api(win, "chrome.get()");
   const expected = {
     x: 0,
-    y: 10,
+    y: 0,
     width: Math.min(sidebarWidth, width - 48),
-    height: height - 20,
+    height,
   };
   for (const field of ["x", "y", "width", "height"])
     assert.ok(
       Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
-  assert.equal(inPage.radius, "28px 28px 28px 28px", `${context}: card radius`);
+  assert.equal(inPage.radius, "0px 0px 0px 0px", `${context}: card radius`);
+  for (const surface of [inPage, overlay]) {
+    assert.ok(
+      Math.abs(surface.firstDot.x - 16) <= TOLERANCE &&
+        Math.abs(surface.firstDot.y - 16) <= TOLERANCE,
+      `${context}: traffic lights align to the native (16, 16) origin: ${JSON.stringify(surface.firstDot)}`,
+    );
+    assert.ok(
+      surface.firstDot.x + surface.firstDot.width <=
+        surface.rail.x + surface.rail.width + TOLERANCE,
+      `${context}: traffic-light controls fit within the collapsed rail`,
+    );
+    assert.ok(
+      Math.abs(
+        surface.rail.y +
+          surface.rail.height -
+          (surface.card.y + surface.card.height - 1),
+      ) <= TOLERANCE,
+      `${context}: rail reaches the card's bottom edge`,
+    );
+    assert.ok(
+      surface.railActions.y + surface.railActions.height <=
+        surface.rail.y + surface.rail.height + TOLERANCE,
+      `${context}: rail actions stay anchored inside the bottom edge`,
+    );
+  }
 
   await api(
     win,
@@ -408,7 +445,7 @@ async function run() {
   await compare(privateWindow, {
     context: "private",
     liveUrl: `${origin}/p`,
-    chrome: { sidebarHovered: true },
+    chrome: { sidebarPinned: true },
     shot: `sidebar-card-${label}-private`,
   });
   assert.ok(

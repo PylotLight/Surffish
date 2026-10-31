@@ -22,9 +22,8 @@
     rgba(13, 12, 18, 0.97)
   );
 }
-/* Native compositor blur: the view itself is the tinted, blurred, rounded card (main sets it up
- * and insets it by the same --sidebar-card-inset), so the card fills the view instead of insetting
- * itself again, and only adds a faint sheen and its border. */
+/* Native compositor blur: the view itself is the tinted, blurred full-height card (main frames it
+ * using --sidebar-card-inset), so the card fills the view instead of insetting itself again. */
 .app-shell[data-surface="sidebar"] .browser-sidebar.is-view-framed {
   top: 0;
   bottom: 0;
