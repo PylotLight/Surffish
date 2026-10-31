@@ -125,6 +125,8 @@ const MEASURE = `(() => {
     card.insertBefore(probe, card.firstChild)
   }
   const rect = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+  const rail = card.querySelector('.sidebar-rail')
+  const panel = card.querySelector('.sidebar-panel')
   const s = getComputedStyle(card)
   const out = {
     className: card.className,
@@ -134,7 +136,9 @@ const MEASURE = `(() => {
     shadow: s.boxShadow,
     controls: rect(card.querySelector('.sidebar-window-controls')),
     firstDot: rect(card.querySelector('.sidebar-window-control')),
-    rail: rect(card.querySelector('.sidebar-rail')),
+    rail: rect(rail),
+    railHidden: Boolean(rail?.classList.contains('is-shape-hidden')),
+    panelHidden: Boolean(panel?.classList.contains('is-shape-hidden')),
     railActions: rect(card.querySelector('.sidebar-rail-actions')),
     pinned: rect(card.querySelector('.sidebar-pinned-sites')),
     tabList: rect(card.querySelector('.tab-list')),
@@ -175,6 +179,16 @@ async function measure(win, which) {
 }
 
 function assertSame(inPage, overlay, context) {
+  assert.equal(
+    inPage.railHidden,
+    overlay.railHidden,
+    `${context}: rail shape state`,
+  );
+  assert.equal(
+    inPage.panelHidden,
+    overlay.panelHidden,
+    `${context}: panel shape state`,
+  );
   for (const key of [
     "card",
     "controls",
@@ -324,7 +338,7 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
         Math.abs(surface.firstDot.y - 16) <= TOLERANCE,
       `${context}: traffic lights align to the native (16, 16) origin: ${JSON.stringify(surface.firstDot)}`,
     );
-    if (surface.rail) {
+    if (surface.rail && !surface.railHidden) {
       assert.ok(
         surface.firstDot.x + surface.firstDot.width <=
           surface.rail.x + surface.rail.width + TOLERANCE,
@@ -372,7 +386,7 @@ async function assertSidebarState(win, which, context, expanded) {
       const card = document.querySelector('.browser-sidebar')
       const rail = card?.querySelector('.sidebar-rail')
       const panel = card?.querySelector('.sidebar-panel')
-      if (!layout || !card) return null
+      if (!layout || !card || !rail || !panel) return null
       const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
       return {
         hasRail: card.classList.contains('has-rail'),
@@ -380,6 +394,8 @@ async function assertSidebarState(win, which, context, expanded) {
         expanded: layout.classList.contains('is-sidebar-visible'),
         visibility: getComputedStyle(card).visibility,
         card: rect(card), rail: rail ? rect(rail) : null,
+        railHidden: rail.classList.contains('is-shape-hidden'),
+        panelHidden: panel.classList.contains('is-shape-hidden'),
         railPresent: Boolean(rail),
         panelPresent: Boolean(panel),
         panelWidth: panel ? rect(panel).width : null
@@ -389,15 +405,17 @@ async function assertSidebarState(win, which, context, expanded) {
   assert.ok(state, `${context}: sidebar card is mounted`);
   assert.equal(state.hasRail, true, `${context}: tab mode keeps the icon rail`);
   assert.equal(state.visibility, "visible", `${context}: sidebar is visible`);
+  assert.equal(state.railPresent, true, `${context}: rail stays mounted`);
+  assert.equal(state.panelPresent, true, `${context}: panel stays mounted`);
   assert.equal(
-    state.railPresent,
-    !expanded,
-    `${context}: only collapsed mode has an icon rail`,
+    state.railHidden,
+    expanded,
+    `${context}: inactive rail is hidden`,
   );
   assert.equal(
-    state.panelPresent,
-    expanded,
-    `${context}: only expanded mode has the tab panel`,
+    state.panelHidden,
+    !expanded,
+    `${context}: inactive panel is hidden`,
   );
   assert.ok(
     Math.abs(state.card.x) <= TOLERANCE &&
@@ -492,7 +510,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
         Boolean(
           await evaluate(
             view,
-            '(() => { const card = document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"); return Boolean(card && !card.querySelector(".sidebar-rail") && card.querySelector(".sidebar-panel") && getComputedStyle(card.querySelector(".sidebar-panel")).display !== "none"); })()',
+            '(() => { const card = document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"); const rail = card?.querySelector(".sidebar-rail"); const panel = card?.querySelector(".sidebar-panel"); return Boolean(card && rail?.classList.contains("is-shape-hidden") && panel && !panel.classList.contains("is-shape-hidden") && getComputedStyle(panel).display !== "none"); })()',
           ),
         ),
       `${which} expanded panel DOM`,
