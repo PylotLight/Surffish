@@ -9,7 +9,12 @@
 export interface SidebarCardGeometry {
   /** Gap between the card and the top/bottom of the window (px). */
   inset: number;
-  /** CSS corner radius of the surface; a square surface may use a one-DIP native compositor clip. */
+  /**
+   * Corner radius of the card's right side (px). The left corners stay square at the window edge
+   * and follow the window's own rounded frame; the native view clips uniformly with this number
+   * (Electron has no per-corner radius), which reads as the rounded right edge plus corners that
+   * blend into the frame.
+   */
   radius: number;
   /** The card never gets wider than the window minus this (px). */
   windowGutter: number;
@@ -22,19 +27,20 @@ export interface SidebarCardGeometry {
   /**
    * Width of the collapsed sidebar's icon rail (px). The card never gets narrower than this, so a
    * collapsed sidebar still shows its icons (the panel is clipped beside the rail). Wide enough
-   * for the macOS window-control row, which sits at the top of the card.
+   * for the macOS window-control row (16px inset + three 13px dots + gaps ends at 74px), with
+   * room to spare.
    */
   railWidth: number;
 }
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
   inset: 0,
-  radius: 0,
+  radius: 20,
   windowGutter: 48,
   borderWidth: 0,
   controlsLeft: 16,
   controlsTop: 16,
-  railWidth: 76,
+  railWidth: 84,
 });
 
 /** Paint that both surfaces share. Only inset shadows: an outer shadow would be clipped away at the overlay view's edge. */

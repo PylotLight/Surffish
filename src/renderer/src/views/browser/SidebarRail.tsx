@@ -33,15 +33,19 @@ export interface SidebarRailProps {
 function RailTab({
   tab,
   animate,
+  motionKey,
 }: {
   tab: BrowserTabSummary;
   animate: boolean;
+  /** Carries the mark from this rail item into its panel counterpart on a shape change. */
+  motionKey: string;
 }): React.JSX.Element {
   return (
     <button
       className={`sidebar-rail-item${tab.active ? " is-active" : ""}${tab.private ? " is-private" : ""}${tab.sleeping ? " is-sleeping" : ""}`}
       type="button"
       data-rail-tab-id={tab.id}
+      data-motion-key={motionKey}
       aria-label={`${tab.title}${tab.active ? " (current tab)" : ""}`}
       aria-current={tab.active ? "page" : undefined}
       title={tab.title}
@@ -90,13 +94,25 @@ export function SidebarRail({
   const openTabs = tabs.filter((tab) => !tab.pinned);
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
   return (
-    <nav className="sidebar-rail" aria-label="Sidebar rail">
-      <div className="sidebar-rail-scroll">
+    <nav
+      className="sidebar-rail sidebar-morph-column"
+      aria-label="Sidebar rail"
+    >
+      <div className="sidebar-rail-scroll" data-glide-scroller>
         {pinnedTabs.map((tab) => (
-          <RailTab key={`pinned-tab:${tab.id}`} tab={tab} animate={animate} />
+          <RailTab
+            key={`pinned-tab:${tab.id}`}
+            tab={tab}
+            animate={animate}
+            motionKey={`pin:${tab.id}`}
+          />
         ))}
         {pinnedSites.map((site) => (
-          <div className="sidebar-rail-site" key={`pinned-site:${site.url}`}>
+          <div
+            className="sidebar-rail-site"
+            key={`pinned-site:${site.url}`}
+            data-motion-key={`site:${site.url}`}
+          >
             <PinnedSiteIcon
               site={site}
               cachedFaviconUrl={
@@ -111,7 +127,12 @@ export function SidebarRail({
           <div className="sidebar-rail-divider" aria-hidden="true" />
         )}
         {openTabs.map((tab) => (
-          <RailTab key={`tab:${tab.id}`} tab={tab} animate={animate} />
+          <RailTab
+            key={`tab:${tab.id}`}
+            tab={tab}
+            animate={animate}
+            motionKey={`tab:${tab.id}`}
+          />
         ))}
       </div>
       <div className="sidebar-rail-actions">

@@ -5,8 +5,10 @@ import {
   scaleArgbAlpha,
   sidebarMotionAt,
   sidebarMotionCssVars,
+  sidebarMotionEasingCss,
   sidebarRevealWidth,
   sidebarSlideX,
+  SIDEBAR_MOTION_EASING,
   SIDEBAR_MOTION_MS,
   startSidebarMotion,
 } from "./sidebar-motion";
@@ -90,13 +92,13 @@ describe("frames", () => {
   });
 
   test("reveal width grows from the rail to the full sidebar", () => {
-    expect(sidebarRevealWidth(0, { railWidth: 76, width: 320 })).toBe(76);
-    expect(sidebarRevealWidth(1, { railWidth: 76, width: 320 })).toBe(320);
-    expect(sidebarRevealWidth(0.5, { railWidth: 76, width: 320 })).toBe(198);
+    expect(sidebarRevealWidth(0, { railWidth: 84, width: 320 })).toBe(84);
+    expect(sidebarRevealWidth(1, { railWidth: 84, width: 320 })).toBe(320);
+    expect(sidebarRevealWidth(0.5, { railWidth: 84, width: 320 })).toBe(202);
     // Out of range progress clamps; a card narrower than the rail is the card.
-    expect(sidebarRevealWidth(2, { railWidth: 76, width: 320 })).toBe(320);
-    expect(sidebarRevealWidth(-1, { railWidth: 76, width: 320 })).toBe(76);
-    expect(sidebarRevealWidth(0.5, { railWidth: 76, width: 60 })).toBe(60);
+    expect(sidebarRevealWidth(2, { railWidth: 84, width: 320 })).toBe(320);
+    expect(sidebarRevealWidth(-1, { railWidth: 84, width: 320 })).toBe(84);
+    expect(sidebarRevealWidth(0.5, { railWidth: 84, width: 60 })).toBe(60);
   });
 
   test("tint alpha scales with progress, colour untouched", () => {
@@ -110,8 +112,22 @@ describe("frames", () => {
   test("css vars carry the same duration and curve", () => {
     expect(sidebarMotionCssVars()).toEqual({
       "--sidebar-motion-duration": `${SIDEBAR_MOTION_MS}ms`,
-      "--sidebar-motion-easing": "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      "--sidebar-motion-easing": sidebarMotionEasingCss(),
     });
+  });
+
+  test("the chosen curve is front-loaded, monotonic, and never overshoots", () => {
+    const ease = cubicBezier(...SIDEBAR_MOTION_EASING);
+    // Most of the way there by the first quarter of the time, then a long soft settle.
+    expect(ease(0.25)).toBeGreaterThan(0.75);
+    expect(ease(1)).toBe(1);
+    let previous = 0;
+    for (let i = 1; i <= 100; i++) {
+      const value = ease(i / 100);
+      expect(value).toBeGreaterThanOrEqual(previous - 1e-9);
+      expect(value).toBeLessThanOrEqual(1 + 1e-9); // no width overshoot mid-flight
+      previous = value;
+    }
   });
 
   test("motion mode override", () => {

@@ -125,7 +125,9 @@ function applyNativeLayer(window: BaseWindow): void {
   const native = getSidebarBackdropMode() === "native";
   if (!native && !layered.has(window)) return;
   try {
-    // Electron needs a nonzero clip radius to keep this native layer painting; one DIP reads as square.
+    // The card's rounded right side is the view's own uniform clip (Electron has no per-corner
+    // radius): the right corners land exactly on the card's, and the left corners read as a soft
+    // arc blending into the window's own rounded frame. One DIP keeps a zero-radius card painting.
     view.setBorderRadius(Math.max(1, SIDEBAR_CARD_RADIUS));
     layered.add(window);
     paintNativeLayer(window, motionProgress.get(window) ?? 1);

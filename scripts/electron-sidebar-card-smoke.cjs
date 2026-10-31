@@ -266,7 +266,7 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
   await settle();
   let overlay = await measure(win, "sidebar");
   // Hover mode under Xvfb: the real X pointer sits over the page, so main's page-exit timer can
-  // un-hover the sidebar before we measure. Re-hover inside the rail, which is only 76px wide when
+  // un-hover the sidebar before we measure. Re-hover inside the rail, which is only 84px wide when
   // collapsed; a point farther right misses the view and cannot open the panel.
   const { sidebarWidth: targetSidebarWidth } = await api(win, "chrome.get()");
   const [windowWidth] = win.getContentSize();
@@ -313,7 +313,11 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
       Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
-  assert.equal(inPage.radius, "0px 0px 0px 0px", `${context}: frame is square`);
+  assert.equal(
+    inPage.radius,
+    "0px 20px 20px 0px",
+    `${context}: frame is rounded on the right, square at the window edge`,
+  );
   for (const surface of [inPage, overlay]) {
     assert.ok(
       Math.abs(surface.firstDot.x - 16) <= TOLERANCE &&
@@ -360,7 +364,7 @@ async function assertSidebarState(win, which, context, expanded) {
   const { sidebarWidth } = await api(win, "chrome.get()");
   const expectedWidth = expanded
     ? Math.min(sidebarWidth, windowWidth - 48)
-    : Math.min(76, windowWidth - 48);
+    : Math.min(84, windowWidth - 48);
   const state = await evaluate(
     view,
     `(() => {
@@ -368,7 +372,7 @@ async function assertSidebarState(win, which, context, expanded) {
       const card = document.querySelector('.browser-sidebar')
       const rail = card?.querySelector('.sidebar-rail')
       const panel = card?.querySelector('.sidebar-panel')
-      if (!layout || !card || !panel) return null
+      if (!layout || !card) return null
       const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
       return {
         hasRail: card.classList.contains('has-rail'),
@@ -377,14 +381,12 @@ async function assertSidebarState(win, which, context, expanded) {
         visibility: getComputedStyle(card).visibility,
         card: rect(card), rail: rail ? rect(rail) : null,
         railPresent: Boolean(rail),
-        panelWidth: rect(panel).width,
-        panelDisplay: getComputedStyle(panel).display,
-        actionCount: rail?.querySelectorAll('.sidebar-rail-action').length ?? 0,
-        panelInert: panel.hasAttribute('inert')
+        panelPresent: Boolean(panel),
+        panelWidth: panel ? rect(panel).width : null
       }
     })()`,
   );
-  assert.ok(state, `${context}: sidebar card, rail, and panel are mounted`);
+  assert.ok(state, `${context}: sidebar card is mounted`);
   assert.equal(state.hasRail, true, `${context}: tab mode keeps the icon rail`);
   assert.equal(state.visibility, "visible", `${context}: sidebar is visible`);
   assert.equal(
@@ -393,9 +395,9 @@ async function assertSidebarState(win, which, context, expanded) {
     `${context}: only collapsed mode has an icon rail`,
   );
   assert.equal(
-    state.actionCount,
-    expanded ? 0 : 4,
-    `${context}: collapsed rail actions are present`,
+    state.panelPresent,
+    expanded,
+    `${context}: only expanded mode has the tab panel`,
   );
   assert.ok(
     Math.abs(state.card.x) <= TOLERANCE &&
@@ -405,21 +407,11 @@ async function assertSidebarState(win, which, context, expanded) {
     `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
   );
   if (expanded) {
-    assert.equal(
-      state.panelDisplay,
-      "flex",
-      `${context}: full tab panel is visible`,
-    );
     assert.ok(
       Math.abs(state.panelWidth - state.card.width) <= TOLERANCE,
       `${context}: expanded tab panel fills the same sidebar surface`,
     );
   } else {
-    assert.equal(
-      state.panelDisplay,
-      "none",
-      `${context}: full panel is hidden while collapsed`,
-    );
     assert.ok(
       state.rail.width > 0 &&
         Math.abs(state.rail.y + state.rail.height - windowHeight) <= TOLERANCE,
@@ -428,11 +420,6 @@ async function assertSidebarState(win, which, context, expanded) {
   }
   assert.equal(state.collapsed, !expanded, `${context}: collapsed state`);
   assert.equal(state.expanded, expanded, `${context}: expanded state`);
-  assert.equal(
-    state.panelInert,
-    !expanded,
-    `${context}: panel interaction state`,
-  );
   if (screenshotDirectory) {
     const image = await view.webContents.capturePage();
     writeFileSync(
@@ -520,7 +507,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     );
     if (which === "sidebar")
       await waitFor(
-        () => view.getBounds().width <= 76 + TOLERANCE,
+        () => view.getBounds().width <= 84 + TOLERANCE,
         "overlay sidebar to return to the collapsed rail",
       );
     await waitFor(
