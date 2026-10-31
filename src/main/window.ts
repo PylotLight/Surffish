@@ -38,6 +38,7 @@ import {
 } from "./browser-shell";
 import { isExpectedRendererDocument } from "./renderer-security";
 import { APP_NAME, WINDOW } from "../shared/config";
+import { SIDEBAR_CARD } from "../shared/sidebar-card";
 import { retryOnce } from "../shared/retry";
 import {
   fitBoundsToDisplays,
@@ -317,7 +318,9 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: isMac ? "hiddenInset" : "default",
-    trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
+    trafficLightPosition: isMac
+      ? { x: SIDEBAR_CARD.controlsLeft, y: SIDEBAR_CARD.controlsTop }
+      : undefined,
     transparent: isMac,
     vibrancy: isMac ? "fullscreen-ui" : undefined,
     visualEffectState: isMac ? "active" : undefined,

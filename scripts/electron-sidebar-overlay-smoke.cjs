@@ -31,7 +31,7 @@ const server = createServer((request, response) => {
     "Cache-Control": "no-store",
   });
   response.end(
-    `<!doctype html><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:0;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`,
+    `<!doctype html><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:90px;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`,
   );
 });
 let mainWindow;
@@ -97,6 +97,13 @@ function nativeViewState() {
         : null,
     surface: surfaceFor(view),
   }));
+}
+
+function collapsedRailVisible() {
+  const view = rendererViews.sidebar;
+  if (!view?.getVisible()) return false;
+  const bounds = view.getBounds();
+  return bounds.x === 0 && bounds.width >= 83 && bounds.width <= 85;
 }
 
 async function evaluate(view, expression) {
@@ -216,13 +223,20 @@ async function waitForStableScroll(accept, description) {
 }
 
 async function waitForSidebarPinControl() {
-  // The overlay view itself slides in (src/main/sidebar-motion.ts): wait for it to land at x=0 first.
-  await waitFor(
-    () =>
-      rendererViews.sidebar.getVisible() &&
-      rendererViews.sidebar.getBounds().x === 0,
-    "the overlay sidebar view to finish sliding in",
-  );
+  // The integrated rail stays at x=0; expansion is complete when the panel is wider than the rail and settles.
+  await waitFor(async () => {
+    const bounds = rendererViews.sidebar.getBounds();
+    if (
+      !rendererViews.sidebar.getVisible() ||
+      bounds.x !== 0 ||
+      bounds.width <= 100
+    ) {
+      return false;
+    }
+    await delay(80);
+    const settled = rendererViews.sidebar.getBounds();
+    return settled.x === 0 && settled.width === bounds.width;
+  }, "the integrated sidebar to finish expanding from its rail to a stable panel width");
   await waitFor(
     () =>
       evaluate(
@@ -339,7 +353,7 @@ async function run() {
   assert.equal(
     await evaluate(
       rendererViews.content,
-      'document.querySelector(".sidebar-new-tab-row")?.getAttribute("aria-label")',
+      '(() => { const card = document.querySelector(".browser-sidebar"); const shape = card?.classList.contains("is-collapsed") ? card.querySelector(".sidebar-rail:not(.is-shape-hidden)") : card?.querySelector(".sidebar-panel:not(.is-shape-hidden)"); return shape?.querySelector("[aria-label=\\"New tab\\"]")?.getAttribute("aria-label") ?? null; })()',
     ),
     "New tab",
     "the bottom New Tab action is available in the sidebar",
@@ -359,18 +373,46 @@ async function run() {
     ),
     "the app brand mark is prominent in the top toolbar",
   );
-  const footerControls = await evaluate(
-    rendererViews.content,
-    `(() => [...document.querySelectorAll('.sidebar-footer-icon-button')].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height })))()`,
+  const sidebarActions = await waitFor(async () => {
+    const state = await evaluate(
+      rendererViews.content,
+      `(() => {
+        const card = document.querySelector('.browser-sidebar')
+        const collapsed = Boolean(card?.classList.contains('is-collapsed'))
+        const shape = card?.querySelector(collapsed ? '.sidebar-rail:not(.is-shape-hidden)' : '.sidebar-panel:not(.is-shape-hidden)')
+        if (!shape) return null
+        const selector = collapsed ? '.sidebar-rail-action' : '.sidebar-footer-icon-button'
+        const controls = [...shape.querySelectorAll(selector)].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height }))
+        return { collapsed, controls, newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null }
+      })()`,
+    );
+    return state?.controls.length ? state : null;
+  }, "the active sidebar shape and its actions");
+  const sidebarControlLabels = sidebarActions.controls.map(
+    ({ label }) => label,
   );
-  assert.deepEqual(
-    footerControls.map(({ label }) => label),
-    ["Keep sidebar open", "Settings", "Quit Surffish"],
-    "pin, Settings and Quit are compact footer actions",
+  assert.equal(
+    sidebarActions.newTab,
+    "New tab",
+    "the active sidebar shape exposes a New Tab action",
   );
   assert.ok(
-    footerControls.every(({ width, height }) => width <= 36 && height <= 36),
-    "the footer controls do not consume full-width rows",
+    sidebarControlLabels.includes("Keep sidebar open") &&
+      sidebarControlLabels.includes("Settings"),
+    "the active sidebar shape exposes pin and Settings controls",
+  );
+  assert.ok(
+    sidebarActions.collapsed
+      ? sidebarControlLabels.includes("New private tab")
+      : sidebarControlLabels.includes("Quit Surffish"),
+    "the active rail or panel exposes its shape-specific action",
+  );
+  const maxActionSize = sidebarActions.collapsed ? 40 : 36;
+  assert.ok(
+    sidebarActions.controls.every(
+      ({ width, height }) => width <= maxActionSize && height <= maxActionSize,
+    ),
+    "the active rail hit targets or panel controls fit their expected size",
   );
   assert.ok(
     await evaluate(
@@ -652,8 +694,8 @@ async function run() {
     mainWindow.getContentBounds().y + Math.floor(contentSize[1] / 2),
   );
   await waitFor(
-    () => !nativeViewState().find((view) => view.surface === "sidebar").visible,
-    "the full-height sidebar to hide after the pointer leaves the left reveal edge",
+    collapsedRailVisible,
+    "the collapsed sidebar rail to remain visible after the pointer leaves its reveal edge",
   );
   const pageHiddenSidebar = fixturePageView.getBounds();
   const sidebarHiddenState = nativeViewState();
@@ -673,19 +715,19 @@ async function run() {
     "the full React renderer is hidden above the page and cannot intercept its input",
   );
   assert.equal(rendererViews.toolbar.getVisible(), true);
-  // Collapsed: slid fully out *and* hidden (it keeps its card size so a reveal never resizes the
-  // renderer, see src/main/sidebar-motion.ts), so nothing in it paints or hit-tests over the page.
+  // In tabs mode the panel collapses to a persistent 84px rail; the full-width page stays underneath.
   assert.equal(
     rendererViews.sidebar.getVisible(),
-    false,
-    "the collapsed sidebar overlay is hidden",
+    true,
+    "the collapsed sidebar rail remains visible",
   );
-  const hiddenSidebarBounds = sidebarHiddenState.find(
+  const collapsedSidebarBounds = sidebarHiddenState.find(
     (view) => view.surface === "sidebar",
   ).bounds;
+  assert.equal(collapsedSidebarBounds.x, 0);
   assert.ok(
-    hiddenSidebarBounds.x + hiddenSidebarBounds.width <= 0,
-    `the hidden sidebar is slid off the left edge (${JSON.stringify(hiddenSidebarBounds)})`,
+    collapsedSidebarBounds.width >= 83 && collapsedSidebarBounds.width <= 85,
+    `the collapsed sidebar is rail-width (${JSON.stringify(collapsedSidebarBounds)})`,
   );
   assert.ok(
     sidebarHiddenState.find((view) => view.surface === "toolbar").index >
@@ -697,7 +739,7 @@ async function run() {
       sidebarHiddenState.find((view) => view.url === fixtureUrl).index,
     "the sidebar is layered above the live page",
   );
-  captureFullWindow("sidebar-overlay-live-page-hidden.png");
+  captureFullWindow("sidebar-overlay-live-page-collapsed-rail.png");
 
   // The old toolbar Tabs toggle is gone; the leftmost toolbar control (Back) and the brand mark must stay inert on hover.
   for (const selector of [
@@ -711,16 +753,15 @@ async function run() {
     const hoverPoint = screenPointForElement(rendererViews.toolbar, hoverRect);
     pointerMove(hoverPoint.x, hoverPoint.y);
     await delay(350);
-    assert.equal(
-      rendererViews.sidebar.getVisible(),
-      false,
-      `hovering ${selector} must not open or reset the sidebar`,
+    assert.ok(
+      collapsedRailVisible(),
+      `hovering ${selector} must leave the sidebar at the collapsed rail`,
     );
   }
 
-  // A click inside the former 14px reveal strip must still reach the full-width live page.
+  // The rail occupies the left edge; a click just beyond it must still reach the full-width live page.
   const edgePoint = {
-    x: mainWindow.getContentBounds().x + 5,
+    x: mainWindow.getContentBounds().x + 104,
     y: mainWindow.getContentBounds().y + pageHiddenSidebar.y + 245,
   };
   pointerClick(edgePoint.x, edgePoint.y);
@@ -729,7 +770,7 @@ async function run() {
       fixturePageView.webContents.executeJavaScript(
         "window.edgeClickCount || 0",
       ),
-    "the page click at the leftmost edge",
+    "the page click just beyond the collapsed rail",
   );
   await delay(250);
   assert.equal(
@@ -737,15 +778,14 @@ async function run() {
       "window.edgeClickCount",
     ),
     1,
-    "the hidden sidebar must not intercept a click at x=5",
+    "the collapsed rail must not intercept a click just beyond its edge",
   );
-  assert.equal(
-    rendererViews.sidebar.getVisible(),
-    false,
-    "a click cancels the delayed hover reveal and leaves the page unobstructed",
+  assert.ok(
+    collapsedRailVisible(),
+    "a page click beyond the rail does not expand the sidebar",
   );
 
-  // The toolbar Tabs toggle is gone: hover the left reveal edge with the real pointer, then pin the
+  // Hover the persistent rail with the real pointer to expand it, then pin the
   // glass sidebar open from its footer control, all with native mouse input.
   pointerMove(
     mainWindow.getContentBounds().x + 5,
@@ -978,12 +1018,16 @@ async function run() {
     ),
     2,
   );
+  await evaluate(
+    rendererViews.toolbar,
+    "window.api.browser.chrome.set({ sidebarFocused: false })",
+  );
   await waitFor(
-    () => !rendererViews.sidebar.getVisible(),
-    "the sidebar to auto-hide after pointer exit and focus release",
+    collapsedRailVisible,
+    "the expanded panel to collapse to its persistent rail after pointer exit and focus release",
   );
 
-  // Hover over the leftmost 14px of the live page; delayed reveal must not reserve or occlude that area while hidden.
+  // The rail owns the left edge; hovering it reveals the panel without changing page bounds.
   const pageAfterHide = fixturePageView.getBounds();
   pointerMove(
     mainWindow.getContentBounds().x + 5,
@@ -1006,8 +1050,8 @@ async function run() {
     mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350,
   );
   await waitFor(
-    () => !rendererViews.sidebar.getVisible(),
-    "the hover-only sidebar to hide again",
+    collapsedRailVisible,
+    "the hover-only panel to collapse back to the visible rail",
   );
 
   // Reveal locks main releases on its own (src/main/sidebar-reveal-guard.ts).
@@ -1026,9 +1070,12 @@ async function run() {
   await waitFor(
     () =>
       rendererViews.sidebar.getVisible() &&
+      rendererViews.sidebar.getBounds().width >= 300 &&
       rendererViews.sidebar.getBounds().x === 0,
     "hover to reopen the sidebar for the stuck-drag check",
   );
+  await waitForSidebarPinControl();
+  const widthBeforeStuckDrag = rendererViews.sidebar.getBounds().width;
   rendererViews.sidebar.webContents.focus();
   await evaluate(
     rendererViews.sidebar,
@@ -1040,15 +1087,15 @@ async function run() {
   }, "a stuck drag and sidebar focus");
   assert.equal(
     rendererViews.sidebar.getBounds().width,
-    widthAfterResize,
-    "a drag in progress never widens the overlay view (no full-size underlay)",
+    widthBeforeStuckDrag,
+    "a drag in progress never widens the current panel overlay (no full-size underlay)",
   );
   pointerMove(pagePoint.x, pagePoint.y);
   await delay(700);
   assert.equal(
-    rendererViews.sidebar.getVisible(),
-    true,
-    "keyboard focus in the sidebar still holds it while only the pointer has left",
+    rendererViews.sidebar.getBounds().width,
+    widthBeforeStuckDrag,
+    "keyboard focus keeps the expanded panel open after the pointer leaves",
   );
   pointerClick(pagePoint.x, pagePoint.y);
   await waitFor(async () => {
@@ -1058,8 +1105,8 @@ async function run() {
     );
   }, "a click on the page to release the drag, focus and hover holds");
   await waitFor(
-    () => !rendererViews.sidebar.getVisible(),
-    "the sidebar to hide after a click on the page",
+    collapsedRailVisible,
+    "the expanded panel to collapse to its persistent rail after a click on the page",
   );
   // 2) A hover the sidebar never saw the pointer leave (it exited over the toolbar, an iframe, or
   //    the hover was set while the pointer was elsewhere): no view reports a move, the cursor poll does.
@@ -1071,28 +1118,39 @@ async function run() {
   await delay(300);
   await evaluate(
     rendererViews.content,
-    "window.api.browser.chrome.set({ sidebarHovered: true })",
+    "window.api.browser.chrome.set({ sidebarFocused: false, sidebarHovered: true })",
   );
   await waitFor(
-    () => rendererViews.sidebar.getVisible(),
+    () =>
+      rendererViews.sidebar.getVisible() &&
+      rendererViews.sidebar.getBounds().width >= 300,
     "a hover reveal with the pointer over the toolbar",
   );
   await waitFor(
-    async () =>
-      !(await chromeState()).sidebarHovered &&
-      !rendererViews.sidebar.getVisible(),
-    "the cursor poll to release a hover whose mouseleave never came",
+    async () => !(await chromeState()).sidebarHovered && collapsedRailVisible(),
+    "the cursor poll to collapse the panel to its rail after a hover whose mouseleave never came",
     5000,
   );
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
-  // Hover-reveal the panel (the old toolbar toggle is gone), then pin it open via the footer control.
+  // Keep the physical cursor over the rail while dispatching the in-page reveal event, then pin the panel.
+  pointerMove(
+    mainWindow.getContentBounds().x + 5,
+    mainWindow.getContentBounds().y + 200,
+  );
   assert.ok(
     await evaluate(
       rendererViews.content,
       '(() => { const layout = document.querySelector(".browser-layout"); if (!layout) return false; layout.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 5, clientY: 200 })); return true; })()',
     ),
     "the browser layout should accept a hover at the reveal edge",
+  );
+  await waitFor(
+    () =>
+      rendererViews.sidebar.getVisible() &&
+      rendererViews.sidebar.getBounds().width >= 300 &&
+      rendererViews.sidebar.getBounds().x === 0,
+    "the in-page synthetic reveal-edge mousemove to expand the overlay panel",
   );
   await waitForSidebarPinControl();
   await clickElement(rendererViews.sidebar, '[aria-label="Keep sidebar open"]');

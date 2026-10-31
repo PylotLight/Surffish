@@ -37,7 +37,7 @@ export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
   /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
-  /** The sidebar view is inset + rounded to the card (it has used the native blur in this window). */
+  /** The sidebar view itself frames the full-height card (it has used native blur in this window). */
   framed: boolean;
 }
 

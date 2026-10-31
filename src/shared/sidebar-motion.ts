@@ -11,10 +11,14 @@
  */
 
 /** Open and close take the same time and curve (CSS, the overlay view and its tint all use these). */
-export const SIDEBAR_MOTION_MS = 200;
-/** cubic-bezier control points: a quick start that settles softly (the sidebar's existing curve). */
+export const SIDEBAR_MOTION_MS = 400;
+/**
+ * cubic-bezier control points: a quick departure that settles long and softly — the reference
+ * browser's "emphasized" curve. The column grows (or slides) as one surface with the page, so the
+ * landing reads as a single soft motion rather than a snap.
+ */
 export const SIDEBAR_MOTION_EASING: readonly [number, number, number, number] =
-  [0.2, 0.8, 0.2, 1];
+  [0.16, 1, 0.3, 1];
 /** Frame pacing for the main-process stepper (ms). ~120 Hz so ProMotion displays don't see steps. */
 export const SIDEBAR_MOTION_FRAME_MS = 8;
 
@@ -133,6 +137,20 @@ export function sidebarMotionAt(
 export function sidebarSlideX(progress: number, width: number): number {
   const hidden = Math.round((1 - clamp01(progress)) * Math.max(0, width));
   return hidden === 0 ? 0 : -hidden;
+}
+
+/**
+ * The card's width at a point of the open/close timeline when a collapsed sidebar keeps its icon
+ * rail on screen: the rail at progress 0, the full sidebar at 1. The rail edge stays put and the
+ * card grows to the right, so the panel is revealed instead of sliding in from off-window.
+ */
+export function sidebarRevealWidth(
+  progress: number,
+  { railWidth, width }: { railWidth: number; width: number },
+): number {
+  const full = Math.max(0, width);
+  const rail = Math.max(0, Math.min(railWidth, full));
+  return Math.round(rail + (full - rail) * clamp01(progress));
 }
 
 /**

@@ -2641,6 +2641,11 @@ export default function Browser({
         setSidebarMode={setSidebarMode}
         setSidebarPinned={setSidebarPinned}
         sidebarOnScreen={sidebarOnScreen}
+        sidebarVisible={sidebarVisible}
+        railOnScreen={
+          surface === "sidebar" ||
+          (surface === "content" && (isLocalPage || sidebarOnScreen))
+        }
         spaces={spaces}
         tabUsage={tabUsage}
         settingsTab={settingsTab}

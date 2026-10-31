@@ -21,6 +21,7 @@ interface DragHandlers {
  */
 export function SplitTabEntry({
   entryId,
+  dataMotionKey,
   tabs,
   dragging,
   animate,
@@ -33,6 +34,8 @@ export function SplitTabEntry({
   onSelectClick,
 }: {
   entryId: string;
+  /** Carries the mark from the rail's first tab of this split into this row on a shape change. */
+  dataMotionKey?: string;
   /** The split's tab group colour (it sits in the group's run with the coloured rail). */
   groupColor?: string;
   tabs: BrowserTabSummary[];
@@ -58,6 +61,7 @@ export function SplitTabEntry({
           : undefined
       }
       data-browser-tab-id={entryId}
+      {...(dataMotionKey ? { "data-motion-key": dataMotionKey } : {})}
       role="tab"
       aria-selected={active}
       aria-label={`Split view: ${label}`}
