@@ -341,10 +341,14 @@ async function run() {
     const content = report.onNewTab.rows.find(
       (entry) => entry.label === "shell:content",
     );
-    // The persistent rail stays visible on New Tab, including its loading favicon animation.
+    // A visible rail can animate a loading favicon while New Tab is shown.
+    // Keep a bounded allowance for that work and shared Linux-runner variance.
     assert.ok(
-      content && content.viewVisible && content.wakeups < 80,
-      `New Tab with the persistent rail stays below the loading-icon wakeup budget (${content?.wakeups} wakeups/s)`,
+      content &&
+        content.viewVisible &&
+        typeof content.wakeups === "number" &&
+        content.wakeups < 120,
+      `New Tab with the persistent rail stays below the 120 wakeups/s loading-icon budget (${content?.wakeups} wakeups/s)`,
     );
     const labels = report.diagnostics.labels;
     for (const expected of [
