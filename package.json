@@ -218,7 +218,7 @@
     "@types/ssh2": "^1.15.6",
     "@vitejs/plugin-react": "^6.1.2",
     "dompurify": "^3.4.17",
-    "electron": "46.0.0-alpha.3",
+    "electron": "46.0.0-alpha.4",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "jsqr": "1.4.0",
