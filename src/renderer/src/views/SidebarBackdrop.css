@@ -6,9 +6,9 @@
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-snapshot {
   background: linear-gradient(
     160deg,
-    rgba(31, 35, 41, 0.95),
-    rgba(18, 21, 25, 0.96) 45%,
-    rgba(12, 14, 17, 0.97)
+    rgba(48, 58, 72, 0.95),
+    rgba(26, 32, 41, 0.96) 45%,
+    rgba(14, 17, 22, 0.97)
   );
 }
 .app-shell[data-surface="sidebar"]
@@ -22,27 +22,40 @@
     rgba(13, 12, 18, 0.97)
   );
 }
-/* Native compositor blur: the view itself is the tinted, blurred, rounded card (main sets it up
- * and insets it by the same --sidebar-card-inset), so the card fills the view instead of insetting
- * itself again, and only adds a faint sheen and its border. */
+/* Native compositor blur: the view itself is the tinted, blurred full-height card (main frames it
+ * using --sidebar-card-inset), so the card fills the view instead of insetting itself again. */
 .app-shell[data-surface="sidebar"] .browser-sidebar.is-view-framed {
   top: 0;
   bottom: 0;
 }
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-native {
-  background: linear-gradient(
-    160deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0) 40%
-  );
+  background:
+    radial-gradient(
+      120% 55% at 6% -8%,
+      rgba(150, 196, 255, 0.16),
+      rgba(150, 196, 255, 0) 60%
+    ),
+    linear-gradient(
+      160deg,
+      rgba(48, 58, 72, 0.56),
+      rgba(26, 32, 41, 0.62) 45%,
+      rgba(14, 17, 22, 0.7)
+    );
 }
 .app-shell[data-surface="sidebar"]
   .browser-sidebar.has-backdrop-native.is-private-window {
-  background: linear-gradient(
-    160deg,
-    rgba(150, 110, 255, 0.16),
-    rgba(150, 110, 255, 0.04) 45%
-  );
+  background:
+    radial-gradient(
+      120% 55% at 6% -8%,
+      rgba(150, 110, 255, 0.2),
+      rgba(150, 110, 255, 0) 60%
+    ),
+    linear-gradient(
+      160deg,
+      rgba(38, 31, 54, 0.62),
+      rgba(21, 18, 30, 0.76) 45%,
+      rgba(13, 12, 18, 0.84)
+    );
 }
 
 /* Snapshot: a static, pre-blurred canvas under a darkening tint, behind the sidebar's content. */

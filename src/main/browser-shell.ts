@@ -18,6 +18,7 @@ import {
   SIDEBAR_CARD,
   sidebarCardInset,
   sidebarCardMaxWidth,
+  sidebarRailWidth,
 } from "../shared/sidebar-card";
 import {
   POPOVER_DISMISS_CHANNEL,
@@ -91,7 +92,7 @@ interface ShellState {
   /** Slides the overlay sidebar view along one open/close timeline (sidebar-motion.ts). */
   sidebarMotion: SidebarOverlayMotion;
   lastOverlayMode: boolean | null;
-  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
+  /** Native-blur backdrop: the sidebar view frames the full-height card (sidebar-backdrop.ts). */
   sidebarFrame: { inset: number; radius: number } | null;
   sidebarOverlayShown: boolean;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
@@ -320,17 +321,23 @@ function applyShellLayout(shell: ShellState): void {
   // drag it follows the live width too: the view's own background is the native blur/tint, so a
   // view widened for the drag showed that underlay at full size (the drag keeps its implicit
   // mouse capture on the sidebar view, so it doesn't need the extra hit-test area).
+  const sidebarWidth = overlaySidebarWidth(shell, width);
+  const railWidth = sidebarRailWidth(width);
   shell.sidebarMotion.layout({
     y: inset,
-    width: overlaySidebarWidth(shell, width),
+    width: sidebarWidth,
     height: Math.max(0, height - inset * 2),
+    railWidth,
   });
-  // Open/close slides along one timeline while live pages stay on screen; entering or leaving
-  // New Tab / a full panel snaps (the in-page sidebar takes over there).
+  // Open/close grows along one timeline while live pages stay on screen; entering or leaving
+  // New Tab / a full panel snaps (the in-page sidebar takes over there). With the tab list the
+  // collapsed view stays as the icon rail, so the sidebar never vanishes completely.
   const overlayShown = overlayMode && sidebarVisible;
+  const railShown =
+    overlayMode && shell.chromeState.sidebarMode === "tabs" && railWidth > 0;
   const animate = shell.lastOverlayMode === overlayMode;
   shell.lastOverlayMode = overlayMode;
-  shell.sidebarMotion.setOpen(overlayShown, { animate });
+  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
   if (overlayShown && !shell.sidebarOverlayShown) {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");

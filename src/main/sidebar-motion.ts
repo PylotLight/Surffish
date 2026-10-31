@@ -5,6 +5,7 @@ import type { WebContentsView } from "electron";
 import {
   parseSidebarMotionMode,
   sidebarMotionAt,
+  sidebarRevealWidth,
   sidebarSlideX,
   startSidebarMotion,
   SIDEBAR_MOTION_FRAME_MS,
@@ -15,12 +16,17 @@ import {
 /**
  * Drives the overlay sidebar view along one open/close timeline (shared/sidebar-motion.ts).
  *
- * The view keeps its full card size the whole time and only its x changes: it slides in from
- * the left edge and back out, so the native blur + tint (the view's own background) and the card
- * drawn inside it move as one piece, and the sidebar renderer never gets a resize (the old
- * 0 → 320px width flip on every reveal made it re-lay out and could show a stale frame). The view
- * is hidden only once a close has fully landed, so its last painted frame is never a half-state
- * that flashes on the next reveal.
+ * Two resting shapes:
+ *  - with a rail (`rail: true`, the tab list): the view never leaves the window. Closed it is the
+ *    card's icon rail at the left edge; opening grows it to the full sidebar width, so the panel
+ *    is revealed beside the rail instead of sliding in from off-window.
+ *  - without a rail (a full panel, or leaving the overlay for New Tab): closed the view waits fully
+ *    slid out at its card width, and only its x moves. Nothing is resized while it is off screen.
+ *
+ * The native blur + tint (the view's own background) always moves and grows with the view, and the
+ * renderer's card fills whatever width it is given (the panel has a fixed width and is clipped), so
+ * an open/close never re-flows the sidebar. The view is hidden only once a close has landed with no
+ * rail to show.
  *
  * SURFFISH_SIDEBAR_MOTION=native tries Electron's compositor-animated setBounds instead (no tint
  * ramp; on macOS the web contents may not follow the layer animation, so it is opt-in), =off snaps.
@@ -32,12 +38,14 @@ export interface SidebarMotionRect {
   y: number;
   width: number;
   height: number;
+  /** Width of the collapsed icon rail; 0 means a closed sidebar is fully hidden. */
+  railWidth?: number;
 }
 
 export interface SidebarMotionHooks {
-  /** Every frame, with the eased progress (0 hidden … 1 open): sidebar-backdrop ramps the native tint. */
+  /** Every frame, with the eased progress (0 closed … 1 open): sidebar-backdrop ramps the native tint. */
   onProgress?: (progress: number) => void;
-  /** A close has landed (the view is hidden now). */
+  /** A close has landed and there is no rail left to show (the view is hidden now). */
   onHidden?: () => void;
 }
 
@@ -60,15 +68,19 @@ export class SidebarOverlayMotion {
   private motion: SidebarMotion | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private rect: SidebarMotionRect = { y: 0, width: 0, height: 0 };
+  /** Closed, the view keeps the icon rail on screen instead of sliding fully out. */
+  private rail = false;
+  /** The panel has already been reported as closed (it collapses to the rail, or the view hides). */
+  private closedNotified = true;
 
   constructor(
     private readonly view: WebContentsView,
     private readonly hooks: SidebarMotionHooks = {},
   ) {}
 
-  /** True while the view is on screen (open, opening or still closing). */
+  /** True while the view is on screen (open, opening, still closing, or resting on its rail). */
   get onScreen(): boolean {
-    return this.target === 1 || this.progress > 0;
+    return this.rail || this.target === 1 || this.progress > 0;
   }
 
   /** Lay out at the current progress (window resize, width drag, card inset change). */
@@ -77,15 +89,30 @@ export class SidebarOverlayMotion {
     this.apply();
   }
 
-  /** Open (true) or close (false) along the timeline; `animate: false` snaps (e.g. leaving live pages). */
-  setOpen(open: boolean, { animate = true }: { animate?: boolean } = {}): void {
+  /**
+   * Open (true) or close (false) along the timeline; `animate: false` snaps (e.g. leaving live
+   * pages). `rail` keeps a collapsed sidebar visible as its icon rail.
+   */
+  setOpen(
+    open: boolean,
+    {
+      animate = true,
+      rail = false,
+    }: { animate?: boolean; rail?: boolean } = {},
+  ): void {
     const to: 0 | 1 = open ? 1 : 0;
+    const railChanged = rail !== this.rail;
+    this.rail = rail;
     const instant =
       !animate ||
       mode === "off" ||
       prefersReducedMotion() ||
       this.rect.width <= 0;
-    if (to === this.target && (this.motion || this.progress === to)) {
+    if (
+      to === this.target &&
+      !railChanged &&
+      (this.motion || this.progress === to)
+    ) {
       if (instant && this.motion) this.finish();
       return;
     }
@@ -101,7 +128,7 @@ export class SidebarOverlayMotion {
     this.motion = startSidebarMotion(this.progress, to, Date.now(), {
       durationMs: SIDEBAR_MOTION_MS,
     });
-    // Show before the first frame so the slide starts from the edge, not from a hidden view.
+    // Show before the first frame so the open starts from the rail (or the edge), not a hidden view.
     if (to === 1) this.view.setVisible(true);
     this.step();
   }
@@ -128,28 +155,29 @@ export class SidebarOverlayMotion {
   private runNative(): void {
     this.clearTimer();
     this.motion = null;
-    const { y, width, height } = this.rect;
     const to = this.target;
-    if (to === 1) {
-      if (this.progress === 0) {
-        const x = sidebarSlideX(0, width);
-        this.appliedKey = `${x},${y},${width},${height}`;
-        this.view.setBounds({ x, y, width, height });
-      }
-      this.view.setVisible(true);
-      this.reported = 1;
-      this.hooks.onProgress?.(1);
-    }
     const duration = Math.round(
       SIDEBAR_MOTION_MS * Math.abs(to - this.progress),
     );
-    const x = sidebarSlideX(to, width);
-    this.appliedKey = `${x},${y},${width},${height}`;
-    this.view.setBounds(
-      { x, y, width, height },
-      { animate: { duration, easing: "ease-out" } },
-    );
-    this.progress = to;
+    if (this.progress !== to) {
+      // Start from wherever it is (the rail, or slid out) before asking for the animated move.
+      this.applyFrame(this.progress);
+      this.view.setVisible(true);
+      const frame = this.frameAt(to);
+      this.appliedKey = `${frame.x},${this.rect.y},${frame.width},${this.rect.height}`;
+      this.view.setBounds(
+        {
+          x: frame.x,
+          y: this.rect.y,
+          width: frame.width,
+          height: this.rect.height,
+        },
+        { animate: { duration, easing: "ease-out" } },
+      );
+      this.progress = to;
+    }
+    this.reported = to;
+    this.hooks.onProgress?.(to);
     if (to === 0) {
       this.timer = setTimeout(() => {
         this.timer = null;
@@ -163,28 +191,56 @@ export class SidebarOverlayMotion {
     this.motion = null;
     this.progress = this.target;
     this.apply();
-    if (this.target === 0) this.hooks.onHidden?.();
+  }
+  /** Where the view's frame sits at a given progress (x from the left, and its width). */
+  private frameAt(progress: number): { x: number; width: number } {
+    const { width, railWidth = 0 } = this.rect;
+    if (this.rail && railWidth > 0)
+      return {
+        x: 0,
+        width: sidebarRevealWidth(progress, { railWidth, width }),
+      };
+    return { x: sidebarSlideX(progress, width), width };
   }
 
   private apply(): void {
-    const { y, width, height } = this.rect;
-    const visible = this.onScreen && width > 0 && height > 0;
-    // Same size every frame (only x moves); a closed view waits fully slid out for the next reveal.
-    if (width > 0 && height > 0) {
-      const x = sidebarSlideX(this.progress, width);
-      const key = `${x},${y},${width},${height}`;
-      // Layout runs on every chrome-state change; only touch the view when its frame really moves
-      // (also keeps a native animated move from being snapped by an unrelated re-layout).
-      if (key !== this.appliedKey) {
-        this.appliedKey = key;
-        this.view.setBounds({ x, y, width, height });
-      }
-    }
+    const { height } = this.rect;
+    this.applyFrame(this.progress);
+    const visible = this.onScreen && this.rect.width > 0 && height > 0;
     // Hidden, not just slid away, once closed: nothing in it should paint or animate then.
     if (this.view.getVisible() !== visible) this.view.setVisible(visible);
     if (this.progress !== this.reported) {
       this.reported = this.progress;
       this.hooks.onProgress?.(this.progress);
+    }
+    this.notifyClosed();
+  }
+
+  /**
+   * Tell the shell once the panel is closed — whether it landed on the rail (still visible) or the
+   * view slid out entirely. Kept separate from visibility: the rail is on screen while closed.
+   */
+  private notifyClosed(): void {
+    const closed = this.target === 0 && this.progress === 0;
+    if (!closed) {
+      this.closedNotified = false;
+      return;
+    }
+    if (this.closedNotified) return;
+    this.closedNotified = true;
+    this.hooks.onHidden?.();
+  }
+
+  private applyFrame(progress: number): void {
+    const { y, height } = this.rect;
+    if (this.rect.width <= 0 || height <= 0) return;
+    const { x, width } = this.frameAt(progress);
+    const key = `${x},${y},${width},${height}`;
+    // Layout runs on every chrome-state change; only touch the view when its frame really moves
+    // (also keeps a native animated move from being snapped by an unrelated re-layout).
+    if (key !== this.appliedKey) {
+      this.appliedKey = key;
+      this.view.setBounds({ x, y, width, height });
     }
   }
 
