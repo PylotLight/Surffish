@@ -5183,10 +5183,12 @@
   font-size: 10px;
 }
 
-/* The sidebar body hosts one shape at a time: the icon rail when collapsed, the tab panel when
- * expanded. They are swapped, not toggled — the shape morph (shared/sidebar-morph.ts) carries
- * each site's mark from where the old shape drew it to where the new one does, while the card's
- * width travels on the shared open/close timeline. */
+/* The sidebar body hosts both shapes: the icon rail when collapsed, the tab panel when expanded,
+ * the inactive one out of flow and invisible (is-shape-hidden below). They are swapped, not torn
+ * down — the framework keeps drawing both, so automation and smokes read their DOM, and the
+ * shape morph (shared/sidebar-morph.ts) carries each site's mark from where the old shape drew
+ * it to where the new one does, while the card's width travels on the shared open/close
+ * timeline. */
 .sidebar-body {
   position: relative;
   display: flex;
@@ -5230,17 +5232,36 @@
   z-index: 0;
   pointer-events: none;
 }
-/* A shape change, for the length of the card's width transition: the incoming column holds its
- * final width, so the marks' measured positions stay true and only the space beside them moves
- * (the card grows or shrinks around the already-laid-out content; shared/sidebar-morph.ts). */
+/* The inactive shape stays mounted, out of flow and invisible, at the width it has in flow
+ * (100% of the body for the panel, its designed width for the rail), so switching shapes swaps
+ * the class and nothing re-flows; the card's overflow clips it (shared/sidebar-morph.ts). */
+.sidebar-morph-column.is-shape-hidden {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.sidebar-panel.is-shape-hidden {
+  width: 100%;
+}
+.sidebar-rail.is-shape-hidden {
+  width: var(--sidebar-rail-width, 84px);
+}
+/* A shape change, for the length of the card's width transition: the incoming (active) column
+ * holds its final width, so the marks' measured positions stay true and only the space beside
+ * them moves (the card grows or shrinks around the already-laid-out content; the hidden column
+ * is out of flow, so the hold applies to the active one; shared/sidebar-morph.ts). */
 .browser-sidebar[data-reshaping="expand"]
   > .sidebar-body
-  > .sidebar-morph-column {
+  > .sidebar-morph-column:not(.is-shape-hidden) {
   flex: 0 0 var(--sidebar-width, 320px);
 }
 .browser-sidebar[data-reshaping="collapse"]
   > .sidebar-body
-  > .sidebar-morph-column {
+  > .sidebar-morph-column:not(.is-shape-hidden) {
   flex: 0 0 var(--sidebar-rail-width, 84px);
 }
 .sidebar-rail-scroll {

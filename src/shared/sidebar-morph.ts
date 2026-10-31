@@ -91,6 +91,14 @@ export const MORPH_RESHAPE_MS = SIDEBAR_MOTION_MS + 40;
 export const MORPH_COLUMN_CLASS = "sidebar-morph-column";
 /** The class the outgoing shape takes when it is re-attached and faded. */
 export const MORPH_GHOST_CLASS = "sidebar-morph-ghost";
+/**
+ * The class the inactive shape keeps while it stays mounted (out of flow and invisible): the
+ * framework keeps drawing it — automation and smokes read its DOM — but it neither shows nor
+ * hit-tests.
+ */
+export const MORPH_HIDDEN_CLASS = "is-shape-hidden";
+/** The shape on screen: the only column that is neither hidden nor a fading ghost. */
+export const ACTIVE_COLUMN_SELECTOR = `:scope > .${MORPH_COLUMN_CLASS}:not(.${MORPH_HIDDEN_CLASS}):not(.${MORPH_GHOST_CLASS})`;
 /** The part of a counterpart the eye follows: its site's mark, if it has one. */
 const MARK_SELECTOR = ".tab-favicon, .pinned-site-mark";
 /** The new surroundings of a travelling mark. */
@@ -133,9 +141,7 @@ export function captureSidebarMorph(
   host: HTMLElement | null,
 ): MorphSnapshot | null {
   if (!host || prefersReducedMotion()) return null;
-  const column = host.querySelector<HTMLElement>(
-    `:scope > .${MORPH_COLUMN_CLASS}`,
-  );
+  const column = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!column) return null;
   const marks: Record<string, MarkRect> = {};
   for (const element of column.querySelectorAll<HTMLElement>(COUNTERPARTS)) {
@@ -226,11 +232,8 @@ export function playSidebarMorph(
   host: HTMLElement,
 ): number {
   if (!snapshot || prefersReducedMotion()) return 0;
-  const incoming = host.querySelector<HTMLElement>(
-    `:scope > .${MORPH_COLUMN_CLASS}`,
-  );
-  if (!incoming || incoming === snapshot.column || snapshot.column?.isConnected)
-    return 0;
+  const incoming = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
+  if (!incoming || incoming === snapshot.column) return 0;
   // A re-toggle while an earlier morph is still running: drop the earlier ghost (it has faded or
   // is mid-fade) so the host holds exactly one outgoing shape.
   for (const ghost of host.querySelectorAll<HTMLElement>(
@@ -344,40 +347,48 @@ function holdUntilRoom(
 }
 
 /**
- * The old shape, back for a moment where it was: unreachable, its marks withdrawn because they
- * are travelling, and fading out. (It is already unmounted by the framework — re-attaching and
- * removing it here is deliberate, and it never comes back to the component tree.)
+ * The old shape, back for a moment where it was: its marks withdrawn because they are
+ * travelling, made unreachable, and faded out. The real column stays in the component tree
+ * (hidden there for the DOM that automation and smokes read), so the ghost is a pixel copy of
+ * it: the copy leaves the document once it has faded, and the framework never touches it.
  */
 function releaseColumn(snapshot: MorphSnapshot): void {
   const { column, host, rect } = snapshot;
-  if (!column) return;
-  for (const node of [column, ...column.querySelectorAll<HTMLElement>("*")]) {
+  if (!column || !host.isConnected) return;
+  const ghost = column.cloneNode(true) as HTMLElement;
+  // The copy inherits the hidden shape's classes; the ghost is the one that shows and fades.
+  ghost.classList.remove(MORPH_HIDDEN_CLASS);
+  ghost.classList.remove(MORPH_COLUMN_CLASS);
+  ghost.classList.add(MORPH_GHOST_CLASS);
+  for (const node of [ghost, ...ghost.querySelectorAll<HTMLElement>("*")]) {
     for (const name of node.getAttributeNames()) {
       if (name === "data-motion-key" || name === "data-morph")
         node.removeAttribute(name);
     }
   }
-  for (const mark of column.querySelectorAll<HTMLElement>(MARK_SELECTOR))
+  for (const mark of ghost.querySelectorAll<HTMLElement>(MARK_SELECTOR))
     mark.style.visibility = "hidden";
-  // It is no longer the current shape: stop matching the column selector, take the ghost's class.
-  column.classList.remove(MORPH_COLUMN_CLASS);
-  column.classList.add(MORPH_GHOST_CLASS);
-  column.setAttribute("aria-hidden", "true");
-  column.inert = true;
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.inert = true;
   const bounds = host.getBoundingClientRect();
-  Object.assign(column.style, {
+  Object.assign(ghost.style, {
     position: "absolute",
     left: `${rect.x - bounds.x}px`,
     top: `${rect.y - bounds.y}px`,
     width: `${rect.width}px`,
     height: `${rect.height}px`,
   });
-  host.append(column);
-  for (const [scroller, top] of snapshot.scrolled) scroller.scrollTop = top;
-  const fade = column.animate([{ opacity: 1 }, { opacity: 0 }], {
+  host.append(ghost);
+  // The copy's scrollers start at the top; restore the offsets the snapshot captured.
+  const ghostScrollers = ghost.querySelectorAll<HTMLElement>(SCROLLER_SELECTOR);
+  snapshot.scrolled.forEach(([_, top], i) => {
+    const scroller = ghostScrollers[i];
+    if (scroller) scroller.scrollTop = top;
+  });
+  const fade = ghost.animate([{ opacity: 1 }, { opacity: 0 }], {
     duration: MORPH_FADE_MS,
     easing: MORPH_EASING,
     fill: "forwards",
   });
-  void fade.finished.catch(() => undefined).then(() => column.remove());
+  void fade.finished.catch(() => undefined).then(() => ghost.remove());
 }

@@ -1,4 +1,8 @@
 import type { BrowserTabSummary, PinnedSite } from "../../../../shared/types";
+import {
+  MORPH_COLUMN_CLASS,
+  MORPH_HIDDEN_CLASS,
+} from "../../../../shared/sidebar-morph";
 import { TabFavicon } from "../TabIndicators";
 import { PinnedSiteIcon } from "./icons";
 import { httpOrigin } from "./chrome-helpers";
@@ -21,6 +25,11 @@ export interface SidebarRailProps {
   cachedSiteIcons: Record<string, string>;
   /** Whether a tab's loading spinner may animate (false when this surface is off screen). */
   animate: boolean;
+  /**
+   * The panel is the current shape: the rail stays mounted (out of flow, invisible) so the
+   * framework keeps drawing it, but it neither shows nor hit-tests.
+   */
+  shapeHidden: boolean;
   sidebarPinned: boolean;
   onOpenPinnedSite: (site: PinnedSite) => void;
   onUnpinPinnedSite: (site: PinnedSite) => void;
@@ -83,6 +92,7 @@ export function SidebarRail({
   tabs,
   cachedSiteIcons,
   animate,
+  shapeHidden,
   sidebarPinned,
   onOpenPinnedSite,
   onUnpinPinnedSite,
@@ -95,7 +105,7 @@ export function SidebarRail({
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
   return (
     <nav
-      className="sidebar-rail sidebar-morph-column"
+      className={`sidebar-rail ${MORPH_COLUMN_CLASS}${shapeHidden ? ` ${MORPH_HIDDEN_CLASS}` : ""}`}
       aria-label="Sidebar rail"
     >
       <div className="sidebar-rail-scroll" data-glide-scroller>
