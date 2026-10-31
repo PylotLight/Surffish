@@ -37,17 +37,25 @@
     ),
     linear-gradient(
       160deg,
-      rgba(255, 255, 255, 0.075),
-      rgba(255, 255, 255, 0) 42%
+      rgba(48, 58, 72, 0.56),
+      rgba(26, 32, 41, 0.62) 45%,
+      rgba(14, 17, 22, 0.7)
     );
 }
 .app-shell[data-surface="sidebar"]
   .browser-sidebar.has-backdrop-native.is-private-window {
-  background: linear-gradient(
-    160deg,
-    rgba(150, 110, 255, 0.16),
-    rgba(150, 110, 255, 0.04) 45%
-  );
+  background:
+    radial-gradient(
+      120% 55% at 6% -8%,
+      rgba(150, 110, 255, 0.2),
+      rgba(150, 110, 255, 0) 60%
+    ),
+    linear-gradient(
+      160deg,
+      rgba(38, 31, 54, 0.62),
+      rgba(21, 18, 30, 0.76) 45%,
+      rgba(13, 12, 18, 0.84)
+    );
 }
 
 /* Snapshot: a static, pre-blurred canvas under a darkening tint, behind the sidebar's content. */

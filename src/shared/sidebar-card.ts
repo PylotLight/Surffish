@@ -30,7 +30,7 @@ export interface SidebarCardGeometry {
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
   inset: 0,
-  radius: 0,
+  radius: 28,
   windowGutter: 48,
   borderWidth: 1,
   controlsLeft: 16,

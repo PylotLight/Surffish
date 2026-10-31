@@ -313,7 +313,7 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
       Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
-  assert.equal(inPage.radius, "0px 0px 0px 0px", `${context}: card radius`);
+  assert.equal(inPage.radius, "28px 28px 28px 28px", `${context}: card radius`);
   for (const surface of [inPage, overlay]) {
     assert.ok(
       Math.abs(surface.firstDot.x - 16) <= TOLERANCE &&
@@ -344,6 +344,161 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     win,
     "chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
   );
+}
+
+async function assertSidebarState(win, which, context, expanded) {
+  const view = surface(win, which);
+  const [windowWidth, windowHeight] = win.getContentSize();
+  const { sidebarWidth } = await api(win, "chrome.get()");
+  const expectedWidth = expanded
+    ? Math.min(sidebarWidth, windowWidth - 48)
+    : Math.min(76, windowWidth - 48);
+  const state = await evaluate(
+    view,
+    `(() => {
+      const layout = document.querySelector('.browser-layout')
+      const card = document.querySelector('.browser-sidebar')
+      const rail = card?.querySelector('.sidebar-rail')
+      const panel = card?.querySelector('.sidebar-panel')
+      if (!layout || !card || !rail || !panel) return null
+      const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+      return {
+        hasRail: card.classList.contains('has-rail'),
+        collapsed: card.classList.contains('is-collapsed'),
+        expanded: layout.classList.contains('is-sidebar-visible'),
+        visibility: getComputedStyle(card).visibility,
+        card: rect(card), rail: rect(rail),
+        actionCount: rail.querySelectorAll('.sidebar-rail-action').length,
+        panelInert: panel.hasAttribute('inert')
+      }
+    })()`,
+  );
+  assert.ok(state, `${context}: sidebar card, rail, and panel are mounted`);
+  assert.equal(state.hasRail, true, `${context}: tab mode keeps the icon rail`);
+  assert.equal(state.visibility, "visible", `${context}: sidebar is visible`);
+  assert.equal(state.actionCount, 4, `${context}: rail actions are present`);
+  assert.ok(
+    Math.abs(state.card.x) <= TOLERANCE &&
+      Math.abs(state.card.y) <= TOLERANCE &&
+      Math.abs(state.card.width - expectedWidth) <= TOLERANCE &&
+      Math.abs(state.card.height - windowHeight) <= TOLERANCE,
+    `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
+  );
+  assert.ok(
+    state.rail.width > 0 &&
+      Math.abs(state.rail.y + state.rail.height - windowHeight) <= TOLERANCE,
+    `${context}: icon rail reaches the bottom edge`,
+  );
+  assert.equal(state.collapsed, !expanded, `${context}: collapsed state`);
+  assert.equal(state.expanded, expanded, `${context}: expanded state`);
+  assert.equal(
+    state.panelInert,
+    !expanded,
+    `${context}: panel interaction state`,
+  );
+  if (screenshotDirectory) {
+    const image = await view.webContents.capturePage();
+    writeFileSync(
+      join(
+        screenshotDirectory,
+        `sidebar-webcontents-${which}-${expanded ? "expanded" : "collapsed"}.png`,
+      ),
+      image.toPNG(),
+    );
+  }
+  return state;
+}
+
+async function verifyCollapsedAndExpanded(win, liveUrl) {
+  const tabs = await api(win, "tabs.get()");
+  const local =
+    tabs.find((tab) => tab.url.startsWith("surffish://")) ?? tabs[0];
+  await api(win, `tabs.create(${JSON.stringify(liveUrl)})`);
+  const live = await waitFor(
+    async () =>
+      (await api(win, "tabs.get()")).find(
+        (tab) => tab.url === liveUrl && !tab.loading,
+      ),
+    "the collapsed-rail live tab",
+  );
+
+  for (const [which, tabId] of [
+    ["content", local.id],
+    ["sidebar", live.id],
+  ]) {
+    await api(win, `tabs.activate(${JSON.stringify(tabId)})`);
+    await api(
+      win,
+      "chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+    );
+    const view = surface(win, which);
+    const open = which === "content";
+    await waitFor(
+      () =>
+        open
+          ? view.getVisible() && !surface(win, "sidebar").getVisible()
+          : view.getVisible() && view.getBounds().width > 0,
+      `${which} collapsed rail surface`,
+    );
+    await waitFor(async () => {
+      const state = await evaluate(
+        view,
+        'Boolean(document.querySelector(".browser-sidebar.has-rail.is-collapsed"))',
+      );
+      return state;
+    }, `${which} collapsed rail DOM`);
+    await settle();
+    await assertSidebarState(win, which, `${which} collapsed`, false);
+    captureWindow(win, `sidebar-${which}-collapsed.png`);
+
+    await evaluate(
+      view,
+      'document.querySelector(".sidebar-rail-pin")?.click()',
+    );
+    const { sidebarWidth } = await api(win, "chrome.get()");
+    const [windowWidth] = win.getContentSize();
+    const expandedWidth = Math.min(sidebarWidth, windowWidth - 48);
+    if (which === "sidebar")
+      await waitFor(
+        () => view.getBounds().width >= expandedWidth - TOLERANCE,
+        "overlay sidebar to expand from the rail",
+      );
+    await waitFor(
+      async () =>
+        Boolean(
+          await evaluate(
+            view,
+            'Boolean(document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"))',
+          ),
+        ),
+      `${which} expanded panel DOM`,
+    );
+    await settle();
+    await assertSidebarState(win, which, `${which} expanded`, true);
+    captureWindow(win, `sidebar-${which}-expanded.png`);
+
+    await api(
+      win,
+      "chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+    );
+    if (which === "sidebar")
+      await waitFor(
+        () => view.getBounds().width <= 76 + TOLERANCE,
+        "overlay sidebar to return to the collapsed rail",
+      );
+    await waitFor(
+      async () =>
+        Boolean(
+          await evaluate(
+            view,
+            'Boolean(document.querySelector(".browser-sidebar.has-rail.is-collapsed"))',
+          ),
+        ),
+      `${which} rail restored after closing the panel`,
+    );
+    await settle();
+    await assertSidebarState(win, which, `${which} collapsed again`, false);
+  }
 }
 
 async function run() {
@@ -378,6 +533,7 @@ async function run() {
       (process.platform === "darwin" ? "native" : "solid"),
     "the expected backdrop path",
   );
+  await verifyCollapsedAndExpanded(win, `${origin}/collapsed-rail`);
 
   await compare(win, {
     context: "docked",
