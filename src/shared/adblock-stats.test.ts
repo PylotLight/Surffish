@@ -6,6 +6,7 @@ import {
   isBlockedResponse,
   MAX_TRACKED_HOSTS,
   OTHER_HOSTS,
+  pruneTalliesWithoutRefs,
   requestHost,
 } from "./adblock-stats";
 
@@ -82,5 +83,19 @@ describe("adblock stats", () => {
         host: "example.com",
       }),
     ).toBe("Ad blocker: off on example.com");
+  });
+
+  test("pruneTalliesWithoutRefs drops tallies whose tab is gone and keeps live ones", () => {
+    const live = new BlockedRequestTally();
+    live.record("https://ad.example.com/1");
+    const dead = new BlockedRequestTally();
+    dead.record("https://ad.example.com/2");
+    const tallies = new Map<number, BlockedRequestTally>([
+      [1, live],
+      [2, dead],
+    ]);
+    pruneTalliesWithoutRefs(tallies, new Set([1, 2]), (id) => id === 1);
+    expect(tallies.has(1)).toBe(true);
+    expect(tallies.has(2)).toBe(false);
   });
 });

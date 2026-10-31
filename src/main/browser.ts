@@ -364,6 +364,7 @@ import {
   type SavedTabGroup,
   type TabGroup,
 } from "../shared/tab-groups";
+import { backgroundTabInsertIndex } from "../shared/tab-insertion";
 import {
   emitGlanceLinkHover,
   glanceShiftClickEnabled,
@@ -1562,6 +1563,17 @@ function markTabInactive(tab: BrowserTab): void {
   scheduleTabSleep(tab);
 }
 
+/** Where a background tab from window `w` opens: right after its active tab (shared/tab-insertion.ts). */
+function backgroundInsertAt(
+  w: BrowserWindowState | undefined,
+): number | undefined {
+  const target = tabTargetWindow(w);
+  return backgroundTabInsertIndex(
+    target?.tabs ?? [],
+    target?.activeTabId ?? null,
+  );
+}
+
 function openBackgroundTab(
   url: string,
   isPrivate = false,
@@ -1575,7 +1587,8 @@ function openBackgroundTab(
     true,
     false,
     undefined,
-    undefined,
+    // After the active tab, so related background opens stay adjacent to it.
+    backgroundInsertAt(w),
     isPrivate,
     false,
     w,
@@ -2477,16 +2490,17 @@ function createTabView(
     if (target && /^https?:\/\//i.test(target)) {
       if (tab.extensionPageOwner === "web-store") {
         // Links from an extension's options page open as ordinary Surffish tabs.
+        const activate = details.disposition !== "background-tab";
         if (
           createTab(
             target,
             selectedSearchEngine,
-            details.disposition !== "background-tab",
+            activate,
             false,
             false,
             false,
             undefined,
-            undefined,
+            activate ? undefined : backgroundInsertAt(tab.win),
             false,
             false,
             tab.win,
@@ -2823,15 +2837,16 @@ function createPdfEditorView(tab: BrowserTab): WebContentsView | null {
   contents.setWindowOpenHandler((details) => {
     const target = resolveNavigationTarget(details.url, selectedSearchEngine);
     if (target && /^https?:\/\//i.test(target)) {
+      const activate = details.disposition !== "background-tab";
       const id = createTab(
         target,
         selectedSearchEngine,
-        details.disposition !== "background-tab",
+        activate,
         false,
         false,
         false,
         undefined,
-        undefined,
+        activate ? undefined : backgroundInsertAt(tab.win),
         tab.isPrivate,
         false,
         tab.win,
@@ -3392,6 +3407,15 @@ function browserTargetForMini(
   return created ? windowStateFor(created) : undefined;
 }
 
+/** The window a new tab lands in: the mini window holds one tab, so opens from it go to a normal window. */
+function tabTargetWindow(
+  targetWindow: BrowserWindowState | undefined,
+): BrowserWindowState | undefined {
+  return targetWindow?.mini === true && !creatingMiniTab
+    ? browserTargetForMini(targetWindow)
+    : targetWindow;
+}
+
 function miniStateFor(window: BaseWindow): BrowserWindowState | undefined {
   const w = windowStateFor(window);
   return w?.mini ? w : undefined;
@@ -3914,10 +3938,9 @@ function createTab(
 ): string | null {
   // The mini window holds one tab: anything opened from it (links, context menu, popups as tabs)
   // goes to a normal window, which comes forward for a foreground tab.
-  const redirected = targetWindow?.mini === true && !creatingMiniTab;
-  const w = redirected ? browserTargetForMini(targetWindow) : targetWindow;
+  const w = tabTargetWindow(targetWindow);
   if (!isLiveWindow(w)) return null;
-  if (redirected && activate && !w.window.isDestroyed()) {
+  if (w !== targetWindow && activate && !w.window.isDestroyed()) {
     w.window.show();
     w.window.focus();
   }

@@ -17,6 +17,7 @@ import {
 import {
   BlockedRequestTally,
   isBlockedResponse,
+  pruneTalliesWithoutRefs,
   type AdblockCounts,
   type AdblockPageInfo,
 } from "../shared/adblock-stats";
@@ -46,6 +47,13 @@ let pushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function flushCounts(): void {
   pushTimer = null;
+  // Self-heal: a block recorded just after its tab was destroyed never attached the
+  // `destroyed` cleanup listener (fromId was already null); drop those tallies here.
+  pruneTalliesWithoutRefs(
+    tallies,
+    dirty,
+    (id) => getBrowserTabRefByWebContentsId(id) != null,
+  );
   const byWindow = new Map<Electron.BaseWindow, AdblockCounts>();
   for (const id of dirty) {
     const ref = getBrowserTabRefByWebContentsId(id);
