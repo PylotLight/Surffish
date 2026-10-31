@@ -9,8 +9,7 @@
 .browser-sidebar {
   position: absolute;
   z-index: 4;
-  /* Card geometry: the --sidebar-card-* vars come from shared/sidebar-card.ts (set on .app-shell),
-   * the same numbers main uses for the overlay view, so in-page and overlay cards line up. */
+  /* Shared frame geometry keeps the in-page and overlay sidebar surfaces aligned. */
   top: min(var(--sidebar-card-inset, 0px), 25%);
   right: auto;
   bottom: min(var(--sidebar-card-inset, 0px), 25%);
@@ -23,8 +22,7 @@
   );
   min-width: 0;
   overflow: hidden;
-  border: var(--sidebar-card-border-width, 1px) solid
-    var(--sidebar-card-border-color, rgba(255, 255, 255, 0.18));
+  border: var(--sidebar-card-border-width, 0px) solid transparent;
   border-radius: var(--sidebar-card-radius, 0px);
   background: linear-gradient(
     150deg,
@@ -2198,9 +2196,8 @@
   display: none !important;
 }
 .app-shell[data-surface="sidebar"] .browser-sidebar {
-  /* Same card as in-page (top/bottom/radius/border from the base rule); main already sizes the
-   * view to the card (the icon rail while collapsed, the full width while open), so the card just
-   * fills the view. */
+  /* The overlay renderer fills its view with the same full-height surface as in-page; main sizes
+   * the view to the collapsed or expanded sidebar width. */
   width: 100%;
   max-width: none;
   min-width: 0;
@@ -5181,12 +5178,7 @@
   font-size: 10px;
 }
 
-/* ---- Sidebar rail ----
- * The tab-list sidebar is a glass card with two columns: a fixed icon rail (pins, open tabs, the
- * actions that would otherwise live in the footer) and the panel beside it. Collapsed, the card
- * shrinks to the rail instead of sliding away, so the sidebar is never an empty edge; opening grows
- * the card to the right and reveals the panel. The panel keeps its full width in both states, so
- * nothing re-flows mid-animation — the card just clips it. */
+/* The collapsed icon presentation and expanded tab list share one sidebar surface. */
 .sidebar-body {
   display: flex;
   flex: 1 1 auto;
@@ -5200,9 +5192,8 @@
   min-width: 0;
   min-height: 0;
 }
-.sidebar-body.has-rail .sidebar-panel {
-  flex: 0 0 auto;
-  width: calc(var(--sidebar-width, 320px) - var(--sidebar-rail-width, 76px));
+.browser-sidebar.is-collapsed .sidebar-panel {
+  display: none;
 }
 .app-shell[data-surface="content"]
   .browser-layout:not(.is-sidebar-visible)
@@ -5218,23 +5209,12 @@
 
 .sidebar-rail {
   display: flex;
-  flex: 0 0 var(--sidebar-rail-width, 76px);
-  width: var(--sidebar-rail-width, 76px);
+  flex: 1 1 auto;
+  width: 100%;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.075);
-  background:
-    radial-gradient(
-      90% 40% at 50% 0%,
-      rgba(255, 255, 255, 0.07),
-      rgba(255, 255, 255, 0) 70%
-    ),
-    linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.045),
-      rgba(255, 255, 255, 0.008) 55%,
-      rgba(255, 255, 255, 0.03)
-    );
+  border: 0;
+  background: transparent;
 }
 .sidebar-rail-scroll {
   display: flex;
@@ -5342,7 +5322,6 @@
   align-items: center;
   gap: 4px;
   padding: 8px 0 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.075);
 }
 .sidebar-rail-action {
   display: grid;
@@ -5381,17 +5360,18 @@
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
-/* A private window keeps its violet cast on the rail too. */
-.browser-sidebar.is-private-window .sidebar-rail {
+/* Private windows tint the same integrated surface, not a separate rail. */
+.browser-sidebar.is-private-window {
   background:
     radial-gradient(
-      90% 40% at 50% 0%,
+      130% 60% at 6% -10%,
       rgba(160, 130, 255, 0.16),
-      rgba(160, 130, 255, 0) 70%
+      rgba(160, 130, 255, 0) 62%
     ),
     linear-gradient(
-      180deg,
-      rgba(160, 130, 255, 0.06),
-      rgba(160, 130, 255, 0) 55%
+      150deg,
+      rgba(50, 42, 68, 0.68),
+      rgba(28, 24, 38, 0.78) 44%,
+      rgba(16, 14, 21, 0.87)
     );
 }

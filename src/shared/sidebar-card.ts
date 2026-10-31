@@ -1,16 +1,15 @@
 /**
- * The sidebar card's geometry, in one place.
+ * The sidebar surface's frame geometry, in one place.
  *
  * The sidebar is drawn two ways: in-page by the content renderer (New Tab, full panels) and as its
- * own WebContentsView overlay above live pages (optionally inset + rounded by main for the native
- * blur). Both must put the card on exactly the same window pixels, so main reads these numbers for
- * the view bounds and the renderer publishes them as CSS custom properties on `.app-shell`
- * (`sidebarCardCssVars`), which every sidebar rule in the CSS uses instead of literals.
+ * own WebContentsView overlay above live pages. Both must put the surface on exactly the same window
+ * pixels. Main uses these numbers for view bounds, and the renderer publishes them as CSS custom
+ * properties on `.app-shell` (`sidebarCardCssVars`) so both renderings read the same values.
  */
 export interface SidebarCardGeometry {
   /** Gap between the card and the top/bottom of the window (px). */
   inset: number;
-  /** Corner radius of the card (and of the native-blur view). */
+  /** CSS corner radius of the surface; a square surface may use a one-DIP native compositor clip. */
   radius: number;
   /** The card never gets wider than the window minus this (px). */
   windowGutter: number;
@@ -30,9 +29,9 @@ export interface SidebarCardGeometry {
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
   inset: 0,
-  radius: 28,
+  radius: 0,
   windowGutter: 48,
-  borderWidth: 1,
+  borderWidth: 0,
   controlsLeft: 16,
   controlsTop: 16,
   railWidth: 76,
@@ -40,8 +39,7 @@ export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
 
 /** Paint that both surfaces share. Only inset shadows: an outer shadow would be clipped away at the overlay view's edge. */
 export const SIDEBAR_CARD_BORDER_COLOR = "rgba(255, 255, 255, 0.18)";
-export const SIDEBAR_CARD_SHADOW =
-  "inset 0 1px rgba(255, 255, 255, 0.14), inset -1px 0 rgba(255, 255, 255, 0.08)";
+export const SIDEBAR_CARD_SHADOW = "inset -1px 0 rgba(255, 255, 255, 0.12)";
 
 export interface CardRect {
   x: number;

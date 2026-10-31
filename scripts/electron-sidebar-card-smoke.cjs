@@ -299,7 +299,7 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     framed: overlay.className.includes("is-view-framed"),
   });
   assertSame(inPage, overlay, `${label} / ${context}`);
-  // Both cards reach the window's top and bottom, and the traffic lights match the native origin.
+  // Both surfaces reach the window's top and bottom, and traffic lights match the native origin.
   const [width, height] = win.getContentSize();
   const { sidebarWidth } = await api(win, "chrome.get()");
   const expected = {
@@ -313,31 +313,39 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
       Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
-  assert.equal(inPage.radius, "28px 28px 28px 28px", `${context}: card radius`);
+  assert.equal(inPage.radius, "0px 0px 0px 0px", `${context}: frame is square`);
   for (const surface of [inPage, overlay]) {
     assert.ok(
       Math.abs(surface.firstDot.x - 16) <= TOLERANCE &&
         Math.abs(surface.firstDot.y - 16) <= TOLERANCE,
       `${context}: traffic lights align to the native (16, 16) origin: ${JSON.stringify(surface.firstDot)}`,
     );
-    assert.ok(
-      surface.firstDot.x + surface.firstDot.width <=
-        surface.rail.x + surface.rail.width + TOLERANCE,
-      `${context}: traffic-light controls fit within the collapsed rail`,
-    );
-    assert.ok(
-      Math.abs(
-        surface.rail.y +
-          surface.rail.height -
-          (surface.card.y + surface.card.height - 1),
-      ) <= TOLERANCE,
-      `${context}: rail reaches the card's bottom edge`,
-    );
-    assert.ok(
-      surface.railActions.y + surface.railActions.height <=
-        surface.rail.y + surface.rail.height + TOLERANCE,
-      `${context}: rail actions stay anchored inside the bottom edge`,
-    );
+    if (surface.rail) {
+      assert.ok(
+        surface.firstDot.x + surface.firstDot.width <=
+          surface.rail.x + surface.rail.width + TOLERANCE,
+        `${context}: traffic-light controls fit within the collapsed sidebar`,
+      );
+      assert.ok(
+        Math.abs(
+          surface.rail.y +
+            surface.rail.height -
+            (surface.card.y + surface.card.height),
+        ) <= TOLERANCE,
+        `${context}: collapsed sidebar reaches the bottom edge`,
+      );
+      assert.ok(
+        surface.railActions.y + surface.railActions.height <=
+          surface.rail.y + surface.rail.height + TOLERANCE,
+        `${context}: collapsed actions stay anchored inside the bottom edge`,
+      );
+    } else {
+      assert.ok(
+        surface.firstDot.x + surface.firstDot.width <=
+          surface.card.x + surface.card.width + TOLERANCE,
+        `${context}: traffic-light controls fit within the expanded sidebar`,
+      );
+    }
   }
 
   await api(
@@ -360,15 +368,18 @@ async function assertSidebarState(win, which, context, expanded) {
       const card = document.querySelector('.browser-sidebar')
       const rail = card?.querySelector('.sidebar-rail')
       const panel = card?.querySelector('.sidebar-panel')
-      if (!layout || !card || !rail || !panel) return null
+      if (!layout || !card || !panel) return null
       const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
       return {
         hasRail: card.classList.contains('has-rail'),
         collapsed: card.classList.contains('is-collapsed'),
         expanded: layout.classList.contains('is-sidebar-visible'),
         visibility: getComputedStyle(card).visibility,
-        card: rect(card), rail: rect(rail),
-        actionCount: rail.querySelectorAll('.sidebar-rail-action').length,
+        card: rect(card), rail: rail ? rect(rail) : null,
+        railPresent: Boolean(rail),
+        panelWidth: rect(panel).width,
+        panelDisplay: getComputedStyle(panel).display,
+        actionCount: rail?.querySelectorAll('.sidebar-rail-action').length ?? 0,
         panelInert: panel.hasAttribute('inert')
       }
     })()`,
@@ -376,7 +387,16 @@ async function assertSidebarState(win, which, context, expanded) {
   assert.ok(state, `${context}: sidebar card, rail, and panel are mounted`);
   assert.equal(state.hasRail, true, `${context}: tab mode keeps the icon rail`);
   assert.equal(state.visibility, "visible", `${context}: sidebar is visible`);
-  assert.equal(state.actionCount, 4, `${context}: rail actions are present`);
+  assert.equal(
+    state.railPresent,
+    !expanded,
+    `${context}: only collapsed mode has an icon rail`,
+  );
+  assert.equal(
+    state.actionCount,
+    expanded ? 0 : 4,
+    `${context}: collapsed rail actions are present`,
+  );
   assert.ok(
     Math.abs(state.card.x) <= TOLERANCE &&
       Math.abs(state.card.y) <= TOLERANCE &&
@@ -384,11 +404,28 @@ async function assertSidebarState(win, which, context, expanded) {
       Math.abs(state.card.height - windowHeight) <= TOLERANCE,
     `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
   );
-  assert.ok(
-    state.rail.width > 0 &&
-      Math.abs(state.rail.y + state.rail.height - windowHeight) <= TOLERANCE,
-    `${context}: icon rail reaches the bottom edge`,
-  );
+  if (expanded) {
+    assert.equal(
+      state.panelDisplay,
+      "flex",
+      `${context}: full tab panel is visible`,
+    );
+    assert.ok(
+      Math.abs(state.panelWidth - state.card.width) <= TOLERANCE,
+      `${context}: expanded tab panel fills the same sidebar surface`,
+    );
+  } else {
+    assert.equal(
+      state.panelDisplay,
+      "none",
+      `${context}: full panel is hidden while collapsed`,
+    );
+    assert.ok(
+      state.rail.width > 0 &&
+        Math.abs(state.rail.y + state.rail.height - windowHeight) <= TOLERANCE,
+      `${context}: icon-only sidebar reaches the bottom edge`,
+    );
+  }
   assert.equal(state.collapsed, !expanded, `${context}: collapsed state`);
   assert.equal(state.expanded, expanded, `${context}: expanded state`);
   assert.equal(
@@ -468,7 +505,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
         Boolean(
           await evaluate(
             view,
-            'Boolean(document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"))',
+            '(() => { const card = document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"); return Boolean(card && !card.querySelector(".sidebar-rail") && card.querySelector(".sidebar-panel") && getComputedStyle(card.querySelector(".sidebar-panel")).display !== "none"); })()',
           ),
         ),
       `${which} expanded panel DOM`,
@@ -581,8 +618,8 @@ async function run() {
     'getComputedStyle(document.querySelector(".browser-sidebar")).boxShadow',
   );
   assert.ok(
-    (spacesShadow.match(/inset/g) || []).length >= 3,
-    `Spaces keeps the card shadows (${spacesShadow})`,
+    (spacesShadow.match(/inset/g) || []).length >= 2,
+    `Spaces keeps the integrated sidebar edge and active-space accent (${spacesShadow})`,
   );
 
   // A private window.

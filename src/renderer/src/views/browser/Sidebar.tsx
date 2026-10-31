@@ -251,7 +251,7 @@ export function Sidebar(props: SidebarProps) {
         </div>
       )}
       <div className={`sidebar-body${hasRail ? " has-rail" : ""}`}>
-        {hasRail && (
+        {hasRail && collapsed && (
           <SidebarRail
             animate={railOnScreen}
             cachedSiteIcons={cachedSiteIcons}

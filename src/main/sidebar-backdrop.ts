@@ -125,7 +125,8 @@ function applyNativeLayer(window: BaseWindow): void {
   const native = getSidebarBackdropMode() === "native";
   if (!native && !layered.has(window)) return;
   try {
-    view.setBorderRadius(SIDEBAR_CARD_RADIUS);
+    // Electron needs a nonzero clip radius to keep this native layer painting; one DIP reads as square.
+    view.setBorderRadius(Math.max(1, SIDEBAR_CARD_RADIUS));
     layered.add(window);
     paintNativeLayer(window, motionProgress.get(window) ?? 1);
   } catch (error) {
