@@ -225,7 +225,7 @@
     "node-api-headers": "^1.9.0",
     "node-html-parser": "^9.0.6",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.4.299",
+    "pdfjs-dist": "6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "vite": "^8.3.5"
