@@ -360,9 +360,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-    timeout-minutes: 15
-    permissions:
-      contents: read
       pull-requests: write
     env:
       PERF_RUNS: 3
