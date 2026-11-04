@@ -41,7 +41,7 @@ permissions:
   actions: read
 
 jobs:
-  runner-select:
+  runner_select:
     name: "Surffish · CI · select available runners"
     runs-on: ubuntu-latest
     outputs:
@@ -85,8 +85,8 @@ jobs:
   lint:
     name: "Surffish · CI · lint · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.linux) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -118,8 +118,8 @@ jobs:
   linux:
     name: "Surffish · CI · linux ${{ matrix.lane }} · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.linux) }}
     timeout-minutes: 30
     env:
       # Software rendering under xvfb is slower than a real GPU; smoke scripts honor this.
@@ -152,7 +152,7 @@ jobs:
           git checkout -q --force FETCH_HEAD
           git clean -qffdx -e node_modules
       - name: Install browser smoke-test dependencies on GitHub-hosted Linux
-        if: needs.runner-select.outputs.linux_fallback == 'true'
+        if: needs.runner_select.outputs.linux_fallback == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -270,8 +270,8 @@ jobs:
   cli:
     name: "Surffish · CI · cli npx · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.linux) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -314,8 +314,8 @@ jobs:
   cli-macos-real:
     name: "Surffish · CI · cli real dl macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name == 'workflow_dispatch' && inputs.cli_real_download
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.macos) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -355,8 +355,8 @@ jobs:
   perf:
     name: "Surffish · CI · perf linux · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.linux) }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -388,7 +388,7 @@ jobs:
             echo "::warning::no base commit to compare against, perf runs on this commit only"
           fi
       - name: Install browser benchmark dependencies on GitHub-hosted Linux
-        if: needs.runner-select.outputs.linux_fallback == 'true'
+        if: needs.runner_select.outputs.linux_fallback == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -509,8 +509,8 @@ jobs:
   native-macos:
     name: "Surffish · CI · native-macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.macos) }}
     timeout-minutes: 45
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -558,8 +558,8 @@ jobs:
   macos-smoke:
     name: "Surffish · CI · macos smoke · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || vars.SURFFISH_MAC_CI != 'label' || contains(github.event.pull_request.labels.*.name, 'mac'))
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.macos) }}
     timeout-minutes: 20
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -626,8 +626,8 @@ jobs:
     name: "Surffish · CI · perf macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     # Opt-in only: a PR with the `perf-mac` label, or a manual workflow_dispatch run.
     if: (github.event_name == 'workflow_dispatch' && inputs.perf_mac) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
-    needs: runner-select
-    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.macos) }}
     timeout-minutes: 20
     permissions:
       contents: read
