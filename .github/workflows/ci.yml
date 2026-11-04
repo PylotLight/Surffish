@@ -1,6 +1,6 @@
 name: ci
 
-# Runs on the self-hosted runners (k3s scale set + persistent Mac), so no hosted minutes.
+# Prefer the self-hosted k3s and ARM64 Mac runners; fall back to GitHub-hosted runners when they are offline.
 # Uses no marketplace actions (repo only allows PylotLight actions).
 # The repo is public: fork PRs never run here (they'd execute untrusted code on our boxes).
 on:
@@ -38,12 +38,55 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  runner-select:
+    name: "Surffish · CI · select available runners"
+    runs-on: ubuntu-latest
+    outputs:
+      linux: ${{ steps.select.outputs.linux }}
+      macos: ${{ steps.select.outputs.macos }}
+      linux_fallback: ${{ steps.select.outputs.linux_fallback }}
+    steps:
+      - name: Prefer online self-hosted runners; otherwise use GitHub-hosted runners
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! runners="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runners?per_page=100" --jq '.runners[]? | select(.status == "online") | {labels: [.labels[].name]}' 2>/dev/null)"; then
+            echo "::warning::Could not inspect self-hosted runner status; using GitHub-hosted runners"
+            runners=""
+          fi
+          has_online_runner() {
+            printf '%s\n' "$runners" | jq -s --arg label "$1" 'any(.[]; (.labels | index($label)) != null)'
+          }
+          has_online_arm64_mac() {
+            printf '%s\n' "$runners" | jq -s 'any(.[]; (.labels | index("self-hosted")) != null and (.labels | index("macOS")) != null and (.labels | index("ARM64")) != null)'
+          }
+          if [ "$(has_online_runner k3s-runners-surffish)" = true ]; then
+            echo 'linux=["k3s-runners-surffish"]' >> "$GITHUB_OUTPUT"
+            echo 'linux_fallback=false' >> "$GITHUB_OUTPUT"
+            echo "Linux CI: online k3s runner found"
+          else
+            echo 'linux=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'linux_fallback=true' >> "$GITHUB_OUTPUT"
+            echo "::notice::Linux CI: using GitHub-hosted ubuntu-latest (no online k3s runner)"
+          fi
+          if [ "$(has_online_arm64_mac)" = true ]; then
+            echo 'macos=["self-hosted","macOS","ARM64"]' >> "$GITHUB_OUTPUT"
+            echo "macOS CI: online self-hosted ARM64 runner found"
+          else
+            echo 'macos=["macos-26"]' >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS CI: using GitHub-hosted macos-26 ARM64 (no online self-hosted ARM64 runner)"
+          fi
+
   lint:
     name: "Surffish · CI · lint · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -75,7 +118,8 @@ jobs:
   linux:
     name: "Surffish · CI · linux ${{ matrix.lane }} · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
     timeout-minutes: 30
     env:
       # Software rendering under xvfb is slower than a real GPU; smoke scripts honor this.
@@ -107,6 +151,15 @@ jobs:
           git fetch -q --no-tags --depth 1 origin "$SHA"
           git checkout -q --force FETCH_HEAD
           git clean -qffdx -e node_modules
+      - name: Install browser smoke-test dependencies on GitHub-hosted Linux
+        if: needs.runner-select.outputs.linux_fallback == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xdotool dbus-x11 libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+            libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0t64 \
+            libxss1 libxtst6 libatspi2.0-0t64
       # Set SURFFISH_CI_CACHE on the runner (or mount a writable /cache) to keep bun, its package
       # cache and the Electron zip across ephemeral pods. Without it nothing changes.
       - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
@@ -217,7 +270,8 @@ jobs:
   cli:
     name: "Surffish · CI · cli npx · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -260,7 +314,8 @@ jobs:
   cli-macos-real:
     name: "Surffish · CI · cli real dl macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name == 'workflow_dispatch' && inputs.cli_real_download
-    runs-on: [self-hosted, macOS]
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
     timeout-minutes: 10
     steps:
       - name: Checkout (plain git, no third-party actions needed)
@@ -300,7 +355,11 @@ jobs:
   perf:
     name: "Surffish · CI · perf linux · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: k3s-runners-surffish
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.linux) }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
     timeout-minutes: 15
     permissions:
       contents: read
@@ -328,6 +387,15 @@ jobs:
           else
             echo "::warning::no base commit to compare against, perf runs on this commit only"
           fi
+      - name: Install browser benchmark dependencies on GitHub-hosted Linux
+        if: needs.runner-select.outputs.linux_fallback == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xdotool dbus-x11 libnspr4 libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
+            libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64 libgtk-3-0t64 \
+            libxss1 libxtst6 libatspi2.0-0t64
       - name: Persistent caches (bun, bun install cache, Electron), only if the runner mounts one
         run: |
           dir="${SURFFISH_CI_CACHE:-}"
@@ -441,7 +509,8 @@ jobs:
   native-macos:
     name: "Surffish · CI · native-macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, macOS]
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
     timeout-minutes: 45
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -489,7 +558,8 @@ jobs:
   macos-smoke:
     name: "Surffish · CI · macos smoke · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || vars.SURFFISH_MAC_CI != 'label' || contains(github.event.pull_request.labels.*.name, 'mac'))
-    runs-on: [self-hosted, macOS]
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
     timeout-minutes: 20
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -556,7 +626,8 @@ jobs:
     name: "Surffish · CI · perf macos · ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || (inputs.pr && format('PR #{0} · manual', inputs.pr)) || (github.event_name == 'workflow_dispatch' && format('manual · {0}', github.ref_name)) || github.ref_name }}"
     # Opt-in only: a PR with the `perf-mac` label, or a manual workflow_dispatch run.
     if: (github.event_name == 'workflow_dispatch' && inputs.perf_mac) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'perf-mac'))
-    runs-on: [self-hosted, macOS]
+    needs: runner-select
+    runs-on: ${{ fromJSON(needs.runner-select.outputs.macos) }}
     timeout-minutes: 20
     permissions:
       contents: read
