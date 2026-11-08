@@ -440,11 +440,19 @@ jobs:
           else
             (cd "$PERF_BASE" && bash "$GITHUB_WORKSPACE/scripts/ci/watch-node.sh" bun install)
           fi
-      - name: Electron SUID sandbox helper (needs passwordless sudo, else run unsandboxed)
+      - name: Electron SUID sandbox helpers (PR and optional base)
         if: env.PERF_SKIP != '1'
         run: |
-          helper="$(bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
-          if sudo -n true 2>/dev/null; then sudo chown root:root "$helper" && sudo chmod 4755 "$helper"; else echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"; fi
+          if ! sudo -n true 2>/dev/null; then
+            echo "ELECTRON_DISABLE_SANDBOX=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          for app in "$GITHUB_WORKSPACE" "${PERF_BASE:-}"; do
+            [ -n "$app" ] || continue
+            helper="$(cd "$app" && bun -p 'require("node:path").join(require("node:path").dirname(require("electron")), "chrome-sandbox")')"
+            sudo chown root:root "$helper"
+            sudo chmod 4755 "$helper"
+          done
       - name: Start D-Bus (silences Chromium bus spam in containers)
         if: env.PERF_SKIP != '1'
         run: |
