@@ -43,14 +43,15 @@ export function adaptBrambleAutofillSettleDelay(contentScript: string): string {
     guard,
     count: [...contentScript.matchAll(guard)].length,
   })).filter(({ count }) => count > 0);
-  if (matching.length !== 1 || matching[0].count !== 1) {
+  const [only] = matching;
+  if (matching.length !== 1 || !only || only.count !== 1) {
     throw new Error(
       "The Bramble release uses an unsupported autofill click guard; refusing an unsafe or incomplete adaptation.",
     );
   }
   // 100 ms still rejects clicks already in flight when a page opens or moves the picker,
   // while avoiding the upstream half-second no-op on a suggestion the user has aimed at.
-  return contentScript.replace(matching[0].guard, (guard) =>
+  return contentScript.replace(only.guard, (guard) =>
     guard.includes("=500,")
       ? guard.replace("=500,", `=${PICKER_SETTLE_MS},`)
       : guard.replace(/<500\}$/, `<${PICKER_SETTLE_MS}}`),
