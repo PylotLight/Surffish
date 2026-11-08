@@ -13,8 +13,11 @@ import { EXTENSION_PAGE_TABS_SHIM } from "./extension-tabs-shim.ts";
 export const BRAMBLE_BROWSER_ALIAS_FILE = "surffish-bramble-browser-alias.js";
 export const BRAMBLE_BACKGROUND_WORKER_FILE = "surffish-bramble-background.js";
 
-const PICKER_SETTLE_GUARD =
-  /var ([\w$]+)=500,([\w$]+)=-1\/0;function [\w$]+\(\)\{\2=performance\.now\(\)\}function [\w$]+\(\)\{return performance\.now\(\)-\2<\1\}/g;
+// Bramble <=1.32 hoisted the delay into a variable; 1.33+ inlines the literal 500.
+const PICKER_SETTLE_GUARDS: readonly RegExp[] = [
+  /var ([\w$]+)=500,([\w$]+)=-1\/0;function [\w$]+\(\)\{\2=performance\.now\(\)\}function [\w$]+\(\)\{return performance\.now\(\)-\2<\1\}/g,
+  /var ([\w$]+)=-1\/0;function [\w$]+\(\)\{\1=performance\.now\(\)\}function [\w$]+\(\)\{return performance\.now\(\)-\1<500\}/g,
+];
 const PICKER_SETTLE_MS = 100;
 
 export type JsonRecord = Record<string, unknown>;
@@ -34,16 +37,23 @@ export function isRecord(value: unknown): value is JsonRecord {
  * behavior and the content script's final geometry/hit test remain untouched.
  */
 export function adaptBrambleAutofillSettleDelay(contentScript: string): string {
-  const settleMatches = [...contentScript.matchAll(PICKER_SETTLE_GUARD)];
-  if (settleMatches.length !== 1) {
+  // Exactly one guard across every known shape, or refuse: a second match (or none)
+  // means the bundle changed in a way this narrow rewrite was not written for.
+  const matching = PICKER_SETTLE_GUARDS.map((guard) => ({
+    guard,
+    count: [...contentScript.matchAll(guard)].length,
+  })).filter(({ count }) => count > 0);
+  if (matching.length !== 1 || matching[0].count !== 1) {
     throw new Error(
       "The Bramble release uses an unsupported autofill click guard; refusing an unsafe or incomplete adaptation.",
     );
   }
   // 100 ms still rejects clicks already in flight when a page opens or moves the picker,
   // while avoiding the upstream half-second no-op on a suggestion the user has aimed at.
-  return contentScript.replace(PICKER_SETTLE_GUARD, (guard) =>
-    guard.replace("=500,", `=${PICKER_SETTLE_MS},`),
+  return contentScript.replace(matching[0].guard, (guard) =>
+    guard.includes("=500,")
+      ? guard.replace("=500,", `=${PICKER_SETTLE_MS},`)
+      : guard.replace(/<500\}$/, `<${PICKER_SETTLE_MS}}`),
   );
 }
 
