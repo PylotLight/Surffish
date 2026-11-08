@@ -110,6 +110,17 @@ import type {
 const api = {
   platform: process.platform,
   browser: {
+    onWindowFullscreen: (
+      callback: (fullscreen: boolean) => void,
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        fullscreen: boolean,
+      ): void => callback(fullscreen);
+      ipcRenderer.on("browser:window-fullscreen", listener);
+      return () =>
+        ipcRenderer.removeListener("browser:window-fullscreen", listener);
+    },
     quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
     windowControl: (
       action: "close" | "minimize" | "toggle-zoom",

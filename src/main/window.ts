@@ -344,6 +344,16 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   win.contentView.addChildView(contentView);
   win.contentView.addChildView(toolbarView);
   win.contentView.addChildView(sidebarView);
+  const broadcastFullscreen = (): void => {
+    const fullscreen = win.isFullScreen();
+    for (const view of [contentView, toolbarView, sidebarView]) {
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.send("browser:window-fullscreen", fullscreen);
+      }
+    }
+  };
+  win.on("enter-full-screen", broadcastFullscreen);
+  win.on("leave-full-screen", broadcastFullscreen);
   attachBrowserShell(
     win,
     { content: contentView, toolbar: toolbarView, sidebar: sidebarView },

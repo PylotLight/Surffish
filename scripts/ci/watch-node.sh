@@ -37,7 +37,11 @@ check() { # pid comm
     [ -z "$exe" ] && exe="$comm"
     case "$exe" in /*) exe="$(resolve "$exe")" ;; esac
   fi
-  case "$exe" in */bun|*/bun-as-node/node) ;; *) echo "$p $exe" >> "$log" ;; esac
+  case "$exe" in
+    */bun|*/bun-as-node/node) ;;
+    node|nodejs|*/node|*/nodejs) echo "$p $exe" >> "$log" ;;
+    *) ;;
+  esac
 }
 
 while kill -0 "$pid" 2>/dev/null; do
