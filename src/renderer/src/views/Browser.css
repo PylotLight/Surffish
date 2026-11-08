@@ -5423,3 +5423,24 @@
       rgba(16, 14, 21, 0.87)
     );
 }
+
+/* Keep the browser chrome (and the existing native traffic-light row) out of the way in native fullscreen. A narrow top reveal strip keeps it reachable. */
+.app-shell[data-fullscreen="true"] .browser-chrome {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  right: 0;
+  left: 0;
+  transform: translateY(calc(-100% + 5px));
+  transition: transform 160ms ease-out;
+}
+.app-shell[data-fullscreen="true"] .browser-chrome:hover,
+.app-shell[data-fullscreen="true"] .browser-chrome:focus-within,
+.app-shell[data-fullscreen="true"] .browser-chrome:focus-visible {
+  transform: translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[data-fullscreen="true"] .browser-chrome {
+    transition: none;
+  }
+}
