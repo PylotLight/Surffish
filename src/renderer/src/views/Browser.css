@@ -5363,50 +5363,10 @@
   margin: 3px 0;
   background: rgba(255, 255, 255, 0.11);
 }
-.sidebar-rail-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0 6px;
-}
-.sidebar-rail-action {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  background: transparent;
-  color: rgba(245, 247, 250, 0.6);
-  cursor: pointer;
-  outline: 0;
-  -webkit-app-region: no-drag;
-  transition:
-    background-color 130ms ease,
-    color 130ms ease;
-}
-.sidebar-rail-action svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.sidebar-rail-action:hover,
-.sidebar-rail-action:focus-visible {
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
-}
-.sidebar-rail-action.is-current {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+/* The rail's footer reuses the panel footer's box (.sidebar-footer), so the pin keeps its exact
+ * position when the sidebar collapses or expands. */
+.sidebar-rail-footer {
+  justify-content: flex-start;
 }
 /* Private windows tint the same integrated surface, not a separate rail. */
 .browser-sidebar.is-private-window {

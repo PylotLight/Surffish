@@ -139,7 +139,8 @@ const MEASURE = `(() => {
     rail: rect(rail),
     railHidden: Boolean(rail?.classList.contains('is-shape-hidden')),
     panelHidden: Boolean(panel?.classList.contains('is-shape-hidden')),
-    railActions: rect(card.querySelector('.sidebar-rail-actions')),
+    railActions: rect(card.querySelector('.sidebar-rail-footer')),
+    pin: rect(card.querySelector('.sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button')),
     pinned: rect(card.querySelector('.sidebar-pinned-sites')),
     tabList: rect(card.querySelector('.tab-list')),
     firstTab: rect(card.querySelector('.tab-item')),
@@ -171,6 +172,7 @@ async function measure(win, which) {
     firstDot: shift(raw.firstDot),
     rail: shift(raw.rail),
     railActions: shift(raw.railActions),
+    pin: shift(raw.pin),
     pinned: shift(raw.pinned),
     tabList: shift(raw.tabList),
     firstTab: shift(raw.firstTab),
@@ -372,6 +374,21 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
   );
 }
 
+const VISIBLE_PIN_RECT =
+  '(() => { const pin = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button"); if (!pin) return null; const r = pin.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+function assertPinStill(collapsedPin, expandedPin, context) {
+  assert.ok(
+    collapsedPin && expandedPin,
+    `${context}: the sidebar pin is drawn in both shapes`,
+  );
+  assert.ok(
+    Math.abs(collapsedPin.x - expandedPin.x) <= TOLERANCE &&
+      Math.abs(collapsedPin.y - expandedPin.y) <= TOLERANCE,
+    `${context}: the sidebar pin stays put between rail and panel: ${JSON.stringify({ collapsedPin, expandedPin })}`,
+  );
+}
+
 async function assertSidebarState(win, which, context, expanded) {
   const view = surface(win, which);
   const [windowWidth, windowHeight] = win.getContentSize();
@@ -491,6 +508,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     }, `${which} collapsed rail DOM`);
     await settle();
     await assertSidebarState(win, which, `${which} collapsed`, false);
+    const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
     captureWindow(win, `sidebar-${which}-collapsed.png`);
 
     await evaluate(
@@ -517,6 +535,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     );
     await settle();
     await assertSidebarState(win, which, `${which} expanded`, true);
+    assertPinStill(collapsedPin, await evaluate(view, VISIBLE_PIN_RECT), which);
     captureWindow(win, `sidebar-${which}-expanded.png`);
 
     await api(

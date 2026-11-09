@@ -381,7 +381,7 @@ async function run() {
         const collapsed = Boolean(card?.classList.contains('is-collapsed'))
         const shape = card?.querySelector(collapsed ? '.sidebar-rail:not(.is-shape-hidden)' : '.sidebar-panel:not(.is-shape-hidden)')
         if (!shape) return null
-        const selector = collapsed ? '.sidebar-rail-action' : '.sidebar-footer-icon-button'
+        const selector = collapsed ? '.sidebar-rail-footer .sidebar-footer-icon-button' : '.sidebar-footer-icon-button'
         const controls = [...shape.querySelectorAll(selector)].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height }))
         return { collapsed, controls, newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null }
       })()`,
@@ -391,23 +391,32 @@ async function run() {
   const sidebarControlLabels = sidebarActions.controls.map(
     ({ label }) => label,
   );
-  assert.equal(
-    sidebarActions.newTab,
-    "New tab",
-    "the active sidebar shape exposes a New Tab action",
-  );
-  assert.ok(
-    sidebarControlLabels.includes("Keep sidebar open") &&
-      sidebarControlLabels.includes("Settings"),
-    "the active sidebar shape exposes pin and Settings controls",
-  );
-  assert.ok(
-    sidebarActions.collapsed
-      ? sidebarControlLabels.includes("New private tab")
-      : sidebarControlLabels.includes("Quit Surffish"),
-    "the active rail or panel exposes its shape-specific action",
-  );
-  const maxActionSize = sidebarActions.collapsed ? 40 : 36;
+  if (sidebarActions.collapsed) {
+    // Hovering the rail reveals the panel over it, so the rail carries only the pin.
+    assert.deepEqual(
+      sidebarControlLabels,
+      ["Keep sidebar open"],
+      "the collapsed rail exposes only the sidebar pin",
+    );
+    assert.equal(
+      sidebarActions.newTab,
+      null,
+      "the collapsed rail has no New Tab action",
+    );
+  } else {
+    assert.equal(
+      sidebarActions.newTab,
+      "New tab",
+      "the expanded panel exposes a New Tab action",
+    );
+    assert.ok(
+      sidebarControlLabels.includes("Keep sidebar open") &&
+        sidebarControlLabels.includes("Settings") &&
+        sidebarControlLabels.includes("Quit Surffish"),
+      "the expanded panel exposes pin, Settings and Quit controls",
+    );
+  }
+  const maxActionSize = 36;
   assert.ok(
     sidebarActions.controls.every(
       ({ width, height }) => width <= maxActionSize && height <= maxActionSize,

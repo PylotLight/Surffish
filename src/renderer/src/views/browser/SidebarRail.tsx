@@ -9,7 +9,7 @@ import { httpOrigin } from "./chrome-helpers";
 
 /**
  * The collapsed sidebar's icon rail (Arc/Zen-style): pinned tabs and bookmarks first, then the
- * open tabs, with the actions that would otherwise be hidden in the panel's footer. It stays on
+ * open tabs, with the sidebar pin at the bottom. It stays on
  * screen when the panel is collapsed, so the sidebar is never an empty edge.
  *
  * Rail items deliberately do NOT carry `data-browser-tab-id` / `data-pin-id`: those select the one
@@ -33,9 +33,6 @@ export interface SidebarRailProps {
   sidebarPinned: boolean;
   onOpenPinnedSite: (site: PinnedSite) => void;
   onUnpinPinnedSite: (site: PinnedSite) => void;
-  onCreateTab: () => void;
-  onCreatePrivateTab: () => void;
-  onOpenSettings: () => void;
   onTogglePinned: () => void;
 }
 
@@ -96,9 +93,6 @@ export function SidebarRail({
   sidebarPinned,
   onOpenPinnedSite,
   onUnpinPinnedSite,
-  onCreateTab,
-  onCreatePrivateTab,
-  onOpenSettings,
   onTogglePinned,
 }: SidebarRailProps): React.JSX.Element {
   const openTabs = tabs.filter((tab) => !tab.pinned);
@@ -145,43 +139,13 @@ export function SidebarRail({
           />
         ))}
       </div>
-      <div className="sidebar-rail-actions">
+      {/* Only the pin lives on the rail: hovering the rail reveals the panel, which covers any
+       * other rail action before it can be clicked, and New tab / Settings are in the panel and
+       * the toolbar anyway. The pin sits in a footer laid out exactly like the panel's, so it
+       * stays on the same spot when the sidebar changes shape. */}
+      <div className="sidebar-footer sidebar-rail-footer">
         <button
-          className="sidebar-rail-action"
-          type="button"
-          aria-label="New tab"
-          title="New tab (Ctrl/⌘+T)"
-          onClick={onCreateTab}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
-        <button
-          className="sidebar-rail-action"
-          type="button"
-          aria-label="New private tab"
-          title="New private tab (Ctrl/⌘+Alt+N)"
-          onClick={onCreatePrivateTab}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M12 3 4 6v5.5c0 4.6 3.2 8 8 9.5 4.8-1.5 8-4.9 8-9.5V6l-8-3Z" />
-          </svg>
-        </button>
-        <button
-          className="sidebar-rail-action"
-          type="button"
-          aria-label="Settings"
-          title={`Settings (${window.api.platform === "darwin" ? "⌘," : "Ctrl+,"})`}
-          onClick={onOpenSettings}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle cx="12" cy="12" r="3.2" />
-            <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
-          </svg>
-        </button>
-        <button
-          className={`sidebar-rail-action sidebar-rail-pin${sidebarPinned ? " is-current" : ""}`}
+          className={`sidebar-footer-icon-button sidebar-pin-button sidebar-rail-pin${sidebarPinned ? " is-current" : ""}`}
           type="button"
           aria-label={sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"}
           aria-pressed={sidebarPinned}

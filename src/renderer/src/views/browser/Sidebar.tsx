@@ -798,12 +798,7 @@ export function Sidebar(props: SidebarProps) {
             shapeHidden={!collapsed}
             animate={railOnScreen}
             cachedSiteIcons={cachedSiteIcons}
-            onCreatePrivateTab={() =>
-              void window.api.browser.tabs.createPrivate()
-            }
-            onCreateTab={createNewTab}
             onOpenPinnedSite={(site: PinnedSite) => void openPinnedSite(site)}
-            onOpenSettings={openSettings}
             onTogglePinned={() =>
               setSidebarPinned((pinned: boolean) => !pinned)
             }
