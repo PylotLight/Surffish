@@ -147,20 +147,6 @@ function measureMarks(column: HTMLElement): Record<string, MarkRect> {
   return marks;
 }
 
-/**
- * The outgoing shape as it stands at the change itself. The at-rest snapshot can be stale by
- * then: the overlay surface's sidebar is captured while its view is hidden or sized for the
- * other shape, so its marks would start their flight from somewhere they were never drawn (the
- * tabs flew in from the right, after a few blank frames). The outgoing column stays mounted
- * (hidden, out of flow, where it stood), so it is measured again; only its scroll offsets, which
- * the snapshot exists to keep, come from before.
- */
-function refreshSnapshot(snapshot: MorphSnapshot): MorphSnapshot {
-  const { column } = snapshot;
-  if (!column?.isConnected) return snapshot;
-  return { ...snapshot, rect: rectOf(column), marks: measureMarks(column) };
-}
-
 /** Before the change: where the current shape is, and where every one of its marks is drawn. */
 export function captureSidebarMorph(
   host: HTMLElement | null,
@@ -199,7 +185,11 @@ export function measureSidebarTargets(column: HTMLElement): MorphTarget[] {
 export function planSidebarMorph(
   marks: Record<string, MarkRect>,
   targets: MorphTarget[],
-  { edgeFrom, widening }: { edgeFrom: number; widening: boolean },
+  {
+    edgeFrom,
+    widening,
+    hold = false,
+  }: { edgeFrom: number; widening: boolean; hold?: boolean },
 ): MorphPlan {
   const flights: FlightPlan[] = [];
   const labels: HTMLElement[] = [];
@@ -213,7 +203,7 @@ export function planSidebarMorph(
     labels.push(...target.labels);
     const dx = from.x + from.width / 2 - (to.x + to.width / 2);
     const dy = from.y + from.height / 2 - (to.y + to.height / 2);
-    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+    if (hold || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
       // The mark stands where it should; its surroundings simply arrive.
       settled.push(target.element);
       durationMs = Math.max(durationMs, MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS);
@@ -251,7 +241,7 @@ export function playSidebarMorph(
   host: HTMLElement,
 ): number {
   if (!captured || prefersReducedMotion()) return 0;
-  const snapshot = refreshSnapshot(captured);
+  const snapshot = captured;
   const incoming = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!incoming || incoming === snapshot.column) return 0;
   // A re-toggle while an earlier morph is still running: drop the earlier ghost (it has faded or
@@ -270,6 +260,12 @@ export function playSidebarMorph(
     {
       edgeFrom: oldRight,
       widening: newRight - oldRight > 1,
+      // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
+      // counterpart never travels: it is shown in place from the first frame. A measured
+      // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
+      // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
+      // in the panel and a column in the rail, swap in place rather than glide.
+      hold: true,
     },
   );
   let total = MORPH_FADE_MS;

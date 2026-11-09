@@ -98,4 +98,13 @@ describe("planSidebarMorph", () => {
     );
     expect(settled.durationMs).toBeGreaterThanOrEqual(MORPH_FADE_MS);
   });
+  test("hold shows every counterpart in place, however far it measured from it", () => {
+    const plan = planSidebarMorph(
+      { "tab:a": rect(60, 100), "tab:b": rect(8, 160) },
+      [target("tab:a", rect(20, 100)), target("tab:b", rect(20, 150))],
+      { edgeFrom: 84, widening: false, hold: true },
+    );
+    expect(plan.flights).toHaveLength(0);
+    expect(plan.settled).toHaveLength(2);
+  });
 });
