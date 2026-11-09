@@ -1,6 +1,6 @@
 # macOS builds and releases
 
-Surffish's macOS release runs `bun run release` on an Apple-silicon Mac, either locally or through the manual `release` workflow (Actions → release → Run workflow), which runs the same script on the self-hosted Mac runner and defaults to a dry run. GitHub's hosted macOS minutes are used up, so nothing builds on hosted runners. Release notes for each version go in `docs/releases/vX.Y.Z.md`. Releases ship a zip, not a DMG. The DMGs for v0.1.0 and v0.1.1 opened with "not supported on this Mac", and at about 320 MB each they were more than twice the size of the zip, which is about 117 MB (max deflate, English-only Chromium locales).
+Surffish's macOS release runs `bun run release` on an Apple-silicon Mac, either locally or through the manual `release` workflow (Actions → release → Run workflow), which runs the same script on the self-hosted Mac runner and defaults to a dry run. When no self-hosted ARM64 Mac is online, the workflow falls back to GitHub-hosted `macos-26` (ARM64), where git and GitHub API calls go direct and `release.ts` uses plain `gh` (`SURFFISH_GH=gh`). Release notes for each version go in `docs/releases/vX.Y.Z.md`. Releases ship a zip, not a DMG. The DMGs for v0.1.0 and v0.1.1 opened with "not supported on this Mac", and at about 320 MB each they were more than twice the size of the zip, which is about 117 MB (max deflate, English-only Chromium locales).
 
 ## TL;DR: `bun run release`
 
