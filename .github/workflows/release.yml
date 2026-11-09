@@ -100,7 +100,11 @@ jobs:
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
           export PATH="$HOME/.bun/bin:$PATH"
-          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          # the GitHub release download 504s now and then (fresh hosted runners always download): retry
+          for i in 1 2 3 4 5; do
+            [ "$(bun --version 2>/dev/null)" = "$want" ] && break
+            curl -fsSL https://bun.sh/install | bash -s "bun-v$want" || { echo "bun download failed (try $i), retrying"; sleep $((i * 5)); }
+          done
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           "$HOME/.bun/bin/bun" --version
       - name: Preflight - can this runner push to GitHub? (git push --dry-run, before the build)
