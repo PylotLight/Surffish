@@ -1105,8 +1105,23 @@
   flex-direction: column;
   gap: 5px;
   margin-top: 3px;
-  padding: 2px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  position: relative;
+  padding: 2px 12px 9px;
+}
+/* The hairline under the pins, drawn by an element rather than the section's border: the
+ * section holds marks that stand in place through a shape change, so the morph never fades it,
+ * and a border on it would pop in at full strength on expand. As its own childless part it is
+ * "new-only" and fades in on the label beat (shared/sidebar-morph.ts revealColumn), while the
+ * held-wide panel column lets the card's clip carry its width with the card. It sits in the
+ * last pixel of the padding (one more than before), where the border was, so nothing re-flows. */
+.sidebar-pinned-divider {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.065);
+  pointer-events: none;
 }
 .sidebar-pinned-list {
   display: flex;

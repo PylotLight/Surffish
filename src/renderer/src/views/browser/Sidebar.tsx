@@ -438,6 +438,8 @@ export function Sidebar(props: SidebarProps) {
                     />
                   ))}
               </div>
+              {/* Its own part so the shape morph fades it in rather than popping it (Browser.css). */}
+              <div className="sidebar-pinned-divider" aria-hidden="true" />
             </section>
           )}
 
