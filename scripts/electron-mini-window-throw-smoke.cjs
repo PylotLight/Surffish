@@ -18,6 +18,10 @@ const assert = require("node:assert/strict");
 const { execFile, execFileSync } = require("node:child_process");
 const { createServer } = require("node:http");
 const { mkdirSync, writeFileSync } = require("node:fs");
+
+// "Same tick": a follower/header setBounds lands within this many ms of the leader's. A 60 Hz
+// frame is ~16.7 ms, so 4 ms is still one tick; 2 ms was tripped by GitHub-hosted runner jitter (2.2 ms).
+const SAME_TICK_MS = Number(process.env.THROW_SAME_TICK_MS || 4);
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -426,8 +430,8 @@ async function run() {
   );
   const panelSkew = max(skew(glide.after, w1.id, glide.grab.panel.id));
   assert.ok(
-    panelSkew <= 2,
-    `the floating header moves in the same tick (max ${panelSkew.toFixed(1)} ms)`,
+    panelSkew <= SAME_TICK_MS,
+    `the floating header moves in the same tick (max ${panelSkew.toFixed(1)} ms, limit ${SAME_TICK_MS} ms)`,
   );
   await park();
 
@@ -643,12 +647,12 @@ async function run() {
     `the follower comes along (${followerSteps.length} steps)`,
   );
   assert.ok(
-    stackPanelSkew <= 2,
-    `the floating header moves in the same tick as the leader (max ${stackPanelSkew.toFixed(1)} ms)`,
+    stackPanelSkew <= SAME_TICK_MS,
+    `the floating header moves in the same tick as the leader (max ${stackPanelSkew.toFixed(1)} ms, limit ${SAME_TICK_MS} ms)`,
   );
   assert.ok(
-    followerSkew <= 2,
-    `the follower moves in the same tick as the leader (max ${followerSkew.toFixed(1)} ms)`,
+    followerSkew <= SAME_TICK_MS,
+    `the follower moves in the same tick as the leader (max ${followerSkew.toFixed(1)} ms, limit ${SAME_TICK_MS} ms)`,
   );
   assert.ok(stack.final.y >= wa.y, "the leader stops on screen");
   await park();

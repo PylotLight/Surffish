@@ -423,15 +423,23 @@ async function run() {
     true,
     "the bookmark star sits at the address bar trailing edge",
   );
-  await evaluate(
-    views.toolbar,
-    `document.querySelector('.site-actions-button').click()`,
-  );
+  // Press until open: a press can land while the toolbar is still settling (focus/blur after
+  // install) and get dismissed at once. Only re-press while the menu is closed, so never toggles shut.
   const siteActionsMenu = await waitFor(
     async () =>
       evaluate(
         views.toolbar,
-        `document.querySelector('#site-actions-menu')?.innerText || null`,
+        `(() => {
+    const menu = document.querySelector('#site-actions-menu')
+    if (menu) return menu.innerText || null
+    const button = document.querySelector('.site-actions-button')
+    const now = performance.now()
+    if (button && button.getAttribute('aria-expanded') !== 'true' && now - (window.__smokeSiteActionsPress || -1e9) > 1000) {
+      window.__smokeSiteActionsPress = now
+      button.click()
+    }
+    return null
+  })()`,
       ),
     "the site-actions menu",
   );
