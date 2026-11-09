@@ -91,9 +91,9 @@ function RailTab({
  * the rail packing them from its own top edge. The panel stays mounted while the rail shows
  * (shared/sidebar-morph.ts), so its rows can be read in either shape.
  *
- * x: every rail mark shifts onto the panel favicons' centre line. y: each tab is pushed down to
- * its panel row, never pulled up, so a scrolled list or the taller pinned column just packs the
- * rail as before (and the morph carries the difference).
+ * x: every rail mark shifts onto the panel favicons' centre line. y: each tab moves onto its
+ * panel row, up by at most the gap before it, so a scrolled list or the taller pinned column just
+ * packs the rail as before (and the morph carries the difference).
  */
 function alignRailToPanel(rail: HTMLElement): void {
   const panel = rail.parentElement?.querySelector<HTMLElement>(
@@ -113,6 +113,10 @@ function alignRailToPanel(rail: HTMLElement): void {
     if (!row || row.getClientRects().length === 0) return null;
     return markOf(row);
   };
+  const scroller = rail.querySelector<HTMLElement>(".sidebar-rail-scroll");
+  const gap = scroller
+    ? Number.parseFloat(getComputedStyle(scroller).rowGap) || 0
+    : 0;
   const railBox = rail.getBoundingClientRect();
   const railCentre = railBox.left + railBox.width / 2;
   let shift: number | null = null;
@@ -126,7 +130,10 @@ function alignRailToPanel(rail: HTMLElement): void {
     const dy = Math.round(
       to.top + to.height / 2 - (from.top + from.height / 2),
     );
-    if (dy > 0) item.style.marginTop = `${dy}px`;
+    // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
+    // marks plus gap), never into the previous mark.
+    const margin = Math.max(dy, -gap);
+    if (margin !== 0) item.style.marginTop = `${margin}px`;
   }
   // Bounded so a mark never leaves the rail (a panel favicon is always near its left edge).
   if (shift !== null && Math.abs(shift) < railBox.width / 2 - 22)

@@ -378,7 +378,7 @@ const VISIBLE_PIN_RECT =
   '(() => { const pin = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button"); if (!pin) return null; const r = pin.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
 
 const VISIBLE_FIRST_TAB_MARK =
-  '(() => { const mark = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+  '(() => { const marks = document.querySelectorAll(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); const mark = marks[marks.length - 1]; if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
 
 function assertPinStill(collapsedPin, expandedPin, context) {
   assert.ok(
@@ -547,7 +547,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
         Math.abs(collapsedTab.x - expandedTab.x) <= TOLERANCE &&
         Math.abs(collapsedTab.y - expandedTab.y) <= TOLERANCE &&
         Math.abs(collapsedTab.width - expandedTab.width) <= TOLERANCE,
-      `${which}: the first tab's favicon stays put between rail and panel: ${JSON.stringify({ collapsedTab, expandedTab })}`,
+      `${which}: the last tab's favicon stays put between rail and panel: ${JSON.stringify({ collapsedTab, expandedTab })}`,
     );
     captureWindow(win, `sidebar-${which}-expanded.png`);
 
