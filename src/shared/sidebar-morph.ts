@@ -136,6 +136,31 @@ function rectOf(element: Element): MarkRect {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 }
 
+/** Where each keyed mark of `column` is drawn now (`data-motion-key` -> its mark's rect). */
+function measureMarks(column: HTMLElement): Record<string, MarkRect> {
+  const marks: Record<string, MarkRect> = {};
+  for (const element of column.querySelectorAll<HTMLElement>(COUNTERPARTS)) {
+    const key = keyOf(element);
+    const rect = shownRect(markOf(element));
+    if (key && rect) marks[key] = rect;
+  }
+  return marks;
+}
+
+/**
+ * The outgoing shape as it stands at the change itself. The at-rest snapshot can be stale by
+ * then: the overlay surface's sidebar is captured while its view is hidden or sized for the
+ * other shape, so its marks would start their flight from somewhere they were never drawn (the
+ * tabs flew in from the right, after a few blank frames). The outgoing column stays mounted
+ * (hidden, out of flow, where it stood), so it is measured again; only its scroll offsets, which
+ * the snapshot exists to keep, come from before.
+ */
+function refreshSnapshot(snapshot: MorphSnapshot): MorphSnapshot {
+  const { column } = snapshot;
+  if (!column?.isConnected) return snapshot;
+  return { ...snapshot, rect: rectOf(column), marks: measureMarks(column) };
+}
+
 /** Before the change: where the current shape is, and where every one of its marks is drawn. */
 export function captureSidebarMorph(
   host: HTMLElement | null,
@@ -143,17 +168,11 @@ export function captureSidebarMorph(
   if (!host || prefersReducedMotion()) return null;
   const column = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!column) return null;
-  const marks: Record<string, MarkRect> = {};
-  for (const element of column.querySelectorAll<HTMLElement>(COUNTERPARTS)) {
-    const key = keyOf(element);
-    const rect = shownRect(markOf(element));
-    if (key && rect) marks[key] = rect;
-  }
   return {
     column,
     host,
     rect: rectOf(column),
-    marks,
+    marks: measureMarks(column),
     scrolled: [...column.querySelectorAll<HTMLElement>(SCROLLER_SELECTOR)].map(
       (scroller): [HTMLElement, number] => [scroller, scroller.scrollTop],
     ),
@@ -228,10 +247,11 @@ export function planSidebarMorph(
  * the whole thing takes (0: reduced motion, or nothing to play).
  */
 export function playSidebarMorph(
-  snapshot: MorphSnapshot | null,
+  captured: MorphSnapshot | null,
   host: HTMLElement,
 ): number {
-  if (!snapshot || prefersReducedMotion()) return 0;
+  if (!captured || prefersReducedMotion()) return 0;
+  const snapshot = refreshSnapshot(captured);
   const incoming = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!incoming || incoming === snapshot.column) return 0;
   // A re-toggle while an earlier morph is still running: drop the earlier ghost (it has faded or
