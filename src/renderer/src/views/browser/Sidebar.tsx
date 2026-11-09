@@ -438,8 +438,11 @@ export function Sidebar(props: SidebarProps) {
                     />
                   ))}
               </div>
-              {/* Its own part so the shape morph fades it in rather than popping it (Browser.css). */}
-              <div className="sidebar-pinned-divider" aria-hidden="true" />
+              {/* Its own part so the shape morph crossfades it with the rail's (Browser.css). Drawn
+               * exactly when the rail draws its own: whenever anything is pinned. */}
+              {(railPinnedTabs.length > 0 || railPinnedSites.length > 0) && (
+                <div className="sidebar-pinned-divider" aria-hidden="true" />
+              )}
             </section>
           )}
 
@@ -717,6 +720,7 @@ export function Sidebar(props: SidebarProps) {
                 <button
                   className="sidebar-new-tab-row"
                   type="button"
+                  data-motion-key="new-tab"
                   aria-label="New tab"
                   title="New tab (Ctrl/⌘+T)"
                   onClick={createNewTab}
@@ -805,6 +809,7 @@ export function Sidebar(props: SidebarProps) {
             onTogglePinned={() =>
               setSidebarPinned((pinned: boolean) => !pinned)
             }
+            onNewTab={createNewTab}
             onUnpinPinnedSite={(site: PinnedSite) =>
               void savePinnedSites(
                 pinnedSites.filter(

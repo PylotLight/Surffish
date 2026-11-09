@@ -11,7 +11,7 @@ import { httpOrigin } from "./chrome-helpers";
 
 /**
  * The collapsed sidebar's icon rail (Arc/Zen-style): pinned tabs and bookmarks first, then the
- * open tabs, with the sidebar pin at the bottom. It stays on
+ * open tabs and a New tab +, with the sidebar pin at the bottom. It stays on
  * screen when the panel is collapsed, so the sidebar is never an empty edge.
  *
  * Rail items deliberately do NOT carry `data-browser-tab-id` / `data-pin-id`: those select the one
@@ -36,6 +36,7 @@ export interface SidebarRailProps {
   onOpenPinnedSite: (site: PinnedSite) => void;
   onUnpinPinnedSite: (site: PinnedSite) => void;
   onTogglePinned: () => void;
+  onNewTab: () => void;
 }
 
 function RailTab({
@@ -86,14 +87,14 @@ function RailTab({
 }
 
 /**
- * Lines the rail's tab marks up with where the panel draws the same tabs, so collapsing or
- * expanding leaves each favicon where it was (the shape morph then has nothing to fly) instead of
- * the rail packing them from its own top edge. The panel stays mounted while the rail shows
- * (shared/sidebar-morph.ts), so its rows can be read in either shape.
+ * Lines the rail's marks up with where the panel draws the same things, so collapsing or
+ * expanding leaves each favicon (and the New tab +) where it was instead of the rail packing them
+ * from its own top edge. The panel stays mounted at its open width while the rail shows
+ * (shared/sidebar-morph.ts, Browser.css), so its rows read the same in either shape.
  *
- * x: every rail mark shifts onto the panel favicons' centre line. y: each tab moves onto its
- * panel row, up by at most the gap before it, so a scrolled list or the taller pinned column just
- * packs the rail as before (and the morph carries the difference).
+ * x: every rail mark shifts onto the panel favicons' centre line. y: each mark moves onto its
+ * panel row, and the pins/tabs hairline onto the panel's, up by at most the gap before it, so a
+ * scrolled list or the taller pinned column just packs the rail as before.
  */
 function alignRailToPanel(rail: HTMLElement): void {
   const panel = rail.parentElement?.querySelector<HTMLElement>(
@@ -101,15 +102,20 @@ function alignRailToPanel(rail: HTMLElement): void {
   );
   const items = [
     ...rail.querySelectorAll<HTMLElement>(
-      ".sidebar-rail-item[data-motion-key]",
+      ".sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
     ),
   ];
   for (const item of items) item.style.marginTop = "";
   if (!panel) return;
-  const counterpart = (key: string): HTMLElement | null => {
-    const row = panel.querySelector<HTMLElement>(
-      `[data-motion-key="${CSS.escape(key)}"]`,
-    );
+  const counterpart = (item: HTMLElement): HTMLElement | null => {
+    const key = item.dataset.motionKey;
+    const row = item.classList.contains("sidebar-rail-divider")
+      ? panel.querySelector<HTMLElement>(".sidebar-pinned-divider")
+      : key
+        ? panel.querySelector<HTMLElement>(
+            `[data-motion-key="${CSS.escape(key)}"]`,
+          )
+        : null;
     if (!row || row.getClientRects().length === 0) return null;
     return markOf(row);
   };
@@ -121,19 +127,21 @@ function alignRailToPanel(rail: HTMLElement): void {
   const railCentre = railBox.left + railBox.width / 2;
   let shift: number | null = null;
   for (const item of items) {
-    const key = item.dataset.motionKey;
-    const target = key ? counterpart(key) : null;
+    const target = counterpart(item);
     if (!target) continue;
     const to = target.getBoundingClientRect();
-    if (shift === null) shift = Math.round(to.left + to.width / 2 - railCentre);
+    if (shift === null && item.dataset.motionKey)
+      shift = Math.round(to.left + to.width / 2 - railCentre);
     const from = markOf(item).getBoundingClientRect();
     const dy = Math.round(
       to.top + to.height / 2 - (from.top + from.height / 2),
     );
     // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
-    // marks plus gap), never into the previous mark.
-    const margin = Math.max(dy, -gap);
-    if (margin !== 0) item.style.marginTop = `${margin}px`;
+    // marks plus gap), never into the previous mark. The divider keeps its own CSS margin as the
+    // base, so it moves by exactly dy.
+    const base = Number.parseFloat(getComputedStyle(item).marginTop) || 0;
+    const margin = Math.max(base + dy, -gap);
+    if (margin !== base) item.style.marginTop = `${margin}px`;
   }
   // Bounded so a mark never leaves the rail (a panel favicon is always near its left edge).
   if (shift !== null && Math.abs(shift) < railBox.width / 2 - 22)
@@ -152,6 +160,7 @@ export function SidebarRail({
   onOpenPinnedSite,
   onUnpinPinnedSite,
   onTogglePinned,
+  onNewTab,
 }: SidebarRailProps): React.JSX.Element {
   const openTabs = tabs.filter((tab) => !tab.pinned);
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
@@ -192,9 +201,9 @@ export function SidebarRail({
             />
           </div>
         ))}
-        {hasPins && openTabs.length > 0 && (
-          <div className="sidebar-rail-divider" aria-hidden="true" />
-        )}
+        {/* The pins/tabs hairline: shown exactly when the panel shows its own (whenever anything
+         * is pinned), aligned onto the panel's line, and crossfaded with it by the morph. */}
+        {hasPins && <div className="sidebar-rail-divider" aria-hidden="true" />}
         {openTabs.map((tab) => (
           <RailTab
             key={`tab:${tab.id}`}
@@ -203,6 +212,22 @@ export function SidebarRail({
             motionKey={`tab:${tab.id}`}
           />
         ))}
+        {/* Keyed to the panel's New Tab row: the + is the same mark on the same spot
+         * (alignRailToPanel), so it holds while "New Tab" fades in beside it. Hovering the rail
+         * reveals the panel over it, and that row covers this spot, so a click lands on New Tab in
+         * either shape. */}
+        <button
+          className="sidebar-rail-item sidebar-rail-new-tab"
+          type="button"
+          data-motion-key="new-tab"
+          aria-label="New tab"
+          title="New tab (Ctrl/⌘+T)"
+          onClick={onNewTab}
+        >
+          <span className="sidebar-new-tab-row-icon" aria-hidden="true">
+            ＋
+          </span>
+        </button>
       </div>
       {/* Only the pin lives on the rail: hovering the rail reveals the panel, which covers any
        * other rail action before it can be clicked, and New tab / Settings are in the panel and

@@ -111,8 +111,14 @@
   cursor: pointer;
   outline: 0;
   -webkit-app-region: no-drag;
+  /* Hover eases in (it is held off while the sidebar changes shape, then arrives under a pointer
+   * already resting on the row; see [data-reshaping] in the morph section). */
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
-.tab-item:hover,
+.tab-item:hover:not(:where([data-reshaping] *)),
 .tab-item:focus-visible {
   background: rgba(255, 255, 255, 0.055);
   color: #f7f9fa;
@@ -121,8 +127,8 @@
   border-color: rgba(255, 255, 255, 0.14);
   background: linear-gradient(
     120deg,
-    rgba(255, 255, 255, 0.12),
-    rgba(255, 255, 255, 0.055)
+    rgba(255, 255, 255, calc(0.12 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.055 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.075),
@@ -231,13 +237,17 @@
   line-height: 1;
   opacity: 0;
   cursor: pointer;
+  transition:
+    opacity 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
 }
-.tab-item:hover .tab-close,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-close,
 .tab-item:focus-within .tab-close,
 .tab-item.is-active .tab-close {
   opacity: 1;
 }
-.tab-close:hover {
+.tab-close:hover:not(:where([data-reshaping] *)) {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
@@ -1136,6 +1146,10 @@
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 .pinned-site-icon-button {
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    outline-color 130ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1150,7 +1164,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.pinned-site-icon-button:hover,
+.pinned-site-icon-button:hover:not(:where([data-reshaping] *)),
 .pinned-site-icon-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.075);
@@ -1158,6 +1172,10 @@
   outline-offset: 1px;
 }
 .pinned-tab-icon-button {
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    outline-color 130ms ease;
   position: relative;
   display: flex;
   align-items: center;
@@ -1172,7 +1190,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.pinned-tab-icon-button:hover,
+.pinned-tab-icon-button:hover:not(:where([data-reshaping] *)),
 .pinned-tab-icon-button:focus-visible,
 .pinned-tab-icon-button.is-active {
   border-color: rgba(255, 255, 255, 0.11);
@@ -1255,8 +1273,8 @@
   border-color: rgba(255, 255, 255, 0.15);
   background: linear-gradient(
     120deg,
-    rgba(255, 255, 255, 0.13),
-    rgba(255, 255, 255, 0.055)
+    rgba(255, 255, 255, calc(0.13 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.055 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.09),
@@ -1275,12 +1293,12 @@
   border-radius: 50%;
   opacity: 0.42;
 }
-.tab-item:hover .tab-close,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-close,
 .tab-item:focus-within .tab-close,
 .tab-item.is-active .tab-close {
   opacity: 0.9;
 }
-.tab-close:hover {
+.tab-close:hover:not(:where([data-reshaping] *)) {
   background: rgba(255, 113, 126, 0.2);
   color: #ffc0c5;
 }
@@ -2855,7 +2873,13 @@
   font-weight: 300;
   line-height: 1;
 }
-.sidebar-new-tab-row:hover,
+.sidebar-new-tab-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-new-tab-row:hover:not(:where([data-reshaping] *)),
 .sidebar-new-tab-row:focus-visible {
   background: rgba(255, 255, 255, 0.055);
   color: rgba(255, 255, 255, 0.9);
@@ -3317,7 +3341,7 @@
 .tab-volume.is-idle {
   display: none;
 }
-.tab-item:hover .tab-volume.is-idle,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-volume.is-idle,
 .tab-item:focus-within .tab-volume.is-idle,
 .tab-volume.is-idle.is-open {
   display: inline-flex;
@@ -4244,7 +4268,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.sidebar-new-private-tab:hover {
+.sidebar-new-private-tab:hover:not(:where([data-reshaping] *)) {
   background: rgba(170, 140, 255, 0.14);
   color: #d9cbff;
 }
@@ -4255,16 +4279,16 @@
 .tab-item.is-private {
   background: linear-gradient(
     120deg,
-    rgba(150, 110, 255, 0.1),
-    rgba(150, 110, 255, 0.03)
+    rgba(150, 110, 255, calc(0.1 * var(--sidebar-row-paint))),
+    rgba(150, 110, 255, calc(0.03 * var(--sidebar-row-paint)))
   );
 }
 .tab-item.is-private.is-active {
   border-color: rgba(180, 150, 255, 0.32);
   background: linear-gradient(
     120deg,
-    rgba(150, 110, 255, 0.26),
-    rgba(150, 110, 255, 0.1)
+    rgba(150, 110, 255, calc(0.26 * var(--sidebar-row-paint))),
+    rgba(150, 110, 255, calc(0.1 * var(--sidebar-row-paint)))
   );
 }
 .tab-private-badge {
@@ -5204,6 +5228,20 @@
  * shape morph (shared/sidebar-morph.ts) carries each site's mark from where the old shape drew
  * it to where the new one does, while the card's width travels on the shared open/close
  * timeline. */
+/* The row highlights' gradients are scaled by this (1 at rest), so the shape morph can fade a
+ * counterpart's highlight in while the outgoing shape's copy fades out: gradients themselves do
+ * not interpolate (shared/sidebar-morph.ts). */
+@property --sidebar-row-paint {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+/* One text rasteriser throughout: titles fade on their own compositor layers mid-morph, and on
+ * macOS a layer that is not opaque draws text without font smoothing, so the default would turn
+ * every title a shade bolder the frame each fade ends. */
+.browser-sidebar {
+  -webkit-font-smoothing: antialiased;
+}
 .sidebar-body {
   position: relative;
   display: flex;
@@ -5247,9 +5285,12 @@
   z-index: 0;
   pointer-events: none;
 }
-/* The inactive shape stays mounted, out of flow and invisible, at the width it has in flow
- * (100% of the body for the panel, its designed width for the rail), so switching shapes swaps
- * the class and nothing re-flows; the card's overflow clips it (shared/sidebar-morph.ts). */
+/* The inactive shape stays mounted, out of flow and invisible, at the width it has when it is
+ * the shape on screen (the open sidebar width for the panel, its designed width for the rail), so
+ * switching shapes swaps the class and nothing re-flows: the panel's titles are laid out at their
+ * final width from the first frame of an expand (the card's overflow clips them), and the rail
+ * aligns onto panel rows measured at that width rather than squeezed into the 84px card, where
+ * the New Tab label wrapped and the pinned row grew a scrollbar (shared/sidebar-morph.ts). */
 .sidebar-morph-column.is-shape-hidden {
   position: absolute;
   top: 0;
@@ -5260,7 +5301,7 @@
   pointer-events: none;
 }
 .sidebar-panel.is-shape-hidden {
-  width: 100%;
+  width: var(--sidebar-width, 320px);
 }
 .sidebar-rail.is-shape-hidden {
   width: var(--sidebar-rail-width, 84px);
@@ -5315,9 +5356,9 @@
     border-color 130ms ease,
     box-shadow 130ms ease;
 }
-.sidebar-rail-item:hover,
+.sidebar-rail-item:hover:not(:where([data-reshaping] *)),
 .sidebar-rail-item:focus-visible,
-.sidebar-rail .pinned-site-icon-button:hover,
+.sidebar-rail .pinned-site-icon-button:hover:not(:where([data-reshaping] *)),
 .sidebar-rail .pinned-site-icon-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.085);
@@ -5327,8 +5368,8 @@
   border-color: rgba(255, 255, 255, 0.2);
   background: linear-gradient(
     150deg,
-    rgba(255, 255, 255, 0.24),
-    rgba(255, 255, 255, 0.09)
+    rgba(255, 255, 255, calc(0.24 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.09 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.24),
@@ -5375,6 +5416,15 @@
 }
 .sidebar-rail-badge.is-audio.is-muted {
   color: rgba(245, 247, 250, 0.55);
+}
+/* The rail's New tab +: the panel row's icon, same glyph, font and colour, on the same spot. */
+.sidebar-rail-new-tab {
+  color: rgba(245, 247, 250, 0.5);
+  font: inherit;
+}
+.sidebar-rail-new-tab:hover:not(:where([data-reshaping] *)),
+.sidebar-rail-new-tab:focus-visible {
+  color: rgba(255, 255, 255, 0.9);
 }
 .sidebar-rail-divider {
   width: 30px;

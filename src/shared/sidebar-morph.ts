@@ -76,11 +76,23 @@ export const MORPH_EASING = sidebarMotionEasingCss();
 export const MORPH_TRAILING_EASING = "cubic-bezier(0.55, 0, 0.25, 1)";
 /** Trailing marks take a little longer than the card so the edge leads them all the way. */
 export const MORPH_TRAILING_FACTOR = 1.15;
-/** New-only parts fade in on a slow beat, arriving behind the marks. */
-export const MORPH_LABEL_MS = 300;
-export const MORPH_LABEL_DELAY_MS = 120;
-/** The outgoing shape's exit fade. */
-export const MORPH_FADE_MS = 200;
+/**
+ * Titles and every other new-only part fade in a little behind the card's edge, on an eased
+ * beat long enough to read as a fade at 30fps (the card's own expo curve would land them in a
+ * frame or two).
+ */
+export const MORPH_LABEL_MS = 260;
+export const MORPH_LABEL_DELAY_MS = 70;
+/** Ease-out (quad): moves at once, settles gently, no linear pop at either end. */
+export const MORPH_LABEL_EASING = "cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+/** The outgoing shape's exit fade: shorter than the fade in, eased at both ends. */
+export const MORPH_FADE_MS = 180;
+export const MORPH_FADE_EASING = "cubic-bezier(0.37, 0, 0.63, 1)";
+/**
+ * A counterpart's own paint (the rail's active pill, the panel's active row) fades in while the
+ * outgoing shape's copy of it fades out, so the highlight crossfades instead of popping.
+ */
+export const MORPH_PAINT_MS = 240;
 /** A mark that must wait for room is released by the fallback if the card never gives it. */
 export const MORPH_ROOM_FALLBACK_MS =
   Math.round(SIDEBAR_MOTION_MS * MORPH_TRAILING_FACTOR) + 80;
@@ -100,9 +112,10 @@ export const MORPH_HIDDEN_CLASS = "is-shape-hidden";
 /** The shape on screen: the only column that is neither hidden nor a fading ghost. */
 export const ACTIVE_COLUMN_SELECTOR = `:scope > .${MORPH_COLUMN_CLASS}:not(.${MORPH_HIDDEN_CLASS}):not(.${MORPH_GHOST_CLASS})`;
 /** The part of a counterpart the eye follows: its site's mark, if it has one. */
-const MARK_SELECTOR = ".tab-favicon, .pinned-site-mark";
+const MARK_SELECTOR =
+  ".tab-favicon, .pinned-site-mark, .sidebar-new-tab-row-icon";
 /** The new surroundings of a travelling mark. */
-const LABEL_SELECTOR = ".tab-title";
+const LABEL_SELECTOR = ".tab-title, .sidebar-new-tab-row-label";
 /** Scrollers whose offsets are measured, so the outgoing shape fades where it stood. */
 const SCROLLER_SELECTOR = "[data-glide-scroller]";
 const COUNTERPARTS = "[data-motion-key], [data-morph]";
@@ -201,9 +214,11 @@ export function planSidebarMorph(
     const to = target.rect;
     if (!from || !to) continue;
     labels.push(...target.labels);
-    const dx = from.x + from.width / 2 - (to.x + to.width / 2);
-    const dy = from.y + from.height / 2 - (to.y + to.height / 2);
-    if (hold || (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5)) {
+    // Whole pixels: a fractional translate re-rasterises the mark (and any text riding with it)
+    // off the pixel grid for the length of the flight, which reads as a shimmer.
+    const dx = Math.round(from.x + from.width / 2 - (to.x + to.width / 2));
+    const dy = Math.round(from.y + from.height / 2 - (to.y + to.height / 2));
+    if (hold || (dx === 0 && dy === 0)) {
       // The mark stands where it should; its surroundings simply arrive.
       settled.push(target.element);
       durationMs = Math.max(durationMs, MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS);
@@ -286,21 +301,43 @@ export function playSidebarMorph(
     if (flight.trailing) holdUntilRoom(animation, flight, card);
     total = Math.max(total, durationMs);
   }
-  for (const label of plan.labels)
-    label.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: MORPH_LABEL_MS,
-      delay: MORPH_LABEL_DELAY_MS,
-      easing: MORPH_EASING,
-      fill: "backwards",
-    });
   // Whatever in the incoming shape has no counterpart in the old one fades in: the parts the
   // eye follows are the marks, which are already drawn throughout.
   const travelling = new Set<HTMLElement>();
   for (const flight of plan.flights) travelling.add(flight.element);
   for (const element of plan.settled) travelling.add(element);
+  for (const element of travelling) {
+    const mark = markOf(element);
+    // A counterpart with no site mark (the sidebar pin) is one element drawn throughout: its
+    // outgoing copy is withdrawn whole (releaseColumn), so it has nothing to crossfade.
+    if (mark === element) continue;
+    // Its own paint crossfades with the outgoing copy's (which keeps its paint and fades with the
+    // ghost): the gradient is scaled by --sidebar-row-paint (Browser.css), the rest interpolate.
+    element.animate(
+      [
+        {
+          offset: 0,
+          "--sidebar-row-paint": 0,
+          backgroundColor: "transparent",
+          borderColor: "transparent",
+          boxShadow: "none",
+          outlineColor: "transparent",
+        },
+      ],
+      {
+        duration: MORPH_PAINT_MS,
+        easing: MORPH_LABEL_EASING,
+        fill: "backwards",
+      },
+    );
+    // Everything around the mark (title, close button, sleep moon, audio and private badges)
+    // arrives on the label beat, together, instead of standing at full strength from frame one.
+    revealColumn(element, new Set([mark]));
+  }
   revealColumn(incoming, travelling);
   total = Math.max(
     total,
+    MORPH_PAINT_MS,
     MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS,
     MORPH_ROOM_FALLBACK_MS + SIDEBAR_MOTION_MS * MORPH_TRAILING_FACTOR,
   );
@@ -325,13 +362,21 @@ function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
       revealColumn(child, travelling);
       continue;
     }
-    child.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: MORPH_LABEL_MS,
-      delay: MORPH_LABEL_DELAY_MS * 0.6,
-      easing: MORPH_EASING,
-      fill: "backwards",
-    });
+    fadeIn(child);
   }
+}
+
+/**
+ * One fade for every arriving part, from transparent to the part's own opacity (an implicit end
+ * keyframe): a close button at 0.42 or a restored moon at 0.5 must not reach 1 and snap back.
+ */
+function fadeIn(element: HTMLElement): void {
+  element.animate([{ offset: 0, opacity: 0 }], {
+    duration: MORPH_LABEL_MS,
+    delay: MORPH_LABEL_DELAY_MS,
+    easing: MORPH_LABEL_EASING,
+    fill: "backwards",
+  });
 }
 
 /**
@@ -407,7 +452,7 @@ function releaseColumn(snapshot: MorphSnapshot): void {
   });
   const fade = ghost.animate([{ opacity: 1 }, { opacity: 0 }], {
     duration: MORPH_FADE_MS,
-    easing: MORPH_EASING,
+    easing: MORPH_FADE_EASING,
     fill: "forwards",
   });
   void fade.finished.catch(() => undefined).then(() => ghost.remove());

@@ -380,6 +380,13 @@ const VISIBLE_PIN_RECT =
 const VISIBLE_FIRST_TAB_MARK =
   '(() => { const marks = document.querySelectorAll(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); const mark = marks[marks.length - 1]; if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
 
+const VISIBLE_NEW_TAB_MARK =
+  '(() => { const mark = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key=\\"new-tab\\"] .sidebar-new-tab-row-icon"); if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+// What a click at a point lands on: the rail's + when collapsed, the panel's New Tab row when open.
+const hitAt = (point) =>
+  `(() => { const hit = document.elementFromPoint(${point.x + point.width / 2}, ${point.y + point.height / 2}); return hit?.closest(".sidebar-rail-new-tab") ? "rail" : hit?.closest(".sidebar-new-tab-row") ? "panel" : hit ? hit.className || hit.tagName : null; })()`;
+
 function assertPinStill(collapsedPin, expandedPin, context) {
   assert.ok(
     collapsedPin && expandedPin,
@@ -513,6 +520,13 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     await assertSidebarState(win, which, `${which} collapsed`, false);
     const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
     const collapsedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    const collapsedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(collapsedPlus, `${which}: the rail draws a New tab +`);
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "rail",
+      `${which}: a click on the rail's + lands on the rail's New tab button`,
+    );
     captureWindow(win, `sidebar-${which}-collapsed.png`);
 
     await evaluate(
@@ -548,6 +562,18 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
         Math.abs(collapsedTab.y - expandedTab.y) <= TOLERANCE &&
         Math.abs(collapsedTab.width - expandedTab.width) <= TOLERANCE,
       `${which}: the last tab's favicon stays put between rail and panel: ${JSON.stringify({ collapsedTab, expandedTab })}`,
+    );
+    const expandedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(
+      expandedPlus &&
+        Math.abs(collapsedPlus.x - expandedPlus.x) <= TOLERANCE &&
+        Math.abs(collapsedPlus.y - expandedPlus.y) <= TOLERANCE,
+      `${which}: the New tab + stays put between rail and panel: ${JSON.stringify({ collapsedPlus, expandedPlus })}`,
+    );
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "panel",
+      `${which}: the rail's + spot lands on the panel's New Tab row once it opens`,
     );
     captureWindow(win, `sidebar-${which}-expanded.png`);
 

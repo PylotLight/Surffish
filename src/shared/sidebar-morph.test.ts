@@ -6,6 +6,7 @@ import {
   MORPH_LABEL_DELAY_MS,
   MORPH_LABEL_MS,
   MORPH_FADE_MS,
+  MORPH_PAINT_MS,
 } from "./sidebar-morph";
 import { SIDEBAR_MOTION_MS } from "./sidebar-motion";
 
@@ -106,5 +107,38 @@ describe("planSidebarMorph", () => {
     );
     expect(plan.flights).toHaveLength(0);
     expect(plan.settled).toHaveLength(2);
+  });
+
+  test("flights travel in whole pixels", () => {
+    const plan = planSidebarMorph(
+      { "tab:a": rect(20.4, 100.6) },
+      [target("tab:a", rect(30, 150.2))],
+      { edgeFrom: 84, widening: true },
+    );
+    expect(Number.isInteger(plan.flights[0]!.dx)).toBe(true);
+    expect(Number.isInteger(plan.flights[0]!.dy)).toBe(true);
+    expect(plan.flights[0]!.dx).toBe(-10);
+    expect(plan.flights[0]!.dy).toBe(-50);
+  });
+
+  test("a sub-pixel difference settles instead of flying", () => {
+    const plan = planSidebarMorph(
+      { "tab:a": rect(20.3, 100.2) },
+      [target("tab:a", rect(20, 100))],
+      { edgeFrom: 84, widening: true },
+    );
+    expect(plan.flights).toEqual([]);
+    expect(plan.settled).toHaveLength(1);
+  });
+
+  test("fades are long enough to read as fades at 30fps, and the exit is the shorter", () => {
+    const frame = 1000 / 30;
+    expect(MORPH_LABEL_MS).toBeGreaterThanOrEqual(220);
+    expect(MORPH_LABEL_MS).toBeLessThanOrEqual(280);
+    expect(MORPH_FADE_MS).toBeGreaterThanOrEqual(150);
+    expect(MORPH_FADE_MS).toBeLessThanOrEqual(200);
+    expect(MORPH_FADE_MS).toBeLessThan(MORPH_LABEL_MS);
+    expect(MORPH_LABEL_MS / frame).toBeGreaterThanOrEqual(6);
+    expect(MORPH_PAINT_MS / frame).toBeGreaterThanOrEqual(6);
   });
 });
