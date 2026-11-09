@@ -377,6 +377,9 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
 const VISIBLE_PIN_RECT =
   '(() => { const pin = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button"); if (!pin) return null; const r = pin.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
 
+const VISIBLE_FIRST_TAB_MARK =
+  '(() => { const mark = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
 function assertPinStill(collapsedPin, expandedPin, context) {
   assert.ok(
     collapsedPin && expandedPin,
@@ -509,6 +512,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     await settle();
     await assertSidebarState(win, which, `${which} collapsed`, false);
     const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
+    const collapsedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
     captureWindow(win, `sidebar-${which}-collapsed.png`);
 
     await evaluate(
@@ -536,6 +540,15 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     await settle();
     await assertSidebarState(win, which, `${which} expanded`, true);
     assertPinStill(collapsedPin, await evaluate(view, VISIBLE_PIN_RECT), which);
+    const expandedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    assert.ok(
+      collapsedTab &&
+        expandedTab &&
+        Math.abs(collapsedTab.x - expandedTab.x) <= TOLERANCE &&
+        Math.abs(collapsedTab.y - expandedTab.y) <= TOLERANCE &&
+        Math.abs(collapsedTab.width - expandedTab.width) <= TOLERANCE,
+      `${which}: the first tab's favicon stays put between rail and panel: ${JSON.stringify({ collapsedTab, expandedTab })}`,
+    );
     captureWindow(win, `sidebar-${which}-expanded.png`);
 
     await api(

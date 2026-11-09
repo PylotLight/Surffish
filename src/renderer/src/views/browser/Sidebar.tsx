@@ -758,6 +758,7 @@ export function Sidebar(props: SidebarProps) {
                 title={
                   sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"
                 }
+                data-morph="sidebar-pin"
                 onClick={() => setSidebarPinned((pinned: boolean) => !pinned)}
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">

@@ -2,7 +2,9 @@ import type { BrowserTabSummary, PinnedSite } from "../../../../shared/types";
 import {
   MORPH_COLUMN_CLASS,
   MORPH_HIDDEN_CLASS,
+  markOf,
 } from "../../../../shared/sidebar-morph";
+import { useLayoutEffect, useRef } from "react";
 import { TabFavicon } from "../TabIndicators";
 import { PinnedSiteIcon } from "./icons";
 import { httpOrigin } from "./chrome-helpers";
@@ -83,6 +85,55 @@ function RailTab({
   );
 }
 
+/**
+ * Lines the rail's tab marks up with where the panel draws the same tabs, so collapsing or
+ * expanding leaves each favicon where it was (the shape morph then has nothing to fly) instead of
+ * the rail packing them from its own top edge. The panel stays mounted while the rail shows
+ * (shared/sidebar-morph.ts), so its rows can be read in either shape.
+ *
+ * x: every rail mark shifts onto the panel favicons' centre line. y: each tab is pushed down to
+ * its panel row, never pulled up, so a scrolled list or the taller pinned column just packs the
+ * rail as before (and the morph carries the difference).
+ */
+function alignRailToPanel(rail: HTMLElement): void {
+  const panel = rail.parentElement?.querySelector<HTMLElement>(
+    ":scope > .sidebar-panel",
+  );
+  const items = [
+    ...rail.querySelectorAll<HTMLElement>(
+      ".sidebar-rail-item[data-motion-key]",
+    ),
+  ];
+  for (const item of items) item.style.marginTop = "";
+  if (!panel) return;
+  const counterpart = (key: string): HTMLElement | null => {
+    const row = panel.querySelector<HTMLElement>(
+      `[data-motion-key="${CSS.escape(key)}"]`,
+    );
+    if (!row || row.getClientRects().length === 0) return null;
+    return markOf(row);
+  };
+  const railBox = rail.getBoundingClientRect();
+  const railCentre = railBox.left + railBox.width / 2;
+  let shift: number | null = null;
+  for (const item of items) {
+    const key = item.dataset.motionKey;
+    const target = key ? counterpart(key) : null;
+    if (!target) continue;
+    const to = target.getBoundingClientRect();
+    if (shift === null) shift = Math.round(to.left + to.width / 2 - railCentre);
+    const from = markOf(item).getBoundingClientRect();
+    const dy = Math.round(
+      to.top + to.height / 2 - (from.top + from.height / 2),
+    );
+    if (dy > 0) item.style.marginTop = `${dy}px`;
+  }
+  // Bounded so a mark never leaves the rail (a panel favicon is always near its left edge).
+  if (shift !== null && Math.abs(shift) < railBox.width / 2 - 22)
+    rail.style.setProperty("--sidebar-rail-mark-shift", `${shift}px`);
+  else rail.style.removeProperty("--sidebar-rail-mark-shift");
+}
+
 export function SidebarRail({
   pinnedTabs,
   pinnedSites,
@@ -97,8 +148,15 @@ export function SidebarRail({
 }: SidebarRailProps): React.JSX.Element {
   const openTabs = tabs.filter((tab) => !tab.pinned);
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
+  const railRef = useRef<HTMLElement>(null);
+  // Before the sidebar's own layout effect plays the shape morph, so the marks it measures are
+  // already where the rail draws them; only while the rail shows, so the panel pays nothing.
+  useLayoutEffect(() => {
+    if (!shapeHidden && railRef.current) alignRailToPanel(railRef.current);
+  });
   return (
     <nav
+      ref={railRef}
       className={`sidebar-rail ${MORPH_COLUMN_CLASS}${shapeHidden ? ` ${MORPH_HIDDEN_CLASS}` : ""}`}
       aria-label="Sidebar rail"
     >
@@ -150,6 +208,7 @@ export function SidebarRail({
           aria-label={sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"}
           aria-pressed={sidebarPinned}
           title={sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"}
+          data-morph="sidebar-pin"
           onClick={onTogglePinned}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">

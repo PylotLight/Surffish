@@ -5319,10 +5319,15 @@
     inset 0 1px rgba(255, 255, 255, 0.24),
     0 4px 14px rgba(0, 0, 0, 0.2);
 }
+/* The rail shifts its column onto the panel's favicon line (SidebarRail.tsx), and draws the
+ * favicon at the panel's size, so a tab's mark neither moves nor resizes when the shape changes. */
+.sidebar-rail-scroll > * {
+  translate: var(--sidebar-rail-mark-shift, 0px) 0;
+}
 .sidebar-rail-item .tab-favicon {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
   font-size: 11px;
 }
 .sidebar-rail .pinned-site-mark {

@@ -361,6 +361,10 @@ function releaseColumn(snapshot: MorphSnapshot): void {
   ghost.classList.remove(MORPH_COLUMN_CLASS);
   ghost.classList.add(MORPH_GHOST_CLASS);
   for (const node of [ghost, ...ghost.querySelectorAll<HTMLElement>("*")]) {
+    // A keyed counterpart is drawn by the incoming shape throughout (travelling or settled), so
+    // its copy here is withdrawn too, even when it has no site mark (the sidebar pin): fading a
+    // second copy over the one that stays reads as a flash.
+    if (keyOf(node)) markOf(node).style.visibility = "hidden";
     for (const name of node.getAttributeNames()) {
       if (name === "data-motion-key" || name === "data-morph")
         node.removeAttribute(name);
