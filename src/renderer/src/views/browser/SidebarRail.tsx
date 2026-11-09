@@ -4,7 +4,7 @@ import {
   MORPH_HIDDEN_CLASS,
   markOf,
 } from "../../../../shared/sidebar-morph";
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { TabFavicon } from "../TabIndicators";
 import { PinnedSiteIcon } from "./icons";
 import { httpOrigin } from "./chrome-helpers";
@@ -86,15 +86,44 @@ function RailTab({
   );
 }
 
+/** `value` on this display's pixel grid, the position the compositor actually paints it at. */
+function onDevicePixels(value: number): number {
+  const ratio = window.devicePixelRatio || 1;
+  return Math.round(value * ratio) / ratio;
+}
+
+/**
+ * How far `from` must move to be painted on the same device pixels as `to`. Rects of the same
+ * size line up edge on edge (each is snapped to the grid where it is painted, so their centres
+ * can never land half a pixel apart); otherwise their centres meet.
+ */
+function deviceOffset(from: DOMRect, to: DOMRect, axis: "x" | "y"): number {
+  const [fromStart, fromSize, toStart, toSize] =
+    axis === "x"
+      ? [from.left, from.width, to.left, to.width]
+      : [from.top, from.height, to.top, to.height];
+  if (Math.abs(fromSize - toSize) < 0.01)
+    return onDevicePixels(toStart) - onDevicePixels(fromStart);
+  return onDevicePixels(toStart + toSize / 2 - (fromStart + fromSize / 2));
+}
+
+/** Further than this, a counterpart is somewhere the rail column cannot follow (the pins' row). */
+const MAX_MARK_NUDGE = 3;
+
 /**
  * Lines the rail's marks up with where the panel draws the same things, so collapsing or
- * expanding leaves each favicon (and the New tab +) where it was instead of the rail packing them
- * from its own top edge. The panel stays mounted at its open width while the rail shows
- * (shared/sidebar-morph.ts, Browser.css), so its rows read the same in either shape.
+ * expanding leaves each favicon (and the New tab +, and the sidebar pin) on exactly the device
+ * pixels it was on instead of the rail packing them from its own top edge. The panel stays
+ * mounted at its open width while the rail shows (shared/sidebar-morph.ts, Browser.css), so its
+ * rows read the same in either shape.
  *
- * x: every rail mark shifts onto the panel favicons' centre line. y: each mark moves onto its
- * panel row, and the pins/tabs hairline onto the panel's, up by at most the gap before it, so a
- * scrolled list or the taller pinned column just packs the rail as before.
+ * Every offset is measured, not assumed, and kept on the device-pixel grid rather than rounded
+ * to whole CSS pixels: the panel's 41px tab rows put each favicon's top on a half pixel, and a
+ * whole-pixel nudge left every rail favicon one device pixel off its panel counterpart at 2x (the
+ * "everything moves 1px" on collapse/expand). x: the column shifts onto the tab list's favicon
+ * line, and a mark whose counterpart sits a little off it is nudged onto it. y: each mark moves
+ * onto its panel row, and the pins/tabs hairline onto the panel's, up by at most the gap before
+ * it, so a scrolled list or the pins' row just packs the rail as before.
  */
 function alignRailToPanel(rail: HTMLElement): void {
   const panel = rail.parentElement?.querySelector<HTMLElement>(
@@ -105,7 +134,13 @@ function alignRailToPanel(rail: HTMLElement): void {
       ".sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
     ),
   ];
-  for (const item of items) item.style.marginTop = "";
+  const pin = rail.querySelector<HTMLElement>('[data-morph="sidebar-pin"]');
+  for (const item of items) {
+    item.style.marginTop = "";
+    item.style.removeProperty("--sidebar-rail-mark-dx");
+  }
+  pin?.style.removeProperty("translate");
+  rail.style.removeProperty("--sidebar-rail-mark-shift");
   if (!panel) return;
   const counterpart = (item: HTMLElement): HTMLElement | null => {
     const key = item.dataset.motionKey;
@@ -124,18 +159,35 @@ function alignRailToPanel(rail: HTMLElement): void {
     ? Number.parseFloat(getComputedStyle(scroller).rowGap) || 0
     : 0;
   const railBox = rail.getBoundingClientRect();
-  const railCentre = railBox.left + railBox.width / 2;
-  let shift: number | null = null;
+  // The column's line: the tab list's favicons (the first open tab, else the New tab +). Pins sit
+  // on the same line in the panel (Browser.css), but only the first of their row can line up.
+  const lineItem =
+    items.find((item) => item.dataset.motionKey?.startsWith("tab:")) ??
+    items.find((item) => item.dataset.motionKey === "new-tab");
+  const lineTarget = lineItem ? counterpart(lineItem) : null;
+  let shift = 0;
+  if (lineItem && lineTarget) {
+    shift = deviceOffset(
+      markOf(lineItem).getBoundingClientRect(),
+      lineTarget.getBoundingClientRect(),
+      "x",
+    );
+    // Bounded so a mark never leaves the rail (a panel favicon is always near its left edge).
+    if (Math.abs(shift) < railBox.width / 2 - 22)
+      rail.style.setProperty("--sidebar-rail-mark-shift", `${shift}px`);
+    else shift = 0;
+  }
   for (const item of items) {
     const target = counterpart(item);
     if (!target) continue;
     const to = target.getBoundingClientRect();
-    if (shift === null && item.dataset.motionKey)
-      shift = Math.round(to.left + to.width / 2 - railCentre);
     const from = markOf(item).getBoundingClientRect();
-    const dy = Math.round(
-      to.top + to.height / 2 - (from.top + from.height / 2),
-    );
+    if (item.dataset.motionKey) {
+      const dx = deviceOffset(from, to, "x");
+      if (dx !== 0 && Math.abs(dx) <= MAX_MARK_NUDGE)
+        item.style.setProperty("--sidebar-rail-mark-dx", `${shift + dx}px`);
+    }
+    const dy = deviceOffset(from, to, "y");
     // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
     // marks plus gap), never into the previous mark. The divider keeps its own CSS margin as the
     // base, so it moves by exactly dy.
@@ -143,10 +195,23 @@ function alignRailToPanel(rail: HTMLElement): void {
     const margin = Math.max(base + dy, -gap);
     if (margin !== base) item.style.marginTop = `${margin}px`;
   }
-  // Bounded so a mark never leaves the rail (a panel favicon is always near its left edge).
-  if (shift !== null && Math.abs(shift) < railBox.width / 2 - 22)
-    rail.style.setProperty("--sidebar-rail-mark-shift", `${shift}px`);
-  else rail.style.removeProperty("--sidebar-rail-mark-shift");
+  // The pin: both footers are laid out alike, but the panel's holds more buttons, so measure it
+  // too rather than trusting the two flex rows to agree to the pixel.
+  const pinTarget = panel.querySelector<HTMLElement>(
+    '[data-morph="sidebar-pin"]',
+  );
+  if (pin && pinTarget && pinTarget.getClientRects().length > 0) {
+    const from = pin.getBoundingClientRect();
+    const to = pinTarget.getBoundingClientRect();
+    const dx = deviceOffset(from, to, "x");
+    const dy = deviceOffset(from, to, "y");
+    if (
+      (dx !== 0 || dy !== 0) &&
+      Math.abs(dx) <= MAX_MARK_NUDGE &&
+      Math.abs(dy) <= MAX_MARK_NUDGE
+    )
+      pin.style.translate = `${dx}px ${dy}px`;
+  }
 }
 
 export function SidebarRail({
@@ -170,6 +235,24 @@ export function SidebarRail({
   useLayoutEffect(() => {
     if (!shapeHidden && railRef.current) alignRailToPanel(railRef.current);
   });
+  // The panel's rows can move without the rail re-rendering (the window resizes, a web font lands),
+  // so line up again then too, while the rail shows.
+  useEffect(() => {
+    if (shapeHidden) return;
+    let frame = 0;
+    const realign = (): void => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (railRef.current) alignRailToPanel(railRef.current);
+      });
+    };
+    window.addEventListener("resize", realign, { passive: true });
+    void document.fonts?.ready.then(realign).catch(() => undefined);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", realign);
+    };
+  }, [shapeHidden]);
   return (
     <nav
       ref={railRef}

@@ -1116,7 +1116,9 @@
   gap: 5px;
   margin-top: 3px;
   position: relative;
-  padding: 2px 12px 9px;
+  /* 14px on the left puts the first pin's mark on the tab favicons' centre line (33px), so the
+   * rail's single column lines up with both. */
+  padding: 2px 12px 9px 14px;
 }
 /* The hairline under the pins, drawn by an element rather than the section's border: the
  * section holds marks that stand in place through a shape change, so the morph never fades it,
@@ -1219,8 +1221,8 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .pinned-tab-icon-button .tab-favicon {
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
   border-radius: 8px;
 }
 .pinned-tab-sleep-indicator {
@@ -1241,8 +1243,8 @@
 .pinned-site-mark {
   display: grid;
   place-items: center;
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.19);
@@ -1254,8 +1256,8 @@
 }
 .pinned-site-mark img {
   display: block;
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
 }
 .tab-list,
@@ -5375,10 +5377,11 @@
     inset 0 1px rgba(255, 255, 255, 0.24),
     0 4px 14px rgba(0, 0, 0, 0.2);
 }
-/* The rail shifts its column onto the panel's favicon line (SidebarRail.tsx), and draws the
- * favicon at the panel's size, so a tab's mark neither moves nor resizes when the shape changes. */
+/* The rail shifts its column onto the panel's favicon line (SidebarRail.tsx; a mark a little off
+ * it takes its own --sidebar-rail-mark-dx), and draws every mark at the panel's size, so a mark
+ * neither moves nor resizes when the shape changes. */
 .sidebar-rail-scroll > * {
-  translate: var(--sidebar-rail-mark-shift, 0px) 0;
+  translate: var(--sidebar-rail-mark-dx, var(--sidebar-rail-mark-shift, 0px)) 0;
 }
 .sidebar-rail-item .tab-favicon {
   width: 24px;
@@ -5387,8 +5390,8 @@
   font-size: 11px;
 }
 .sidebar-rail .pinned-site-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 8px;
   font-size: 11px;
 }

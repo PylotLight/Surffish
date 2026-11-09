@@ -22,7 +22,8 @@ const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 const userData = join(tmpdir(), `surffish-sidebar-card-smoke-${process.pid}`);
 const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR;
 const label = process.env.SURFFISH_SIDEBAR_BACKDROP || "default";
-const TOLERANCE = 1;
+// Card and surface geometry: whole CSS pixels on both surfaces, so half a pixel is already a miss.
+const TOLERANCE = 0.5;
 
 const server = createServer((request, response) => {
   response.writeHead(200, {
@@ -387,15 +388,31 @@ const VISIBLE_NEW_TAB_MARK =
 const hitAt = (point) =>
   `(() => { const hit = document.elementFromPoint(${point.x + point.width / 2}, ${point.y + point.height / 2}); return hit?.closest(".sidebar-rail-new-tab") ? "rail" : hit?.closest(".sidebar-new-tab-row") ? "panel" : hit ? hit.className || hit.tagName : null; })()`;
 
-function assertPinStill(collapsedPin, expandedPin, context) {
+// A mark must land on the very device pixels it left: half a CSS pixel is a whole device pixel at
+// 2x, which is exactly the shift the eye catches on collapse/expand. Compare painted positions
+// (layout snapped to the device-pixel grid), so a layout-only half-pixel difference that paints
+// the same does not count, and one that paints a pixel off does.
+const devicePixels = (value, dpr) => Math.round(value * dpr) / dpr;
+function samePaintedSpot(a, b, dpr, fields = ["x", "y", "width", "height"]) {
+  return Boolean(
+    a &&
+    b &&
+    fields.every(
+      (field) =>
+        Math.abs(devicePixels(a[field], dpr) - devicePixels(b[field], dpr)) <
+        0.01,
+    ),
+  );
+}
+
+function assertPinStill(collapsedPin, expandedPin, context, dpr) {
   assert.ok(
     collapsedPin && expandedPin,
     `${context}: the sidebar pin is drawn in both shapes`,
   );
   assert.ok(
-    Math.abs(collapsedPin.x - expandedPin.x) <= TOLERANCE &&
-      Math.abs(collapsedPin.y - expandedPin.y) <= TOLERANCE,
-    `${context}: the sidebar pin stays put between rail and panel: ${JSON.stringify({ collapsedPin, expandedPin })}`,
+    samePaintedSpot(collapsedPin, expandedPin, dpr),
+    `${context}: the sidebar pin stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPin, expandedPin })}`,
   );
 }
 
@@ -518,6 +535,7 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     }, `${which} collapsed rail DOM`);
     await settle();
     await assertSidebarState(win, which, `${which} collapsed`, false);
+    const dpr = await evaluate(view, "window.devicePixelRatio || 1");
     const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
     const collapsedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
     const collapsedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
@@ -553,22 +571,21 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     );
     await settle();
     await assertSidebarState(win, which, `${which} expanded`, true);
-    assertPinStill(collapsedPin, await evaluate(view, VISIBLE_PIN_RECT), which);
+    assertPinStill(
+      collapsedPin,
+      await evaluate(view, VISIBLE_PIN_RECT),
+      which,
+      dpr,
+    );
     const expandedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
     assert.ok(
-      collapsedTab &&
-        expandedTab &&
-        Math.abs(collapsedTab.x - expandedTab.x) <= TOLERANCE &&
-        Math.abs(collapsedTab.y - expandedTab.y) <= TOLERANCE &&
-        Math.abs(collapsedTab.width - expandedTab.width) <= TOLERANCE,
-      `${which}: the last tab's favicon stays put between rail and panel: ${JSON.stringify({ collapsedTab, expandedTab })}`,
+      samePaintedSpot(collapsedTab, expandedTab, dpr),
+      `${which}: the last tab's favicon stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedTab, expandedTab })}`,
     );
     const expandedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
     assert.ok(
-      expandedPlus &&
-        Math.abs(collapsedPlus.x - expandedPlus.x) <= TOLERANCE &&
-        Math.abs(collapsedPlus.y - expandedPlus.y) <= TOLERANCE,
-      `${which}: the New tab + stays put between rail and panel: ${JSON.stringify({ collapsedPlus, expandedPlus })}`,
+      samePaintedSpot(collapsedPlus, expandedPlus, dpr),
+      `${which}: the New tab + stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPlus, expandedPlus })}`,
     );
     assert.equal(
       await evaluate(view, hitAt(collapsedPlus)),
