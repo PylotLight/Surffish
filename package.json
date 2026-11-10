@@ -118,6 +118,7 @@
     "test:electron-translation": "electron scripts/electron-translation-smoke.cjs"
   },
   "build": {
+    "npmRebuild": false,
     "appId": "com.pylotlight.surffish",
     "afterPack": "./scripts/patch-macos-uuid.cjs",
     "productName": "Surffish",
