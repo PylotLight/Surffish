@@ -13,7 +13,7 @@
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
-import { SIDEBAR_CARD } from "./sidebar-card";
+import { BROWSER_FRAME_TINT_ARGB, SIDEBAR_CARD } from "./sidebar-card";
 
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
@@ -56,12 +56,12 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius for the native compositor blur (px). */
-export const SIDEBAR_NATIVE_BLUR_RADIUS = 36;
-/** ARGB tint under the native blur: dark enough to read white text even if no blur shows. */
-export const SIDEBAR_NATIVE_TINT = "#C4131619";
-/** ARGB fill for a card-framed view after leaving the native path (blur off at runtime). */
-export const SIDEBAR_FRAMED_SOLID_TINT = "#F2131619";
+/** Blur radius matches the toolbar's glass so its frame continues into the overlay without a crease. */
+export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
+/** The sidebar is the same material as the toolbar, not a second, darker card over it. */
+export const SIDEBAR_NATIVE_TINT = BROWSER_FRAME_TINT_ARGB;
+/** Fallback fill uses that same frame tint when native blur is unavailable. */
+export const SIDEBAR_FRAMED_SOLID_TINT = BROWSER_FRAME_TINT_ARGB;
 /** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
 export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
 export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;

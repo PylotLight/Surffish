@@ -7,7 +7,11 @@ import {
   resolveSidebarBackdropMode,
   sidebarCaptureRegions,
   snapshotDue,
+  SIDEBAR_FRAMED_SOLID_TINT,
+  SIDEBAR_NATIVE_BLUR_RADIUS,
+  SIDEBAR_NATIVE_TINT,
 } from "./sidebar-backdrop";
+import { BROWSER_FRAME_TINT_ARGB } from "./sidebar-card";
 
 describe("sidebar backdrop mode", () => {
   test("blur is on by default and survives junk input", () => {
@@ -77,6 +81,12 @@ describe("sidebar backdrop mode", () => {
         override: "native",
       }),
     ).toBe("native");
+  });
+
+  test("the sidebar overlay continues the browser-frame material without a second tint", () => {
+    expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
+    expect(SIDEBAR_FRAMED_SOLID_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
+    expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 });
 

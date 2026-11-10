@@ -5257,7 +5257,8 @@
 /* The frame's first row sits the frame gap below the toolbar's line, level with the page card's
  * top, in both shapes (the rail is aligned onto the panel's rows, SidebarRail alignRailToPanel). */
 .sidebar-body {
-  padding-top: 6px;
+  --sidebar-content-top-inset: 6px;
+  padding-top: var(--sidebar-content-top-inset);
 }
 
 /* The rail holds its designed width (the card is exactly this wide when collapsed), so its marks
@@ -5284,15 +5285,13 @@
   border-top-color: transparent;
   background: transparent;
 }
-/* The inactive shape stays mounted, out of flow and invisible, at the width it has when it is
- * the shape on screen (the open sidebar width for the panel, its designed width for the rail), so
- * switching shapes swaps the class and nothing re-flows: the panel's titles are laid out at their
- * final width from the first frame of an expand (the card's overflow clips them), and the rail
- * aligns onto panel rows measured at that width rather than squeezed into the 84px card, where
- * the New Tab label wrapped and the pinned row grew a scrollbar (shared/sidebar-morph.ts). */
+/* The inactive shape stays mounted, out of flow and invisible, at the width it has when it is the
+ * shape on screen (the open sidebar width for the panel, its designed width for the rail), so
+ * switching shapes swaps the class and nothing re-flows. It shares the body's content inset, so
+ * the panel rows are measured at their final vertical position instead of six pixels too high. */
 .sidebar-morph-column.is-shape-hidden {
   position: absolute;
-  top: 0;
+  top: var(--sidebar-content-top-inset, 6px);
   bottom: 0;
   left: 0;
   z-index: 0;
@@ -5576,4 +5575,14 @@
   .browser-chrome {
   border-bottom-color: transparent;
   background: transparent;
+}
+/* The overlay WebContentsView owns the live glass/tint underneath its web contents. A second CSS
+ * gradient + backdrop filter on this element stacks another material at the toolbar's bottom edge,
+ * which reads as a hard crease. Keep this surface transparent so the one frame material continues
+ * from the full-width toolbar into the sidebar; private windows retain their intentionally tinted
+ * surface. */
+.app-shell[data-surface="sidebar"] .browser-sidebar:not(.is-private-window) {
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }

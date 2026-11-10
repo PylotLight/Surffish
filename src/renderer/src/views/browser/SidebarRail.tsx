@@ -212,14 +212,16 @@ function setInlinePx(
   element: HTMLElement,
   property: string,
   px: number | null,
-): void {
+): boolean {
   const current = element.style.getPropertyValue(property);
   if (px === null) {
-    if (current) element.style.removeProperty(property);
-    return;
+    if (!current) return false;
+    element.style.removeProperty(property);
+    return true;
   }
-  if (current && Math.abs(inlinePx(current) - px) < 0.001) return;
+  if (current && Math.abs(inlinePx(current) - px) < 0.001) return false;
   element.style.setProperty(property, `${px}px`);
+  return true;
 }
 
 /**
@@ -245,22 +247,31 @@ function setInlinePx(
  * first frame (perf: "New Tab page shown").
  */
 function alignRailToPanel(rail: HTMLElement): void {
+  // The panel's pin marks are destinations during a shape morph, not live targets. Re-aligning
+  // against them while they travel shifts the rail underneath the flights and leaves pins adrift.
+  if (rail.closest(".browser-sidebar")?.hasAttribute("data-reshaping")) return;
   const panel = rail.parentElement?.querySelector<HTMLElement>(
     ":scope > .sidebar-panel",
   );
   const items = [
     ...rail.querySelectorAll<HTMLElement>(
-      ".sidebar-rail-pins-row > [data-rail-align], .sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
+      ".sidebar-rail-pins-row [data-rail-align], .sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
     ),
   ];
   const pin = rail.querySelector<HTMLElement>('[data-morph="sidebar-pin"]');
   if (!panel) {
+    let changed = false;
     for (const item of items) {
-      setInlinePx(item, "margin-top", null);
-      setInlinePx(item, "--sidebar-rail-mark-dx", null);
+      changed = setInlinePx(item, "margin-top", null) || changed;
+      changed = setInlinePx(item, "--sidebar-rail-mark-dx", null) || changed;
     }
-    if (pin?.style.translate) pin.style.removeProperty("translate");
-    setInlinePx(rail, "--sidebar-rail-mark-shift", null);
+    if (pin?.style.translate) {
+      pin.style.removeProperty("translate");
+      changed = true;
+    }
+    changed = setInlinePx(rail, "--sidebar-rail-mark-shift", null) || changed;
+    if (changed)
+      rail.dispatchEvent(new Event("sidebar-rail-aligned", { bubbles: true }));
     return;
   }
   const counterpart = (item: HTMLElement): HTMLElement | null => {
@@ -372,9 +383,16 @@ function alignRailToPanel(rail: HTMLElement): void {
     }
     const dy = deviceOffset(from, to, "y");
     // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
-    // marks plus gap), never into the previous mark. The divider keeps its own CSS margin as the
-    // base, so it moves by exactly dy.
-    const margin = Math.max(base + dy, -gap);
+    // marks plus gap), never into the previous mark. The pins row is outside that scroller, so use
+    // its own top padding instead; otherwise its first pin can remain a couple of pixels too low.
+    // The divider keeps its own CSS margin as the base, so it moves by exactly dy.
+    const pullUpLimit =
+      item.dataset.railAlign === "pins"
+        ? Number.parseFloat(
+            getComputedStyle(item.parentElement ?? rail).paddingTop,
+          ) || gap
+        : gap;
+    const margin = Math.max(base + dy, -pullUpLimit);
     moved += margin - base;
     return { item, base, dx, margin: margin !== base ? margin : null };
   });
@@ -391,21 +409,31 @@ function alignRailToPanel(rail: HTMLElement): void {
   }
 
   // Write: only what changed, so a render that moved nothing leaves layout clean.
-  setInlinePx(rail, "--sidebar-rail-mark-shift", shift !== 0 ? shift : null);
+  let changed = setInlinePx(
+    rail,
+    "--sidebar-rail-mark-shift",
+    shift !== 0 ? shift : null,
+  );
   for (const { item, base, dx, margin } of writes) {
-    setInlinePx(item, "--sidebar-rail-mark-dx", dx);
+    changed = setInlinePx(item, "--sidebar-rail-mark-dx", dx) || changed;
     if (margin === null) {
-      if (item.style.marginTop) item.style.marginTop = "";
+      if (item.style.marginTop) {
+        item.style.marginTop = "";
+        changed = true;
+      }
       railBaseMargins.delete(item);
     } else {
       railBaseMargins.set(item, base);
-      setInlinePx(item, "margin-top", margin);
+      changed = setInlinePx(item, "margin-top", margin) || changed;
     }
   }
   if (pin && pin.style.translate !== pinTranslate) {
     if (pinTranslate) pin.style.translate = pinTranslate;
     else pin.style.removeProperty("translate");
+    changed = true;
   }
+  if (changed)
+    rail.dispatchEvent(new Event("sidebar-rail-aligned", { bubbles: true }));
 }
 
 export function SidebarRail({
@@ -423,10 +451,9 @@ export function SidebarRail({
   const openTabs = tabs.filter((tab) => !tab.pinned);
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
   const railRef = useRef<HTMLElement>(null);
-  // Before the sidebar's own layout effect plays the shape morph, so the marks it measures are
-  // already where the rail draws them; only while the rail is the shape on screen in a surface
-  // that paints it (`animate`), so the panel, and the hidden toolbar surface, pay nothing.
-  const aligning = !shapeHidden && animate;
+  // Keep the rail aligned even while the panel is visible, so either direction starts on the
+  // panel's current rows. `animate` is true only for a surface that paints the rail.
+  const aligning = animate;
   useLayoutEffect(() => {
     if (aligning && railRef.current) alignRailToPanel(railRef.current);
   });
@@ -436,18 +463,42 @@ export function SidebarRail({
     if (!aligning) return;
     let frame = 0;
     let live = true;
+    const rail = railRef.current;
+    const panel = rail?.parentElement?.querySelector<HTMLElement>(
+      ":scope > .sidebar-panel",
+    );
+    const card = rail?.closest(".browser-sidebar") ?? null;
     const realign = (): void => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (live && railRef.current) alignRailToPanel(railRef.current);
       });
     };
+    const resizeObserver = new ResizeObserver(realign);
+    if (rail) resizeObserver.observe(rail);
+    if (panel) resizeObserver.observe(panel);
+    if (card) resizeObserver.observe(card);
+    const mutationObserver = new MutationObserver(realign);
+    if (panel)
+      mutationObserver.observe(panel, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+        childList: true,
+        subtree: true,
+      });
+    if (card)
+      mutationObserver.observe(card, {
+        attributes: true,
+        attributeFilter: ["data-reshaping"],
+      });
     window.addEventListener("resize", realign, { passive: true });
     if (document.fonts?.status === "loading")
       void document.fonts.ready.then(realign).catch(() => undefined);
     return () => {
       live = false;
       cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
       window.removeEventListener("resize", realign);
     };
   }, [aligning]);

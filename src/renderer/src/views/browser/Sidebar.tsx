@@ -195,7 +195,10 @@ export function Sidebar(props: SidebarProps) {
     const shape = collapsed ? "rail" : "panel";
     if (shape === morphShapeRef.current) {
       // At rest: keep the snapshot fresh, so the next change captures where things stand now.
-      morphSnapshotRef.current = captureSidebarMorph(host);
+      // During a morph, its marks are still travelling; recapturing them here makes the next
+      // transition start from an arbitrary in-flight position.
+      if (!card.hasAttribute("data-reshaping"))
+        morphSnapshotRef.current = captureSidebarMorph(host);
       return;
     }
     const previous = morphShapeRef.current;
@@ -240,10 +243,20 @@ export function Sidebar(props: SidebarProps) {
       queued = true;
       requestAnimationFrame(refresh);
     };
+    const refreshAlignedRail = () => {
+      if (
+        card.hasAttribute("data-reshaping") ||
+        morphShapeRef.current !== "rail"
+      )
+        return;
+      morphSnapshotRef.current = captureSidebarMorph(host);
+    };
     host.addEventListener("scroll", queue, { capture: true, passive: true });
+    host.addEventListener("sidebar-rail-aligned", refreshAlignedRail);
     window.addEventListener("resize", queue, { passive: true });
     return () => {
       host.removeEventListener("scroll", queue, true);
+      host.removeEventListener("sidebar-rail-aligned", refreshAlignedRail);
       window.removeEventListener("resize", queue);
       window.clearTimeout(morphTimerRef.current);
     };

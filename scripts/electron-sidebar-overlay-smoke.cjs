@@ -121,6 +121,171 @@ async function evaluate(view, expression) {
   return view.webContents.executeJavaScript(expression);
 }
 
+function sampleSidebarPinMorph(view, direction) {
+  const directionLiteral = JSON.stringify(direction);
+  return evaluate(
+    view,
+    `(() => {
+      const direction = ${directionLiteral}
+      const card = document.querySelector('.browser-sidebar')
+      if (!card) throw new Error('sidebar card is unavailable for pin sampling')
+      const marks = (root, selector) => [...(root?.querySelectorAll(selector) ?? [])].map((element) => {
+        const mark = element.querySelector('.tab-favicon, .pinned-site-mark') ?? element
+        const rect = mark.getBoundingClientRect()
+        return { key: element.dataset.motionKey ?? null, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+      })
+      const rail = card.querySelector('.sidebar-rail')
+      const panel = card.querySelector('.sidebar-panel')
+      const railButton = rail?.querySelector('.sidebar-rail-pins-row [data-rail-align="pins"]')
+      const rect = (element) => {
+        if (!element) return null
+        const value = element.getBoundingClientRect()
+        return { x: value.x, y: value.y, width: value.width, height: value.height }
+      }
+      const before = {
+        rail: marks(rail, '.sidebar-rail-pins-slot'),
+        panel: marks(panel, '.sidebar-pinned-list > [data-motion-key]'),
+        railDebug: {
+          card: rect(card),
+          body: rect(card.querySelector('.sidebar-body')),
+          rail: rect(rail),
+          button: rect(railButton),
+          buttonMargin: railButton?.style.marginTop ?? null,
+          buttonMarkDx: railButton?.style.getPropertyValue('--sidebar-rail-mark-dx') ?? null,
+          columnMarkShift: rail?.style.getPropertyValue('--sidebar-rail-mark-shift') ?? null,
+          buttonTranslate: railButton ? getComputedStyle(railButton).translate : null,
+        },
+      }
+      const activeSelector = direction === 'expand'
+        ? '.sidebar-panel:not(.is-shape-hidden)'
+        : '.sidebar-rail:not(.is-shape-hidden)'
+      const activeMarksSelector = direction === 'expand'
+        ? '.sidebar-pinned-list > [data-motion-key]'
+        : '.sidebar-rail-pins-slot'
+      return new Promise((resolve, reject) => {
+        const frames = []
+        const startedAt = performance.now()
+        const tick = () => {
+          const phase = card.getAttribute('data-reshaping')
+          if (phase === direction) {
+            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector) })
+          } else if (frames.length) {
+            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector) })
+            resolve({ before, frames })
+            return
+          }
+          if (performance.now() - startedAt > 5000) {
+            reject(new Error('timed out sampling the ' + direction + ' pin morph'))
+            return
+          }
+          requestAnimationFrame(tick)
+        }
+        const patch = direction === 'expand'
+          ? { sidebarPinned: true, sidebarHovered: false, sidebarFocused: false }
+          : { sidebarPinned: false, sidebarHovered: false, sidebarFocused: false }
+        Promise.resolve(window.api.browser.chrome.set(patch)).catch(reject)
+        requestAnimationFrame(tick)
+      })
+    })()`,
+  );
+}
+
+function assertSidebarPinMorph(sample, direction) {
+  const from =
+    direction === "expand" ? sample.before.rail : sample.before.panel;
+  const target =
+    direction === "expand" ? sample.before.panel : sample.before.rail;
+  const targetKeys = new Set(target.map((pin) => pin.key));
+  const common = from.filter((pin) => targetKeys.has(pin.key));
+  assert.ok(
+    common.length >= 2,
+    `${direction} has multiple pinned marks to glide`,
+  );
+  assert.deepEqual(
+    common.map((pin) => pin.key),
+    target
+      .filter((pin) => common.some((item) => item.key === pin.key))
+      .map((pin) => pin.key),
+    `${direction} keeps the rail and panel pin order`,
+  );
+  assert.ok(
+    sample.frames.length >= 4,
+    `${direction} samples several rendered animation frames`,
+  );
+  assert.deepEqual(
+    sample.frames.at(-1).marks.map((pin) => pin.key),
+    target.map((pin) => pin.key),
+    `${direction} ends with the target shape's pin order`,
+  );
+
+  const first = common[0];
+  const firstTarget = target.find((pin) => pin.key === first.key);
+  assert.ok(firstTarget);
+  assert.ok(
+    Math.abs(first.x - firstTarget.x) <= 1 &&
+      Math.abs(first.y - firstTarget.y) <= 1,
+    `${direction} starts with the first pin aligned to its counterpart (rail ${JSON.stringify(first)}, target ${JSON.stringify(firstTarget)}, layout ${JSON.stringify(sample.before.railDebug)})`,
+  );
+  for (const frame of sample.frames) {
+    const pin = frame.marks.find((item) => item.key === first.key);
+    assert.ok(pin, `${direction} keeps the first pin in every sampled frame`);
+    assert.ok(
+      Math.abs(pin.x - first.x) <= 1 && Math.abs(pin.y - first.y) <= 1,
+      `${direction} keeps the first pin fixed through the morph (x=${pin.x}, y=${pin.y})`,
+    );
+  }
+
+  for (const start of common.slice(1)) {
+    const end = target.find((pin) => pin.key === start.key);
+    assert.ok(end);
+    const travel = end.x - start.x;
+    assert.ok(
+      Math.abs(travel) > 1,
+      `${direction} gives ${start.key} a sideways glide`,
+    );
+    assert.ok(
+      Math.abs(travel) < 100,
+      `${direction} keeps ${start.key}'s glide under 100px`,
+    );
+    const path = sample.frames.map((frame) =>
+      frame.marks.find((pin) => pin.key === start.key),
+    );
+    assert.ok(
+      path.every(Boolean),
+      `${direction} samples ${start.key} throughout the morph`,
+    );
+    let maxStep = 0;
+    let maxStepIndex = 0;
+    for (let index = 1; index < path.length; index += 1) {
+      const step = path[index].x - path[index - 1].x;
+      if (Math.abs(step) > maxStep) {
+        maxStep = Math.abs(step);
+        maxStepIndex = index;
+      }
+      assert.ok(
+        travel > 0 ? step >= -1 : step <= 1,
+        `${direction} moves ${start.key} monotonically toward its target`,
+      );
+    }
+    const worstIntervalMs =
+      maxStepIndex > 0
+        ? sample.frames[maxStepIndex].at - sample.frames[maxStepIndex - 1].at
+        : 0;
+    assert.ok(
+      maxStep <= 12,
+      `${direction} glides ${start.key} without a jump (max ${maxStep.toFixed(2)}px over ${worstIntervalMs.toFixed(1)}ms; x=${path.map((pin) => pin.x.toFixed(1)).join("→")})`,
+    );
+    assert.ok(
+      Math.abs(path.at(-1).x - end.x) <= 1 &&
+        Math.abs(path.at(-1).y - end.y) <= 1,
+      `${direction} lands ${start.key} on its panel/rail target`,
+    );
+  }
+  console.log(
+    `[sidebar-overlay-smoke] ${direction} pin morph: ${sample.frames.length} rendered frames; first pin fixed; remaining pins glide and land on target`,
+  );
+}
+
 function captureFullWindow(name) {
   if (!screenshotDirectory) return;
   mkdirSync(screenshotDirectory, { recursive: true });
@@ -403,6 +568,8 @@ async function run() {
         const markRect = (el) => { const mark = el.querySelector('.tab-favicon, .pinned-site-mark') ?? el; const r = mark.getBoundingClientRect(); return { key: el.dataset.motionKey ?? null, x: r.x + r.width / 2, y: r.y + r.height / 2 } }
         const railPinMarks = collapsed ? [...shape.querySelectorAll('.sidebar-rail-pins-slot')].map(markRect) : null
         const panelPinMarks = collapsed ? [...(card.querySelector('.sidebar-panel')?.querySelectorAll('.sidebar-pinned-list > [data-motion-key]') ?? [])].map(markRect) : null
+        const railPinButton = collapsed ? shape.querySelector('.sidebar-rail-pins-row [data-rail-align="pins"]') : null
+        const railPinAlign = railPinButton ? { marginTop: railPinButton.style.marginTop, shift: railPinButton.style.getPropertyValue('--sidebar-rail-mark-shift'), dx: railPinButton.style.getPropertyValue('--sidebar-rail-mark-dx'), reshaping: card.getAttribute('data-reshaping') } : null
         const railFirstTab = collapsed ? iconRect(shape, '[data-motion-key^="tab:"] .tab-favicon') : null
         const panelFirstTab = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '[data-motion-key^="tab:"] .tab-favicon') : null
         return {
@@ -414,6 +581,7 @@ async function run() {
           pins,
           railPinMarks,
           panelPinMarks,
+          railPinAlign,
           railFirstTab,
           panelFirstTab,
         }
@@ -457,6 +625,9 @@ async function run() {
     const pins = sidebarActions.pins ?? [];
     console.log(
       `[sidebar-overlay-smoke] rail pins: ${JSON.stringify(pins)} first tab: ${JSON.stringify(sidebarActions.railFirstTab)} panel first tab: ${JSON.stringify(sidebarActions.panelFirstTab)}`,
+    );
+    console.log(
+      `[sidebar-overlay-smoke] rail pin alignment: ${JSON.stringify(sidebarActions.railPinAlign)}`,
     );
     assert.ok(pins.length >= 1, "the collapsed rail draws its pins");
     assert.ok(pins.length <= 4, "the rail draws at most four pin slots");
@@ -841,7 +1012,7 @@ async function run() {
     "the full React renderer is hidden above the page and cannot intercept its input",
   );
   assert.equal(rendererViews.toolbar.getVisible(), true);
-  // In tabs mode the panel collapses to a persistent 84px rail; the full-width page stays underneath.
+  // In tabs mode the panel collapses to a persistent 84px rail; the inset live-page card stays beside it.
   assert.equal(
     rendererViews.sidebar.getVisible(),
     true,
@@ -894,6 +1065,40 @@ async function run() {
     "the sidebar is layered above the live page",
   );
   captureFullWindow("sidebar-overlay-live-page-collapsed-rail.png");
+
+  const expandPinSample = await sampleSidebarPinMorph(
+    rendererViews.sidebar,
+    "expand",
+  );
+  assertSidebarPinMorph(expandPinSample, "expand");
+  await waitFor(
+    () => rendererViews.sidebar.getBounds().width >= 300,
+    "the pinned sidebar to finish expanding after its pin morph",
+  );
+  const overlaySurfaceStyle = await evaluate(
+    rendererViews.sidebar,
+    '(() => { const style = getComputedStyle(document.querySelector(".browser-sidebar")); return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, boxShadow: style.boxShadow, backdropFilter: style.backdropFilter }; })()',
+  );
+  assert.deepEqual(
+    overlaySurfaceStyle,
+    {
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      backgroundImage: "none",
+      boxShadow: "none",
+      backdropFilter: "none",
+    },
+    "the overlay sidebar relies on one native glass surface instead of layering CSS tint on top",
+  );
+  captureFullWindow("sidebar-overlay-live-page-expanded.png");
+  const collapsePinSample = await sampleSidebarPinMorph(
+    rendererViews.sidebar,
+    "collapse",
+  );
+  assertSidebarPinMorph(collapsePinSample, "collapse");
+  await waitFor(
+    collapsedRailVisible,
+    "the sidebar to return to its collapsed rail after pin morph validation",
+  );
 
   // The old toolbar Tabs toggle is gone; the leftmost toolbar control (Back) and the brand mark must stay inert on hover.
   for (const selector of [
@@ -1439,12 +1644,17 @@ async function run() {
   await waitFor(
     () =>
       rendererViews.toolbar.getVisible() && !rendererViews.content.getVisible(),
-    "return to the full-width live page overlay",
+    "return to the live page overlay with its inset card",
   );
-  await waitFor(
-    () => fixturePageView.getBounds().width === contentSize[0],
-    "the full-width page after tab activation",
-  );
+  await waitFor(() => {
+    const actual = fixturePageView.getBounds();
+    return (
+      actual.x === pageVisibleSidebar.x &&
+      actual.y === pageVisibleSidebar.y &&
+      actual.width === pageVisibleSidebar.width &&
+      actual.height === pageVisibleSidebar.height
+    );
+  }, "the inset page card after tab activation");
   assert.match(
     await fixturePageView.webContents.executeJavaScript("document.cookie"),
     /surffish-overlay-smoke=cookie-preserved/,
@@ -1452,10 +1662,13 @@ async function run() {
   );
   captureFullWindow("sidebar-overlay-live-page-restored.png");
 
-  assert.equal(fixturePageView.getBounds().x, 0);
-  assert.equal(fixturePageView.getBounds().width, contentSize[0]);
+  assert.deepEqual(
+    fixturePageView.getBounds(),
+    pageVisibleSidebar,
+    "the restored live page keeps its inset-card geometry",
+  );
   console.log(
-    `BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page x=${fixturePageView.getBounds().x}, width=${fixturePageView.getBounds().width}/${contentSize[0]}; persisted sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and hover stability, pointer resize/persistence, x=5 click-through, overlay page input/wheel, delayed edge reveal, and tab/New Tab lifecycle verified.`,
+    `BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page card=${JSON.stringify(fixturePageView.getBounds())}; persisted sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and hover stability, pointer resize/persistence, x=5 click-through, overlay page input/wheel, delayed edge reveal, and tab/New Tab lifecycle verified.`,
   );
 }
 

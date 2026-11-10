@@ -3,10 +3,10 @@
  * the rail opening back into the list — as one continuous change rather than one column
  * vanishing and another appearing.
  *
- * Everything the two shapes have in common is a site's mark: each one travels from where the old
- * shape drew it to where the new one does, on the same curve the card's width travels on, so the
- * column reads as one surface. What only the old shape had fades where it stood; what only the
- * new shape has fades in around the marks.
+ * Marks shared by the two shapes travel between their measured positions. Ordinary marks follow
+ * the card curve; pinned favicons use a gentler ease-in-out over the same duration, so the compact
+ * cluster spreads or gathers without a front-loaded jump. What only the old shape had fades where
+ * it stood; what only the new shape has fades in around the marks.
  *
  * Every step is a transform or an opacity, carried by the compositor. The only measuring is once
  * before the change (capture) and once after (the flight destinations). The planning is pure and
@@ -73,6 +73,8 @@ export interface MorphPlan {
 
 /** The card's open/close curve (shared/sidebar-motion.ts): marks travel with it. */
 export const MORPH_EASING = sidebarMotionEasingCss();
+/** Pin clusters glide at a balanced pace instead of inheriting the card's front-loaded departure. */
+export const MORPH_PIN_EASING = "cubic-bezier(0.3, 0, 0.7, 1)";
 /** Slow out of the shape and settling late, so a mark stays behind the card's moving edge. */
 export const MORPH_TRAILING_EASING = "cubic-bezier(0.55, 0, 0.25, 1)";
 /** Trailing marks take a little longer than the card so the edge leads them all the way. */
@@ -210,9 +212,9 @@ export function planSidebarMorph(
     hold?: boolean;
     /**
      * Keys that travel even under `hold`: the pins, a stacked cluster in the rail and a row in the
-     * panel. They glide alongside the card's edge (its curve and duration, never trailing: a pin
+     * panel. They glide over the card's duration with a gentle ease-in-out, never trailing: a pin
      * bound inside the card's final width stays inside its moving edge all the way, both ends being
-     * inside it), so the row spreads out of the cluster, or gathers into it.
+     * inside it, so the row spreads out of the cluster or gathers into it smoothly.
      */
     glide?: (key: string) => boolean;
   },
@@ -313,6 +315,8 @@ export function playSidebarMorph(
   for (const flight of plan.flights) {
     const durationMs =
       SIDEBAR_MOTION_MS * (flight.trailing ? MORPH_TRAILING_FACTOR : 1);
+    const key = flight.element.dataset.motionKey;
+    const pinGlide = Boolean(key && isPinMotionKey(key));
     const animation = flight.element.animate(
       [
         { transform: `translate(${flight.dx}px, ${flight.dy}px)` },
@@ -320,7 +324,11 @@ export function playSidebarMorph(
       ],
       {
         duration: durationMs,
-        easing: flight.trailing ? MORPH_TRAILING_EASING : MORPH_EASING,
+        easing: flight.trailing
+          ? MORPH_TRAILING_EASING
+          : pinGlide
+            ? MORPH_PIN_EASING
+            : MORPH_EASING,
         fill: "backwards",
       },
     );
