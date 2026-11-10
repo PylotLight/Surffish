@@ -511,6 +511,9 @@ const api = {
       return () =>
         ipcRenderer.removeListener("browser:focus-address", listener);
     },
+    /** Give this shell surface the keyboard (a New Tab's restored address bar draft). */
+    focusAddressSurface: (): Promise<boolean> =>
+      ipcRenderer.invoke("browser:focus-address-surface"),
     /** Safety pack: tab recovery, spellcheck, privacy / site data, HTTPS-only, proxy kill switch. */
     safety: {
       tabRecovery: (

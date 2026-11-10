@@ -632,6 +632,7 @@ export default function Browser({
   );
   const activeSuggestionIndex = omniboxPreview ? omniboxPreview.index : -1;
   const omniboxCaretToEndRef = useRef(false);
+  const restoringAddressFocusRef = useRef(false);
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(
     DEFAULT_SEARCH_ENGINE,
   );
@@ -2292,6 +2293,39 @@ export default function Browser({
     setNavigationError("");
   }, [activeTabId]);
 
+  // Each tab keeps its own unsubmitted text (shared/omnibox-drafts), as in Chrome and Arc.
+  const draftTabs = useMemo(
+    () =>
+      tabs.map((tab) => ({
+        id: tab.id,
+        display: addressDisplayValue(
+          tab.url,
+          tab.url === SURFFISH_QUICK_LINKS_URL,
+        ),
+      })),
+    [tabs],
+  );
+  const restoreAddressFocus = useCallback(
+    (input: HTMLInputElement, placeCaret: () => void) => {
+      // Back on a New Tab with half-typed text: keyboard into the bar, caret where it was, and no
+      // select-all or suggestions dropdown. The focus handler skips both while this is set, which
+      // covers the input's own focus and the one Chromium fires again when the surface takes the
+      // keyboard from main.
+      restoringAddressFocusRef.current = true;
+      input.focus({ preventScroll: true });
+      placeCaret();
+      void window.api.browser
+        .focusAddressSurface()
+        .catch(() => false)
+        .then(() => {
+          placeCaret();
+          window.setTimeout(() => {
+            restoringAddressFocusRef.current = false;
+          }, 50);
+        });
+    },
+    [],
+  );
   // The tab URL wins unless the user is really typing (activeElement alone sticks when focus moves to another view).
   const addressSync = useAddressBarSync({
     inputRef: addressRef,
@@ -2299,6 +2333,8 @@ export default function Browser({
     setAddress,
     displayUrl: addressDisplayValue(browser.url, isLocalNewTab),
     tabKey: activeTabId,
+    tabs: draftTabs,
+    onRestoreFocus: restoreAddressFocus,
   });
   // After arrowing (or Esc back to the typed text), caret at the end with nothing selected, so the
   // next keystroke edits the text instead of replacing it.
@@ -2331,6 +2367,7 @@ export default function Browser({
     ) {
       if (hadPrerenderHint) window.api.browser.preconnect.typingEnded();
       setNavigationError("");
+      addressSync.clearDraft();
       addressRef.current?.blur();
       return;
     }
@@ -2421,6 +2458,7 @@ export default function Browser({
         setOmniboxPreview(null);
         omniboxCaretToEndRef.current = true;
         setAddress(escape.text);
+        addressSync.rememberDraft(escape.text);
         return;
       }
       // Like Chrome: Esc drops the dropdown and any half-typed text, leaving the real URL selected.
@@ -2459,6 +2497,7 @@ export default function Browser({
     setOmniboxPreview(next.preview);
     omniboxCaretToEndRef.current = true;
     setAddress(next.text);
+    addressSync.rememberDraft(next.text);
   }
 
   async function saveProxy(): Promise<void> {
@@ -2994,6 +3033,7 @@ export default function Browser({
                   onChange={(event) => {
                     // Typing (including editing a filled-in suggestion) makes this the new query.
                     setAddress(event.target.value);
+                    addressSync.rememberDraft(event.target.value, event.target);
                     setNavigationError("");
                     setSuggestionsOpen(true);
                     setOmniboxPreview(null);
@@ -3011,6 +3051,8 @@ export default function Browser({
                   }}
                   onFocus={(event) => {
                     setOmniboxPreview(null);
+                    // A restored per-tab draft keeps its caret and leaves the dropdown closed.
+                    if (restoringAddressFocusRef.current) return;
                     event.currentTarget.select();
                     setSuggestionsOpen(true);
                     if (historyStaleRef.current) void refreshHistory();
