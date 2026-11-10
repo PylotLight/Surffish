@@ -31,7 +31,7 @@ const server = createServer((request, response) => {
     "Cache-Control": "no-store",
   });
   response.end(
-    `<!doctype html><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:90px;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`,
+    `<!doctype html><meta charset="utf-8"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>${fixtureTitle}</title><style>html,body{margin:0;width:100%;min-height:180vh;font:20px system-ui;color:#fff;background:repeating-linear-gradient(135deg,#145b55 0 56px,#2f8e78 56px 112px)}h1{margin:0;padding:18px;background:#b21e35;font-size:20px}#target{position:absolute;top:112px;left:68vw;width:230px;height:78px;display:grid;place-items:center;background:#192e4a;border:3px solid #fff;border-radius:12px;cursor:pointer}#target strong{font-size:20px}#count{position:absolute;top:205px;left:68vw}#edge-target{position:absolute;top:230px;left:8px;width:28px;height:48px;padding:0;background:#f0c419;color:#000;cursor:pointer}#page-input{position:absolute;top:270px;left:58vw;width:280px;height:42px;font:18px system-ui}</style><h1>LIVE SYNTHETIC PAGE — FULL-WIDTH OVERLAY TEST</h1><button id="target" onclick="window.clickCount=(window.clickCount||0)+1;document.querySelector('#count').textContent='Clicks: '+window.clickCount"><strong>Click page under overlay</strong></button><button id="edge-target" aria-label="Edge click target" onclick="window.edgeClickCount=(window.edgeClickCount||0)+1">edge</button><div id="count">Clicks: 0</div><input id="page-input" aria-label="Page input" placeholder="Real keyboard input test"><p style="margin-top:420px">Synthetic full-width web content</p>`,
   );
 });
 let mainWindow;
@@ -392,12 +392,18 @@ async function run() {
         }
         const railPlus = collapsed ? iconRect(shape, '.sidebar-rail-new-tab .sidebar-new-tab-row-icon') : null
         const panelPlus = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '.sidebar-new-tab-row .sidebar-new-tab-row-icon') : null
+        const pins = collapsed ? [...shape.querySelectorAll('.sidebar-rail-pins-slot, .sidebar-rail-pins-more')].map((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, more: el.classList.contains('sidebar-rail-pins-more') ? el.textContent : null } }) : null
+        const railFirstTab = collapsed ? iconRect(shape, '[data-motion-key^="tab:"] .tab-favicon') : null
+        const panelFirstTab = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '[data-motion-key^="tab:"] .tab-favicon') : null
         return {
           collapsed,
           controls,
           labels,
           newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null,
           newTabOffset: railPlus && panelPlus ? { dx: railPlus.x - panelPlus.x, dy: railPlus.y - panelPlus.y } : null,
+          pins,
+          railFirstTab,
+          panelFirstTab,
         }
       })()`,
     );
@@ -434,6 +440,36 @@ async function run() {
         Math.abs(dx) <= 1,
         `the rail New tab + sits on the panel row's + horizontally (dx=${dx})`,
       );
+    }
+    // Pins are one row of stacked marks (shared/rail-pin-cluster.ts), so the tabs start right below.
+    const pins = sidebarActions.pins ?? [];
+    console.log(
+      `[sidebar-overlay-smoke] rail pins: ${JSON.stringify(pins)} first tab: ${JSON.stringify(sidebarActions.railFirstTab)} panel first tab: ${JSON.stringify(sidebarActions.panelFirstTab)}`,
+    );
+    assert.ok(pins.length >= 1, "the collapsed rail draws its pins");
+    assert.ok(pins.length <= 4, "the rail draws at most four pin slots");
+    for (const pin of pins)
+      assert.ok(
+        Math.abs(pin.top - pins[0].top) <= 1,
+        `every rail pin shares one row (${JSON.stringify(pins)})`,
+      );
+    if (sidebarActions.railFirstTab) {
+      const pinCentre = (pins[0].top + pins[0].bottom) / 2;
+      const below = sidebarActions.railFirstTab.y - pinCentre;
+      assert.ok(
+        sidebarActions.railFirstTab.y > pins[0].bottom && below <= 80,
+        `the first tab sits one row below the pins (${below}px)`,
+      );
+      if (sidebarActions.panelFirstTab) {
+        const dx =
+          sidebarActions.railFirstTab.x - sidebarActions.panelFirstTab.x;
+        const dy =
+          sidebarActions.railFirstTab.y - sidebarActions.panelFirstTab.y;
+        assert.ok(
+          Math.abs(dx) <= 1 && Math.abs(dy) <= 1,
+          `the rail's first tab favicon sits on the panel's within 1px (dx=${dx}, dy=${dy})`,
+        );
+      }
     }
   } else {
     assert.equal(
@@ -674,7 +710,7 @@ async function run() {
       rendererViews.content.getBounds().width === width &&
       rendererViews.toolbar.getBounds().width === width &&
       rendererViews.sidebar.getBounds().height === height &&
-      siteBounds.width === width &&
+      siteBounds.x + siteBounds.width === width &&
       siteBounds.height === Math.max(0, height - siteBounds.y)
     );
   }, "all native shell layers and the live page resize with the window");
@@ -725,7 +761,7 @@ async function run() {
       rendererViews.content.getBounds().width === width &&
       rendererViews.toolbar.getBounds().width === width &&
       rendererViews.sidebar.getBounds().height === height &&
-      siteBounds.width === width &&
+      siteBounds.x + siteBounds.width === width &&
       siteBounds.height === Math.max(0, height - siteBounds.y)
     );
   }, "native shell layers and the live page match the size after maximize");
@@ -740,15 +776,11 @@ async function run() {
   );
   const pageHiddenSidebar = fixturePageView.getBounds();
   const sidebarHiddenState = nativeViewState();
+  // The auto-hiding sidebar's rail stays on screen, so the page sits beside it rather than under it.
   assert.equal(
-    pageHiddenSidebar.x,
-    0,
-    "a live page starts at the left edge without a reveal-strip inset",
-  );
-  assert.equal(
-    pageHiddenSidebar.width,
+    pageHiddenSidebar.x + pageHiddenSidebar.width,
     contentSize[0],
-    "the live page spans the entire native content width",
+    "the live page runs to the window's right edge",
   );
   assert.equal(
     rendererViews.content.getVisible(),
@@ -769,6 +801,11 @@ async function run() {
   assert.ok(
     collapsedSidebarBounds.width >= 83 && collapsedSidebarBounds.width <= 85,
     `the collapsed sidebar is rail-width (${JSON.stringify(collapsedSidebarBounds)})`,
+  );
+  assert.ok(
+    pageHiddenSidebar.x >=
+      collapsedSidebarBounds.x + collapsedSidebarBounds.width,
+    `the live page starts at or right of the collapsed rail's right edge (page ${JSON.stringify(pageHiddenSidebar)}, rail ${JSON.stringify(collapsedSidebarBounds)})`,
   );
   assert.ok(
     sidebarHiddenState.find((view) => view.surface === "toolbar").index >
@@ -1081,10 +1118,14 @@ async function run() {
       rendererViews.sidebar.getBounds().x === 0,
     "hover over the live-page edge to reopen the sidebar",
   );
-  assert.equal(
-    fixturePageView.getBounds().width,
-    contentSize[0],
-    "hover reveal keeps the live page full width",
+  assert.deepEqual(
+    fixturePageView.getBounds(),
+    pageAfterHide,
+    "hover reveal overlays the page without moving or resizing it",
+  );
+  assert.ok(
+    pageAfterHide.x >= 83,
+    `the collapsed page sits beside the rail (${JSON.stringify(pageAfterHide)})`,
   );
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),

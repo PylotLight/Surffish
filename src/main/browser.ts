@@ -305,6 +305,7 @@ import {
 import { setPageViewOnScreen, type TabProcessEntry } from "./tab-visibility";
 import {
   initialPageViewBounds,
+  insetPageArea,
   pageViewBounds,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
@@ -530,6 +531,8 @@ interface BrowserWindowState {
   activeTabId: string | null;
   /** Page area in window coordinates (where the active site view sits). */
   browserBounds: BrowserBounds;
+  /** Left inset the page area keeps beside the collapsed sidebar rail (shared/page-view-bounds.ts). */
+  pageLeftInset?: number;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -6332,12 +6335,17 @@ export function setBrowserBounds(input: unknown): void {
     values.some((value) => typeof value !== "number" || !Number.isFinite(value))
   )
     return;
-  const browserBounds = (w.browserBounds = {
-    x: Math.max(0, Math.round(bounds.x!)),
-    y: Math.max(0, Math.round(bounds.y!)),
-    width: Math.max(0, Math.round(bounds.width!)),
-    height: Math.max(0, Math.round(bounds.height!)),
-  });
+  // The content renderer measures its viewport at the window's left edge; live pages sit beside
+  // the collapsed rail (syncBrowserBoundsToWindow), so its report is held to the same inset.
+  const browserBounds = (w.browserBounds = insetPageArea(
+    {
+      x: Math.max(0, Math.round(bounds.x!)),
+      y: Math.max(0, Math.round(bounds.y!)),
+      width: Math.max(0, Math.round(bounds.width!)),
+      height: Math.max(0, Math.round(bounds.height!)),
+    },
+    w.pageLeftInset ?? 0,
+  ));
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
   if (browserBounds.width === 0 || browserBounds.height === 0)
     hideLinkStatus(false, w.window);
@@ -6349,18 +6357,19 @@ export function syncBrowserBoundsToWindow(
   height: number,
   overlayMode: boolean,
   window?: BaseWindow,
+  leftInset = 0,
 ): void {
   const w = window ? windowStateFor(window) : currentWindowState();
-  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return;
+  if (!isLiveWindow(w)) return;
+  w.pageLeftInset = overlayMode ? Math.max(0, Math.round(leftInset)) : 0;
+  if (!overlayMode || width <= 0 || height <= 0) return;
   const { browserBounds } = w;
   if (browserBounds.width <= 0 || browserBounds.height <= 0) return;
   const y = Math.min(browserBounds.y, height);
-  const nextBounds: BrowserBounds = {
-    x: 0,
-    y,
-    width,
-    height: Math.max(0, height - y),
-  };
+  const nextBounds: BrowserBounds = insetPageArea(
+    { x: 0, y, width, height: Math.max(0, height - y) },
+    w.pageLeftInset,
+  );
   if (
     nextBounds.x === browserBounds.x &&
     nextBounds.y === browserBounds.y &&

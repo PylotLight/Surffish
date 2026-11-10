@@ -38,3 +38,44 @@ export function initialPageViewBounds(
     height: pageArea.height,
   };
 }
+
+/**
+ * The left inset live pages keep beside the sidebar: the collapsed icon rail's width while the
+ * sidebar auto-hides (the rail stays on screen, so the page sits beside it rather than under it),
+ * 0 when the sidebar is pinned open (it floats over the page as before) or there is no rail.
+ * History opens over the rail like a hover reveal, so it keeps the inset too: revealing the panel
+ * never resizes the page.
+ */
+export function pageRailInset({
+  overlayMode,
+  sidebarMode,
+  sidebarPinned,
+  railWidth,
+}: {
+  overlayMode: boolean;
+  sidebarMode: string;
+  sidebarPinned: boolean;
+  railWidth: number;
+}): number {
+  if (!overlayMode || sidebarPinned || !(railWidth > 0)) return 0;
+  return sidebarMode === "tabs" || sidebarMode === "history"
+    ? Math.round(railWidth)
+    : 0;
+}
+
+/**
+ * `rect` starting no further left than `inset`, its right edge kept. Idempotent, so a page area a
+ * renderer already measured beside the rail is left as it is; a hidden (empty) area stays empty.
+ */
+export function insetPageArea(rect: ViewRect, inset: number): ViewRect {
+  const left = Math.max(0, Math.round(inset));
+  if (rect.x >= left || !(rect.width > 0) || !(rect.height > 0))
+    return { ...rect };
+  const shift = left - rect.x;
+  return {
+    x: left,
+    y: rect.y,
+    width: Math.max(0, rect.width - shift),
+    height: rect.height,
+  };
+}

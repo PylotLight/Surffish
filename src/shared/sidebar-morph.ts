@@ -265,24 +265,24 @@ export function playSidebarMorph(
     `:scope > .${MORPH_GHOST_CLASS}`,
   ))
     ghost.remove();
-  releaseColumn(snapshot);
-  const card = host.parentElement ?? host;
+  const targets = measureSidebarTargets(incoming);
+  const incomingKeys = new Set(
+    targets.flatMap((target) => (target.key ? [target.key] : [])),
+  );
   const oldRight = snapshot.rect.x + snapshot.rect.width;
   const newRight = incoming.getBoundingClientRect().right;
-  const plan = planSidebarMorph(
-    snapshot.marks,
-    measureSidebarTargets(incoming),
-    {
-      edgeFrom: oldRight,
-      widening: newRight - oldRight > 1,
-      // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
-      // counterpart never travels: it is shown in place from the first frame. A measured
-      // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
-      // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
-      // in the panel and a column in the rail, swap in place rather than glide.
-      hold: true,
-    },
-  );
+  releaseColumn(snapshot, incomingKeys);
+  const card = host.parentElement ?? host;
+  const plan = planSidebarMorph(snapshot.marks, targets, {
+    edgeFrom: oldRight,
+    widening: newRight - oldRight > 1,
+    // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
+    // counterpart never travels: it is shown in place from the first frame. A measured
+    // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
+    // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
+    // in the panel and one stacked cluster in the rail, crossfade (releaseColumn).
+    hold: true,
+  });
   let total = MORPH_FADE_MS;
   for (const flight of plan.flights) {
     const durationMs =
@@ -413,9 +413,15 @@ function holdUntilRoom(
  * (hidden there for the DOM that automation and smokes read), so the ghost is a pixel copy of
  * it: the copy leaves the document once it has faded, and the framework never touches it.
  */
-function releaseColumn(snapshot: MorphSnapshot): void {
+function releaseColumn(
+  snapshot: MorphSnapshot,
+  incomingKeys: ReadonlySet<string>,
+): void {
   const { column, host, rect } = snapshot;
   if (!column || !host.isConnected) return;
+  // Marks the incoming shape does not draw (the panel's pins row vs the rail's pin cluster) stay
+  // in the copy and fade out with it while their new form fades in: a crossfade, not a blink.
+  const fading = new Set<HTMLElement>();
   const ghost = column.cloneNode(true) as HTMLElement;
   // The copy inherits the hidden shape's classes; the ghost is the one that shows and fades.
   ghost.classList.remove(MORPH_HIDDEN_CLASS);
@@ -425,14 +431,17 @@ function releaseColumn(snapshot: MorphSnapshot): void {
     // A keyed counterpart is drawn by the incoming shape throughout (travelling or settled), so
     // its copy here is withdrawn too, even when it has no site mark (the sidebar pin): fading a
     // second copy over the one that stays reads as a flash.
-    if (keyOf(node)) markOf(node).style.visibility = "hidden";
+    const key = keyOf(node);
+    if (key && incomingKeys.has(key)) markOf(node).style.visibility = "hidden";
+    else if (key) fading.add(markOf(node));
     for (const name of node.getAttributeNames()) {
       if (name === "data-motion-key" || name === "data-morph")
         node.removeAttribute(name);
     }
   }
   for (const mark of ghost.querySelectorAll<HTMLElement>(MARK_SELECTOR))
-    mark.style.visibility = "hidden";
+    if (!fading.has(mark) && !mark.closest("[data-morph-fade]"))
+      mark.style.visibility = "hidden";
   ghost.setAttribute("aria-hidden", "true");
   ghost.inert = true;
   const bounds = host.getBoundingClientRect();

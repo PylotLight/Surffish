@@ -805,18 +805,21 @@ export function Sidebar(props: SidebarProps) {
             shapeHidden={!collapsed}
             animate={railOnScreen}
             cachedSiteIcons={cachedSiteIcons}
-            onOpenPinnedSite={(site: PinnedSite) => void openPinnedSite(site)}
+            onRevealPins={() =>
+              // Focus in the sidebar keeps the panel revealed; once it is the shape on screen, the
+              // panel's own pins row takes focus (that is where a pin is opened or rearranged).
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() =>
+                  pinnedListRef.current
+                    ?.querySelector<HTMLElement>("button")
+                    ?.focus(),
+                ),
+              )
+            }
             onTogglePinned={() =>
               setSidebarPinned((pinned: boolean) => !pinned)
             }
             onNewTab={createNewTab}
-            onUnpinPinnedSite={(site: PinnedSite) =>
-              void savePinnedSites(
-                pinnedSites.filter(
-                  (pinned: PinnedSite) => pinned.url !== site.url,
-                ),
-              )
-            }
             pinnedSites={railPinnedSites}
             pinnedTabs={railPinnedTabs}
             sidebarPinned={sidebarPinned}

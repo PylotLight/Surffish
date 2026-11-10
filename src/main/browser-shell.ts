@@ -28,6 +28,7 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
+import { pageRailInset } from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import { SidebarOverlayMotion } from "./sidebar-motion";
@@ -74,6 +75,8 @@ type BrowserShellLayoutSync = (
   height: number,
   overlayMode: boolean,
   window: BaseWindow,
+  /** Left inset live pages keep beside the collapsed rail (shared/page-view-bounds.ts). */
+  leftInset: number,
 ) => void;
 
 /** One window's shell: its three renderer surfaces and the chrome (sidebar/toolbar) state they share. */
@@ -342,7 +345,17 @@ function applyShellLayout(shell: ShellState): void {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");
   }
-  shell.syncPageBounds?.(width, height, overlayMode, shell.window);
+  // The auto-hiding sidebar's rail stays on screen beside live pages, so they start at its right
+  // edge instead of under it (Gmail's left nav was cut off). A hover/focus reveal overlays the page
+  // and never changes this; pinning/unpinning moves it once, while the card covers the page's
+  // left edge either way, so the page's own left edge never shows moving.
+  const pageInset = pageRailInset({
+    overlayMode,
+    sidebarMode: shell.chromeState.sidebarMode,
+    sidebarPinned: shell.chromeState.sidebarPinned,
+    railWidth,
+  });
+  shell.syncPageBounds?.(width, height, overlayMode, shell.window, pageInset);
   const cause = shell.layoutCause ?? "layout";
   shell.layoutCause = null;
   shell.revealGuard?.noteChromeChanged(cause);

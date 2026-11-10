@@ -5424,6 +5424,84 @@
   width: 18px;
   height: 18px;
 }
+/* The rail's pins as one row: each mark stacked a little over the next (shared/rail-pin-cluster.ts
+ * gives every slot its x and stacking), ringed in the rail's own tint so the overlaps read. One
+ * row at the rail's pitch, lined up on the panel's pins row (SidebarRail alignRailToPanel), so
+ * the tabs start right below in either shape. */
+.sidebar-rail-pins {
+  --rail-pin-ring: rgba(24, 29, 36, 0.96);
+  --rail-pins-fan: 0px;
+  position: relative;
+  display: block;
+  width: calc(var(--rail-pins-width, 24px) + 12px);
+  height: 36px;
+  flex: 0 0 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 13px;
+  background: transparent;
+  cursor: pointer;
+  outline: 0;
+  -webkit-app-region: no-drag;
+  -webkit-user-drag: none;
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease;
+}
+.browser-sidebar.is-private-window .sidebar-rail-pins {
+  --rail-pin-ring: rgba(30, 26, 40, 0.96);
+}
+.sidebar-rail-pins:hover:not(:where([data-reshaping] *)),
+.sidebar-rail-pins:focus-visible {
+  --rail-pins-fan: 3px;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.085);
+}
+.sidebar-rail-pins-slot,
+.sidebar-rail-pins-more {
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--rail-pin-ring);
+  box-shadow: 0 0 0 2px var(--rail-pin-ring);
+  pointer-events: none;
+  translate: calc(
+      var(--rail-pin-x, 0px) + var(--rail-pin-slot, 0) * var(--rail-pins-fan)
+    )
+    0;
+  transition: translate 160ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.sidebar-rail-pins-slot.is-active {
+  box-shadow:
+    0 0 0 2px var(--rail-pin-ring),
+    0 0 0 3px rgba(180, 243, 202, 0.5);
+}
+.sidebar-rail-pins .tab-favicon,
+.sidebar-rail-pins .pinned-site-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  font-size: 11px;
+}
+.sidebar-rail-pins-more {
+  background: rgba(52, 60, 72, 0.98);
+  color: rgba(245, 247, 250, 0.84);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-rail-pins-slot,
+  .sidebar-rail-pins-more {
+    transition: none;
+  }
+}
 .sidebar-rail-badge {
   position: absolute;
   right: 3px;
@@ -5454,11 +5532,13 @@
 .sidebar-rail-new-tab:focus-visible {
   color: rgba(255, 255, 255, 0.9);
 }
+/* No margin below: the panel's first tab sits close under its hairline, and the rail's first tab
+ * can be pulled up by at most the column gap (alignRailToPanel). */
 .sidebar-rail-divider {
   width: 30px;
   height: 1px;
   flex: 0 0 1px;
-  margin: 3px 0;
+  margin: 3px 0 0;
   background: rgba(255, 255, 255, 0.11);
 }
 /* The rail's footer reuses the panel footer's box (.sidebar-footer), so the pin keeps its exact
