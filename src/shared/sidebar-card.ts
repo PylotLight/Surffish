@@ -127,13 +127,13 @@ export function sidebarCardCssVars(
 }
 
 /**
- * The browser frame's tint, ARGB: rgba(18, 21, 25, 0.82), the toolbar strip's own ground
- * (.browser-chrome in Browser.css). Over live pages main sets it as the window root's background
- * (browser-shell.ts), under the toolbar strip, the rail, the docked panel and the page card, which
- * draw none of their own there: one material, the macOS window vibrancy (or the window colour
- * elsewhere) under one tint, showing in the gaps and the card's rounded cut-out corners too.
+ * The browser frame's tint, ARGB: rgba(18, 21, 25, 0.65), matched by the toolbar strip in
+ * Browser.css. Over live pages main sets it as the window root's background (browser-shell.ts), under
+ * the toolbar strip, rail, docked panel and page card, which draw none of their own there: one system
+ * material (macOS sidebar vibrancy or supported Windows Mica) under one tint, with a solid fallback.
+ * It shows through the gaps and the card's rounded cut-out corners too.
  */
-export const BROWSER_FRAME_TINT_ARGB = "#D1121519";
+export const BROWSER_FRAME_TINT_ARGB = "#A6121519";
 /**
  * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
  * where the sidebar meets the toolbar they read as the frame's rounded inner corner.

@@ -1089,6 +1089,19 @@ async function run() {
     },
     "the overlay sidebar relies on one native glass surface instead of layering CSS tint on top",
   );
+  const toolbarSurfaceStyle = await evaluate(
+    rendererViews.toolbar,
+    '(() => { const style = getComputedStyle(document.querySelector(".browser-chrome")); return { backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, backdropFilter: style.backdropFilter }; })()',
+  );
+  assert.deepEqual(
+    toolbarSurfaceStyle,
+    {
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      backgroundImage: "none",
+      backdropFilter: "none",
+    },
+    "the overlay toolbar relies on the same native frame material without a CSS glass layer",
+  );
   captureFullWindow("sidebar-overlay-live-page-expanded.png");
   const collapsePinSample = await sampleSidebarPinMorph(
     rendererViews.sidebar,

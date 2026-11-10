@@ -16,7 +16,7 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { app, BaseWindow, nativeImage } = require("electron");
+const { app, BaseWindow, nativeImage, screen } = require("electron");
 const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 
 const userData = join(
@@ -117,6 +117,13 @@ function captureWindow(name) {
   const dir = screenshotDirectory || join(userData, "shots");
   mkdirSync(dir, { recursive: true });
   const { x, y, width, height } = mainWindow.getContentBounds();
+  const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
+  const captureWidth = Math.min(width, display.x + display.width - x);
+  const captureHeight = Math.min(height, display.y + display.height - y);
+  if (captureWidth <= 0 || captureHeight <= 0)
+    throw new Error(
+      "The browser content is outside the visible display bounds",
+    );
   const file = join(dir, name);
   execFileSync("ffmpeg", [
     "-hide_banner",
@@ -125,7 +132,7 @@ function captureWindow(name) {
     "-f",
     "x11grab",
     "-video_size",
-    `${width}x${height}`,
+    `${captureWidth}x${captureHeight}`,
     "-i",
     `${process.env.DISPLAY}.0+${x},${y}`,
     "-frames:v",
@@ -328,28 +335,52 @@ async function run() {
         );
       }
       if (mode === "native") {
+        const toolbarBottom = await evaluate(
+          toolbar,
+          'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+        );
+        const nativeCardInset = process.platform === "darwin" ? 10 : 0;
+        assert.equal(
+          card.backgroundImage,
+          "none",
+          "the native view supplies blur and tint without a CSS glass layer",
+        );
+        assert.equal(
+          card.backgroundColor,
+          "rgba(0, 0, 0, 0)",
+          "native material shows through the transparent sidebar surface",
+        );
         assert.equal(
           sidebarBounds.y,
-          10,
-          "the native-blur view is inset to the card",
+          toolbarBottom + nativeCardInset,
+          "the sidebar starts below the toolbar and uses the macOS native card inset",
         );
         assert.ok(
-          sidebarBounds.height <= mainWindow.getContentBounds().height - 20,
+          sidebarBounds.height <=
+            mainWindow.getContentBounds().height - nativeCardInset * 2,
         );
       }
       // The page's nav text and thumbnails must not read through: the empty card area stays flat.
-      assert.ok(
-        results.at(-1).std < 8,
-        `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
-      );
+      if (mode !== "native" || process.platform === "darwin")
+        assert.ok(
+          results.at(-1).std < 8,
+          `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
+        );
+      else
+        console.log(
+          "Skipping native-blur contrast assertion: this platform does not provide the macOS compositor layer.",
+        );
     }
     await evaluate(
       toolbar,
       "window.api.browser.chrome.set({ sidebarHovered: false })",
     );
-    await waitFor(() => !sidebar.getVisible(), "the overlay sidebar to hide");
+    await waitFor(() => {
+      const bounds = sidebar.getBounds();
+      return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
+    }, "the hover panel to collapse back to its visible tab rail");
     if (mode === "snapshot") {
-      // Hidden: no snapshot is kept around (and none is taken).
+      // Collapsed: no full-panel snapshot is kept around (and none is taken).
       await waitFor(
         () =>
           evaluate(
@@ -386,10 +417,15 @@ async function run() {
         ),
       "the solid card",
     );
-    // A view that had the native blur keeps its card-sized frame (blur 0, opaque fill); others stay full height.
+    // The macOS native card frame keeps its inset; every path starts below the toolbar.
+    const toolbarBottom = await evaluate(
+      toolbar,
+      'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+    );
     assert.equal(
       sidebar.getBounds().y,
-      mode === "native" ? 10 : 0,
+      toolbarBottom +
+        (mode === "native" && process.platform === "darwin" ? 10 : 0),
       "the sidebar view frame after turning blur off",
     );
     await delay(700);

@@ -60,8 +60,8 @@ export interface Rect {
 export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
 /** The sidebar is the same material as the toolbar, not a second, darker card over it. */
 export const SIDEBAR_NATIVE_TINT = BROWSER_FRAME_TINT_ARGB;
-/** Fallback fill uses that same frame tint when native blur is unavailable. */
-export const SIDEBAR_FRAMED_SOLID_TINT = BROWSER_FRAME_TINT_ARGB;
+/** Near-opaque fallback keeps busy page detail from bleeding through when native blur is unavailable. */
+export const SIDEBAR_FRAMED_SOLID_TINT = "#FC121519";
 /** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
 export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
 export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;

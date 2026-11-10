@@ -34,7 +34,7 @@
    * whole top edge even, rather than showing a diagonal color seam. */
   background: linear-gradient(
     to bottom,
-    rgba(18, 21, 25, 0.82) 0%,
+    rgba(18, 21, 25, 0.65) 0%,
     rgba(39, 46, 55, 0.48) 42%,
     rgba(16, 20, 25, 0.6) 100%
   );
@@ -519,7 +519,7 @@
   z-index: 1;
   flex: 0 0 auto;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(18, 21, 25, 0.82);
+  background: rgba(18, 21, 25, 0.65);
   backdrop-filter: blur(20px) saturate(150%);
 }
 .browser-toolbar {
@@ -5238,7 +5238,7 @@
 .browser-layout.is-sidebar-docked .browser-sidebar {
   border-top-right-radius: var(--sidebar-frame-radius, 0px);
   border-bottom-right-radius: var(--sidebar-frame-radius, 0px);
-  background: rgba(18, 21, 25, 0.82);
+  background: rgba(18, 21, 25, 0.65);
   box-shadow: var(--sidebar-frame-shadow, none);
 }
 .app-shell[data-surface="sidebar"][data-surface]
@@ -5576,11 +5576,9 @@
   border-bottom-color: transparent;
   background: transparent;
 }
-/* The overlay WebContentsView owns the live glass/tint underneath its web contents. A second CSS
- * gradient + backdrop filter on this element stacks another material at the toolbar's bottom edge,
- * which reads as a hard crease. Keep this surface transparent so the one frame material continues
- * from the full-width toolbar into the sidebar; private windows retain their intentionally tinted
- * surface. */
+/* Native toolbar/sidebar surfaces stay transparent: the shared frame material comes from the window
+ * or native view, never a CSS blur or second gradient. Solid and snapshot fallback fills are defined
+ * by SidebarBackdrop.css, including their private-window tint. */
 .app-shell[data-surface="sidebar"] .browser-sidebar:not(.is-private-window) {
   background: transparent;
   box-shadow: none;

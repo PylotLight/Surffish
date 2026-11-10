@@ -14,6 +14,7 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
+import { release as systemRelease } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -40,6 +41,7 @@ import { isExpectedRendererDocument } from "./renderer-security";
 import { APP_NAME, WINDOW } from "../shared/config";
 import { SIDEBAR_CARD } from "../shared/sidebar-card";
 import { retryOnce } from "../shared/retry";
+import { resolveWindowFrameMaterial } from "../shared/window-frame-material";
 import {
   fitBoundsToDisplays,
   parseSavedWindowState,
@@ -309,6 +311,12 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   const geometry = options.position
     ? null
     : (options.geometry ?? (browserWindows().length === 0 ? savedState : null));
+  const windowFrameMaterial = resolveWindowFrameMaterial({
+    platform: process.platform,
+    osRelease: systemRelease(),
+    supportsWindowsBackgroundMaterial:
+      typeof BaseWindow.prototype.setBackgroundMaterial === "function",
+  });
   const win = new BaseWindow({
     title: APP_NAME,
     icon: appIconPath,
@@ -322,8 +330,10 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
       ? { x: SIDEBAR_CARD.controlsLeft, y: SIDEBAR_CARD.controlsTop }
       : undefined,
     transparent: isMac,
-    vibrancy: isMac ? "fullscreen-ui" : undefined,
+    vibrancy: isMac ? "sidebar" : undefined,
     visualEffectState: isMac ? "active" : undefined,
+    backgroundMaterial:
+      windowFrameMaterial === "windows-mica" ? "mica" : undefined,
     backgroundColor: isMac ? "#00000000" : "#101418",
   });
   if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath));

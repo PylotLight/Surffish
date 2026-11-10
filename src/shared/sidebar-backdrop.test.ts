@@ -83,9 +83,10 @@ describe("sidebar backdrop mode", () => {
     ).toBe("native");
   });
 
-  test("the sidebar overlay continues the browser-frame material without a second tint", () => {
+  test("the native sidebar shares the frame tint and the solid fallback stays opaque", () => {
+    expect(BROWSER_FRAME_TINT_ARGB).toBe("#A6121519");
     expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
-    expect(SIDEBAR_FRAMED_SOLID_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
+    expect(SIDEBAR_FRAMED_SOLID_TINT).toBe("#FC121519");
     expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 });

@@ -337,9 +337,9 @@ function applyShellLayout(shell: ShellState): void {
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
   // lives only below the toolbar's bottom line; live pages are a rounded card inset from both by
-  // PAGE_FRAME_GAP. One material: the window root carries the frame's tint (over the macOS window
-  // vibrancy, or the window colour elsewhere), the toolbar strip, the rail and the docked panel
-  // draw no ground of their own over it, so there is no seam or second layer anywhere in the
+  // PAGE_FRAME_GAP. One material: the window root carries the frame's tint (over macOS sidebar
+  // vibrancy or supported Windows Mica, with a solid window-colour fallback), the toolbar strip,
+  // rail and docked panel draw no ground of their own over it, so there is no seam or second layer
   // frame, and the card's cut-out corners show exactly that tint. Off while the content renderer
   // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
   const fullscreen = shell.window.isFullScreen();
