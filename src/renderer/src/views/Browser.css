@@ -29,11 +29,14 @@
   border-top-right-radius: var(--sidebar-card-radius, 0px);
   border-bottom-right-radius: var(--sidebar-card-radius, 0px);
   border-bottom-left-radius: 0;
+  /* Start on the same tint as the full-width address-bar frame, then let the
+   * existing glass surface emerge below it. A vertical gradient keeps the
+   * whole top edge even, rather than showing a diagonal color seam. */
   background: linear-gradient(
-    150deg,
-    rgba(240, 247, 255, 0.24),
+    to bottom,
+    rgba(18, 21, 25, 0.82) 0%,
     rgba(39, 46, 55, 0.48) 42%,
-    rgba(16, 20, 25, 0.6)
+    rgba(16, 20, 25, 0.6) 100%
   );
   box-shadow: var(--sidebar-card-shadow);
   backdrop-filter: blur(34px) saturate(185%);
