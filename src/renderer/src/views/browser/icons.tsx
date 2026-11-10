@@ -43,6 +43,7 @@ export function NewTabSiteIcon({
       <span className="new-tab-site-icon" aria-hidden="true">
         {!iconFailed && (
           <img
+            draggable={false}
             src={iconSource}
             alt=""
             loading="lazy"
@@ -117,6 +118,7 @@ export function PinnedSiteIcon({
       <span className="pinned-site-mark" aria-hidden="true">
         {quickLink && iconSource && !iconFailed && (
           <img
+            draggable={false}
             src={iconSource}
             alt=""
             loading="lazy"
@@ -197,6 +199,7 @@ export function SuggestionFavicon({
     "↗";
   return source ? (
     <img
+      draggable={false}
       src={source}
       alt=""
       referrerPolicy="no-referrer"
