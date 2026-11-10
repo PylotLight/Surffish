@@ -5287,6 +5287,13 @@
   z-index: 0;
   pointer-events: none;
 }
+/* The footer holds the sidebar pin, a held mark, so the arriving shape draws its footer (hairline
+ * and tint) at full strength from the first frame. The ghost's copy fading out on top of it
+ * doubled the hairline for the fade, which read as the divider brightening and blinking. */
+.sidebar-morph-ghost .sidebar-footer {
+  border-top-color: transparent;
+  background: transparent;
+}
 /* The inactive shape stays mounted, out of flow and invisible, at the width it has when it is
  * the shape on screen (the open sidebar width for the panel, its designed width for the rail), so
  * switching shapes swaps the class and nothing re-flows: the panel's titles are laid out at their
