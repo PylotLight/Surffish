@@ -807,6 +807,22 @@ async function run() {
       collapsedSidebarBounds.x + collapsedSidebarBounds.width,
     `the live page starts at or right of the collapsed rail's right edge (page ${JSON.stringify(pageHiddenSidebar)}, rail ${JSON.stringify(collapsedSidebarBounds)})`,
   );
+  // The page's top-left (its rounded inner corner) sits where the toolbar strip meets the rail.
+  const toolbarBottom = await evaluate(
+    rendererViews.toolbar,
+    'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
+  );
+  assert.ok(
+    Math.abs(pageHiddenSidebar.y - toolbarBottom) <= 1,
+    `the live page starts at the toolbar's bottom line (page y ${pageHiddenSidebar.y}, toolbar bottom ${toolbarBottom})`,
+  );
+  assert.ok(
+    await evaluate(
+      rendererViews.toolbar,
+      'getComputedStyle(document.querySelector(".browser-chrome")).borderBottomColor === "rgba(0, 0, 0, 0)"',
+    ),
+    "the toolbar draws no seam above the page beside the collapsed rail",
+  );
   assert.ok(
     sidebarHiddenState.find((view) => view.surface === "toolbar").index >
       sidebarHiddenState.find((view) => view.url === fixtureUrl).index,

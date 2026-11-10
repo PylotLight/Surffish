@@ -33,6 +33,7 @@ import {
   dialog,
   Menu,
   screen,
+  View,
   WebContentsView,
   type BaseWindow,
   type ContextMenuParams,
@@ -41,6 +42,10 @@ import {
   type WebContents,
   type WebFrameMain,
 } from "electron";
+import {
+  BROWSER_FRAME_TINT_ARGB,
+  PAGE_FRAME_RADIUS,
+} from "../shared/sidebar-card";
 import type {
   BrowserBounds,
   BrowserFindState,
@@ -1427,6 +1432,53 @@ export function getBrowserTabPageInfo(id?: string | null): {
   };
 }
 
+const pageCornerRadii = new WeakMap<View, number>();
+
+/** Rounds a page view's corners, touching the native view only when the radius changes. */
+function setPageCornerRadius(view: View, radius: number): void {
+  if ((pageCornerRadii.get(view) ?? 0) === radius) return;
+  pageCornerRadii.set(view, radius);
+  view.setBorderRadius(radius);
+}
+
+const pageFrameUnderlays = new WeakMap<BaseWindow, View>();
+
+/**
+ * Beside the collapsed rail the page is a rounded card inside the toolbar + rail frame. On macOS
+ * the window is native vibrancy, so the page's rounded corners would show it untinted; a plain
+ * native view in the frame's tint sits right under the page (no renderer, no input: the page's
+ * corner cut-outs still take their clicks), so the inner corner reads as the frame's own colour.
+ * Elsewhere the window background already is that colour.
+ */
+function syncPageFrameUnderlay(w: BrowserWindowState, framed: boolean): void {
+  if (process.platform !== "darwin" || w.window.isDestroyed()) return;
+  let view = pageFrameUnderlays.get(w.window);
+  if (!framed) {
+    if (view?.getVisible()) view.setVisible(false);
+    return;
+  }
+  if (!view) {
+    view = new View();
+    view.setBackgroundColor(BROWSER_FRAME_TINT_ARGB);
+    pageFrameUnderlays.set(w.window, view);
+  }
+  const bounds = w.browserBounds;
+  const current = view.getBounds();
+  if (
+    current.x !== bounds.x ||
+    current.y !== bounds.y ||
+    current.width !== bounds.width ||
+    current.height !== bounds.height
+  )
+    view.setBounds({ ...bounds });
+  if (!view.getVisible()) view.setVisible(true);
+  const { contentView } = w.window;
+  if (contentView.children[0] !== view) {
+    if (contentView.children.includes(view)) contentView.removeChildView(view);
+    contentView.addChildView(view, 0);
+  }
+}
+
 function applyTabBounds(w: BrowserWindowState): void {
   const { browserBounds } = w;
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
@@ -1434,6 +1486,9 @@ function applyTabBounds(w: BrowserWindowState): void {
   const split = splitOf(activeTabOf(w));
   const layout =
     split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null;
+  // Beside the collapsed rail (pageLeftInset) the page is a rounded card in the toolbar + rail
+  // frame; a split keeps its own surface and square panes.
+  const framed = pageAreaShown && !layout && (w.pageLeftInset ?? 0) > 0;
   for (const tab of w.tabs) {
     if (!tab.view) continue;
     const pane = split ? split.tabIds.indexOf(tab.id) : -1;
@@ -1455,6 +1510,9 @@ function applyTabBounds(w: BrowserWindowState): void {
       tab.view.setBounds(target);
       reader?.setBounds(target);
     }
+    const radius = visible && framed ? PAGE_FRAME_RADIUS : 0;
+    setPageCornerRadius(tab.view, radius);
+    if (reader) setPageCornerRadius(reader, radius);
     if (!w.window.isDestroyed()) {
       setPageViewOnScreen(
         w.window,
@@ -1477,6 +1535,7 @@ function applyTabBounds(w: BrowserWindowState): void {
         : null,
     );
   }
+  syncPageFrameUnderlay(w, framed);
 }
 
 function cancelSleepTimer(tab: BrowserTab): void {

@@ -121,3 +121,13 @@ export function sidebarCardCssVars(
     "--sidebar-controls-top": `${geometry.controlsTop}px`,
   };
 }
+
+/**
+ * The browser frame's tint, ARGB: the toolbar strip (.browser-chrome in Browser.css) and, while the
+ * sidebar is collapsed, the icon rail, which together are one L-shaped frame around the page.
+ * Main paints it under a live page beside the rail (macOS: the window itself is vibrancy, so the
+ * page's rounded corners would otherwise show it untinted).
+ */
+export const BROWSER_FRAME_TINT_ARGB = "#D1121519";
+/** Rounding of a live page's corners beside the collapsed rail: its top-left is the frame's inner corner. */
+export const PAGE_FRAME_RADIUS = 10;

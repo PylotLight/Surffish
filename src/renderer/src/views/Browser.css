@@ -5287,6 +5287,19 @@
 .browser-sidebar.is-collapsed .sidebar-resize-handle {
   display: none;
 }
+/* Collapsed, the rail and the toolbar strip are one L-shaped frame around the page: the rail takes
+ * the toolbar's own tint (.browser-chrome), with no rounded top corner and no edge hairline
+ * against the toolbar, so the strip runs the full width (traffic lights included) and the rail
+ * reads as starting at its bottom line. The page beside it is the rounded card (main:
+ * PAGE_FRAME_RADIUS), so the frame's inner corner where the strip meets the rail is the page's
+ * own top-left curve. The open panel keeps its card look (it floats over the frame). Same on both
+ * surfaces, so the in-page and overlay cards still match (electron-sidebar-card-smoke). */
+.browser-sidebar.has-rail.is-collapsed,
+.app-shell[data-surface="sidebar"] .browser-sidebar.has-rail.is-collapsed {
+  border-top-right-radius: 0;
+  background: rgba(18, 21, 25, 0.82);
+  box-shadow: none;
+}
 
 /* The rail holds its designed width (the card is exactly this wide when collapsed), so its marks
  * stand still while the card grows or shrinks around them. */
@@ -5581,4 +5594,12 @@
   .app-shell[data-fullscreen="true"] .browser-chrome {
     transition: none;
   }
+}
+
+/* The page's top edge beside the collapsed rail is the frame's inner edge (its rounded top-left
+ * corner meets it), so the toolbar draws no hairline of its own there. */
+.app-shell[data-surface="toolbar"]
+  .browser-layout.has-rail-frame
+  .browser-chrome {
+  border-bottom-color: transparent;
 }

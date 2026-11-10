@@ -2648,7 +2648,7 @@ export default function Browser({
 
   return (
     <section
-      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
+      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${(sidebarMode === "tabs" || sidebarMode === "history") && !sidebarPinned ? " has-rail-frame" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
       aria-label="Surffish browser"
       onMouseMove={(event) => {
