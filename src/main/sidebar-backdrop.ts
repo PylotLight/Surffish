@@ -35,8 +35,10 @@ import {
   getSidebarOverlayView,
   getWindowRenderers,
   isMainWindowRenderer,
+  isSidebarDocked,
   isSidebarOverlayShown,
   sendToMainWindowRenderers,
+  setSidebarDockListener,
   setSidebarMotionListener,
   setSidebarOverlayFrame,
   setSidebarOverlayListener,
@@ -149,10 +151,13 @@ function paintNativeLayer(window: BaseWindow, progress: number): void {
   const view = getSidebarOverlayView(window);
   if (!view || !layered.has(window)) return;
   const native = getSidebarBackdropMode() === "native";
-  // Never fully transparent: a layered view with a 0-alpha background stops drawing its web
-  // contents at all (see applyNativeLayer), and a collapsed sidebar keeps its icon rail on screen,
-  // which needs its own glass even at progress 0.
-  const ramp = Math.max(0.02, Math.min(1, 0.55 + 0.45 * progress));
+  // The collapsed rail and the docked panel are part of the browser frame: the window root carries
+  // the frame's tint (browser-shell.ts), so the view adds none of its own there (a second tint
+  // over it was the rail's "own layer"). Only a panel slid out over the page card is tinted and
+  // blurred, ramping with its slide. Never fully transparent: a layered view with a 0-alpha
+  // background stops drawing its web contents at all (see applyNativeLayer).
+  const docked = isSidebarDocked(window);
+  const ramp = docked ? 0.02 : Math.max(0.02, Math.min(1, progress));
   view.setBackgroundColor(
     scaleArgbAlpha(
       native ? SIDEBAR_NATIVE_TINT : SIDEBAR_FRAMED_SOLID_TINT,
@@ -160,7 +165,7 @@ function paintNativeLayer(window: BaseWindow, progress: number): void {
     ),
   );
   view.setBackgroundBlur(
-    native ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * ramp) : 0,
+    native && !docked ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * ramp) : 0,
   );
 }
 
@@ -344,6 +349,9 @@ export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE));
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
+  setSidebarDockListener((window) =>
+    onMotion(window, motionProgress.get(window) ?? 0),
+  );
   ipcMain.handle("browser:sidebar-backdrop:get", (event) => {
     assertMainRenderer(event);
     const window = getShellWindowFor(event.sender);

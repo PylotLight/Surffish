@@ -15,6 +15,7 @@ import {
   normalizeSidebarWidth,
 } from "../shared/persistence";
 import {
+  BROWSER_FRAME_TINT_ARGB,
   SIDEBAR_CARD,
   sidebarCardInset,
   sidebarCardMaxWidth,
@@ -28,7 +29,7 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
-import { pageRailInset } from "../shared/page-view-bounds";
+import { pageFrameLeft } from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import { SidebarOverlayMotion } from "./sidebar-motion";
@@ -75,8 +76,8 @@ type BrowserShellLayoutSync = (
   height: number,
   overlayMode: boolean,
   window: BaseWindow,
-  /** Left inset live pages keep beside the collapsed rail (shared/page-view-bounds.ts). */
-  leftInset: number,
+  /** Where the browser frame's left side ends for live pages, null for no frame (shared/page-view-bounds.ts). */
+  frameLeft: number | null,
 ) => void;
 
 /** One window's shell: its three renderer surfaces and the chrome (sidebar/toolbar) state they share. */
@@ -98,6 +99,10 @@ interface ShellState {
   /** Native-blur backdrop: the sidebar view frames the full-height card (sidebar-backdrop.ts). */
   sidebarFrame: { inset: number; radius: number } | null;
   sidebarOverlayShown: boolean;
+  /** The window root's frame tint as last set (diffed: layout runs on every chrome change). */
+  frameGround: string | null;
+  /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
+  sidebarDocked: boolean | null;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
   dismissOnBlur: () => void;
   dismissOnSidebarPress: (
@@ -127,6 +132,25 @@ export function setSidebarOverlayListener(
 
 let sidebarMotionListener:
   ((window: BaseWindow, progress: number) => void) | null = null;
+
+let sidebarDockListener:
+  ((window: BaseWindow, docked: boolean) => void) | null = null;
+
+/**
+ * sidebar-backdrop.ts: the sidebar became docked (pinned open beside the page card) or stopped
+ * being docked. Docked, the panel is part of the frame and lets the frame's tint show through, so
+ * the sidebar view's own tint and blur drop away.
+ */
+export function setSidebarDockListener(
+  listener: ((window: BaseWindow, docked: boolean) => void) | null,
+): void {
+  sidebarDockListener = listener;
+}
+
+/** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
+export function isSidebarDocked(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarDocked === true;
+}
 
 /** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), to ramp the native tint. */
 export function setSidebarMotionListener(
@@ -310,9 +334,27 @@ function applyShellLayout(shell: ShellState): void {
   });
   shellViews.toolbar.setVisible(overlayMode);
 
+  // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
+  // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
+  // lives only below the toolbar's bottom line; live pages are a rounded card inset from both by
+  // PAGE_FRAME_GAP. One material: the window root carries the frame's tint (over the macOS window
+  // vibrancy, or the window colour elsewhere), the toolbar strip, the rail and the docked panel
+  // draw no ground of their own over it, so there is no seam or second layer anywhere in the
+  // frame, and the card's cut-out corners show exactly that tint. Off while the content renderer
+  // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
+  const fullscreen = shell.window.isFullScreen();
+  const frameShown = overlayMode && !fullscreen;
+  const ground = frameShown ? BROWSER_FRAME_TINT_ARGB : "#00000000";
+  if (shell.frameGround !== ground) {
+    shell.frameGround = ground;
+    shell.window.contentView.setBackgroundColor(ground);
+  }
+  const frameTop = fullscreen ? 0 : toolbarHeight;
+
   // With the native blur on, the view is cut to the card itself (the blur covers the whole view);
   // otherwise it is the full-height strip and the CSS insets the card. Either way the card lands on
-  // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts).
+  // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts), starting at
+  // the toolbar's bottom line.
   const inset = shell.sidebarFrame
     ? sidebarCardInset(height, {
         ...SIDEBAR_CARD,
@@ -326,10 +368,11 @@ function applyShellLayout(shell: ShellState): void {
   // mouse capture on the sidebar view, so it doesn't need the extra hit-test area).
   const sidebarWidth = overlaySidebarWidth(shell, width);
   const railWidth = sidebarRailWidth(width);
+  const sidebarTop = Math.min(height, frameTop + inset);
   shell.sidebarMotion.layout({
-    y: inset,
+    y: sidebarTop,
     width: sidebarWidth,
-    height: Math.max(0, height - inset * 2),
+    height: Math.max(0, height - sidebarTop - inset),
     railWidth,
   });
   // Open/close grows along one timeline while live pages stay on screen; entering or leaving
@@ -345,17 +388,31 @@ function applyShellLayout(shell: ShellState): void {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");
   }
-  // The auto-hiding sidebar's rail stays on screen beside live pages, so they start at its right
-  // edge instead of under it (Gmail's left nav was cut off). A hover/focus reveal overlays the page
-  // and never changes this; pinning/unpinning moves it once, while the card covers the page's
-  // left edge either way, so the page's own left edge never shows moving.
-  const pageInset = pageRailInset({
+  // Live pages start right of the frame's left side: the rail while the sidebar auto-hides (Gmail's
+  // left nav was cut off under it), the panel itself while it is docked. A hover/focus reveal
+  // slides the panel out over the card and never resizes it.
+  const { sidebarMode, sidebarPinned } = shell.chromeState;
+  const frameLeft = pageFrameLeft({
     overlayMode,
-    sidebarMode: shell.chromeState.sidebarMode,
-    sidebarPinned: shell.chromeState.sidebarPinned,
+    fullscreen,
+    sidebarMode,
+    sidebarPinned,
+    sidebarWidth,
     railWidth,
   });
-  shell.syncPageBounds?.(width, height, overlayMode, shell.window, pageInset);
+  const docked =
+    frameShown &&
+    sidebarPinned &&
+    (sidebarMode === "tabs" || sidebarMode === "history");
+  if (shell.sidebarDocked !== docked) {
+    shell.sidebarDocked = docked;
+    try {
+      sidebarDockListener?.(shell.window, docked);
+    } catch (error) {
+      console.warn("Sidebar dock listener failed:", error);
+    }
+  }
+  shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
   const cause = shell.layoutCause ?? "layout";
   shell.layoutCause = null;
   shell.revealGuard?.noteChromeChanged(cause);
@@ -411,6 +468,8 @@ export function attachBrowserShell(
     lastOverlayMode: null,
     sidebarFrame: null,
     sidebarOverlayShown: false,
+    frameGround: null,
+    sidebarDocked: null,
     lastActiveTabId: null,
     activeTabSince: 0,
     revealGuard: null,

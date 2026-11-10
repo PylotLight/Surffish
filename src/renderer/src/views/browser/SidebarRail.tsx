@@ -48,11 +48,13 @@ type RailPin =
   | { kind: "site"; key: string; site: PinnedSite };
 
 /**
- * Every pin as one rail row: marks stacked a little over each other (shared/rail-pin-cluster.ts),
- * the active pin (else the first) in front, "+N" past four. One button: hovering the rail reveals
- * the panel over it, whose pins row is where a specific pin is opened, dragged or removed, so the
- * cluster never guesses which pin a click meant. Its marks are unkeyed (data-morph-fade): they
- * crossfade with the panel's row on a shape change instead of flying.
+ * Every pin as one rail row: marks stacked a little over each other (shared/rail-pin-cluster.ts)
+ * in the panel's own order, the first in front and on the panel row's first pin, "+N" past four.
+ * The active pin keeps its slot and is marked by its ring only. Each mark carries its pin's
+ * motion key, so a shape change glides it between its slot here and its slot in the panel's row
+ * (shared/sidebar-morph.ts). One button: hovering the rail reveals the panel over it, whose pins
+ * row is where a specific pin is opened, dragged or removed, so the cluster never guesses which
+ * pin a click meant.
  */
 function RailPinCluster({
   pins,
@@ -65,20 +67,17 @@ function RailPinCluster({
   animate: boolean;
   onReveal: () => void;
 }): React.JSX.Element {
-  const activeIndex = pins.findIndex(
-    (pin) => pin.kind === "tab" && pin.tab.active,
-  );
-  const plan = planRailPinCluster(pins.length, { activeIndex });
+  const plan = planRailPinCluster(pins.length);
   const names = pins.map((pin) =>
     pin.kind === "tab" ? pin.tab.title : pin.site.title,
   );
   const label = `Pinned: ${names.join(", ")}`;
+  const active = pins.some((pin) => pin.kind === "tab" && pin.tab.active);
   return (
     <button
-      className={`sidebar-rail-pins${activeIndex >= 0 ? " is-active" : ""}`}
+      className={`sidebar-rail-pins${active ? " is-active" : ""}`}
       type="button"
       data-rail-align="pins"
-      data-morph-fade=""
       aria-label={label}
       title={label}
       draggable={false}
@@ -108,6 +107,7 @@ function RailPinCluster({
             key={pin.key}
             className={`sidebar-rail-pins-slot${pin.kind === "tab" && pin.tab.active ? " is-active" : ""}`}
             style={style}
+            data-motion-key={pin.key}
             aria-hidden="true"
           >
             {pin.kind === "tab" ? (
@@ -250,7 +250,7 @@ function alignRailToPanel(rail: HTMLElement): void {
   );
   const items = [
     ...rail.querySelectorAll<HTMLElement>(
-      ".sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > [data-rail-align], .sidebar-rail-scroll > .sidebar-rail-divider",
+      ".sidebar-rail-pins-row > [data-rail-align], .sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
     ),
   ];
   const pin = rail.querySelector<HTMLElement>('[data-morph="sidebar-pin"]');
@@ -265,8 +265,9 @@ function alignRailToPanel(rail: HTMLElement): void {
   }
   const counterpart = (item: HTMLElement): HTMLElement | null => {
     const key = item.dataset.motionKey;
-    // The pin cluster lines up on the panel's pins row (its front mark on the row's first pin), so
-    // the hairline and every tab below line up too: pins take one row in both shapes.
+    // The pin cluster lines up on the panel's pins row (its first mark exactly on the row's first
+    // pin, x and y), so the hairline and every tab below line up too: pins take one row in both
+    // shapes, and the first pin never moves between them.
     const row = item.classList.contains("sidebar-rail-divider")
       ? panel.querySelector<HTMLElement>(".sidebar-pinned-divider")
       : item.dataset.railAlign === "pins"
@@ -361,6 +362,13 @@ function alignRailToPanel(rail: HTMLElement): void {
       const offset = deviceOffset(from, to, "x");
       if (offset !== 0 && Math.abs(offset) <= MAX_MARK_NUDGE)
         dx = shift + offset;
+    } else if (item.dataset.railAlign === "pins") {
+      // The cluster is centred in the rail and its width follows the pin count, so its first mark
+      // can sit further off the panel's first pin than a nudge: move it all the way, inside the
+      // rail.
+      const offset = deviceOffset(from, to, "x");
+      if (offset !== 0 && Math.abs(shift + offset) < railBox.width / 2)
+        dx = shift + offset;
     }
     const dy = deviceOffset(from, to, "y");
     // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
@@ -449,8 +457,11 @@ export function SidebarRail({
       className={`sidebar-rail ${MORPH_COLUMN_CLASS}${shapeHidden ? ` ${MORPH_HIDDEN_CLASS}` : ""}`}
       aria-label="Sidebar rail"
     >
-      <div className="sidebar-rail-scroll" data-glide-scroller>
-        {hasPins && (
+      {/* Out of the tab list's scroller, like the panel's pins row: the cluster never scrolls away,
+       * and a pin gliding to or from its panel slot is clipped only by the card's moving edge
+       * (the scroller clips sideways at the rail's width). */}
+      {hasPins && (
+        <div className="sidebar-rail-pins-row">
           <RailPinCluster
             pins={[
               ...pinnedTabs.map((tab): RailPin => ({
@@ -468,7 +479,9 @@ export function SidebarRail({
             animate={animate}
             onReveal={onRevealPins}
           />
-        )}
+        </div>
+      )}
+      <div className="sidebar-rail-scroll" data-glide-scroller>
         {/* The pins/tabs hairline: shown exactly when the panel shows its own (whenever anything
          * is pinned), aligned onto the panel's line, and crossfaded with it by the morph. */}
         {hasPins && <div className="sidebar-rail-divider" aria-hidden="true" />}

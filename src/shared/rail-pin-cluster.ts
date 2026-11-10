@@ -3,6 +3,13 @@
  * like a group of avatars, so pins take one rail row however many there are and the open tabs
  * start right below them (SidebarRail.tsx). The panel keeps its own full pins row.
  *
+ * The cluster is the panel's pins row folded up, in the SAME order: slot i draws pin i, the first
+ * pin is in front (on top of the stack, leftmost) and sits exactly where the panel draws its first
+ * pin, so it never moves between the two shapes; the active pin is marked by its ring only, never
+ * brought forward. Past `maxSlots` pins the last slot is a "+N" chip for the rest. On a shape
+ * change each drawn pin glides between its cluster slot and its row slot (shared/sidebar-morph.ts
+ * `glide`, horizontally only); pins behind the chip fade in or out at their row slot.
+ *
  * Pure: the slot maths is unit-tested without a document.
  */
 
@@ -16,9 +23,9 @@ export const RAIL_PIN_CLUSTER_MAX_WIDTH = 60;
 export const RAIL_PIN_CLUSTER_MAX_STEP = 12;
 
 export interface RailPinClusterSlot {
-  /** Index into the pins list this slot draws, or null for the "+N" chip. */
+  /** Index into the pins list this slot draws (always the slot's own index), or null for "+N". */
   pin: number | null;
-  /** Left offset inside the cluster (px). */
+  /** Left offset inside the cluster (px), from the first pin's left edge. */
   x: number;
   /** Stacking order: higher is drawn on top. */
   z: number;
@@ -35,20 +42,18 @@ export interface RailPinCluster {
 }
 
 /**
- * Lays out `count` pins as one overlapping row. The front mark (on top of the stack, leftmost) is
- * the active pin when one is active, else the first pin; the rest follow in pin order. Past
- * `maxSlots` pins the last slot is a "+N" chip, drawn on top so its count is never covered.
+ * Lays out `count` pins as one overlapping row in pin order: the first pin in front, each later
+ * one tucked a step to the right behind it, and the "+N" chip (when there are more pins than
+ * slots) last and drawn on top so its count is never covered.
  */
 export function planRailPinCluster(
   count: number,
   {
-    activeIndex = -1,
     maxSlots = RAIL_PIN_CLUSTER_MAX_SLOTS,
     mark = RAIL_PIN_CLUSTER_MARK,
     maxWidth = RAIL_PIN_CLUSTER_MAX_WIDTH,
     maxStep = RAIL_PIN_CLUSTER_MAX_STEP,
   }: {
-    activeIndex?: number;
     maxSlots?: number;
     mark?: number;
     maxWidth?: number;
@@ -69,16 +74,15 @@ export function planRailPinCluster(
           Math.min(maxStep, Math.floor((maxWidth - mark) / (slotCount - 1))),
         )
       : 0;
-  const front =
-    Number.isInteger(activeIndex) && activeIndex >= 0 && activeIndex < total
-      ? activeIndex
-      : 0;
-  const order = [front];
-  for (let index = 0; index < total && order.length < markSlots; index += 1)
-    if (index !== front) order.push(index);
-  const slots: RailPinClusterSlot[] = order
-    .slice(0, markSlots)
-    .map((pin, slot) => ({ pin, x: slot * step, z: slotCount - slot }));
+  const slots: RailPinClusterSlot[] = Array.from(
+    { length: markSlots },
+    (_, slot) => ({ pin: slot, x: slot * step, z: slotCount - slot }),
+  );
   if (chip) slots.push({ pin: null, x: markSlots * step, z: slotCount + 1 });
   return { slots, overflow, step, width: mark + (slotCount - 1) * step };
+}
+
+/** A pin's motion key, the same in the rail's cluster and the panel's row (`pin:`/`site:`). */
+export function isPinMotionKey(key: string): boolean {
+  return key.startsWith("pin:") || key.startsWith("site:");
 }

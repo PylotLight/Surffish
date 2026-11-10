@@ -35,6 +35,13 @@ const server = createServer((request, response) => {
   );
 });
 let mainWindow;
+// shared/page-view-bounds.ts PAGE_FRAME_GAP: the page card's gap from the browser frame on every side.
+const PAGE_FRAME_GAP = 6;
+// The sidebar view starts at the toolbar's bottom line (the browser frame) and runs to the bottom.
+const sidebarReachesBottom = (height) => {
+  const bounds = rendererViews.sidebar.getBounds();
+  return bounds.y > 0 && bounds.y + bounds.height === height;
+};
 let fixtureUrl;
 let rendererViews = {};
 let fixturePageView;
@@ -393,6 +400,9 @@ async function run() {
         const railPlus = collapsed ? iconRect(shape, '.sidebar-rail-new-tab .sidebar-new-tab-row-icon') : null
         const panelPlus = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '.sidebar-new-tab-row .sidebar-new-tab-row-icon') : null
         const pins = collapsed ? [...shape.querySelectorAll('.sidebar-rail-pins-slot, .sidebar-rail-pins-more')].map((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, more: el.classList.contains('sidebar-rail-pins-more') ? el.textContent : null } }) : null
+        const markRect = (el) => { const mark = el.querySelector('.tab-favicon, .pinned-site-mark') ?? el; const r = mark.getBoundingClientRect(); return { key: el.dataset.motionKey ?? null, x: r.x + r.width / 2, y: r.y + r.height / 2 } }
+        const railPinMarks = collapsed ? [...shape.querySelectorAll('.sidebar-rail-pins-slot')].map(markRect) : null
+        const panelPinMarks = collapsed ? [...(card.querySelector('.sidebar-panel')?.querySelectorAll('.sidebar-pinned-list > [data-motion-key]') ?? [])].map(markRect) : null
         const railFirstTab = collapsed ? iconRect(shape, '[data-motion-key^="tab:"] .tab-favicon') : null
         const panelFirstTab = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '[data-motion-key^="tab:"] .tab-favicon') : null
         return {
@@ -402,6 +412,8 @@ async function run() {
           newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null,
           newTabOffset: railPlus && panelPlus ? { dx: railPlus.x - panelPlus.x, dy: railPlus.y - panelPlus.y } : null,
           pins,
+          railPinMarks,
+          panelPinMarks,
           railFirstTab,
           panelFirstTab,
         }
@@ -453,6 +465,41 @@ async function run() {
         Math.abs(pin.top - pins[0].top) <= 1,
         `every rail pin shares one row (${JSON.stringify(pins)})`,
       );
+    // The cluster is the panel's pins row folded up (shared/rail-pin-cluster.ts): the same order,
+    // never reordered for the active pin, its first pin exactly on the row's first pin and every
+    // mark on the row's line, so a shape change only spreads or gathers them horizontally.
+    const railPinMarks = sidebarActions.railPinMarks ?? [];
+    const panelPinMarks = sidebarActions.panelPinMarks ?? [];
+    console.log(
+      `[sidebar-overlay-smoke] rail pin marks: ${JSON.stringify(railPinMarks)} panel pin marks: ${JSON.stringify(panelPinMarks)}`,
+    );
+    assert.ok(
+      railPinMarks.length >= 1 && panelPinMarks.length >= railPinMarks.length,
+      "the panel's pins row draws every pin the cluster draws",
+    );
+    assert.deepEqual(
+      railPinMarks.map((pin) => pin.key),
+      panelPinMarks.slice(0, railPinMarks.length).map((pin) => pin.key),
+      "the rail's pin cluster keeps the panel row's order",
+    );
+    if (pins.some((pin) => pin.more !== null))
+      assert.ok(
+        pins.at(-1).more !== null,
+        "the +N chip is the cluster's last slot",
+      );
+    {
+      const dx = railPinMarks[0].x - panelPinMarks[0].x;
+      const dy = railPinMarks[0].y - panelPinMarks[0].y;
+      assert.ok(
+        Math.abs(dx) <= 1 && Math.abs(dy) <= 1,
+        `the cluster's first pin sits on the panel row's first pin within 1px (dx=${dx}, dy=${dy})`,
+      );
+      for (const pin of railPinMarks)
+        assert.ok(
+          Math.abs(pin.y - panelPinMarks[0].y) <= 1,
+          `every cluster pin is on the panel pins row's y (${pin.key}: ${pin.y} vs ${panelPinMarks[0].y})`,
+        );
+    }
     if (sidebarActions.railFirstTab) {
       const pinCentre = (pins[0].top + pins[0].bottom) / 2;
       const below = sidebarActions.railFirstTab.y - pinCentre;
@@ -709,9 +756,9 @@ async function run() {
       height > contentSizeBeforeResize[1] &&
       rendererViews.content.getBounds().width === width &&
       rendererViews.toolbar.getBounds().width === width &&
-      rendererViews.sidebar.getBounds().height === height &&
-      siteBounds.x + siteBounds.width === width &&
-      siteBounds.height === Math.max(0, height - siteBounds.y)
+      sidebarReachesBottom(height) &&
+      siteBounds.x + siteBounds.width === width - PAGE_FRAME_GAP &&
+      siteBounds.y + siteBounds.height === height - PAGE_FRAME_GAP
     );
   }, "all native shell layers and the live page resize with the window");
   const toolbarLayout = await evaluate(
@@ -760,9 +807,9 @@ async function run() {
       height > 0 &&
       rendererViews.content.getBounds().width === width &&
       rendererViews.toolbar.getBounds().width === width &&
-      rendererViews.sidebar.getBounds().height === height &&
-      siteBounds.x + siteBounds.width === width &&
-      siteBounds.height === Math.max(0, height - siteBounds.y)
+      sidebarReachesBottom(height) &&
+      siteBounds.x + siteBounds.width === width - PAGE_FRAME_GAP &&
+      siteBounds.y + siteBounds.height === height - PAGE_FRAME_GAP
     );
   }, "native shell layers and the live page match the size after maximize");
   const contentSize = mainWindow.getContentSize();
@@ -776,11 +823,17 @@ async function run() {
   );
   const pageHiddenSidebar = fixturePageView.getBounds();
   const sidebarHiddenState = nativeViewState();
-  // The auto-hiding sidebar's rail stays on screen, so the page sits beside it rather than under it.
+  // The auto-hiding sidebar's rail stays on screen, so the page sits beside it rather than under it,
+  // as a card inset from the frame (and the window's right and bottom edges) by the frame gap.
   assert.equal(
-    pageHiddenSidebar.x + pageHiddenSidebar.width,
-    contentSize[0],
-    "the live page runs to the window's right edge",
+    contentSize[0] - (pageHiddenSidebar.x + pageHiddenSidebar.width),
+    PAGE_FRAME_GAP,
+    "the live page card keeps the frame gap from the window's right edge",
+  );
+  assert.equal(
+    contentSize[1] - (pageHiddenSidebar.y + pageHiddenSidebar.height),
+    PAGE_FRAME_GAP,
+    "the live page card keeps the frame gap from the window's bottom edge",
   );
   assert.equal(
     rendererViews.content.getVisible(),
@@ -802,26 +855,33 @@ async function run() {
     collapsedSidebarBounds.width >= 83 && collapsedSidebarBounds.width <= 85,
     `the collapsed sidebar is rail-width (${JSON.stringify(collapsedSidebarBounds)})`,
   );
-  assert.ok(
-    pageHiddenSidebar.x >=
-      collapsedSidebarBounds.x + collapsedSidebarBounds.width,
-    `the live page starts at or right of the collapsed rail's right edge (page ${JSON.stringify(pageHiddenSidebar)}, rail ${JSON.stringify(collapsedSidebarBounds)})`,
+  assert.equal(
+    pageHiddenSidebar.x -
+      (collapsedSidebarBounds.x + collapsedSidebarBounds.width),
+    PAGE_FRAME_GAP,
+    `the live page card keeps the frame gap from the collapsed rail's right edge (page ${JSON.stringify(pageHiddenSidebar)}, rail ${JSON.stringify(collapsedSidebarBounds)})`,
   );
-  // The page's top-left (its rounded inner corner) sits where the toolbar strip meets the rail.
+  // The browser frame: the toolbar strip runs the full width and the sidebar lives only below its
+  // bottom line; the page card starts the frame gap below it.
   const toolbarBottom = await evaluate(
     rendererViews.toolbar,
     'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
   );
   assert.ok(
-    Math.abs(pageHiddenSidebar.y - toolbarBottom) <= 1,
-    `the live page starts at the toolbar's bottom line (page y ${pageHiddenSidebar.y}, toolbar bottom ${toolbarBottom})`,
+    collapsedSidebarBounds.y >= toolbarBottom - 0.5 &&
+      collapsedSidebarBounds.y - toolbarBottom <= 1,
+    `the collapsed rail starts at the toolbar's bottom line, never over the toolbar (rail y ${collapsedSidebarBounds.y}, toolbar bottom ${toolbarBottom})`,
+  );
+  assert.ok(
+    Math.abs(pageHiddenSidebar.y - toolbarBottom - PAGE_FRAME_GAP) <= 1,
+    `the live page card keeps the frame gap below the toolbar (page y ${pageHiddenSidebar.y}, toolbar bottom ${toolbarBottom})`,
   );
   assert.ok(
     await evaluate(
       rendererViews.toolbar,
-      'getComputedStyle(document.querySelector(".browser-chrome")).borderBottomColor === "rgba(0, 0, 0, 0)"',
+      '(() => { const style = getComputedStyle(document.querySelector(".browser-chrome")); return style.borderBottomColor === "rgba(0, 0, 0, 0)" && style.backgroundColor === "rgba(0, 0, 0, 0)" })()',
     ),
-    "the toolbar draws no seam above the page beside the collapsed rail",
+    "the toolbar strip draws no seam or ground of its own over the frame's material",
   );
   assert.ok(
     sidebarHiddenState.find((view) => view.surface === "toolbar").index >
@@ -981,28 +1041,46 @@ async function run() {
     "the resized sidebar width to persist",
   );
 
-  const pageVisibleSidebar = fixturePageView.getBounds();
+  // Docked open, the panel is part of the browser frame: the page card sits to its right with the
+  // same frame gap on every side, and the panel starts at the toolbar's bottom line.
+  const dockedToolbarBottom = await evaluate(
+    rendererViews.toolbar,
+    'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
+  );
+  const pageVisibleSidebar = await waitFor(() => {
+    const page = fixturePageView.getBounds();
+    return page.x === widthAfterResize + PAGE_FRAME_GAP ? page : null;
+  }, "the live page card to sit beside the docked sidebar");
   const sidebarView = rendererViews.sidebar.getBounds();
   assert.equal(
-    pageVisibleSidebar.x,
-    0,
-    "opening the sidebar must not inset the page",
+    pageVisibleSidebar.x - (sidebarView.x + sidebarView.width),
+    PAGE_FRAME_GAP,
+    "the docked sidebar keeps the frame gap from the page card",
   );
   assert.equal(
-    pageVisibleSidebar.width,
-    contentSize[0],
-    "opening the sidebar must not narrow the page",
+    contentSize[0] - (pageVisibleSidebar.x + pageVisibleSidebar.width),
+    PAGE_FRAME_GAP,
+    "beside the docked sidebar the page card keeps the gap from the right edge",
+  );
+  assert.equal(
+    contentSize[1] - (pageVisibleSidebar.y + pageVisibleSidebar.height),
+    PAGE_FRAME_GAP,
+    "beside the docked sidebar the page card keeps the gap from the bottom edge",
+  );
+  assert.ok(
+    Math.abs(pageVisibleSidebar.y - dockedToolbarBottom - PAGE_FRAME_GAP) <= 1,
+    `beside the docked sidebar the page card keeps the gap below the toolbar (page y ${pageVisibleSidebar.y}, toolbar bottom ${dockedToolbarBottom})`,
   );
   assert.equal(sidebarView.width, widthAfterResize);
-  assert.equal(
-    sidebarView.y,
-    0,
-    "the sidebar starts at the top edge of the window",
+  assert.ok(
+    sidebarView.y >= dockedToolbarBottom - 0.5 &&
+      sidebarView.y - dockedToolbarBottom <= 1,
+    `the docked sidebar starts at the toolbar's bottom line, never over it (sidebar y ${sidebarView.y}, toolbar bottom ${dockedToolbarBottom})`,
   );
   assert.equal(
-    sidebarView.height,
+    sidebarView.y + sidebarView.height,
     contentSize[1],
-    "the sidebar covers the full window height",
+    "the docked sidebar runs to the window's bottom edge",
   );
   captureFullWindow("sidebar-overlay-live-page-visible.png");
   // This is an authentic app-window capture over the harness's loopback-only synthetic page.
@@ -1087,6 +1165,12 @@ async function run() {
       ),
     "the sidebar pin control to show unpinned",
   );
+  // Undocked, the page card goes back beside the rail; let its page lay out there before aiming.
+  await waitFor(
+    () => fixturePageView.getBounds().x === pageHiddenSidebar.x,
+    "the live page card to return beside the rail once the sidebar is unpinned",
+  );
+  await delay(250);
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),
     mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350,
@@ -1143,6 +1227,16 @@ async function run() {
     pageAfterHide.x >= 83,
     `the collapsed page sits beside the rail (${JSON.stringify(pageAfterHide)})`,
   );
+  // The hover-revealed panel slides out within the frame: from the toolbar's bottom line, over the
+  // page card, never over the toolbar.
+  {
+    const revealed = rendererViews.sidebar.getBounds();
+    assert.ok(
+      revealed.y >= dockedToolbarBottom - 0.5 &&
+        revealed.y + revealed.height === contentSize[1],
+      `the hover-revealed panel starts at the toolbar's bottom line (${JSON.stringify(revealed)}, toolbar bottom ${dockedToolbarBottom})`,
+    );
+  }
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),
     mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350,

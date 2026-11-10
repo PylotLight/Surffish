@@ -10,10 +10,11 @@ export interface SidebarCardGeometry {
   /** Gap between the card and the top/bottom of the window (px). */
   inset: number;
   /**
-   * Corner radius of the card's right side (px). The left corners stay square at the window edge
-   * and follow the window's own rounded frame; the native view clips uniformly with this number
-   * (Electron has no per-corner radius), which reads as the rounded right edge plus corners that
-   * blend into the frame.
+   * Corner radius of the card's right side (px). 0: the sidebar is part of the browser frame (it
+   * starts at the toolbar's bottom line, see browser-shell.ts), so it has no rounded corner of its
+   * own to poke out at the toolbar; the page card beside it carries the frame's rounded inner
+   * corners (PAGE_FRAME_RADIUS). The native view clips uniformly with this number (Electron has no
+   * per-corner radius), so anything above 0 would round its top-left at the frame too.
    */
   radius: number;
   /** The card never gets wider than the window minus this (px). */
@@ -22,7 +23,10 @@ export interface SidebarCardGeometry {
   borderWidth: number;
   /** Left position of the macOS traffic-light dots, measured from the window edge (px). */
   controlsLeft: number;
-  /** Top position of the macOS traffic-light dots, measured from the window edge (px). */
+  /**
+   * Top position of the macOS traffic-light dots, measured from the window edge (px): centred on
+   * the toolbar strip (50px on macOS), which holds them now the sidebar starts below it.
+   */
   controlsTop: number;
   /**
    * Width of the collapsed sidebar's icon rail (px). The card never gets narrower than this, so a
@@ -35,11 +39,11 @@ export interface SidebarCardGeometry {
 
 export const SIDEBAR_CARD: Readonly<SidebarCardGeometry> = Object.freeze({
   inset: 0,
-  radius: 20,
+  radius: 0,
   windowGutter: 48,
   borderWidth: 0,
   controlsLeft: 16,
-  controlsTop: 16,
+  controlsTop: 18,
   railWidth: 84,
 });
 
@@ -123,11 +127,15 @@ export function sidebarCardCssVars(
 }
 
 /**
- * The browser frame's tint, ARGB: the toolbar strip (.browser-chrome in Browser.css) and, while the
- * sidebar is collapsed, the icon rail, which together are one L-shaped frame around the page.
- * Main paints it under a live page beside the rail (macOS: the window itself is vibrancy, so the
- * page's rounded corners would otherwise show it untinted).
+ * The browser frame's tint, ARGB: rgba(18, 21, 25, 0.82), the toolbar strip's own ground
+ * (.browser-chrome in Browser.css). Over live pages main sets it as the window root's background
+ * (browser-shell.ts), under the toolbar strip, the rail, the docked panel and the page card, which
+ * draw none of their own there: one material, the macOS window vibrancy (or the window colour
+ * elsewhere) under one tint, showing in the gaps and the card's rounded cut-out corners too.
  */
 export const BROWSER_FRAME_TINT_ARGB = "#D1121519";
-/** Rounding of a live page's corners beside the collapsed rail: its top-left is the frame's inner corner. */
+/**
+ * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
+ * where the sidebar meets the toolbar they read as the frame's rounded inner corner.
+ */
 export const PAGE_FRAME_RADIUS = 10;

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   initialPageViewBounds,
-  insetPageArea,
-  pageRailInset,
+  framePageArea,
+  pageFrameLeft,
   pageViewBounds,
 } from "./page-view-bounds";
 
@@ -39,42 +39,63 @@ describe("page view bounds", () => {
   });
 });
 
-describe("pageRailInset", () => {
+describe("pageFrameLeft", () => {
   const base = {
     overlayMode: true,
+    fullscreen: false,
     sidebarMode: "tabs",
     sidebarPinned: false,
+    sidebarWidth: 300,
     railWidth: 84,
   };
-  test("the auto-hiding sidebar's rail insets the page", () => {
-    expect(pageRailInset(base)).toBe(84);
-    expect(pageRailInset({ ...base, sidebarMode: "history" })).toBe(84);
+  test("the auto-hiding sidebar's rail is the frame's left side", () => {
+    expect(pageFrameLeft(base)).toBe(84);
+    expect(pageFrameLeft({ ...base, sidebarMode: "history" })).toBe(84);
   });
-  test("pinned open, a full panel, no overlay or no rail: no inset", () => {
-    expect(pageRailInset({ ...base, sidebarPinned: true })).toBe(0);
-    expect(pageRailInset({ ...base, sidebarMode: "settings" })).toBe(0);
-    expect(pageRailInset({ ...base, overlayMode: false })).toBe(0);
-    expect(pageRailInset({ ...base, railWidth: 0 })).toBe(0);
+  test("docked open, the panel is: the card sits beside it", () => {
+    expect(pageFrameLeft({ ...base, sidebarPinned: true })).toBe(300);
+    expect(
+      pageFrameLeft({ ...base, sidebarPinned: true, sidebarMode: "history" }),
+    ).toBe(300);
+  });
+  test("no rail, or another panel: the frame starts at the window edge", () => {
+    expect(pageFrameLeft({ ...base, railWidth: 0 })).toBe(0);
+    expect(pageFrameLeft({ ...base, sidebarMode: "settings" })).toBe(0);
+  });
+  test("in-page shapes and native fullscreen have no frame", () => {
+    expect(pageFrameLeft({ ...base, overlayMode: false })).toBeNull();
+    expect(pageFrameLeft({ ...base, fullscreen: true })).toBeNull();
   });
 });
 
-describe("insetPageArea", () => {
-  test("moves the left edge to the inset and keeps the right edge", () => {
-    expect(
-      insetPageArea({ x: 0, y: 50, width: 1000, height: 600 }, 84),
-    ).toEqual({ x: 84, y: 50, width: 916, height: 600 });
+describe("framePageArea", () => {
+  const area = { x: 0, y: 50, width: 1000, height: 650 };
+  test("the card keeps the gap from the rail, the toolbar and the window edges", () => {
+    expect(framePageArea(area, 84, 6)).toEqual({
+      x: 90,
+      y: 56,
+      width: 904,
+      height: 638,
+    });
   });
-  test("idempotent: a rect already beside the rail is unchanged", () => {
-    const rect = { x: 84, y: 50, width: 916, height: 600 };
-    expect(insetPageArea(rect, 84)).toEqual(rect);
-    expect(insetPageArea(insetPageArea(rect, 84), 84)).toEqual(rect);
+  test("every side gets the same gap", () => {
+    const card = framePageArea(area, 300, 6);
+    expect(card.x - 300).toBe(6);
+    expect(card.y - area.y).toBe(6);
+    expect(area.x + area.width - (card.x + card.width)).toBe(6);
+    expect(area.y + area.height - (card.y + card.height)).toBe(6);
   });
-  test("no inset, or a hidden page area, is left alone", () => {
-    const rect = { x: 0, y: 0, width: 500, height: 400 };
-    expect(insetPageArea(rect, 0)).toEqual(rect);
+  test("a frame starting at the window edge still insets the card", () => {
+    expect(framePageArea(area, 0, 6).x).toBe(6);
+  });
+  test("an area already right of the frame keeps its own left edge", () => {
+    expect(framePageArea({ ...area, x: 120, width: 880 }, 84, 6).x).toBe(126);
+  });
+  test("no frame, or a hidden page area, is left alone", () => {
+    expect(framePageArea(area, null)).toEqual(area);
     const hidden = { x: 0, y: 0, width: 0, height: 0 };
-    expect(insetPageArea(hidden, 84)).toEqual(hidden);
-    expect(insetPageArea({ x: 0, y: 0, width: 50, height: 10 }, 84).width).toBe(
+    expect(framePageArea(hidden, 84)).toEqual(hidden);
+    expect(framePageArea({ x: 0, y: 0, width: 50, height: 10 }, 84).width).toBe(
       0,
     );
   });

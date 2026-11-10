@@ -2254,77 +2254,6 @@
 .app-shell[data-platform="darwin"] .browser-toolbar-leading {
   margin-left: 70px;
 }
-.sidebar-window-controls {
-  position: relative;
-  top: calc(0px - var(--sidebar-controls-top, 16px));
-  /* Dot origin follows the native window controls on either sidebar surface. */
-  margin-top: calc(
-    var(--sidebar-controls-top, 16px) + var(--sidebar-controls-top, 16px) -
-      var(--sidebar-card-inset, 0px) - var(--sidebar-card-border-width, 1px) -
-      4.5px
-  );
-  display: flex;
-  align-self: flex-start;
-  flex: 0 0 auto;
-  align-items: center;
-  /* 9.5px gap + 13px dots matches the native macOS traffic light spacing. */
-  gap: 9.5px;
-  width: calc(
-    var(--sidebar-controls-left, 16px) - var(--sidebar-card-border-width, 1px) +
-      58px
-  );
-  height: 22px;
-  padding: 0 0 0
-    calc(
-      var(--sidebar-controls-left, 16px) - var(--sidebar-card-border-width, 1px)
-    );
-  -webkit-app-region: no-drag;
-}
-.sidebar-window-control {
-  display: grid;
-  width: 13px;
-  height: 13px;
-  flex: 0 0 13px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.22);
-  border-radius: 50%;
-  color: rgba(0, 0, 0, 0.68);
-  font: 700 9px/1 sans-serif;
-  cursor: pointer;
-  box-shadow:
-    inset 0 1px rgba(255, 255, 255, 0.33),
-    0 0 0 1px rgba(255, 255, 255, 0.09);
-}
-.sidebar-window-control::before {
-  opacity: 0;
-}
-.sidebar-window-control:hover::before,
-.sidebar-window-control:focus-visible::before {
-  opacity: 0.8;
-}
-.sidebar-window-control:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.8);
-  outline-offset: 2px;
-}
-.sidebar-window-control.is-close {
-  background: #ff6058;
-}
-.sidebar-window-control.is-close::before {
-  content: "×";
-}
-.sidebar-window-control.is-minimize {
-  background: #ffbd2e;
-}
-.sidebar-window-control.is-minimize::before {
-  content: "−";
-}
-.sidebar-window-control.is-zoom {
-  background: #28c840;
-}
-.sidebar-window-control.is-zoom::before {
-  content: "↗";
-}
 .tab-favicon img {
   display: block;
   width: 18px;
@@ -5287,19 +5216,45 @@
 .browser-sidebar.is-collapsed .sidebar-resize-handle {
   display: none;
 }
-/* Collapsed, the rail and the toolbar strip are one L-shaped frame around the page: the rail takes
- * the toolbar's own tint (.browser-chrome), with no rounded top corner and no edge hairline
- * against the toolbar, so the strip runs the full width (traffic lights included) and the rail
- * reads as starting at its bottom line. The page beside it is the rounded card (main:
- * PAGE_FRAME_RADIUS), so the frame's inner corner where the strip meets the rail is the page's
- * own top-left curve. The open panel keeps its card look (it floats over the frame). Same on both
- * surfaces, so the in-page and overlay cards still match (electron-sidebar-card-smoke). */
+/* The browser frame (main: browser-shell.ts applyShellLayout, Zephium's layout): the toolbar strip
+ * runs the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
+ * starts at the toolbar's bottom line and never draws over it; live pages are a rounded card inset
+ * from both (PAGE_FRAME_GAP, PAGE_FRAME_RADIUS). The overlay view is placed there by main; the
+ * in-page sidebar starts at the same line (--sidebar-frame-top, the content renderer's viewport
+ * top: the toolbar's bottom, or the window top in fullscreen). */
+.app-shell[data-surface="content"] .browser-sidebar {
+  top: var(--sidebar-frame-top, 0px);
+}
+/* The collapsed rail and the docked panel are the frame itself: one flat material with the
+ * toolbar strip, square, no hairline or shadow at the toolbar or the page. In-page they take the
+ * toolbar's own tint (.browser-chrome); over live pages the window root carries the frame's tint
+ * (BROWSER_FRAME_TINT_ARGB, the same colour), so the overlay view draws no ground of its own there
+ * (main also drops the view's own tint and blur), and there is no second layer to seam. Only the
+ * panel slid out over the page card by a hover reveal has its own ground (it covers the page). */
 .browser-sidebar.has-rail.is-collapsed,
-.app-shell[data-surface="sidebar"] .browser-sidebar.has-rail.is-collapsed {
-  /* No variables are set for these: the fallbacks are the frame's square corner and no seam. */
-  border-top-right-radius: var(--sidebar-rail-frame-radius, 0px);
+.browser-layout.is-sidebar-docked .browser-sidebar {
+  border-top-right-radius: var(--sidebar-frame-radius, 0px);
+  border-bottom-right-radius: var(--sidebar-frame-radius, 0px);
   background: rgba(18, 21, 25, 0.82);
-  box-shadow: var(--sidebar-rail-frame-shadow, none);
+  box-shadow: var(--sidebar-frame-shadow, none);
+}
+.app-shell[data-surface="sidebar"][data-surface]
+  .browser-layout
+  .browser-sidebar.has-rail.is-collapsed,
+.app-shell[data-surface="sidebar"][data-surface]
+  .browser-layout.is-sidebar-docked
+  .browser-sidebar {
+  background: transparent;
+}
+/* Nothing of the snapshot backdrop shows where the sidebar is the frame (no page is under it). */
+.browser-layout.is-sidebar-docked .sidebar-backdrop,
+.browser-sidebar.is-collapsed > .sidebar-backdrop {
+  display: none;
+}
+/* The frame's first row sits the frame gap below the toolbar's line, level with the page card's
+ * top, in both shapes (the rail is aligned onto the panel's rows, SidebarRail alignRailToPanel). */
+.sidebar-body {
+  padding-top: 6px;
 }
 
 /* The rail holds its designed width (the card is exactly this wide when collapsed), so its marks
@@ -5373,6 +5328,18 @@
   padding: 8px 0;
   scrollbar-width: none;
 }
+/* The pins' row sits above the tab list's scroller, laid out as its first row was (the scroller's
+ * top padding above it, its row gap below), so nothing below moves for it. */
+.sidebar-rail-pins-row {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+}
+.sidebar-rail-pins-row + .sidebar-rail-scroll {
+  padding-top: 6px;
+}
 .sidebar-rail-scroll::-webkit-scrollbar {
   display: none;
 }
@@ -5419,7 +5386,8 @@
 /* The rail shifts its column onto the panel's favicon line (SidebarRail.tsx; a mark a little off
  * it takes its own --sidebar-rail-mark-dx), and draws every mark at the panel's size, so a mark
  * neither moves nor resizes when the shape changes. */
-.sidebar-rail-scroll > * {
+.sidebar-rail-scroll > *,
+.sidebar-rail-pins-row > * {
   translate: var(--sidebar-rail-mark-dx, var(--sidebar-rail-mark-shift, 0px)) 0;
 }
 .sidebar-rail-item .tab-favicon {
@@ -5597,10 +5565,12 @@
   }
 }
 
-/* The page's top edge beside the collapsed rail is the frame's inner edge (its rounded top-left
- * corner meets it), so the toolbar draws no hairline of its own there. */
-.app-shell[data-surface="toolbar"]
-  .browser-layout.has-rail-frame
+/* Over live pages the toolbar strip is part of the browser frame: the window root carries the
+ * frame's tint (main), so the strip draws no ground or bottom hairline of its own, and the strip,
+ * the rail and the docked panel read as one surface. In fullscreen there is no frame and the strip
+ * slides over the page, so it keeps its own ground there. */
+.app-shell[data-surface="toolbar"]:not([data-fullscreen="true"])
   .browser-chrome {
   border-bottom-color: transparent;
+  background: transparent;
 }

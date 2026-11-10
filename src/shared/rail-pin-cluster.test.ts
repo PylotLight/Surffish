@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   RAIL_PIN_CLUSTER_MAX_WIDTH,
+  isPinMotionKey,
   planRailPinCluster,
 } from "./rail-pin-cluster";
 
@@ -45,22 +46,45 @@ describe("planRailPinCluster", () => {
     expect(plan.width).toBeLessThanOrEqual(RAIL_PIN_CLUSTER_MAX_WIDTH);
   });
 
-  test("the first pin is in front when nothing pinned is active", () => {
+  test("the cluster keeps the panel's order: slot i draws pin i, never reordered", () => {
+    for (const count of [1, 2, 3, 4, 5, 9]) {
+      const plan = planRailPinCluster(count);
+      const pins = plan.slots.flatMap((slot) =>
+        slot.pin === null ? [] : [slot.pin],
+      );
+      expect(pins).toEqual(pins.map((_, index) => index));
+    }
+  });
+
+  test("the first pin is in front, at the cluster's origin (the panel row's first pin)", () => {
     const [front, ...rest] = planRailPinCluster(3).slots;
-    expect(front?.pin).toBe(0);
+    expect(front).toEqual({ pin: 0, x: 0, z: 3 });
     for (const slot of rest) expect(slot.z).toBeLessThan(front?.z ?? 0);
   });
 
-  test("the active pin comes to the front, even from the overflow", () => {
-    const plan = planRailPinCluster(6, { activeIndex: 5 });
-    expect(plan.slots.map((slot) => slot.pin)).toEqual([5, 0, 1, null]);
+  test("the +N chip stays last and on top, standing for every pin it hides", () => {
+    const plan = planRailPinCluster(6);
+    expect(plan.slots.at(-1)?.pin).toBeNull();
     expect(plan.overflow).toBe(3);
-    expect(plan.slots[0]?.z).toBe(4);
+    const slots = plan.slots.map((slot) => slot.x);
+    expect([...slots].sort((a, b) => a - b)).toEqual(slots);
   });
 
-  test("an out-of-range active index falls back to the first pin", () => {
-    expect(planRailPinCluster(3, { activeIndex: 9 }).slots[0]?.pin).toBe(0);
-    expect(planRailPinCluster(3, { activeIndex: -1 }).slots[0]?.pin).toBe(0);
+  test("slots step evenly to the right, so a glide to the row is a pure spread", () => {
+    const plan = planRailPinCluster(4);
+    expect(plan.slots.map((slot) => slot.x)).toEqual([
+      0,
+      plan.step,
+      plan.step * 2,
+      plan.step * 3,
+    ]);
+  });
+
+  test("pin keys are the shared motion keys", () => {
+    expect(isPinMotionKey("pin:tab-1")).toBe(true);
+    expect(isPinMotionKey("site:https://github.com/")).toBe(true);
+    expect(isPinMotionKey("tab:tab-1")).toBe(false);
+    expect(isPinMotionKey("new-tab")).toBe(false);
   });
 
   test("a narrow budget tightens the step but never goes negative", () => {

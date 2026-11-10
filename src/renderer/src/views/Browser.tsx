@@ -2259,6 +2259,15 @@ export default function Browser({
     if (!element) return;
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect();
+      // The in-page sidebar starts at the toolbar's bottom line, where the overlay sidebar view
+      // starts (main: the browser frame), and at the window top in fullscreen (the toolbar hides).
+      const layout = element.closest<HTMLElement>(".browser-layout");
+      const frameTop = `${Math.max(0, Math.round(rect.top))}px`;
+      if (
+        layout &&
+        layout.style.getPropertyValue("--sidebar-frame-top") !== frameTop
+      )
+        layout.style.setProperty("--sidebar-frame-top", frameTop);
       const canShow =
         sidebarMode !== "downloads" &&
         sidebarMode !== "bookmarks" &&
@@ -2648,7 +2657,7 @@ export default function Browser({
 
   return (
     <section
-      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${(sidebarMode === "tabs" || sidebarMode === "history") && !sidebarPinned ? " has-rail-frame" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
+      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${(sidebarMode === "tabs" || sidebarMode === "history") && sidebarPinned ? " is-sidebar-docked" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
       aria-label="Surffish browser"
       onMouseMove={(event) => {

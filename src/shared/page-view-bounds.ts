@@ -40,42 +40,65 @@ export function initialPageViewBounds(
 }
 
 /**
- * The left inset live pages keep beside the sidebar: the collapsed icon rail's width while the
- * sidebar auto-hides (the rail stays on screen, so the page sits beside it rather than under it),
- * 0 when the sidebar is pinned open (it floats over the page as before) or there is no rail.
- * History opens over the rail like a hover reveal, so it keeps the inset too: revealing the panel
- * never resizes the page.
+ * Gap the page card keeps from the browser frame on every side (px): from the sidebar (its rail
+ * or the docked panel) on the left, the toolbar's bottom line on top, and the window's right and
+ * bottom edges. The frame (toolbar strip + sidebar, one material) shows in it, and the card's
+ * rounded corners (PAGE_FRAME_RADIUS, shared/sidebar-card.ts) read as the frame's inner corners,
+ * as Zephium lays its page out (crates/zephium-core/src/layout.rs: padding and gap around content).
  */
-export function pageRailInset({
+export const PAGE_FRAME_GAP = 6;
+
+/**
+ * Where the browser frame's left side ends for live pages, in window px: the docked sidebar's
+ * width when the tab list (or history) is pinned open, the collapsed icon rail's width while the
+ * sidebar auto-hides (the rail stays on screen, so the page sits beside it rather than under it),
+ * else 0. A hover/focus reveal never changes it: the panel slides out over the page card. History
+ * opens over the rail like a hover reveal, so it keeps the rail's edge too. null: no frame at all
+ * (New Tab and full panels draw in-page; native fullscreen gives the page the whole window).
+ */
+export function pageFrameLeft({
   overlayMode,
+  fullscreen,
   sidebarMode,
   sidebarPinned,
+  sidebarWidth,
   railWidth,
 }: {
   overlayMode: boolean;
+  fullscreen: boolean;
   sidebarMode: string;
   sidebarPinned: boolean;
+  sidebarWidth: number;
   railWidth: number;
-}): number {
-  if (!overlayMode || sidebarPinned || !(railWidth > 0)) return 0;
-  return sidebarMode === "tabs" || sidebarMode === "history"
-    ? Math.round(railWidth)
-    : 0;
+}): number | null {
+  if (!overlayMode || fullscreen) return null;
+  if (sidebarMode !== "tabs" && sidebarMode !== "history") return 0;
+  if (sidebarPinned && sidebarWidth > 0) return Math.round(sidebarWidth);
+  return railWidth > 0 ? Math.round(railWidth) : 0;
 }
 
 /**
- * `rect` starting no further left than `inset`, its right edge kept. Idempotent, so a page area a
- * renderer already measured beside the rail is left as it is; a hidden (empty) area stays empty.
+ * The page card inside the frame: `area` (the page area the content renderer measured, its top
+ * on the toolbar's bottom line) starting no further left than the frame's left edge, then inset
+ * by `gap` on every side. `frameLeft` null (no frame) or an empty area leaves `area` as it is.
+ * Not idempotent by design: callers keep the measured area and derive the card from it.
  */
-export function insetPageArea(rect: ViewRect, inset: number): ViewRect {
-  const left = Math.max(0, Math.round(inset));
-  if (rect.x >= left || !(rect.width > 0) || !(rect.height > 0))
-    return { ...rect };
-  const shift = left - rect.x;
+export function framePageArea(
+  area: ViewRect,
+  frameLeft: number | null,
+  gap = PAGE_FRAME_GAP,
+): ViewRect {
+  if (frameLeft === null || !(area.width > 0) || !(area.height > 0))
+    return { ...area };
+  const inset = Math.max(0, Math.round(gap));
+  const left = Math.max(area.x, Math.round(frameLeft)) + inset;
+  const top = area.y + inset;
+  const right = area.x + area.width - inset;
+  const bottom = area.y + area.height - inset;
   return {
     x: left,
-    y: rect.y,
-    width: Math.max(0, rect.width - shift),
-    height: rect.height,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
   };
 }

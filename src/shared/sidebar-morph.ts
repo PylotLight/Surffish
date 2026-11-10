@@ -13,6 +13,7 @@
  * unit-tested; the capture and play below are thin DOM glue around it.
  */
 import { SIDEBAR_MOTION_MS, sidebarMotionEasingCss } from "./sidebar-motion";
+import { isPinMotionKey } from "./rail-pin-cluster";
 
 /** A shape or mark's bounding box, in viewport coordinates. */
 export interface MarkRect {
@@ -164,7 +165,7 @@ function measureMarks(column: HTMLElement): Record<string, MarkRect> {
 export function captureSidebarMorph(
   host: HTMLElement | null,
 ): MorphSnapshot | null {
-  if (!host || prefersReducedMotion()) return null;
+  if (!host) return null;
   const column = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!column) return null;
   return {
@@ -202,7 +203,19 @@ export function planSidebarMorph(
     edgeFrom,
     widening,
     hold = false,
-  }: { edgeFrom: number; widening: boolean; hold?: boolean },
+    glide,
+  }: {
+    edgeFrom: number;
+    widening: boolean;
+    hold?: boolean;
+    /**
+     * Keys that travel even under `hold`: the pins, a stacked cluster in the rail and a row in the
+     * panel. They glide alongside the card's edge (its curve and duration, never trailing: a pin
+     * bound inside the card's final width stays inside its moving edge all the way, both ends being
+     * inside it), so the row spreads out of the cluster, or gathers into it.
+     */
+    glide?: (key: string) => boolean;
+  },
 ): MorphPlan {
   const flights: FlightPlan[] = [];
   const labels: HTMLElement[] = [];
@@ -218,13 +231,14 @@ export function planSidebarMorph(
     // off the pixel grid for the length of the flight, which reads as a shimmer.
     const dx = Math.round(from.x + from.width / 2 - (to.x + to.width / 2));
     const dy = Math.round(from.y + from.height / 2 - (to.y + to.height / 2));
-    if (hold || (dx === 0 && dy === 0)) {
+    const gliding = Boolean(target.key && glide?.(target.key));
+    if ((hold && !gliding) || (dx === 0 && dy === 0)) {
       // The mark stands where it should; its surroundings simply arrive.
       settled.push(target.element);
       durationMs = Math.max(durationMs, MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS);
       continue;
     }
-    const trailing = widening && to.x + to.width / 2 > edgeFrom;
+    const trailing = !gliding && widening && to.x + to.width / 2 > edgeFrom;
     flights.push({
       element: target.element,
       dx,
@@ -255,8 +269,12 @@ export function playSidebarMorph(
   captured: MorphSnapshot | null,
   host: HTMLElement,
 ): number {
-  if (!captured || prefersReducedMotion()) return 0;
+  if (!captured) return 0;
   const snapshot = captured;
+  // Reduced motion: nothing travels. The pins, which would glide between their cluster and row
+  // slots, crossfade instead (their outgoing copies fade with the old shape, the new ones fade in);
+  // everything else stands in place as it does with motion.
+  const reduce = prefersReducedMotion();
   const incoming = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!incoming || incoming === snapshot.column) return 0;
   // A re-toggle while an earlier morph is still running: drop the earlier ghost (it has faded or
@@ -265,7 +283,11 @@ export function playSidebarMorph(
     `:scope > .${MORPH_GHOST_CLASS}`,
   ))
     ghost.remove();
-  const targets = measureSidebarTargets(incoming);
+  const targets = measureSidebarTargets(incoming).map((target) =>
+    reduce && target.key && isPinMotionKey(target.key)
+      ? { ...target, key: null }
+      : target,
+  );
   const incomingKeys = new Set(
     targets.flatMap((target) => (target.key ? [target.key] : [])),
   );
@@ -280,8 +302,12 @@ export function playSidebarMorph(
     // counterpart never travels: it is shown in place from the first frame. A measured
     // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
     // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
-    // in the panel and one stacked cluster in the rail, crossfade (releaseColumn).
+    // in the panel and one stacked cluster in the rail, are the exception: they are laid out on
+    // the same line in the same order (rail-pin-cluster.ts), the first pin on the row's first, and
+    // each glides between its cluster slot and its row slot; pins behind the "+N" chip have no
+    // counterpart and fade where the row draws them.
     hold: true,
+    glide: reduce ? undefined : isPinMotionKey,
   });
   let total = MORPH_FADE_MS;
   for (const flight of plan.flights) {

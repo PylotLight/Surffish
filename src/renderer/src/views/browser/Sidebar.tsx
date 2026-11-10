@@ -303,31 +303,6 @@ export function Sidebar(props: SidebarProps) {
       {surface === "sidebar" && (
         <SidebarBackdropLayer state={sidebarBackdrop} cardRef={sidebarRef} />
       )}
-      {window.api.platform === "darwin" && (
-        <div className="sidebar-window-controls" aria-label="Window controls">
-          <button
-            className="sidebar-window-control is-close"
-            type="button"
-            aria-label="Close window"
-            title="Close window"
-            onClick={() => void window.api.browser.windowControl("close")}
-          />
-          <button
-            className="sidebar-window-control is-minimize"
-            type="button"
-            aria-label="Minimize window"
-            title="Minimize window"
-            onClick={() => void window.api.browser.windowControl("minimize")}
-          />
-          <button
-            className="sidebar-window-control is-zoom"
-            type="button"
-            aria-label="Toggle window zoom"
-            title="Toggle window zoom"
-            onClick={() => void window.api.browser.windowControl("toggle-zoom")}
-          />
-        </div>
-      )}
       <div
         ref={morphHostRef}
         className={`sidebar-body${hasRail ? " has-rail" : ""}`}

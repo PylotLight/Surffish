@@ -43,12 +43,12 @@ describe("sidebar card geometry", () => {
   test("css vars carry every number", () => {
     const vars = sidebarCardCssVars();
     expect(vars["--sidebar-card-inset"]).toBe("0px");
-    expect(vars["--sidebar-card-radius"]).toBe("20px");
+    expect(vars["--sidebar-card-radius"]).toBe("0px");
     expect(vars["--sidebar-rail-width"]).toBe("84px");
     expect(vars["--sidebar-card-gutter"]).toBe("48px");
     expect(vars["--sidebar-card-border-width"]).toBe("0px");
     expect(vars["--sidebar-controls-left"]).toBe("16px");
-    expect(vars["--sidebar-controls-top"]).toBe("16px");
+    expect(vars["--sidebar-controls-top"]).toBe("18px");
     // Inset shadows only: an outer one would be cut off at the overlay view's edge.
     expect(
       (vars["--sidebar-card-shadow"] ?? "")

@@ -42,10 +42,7 @@ import {
   type WebContents,
   type WebFrameMain,
 } from "electron";
-import {
-  BROWSER_FRAME_TINT_ARGB,
-  PAGE_FRAME_RADIUS,
-} from "../shared/sidebar-card";
+import { PAGE_FRAME_RADIUS } from "../shared/sidebar-card";
 import type {
   BrowserBounds,
   BrowserFindState,
@@ -309,8 +306,8 @@ import {
 } from "./mac-trackpad-swipe";
 import { setPageViewOnScreen, type TabProcessEntry } from "./tab-visibility";
 import {
+  framePageArea,
   initialPageViewBounds,
-  insetPageArea,
   pageViewBounds,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
@@ -536,8 +533,13 @@ interface BrowserWindowState {
   activeTabId: string | null;
   /** Page area in window coordinates (where the active site view sits). */
   browserBounds: BrowserBounds;
-  /** Left inset the page area keeps beside the collapsed sidebar rail (shared/page-view-bounds.ts). */
-  pageLeftInset?: number;
+  /**
+   * The page area as the content renderer measured it (its viewport), before the frame insets it:
+   * browserBounds is the page card derived from it (shared/page-view-bounds.ts framePageArea).
+   */
+  pageArea?: BrowserBounds;
+  /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
+  pageFrameLeft?: number | null;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -1441,44 +1443,6 @@ function setPageCornerRadius(view: View, radius: number): void {
   view.setBorderRadius(radius);
 }
 
-const pageFrameUnderlays = new WeakMap<BaseWindow, View>();
-
-/**
- * Beside the collapsed rail the page is a rounded card inside the toolbar + rail frame. On macOS
- * the window is native vibrancy, so the page's rounded corners would show it untinted; a plain
- * native view in the frame's tint sits right under the page (no renderer, no input: the page's
- * corner cut-outs still take their clicks), so the inner corner reads as the frame's own colour.
- * Elsewhere the window background already is that colour.
- */
-function syncPageFrameUnderlay(w: BrowserWindowState, framed: boolean): void {
-  if (process.platform !== "darwin" || w.window.isDestroyed()) return;
-  let view = pageFrameUnderlays.get(w.window);
-  if (!framed) {
-    if (view?.getVisible()) view.setVisible(false);
-    return;
-  }
-  if (!view) {
-    view = new View();
-    view.setBackgroundColor(BROWSER_FRAME_TINT_ARGB);
-    pageFrameUnderlays.set(w.window, view);
-  }
-  const bounds = w.browserBounds;
-  const current = view.getBounds();
-  if (
-    current.x !== bounds.x ||
-    current.y !== bounds.y ||
-    current.width !== bounds.width ||
-    current.height !== bounds.height
-  )
-    view.setBounds({ ...bounds });
-  if (!view.getVisible()) view.setVisible(true);
-  const { contentView } = w.window;
-  if (contentView.children[0] !== view) {
-    if (contentView.children.includes(view)) contentView.removeChildView(view);
-    contentView.addChildView(view, 0);
-  }
-}
-
 function applyTabBounds(w: BrowserWindowState): void {
   const { browserBounds } = w;
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
@@ -1486,9 +1450,10 @@ function applyTabBounds(w: BrowserWindowState): void {
   const split = splitOf(activeTabOf(w));
   const layout =
     split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null;
-  // Beside the collapsed rail (pageLeftInset) the page is a rounded card in the toolbar + rail
-  // frame; a split keeps its own surface and square panes.
-  const framed = pageAreaShown && !layout && (w.pageLeftInset ?? 0) > 0;
+  // Inside the browser frame (toolbar strip + sidebar, browser-shell.ts) the page is a rounded card
+  // (native View.setBorderRadius: real rounded corners, the frame's material shows through the
+  // cut-outs); a split keeps its own surface and square panes.
+  const framed = pageAreaShown && !layout && (w.pageFrameLeft ?? null) !== null;
   for (const tab of w.tabs) {
     if (!tab.view) continue;
     const pane = split ? split.tabIds.indexOf(tab.id) : -1;
@@ -1535,7 +1500,6 @@ function applyTabBounds(w: BrowserWindowState): void {
         : null,
     );
   }
-  syncPageFrameUnderlay(w, framed);
 }
 
 function cancelSleepTimer(tab: BrowserTab): void {
@@ -6394,16 +6358,17 @@ export function setBrowserBounds(input: unknown): void {
     values.some((value) => typeof value !== "number" || !Number.isFinite(value))
   )
     return;
-  // The content renderer measures its viewport at the window's left edge; live pages sit beside
-  // the collapsed rail (syncBrowserBoundsToWindow), so its report is held to the same inset.
-  const browserBounds = (w.browserBounds = insetPageArea(
-    {
-      x: Math.max(0, Math.round(bounds.x!)),
-      y: Math.max(0, Math.round(bounds.y!)),
-      width: Math.max(0, Math.round(bounds.width!)),
-      height: Math.max(0, Math.round(bounds.height!)),
-    },
-    w.pageLeftInset ?? 0,
+  // The content renderer measures its viewport (full width, from the toolbar's bottom line); live
+  // pages are the card inside the frame (syncBrowserBoundsToWindow), so its report is framed too.
+  w.pageArea = {
+    x: Math.max(0, Math.round(bounds.x!)),
+    y: Math.max(0, Math.round(bounds.y!)),
+    width: Math.max(0, Math.round(bounds.width!)),
+    height: Math.max(0, Math.round(bounds.height!)),
+  };
+  const browserBounds = (w.browserBounds = framePageArea(
+    w.pageArea,
+    w.pageFrameLeft ?? null,
   ));
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
   if (browserBounds.width === 0 || browserBounds.height === 0)
@@ -6416,20 +6381,25 @@ export function syncBrowserBoundsToWindow(
   height: number,
   overlayMode: boolean,
   window?: BaseWindow,
-  leftInset = 0,
+  frameLeft: number | null = null,
 ): void {
   const w = window ? windowStateFor(window) : currentWindowState();
   if (!isLiveWindow(w)) return;
-  w.pageLeftInset = overlayMode ? Math.max(0, Math.round(leftInset)) : 0;
+  const nextFrame =
+    overlayMode && frameLeft !== null
+      ? Math.max(0, Math.round(frameLeft))
+      : null;
+  const frameChanged = nextFrame !== (w.pageFrameLeft ?? null);
+  w.pageFrameLeft = nextFrame;
   if (!overlayMode || width <= 0 || height <= 0) return;
+  const area = w.pageArea ?? w.browserBounds;
+  if (area.width <= 0 || area.height <= 0) return;
+  const y = Math.min(area.y, height);
+  w.pageArea = { x: 0, y, width, height: Math.max(0, height - y) };
+  const nextBounds: BrowserBounds = framePageArea(w.pageArea, nextFrame);
   const { browserBounds } = w;
-  if (browserBounds.width <= 0 || browserBounds.height <= 0) return;
-  const y = Math.min(browserBounds.y, height);
-  const nextBounds: BrowserBounds = insetPageArea(
-    { x: 0, y, width, height: Math.max(0, height - y) },
-    w.pageLeftInset,
-  );
   if (
+    !frameChanged &&
     nextBounds.x === browserBounds.x &&
     nextBounds.y === browserBounds.y &&
     nextBounds.width === browserBounds.width &&
