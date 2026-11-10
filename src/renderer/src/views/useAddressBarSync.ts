@@ -89,12 +89,7 @@ export function useAddressBarSync({
         if (shown === draft.text) {
           // The field still holds the draft (this renderer kept it while another tab was showing),
           // so nothing re-renders: put the keyboard back on a New Tab here instead.
-          if (
-            reason === "tab" &&
-            next === "" &&
-            input &&
-            document.activeElement !== input
-          )
+          if (reason === "tab" && next === "" && input && !hasKeyboard(input))
             restoreFocusRef.current?.(input, caretPlacer(input, draft));
           return;
         }
@@ -139,7 +134,7 @@ export function useAddressBarSync({
       if (!input || input.value !== restore.draft.text) return;
       restoreRef.current = null;
       const placeCaret = caretPlacer(input, restore.draft);
-      if (document.activeElement === input) placeCaret();
+      if (hasKeyboard(input)) placeCaret();
       else if (restore.focus) onRestoreFocus?.(input, placeCaret);
       return;
     }
@@ -206,4 +201,12 @@ function caretPlacer(input: HTMLInputElement, draft: OmniboxDraft): () => void {
       Math.min(selectionEnd ?? end, end),
     );
   };
+}
+
+/**
+ * The bar really has the keyboard: focused in this document and this surface has the OS focus.
+ * activeElement alone sticks on a surface that lost focus to another view (the toolbar, a page).
+ */
+function hasKeyboard(input: HTMLInputElement): boolean {
+  return document.activeElement === input && document.hasFocus();
 }
