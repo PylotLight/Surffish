@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent } from "electron";
+import { BaseWindow, ipcMain, type IpcMainInvokeEvent } from "electron";
 import { isMainWindowRenderer } from "./browser-shell";
 import {
   focusActivePage,
@@ -24,6 +24,15 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 
 /** Command registry, command palette and search keyword channels (shell renderers only). */
 export function registerCommandIpc(): void {
+  // A New Tab's half-typed address bar text came back after a tab switch: the content surface takes
+  // the keyboard, but only while one of the app's windows is focused (never steals it from another app).
+  ipcMain.handle("browser:focus-address-surface", (event) => {
+    assertMainRenderer(event);
+    if (!BaseWindow.getFocusedWindow() || event.sender.isDestroyed())
+      return false;
+    event.sender.focus();
+    return true;
+  });
   ipcMain.handle("browser:commands:list", (event) => {
     assertMainRenderer(event);
     return getCommandPaletteSnapshot();

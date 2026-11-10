@@ -318,6 +318,88 @@ async function run() {
     "a blank New Tab focuses the address bar",
   );
 
+  // --- each tab keeps its own half-typed text across tab switches (as in Chrome and Arc)
+  const contentBar = () => evaluate(content, `${INPUT}.value`);
+  content.focus();
+  await evaluate(content, `${INPUT}.focus(), true`);
+  await waitFor(
+    () =>
+      evaluate(
+        content,
+        `document.hasFocus() && document.activeElement === ${INPUT}`,
+      ),
+    "the New Tab's address bar to have the keyboard before typing",
+  );
+  await content.insertText("copied query");
+  await waitFor(
+    async () => (await contentBar()) === "copied query",
+    "text typed on the New Tab",
+  );
+  const tabList = await evaluate(toolbar, "window.api.browser.tabs.get()");
+  const newTabId = tabList.find((tab) => tab.active).id;
+  const openedTabId = tabList.find((tab) => tab.url === `${origin}/opened`).id;
+  const activate = (id) =>
+    evaluate(
+      toolbar,
+      `window.api.browser.tabs.activate(${JSON.stringify(id)})`,
+    );
+  await activate(openedTabId);
+  await expectBar("/opened", "another tab shows its own URL, not the draft");
+  await focusBar();
+  await typeInBar("web draft");
+  await activate(newTabId);
+  await waitFor(
+    async () => (await contentBar()) === "copied query",
+    "the New Tab's draft comes back",
+  ).catch(async (error) => {
+    throw new Error(
+      `${error.message} — New Tab bar shows ${JSON.stringify(await contentBar())}`,
+    );
+  });
+  await waitFor(
+    () =>
+      evaluate(
+        content,
+        `document.hasFocus() && document.activeElement === ${INPUT}`,
+      ),
+    "the restored New Tab draft to have the keyboard",
+  );
+  assert.deepEqual(
+    await evaluate(
+      content,
+      `[${INPUT}.selectionStart, ${INPUT}.selectionEnd, ${INPUT}.getAttribute("aria-expanded")]`,
+    ),
+    ["copied query".length, "copied query".length, "false"],
+    "caret back at the end, suggestions stay closed",
+  );
+  await activate(openedTabId);
+  await waitFor(
+    async () => (await bar()) === "web draft",
+    "the web tab's own draft comes back",
+  ).catch(async (error) => {
+    throw new Error(
+      `${error.message} — bar actually shows ${JSON.stringify(await bar())}`,
+    );
+  });
+  // Esc drops the draft: the tab's URL stays after another round trip.
+  await focusBar();
+  toolbar.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  toolbar.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+  await expectBar("/opened", "Esc reverts the draft");
+  await activate(newTabId);
+  await waitFor(
+    async () => (await contentBar()) === "copied query",
+    "the New Tab still has its draft",
+  );
+  await activate(openedTabId);
+  await expectBar("/opened", "a reverted draft does not come back");
+  await delay(300);
+  assert.equal(
+    await bar(),
+    `${origin}/opened`,
+    "the reverted draft stays gone",
+  );
+
   console.log("Address bar sync smoke passed.");
 }
 
