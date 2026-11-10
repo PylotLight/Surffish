@@ -64,7 +64,9 @@ export function useAddressBarSync({
   const restoreRef = useRef<{ draft: OmniboxDraft; focus: boolean } | null>(
     null,
   );
+  const restoreFocusRef = useRef(onRestoreFocus);
   useLayoutEffect(() => {
+    restoreFocusRef.current = onRestoreFocus;
     valueRef.current = address;
     displayRef.current = displayUrl;
     tabKeyRef.current = tabKey;
@@ -84,7 +86,18 @@ export function useAddressBarSync({
         reason === "blur" ? null : drafts.draftFor(tabKeyRef.current, next);
       if (draft) {
         syncedRef.current = next;
-        if (shown === draft.text) return;
+        if (shown === draft.text) {
+          // The field still holds the draft (this renderer kept it while another tab was showing),
+          // so nothing re-renders: put the keyboard back on a New Tab here instead.
+          if (
+            reason === "tab" &&
+            next === "" &&
+            input &&
+            document.activeElement !== input
+          )
+            restoreFocusRef.current?.(input, caretPlacer(input, draft));
+          return;
+        }
         selectAllRef.current = false;
         restoreRef.current = { draft, focus: next === "" };
         valueRef.current = draft.text;
@@ -125,15 +138,7 @@ export function useAddressBarSync({
     if (restore) {
       if (!input || input.value !== restore.draft.text) return;
       restoreRef.current = null;
-      const { text, selectionStart, selectionEnd } = restore.draft;
-      const placeCaret = (): void => {
-        if (document.activeElement !== input || input.value !== text) return;
-        const end = input.value.length;
-        input.setSelectionRange(
-          Math.min(selectionStart ?? end, end),
-          Math.min(selectionEnd ?? end, end),
-        );
-      };
+      const placeCaret = caretPlacer(input, restore.draft);
       if (document.activeElement === input) placeCaret();
       else if (restore.focus) onRestoreFocus?.(input, placeCaret);
       return;
@@ -188,4 +193,17 @@ export function useAddressBarSync({
     [clearDraft],
   );
   return { onBlur, markSynced, rememberDraft, clearDraft };
+}
+
+/** Puts the caret (or selection) back where it was in a restored draft, if the bar has the keyboard. */
+function caretPlacer(input: HTMLInputElement, draft: OmniboxDraft): () => void {
+  const { text, selectionStart, selectionEnd } = draft;
+  return () => {
+    if (document.activeElement !== input || input.value !== text) return;
+    const end = input.value.length;
+    input.setSelectionRange(
+      Math.min(selectionStart ?? end, end),
+      Math.min(selectionEnd ?? end, end),
+    );
+  };
 }

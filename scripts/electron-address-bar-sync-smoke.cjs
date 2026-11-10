@@ -320,6 +320,16 @@ async function run() {
 
   // --- each tab keeps its own half-typed text across tab switches (as in Chrome and Arc)
   const contentBar = () => evaluate(content, `${INPUT}.value`);
+  content.focus();
+  await evaluate(content, `${INPUT}.focus(), true`);
+  await waitFor(
+    () =>
+      evaluate(
+        content,
+        `document.hasFocus() && document.activeElement === ${INPUT}`,
+      ),
+    "the New Tab's address bar to have the keyboard before typing",
+  );
   await content.insertText("copied query");
   await waitFor(
     async () => (await contentBar()) === "copied query",
