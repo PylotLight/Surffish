@@ -5296,9 +5296,10 @@
  * surfaces, so the in-page and overlay cards still match (electron-sidebar-card-smoke). */
 .browser-sidebar.has-rail.is-collapsed,
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-rail.is-collapsed {
-  border-top-right-radius: 0;
+  /* No variables are set for these: the fallbacks are the frame's square corner and no seam. */
+  border-top-right-radius: var(--sidebar-rail-frame-radius, 0px);
   background: rgba(18, 21, 25, 0.82);
-  box-shadow: none;
+  box-shadow: var(--sidebar-rail-frame-shadow, none);
 }
 
 /* The rail holds its designed width (the card is exactly this wide when collapsed), so its marks
