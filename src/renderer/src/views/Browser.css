@@ -111,8 +111,14 @@
   cursor: pointer;
   outline: 0;
   -webkit-app-region: no-drag;
+  /* Hover eases in (it is held off while the sidebar changes shape, then arrives under a pointer
+   * already resting on the row; see [data-reshaping] in the morph section). */
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
 }
-.tab-item:hover,
+.tab-item:hover:not(:where([data-reshaping] *)),
 .tab-item:focus-visible {
   background: rgba(255, 255, 255, 0.055);
   color: #f7f9fa;
@@ -121,8 +127,8 @@
   border-color: rgba(255, 255, 255, 0.14);
   background: linear-gradient(
     120deg,
-    rgba(255, 255, 255, 0.12),
-    rgba(255, 255, 255, 0.055)
+    rgba(255, 255, 255, calc(0.12 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.055 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.075),
@@ -231,13 +237,17 @@
   line-height: 1;
   opacity: 0;
   cursor: pointer;
+  transition:
+    opacity 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
 }
-.tab-item:hover .tab-close,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-close,
 .tab-item:focus-within .tab-close,
 .tab-item.is-active .tab-close {
   opacity: 1;
 }
-.tab-close:hover {
+.tab-close:hover:not(:where([data-reshaping] *)) {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
 }
@@ -1105,8 +1115,25 @@
   flex-direction: column;
   gap: 5px;
   margin-top: 3px;
-  padding: 2px 12px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
+  position: relative;
+  /* 14px on the left puts the first pin's mark on the tab favicons' centre line (33px), so the
+   * rail's single column lines up with both. */
+  padding: 2px 12px 9px 14px;
+}
+/* The hairline under the pins, drawn by an element rather than the section's border: the
+ * section holds marks that stand in place through a shape change, so the morph never fades it,
+ * and a border on it would pop in at full strength on expand. As its own childless part it is
+ * "new-only" and fades in on the label beat (shared/sidebar-morph.ts revealColumn), while the
+ * held-wide panel column lets the card's clip carry its width with the card. It sits in the
+ * last pixel of the padding (one more than before), where the border was, so nothing re-flows. */
+.sidebar-pinned-divider {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.065);
+  pointer-events: none;
 }
 .sidebar-pinned-list {
   display: flex;
@@ -1121,6 +1148,10 @@
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 .pinned-site-icon-button {
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    outline-color 130ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1135,7 +1166,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.pinned-site-icon-button:hover,
+.pinned-site-icon-button:hover:not(:where([data-reshaping] *)),
 .pinned-site-icon-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.075);
@@ -1143,6 +1174,10 @@
   outline-offset: 1px;
 }
 .pinned-tab-icon-button {
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    outline-color 130ms ease;
   position: relative;
   display: flex;
   align-items: center;
@@ -1157,7 +1192,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.pinned-tab-icon-button:hover,
+.pinned-tab-icon-button:hover:not(:where([data-reshaping] *)),
 .pinned-tab-icon-button:focus-visible,
 .pinned-tab-icon-button.is-active {
   border-color: rgba(255, 255, 255, 0.11);
@@ -1186,8 +1221,8 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 .pinned-tab-icon-button .tab-favicon {
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
   border-radius: 8px;
 }
 .pinned-tab-sleep-indicator {
@@ -1208,8 +1243,8 @@
 .pinned-site-mark {
   display: grid;
   place-items: center;
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.19);
@@ -1221,8 +1256,8 @@
 }
 .pinned-site-mark img {
   display: block;
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
 }
 .tab-list,
@@ -1240,8 +1275,8 @@
   border-color: rgba(255, 255, 255, 0.15);
   background: linear-gradient(
     120deg,
-    rgba(255, 255, 255, 0.13),
-    rgba(255, 255, 255, 0.055)
+    rgba(255, 255, 255, calc(0.13 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.055 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.09),
@@ -1260,12 +1295,12 @@
   border-radius: 50%;
   opacity: 0.42;
 }
-.tab-item:hover .tab-close,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-close,
 .tab-item:focus-within .tab-close,
 .tab-item.is-active .tab-close {
   opacity: 0.9;
 }
-.tab-close:hover {
+.tab-close:hover:not(:where([data-reshaping] *)) {
   background: rgba(255, 113, 126, 0.2);
   color: #ffc0c5;
 }
@@ -2840,7 +2875,13 @@
   font-weight: 300;
   line-height: 1;
 }
-.sidebar-new-tab-row:hover,
+.sidebar-new-tab-row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-new-tab-row:hover:not(:where([data-reshaping] *)),
 .sidebar-new-tab-row:focus-visible {
   background: rgba(255, 255, 255, 0.055);
   color: rgba(255, 255, 255, 0.9);
@@ -3302,7 +3343,7 @@
 .tab-volume.is-idle {
   display: none;
 }
-.tab-item:hover .tab-volume.is-idle,
+.tab-item:hover:not(:where([data-reshaping] *)) .tab-volume.is-idle,
 .tab-item:focus-within .tab-volume.is-idle,
 .tab-volume.is-idle.is-open {
   display: inline-flex;
@@ -4229,7 +4270,7 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
-.sidebar-new-private-tab:hover {
+.sidebar-new-private-tab:hover:not(:where([data-reshaping] *)) {
   background: rgba(170, 140, 255, 0.14);
   color: #d9cbff;
 }
@@ -4240,16 +4281,16 @@
 .tab-item.is-private {
   background: linear-gradient(
     120deg,
-    rgba(150, 110, 255, 0.1),
-    rgba(150, 110, 255, 0.03)
+    rgba(150, 110, 255, calc(0.1 * var(--sidebar-row-paint))),
+    rgba(150, 110, 255, calc(0.03 * var(--sidebar-row-paint)))
   );
 }
 .tab-item.is-private.is-active {
   border-color: rgba(180, 150, 255, 0.32);
   background: linear-gradient(
     120deg,
-    rgba(150, 110, 255, 0.26),
-    rgba(150, 110, 255, 0.1)
+    rgba(150, 110, 255, calc(0.26 * var(--sidebar-row-paint))),
+    rgba(150, 110, 255, calc(0.1 * var(--sidebar-row-paint)))
   );
 }
 .tab-private-badge {
@@ -5189,6 +5230,20 @@
  * shape morph (shared/sidebar-morph.ts) carries each site's mark from where the old shape drew
  * it to where the new one does, while the card's width travels on the shared open/close
  * timeline. */
+/* The row highlights' gradients are scaled by this (1 at rest), so the shape morph can fade a
+ * counterpart's highlight in while the outgoing shape's copy fades out: gradients themselves do
+ * not interpolate (shared/sidebar-morph.ts). */
+@property --sidebar-row-paint {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+/* One text rasteriser throughout: titles fade on their own compositor layers mid-morph, and on
+ * macOS a layer that is not opaque draws text without font smoothing, so the default would turn
+ * every title a shade bolder the frame each fade ends. */
+.browser-sidebar {
+  -webkit-font-smoothing: antialiased;
+}
 .sidebar-body {
   position: relative;
   display: flex;
@@ -5232,9 +5287,19 @@
   z-index: 0;
   pointer-events: none;
 }
-/* The inactive shape stays mounted, out of flow and invisible, at the width it has in flow
- * (100% of the body for the panel, its designed width for the rail), so switching shapes swaps
- * the class and nothing re-flows; the card's overflow clips it (shared/sidebar-morph.ts). */
+/* The footer holds the sidebar pin, a held mark, so the arriving shape draws its footer (hairline
+ * and tint) at full strength from the first frame. The ghost's copy fading out on top of it
+ * doubled the hairline for the fade, which read as the divider brightening and blinking. */
+.sidebar-morph-ghost .sidebar-footer {
+  border-top-color: transparent;
+  background: transparent;
+}
+/* The inactive shape stays mounted, out of flow and invisible, at the width it has when it is
+ * the shape on screen (the open sidebar width for the panel, its designed width for the rail), so
+ * switching shapes swaps the class and nothing re-flows: the panel's titles are laid out at their
+ * final width from the first frame of an expand (the card's overflow clips them), and the rail
+ * aligns onto panel rows measured at that width rather than squeezed into the 84px card, where
+ * the New Tab label wrapped and the pinned row grew a scrollbar (shared/sidebar-morph.ts). */
 .sidebar-morph-column.is-shape-hidden {
   position: absolute;
   top: 0;
@@ -5245,7 +5310,7 @@
   pointer-events: none;
 }
 .sidebar-panel.is-shape-hidden {
-  width: 100%;
+  width: var(--sidebar-width, 320px);
 }
 .sidebar-rail.is-shape-hidden {
   width: var(--sidebar-rail-width, 84px);
@@ -5300,9 +5365,9 @@
     border-color 130ms ease,
     box-shadow 130ms ease;
 }
-.sidebar-rail-item:hover,
+.sidebar-rail-item:hover:not(:where([data-reshaping] *)),
 .sidebar-rail-item:focus-visible,
-.sidebar-rail .pinned-site-icon-button:hover,
+.sidebar-rail .pinned-site-icon-button:hover:not(:where([data-reshaping] *)),
 .sidebar-rail .pinned-site-icon-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.085);
@@ -5312,22 +5377,28 @@
   border-color: rgba(255, 255, 255, 0.2);
   background: linear-gradient(
     150deg,
-    rgba(255, 255, 255, 0.24),
-    rgba(255, 255, 255, 0.09)
+    rgba(255, 255, 255, calc(0.24 * var(--sidebar-row-paint))),
+    rgba(255, 255, 255, calc(0.09 * var(--sidebar-row-paint)))
   );
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.24),
     0 4px 14px rgba(0, 0, 0, 0.2);
 }
+/* The rail shifts its column onto the panel's favicon line (SidebarRail.tsx; a mark a little off
+ * it takes its own --sidebar-rail-mark-dx), and draws every mark at the panel's size, so a mark
+ * neither moves nor resizes when the shape changes. */
+.sidebar-rail-scroll > * {
+  translate: var(--sidebar-rail-mark-dx, var(--sidebar-rail-mark-shift, 0px)) 0;
+}
 .sidebar-rail-item .tab-favicon {
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
   font-size: 11px;
 }
 .sidebar-rail .pinned-site-mark {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border-radius: 8px;
   font-size: 11px;
 }
@@ -5356,6 +5427,15 @@
 .sidebar-rail-badge.is-audio.is-muted {
   color: rgba(245, 247, 250, 0.55);
 }
+/* The rail's New tab +: the panel row's icon, same glyph, font and colour, on the same spot. */
+.sidebar-rail-new-tab {
+  color: rgba(245, 247, 250, 0.5);
+  font: inherit;
+}
+.sidebar-rail-new-tab:hover:not(:where([data-reshaping] *)),
+.sidebar-rail-new-tab:focus-visible {
+  color: rgba(255, 255, 255, 0.9);
+}
 .sidebar-rail-divider {
   width: 30px;
   height: 1px;
@@ -5363,50 +5443,10 @@
   margin: 3px 0;
   background: rgba(255, 255, 255, 0.11);
 }
-.sidebar-rail-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 0 6px;
-}
-.sidebar-rail-action {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 13px;
-  background: transparent;
-  color: rgba(245, 247, 250, 0.6);
-  cursor: pointer;
-  outline: 0;
-  -webkit-app-region: no-drag;
-  transition:
-    background-color 130ms ease,
-    color 130ms ease;
-}
-.sidebar-rail-action svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.sidebar-rail-action:hover,
-.sidebar-rail-action:focus-visible {
-  background: rgba(255, 255, 255, 0.09);
-  color: #fff;
-}
-.sidebar-rail-action.is-current {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
+/* The rail's footer reuses the panel footer's box (.sidebar-footer), so the pin keeps its exact
+ * position when the sidebar collapses or expands. */
+.sidebar-rail-footer {
+  justify-content: flex-start;
 }
 /* Private windows tint the same integrated surface, not a separate rail. */
 .browser-sidebar.is-private-window {

@@ -22,7 +22,8 @@ const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 const userData = join(tmpdir(), `surffish-sidebar-card-smoke-${process.pid}`);
 const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR;
 const label = process.env.SURFFISH_SIDEBAR_BACKDROP || "default";
-const TOLERANCE = 1;
+// Card and surface geometry: whole CSS pixels on both surfaces, so half a pixel is already a miss.
+const TOLERANCE = 0.5;
 
 const server = createServer((request, response) => {
   response.writeHead(200, {
@@ -139,7 +140,8 @@ const MEASURE = `(() => {
     rail: rect(rail),
     railHidden: Boolean(rail?.classList.contains('is-shape-hidden')),
     panelHidden: Boolean(panel?.classList.contains('is-shape-hidden')),
-    railActions: rect(card.querySelector('.sidebar-rail-actions')),
+    railActions: rect(card.querySelector('.sidebar-rail-footer')),
+    pin: rect(card.querySelector('.sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button')),
     pinned: rect(card.querySelector('.sidebar-pinned-sites')),
     tabList: rect(card.querySelector('.tab-list')),
     firstTab: rect(card.querySelector('.tab-item')),
@@ -171,6 +173,7 @@ async function measure(win, which) {
     firstDot: shift(raw.firstDot),
     rail: shift(raw.rail),
     railActions: shift(raw.railActions),
+    pin: shift(raw.pin),
     pinned: shift(raw.pinned),
     tabList: shift(raw.tabList),
     firstTab: shift(raw.firstTab),
@@ -372,6 +375,47 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
   );
 }
 
+const VISIBLE_PIN_RECT =
+  '(() => { const pin = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button"); if (!pin) return null; const r = pin.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+const VISIBLE_FIRST_TAB_MARK =
+  '(() => { const marks = document.querySelectorAll(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); const mark = marks[marks.length - 1]; if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+const VISIBLE_NEW_TAB_MARK =
+  '(() => { const mark = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key=\\"new-tab\\"] .sidebar-new-tab-row-icon"); if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+// What a click at a point lands on: the rail's + when collapsed, the panel's New Tab row when open.
+const hitAt = (point) =>
+  `(() => { const hit = document.elementFromPoint(${point.x + point.width / 2}, ${point.y + point.height / 2}); return hit?.closest(".sidebar-rail-new-tab") ? "rail" : hit?.closest(".sidebar-new-tab-row") ? "panel" : hit ? hit.className || hit.tagName : null; })()`;
+
+// A mark must land on the very device pixels it left: half a CSS pixel is a whole device pixel at
+// 2x, which is exactly the shift the eye catches on collapse/expand. Compare painted positions
+// (layout snapped to the device-pixel grid), so a layout-only half-pixel difference that paints
+// the same does not count, and one that paints a pixel off does.
+const devicePixels = (value, dpr) => Math.round(value * dpr) / dpr;
+function samePaintedSpot(a, b, dpr, fields = ["x", "y", "width", "height"]) {
+  return Boolean(
+    a &&
+    b &&
+    fields.every(
+      (field) =>
+        Math.abs(devicePixels(a[field], dpr) - devicePixels(b[field], dpr)) <
+        0.01,
+    ),
+  );
+}
+
+function assertPinStill(collapsedPin, expandedPin, context, dpr) {
+  assert.ok(
+    collapsedPin && expandedPin,
+    `${context}: the sidebar pin is drawn in both shapes`,
+  );
+  assert.ok(
+    samePaintedSpot(collapsedPin, expandedPin, dpr),
+    `${context}: the sidebar pin stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPin, expandedPin })}`,
+  );
+}
+
 async function assertSidebarState(win, which, context, expanded) {
   const view = surface(win, which);
   const [windowWidth, windowHeight] = win.getContentSize();
@@ -491,6 +535,16 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     }, `${which} collapsed rail DOM`);
     await settle();
     await assertSidebarState(win, which, `${which} collapsed`, false);
+    const dpr = await evaluate(view, "window.devicePixelRatio || 1");
+    const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
+    const collapsedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    const collapsedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(collapsedPlus, `${which}: the rail draws a New tab +`);
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "rail",
+      `${which}: a click on the rail's + lands on the rail's New tab button`,
+    );
     captureWindow(win, `sidebar-${which}-collapsed.png`);
 
     await evaluate(
@@ -517,6 +571,27 @@ async function verifyCollapsedAndExpanded(win, liveUrl) {
     );
     await settle();
     await assertSidebarState(win, which, `${which} expanded`, true);
+    assertPinStill(
+      collapsedPin,
+      await evaluate(view, VISIBLE_PIN_RECT),
+      which,
+      dpr,
+    );
+    const expandedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    assert.ok(
+      samePaintedSpot(collapsedTab, expandedTab, dpr),
+      `${which}: the last tab's favicon stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedTab, expandedTab })}`,
+    );
+    const expandedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(
+      samePaintedSpot(collapsedPlus, expandedPlus, dpr),
+      `${which}: the New tab + stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPlus, expandedPlus })}`,
+    );
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "panel",
+      `${which}: the rail's + spot lands on the panel's New Tab row once it opens`,
+    );
     captureWindow(win, `sidebar-${which}-expanded.png`);
 
     await api(

@@ -381,9 +381,24 @@ async function run() {
         const collapsed = Boolean(card?.classList.contains('is-collapsed'))
         const shape = card?.querySelector(collapsed ? '.sidebar-rail:not(.is-shape-hidden)' : '.sidebar-panel:not(.is-shape-hidden)')
         if (!shape) return null
-        const selector = collapsed ? '.sidebar-rail-action' : '.sidebar-footer-icon-button'
+        const selector = collapsed ? '.sidebar-rail-footer .sidebar-footer-icon-button' : '.sidebar-footer-icon-button'
         const controls = [...shape.querySelectorAll(selector)].map((button) => ({ label: button.getAttribute('aria-label'), width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height }))
-        return { collapsed, controls, newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null }
+        const labels = [...shape.querySelectorAll('[aria-label]')].map((element) => element.getAttribute('aria-label'))
+        const iconRect = (root, selector) => {
+          const icon = root?.querySelector(selector)
+          if (!icon || icon.getClientRects().length === 0) return null
+          const rect = icon.getBoundingClientRect()
+          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+        }
+        const railPlus = collapsed ? iconRect(shape, '.sidebar-rail-new-tab .sidebar-new-tab-row-icon') : null
+        const panelPlus = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '.sidebar-new-tab-row .sidebar-new-tab-row-icon') : null
+        return {
+          collapsed,
+          controls,
+          labels,
+          newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null,
+          newTabOffset: railPlus && panelPlus ? { dx: railPlus.x - panelPlus.x, dy: railPlus.y - panelPlus.y } : null,
+        }
       })()`,
     );
     return state?.controls.length ? state : null;
@@ -391,23 +406,49 @@ async function run() {
   const sidebarControlLabels = sidebarActions.controls.map(
     ({ label }) => label,
   );
-  assert.equal(
-    sidebarActions.newTab,
-    "New tab",
-    "the active sidebar shape exposes a New Tab action",
-  );
-  assert.ok(
-    sidebarControlLabels.includes("Keep sidebar open") &&
-      sidebarControlLabels.includes("Settings"),
-    "the active sidebar shape exposes pin and Settings controls",
-  );
-  assert.ok(
-    sidebarActions.collapsed
-      ? sidebarControlLabels.includes("New private tab")
-      : sidebarControlLabels.includes("Quit Surffish"),
-    "the active rail or panel exposes its shape-specific action",
-  );
-  const maxActionSize = sidebarActions.collapsed ? 40 : 36;
+  if (sidebarActions.collapsed) {
+    // Hovering the rail reveals the panel over it, so the rail carries only the pin.
+    assert.deepEqual(
+      sidebarControlLabels,
+      ["Keep sidebar open"],
+      "the collapsed rail exposes only the sidebar pin",
+    );
+    // The rail keeps its own New tab +, keyed to and lined up on the panel's New Tab row.
+    assert.equal(
+      sidebarActions.newTab,
+      "New tab",
+      "the collapsed rail has its New Tab + action",
+    );
+    for (const absent of ["New private tab", "Settings"])
+      assert.ok(
+        !sidebarActions.labels.includes(absent),
+        `the collapsed rail has no ${absent} action`,
+      );
+    if (sidebarActions.newTabOffset) {
+      const { dx, dy } = sidebarActions.newTabOffset;
+      console.log(
+        `[sidebar-overlay-smoke] rail New tab + vs panel row: dx=${dx.toFixed(2)} dy=${dy.toFixed(2)}`,
+      );
+      // The column shifts onto the panel's favicon line and nudges each mark onto its counterpart.
+      assert.ok(
+        Math.abs(dx) <= 1,
+        `the rail New tab + sits on the panel row's + horizontally (dx=${dx})`,
+      );
+    }
+  } else {
+    assert.equal(
+      sidebarActions.newTab,
+      "New tab",
+      "the expanded panel exposes a New Tab action",
+    );
+    assert.ok(
+      sidebarControlLabels.includes("Keep sidebar open") &&
+        sidebarControlLabels.includes("Settings") &&
+        sidebarControlLabels.includes("Quit Surffish"),
+      "the expanded panel exposes pin, Settings and Quit controls",
+    );
+  }
+  const maxActionSize = 36;
   assert.ok(
     sidebarActions.controls.every(
       ({ width, height }) => width <= maxActionSize && height <= maxActionSize,
