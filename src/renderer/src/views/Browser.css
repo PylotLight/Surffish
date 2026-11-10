@@ -5244,6 +5244,24 @@
 .browser-sidebar {
   -webkit-font-smoothing: antialiased;
 }
+/* Sidebar chrome is never text: a drag-select or ⌘A that runs over it used to select the tab rows
+ * and pinned site icons like text, painting the selection tint over the favicons (they looked
+ * faded). Real fields (history search, rename) still select; the tint is a backstop for anything
+ * a selection still reaches (e.g. a selection that starts in a field and is dragged out). */
+.browser-sidebar {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.browser-sidebar :is(input, textarea, [contenteditable="true"]) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.browser-sidebar img {
+  -webkit-user-drag: none;
+}
+.browser-sidebar :not(input, textarea, [contenteditable="true"])::selection {
+  background: transparent;
+}
 .sidebar-body {
   position: relative;
   display: flex;
