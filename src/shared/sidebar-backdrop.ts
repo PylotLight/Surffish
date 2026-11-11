@@ -13,7 +13,7 @@
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
-import { BROWSER_FRAME_TINT_ARGB, SIDEBAR_CARD } from "./sidebar-card";
+import { BROWSER_FRAME_TINT_ARGB } from "./sidebar-card";
 
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
@@ -37,8 +37,8 @@ export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
   /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
-  /** The sidebar view itself frames the full-height card (it has used native blur in this window). */
-  framed: boolean;
+  /** True only while a separate native View blurs live page pixels behind a floating sidebar. */
+  nativeOverlay: boolean;
 }
 
 export interface SidebarBackdropImage {
@@ -56,15 +56,10 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius matches the toolbar's glass so its frame continues into the overlay without a crease. */
+/** Blur radius for a temporary native overlay above live page pixels. */
 export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
-/** The sidebar is the same material as the toolbar, not a second, darker card over it. */
+/** The temporary hover overlay uses the same tint colour as the browser frame. */
 export const SIDEBAR_NATIVE_TINT = BROWSER_FRAME_TINT_ARGB;
-/** Near-opaque fallback keeps busy page detail from bleeding through when native blur is unavailable. */
-export const SIDEBAR_FRAMED_SOLID_TINT = "#FC121519";
-/** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
-export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
-export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;
 /** Fraction of the captured bitmap's physical width kept before the one-off canvas blur. */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25;
 /** At most one snapshot per this many ms while the sidebar stays open. */
@@ -111,6 +106,19 @@ export function resolveSidebarBackdropMode({
   if (!settings.blur) return "solid";
   if (override) return override;
   return platform === "darwin" ? "native" : "solid";
+}
+
+/** The docked sidebar is part of the window frame; only a floating overlay needs its own blur layer. */
+export function shouldUseNativeSidebarLayer({
+  mode,
+  docked,
+  visible,
+}: {
+  mode: SidebarBackdropMode;
+  docked: boolean;
+  visible: boolean;
+}): boolean {
+  return mode === "native" && visible && !docked;
 }
 
 export function intersectRects(a: Rect, b: Rect): Rect | null {

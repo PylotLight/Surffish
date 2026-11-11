@@ -29,11 +29,6 @@
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-native {
   background: transparent;
 }
-/* Native compositor blur: the view is framed to the card by main using --sidebar-card-inset. */
-.app-shell[data-surface="sidebar"] .browser-sidebar.is-view-framed {
-  top: 0;
-  bottom: 0;
-}
 
 /* Snapshot: a static, pre-blurred canvas under a darkening tint, behind the sidebar's content. */
 .sidebar-backdrop {

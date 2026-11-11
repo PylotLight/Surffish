@@ -5,9 +5,9 @@ import {
   normalizeSidebarBackdropSettings,
   parseSidebarBackdropOverride,
   resolveSidebarBackdropMode,
+  shouldUseNativeSidebarLayer,
   sidebarCaptureRegions,
   snapshotDue,
-  SIDEBAR_FRAMED_SOLID_TINT,
   SIDEBAR_NATIVE_BLUR_RADIUS,
   SIDEBAR_NATIVE_TINT,
 } from "./sidebar-backdrop";
@@ -83,10 +83,23 @@ describe("sidebar backdrop mode", () => {
     ).toBe("native");
   });
 
-  test("the native sidebar shares the frame tint and the solid fallback stays opaque", () => {
+  test("only a visible undocked overlay gets its own native material layer", () => {
+    const overlay = { mode: "native" as const, docked: false, visible: true };
+    expect(shouldUseNativeSidebarLayer(overlay)).toBe(true);
+    expect(shouldUseNativeSidebarLayer({ ...overlay, docked: true })).toBe(
+      false,
+    );
+    expect(shouldUseNativeSidebarLayer({ ...overlay, visible: false })).toBe(
+      false,
+    );
+    expect(shouldUseNativeSidebarLayer({ ...overlay, mode: "solid" })).toBe(
+      false,
+    );
+  });
+
+  test("the native hover overlay shares the root frame tint", () => {
     expect(BROWSER_FRAME_TINT_ARGB).toBe("#A6121519");
     expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
-    expect(SIDEBAR_FRAMED_SOLID_TINT).toBe("#FC121519");
     expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 });

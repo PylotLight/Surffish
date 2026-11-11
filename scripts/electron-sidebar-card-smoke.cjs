@@ -299,7 +299,6 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     inPage: inPage.card,
     overlay: overlay.card,
     view: overlay.view,
-    framed: overlay.className.includes("is-view-framed"),
   });
   assertSame(inPage, overlay, `${label} / ${context}`);
   // Both surfaces start at the toolbar's bottom line and reach the window's bottom.
@@ -393,6 +392,10 @@ function assertPinStill(collapsedPin, expandedPin, context, dpr) {
 async function assertSidebarState(win, which, context, expanded) {
   const view = surface(win, which);
   const [windowWidth, windowHeight] = win.getContentSize();
+  const toolbarBottom = await evaluate(
+    surface(win, "toolbar"),
+    'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+  );
   const { sidebarWidth } = await api(win, "chrome.get()");
   const expectedWidth = expanded
     ? Math.min(sidebarWidth, windowWidth - 48)
@@ -437,9 +440,9 @@ async function assertSidebarState(win, which, context, expanded) {
   );
   assert.ok(
     Math.abs(state.card.x) <= TOLERANCE &&
-      Math.abs(state.card.y) <= TOLERANCE &&
+      Math.abs(state.card.y - toolbarBottom) <= TOLERANCE &&
       Math.abs(state.card.width - expectedWidth) <= TOLERANCE &&
-      Math.abs(state.card.height - windowHeight) <= TOLERANCE,
+      Math.abs(state.card.height - (windowHeight - toolbarBottom)) <= TOLERANCE,
     `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
   );
   if (expanded) {

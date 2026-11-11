@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SIDEBAR_CARD_INSET, SIDEBAR_CARD_RADIUS } from "./sidebar-backdrop";
 import {
-  SIDEBAR_CARD,
   sidebarCardCssVars,
   sidebarCardInset,
   sidebarCardMaxWidth,
@@ -11,11 +9,6 @@ import {
 } from "./sidebar-card";
 
 describe("sidebar card geometry", () => {
-  test("the native-blur frame uses the card numbers", () => {
-    expect(SIDEBAR_CARD_INSET).toBe(SIDEBAR_CARD.inset);
-    expect(SIDEBAR_CARD_RADIUS).toBe(SIDEBAR_CARD.radius);
-  });
-
   test("card rect: attached to the top and bottom, capped by the window gutter", () => {
     expect(
       sidebarCardRect({
@@ -97,13 +90,6 @@ describe("sidebar css uses the shared card geometry", () => {
           const name = property?.trim();
           const value = rest.join(":").trim();
           if (!name || !geometry.includes(name)) continue;
-          // `top/bottom: 0` is how the framed view fills itself (main already inset the view).
-          if (
-            (name === "top" || name === "bottom") &&
-            value === "0" &&
-            selectors.every((selector) => selector.includes("is-view-framed"))
-          )
-            continue;
           if (name === "left" && value === "0") continue;
           expect({ selector: selectorText, [name]: value }).toEqual({
             selector: selectorText,

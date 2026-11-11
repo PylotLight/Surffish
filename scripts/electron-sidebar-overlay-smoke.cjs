@@ -732,9 +732,11 @@ async function run() {
     ),
   );
   // The hidden tab-overview view is preloaded ~1.5s after the window opens (a data: URL), so it is not
-  // counted as a page view; only the three shell surfaces may remain for New Tab.
+  // counted as a page view. Background-only native Views have no WebContents and are not renderer
+  // surfaces; only the three shell surfaces may remain for New Tab.
   const pageLevelChildren = () =>
     mainWindow.contentView.children.filter((view) => {
+      if (!view.webContents) return false;
       try {
         return !(
           view.webContents &&
@@ -1074,6 +1076,31 @@ async function run() {
   await waitFor(
     () => rendererViews.sidebar.getBounds().width >= 300,
     "the pinned sidebar to finish expanding after its pin morph",
+  );
+  const dockedSidebarBounds = rendererViews.sidebar.getBounds();
+  const dockedPageBounds = fixturePageView.getBounds();
+  const dockedBackdropState = await evaluate(
+    rendererViews.toolbar,
+    "window.api.browser.sidebarBackdrop.get()",
+  );
+  assert.equal(
+    dockedBackdropState.state.nativeOverlay,
+    false,
+    "the docked panel hides the hover-only backdrop and exposes the window material",
+  );
+  assert.equal(
+    dockedSidebarBounds.y,
+    toolbarBottom,
+    "the docked panel begins at the toolbar's bottom edge",
+  );
+  assert.equal(
+    dockedPageBounds.x - (dockedSidebarBounds.x + dockedSidebarBounds.width),
+    PAGE_FRAME_GAP,
+    "the live page remains an inset card beside the docked sidebar",
+  );
+  assert.ok(
+    Math.abs(dockedPageBounds.y - toolbarBottom - PAGE_FRAME_GAP) <= 1,
+    "the live page card keeps its top inset below the toolbar",
   );
   const overlaySurfaceStyle = await evaluate(
     rendererViews.sidebar,

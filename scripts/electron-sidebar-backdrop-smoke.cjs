@@ -339,7 +339,45 @@ async function run() {
           toolbar,
           'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
         );
-        const nativeCardInset = process.platform === "darwin" ? 10 : 0;
+        const nativeState = await evaluate(
+          toolbar,
+          "window.api.browser.sidebarBackdrop.get()",
+        );
+        assert.equal(
+          nativeState.state.nativeOverlay,
+          true,
+          "the floating overlay has a separate native background View over live page pixels",
+        );
+        const nativeViews = mainWindow.contentView.children.filter(
+          (view) => !view.webContents,
+        );
+        assert.equal(
+          nativeViews.length,
+          1,
+          "one background-only native View is attached",
+        );
+        const nativeBackdrop = nativeViews[0];
+        const childViews = mainWindow.contentView.children;
+        const pageIndex = childViews.findIndex(
+          (view) =>
+            view.webContents && view.webContents.getURL().includes(`/${theme}`),
+        );
+        assert.ok(
+          pageIndex >= 0,
+          "the live page view is present underneath the sidebar",
+        );
+        assert.ok(
+          pageIndex < childViews.indexOf(nativeBackdrop) &&
+            childViews.indexOf(nativeBackdrop) < childViews.indexOf(toolbar) &&
+            childViews.indexOf(nativeBackdrop) < childViews.indexOf(sidebar),
+          "the native material is above live page pixels but behind toolbar and sidebar content",
+        );
+        assert.equal(nativeBackdrop.getVisible(), true);
+        assert.deepEqual(
+          nativeBackdrop.getBounds(),
+          sidebar.getBounds(),
+          "the native material View matches the sidebar's live bounds",
+        );
         assert.equal(
           card.backgroundImage,
           "none",
@@ -352,12 +390,42 @@ async function run() {
         );
         assert.equal(
           sidebarBounds.y,
-          toolbarBottom + nativeCardInset,
-          "the sidebar starts below the toolbar and uses the macOS native card inset",
+          toolbarBottom,
+          "the floating overlay starts at the toolbar's bottom edge without a second frame inset",
         );
-        assert.ok(
-          sidebarBounds.height <=
-            mainWindow.getContentBounds().height - nativeCardInset * 2,
+        assert.equal(
+          sidebarBounds.height,
+          mainWindow.getContentBounds().height - toolbarBottom,
+          "the overlay fills the remaining area below the toolbar",
+        );
+        const { sidebarWidth: originalWidth } = await evaluate(
+          toolbar,
+          "window.api.browser.chrome.get()",
+        );
+        const resizedWidth = Math.min(
+          originalWidth + 32,
+          mainWindow.getContentBounds().width - 48,
+        );
+        await evaluate(
+          toolbar,
+          `window.api.browser.chrome.set({ sidebarWidth: ${resizedWidth} })`,
+        );
+        await waitFor(
+          () => sidebar.getBounds().width === resizedWidth,
+          "the floating sidebar to apply its resized width",
+        );
+        assert.deepEqual(
+          nativeBackdrop.getBounds(),
+          sidebar.getBounds(),
+          "a width-only layout update keeps native material aligned without a progress change",
+        );
+        await evaluate(
+          toolbar,
+          `window.api.browser.chrome.set({ sidebarWidth: ${originalWidth} })`,
+        );
+        await waitFor(
+          () => sidebar.getBounds().width === originalWidth,
+          "the floating sidebar to restore its original width",
         );
       }
       // The page's nav text and thumbnails must not read through: the empty card area stays flat.
@@ -405,6 +473,15 @@ async function run() {
           .state.mode === "solid",
       "blur off to switch to solid",
     );
+    const solidState = await evaluate(
+      toolbar,
+      "window.api.browser.sidebarBackdrop.get()",
+    );
+    assert.equal(
+      solidState.state.nativeOverlay,
+      false,
+      "the solid fallback hides the separate native overlay View",
+    );
     await evaluate(
       toolbar,
       "window.api.browser.chrome.set({ sidebarHovered: true })",
@@ -417,16 +494,15 @@ async function run() {
         ),
       "the solid card",
     );
-    // The macOS native card frame keeps its inset; every path starts below the toolbar.
+    // Switching to a solid fallback removes the native overlay layer; the sidebar stays below the toolbar.
     const toolbarBottom = await evaluate(
       toolbar,
       'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
     );
     assert.equal(
       sidebar.getBounds().y,
-      toolbarBottom +
-        (mode === "native" && process.platform === "darwin" ? 10 : 0),
-      "the sidebar view frame after turning blur off",
+      toolbarBottom,
+      "the sidebar view remains aligned to the toolbar after turning blur off",
     );
     await delay(700);
     // Switched at runtime (e.g. native → solid): the card must still paint, over the dark page.
