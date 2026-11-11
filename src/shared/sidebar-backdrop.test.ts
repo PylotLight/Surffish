@@ -9,12 +9,14 @@ import {
   sidebarCaptureRegions,
   snapshotDue,
   SIDEBAR_NATIVE_BLUR_RADIUS,
-  SIDEBAR_NATIVE_TINT,
   sidebarNativeLayerPaint,
 } from "./sidebar-backdrop";
 import {
   BROWSER_FRAME_SURFACE_ARGB,
-  BROWSER_FRAME_TINT_ARGB,
+  BROWSER_FRAME_SURFACE_PRIVATE_ARGB,
+  argbToCss,
+  browserFrameSurfaceArgb,
+  sidebarCardCssVars,
 } from "./sidebar-card";
 
 describe("sidebar backdrop mode", () => {
@@ -101,10 +103,21 @@ describe("sidebar backdrop mode", () => {
     );
   });
 
-  test("the native hover overlay paints the frame's on-screen colour, opaque", () => {
-    expect(BROWSER_FRAME_TINT_ARGB).toBe("#A6121519");
+  test("toolbar, frame and hover panel are one opaque surface colour", () => {
     expect(BROWSER_FRAME_SURFACE_ARGB).toBe("#FF191B1F");
-    expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_SURFACE_ARGB);
+    expect(BROWSER_FRAME_SURFACE_PRIVATE_ARGB).toBe("#FF1E1A28");
+    // Fully opaque: a translucent frame would read differently over vibrancy than over the page.
+    expect(BROWSER_FRAME_SURFACE_ARGB.slice(1, 3)).toBe("FF");
+    expect(BROWSER_FRAME_SURFACE_PRIVATE_ARGB.slice(1, 3)).toBe("FF");
+    expect(browserFrameSurfaceArgb(false)).toBe(BROWSER_FRAME_SURFACE_ARGB);
+    expect(browserFrameSurfaceArgb(true)).toBe(
+      BROWSER_FRAME_SURFACE_PRIVATE_ARGB,
+    );
+    // The CSS the toolbar / in-page frame / solid hover panel paint is the same colour.
+    const vars = sidebarCardCssVars();
+    expect(vars["--frame-surface"]).toBe("rgb(25, 27, 31)");
+    expect(vars["--frame-surface-private"]).toBe("rgb(30, 26, 40)");
+    expect(argbToCss("#80FF0000")).toBe("rgba(255, 0, 0, 0.502)");
     expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 

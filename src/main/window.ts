@@ -33,6 +33,7 @@ import {
 } from "./window-scope";
 import {
   attachBrowserShell,
+  setBrowserFramePrivate,
   detachBrowserShell,
   isFocusAddressShortcut,
   sendFocusAddressToVisibleRenderer,
@@ -370,6 +371,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
     rendererDocuments,
     syncBrowserBoundsToWindow,
   );
+  setBrowserFramePrivate(win, options.private === true);
   attachBrowserView(win, {
     private: options.private,
     session: options.session,

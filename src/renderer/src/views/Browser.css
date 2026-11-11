@@ -5228,18 +5228,47 @@
 .app-shell[data-surface="content"] .browser-sidebar {
   top: var(--sidebar-frame-top, 0px);
 }
-/* The collapsed rail and the docked panel are the frame itself: one flat material with the
- * toolbar strip, square, no hairline or shadow at the toolbar or the page. In-page they take the
- * toolbar's own tint (.browser-chrome); over live pages the window root carries the frame's tint
- * (BROWSER_FRAME_TINT_ARGB, the same colour), so the overlay view draws no ground of its own there
- * (main also drops the view's own tint and blur), and there is no second layer to seam. Only the
- * panel slid out over the page card by a hover reveal has its own ground (it covers the page). */
+/* The collapsed rail and the docked panel are the frame itself: one flat surface with the
+ * toolbar strip, square, no hairline or shadow at the toolbar or the page. In-page they paint the
+ * frame's opaque colour (--frame-surface), like the in-page toolbar strip; over live pages the
+ * window root carries that same colour (BROWSER_FRAME_SURFACE_ARGB), so the overlay view draws no
+ * ground of its own there (main also drops the view's own tint and blur), and there is no second
+ * layer to seam. The hover panel slid out over the page card paints the identical colour. */
 .browser-sidebar.has-rail.is-collapsed,
 .browser-layout.is-sidebar-docked .browser-sidebar {
   border-top-right-radius: var(--sidebar-frame-radius, 0px);
   border-bottom-right-radius: var(--sidebar-frame-radius, 0px);
-  background: rgba(18, 21, 25, 0.65);
+  background: var(--frame-surface, rgb(25, 27, 31));
   box-shadow: var(--sidebar-frame-shadow, none);
+}
+.browser-sidebar.has-rail.is-collapsed.is-private-window,
+.browser-layout.is-sidebar-docked .browser-sidebar.is-private-window {
+  background: var(--frame-surface-private, rgb(30, 26, 40));
+}
+/* In-page (New Tab, full panels) the toolbar strip and the floating sidebar panel are the same
+ * frame surface too: opaque, one colour, no hairline at the toolbar's bottom line. Only native
+ * fullscreen (no frame, the strip slides over the page) keeps the strip's own translucent ground. */
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-chrome {
+  border-bottom-color: transparent;
+  background: var(--frame-surface, rgb(25, 27, 31));
+  backdrop-filter: none;
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-chrome:has(.browser-toolbar.is-private) {
+  background: var(--frame-surface-private, rgb(30, 26, 40));
+}
+.app-shell[data-surface="content"] .browser-sidebar {
+  background: var(--frame-surface, rgb(25, 27, 31));
+  backdrop-filter: none;
+}
+.app-shell[data-surface="content"] .browser-sidebar.is-private-window {
+  background: var(--frame-surface-private, rgb(30, 26, 40));
+}
+/* The private window's violet underline would draw a line across the frame at the toolbar's
+ * bottom; the frame's private colour and the omnibox pill mark the window instead. */
+.app-shell:not([data-fullscreen="true"]) .browser-toolbar.is-private {
+  box-shadow: none;
 }
 .app-shell[data-surface="sidebar"][data-surface]
   .browser-layout
@@ -5568,7 +5597,7 @@
 }
 
 /* Over live pages the toolbar strip is part of the browser frame: the window root carries the
- * frame's tint (main), so the strip draws no ground or bottom hairline of its own, and the strip,
+ * frame's opaque surface colour (main), so the strip draws no ground or bottom hairline of its own, and the strip,
  * the rail and the docked panel read as one surface. In fullscreen there is no frame and the strip
  * slides over the page, so it keeps its own ground there. */
 .app-shell[data-surface="toolbar"]:not([data-fullscreen="true"])

@@ -1,14 +1,12 @@
 /* Overlay sidebar background over live pages (see shared/sidebar-backdrop.ts).
  * Native mode paints only in the native view; CSS supplies a flat fallback or snapshot tint, never
  * an extra glass layer over the native material. */
-.app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-solid {
-  background: rgba(18, 21, 25, 0.99);
-}
-/* macOS: the frame reads as rgb(25, 27, 31) (frame tint over the window vibrancy,
- * BROWSER_FRAME_SURFACE_ARGB); a hover panel over the page uses that, opaque, to stay one material. */
-.app-shell[data-surface="sidebar"][data-platform="darwin"]
-  .browser-sidebar.has-backdrop-solid:not(.is-private-window) {
-  background: rgb(25, 27, 31);
+/* Solid: the frame's own opaque surface colour (--frame-surface, BROWSER_FRAME_SURFACE_ARGB), the
+ * exact colour the window root paints under the toolbar strip and rail, so a hover panel is the
+ * same surface as the toolbar it grows out of, with no seam at the toolbar line. */
+.app-shell[data-surface="sidebar"][data-surface]
+  .browser-sidebar.has-backdrop-solid {
+  background: var(--frame-surface, rgb(25, 27, 31));
 }
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-snapshot {
   background: linear-gradient(
@@ -20,7 +18,7 @@
 }
 .app-shell[data-surface="sidebar"]
   .browser-sidebar.has-backdrop-solid.is-private-window {
-  background: rgba(38, 31, 54, 0.99);
+  background: var(--frame-surface-private, rgb(30, 26, 40));
 }
 .app-shell[data-surface="sidebar"]
   .browser-sidebar.has-backdrop-snapshot.is-private-window {

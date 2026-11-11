@@ -123,26 +123,43 @@ export function sidebarCardCssVars(
     "--sidebar-card-shadow": SIDEBAR_CARD_SHADOW,
     "--sidebar-controls-left": `${geometry.controlsLeft}px`,
     "--sidebar-controls-top": `${geometry.controlsTop}px`,
+    "--frame-surface": argbToCss(BROWSER_FRAME_SURFACE_ARGB),
+    "--frame-surface-private": argbToCss(BROWSER_FRAME_SURFACE_PRIVATE_ARGB),
   };
 }
 
 /**
- * The browser frame's tint, ARGB: rgba(18, 21, 25, 0.65), matched by the toolbar strip in
- * Browser.css. Over live pages main sets it as the window root's background (browser-shell.ts), under
- * the toolbar strip, rail, docked panel and page card, which draw none of their own there: one system
- * material (macOS sidebar vibrancy or supported Windows Mica) under one tint, with a solid fallback.
- * It shows through the gaps and the card's rounded cut-out corners too.
- */
-export const BROWSER_FRAME_TINT_ARGB = "#A6121519";
-/**
- * What the frame reads as on screen on macOS (dark): the tint above composited over the window's
- * sidebar vibrancy, measured off a real window as rgb(25, 27, 31). A hover panel slid out over the
- * page card can't sit on the vibrancy (the page view is between them), so painting the tint there
- * composites over page pixels instead: a darker, page-dependent shade with the page ghosting
- * through. It paints this opaque colour instead, so it reads as the same material as the toolbar
- * strip and the rail it grows out of.
+ * The browser frame's one surface colour, ARGB, opaque: rgb(25, 27, 31). The toolbar strip, the
+ * rail, the docked panel and the hover panel all show exactly this colour, so they read as one
+ * continuous frame with no seam in any state. Over live pages main sets it as the window root's
+ * background (browser-shell.ts), under the toolbar strip, rail, docked panel and page card, which
+ * draw no ground of their own there; the hover panel's native layer (sidebar-backdrop.ts) and the
+ * solid fallback paint the same colour. It is opaque on purpose: a translucent tint over macOS
+ * vibrancy reads as a wallpaper-dependent shade that no layer above the page can match (that was
+ * the toolbar/hover-panel seam), so the frame trades vibrancy for one exact colour.
  */
 export const BROWSER_FRAME_SURFACE_ARGB = "#FF191B1F";
+/** The same frame in a private window: one opaque violet-tinted surface, rgb(30, 26, 40). */
+export const BROWSER_FRAME_SURFACE_PRIVATE_ARGB = "#FF1E1A28";
+
+/** The frame surface for a window (private windows get their own tint, still one surface). */
+export function browserFrameSurfaceArgb(isPrivate: boolean): string {
+  return isPrivate
+    ? BROWSER_FRAME_SURFACE_PRIVATE_ARGB
+    : BROWSER_FRAME_SURFACE_ARGB;
+}
+
+/** `#AARRGGBB` → CSS `rgb(r, g, b)` / `rgba(...)`, as getComputedStyle reports it. */
+export function argbToCss(argb: string): string {
+  const value = argb.replace(/^#/, "");
+  const a = parseInt(value.slice(0, 2), 16);
+  const r = parseInt(value.slice(2, 4), 16);
+  const g = parseInt(value.slice(4, 6), 16);
+  const b = parseInt(value.slice(6, 8), 16);
+  return a === 255
+    ? `rgb(${r}, ${g}, ${b})`
+    : `rgba(${r}, ${g}, ${b}, ${Number((a / 255).toFixed(3))})`;
+}
 /**
  * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
  * where the sidebar meets the toolbar they read as the frame's rounded inner corner.

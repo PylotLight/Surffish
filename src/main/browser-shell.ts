@@ -15,7 +15,7 @@ import {
   normalizeSidebarWidth,
 } from "../shared/persistence";
 import {
-  BROWSER_FRAME_TINT_ARGB,
+  browserFrameSurfaceArgb,
   sidebarCardMaxWidth,
   sidebarRailWidth,
 } from "../shared/sidebar-card";
@@ -95,8 +95,10 @@ interface ShellState {
   sidebarMotion: SidebarOverlayMotion;
   lastOverlayMode: boolean | null;
   sidebarOverlayShown: boolean;
-  /** The window root's frame tint as last set (diffed: layout runs on every chrome change). */
+  /** The window root's frame surface as last set (diffed: layout runs on every chrome change). */
   frameGround: string | null;
+  /** Private window: the frame takes the private surface colour (window.ts sets it at creation). */
+  framePrivate: boolean;
   /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
   sidebarDocked: boolean | null;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
@@ -134,7 +136,7 @@ let sidebarDockListener:
 
 /**
  * sidebar-backdrop.ts: the sidebar became docked (pinned open beside the page card) or stopped
- * being docked. Docked, the panel is part of the frame and lets the frame's tint show through, so
+ * being docked. Docked, the panel is part of the frame and lets the frame's surface show through, so
  * the sidebar view's own tint and blur drop away.
  */
 export function setSidebarDockListener(
@@ -144,6 +146,22 @@ export function setSidebarDockListener(
 }
 
 /** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
+/** window.ts: a private window's frame takes the private surface colour. */
+export function setBrowserFramePrivate(
+  window: BaseWindow,
+  isPrivate: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.framePrivate === isPrivate) return;
+  shell.framePrivate = isPrivate;
+  shell.scheduleLayout();
+}
+
+/** The frame's surface colour for this window (sidebar-backdrop.ts paints the hover layer with it). */
+export function getBrowserFrameSurface(window: BaseWindow): string {
+  return browserFrameSurfaceArgb(shells.get(window)?.framePrivate === true);
+}
+
 export function isSidebarDocked(window: BaseWindow): boolean {
   return shells.get(window)?.sidebarDocked === true;
 }
@@ -333,14 +351,18 @@ function applyShellLayout(shell: ShellState): void {
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
   // lives only below the toolbar's bottom line; live pages are a rounded card inset from both by
-  // PAGE_FRAME_GAP. One material: the window root carries the frame's tint (over macOS sidebar
-  // vibrancy or supported Windows Mica, with a solid window-colour fallback), the toolbar strip,
-  // rail and docked panel draw no ground of their own over it, so there is no seam or second layer
-  // frame, and the card's cut-out corners show exactly that tint. Off while the content renderer
-  // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
+  // PAGE_FRAME_GAP. One surface: the window root carries the frame's opaque colour
+  // (browserFrameSurfaceArgb), the toolbar strip, rail and docked panel draw no ground of their own
+  // over it, and the hover panel's own layer paints the identical colour, so the frame is one
+  // continuous surface with no seam in any state; the card's cut-out corners show it too. Opaque,
+  // not a tint over vibrancy: vibrancy reads differently from anything a layer above the page can
+  // paint. Off while the content renderer draws everything in-page (New Tab, full panels) and in
+  // native fullscreen (no frame).
   const fullscreen = shell.window.isFullScreen();
   const frameShown = overlayMode && !fullscreen;
-  const ground = frameShown ? BROWSER_FRAME_TINT_ARGB : "#00000000";
+  const ground = frameShown
+    ? browserFrameSurfaceArgb(shell.framePrivate)
+    : "#00000000";
   if (shell.frameGround !== ground) {
     shell.frameGround = ground;
     shell.window.contentView.setBackgroundColor(ground);
@@ -455,6 +477,7 @@ export function attachBrowserShell(
     lastOverlayMode: null,
     sidebarOverlayShown: false,
     frameGround: null,
+    framePrivate: false,
     sidebarDocked: null,
     lastActiveTabId: null,
     activeTabSince: 0,

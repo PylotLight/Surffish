@@ -18,7 +18,6 @@ import {
   shouldUseNativeSidebarLayer,
   sidebarCaptureRegions,
   snapshotDue,
-  SIDEBAR_NATIVE_TINT,
   sidebarNativeLayerPaint,
   SIDEBAR_SNAPSHOT_SCALE,
   SIDEBAR_SNAPSHOT_THROTTLE_MS,
@@ -29,6 +28,7 @@ import {
 } from "../shared/sidebar-backdrop";
 import {
   getBrowserChromeState,
+  getBrowserFrameSurface,
   getShellWindowFor,
   getShellWindows,
   getSidebarOverlayView,
@@ -168,7 +168,7 @@ function applyNativeLayer(
   try {
     const wasVisible = backdrop.getVisible();
     backdrop.setBounds(sidebar.getBounds());
-    paintNativeLayer(backdrop, progress);
+    paintNativeLayer(backdrop, progress, getBrowserFrameSurface(window));
     backdrop.setVisible(true);
     if (!wasVisible) sendState(window);
   } catch (error) {
@@ -181,9 +181,9 @@ function applyNativeLayer(
  * The background-only View's tint + blur at a point of the open/close slide: they fade in and out
  * with the panel instead of popping in at full strength before it has moved.
  */
-function paintNativeLayer(view: View, progress: number): void {
+function paintNativeLayer(view: View, progress: number, surface: string): void {
   const { alpha, blur } = sidebarNativeLayerPaint(progress);
-  view.setBackgroundColor(scaleArgbAlpha(SIDEBAR_NATIVE_TINT, alpha));
+  view.setBackgroundColor(scaleArgbAlpha(surface, alpha));
   view.setBackgroundBlur(blur);
 }
 

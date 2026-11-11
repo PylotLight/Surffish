@@ -6,7 +6,14 @@ const { mkdirSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { basename, join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { app, BaseWindow, dialog, session, webContents } = require("electron");
+const {
+  app,
+  BaseWindow,
+  dialog,
+  nativeImage,
+  session,
+  webContents,
+} = require("electron");
 const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 
 const userData = join(
@@ -283,6 +290,73 @@ function assertSidebarPinMorph(sample, direction) {
   }
   console.log(
     `[sidebar-overlay-smoke] ${direction} pin morph: ${sample.frames.length} rendered frames; first pin fixed; remaining pins glide and land on target`,
+  );
+}
+
+// The frame's one surface colour (src/shared/sidebar-card.ts BROWSER_FRAME_SURFACE_ARGB): the
+// toolbar strip, rail, docked panel and hover panel all paint exactly this.
+const FRAME_SURFACE_RGB = [25, 27, 31];
+
+/**
+ * Toolbar, frame and sidebar meet at the toolbar's bottom line as one surface (no seam): grab the
+ * composited window (every native view, as X11 shows it) a few px above and below that line at x
+ * and require the same colour, the frame's surface colour, on both sides.
+ */
+async function assertFrameJunction(what, x = 40) {
+  if (process.platform !== "linux" || !process.env.DISPLAY) return;
+  const toolbarBottom = Math.round(
+    await evaluate(
+      rendererViews.toolbar,
+      'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
+    ),
+  );
+  const content = mainWindow.getContentBounds();
+  const top = toolbarBottom - 4;
+  const file = join(userData, `frame-junction-${Date.now()}.png`);
+  const sample = () => {
+    execFileSync("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "x11grab",
+      "-video_size",
+      "1x9",
+      "-i",
+      `${process.env.DISPLAY}.0+${content.x + x},${content.y + top}`,
+      "-frames:v",
+      "1",
+      "-y",
+      file,
+    ]);
+    const bitmap = nativeImage.createFromPath(file).toBitmap(); // BGRA, 1 px wide
+    const at = (row) => [
+      bitmap[row * 4 + 2],
+      bitmap[row * 4 + 1],
+      bitmap[row * 4],
+    ];
+    return { above: at(0), below: at(8) };
+  };
+  const close = (a, b) => a.every((value, i) => Math.abs(value - b[i]) <= 2);
+  // A fresh layout may still be compositing; poll briefly before judging the colours.
+  let last = null;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    last = sample();
+    if (close(last.above, last.below) && close(last.above, FRAME_SURFACE_RGB))
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  console.log(
+    `[sidebar-overlay-smoke] frame junction (${what}) at x=${x}: above ${last.above.join(",")} below ${last.below.join(",")}`,
+  );
+  assert.ok(
+    close(last.above, last.below),
+    `${what}: the toolbar (${last.above}) and the sidebar (${last.below}) are one surface at the toolbar's bottom line`,
+  );
+  assert.ok(
+    close(last.above, FRAME_SURFACE_RGB),
+    `${what}: the frame paints its surface colour (${last.above}, want ${FRAME_SURFACE_RGB})`,
   );
 }
 
@@ -1071,6 +1145,7 @@ async function run() {
       collapsedSidebarBounds.y - toolbarBottom <= 1,
     `the collapsed rail starts at the toolbar's bottom line, never over the toolbar (rail y ${collapsedSidebarBounds.y}, toolbar bottom ${toolbarBottom})`,
   );
+  await assertFrameJunction("collapsed rail");
   assert.ok(
     Math.abs(pageHiddenSidebar.y - toolbarBottom - PAGE_FRAME_GAP) <= 1,
     `the live page card keeps the frame gap below the toolbar (page y ${pageHiddenSidebar.y}, toolbar bottom ${toolbarBottom})`,
@@ -1353,6 +1428,7 @@ async function run() {
     contentSize[1],
     "the docked sidebar runs to the window's bottom edge",
   );
+  await assertFrameJunction("docked panel");
   captureFullWindow("sidebar-overlay-live-page-visible.png");
   // This is an authentic app-window capture over the harness's loopback-only synthetic page.
   captureFullWindow("surffish-current-app.png");
@@ -1508,6 +1584,7 @@ async function run() {
       `the hover-revealed panel starts at the toolbar's bottom line (${JSON.stringify(revealed)}, toolbar bottom ${dockedToolbarBottom})`,
     );
   }
+  await assertFrameJunction("hover panel");
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),
     mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350,
