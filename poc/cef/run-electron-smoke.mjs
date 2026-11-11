@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { FILTER_ENVIRONMENT } from "../../src/main/adblock-policy.ts";
+import { createProcessTreeMetrics } from "./process-tree-metrics.mjs";
 
 const electronBinary = process.env.ELECTRON_POC_BINARY
   ? resolve(process.env.ELECTRON_POC_BINARY)
@@ -22,26 +23,42 @@ const extensionPath = process.env.ELECTRON_POC_EXTENSION_PATH
   ? resolve(process.env.ELECTRON_POC_EXTENSION_PATH)
   : undefined;
 if (extensionPath && !existsSync(`${extensionPath}/manifest.json`)) {
-  throw new Error("ELECTRON_POC_EXTENSION_PATH must contain a staged manifest.json.");
+  throw new Error(
+    "ELECTRON_POC_EXTENSION_PATH must contain a staged manifest.json.",
+  );
 }
 const engineFile = process.env.ELECTRON_POC_ENGINE_FILE
   ? resolve(process.env.ELECTRON_POC_ENGINE_FILE)
   : undefined;
 if (engineFile && !existsSync(engineFile)) {
-  throw new Error("ELECTRON_POC_ENGINE_FILE must point to a serialized Ghostery engine.");
+  throw new Error(
+    "ELECTRON_POC_ENGINE_FILE must point to a serialized Ghostery engine.",
+  );
 }
 const blockHost = process.env.ELECTRON_POC_BLOCK_HOST ?? "tracker.test";
 if (!/^[A-Za-z0-9.-]+$/.test(blockHost)) {
   throw new Error("ELECTRON_POC_BLOCK_HOST must be a hostname.");
 }
+const benchmarkIdleMs = Number(process.env.SURFFISH_POC_BENCH_IDLE_MS ?? 0);
+const benchmarkActiveMs = Number(process.env.SURFFISH_POC_BENCH_ACTIVE_MS ?? 0);
+const benchmarkEnabled =
+  Number.isSafeInteger(benchmarkIdleMs) &&
+  benchmarkIdleMs > 0 &&
+  Number.isSafeInteger(benchmarkActiveMs) &&
+  benchmarkActiveMs > 0;
 const filterMode = engineFile ? "production-live-lists" : "synthetic-fixture";
 const hasBrambleProbe = Boolean(
   extensionPath && existsSync(`${extensionPath}/cef-api-probe.js`),
 );
 const repoRoot = resolve(import.meta.dir, "../..");
-const ghosteryPackage = join(repoRoot, "node_modules/@ghostery/adblocker-electron");
+const ghosteryPackage = join(
+  repoRoot,
+  "node_modules/@ghostery/adblocker-electron",
+);
 if (!existsSync(`${ghosteryPackage}/package.json`)) {
-  throw new Error("The repository's @ghostery/adblocker-electron dependency is unavailable.");
+  throw new Error(
+    "The repository's @ghostery/adblocker-electron dependency is unavailable.",
+  );
 }
 const tempRoot = process.env.ELECTRON_POC_TMPDIR ?? "/dev/shm";
 const appDir = mkdtempSync(join(tempRoot, "surffish-electron-poc-"));
@@ -51,7 +68,16 @@ symlinkSync(ghosteryPackage, join(packageScope, "adblocker-electron"), "dir");
 const userDataDir = join(appDir, "user-data");
 writeFileSync(
   join(appDir, "package.json"),
-  JSON.stringify({ name: "surffish-electron-poc", version: "1.0.0", main: "main.mjs", type: "module" }, null, 2),
+  JSON.stringify(
+    {
+      name: "surffish-electron-poc",
+      version: "1.0.0",
+      main: "main.mjs",
+      type: "module",
+    },
+    null,
+    2,
+  ),
 );
 writeFileSync(
   join(appDir, "main.mjs"),
@@ -106,10 +132,52 @@ app.on('window-all-closed', () => app.quit());
 );
 
 const originRequests = [];
+const benchmarkPhases = new Set([
+  "ready",
+  "idle-start",
+  "idle-end",
+  "active-start",
+  "active-end",
+]);
+let processMetrics;
 const pageServer = http.createServer((request, response) => {
-  const path = new URL(request.url, "http://localhost").pathname;
+  const requestUrl = new URL(request.url, "http://localhost");
+  const path = requestUrl.pathname;
+  if (path === "/__bench-phase" && benchmarkEnabled) {
+    const phase = requestUrl.searchParams.get("name");
+    if (!phase || !benchmarkPhases.has(phase) || !processMetrics) {
+      response.writeHead(400).end();
+      return;
+    }
+    processMetrics.mark(phase);
+    response.writeHead(204, { "cache-control": "no-store" }).end();
+    return;
+  }
   if (path === "/") {
     const port = pageServer.address().port;
+    const benchmarkScript = benchmarkEnabled
+      ? `const runBenchmarkStates = async () => {
+  const mark = async (name) => {
+    try { await fetch('/__bench-phase?name=' + encodeURIComponent(name), { cache: 'no-store' }); } catch {}
+  };
+  await mark('ready');
+  await mark('idle-start');
+  await new Promise((resolve) => setTimeout(resolve, ${benchmarkIdleMs}));
+  await mark('idle-end');
+  await mark('active-start');
+  const deadline = performance.now() + ${benchmarkActiveMs};
+  let iterations = 0;
+  let checksum = 0;
+  while (performance.now() < deadline) {
+    for (let i = 0; i < 4096; i += 1) {
+      checksum += Math.sin((i + iterations) % 10000) * Math.cos((i + 3) % 10000);
+    }
+    iterations += 4096;
+  }
+  await mark('active-end');
+  return iterations + ':' + checksum.toFixed(2);
+};`
+      : `const runBenchmarkStates = async () => null;`;
     const waitForBramble = hasBrambleProbe
       ? `const waitForBramble = () => new Promise((resolve) => {
   let attempts = 0;
@@ -135,6 +203,7 @@ const pageServer = http.createServer((request, response) => {
     response.end(`<!doctype html><meta charset="utf-8"><title>starting</title>
 <script>
 ${waitForBramble}
+${benchmarkScript}
 const load = (src) => new Promise((resolve) => {
   const script = document.createElement('script');
   script.src = src;
@@ -146,11 +215,13 @@ Promise.all([
   load('http://${blockHost}:${port}/tracker.js'),
   load('http://allowed.test:${port}/allowed.js'),
   waitForBramble()
-]).then(([tracker, allowed, bramble]) => {
+]).then(async ([tracker, allowed, bramble]) => {
+  const benchmarkResult = await runBenchmarkStates();
+  const benchmarkSuffix = benchmarkResult === null ? '' : ';bench=' + encodeURIComponent(benchmarkResult);
   document.title = 'CEF_POC_RESULT:tracker=' + tracker + ';allowed=' + allowed +
     ';trackerExecuted=' + (window.trackerExecuted === true) +
     ';allowedExecuted=' + (window.allowedExecuted === true) +
-    ';bramble=' + encodeURIComponent(bramble);
+    benchmarkSuffix + ';bramble=' + encodeURIComponent(bramble);
 });
 </script>`);
     return;
@@ -198,9 +269,12 @@ try {
   if (hasBrambleProbe) {
     const probePath = join(extensionPath, "cef-api-probe.js");
     const probeSource = readFileSync(probePath, "utf8");
-    const originAssignment = /const originUrl = (__SURFFISH_CEF_ORIGIN_PROBE_URL__|"http:\/\/site\.test:\d+\/origin");/;
+    const originAssignment =
+      /const originUrl = (__SURFFISH_CEF_ORIGIN_PROBE_URL__|"http:\/\/site\.test:\d+\/origin");/;
     if (!originAssignment.test(probeSource)) {
-      throw new Error("Bramble test copy is missing the origin-probe placeholder/assignment.");
+      throw new Error(
+        "Bramble test copy is missing the origin-probe placeholder/assignment.",
+      );
     }
     writeFileSync(
       probePath,
@@ -220,11 +294,14 @@ try {
     appDir,
   ];
   const binaryDir = dirname(electronBinary);
+  const startedAtNs = process.hrtime.bigint();
   child = spawn("xvfb-run", args, {
     cwd: binaryDir,
     env: {
       ...process.env,
-      LD_LIBRARY_PATH: [binaryDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":"),
+      LD_LIBRARY_PATH: [binaryDir, process.env.LD_LIBRARY_PATH]
+        .filter(Boolean)
+        .join(":"),
       SURFFISH_ELECTRON_POC_URL: url,
       SURFFISH_ELECTRON_POC_EXTENSION_PATH: extensionPath ?? "",
       SURFFISH_ELECTRON_POC_ENGINE_FILE: engineFile ?? "",
@@ -235,6 +312,12 @@ try {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (benchmarkEnabled) {
+    processMetrics = createProcessTreeMetrics(process.pid, {
+      startedAtNs,
+      intervalMs: 125,
+    });
+  }
   const collect = (chunk) => {
     output = (output + chunk.toString("utf8")).slice(-30_000);
   };
@@ -280,11 +363,14 @@ try {
   });
   clearInterval(memoryMonitor);
   sampleProcessTree();
+  const benchmarkMetrics = processMetrics?.finish() ?? null;
   const title = output.match(/ELECTRON_POC_TITLE=(.*)/)?.[1] ?? "";
   const encodedProbe = title.match(/;bramble=([^;]+)/)?.[1] ?? "";
   let brambleProbe = "not-requested";
   try {
-    brambleProbe = encodedProbe ? decodeURIComponent(encodedProbe) : "missing-title-data";
+    brambleProbe = encodedProbe
+      ? decodeURIComponent(encodedProbe)
+      : "missing-title-data";
   } catch {
     brambleProbe = "invalid-probe-data";
   }
@@ -304,48 +390,69 @@ try {
     .filter((line) => line.startsWith("ELECTRON_POC_DECISION="))
     .map((line) => JSON.parse(line.slice("ELECTRON_POC_DECISION=".length)));
   const pagePassed =
-    title.includes("tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true") &&
+    title.includes(
+      "tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true",
+    ) &&
     decisions.some((item) => item.url.includes(blockHost) && item.cancel) &&
     decisions.some((item) => item.url.includes("allowed.test") && !item.cancel);
   const bramblePassed = Boolean(
     brambleApi?.runtimeId &&
-      brambleApi?.runtimeMessage &&
-      brambleApi?.runtimeMessageSucceeded &&
-      brambleApi?.originProbe?.ok &&
-      brambleApi?.storageGet &&
-      brambleApi?.background?.phase === "background-imported" &&
-      brambleApi?.background?.runtimeMessage &&
-      brambleApi?.background?.storage,
+    brambleApi?.runtimeMessage &&
+    brambleApi?.runtimeMessageSucceeded &&
+    brambleApi?.originProbe?.ok &&
+    brambleApi?.storageGet &&
+    brambleApi?.background?.phase === "background-imported" &&
+    brambleApi?.background?.runtimeMessage &&
+    brambleApi?.background?.storage,
   );
-  const passed = result.code === 0 && pagePassed && (!hasBrambleProbe || bramblePassed);
-  console.log(JSON.stringify({
-    process: result,
-    electronVersion: runtime?.electron ?? null,
-    filterMode,
-    blockHost,
-    passed,
-    runtime,
-    peakTreeRssMiB: Number((peakTreeRssKb / 1024).toFixed(1)),
-    peakTreeProcessCount,
-    title,
-    bramblePassed: hasBrambleProbe ? bramblePassed : null,
-    brambleProbe: hasBrambleProbe ? brambleApi ?? brambleProbe : "not-requested",
-    originProbeUrl: hasBrambleProbe ? originProbeUrl : null,
-    originRequests,
-    extensionPath: extensionPath ?? null,
-    engineFile: engineFile ?? null,
-    decisions,
-    output,
-  }, null, 2));
-  if (!passed) throw new Error("Electron/Ghostery/Bramble fixture smoke test failed.");
+  const passed =
+    result.code === 0 && pagePassed && (!hasBrambleProbe || bramblePassed);
+  console.log(
+    JSON.stringify(
+      {
+        process: result,
+        electronVersion: runtime?.electron ?? null,
+        filterMode,
+        blockHost,
+        passed,
+        runtime,
+        peakTreeRssMiB: Number((peakTreeRssKb / 1024).toFixed(1)),
+        peakTreeProcessCount,
+        benchmark: benchmarkEnabled
+          ? {
+              idleMs: benchmarkIdleMs,
+              activeMs: benchmarkActiveMs,
+              metrics: benchmarkMetrics,
+            }
+          : null,
+        title,
+        bramblePassed: hasBrambleProbe ? bramblePassed : null,
+        brambleProbe: hasBrambleProbe
+          ? (brambleApi ?? brambleProbe)
+          : "not-requested",
+        originProbeUrl: hasBrambleProbe ? originProbeUrl : null,
+        originRequests,
+        extensionPath: extensionPath ?? null,
+        engineFile: engineFile ?? null,
+        decisions,
+        output,
+      },
+      null,
+      2,
+    ),
+  );
+  if (!passed)
+    throw new Error("Electron/Ghostery/Bramble fixture smoke test failed.");
 } finally {
   if (memoryMonitor) clearInterval(memoryMonitor);
+  processMetrics?.finish();
   if (child && child.exitCode === null) {
     try {
       process.kill(-child.pid, "SIGKILL");
     } catch {}
   }
-  if (pageServer.listening) await new Promise((resolveClose) => pageServer.close(resolveClose));
+  if (pageServer.listening)
+    await new Promise((resolveClose) => pageServer.close(resolveClose));
   try {
     rmSync(appDir, { recursive: true, force: true });
   } catch {}

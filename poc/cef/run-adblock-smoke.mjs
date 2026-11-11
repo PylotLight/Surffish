@@ -13,19 +13,24 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { FiltersEngine } from "@ghostery/adblocker";
 import { evaluateCefRequest } from "./ghostery-adapter.mjs";
+import { createProcessTreeMetrics } from "./process-tree-metrics.mjs";
 import { FILTER_ENVIRONMENT } from "../../src/main/adblock-policy.ts";
 
 const binary = process.env.CEF_POC_BINARY
   ? resolve(process.env.CEF_POC_BINARY)
   : undefined;
 if (!binary || !existsSync(binary)) {
-  throw new Error("Set CEF_POC_BINARY to the built cef-project minimal executable.");
+  throw new Error(
+    "Set CEF_POC_BINARY to the built cef-project minimal executable.",
+  );
 }
 const extensionPath = process.env.CEF_POC_EXTENSION_PATH
   ? resolve(process.env.CEF_POC_EXTENSION_PATH)
   : undefined;
 if (extensionPath && !existsSync(`${extensionPath}/manifest.json`)) {
-  throw new Error("CEF_POC_EXTENSION_PATH must contain the staged manifest.json.");
+  throw new Error(
+    "CEF_POC_EXTENSION_PATH must contain the staged manifest.json.",
+  );
 }
 const hasBrambleProbe = Boolean(
   extensionPath && existsSync(`${extensionPath}/cef-api-probe.js`),
@@ -34,6 +39,13 @@ const blockHost = process.env.CEF_POC_BLOCK_HOST ?? "tracker.test";
 if (!/^[A-Za-z0-9.-]+$/.test(blockHost)) {
   throw new Error("CEF_POC_BLOCK_HOST must be a hostname.");
 }
+const benchmarkIdleMs = Number(process.env.SURFFISH_POC_BENCH_IDLE_MS ?? 0);
+const benchmarkActiveMs = Number(process.env.SURFFISH_POC_BENCH_ACTIVE_MS ?? 0);
+const benchmarkEnabled =
+  Number.isSafeInteger(benchmarkIdleMs) &&
+  benchmarkIdleMs > 0 &&
+  Number.isSafeInteger(benchmarkActiveMs) &&
+  benchmarkActiveMs > 0;
 const engineFile = process.env.CEF_POC_ENGINE_FILE
   ? resolve(process.env.CEF_POC_ENGINE_FILE)
   : undefined;
@@ -45,6 +57,14 @@ engine.updateEnv(new Map(FILTER_ENVIRONMENT));
 const filterMode = engineFile ? "production-live-lists" : "synthetic-fixture";
 const decisions = [];
 const originRequests = [];
+const benchmarkPhases = new Set([
+  "ready",
+  "idle-start",
+  "idle-end",
+  "active-start",
+  "active-end",
+]);
+let processMetrics;
 const socketPath = `/tmp/surffish-cef-filter-${process.pid}.sock`;
 const cachePath = `/tmp/surffish-cef-profile-${process.pid}`;
 if (existsSync(socketPath)) unlinkSync(socketPath);
@@ -70,9 +90,43 @@ const filterServer = net.createServer((connection) => {
 });
 
 const pageServer = http.createServer((request, response) => {
-  const path = new URL(request.url, "http://localhost").pathname;
+  const requestUrl = new URL(request.url, "http://localhost");
+  const path = requestUrl.pathname;
+  if (path === "/__bench-phase" && benchmarkEnabled) {
+    const phase = requestUrl.searchParams.get("name");
+    if (!phase || !benchmarkPhases.has(phase) || !processMetrics) {
+      response.writeHead(400).end();
+      return;
+    }
+    processMetrics.mark(phase);
+    response.writeHead(204, { "cache-control": "no-store" }).end();
+    return;
+  }
   if (path === "/") {
     const port = pageServer.address().port;
+    const benchmarkScript = benchmarkEnabled
+      ? `const runBenchmarkStates = async () => {
+  const mark = async (name) => {
+    try { await fetch('/__bench-phase?name=' + encodeURIComponent(name), { cache: 'no-store' }); } catch {}
+  };
+  await mark('ready');
+  await mark('idle-start');
+  await new Promise((resolve) => setTimeout(resolve, ${benchmarkIdleMs}));
+  await mark('idle-end');
+  await mark('active-start');
+  const deadline = performance.now() + ${benchmarkActiveMs};
+  let iterations = 0;
+  let checksum = 0;
+  while (performance.now() < deadline) {
+    for (let i = 0; i < 4096; i += 1) {
+      checksum += Math.sin((i + iterations) % 10000) * Math.cos((i + 3) % 10000);
+    }
+    iterations += 4096;
+  }
+  await mark('active-end');
+  return iterations + ':' + checksum.toFixed(2);
+};`
+      : `const runBenchmarkStates = async () => null;`;
     const waitForBramble = hasBrambleProbe
       ? `const waitForBramble = () => new Promise((resolve) => {
   let attempts = 0;
@@ -98,6 +152,7 @@ const pageServer = http.createServer((request, response) => {
     response.end(`<!doctype html><meta charset="utf-8"><title>starting</title>
 <script>
 ${waitForBramble}
+${benchmarkScript}
 const load = (src) => new Promise((resolve) => {
   const script = document.createElement('script');
   script.src = src;
@@ -109,11 +164,13 @@ Promise.all([
   load('http://${blockHost}:${port}/tracker.js'),
   load('http://allowed.test:${port}/allowed.js'),
   waitForBramble()
-]).then(([tracker, allowed, bramble]) => {
+]).then(async ([tracker, allowed, bramble]) => {
+  const benchmarkResult = await runBenchmarkStates();
+  const benchmarkSuffix = benchmarkResult === null ? '' : ';bench=' + encodeURIComponent(benchmarkResult);
   document.title = 'CEF_POC_RESULT:tracker=' + tracker + ';allowed=' + allowed +
     ';trackerExecuted=' + (window.trackerExecuted === true) +
     ';allowedExecuted=' + (window.allowedExecuted === true) +
-    ';bramble=' + encodeURIComponent(bramble);
+    benchmarkSuffix + ';bramble=' + encodeURIComponent(bramble);
 });
 </script>`);
     return;
@@ -159,9 +216,12 @@ const originProbeUrl = `http://site.test:${port}/origin`;
 if (hasBrambleProbe) {
   const probePath = `${extensionPath}/cef-api-probe.js`;
   const probeSource = readFileSync(probePath, "utf8");
-  const originAssignment = /const originUrl = (__SURFFISH_CEF_ORIGIN_PROBE_URL__|"http:\/\/site\.test:\d+\/origin");/;
+  const originAssignment =
+    /const originUrl = (__SURFFISH_CEF_ORIGIN_PROBE_URL__|"http:\/\/site\.test:\d+\/origin");/;
   if (!originAssignment.test(probeSource)) {
-    throw new Error("Bramble test copy is missing the origin-probe placeholder/assignment.");
+    throw new Error(
+      "Bramble test copy is missing the origin-probe placeholder/assignment.",
+    );
   }
   writeFileSync(
     probePath,
@@ -183,17 +243,26 @@ const args = [
 ];
 if (extensionPath) args.push(`--load-extension=${extensionPath}`);
 const binaryDir = dirname(binary);
+const startedAtNs = process.hrtime.bigint();
 const child = spawn("xvfb-run", args, {
   cwd: binaryDir,
   env: {
     ...process.env,
-    LD_LIBRARY_PATH: [binaryDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":"),
+    LD_LIBRARY_PATH: [binaryDir, process.env.LD_LIBRARY_PATH]
+      .filter(Boolean)
+      .join(":"),
     SURFFISH_CEF_ADBLOCK_SOCKET: socketPath,
     SURFFISH_CEF_POC_CACHE_PATH: cachePath,
   },
   detached: true,
   stdio: ["ignore", "pipe", "pipe"],
 });
+if (benchmarkEnabled) {
+  processMetrics = createProcessTreeMetrics(process.pid, {
+    startedAtNs,
+    intervalMs: 125,
+  });
+}
 let output = "";
 const collect = (chunk) => {
   output = (output + chunk.toString("utf8")).slice(-30_000);
@@ -244,6 +313,7 @@ const result = await exited;
 clearTimeout(timeout);
 clearInterval(memoryMonitor);
 sampleProcessTree();
+const benchmarkMetrics = processMetrics?.finish() ?? null;
 await delay(250);
 await new Promise((resolveClose) => pageServer.close(resolveClose));
 await new Promise((resolveClose) => filterServer.close(resolveClose));
@@ -256,7 +326,9 @@ const title = output.match(/CEF_POC_TITLE=(.*)/)?.[1] ?? "";
 const encodedProbe = title.match(/;bramble=([^;]+)/)?.[1] ?? "";
 let brambleProbe = "not-requested";
 try {
-  brambleProbe = encodedProbe ? decodeURIComponent(encodedProbe) : "missing-title-data";
+  brambleProbe = encodedProbe
+    ? decodeURIComponent(encodedProbe)
+    : "missing-title-data";
 } catch {
   brambleProbe = "invalid-probe-data";
 }
@@ -284,40 +356,59 @@ const extensionWorkerRequestSeenByCefHandler = unattributedRequests.some(
   (item) => item.url.includes("/origin"),
 );
 const pagePassed =
-  title.includes("tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true") &&
+  title.includes(
+    "tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true",
+  ) &&
   blockedTracker &&
   allowedRequest;
 const bramblePassed = Boolean(
   brambleApi?.runtimeId &&
-    brambleApi?.runtimeMessage &&
-    brambleApi?.runtimeMessageSucceeded &&
-    brambleApi?.originProbe?.ok &&
-    brambleApi?.storageGet &&
-    brambleApi?.background?.phase === "background-imported" &&
-    brambleApi?.background?.runtimeMessage &&
-    brambleApi?.background?.storage,
+  brambleApi?.runtimeMessage &&
+  brambleApi?.runtimeMessageSucceeded &&
+  brambleApi?.originProbe?.ok &&
+  brambleApi?.storageGet &&
+  brambleApi?.background?.phase === "background-imported" &&
+  brambleApi?.background?.runtimeMessage &&
+  brambleApi?.background?.storage,
 );
-console.log(JSON.stringify({
-  process: result,
-  filterMode,
-  blockHost,
-  serializedEngineBytes: serializedEngine?.byteLength ?? null,
-  peakTreeRssMiB: Number((peakTreeRssKb / 1024).toFixed(1)),
-  filterBrokerRssMiB: Number((process.memoryUsage().rss / (1024 * 1024)).toFixed(1)),
-  peakTreeProcessCount,
-  pagePassed,
-  bramblePassed: hasBrambleProbe ? bramblePassed : null,
-  title,
-  brambleProbe: hasBrambleProbe ? brambleApi ?? brambleProbe : "not-requested",
-  originProbeUrl: hasBrambleProbe ? originProbeUrl : null,
-  originRequests,
-  extensionWorkerFetchReachedEcho,
-  extensionWorkerRequestSeenByCefHandler,
-  unattributedRequests,
-  extensionPath: extensionPath ?? null,
-  decisions,
-  output,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      process: result,
+      filterMode,
+      blockHost,
+      serializedEngineBytes: serializedEngine?.byteLength ?? null,
+      peakTreeRssMiB: Number((peakTreeRssKb / 1024).toFixed(1)),
+      filterBrokerRssMiB: Number(
+        (process.memoryUsage().rss / (1024 * 1024)).toFixed(1),
+      ),
+      peakTreeProcessCount,
+      benchmark: benchmarkEnabled
+        ? {
+            idleMs: benchmarkIdleMs,
+            activeMs: benchmarkActiveMs,
+            metrics: benchmarkMetrics,
+          }
+        : null,
+      pagePassed,
+      bramblePassed: hasBrambleProbe ? bramblePassed : null,
+      title,
+      brambleProbe: hasBrambleProbe
+        ? (brambleApi ?? brambleProbe)
+        : "not-requested",
+      originProbeUrl: hasBrambleProbe ? originProbeUrl : null,
+      originRequests,
+      extensionWorkerFetchReachedEcho,
+      extensionWorkerRequestSeenByCefHandler,
+      unattributedRequests,
+      extensionPath: extensionPath ?? null,
+      decisions,
+      output,
+    },
+    null,
+    2,
+  ),
+);
 if (result.code !== 0 || !pagePassed || (hasBrambleProbe && !bramblePassed)) {
   throw new Error("CEF/Ghostery/Bramble smoke-test assertions failed.");
 }
