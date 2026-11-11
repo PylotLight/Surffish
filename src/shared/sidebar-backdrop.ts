@@ -6,14 +6,13 @@
  * window vibrancy (NSVisualEffectView) sits *behind* the page view, so it can't reach either.
  * The three paths that do work:
  *  - 'native':   View.setBackgroundBlur (Electron 44): the compositor blurs whatever is under the
- *                sidebar view, live, with no renderer raster work. Paired with a translucent tint
- *                that is still readable on its own in case a platform's compositor can't sample
- *                the page beneath.
+ *                sidebar view, live, with no renderer raster work, while it fades in/out; at
+ *                rest the layer is the frame's opaque on-screen colour (no page ghosting).
  *  - 'snapshot': capture the page strip under the sidebar once when it opens (and again on tab
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
-import { BROWSER_FRAME_TINT_ARGB } from "./sidebar-card";
+import { BROWSER_FRAME_SURFACE_ARGB } from "./sidebar-card";
 
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
@@ -56,10 +55,28 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius for a temporary native overlay above live page pixels. */
+/** Blur radius under the hover overlay while it fades in/out (at full strength it is opaque). */
 export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
-/** The temporary hover overlay uses the same tint colour as the browser frame. */
-export const SIDEBAR_NATIVE_TINT = BROWSER_FRAME_TINT_ARGB;
+/**
+ * The hover overlay paints the frame's on-screen colour, opaque (BROWSER_FRAME_SURFACE_ARGB), not
+ * the translucent frame tint: the tint only reads as the frame over the window vibrancy, and over a
+ * page it gave a different shade with the page ghosting through.
+ */
+export const SIDEBAR_NATIVE_TINT = BROWSER_FRAME_SURFACE_ARGB;
+
+/** Native hover layer paint at a point of the open/close slide (progress 0..1). */
+export function sidebarNativeLayerPaint(progress: number): {
+  alpha: number;
+  blur: number;
+} {
+  const alpha = Math.max(0.02, Math.min(1, progress));
+  // Blur only softens the page while the layer is still partly see-through; once opaque it is
+  // invisible work for the compositor, so drop it.
+  return {
+    alpha,
+    blur: alpha >= 1 ? 0 : Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * alpha),
+  };
+}
 /** Fraction of the captured bitmap's physical width kept before the one-off canvas blur. */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25;
 /** At most one snapshot per this many ms while the sidebar stays open. */

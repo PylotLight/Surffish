@@ -4,6 +4,12 @@
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-solid {
   background: rgba(18, 21, 25, 0.99);
 }
+/* macOS: the frame reads as rgb(25, 27, 31) (frame tint over the window vibrancy,
+ * BROWSER_FRAME_SURFACE_ARGB); a hover panel over the page uses that, opaque, to stay one material. */
+.app-shell[data-surface="sidebar"][data-platform="darwin"]
+  .browser-sidebar.has-backdrop-solid:not(.is-private-window) {
+  background: rgb(25, 27, 31);
+}
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-snapshot {
   background: linear-gradient(
     160deg,

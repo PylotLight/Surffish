@@ -135,6 +135,15 @@ export function sidebarCardCssVars(
  */
 export const BROWSER_FRAME_TINT_ARGB = "#A6121519";
 /**
+ * What the frame reads as on screen on macOS (dark): the tint above composited over the window's
+ * sidebar vibrancy, measured off a real window as rgb(25, 27, 31). A hover panel slid out over the
+ * page card can't sit on the vibrancy (the page view is between them), so painting the tint there
+ * composites over page pixels instead: a darker, page-dependent shade with the page ghosting
+ * through. It paints this opaque colour instead, so it reads as the same material as the toolbar
+ * strip and the rail it grows out of.
+ */
+export const BROWSER_FRAME_SURFACE_ARGB = "#FF191B1F";
+/**
  * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
  * where the sidebar meets the toolbar they read as the frame's rounded inner corner.
  */

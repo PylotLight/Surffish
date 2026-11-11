@@ -18,8 +18,8 @@ import {
   shouldUseNativeSidebarLayer,
   sidebarCaptureRegions,
   snapshotDue,
-  SIDEBAR_NATIVE_BLUR_RADIUS,
   SIDEBAR_NATIVE_TINT,
+  sidebarNativeLayerPaint,
   SIDEBAR_SNAPSHOT_SCALE,
   SIDEBAR_SNAPSHOT_THROTTLE_MS,
   type SidebarBackdropImage,
@@ -182,9 +182,9 @@ function applyNativeLayer(
  * with the panel instead of popping in at full strength before it has moved.
  */
 function paintNativeLayer(view: View, progress: number): void {
-  const ramp = Math.max(0.02, Math.min(1, progress));
-  view.setBackgroundColor(scaleArgbAlpha(SIDEBAR_NATIVE_TINT, ramp));
-  view.setBackgroundBlur(Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * ramp));
+  const { alpha, blur } = sidebarNativeLayerPaint(progress);
+  view.setBackgroundColor(scaleArgbAlpha(SIDEBAR_NATIVE_TINT, alpha));
+  view.setBackgroundBlur(blur);
 }
 
 function onMotion(window: BaseWindow, progress: number): void {

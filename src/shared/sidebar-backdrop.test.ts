@@ -10,8 +10,12 @@ import {
   snapshotDue,
   SIDEBAR_NATIVE_BLUR_RADIUS,
   SIDEBAR_NATIVE_TINT,
+  sidebarNativeLayerPaint,
 } from "./sidebar-backdrop";
-import { BROWSER_FRAME_TINT_ARGB } from "./sidebar-card";
+import {
+  BROWSER_FRAME_SURFACE_ARGB,
+  BROWSER_FRAME_TINT_ARGB,
+} from "./sidebar-card";
 
 describe("sidebar backdrop mode", () => {
   test("blur is on by default and survives junk input", () => {
@@ -97,10 +101,18 @@ describe("sidebar backdrop mode", () => {
     );
   });
 
-  test("the native hover overlay shares the root frame tint", () => {
+  test("the native hover overlay paints the frame's on-screen colour, opaque", () => {
     expect(BROWSER_FRAME_TINT_ARGB).toBe("#A6121519");
-    expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_TINT_ARGB);
+    expect(BROWSER_FRAME_SURFACE_ARGB).toBe("#FF191B1F");
+    expect(SIDEBAR_NATIVE_TINT).toBe(BROWSER_FRAME_SURFACE_ARGB);
     expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
+  });
+
+  test("the hover layer ends opaque with no blur and fades in with a blur", () => {
+    expect(sidebarNativeLayerPaint(1)).toEqual({ alpha: 1, blur: 0 });
+    expect(sidebarNativeLayerPaint(1.4)).toEqual({ alpha: 1, blur: 0 });
+    expect(sidebarNativeLayerPaint(0.5)).toEqual({ alpha: 0.5, blur: 10 });
+    expect(sidebarNativeLayerPaint(0).alpha).toBe(0.02);
   });
 });
 
