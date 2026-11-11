@@ -290,6 +290,7 @@ try {
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    "--lang=en-US",
     `--host-resolver-rules=MAP site.test 127.0.0.1,MAP ${blockHost} 127.0.0.1,MAP allowed.test 127.0.0.1`,
     appDir,
   ];
@@ -316,6 +317,7 @@ try {
     processMetrics = createProcessTreeMetrics(process.pid, {
       startedAtNs,
       intervalMs: 125,
+      pssIntervalMs: Number(process.env.SURFFISH_POC_PSS_INTERVAL_MS ?? 500),
     });
   }
   const collect = (chunk) => {

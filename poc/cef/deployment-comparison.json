@@ -1,0 +1,3604 @@
+{
+  "generatedAt": "2026-11-11T04:34:31.094Z",
+  "git": {
+    "branch": "poc/cef-bramble-adblock",
+    "commit": "fe32a37137f6920ac11a93560ce95078fbddcae2",
+    "workingTreeDirtyAtCapture": true
+  },
+  "host": {
+    "platform": "linux 6.18.38+",
+    "architecture": "x64",
+    "logicalCpus": 8,
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.50GHz",
+    "memoryBytes": 25383874560,
+    "packageFormat": "Debian binary package, amd64"
+  },
+  "method": {
+    "scope": "runtime-only POC packages, not production Surffish application installers",
+    "description": "Both runtime trees were staged independently from the existing builds, stripped of ELF debug sections, reduced to en-US.pak, and packaged with identical dpkg-deb xz level-6 settings. The same ten-list serialized Ghostery engine and Bramble probe were included in both packages. The packages were unpacked staging trees for this smoke benchmark; they were not installed. PSS was sampled every 500 ms in a memory-profile pass; CPU was measured in a separate pass with PSS disabled to avoid observer overhead.",
+    "compression": "dpkg-deb xz level 6, uniform control/data compression",
+    "locale": "en-US only; both POC launchers explicitly pass --lang=en-US",
+    "symbols": "ELF .debug_* sections removed; dynamic and non-debug symbols retained",
+    "cgroupMemory": "cgroup v2 memory.current came from the shared sandbox service cgroup, not an isolated benchmark cgroup, so it is diagnostic only and cannot be attributed to these process trees",
+    "pssPeak": "PSS peaks are maxima among sampled smaps_rollup observations, not guaranteed instantaneous peaks",
+    "omitted": "Production Surffish UI, full application dependencies, installers/integration, signing, update/uninstall paths, CEF secure sandbox configuration, and unsupported extension-host integration",
+    "workloadAssets": {
+      "ghosteryEngineBytes": 16398869,
+      "ghosteryEngineSha256": "f35d43babd95316a765c32712bf8409ca9d2c8c9fabdd62e2a45aac768205d9d",
+      "brambleProbeFiles": 83,
+      "brambleProbeSha256": "402deeddf6133a2ce107331018dcf2116cd4d3ad2bde4b0c280df58ecbe05ea8"
+    }
+  },
+  "runtimes": {
+    "cef": {
+      "version": "156.0.27+ga10dae3+chromium-156.0.8078.88",
+      "chromium": "156.0.8078.88",
+      "package": {
+        "path": "/dev/shm/surffish-deployment-comparison-VnelTm/surffish-cef-runtime-poc.deb",
+        "bytes": 132691716,
+        "control": "Package: surffish-cef-runtime-poc\nVersion: 156.0.27-1\nArchitecture: amd64\nMaintainer: Surffish POC\nDescription: same Surffish POC runtime and workload assets\n",
+        "compression": "dpkg-deb xz level 6, uniform control/data compression"
+      },
+      "sourceTree": {
+        "source": "/dev/shm/surffish-cef156-build/Release",
+        "original": {
+          "apparentBytes": 1587971393,
+          "allocatedBytes": 1588785152,
+          "files": 232
+        },
+        "sourceDebugElfs": [
+          {
+            "path": "chrome-sandbox",
+            "debugSectionBytes": 12270,
+            "fileBytes": 31952
+          },
+          {
+            "path": "libcef.so",
+            "debugSectionBytes": 1005183328,
+            "fileBytes": 1480767784
+          },
+          {
+            "path": "libvk_swiftshader.so",
+            "debugSectionBytes": 9353145,
+            "fileBytes": 15073248
+          },
+          {
+            "path": "libvulkan.so.1",
+            "debugSectionBytes": 704614,
+            "fileBytes": 1561800
+          }
+        ],
+        "stripped": [
+          {
+            "path": "chrome-sandbox",
+            "debugBytesBefore": 12270,
+            "debugBytesAfter": 0,
+            "fileBytesBefore": 31952,
+            "fileBytesAfter": 18696
+          },
+          {
+            "path": "libcef.so",
+            "debugBytesBefore": 1005183328,
+            "debugBytesAfter": 0,
+            "fileBytesBefore": 1480767784,
+            "fileBytesAfter": 473045792
+          },
+          {
+            "path": "libvk_swiftshader.so",
+            "debugBytesBefore": 9353145,
+            "debugBytesAfter": 0,
+            "fileBytesBefore": 15073248,
+            "fileBytesAfter": 5699448
+          },
+          {
+            "path": "libvulkan.so.1",
+            "debugBytesBefore": 704614,
+            "debugBytesAfter": 0,
+            "fileBytesBefore": 1561800,
+            "fileBytesAfter": 850672
+          }
+        ],
+        "staged": {
+          "apparentBytes": 519462896,
+          "allocatedBytes": 519487488,
+          "files": 13
+        },
+        "stagedDebugElfs": [],
+        "locales": ["en-US.pak"],
+        "directory": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/runtime"
+      },
+      "installedMiB": 495.4
+    },
+    "electron": {
+      "version": "46.0.0-alpha.8",
+      "chromium": "159.0.8140.0",
+      "package": {
+        "path": "/dev/shm/surffish-deployment-comparison-VnelTm/surffish-electron-runtime-poc.deb",
+        "bytes": 101239444,
+        "control": "Package: surffish-electron-runtime-poc\nVersion: 46.0.0~alpha.8-1\nArchitecture: amd64\nMaintainer: Surffish POC\nDescription: same Surffish POC runtime and workload assets\n",
+        "compression": "dpkg-deb xz level 6, uniform control/data compression"
+      },
+      "sourceTree": {
+        "source": "/dev/shm/surffish-electron46-alpha8/node_modules/electron/dist",
+        "original": {
+          "apparentBytes": 297612871,
+          "allocatedBytes": 297775104,
+          "files": 72
+        },
+        "sourceDebugElfs": [
+          {
+            "path": "libvulkan.so.1",
+            "debugSectionBytes": 838493,
+            "fileBytes": 2548840
+          }
+        ],
+        "stripped": [
+          {
+            "path": "libvulkan.so.1",
+            "debugBytesBefore": 838493,
+            "debugBytesAfter": 0,
+            "fileBytesBefore": 2548840,
+            "fileBytesAfter": 823808
+          }
+        ],
+        "staged": {
+          "apparentBytes": 288028101,
+          "allocatedBytes": 288071680,
+          "files": 18
+        },
+        "stagedDebugElfs": [],
+        "locales": ["en-US.pak"],
+        "directory": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/runtime"
+      },
+      "installedMiB": 274.69
+    }
+  },
+  "benchmark": {
+    "memoryProfile": {
+      "generatedAt": "2026-11-11T04:33:34.313Z",
+      "host": {
+        "platform": "linux 6.18.38+",
+        "architecture": "x64",
+        "logicalCpus": 8,
+        "cpuModel": "Intel(R) Xeon(R) Processor @ 2.50GHz",
+        "memoryBytes": 25383874560,
+        "xvfb": true,
+        "sandbox": "--no-sandbox (isolated Linux POC only)"
+      },
+      "runtimes": {
+        "cef": {
+          "version": "156.0.27+ga10dae3+chromium-156.0.8078.88",
+          "chromium": "156.0.8078.88",
+          "runtimeDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/runtime",
+          "runtimeDirectoryAllocatedBytes": 519487488,
+          "runtimeDirectoryApparentBytes": 519462896,
+          "officialArchiveBytes": 333362327,
+          "officialArchiveSha1": "1ccade9535dba5362f0c6adb05f9ae019e860af1"
+        },
+        "electron": {
+          "version": "46.0.0-alpha.8",
+          "chromium": "159.0.8140.0",
+          "runtimeDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/runtime",
+          "runtimeDirectoryAllocatedBytes": 288071680,
+          "runtimeDirectoryApparentBytes": 288028101,
+          "officialArchiveBytes": 129755550,
+          "officialArchiveSha256": ""
+        }
+      },
+      "workload": {
+        "repetitions": 4,
+        "order": "alternating CEF-first and Electron-first by trial",
+        "idleMs": 3000,
+        "activeMs": 3000,
+        "activeWork": "renderer JavaScript trigonometric busy-loop",
+        "pageFixture": "same localhost page; block doubleclick.net script; allow control script; await Bramble worker messaging/storage/API probe",
+        "filterEngine": {
+          "source": "same previously compiled Surffish production-selected 10-list Ghostery engine",
+          "bytes": 16398869,
+          "sha256": "f35d43babd95316a765c32712bf8409ca9d2c8c9fabdd62e2a45aac768205d9d",
+          "filterHost": "doubleclick.net"
+        },
+        "extensions": {
+          "cefDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+          "electronDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+          "sha256": "402deeddf6133a2ce107331018dcf2116cd4d3ad2bde4b0c280df58ecbe05ea8",
+          "files": 83
+        },
+        "measurement": "fresh browser process/profile per run; process-tree RSS and /proc CPU ticks sampled at 125 ms; PSS from /proc/<pid>/smaps_rollup sampled every 500 ms (0 disables PSS); shared sandbox service cgroup memory.current also sampled but is not attributable to this process tree; runtime directories measured for allocated and apparent bytes on /dev/shm tmpfs; 8 visible logical CPUs; host OS filesystem cache not flushed"
+      },
+      "summary": {
+        "cef": {
+          "runs": 4,
+          "coldStartupMs": {
+            "min": 677,
+            "median": 720.8,
+            "max": 836
+          },
+          "idleCpuMs": {
+            "min": 313.1,
+            "median": 335.8,
+            "max": 348
+          },
+          "idleCpuPercentOfOneCore": {
+            "min": 10.4,
+            "median": 11.2,
+            "max": 11.6
+          },
+          "idleMeanRssMiB": {
+            "min": 1020.2,
+            "median": 1021.4,
+            "max": 1023.8
+          },
+          "idleMeanPssMiB": {
+            "min": 462.6,
+            "median": 464.6,
+            "max": 465.1
+          },
+          "idlePeakPssMiB": {
+            "min": 463.2,
+            "median": 465.1,
+            "max": 465.5
+          },
+          "idlePeakRssMiB": {
+            "min": 1021.5,
+            "median": 1022.8,
+            "max": 1025.1
+          },
+          "activeCpuMs": {
+            "min": 3136,
+            "median": 3149,
+            "max": 3197.4
+          },
+          "activeCpuPercentOfOneCore": {
+            "min": 104.4,
+            "median": 104.8,
+            "max": 106.4
+          },
+          "activeMeanRssMiB": {
+            "min": 1032.2,
+            "median": 1033.2,
+            "max": 1036
+          },
+          "activeMeanPssMiB": {
+            "min": 469.6,
+            "median": 471.1,
+            "max": 472
+          },
+          "activePeakPssMiB": {
+            "min": 470.1,
+            "median": 471.4,
+            "max": 472.4
+          },
+          "activePeakRssMiB": {
+            "min": 1033.1,
+            "median": 1034,
+            "max": 1037
+          },
+          "peakProcessTreeRssMiB": {
+            "min": 1033.1,
+            "median": 1034,
+            "max": 1037
+          },
+          "peakProcessTreePssMiB": {
+            "min": 470.1,
+            "median": 471.4,
+            "max": 472.4
+          },
+          "sharedCgroupPeakObservedMiB": {
+            "min": 7271.3,
+            "median": 7350.8,
+            "max": 7477.9
+          }
+        },
+        "electron": {
+          "runs": 4,
+          "coldStartupMs": {
+            "min": 742.1,
+            "median": 755.6,
+            "max": 781.3
+          },
+          "idleCpuMs": {
+            "min": 196.4,
+            "median": 206.7,
+            "max": 222.6
+          },
+          "idleCpuPercentOfOneCore": {
+            "min": 6.5,
+            "median": 6.9,
+            "max": 7.4
+          },
+          "idleMeanRssMiB": {
+            "min": 754.8,
+            "median": 755.8,
+            "max": 756.8
+          },
+          "idleMeanPssMiB": {
+            "min": 365.3,
+            "median": 365.8,
+            "max": 366.8
+          },
+          "idlePeakPssMiB": {
+            "min": 365.9,
+            "median": 366.4,
+            "max": 367.5
+          },
+          "idlePeakRssMiB": {
+            "min": 756.2,
+            "median": 757.1,
+            "max": 758.1
+          },
+          "activeCpuMs": {
+            "min": 3118.5,
+            "median": 3146.9,
+            "max": 3170.3
+          },
+          "activeCpuPercentOfOneCore": {
+            "min": 103.8,
+            "median": 104.7,
+            "max": 105.5
+          },
+          "activeMeanRssMiB": {
+            "min": 760.6,
+            "median": 761.8,
+            "max": 762.4
+          },
+          "activeMeanPssMiB": {
+            "min": 366.4,
+            "median": 367.5,
+            "max": 368.4
+          },
+          "activePeakPssMiB": {
+            "min": 367,
+            "median": 368.3,
+            "max": 369
+          },
+          "activePeakRssMiB": {
+            "min": 761.5,
+            "median": 762.8,
+            "max": 763.3
+          },
+          "peakProcessTreeRssMiB": {
+            "min": 762,
+            "median": 762.8,
+            "max": 763.4
+          },
+          "peakProcessTreePssMiB": {
+            "min": 367,
+            "median": 368.3,
+            "max": 369
+          },
+          "sharedCgroupPeakObservedMiB": {
+            "min": 7295.8,
+            "median": 7326.5,
+            "max": 7424.7
+          }
+        }
+      },
+      "runs": [
+        {
+          "browser": "cef",
+          "trial": 1,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 952.5,
+            "filterBrokerRssMiB": 75.5,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 836,
+                "coldStartup": {
+                  "durationMs": 836,
+                  "cpuMs": 838.3,
+                  "cpuPercentOfOneCore": 100.3,
+                  "cpuPercentOfVisibleLogicalCpus": 12.5,
+                  "meanRssMiB": 598.3,
+                  "peakRssMiB": 1018.8,
+                  "meanPssMiB": 238,
+                  "peakPssMiB": 426.6,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 7
+                },
+                "idle": {
+                  "durationMs": 3005.9,
+                  "cpuMs": 341,
+                  "cpuPercentOfOneCore": 11.3,
+                  "cpuPercentOfVisibleLogicalCpus": 1.4,
+                  "meanRssMiB": 1020.2,
+                  "peakRssMiB": 1021.6,
+                  "meanPssMiB": 462.6,
+                  "peakPssMiB": 463.2,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3005.2,
+                  "cpuMs": 3155,
+                  "cpuPercentOfOneCore": 105,
+                  "cpuPercentOfVisibleLogicalCpus": 13.1,
+                  "meanRssMiB": 1032.2,
+                  "peakRssMiB": 1033.1,
+                  "meanPssMiB": 469.6,
+                  "peakPssMiB": 470.1,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6932.7,
+                  "cpuMs": 4350,
+                  "cpuPercentOfOneCore": 62.7,
+                  "cpuPercentOfVisibleLogicalCpus": 7.8,
+                  "meanRssMiB": 955.8,
+                  "peakRssMiB": 1033.1,
+                  "meanPssMiB": 408.3,
+                  "peakPssMiB": 470.1,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 1033.1,
+                "peakProcessTreePssMiB": 470.1,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7095.4,
+                  "medianCurrentMiB": 7463.1,
+                  "peakObservedCurrentMiB": 7477.9,
+                  "currentEndMiB": 7315.4,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 836
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 839
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3844.9
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3848.3
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6853.5
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42205184%3A-781.14;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:45013/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:45013/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:45013/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:45013/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:45013/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3164251:3164251:1111/133238.047806:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:45013/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:45013/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42205184%3A-781.14;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 1,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 711.1,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 767.9,
+                "coldStartup": {
+                  "durationMs": 767.9,
+                  "cpuMs": 708.7,
+                  "cpuPercentOfOneCore": 92.3,
+                  "cpuPercentOfVisibleLogicalCpus": 11.5,
+                  "meanRssMiB": 473,
+                  "peakRssMiB": 751.7,
+                  "meanPssMiB": 188.8,
+                  "peakPssMiB": 357.8,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3006,
+                  "cpuMs": 222.6,
+                  "cpuPercentOfOneCore": 7.4,
+                  "cpuPercentOfVisibleLogicalCpus": 0.9,
+                  "meanRssMiB": 754.8,
+                  "peakRssMiB": 756.2,
+                  "meanPssMiB": 366.1,
+                  "peakPssMiB": 366.5,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3008.2,
+                  "cpuMs": 3170.3,
+                  "cpuPercentOfOneCore": 105.4,
+                  "cpuPercentOfVisibleLogicalCpus": 13.2,
+                  "meanRssMiB": 760.6,
+                  "peakRssMiB": 761.5,
+                  "meanPssMiB": 367.9,
+                  "peakPssMiB": 368.6,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6954.6,
+                  "cpuMs": 4180,
+                  "cpuPercentOfOneCore": 60.1,
+                  "cpuPercentOfVisibleLogicalCpus": 7.5,
+                  "meanRssMiB": 706.1,
+                  "peakRssMiB": 762,
+                  "meanPssMiB": 320.5,
+                  "peakPssMiB": 368.6,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 57
+                },
+                "peakProcessTreeRssMiB": 762,
+                "peakProcessTreePssMiB": 368.6,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7271.1,
+                  "medianCurrentMiB": 7319.1,
+                  "peakObservedCurrentMiB": 7424.7,
+                  "currentEndMiB": 7182,
+                  "sampleCount": 57
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 767.9
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 770.1
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3776.1
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3787.9
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6796.1
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42217472%3A-4249.21;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:39891/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:39891/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:39891/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3164506) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:39891/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:39891/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42217472%3A-4249.21;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 2,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 712.5,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 781.3,
+                "coldStartup": {
+                  "durationMs": 781.3,
+                  "cpuMs": 750,
+                  "cpuPercentOfOneCore": 96,
+                  "cpuPercentOfVisibleLogicalCpus": 12,
+                  "meanRssMiB": 460.7,
+                  "peakRssMiB": 753.8,
+                  "meanPssMiB": 187.9,
+                  "peakPssMiB": 356.1,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3008.4,
+                  "cpuMs": 200.3,
+                  "cpuPercentOfOneCore": 6.7,
+                  "cpuPercentOfVisibleLogicalCpus": 0.8,
+                  "meanRssMiB": 756.8,
+                  "peakRssMiB": 758.1,
+                  "meanPssMiB": 366.8,
+                  "peakPssMiB": 367.5,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.5,
+                  "cpuMs": 3169.6,
+                  "cpuPercentOfOneCore": 105.5,
+                  "cpuPercentOfVisibleLogicalCpus": 13.2,
+                  "meanRssMiB": 762.4,
+                  "peakRssMiB": 763.2,
+                  "meanPssMiB": 368.4,
+                  "peakPssMiB": 369,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6960,
+                  "cpuMs": 4170,
+                  "cpuPercentOfOneCore": 59.9,
+                  "cpuPercentOfVisibleLogicalCpus": 7.5,
+                  "meanRssMiB": 709.4,
+                  "peakRssMiB": 763.2,
+                  "meanPssMiB": 320.9,
+                  "peakPssMiB": 369,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 57
+                },
+                "peakProcessTreeRssMiB": 763.2,
+                "peakProcessTreePssMiB": 369,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7175.9,
+                  "medianCurrentMiB": 7328.9,
+                  "peakObservedCurrentMiB": 7330.7,
+                  "currentEndMiB": 7169.2,
+                  "sampleCount": 57
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 781.3
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 793.7
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3802.2
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3804.9
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6808.4
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42795008%3A-710.83;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:46059/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:46059/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:46059/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3164722) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:46059/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:46059/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42795008%3A-710.83;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 2,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 954.2,
+            "filterBrokerRssMiB": 76,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 728.2,
+                "coldStartup": {
+                  "durationMs": 728.2,
+                  "cpuMs": 845.7,
+                  "cpuPercentOfOneCore": 116.1,
+                  "cpuPercentOfVisibleLogicalCpus": 14.5,
+                  "meanRssMiB": 678.7,
+                  "peakRssMiB": 1020.4,
+                  "meanPssMiB": 256.5,
+                  "peakPssMiB": 463.9,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.7,
+                  "cpuMs": 330.6,
+                  "cpuPercentOfOneCore": 11,
+                  "cpuPercentOfVisibleLogicalCpus": 1.4,
+                  "meanRssMiB": 1022.3,
+                  "peakRssMiB": 1023.9,
+                  "meanPssMiB": 464.7,
+                  "peakPssMiB": 465.1,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.2,
+                  "cpuMs": 3136,
+                  "cpuPercentOfOneCore": 104.4,
+                  "cpuPercentOfVisibleLogicalCpus": 13,
+                  "meanRssMiB": 1033.8,
+                  "peakRssMiB": 1034.7,
+                  "meanPssMiB": 471.1,
+                  "peakPssMiB": 471.2,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6811.6,
+                  "cpuMs": 4320,
+                  "cpuPercentOfOneCore": 63.4,
+                  "cpuPercentOfVisibleLogicalCpus": 7.9,
+                  "meanRssMiB": 972.7,
+                  "peakRssMiB": 1034.7,
+                  "meanPssMiB": 412.2,
+                  "peakPssMiB": 471.2,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1034.7,
+                "peakProcessTreePssMiB": 471.2,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7179.8,
+                  "medianCurrentMiB": 7347.7,
+                  "peakObservedCurrentMiB": 7349.6,
+                  "currentEndMiB": 7199.8,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 728.2
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 731.6
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3736.3
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3739.5
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6743.7
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42328064%3A-3370.98;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:35305/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:35305/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:35305/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:35305/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:35305/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3164942:3164942:1111/133259.314646:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:35305/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:35305/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42328064%3A-3370.98;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 3,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 952.9,
+            "filterBrokerRssMiB": 76,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 677,
+                "coldStartup": {
+                  "durationMs": 677,
+                  "cpuMs": 684.9,
+                  "cpuPercentOfOneCore": 101.2,
+                  "cpuPercentOfVisibleLogicalCpus": 12.6,
+                  "meanRssMiB": 689.9,
+                  "peakRssMiB": 1019,
+                  "meanPssMiB": 256.2,
+                  "peakPssMiB": 463.4,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.3,
+                  "cpuMs": 348,
+                  "cpuPercentOfOneCore": 11.6,
+                  "cpuPercentOfVisibleLogicalCpus": 1.4,
+                  "meanRssMiB": 1020.5,
+                  "peakRssMiB": 1021.5,
+                  "meanPssMiB": 464.5,
+                  "peakPssMiB": 465,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3005.1,
+                  "cpuMs": 3197.4,
+                  "cpuPercentOfOneCore": 106.4,
+                  "cpuPercentOfVisibleLogicalCpus": 13.3,
+                  "meanRssMiB": 1032.5,
+                  "peakRssMiB": 1033.3,
+                  "meanPssMiB": 471.1,
+                  "peakPssMiB": 471.6,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6762.6,
+                  "cpuMs": 4250,
+                  "cpuPercentOfOneCore": 62.8,
+                  "cpuPercentOfVisibleLogicalCpus": 7.9,
+                  "meanRssMiB": 972.6,
+                  "peakRssMiB": 1033.3,
+                  "meanPssMiB": 412.1,
+                  "peakPssMiB": 471.6,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1033.3,
+                "peakProcessTreePssMiB": 471.6,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7181.1,
+                  "medianCurrentMiB": 7347.7,
+                  "peakObservedCurrentMiB": 7351.9,
+                  "currentEndMiB": 7186.6,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 677
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 679.8
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3684.1
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3686.7
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6691.8
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41414656%3A-212.43;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:36489/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:36489/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:36489/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:36489/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:36489/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3165207:3165207:1111/133306.457459:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:36489/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:36489/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41414656%3A-212.43;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 3,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 712,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 743.3,
+                "coldStartup": {
+                  "durationMs": 743.3,
+                  "cpuMs": 664.3,
+                  "cpuPercentOfOneCore": 89.4,
+                  "cpuPercentOfVisibleLogicalCpus": 11.2,
+                  "meanRssMiB": 493.6,
+                  "peakRssMiB": 752.3,
+                  "meanPssMiB": 189.1,
+                  "peakPssMiB": 358.4,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.2,
+                  "cpuMs": 196.4,
+                  "cpuPercentOfOneCore": 6.5,
+                  "cpuPercentOfVisibleLogicalCpus": 0.8,
+                  "meanRssMiB": 755.2,
+                  "peakRssMiB": 756.7,
+                  "meanPssMiB": 365.3,
+                  "peakPssMiB": 366.2,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.5,
+                  "cpuMs": 3118.5,
+                  "cpuPercentOfOneCore": 103.8,
+                  "cpuPercentOfVisibleLogicalCpus": 13,
+                  "meanRssMiB": 761.3,
+                  "peakRssMiB": 762.3,
+                  "meanPssMiB": 366.4,
+                  "peakPssMiB": 367,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6907.3,
+                  "cpuMs": 4010,
+                  "cpuPercentOfOneCore": 58.1,
+                  "cpuPercentOfVisibleLogicalCpus": 7.3,
+                  "meanRssMiB": 717.3,
+                  "peakRssMiB": 762.4,
+                  "meanPssMiB": 319.7,
+                  "peakPssMiB": 367,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 762.4,
+                "peakProcessTreePssMiB": 367,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7155.5,
+                  "medianCurrentMiB": 7277.7,
+                  "peakObservedCurrentMiB": 7322.2,
+                  "currentEndMiB": 7136.6,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 743.3
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 745.8
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3749
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3751.4
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6754.9
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=43151360%3A-3697.83;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:39941/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:39941/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:39941/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3165463) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:39941/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:39941/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=43151360%3A-3697.83;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 4,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 713.1,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 742.1,
+                "coldStartup": {
+                  "durationMs": 742.1,
+                  "cpuMs": 633.9,
+                  "cpuPercentOfOneCore": 85.4,
+                  "cpuPercentOfVisibleLogicalCpus": 10.7,
+                  "meanRssMiB": 490.4,
+                  "peakRssMiB": 753.4,
+                  "meanPssMiB": 189.5,
+                  "peakPssMiB": 359.5,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.4,
+                  "cpuMs": 213.1,
+                  "cpuPercentOfOneCore": 7.1,
+                  "cpuPercentOfVisibleLogicalCpus": 0.9,
+                  "meanRssMiB": 756.3,
+                  "peakRssMiB": 757.5,
+                  "meanPssMiB": 365.4,
+                  "peakPssMiB": 365.9,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.9,
+                  "cpuMs": 3124.1,
+                  "cpuPercentOfOneCore": 104,
+                  "cpuPercentOfVisibleLogicalCpus": 13,
+                  "meanRssMiB": 762.3,
+                  "peakRssMiB": 763.3,
+                  "meanPssMiB": 367.2,
+                  "peakPssMiB": 367.9,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6910.1,
+                  "cpuMs": 4010,
+                  "cpuPercentOfOneCore": 58,
+                  "cpuPercentOfVisibleLogicalCpus": 7.3,
+                  "meanRssMiB": 717.9,
+                  "peakRssMiB": 763.4,
+                  "meanPssMiB": 320,
+                  "peakPssMiB": 367.9,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 10,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 763.4,
+                "peakProcessTreePssMiB": 367.9,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7116.9,
+                  "medianCurrentMiB": 7294.3,
+                  "peakObservedCurrentMiB": 7295.8,
+                  "currentEndMiB": 7045.6,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 742.1
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 744.5
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3747.9
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3750.9
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6754.7
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42287104%3A-758.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:35903/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:35903/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:35903/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3165680) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:35903/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:35903/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42287104%3A-758.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 4,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 955.2,
+            "filterBrokerRssMiB": 77.5,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": 500,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 713.4,
+                "coldStartup": {
+                  "durationMs": 713.4,
+                  "cpuMs": 790,
+                  "cpuPercentOfOneCore": 110.7,
+                  "cpuPercentOfVisibleLogicalCpus": 13.8,
+                  "meanRssMiB": 683.3,
+                  "peakRssMiB": 1022.2,
+                  "meanPssMiB": 257.3,
+                  "peakPssMiB": 464.5,
+                  "pssSampleCount": 2,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.7,
+                  "cpuMs": 313.1,
+                  "cpuPercentOfOneCore": 10.4,
+                  "cpuPercentOfVisibleLogicalCpus": 1.3,
+                  "meanRssMiB": 1023.8,
+                  "peakRssMiB": 1025.1,
+                  "meanPssMiB": 465.1,
+                  "peakPssMiB": 465.5,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.1,
+                  "cpuMs": 3143,
+                  "cpuPercentOfOneCore": 104.6,
+                  "cpuPercentOfVisibleLogicalCpus": 13.1,
+                  "meanRssMiB": 1036,
+                  "peakRssMiB": 1037,
+                  "meanPssMiB": 472,
+                  "peakPssMiB": 472.4,
+                  "pssSampleCount": 6,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6799.7,
+                  "cpuMs": 4260,
+                  "cpuPercentOfOneCore": 62.6,
+                  "cpuPercentOfVisibleLogicalCpus": 7.8,
+                  "meanRssMiB": 974.9,
+                  "peakRssMiB": 1037,
+                  "meanPssMiB": 412.9,
+                  "peakPssMiB": 472.4,
+                  "pssSampleCount": 15,
+                  "maxPssProcessCount": 12,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1037,
+                "peakProcessTreePssMiB": 472.4,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7066.9,
+                  "medianCurrentMiB": 7269.3,
+                  "peakObservedCurrentMiB": 7271.3,
+                  "currentEndMiB": 7126.6,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 713.4
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 716.5
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3721.2
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3724.4
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6728.5
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41054208%3A-2015.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:37853/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:37853/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:37853/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:37853/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:37853/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3165901:3165901:1111/133327.599815:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:37853/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:37853/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41054208%3A-2015.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        }
+      ]
+    },
+    "cpuProfile": {
+      "generatedAt": "2026-11-11T04:34:31.083Z",
+      "host": {
+        "platform": "linux 6.18.38+",
+        "architecture": "x64",
+        "logicalCpus": 8,
+        "cpuModel": "Intel(R) Xeon(R) Processor @ 2.50GHz",
+        "memoryBytes": 25383874560,
+        "xvfb": true,
+        "sandbox": "--no-sandbox (isolated Linux POC only)"
+      },
+      "runtimes": {
+        "cef": {
+          "version": "156.0.27+ga10dae3+chromium-156.0.8078.88",
+          "chromium": "156.0.8078.88",
+          "runtimeDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/runtime",
+          "runtimeDirectoryAllocatedBytes": 519487488,
+          "runtimeDirectoryApparentBytes": 519462896,
+          "officialArchiveBytes": 333362327,
+          "officialArchiveSha1": "1ccade9535dba5362f0c6adb05f9ae019e860af1"
+        },
+        "electron": {
+          "version": "46.0.0-alpha.8",
+          "chromium": "159.0.8140.0",
+          "runtimeDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/runtime",
+          "runtimeDirectoryAllocatedBytes": 288071680,
+          "runtimeDirectoryApparentBytes": 288028101,
+          "officialArchiveBytes": 129755550,
+          "officialArchiveSha256": ""
+        }
+      },
+      "workload": {
+        "repetitions": 4,
+        "order": "alternating CEF-first and Electron-first by trial",
+        "idleMs": 3000,
+        "activeMs": 3000,
+        "activeWork": "renderer JavaScript trigonometric busy-loop",
+        "pageFixture": "same localhost page; block doubleclick.net script; allow control script; await Bramble worker messaging/storage/API probe",
+        "filterEngine": {
+          "source": "same previously compiled Surffish production-selected 10-list Ghostery engine",
+          "bytes": 16398869,
+          "sha256": "f35d43babd95316a765c32712bf8409ca9d2c8c9fabdd62e2a45aac768205d9d",
+          "filterHost": "doubleclick.net"
+        },
+        "extensions": {
+          "cefDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+          "electronDirectory": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+          "sha256": "402deeddf6133a2ce107331018dcf2116cd4d3ad2bde4b0c280df58ecbe05ea8",
+          "files": 83
+        },
+        "measurement": "fresh browser process/profile per run; process-tree RSS and /proc CPU ticks sampled at 125 ms; PSS from /proc/<pid>/smaps_rollup sampled every 0 ms (0 disables PSS); shared sandbox service cgroup memory.current also sampled but is not attributable to this process tree; runtime directories measured for allocated and apparent bytes on /dev/shm tmpfs; 8 visible logical CPUs; host OS filesystem cache not flushed"
+      },
+      "summary": {
+        "cef": {
+          "runs": 4,
+          "coldStartupMs": {
+            "min": 670.8,
+            "median": 698.6,
+            "max": 756.7
+          },
+          "idleCpuMs": {
+            "min": 174.4,
+            "median": 180.3,
+            "max": 193
+          },
+          "idleCpuPercentOfOneCore": {
+            "min": 5.8,
+            "median": 6,
+            "max": 6.4
+          },
+          "idleMeanRssMiB": {
+            "min": 1020.7,
+            "median": 1021.8,
+            "max": 1022.6
+          },
+          "idleMeanPssMiB": null,
+          "idlePeakPssMiB": null,
+          "idlePeakRssMiB": {
+            "min": 1022,
+            "median": 1023.2,
+            "max": 1024.4
+          },
+          "activeCpuMs": {
+            "min": 3049.4,
+            "median": 3062.4,
+            "max": 3079.8
+          },
+          "activeCpuPercentOfOneCore": {
+            "min": 101.5,
+            "median": 101.9,
+            "max": 102.5
+          },
+          "activeMeanRssMiB": {
+            "min": 1032.2,
+            "median": 1033.2,
+            "max": 1034.2
+          },
+          "activeMeanPssMiB": null,
+          "activePeakPssMiB": null,
+          "activePeakRssMiB": {
+            "min": 1033,
+            "median": 1033.9,
+            "max": 1034.8
+          },
+          "peakProcessTreeRssMiB": {
+            "min": 1033,
+            "median": 1033.9,
+            "max": 1034.8
+          },
+          "peakProcessTreePssMiB": null,
+          "sharedCgroupPeakObservedMiB": {
+            "min": 7274.5,
+            "median": 7280,
+            "max": 7295.9
+          }
+        },
+        "electron": {
+          "runs": 4,
+          "coldStartupMs": {
+            "min": 719.3,
+            "median": 728.3,
+            "max": 757.3
+          },
+          "idleCpuMs": {
+            "min": 126.6,
+            "median": 137.6,
+            "max": 153.4
+          },
+          "idleCpuPercentOfOneCore": {
+            "min": 4.2,
+            "median": 4.6,
+            "max": 5.1
+          },
+          "idleMeanRssMiB": {
+            "min": 751.1,
+            "median": 754.7,
+            "max": 757.1
+          },
+          "idleMeanPssMiB": null,
+          "idlePeakPssMiB": null,
+          "idlePeakRssMiB": {
+            "min": 752.5,
+            "median": 756.1,
+            "max": 758.6
+          },
+          "activeCpuMs": {
+            "min": 3036,
+            "median": 3045.1,
+            "max": 3054.5
+          },
+          "activeCpuPercentOfOneCore": {
+            "min": 101.1,
+            "median": 101.4,
+            "max": 101.7
+          },
+          "activeMeanRssMiB": {
+            "min": 757,
+            "median": 760.4,
+            "max": 763.5
+          },
+          "activeMeanPssMiB": null,
+          "activePeakPssMiB": null,
+          "activePeakRssMiB": {
+            "min": 758,
+            "median": 761.5,
+            "max": 764.5
+          },
+          "peakProcessTreeRssMiB": {
+            "min": 758.6,
+            "median": 761.9,
+            "max": 765.2
+          },
+          "peakProcessTreePssMiB": null,
+          "sharedCgroupPeakObservedMiB": {
+            "min": 7230.8,
+            "median": 7234.9,
+            "max": 7258
+          }
+        }
+      },
+      "runs": [
+        {
+          "browser": "cef",
+          "trial": 1,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 951.7,
+            "filterBrokerRssMiB": 76.9,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 691.3,
+                "coldStartup": {
+                  "durationMs": 691.3,
+                  "cpuMs": 745.5,
+                  "cpuPercentOfOneCore": 107.8,
+                  "cpuPercentOfVisibleLogicalCpus": 13.5,
+                  "meanRssMiB": 688.6,
+                  "peakRssMiB": 1019,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.8,
+                  "cpuMs": 185.3,
+                  "cpuPercentOfOneCore": 6.2,
+                  "cpuPercentOfVisibleLogicalCpus": 0.8,
+                  "meanRssMiB": 1020.9,
+                  "peakRssMiB": 1022,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.7,
+                  "cpuMs": 3049.4,
+                  "cpuPercentOfOneCore": 101.5,
+                  "cpuPercentOfVisibleLogicalCpus": 12.7,
+                  "meanRssMiB": 1032.3,
+                  "peakRssMiB": 1033.1,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6778.2,
+                  "cpuMs": 3990,
+                  "cpuPercentOfOneCore": 58.9,
+                  "cpuPercentOfVisibleLogicalCpus": 7.4,
+                  "meanRssMiB": 972.5,
+                  "peakRssMiB": 1033.1,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1033.1,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7132.6,
+                  "medianCurrentMiB": 7231.8,
+                  "peakObservedCurrentMiB": 7295.9,
+                  "currentEndMiB": 7097.1,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 691.3
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 694.6
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3699.4
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3702.3
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6707
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42287104%3A-758.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:42135/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:42135/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:42135/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:42135/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42135/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3166195:3166195:1111/133335.000419:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:42135/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:42135/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42287104%3A-758.84;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 1,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 708.1,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 719.3,
+                "coldStartup": {
+                  "durationMs": 719.3,
+                  "cpuMs": 670.4,
+                  "cpuPercentOfOneCore": 93.2,
+                  "cpuPercentOfVisibleLogicalCpus": 11.7,
+                  "meanRssMiB": 518.3,
+                  "peakRssMiB": 748.1,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.3,
+                  "cpuMs": 126.6,
+                  "cpuPercentOfOneCore": 4.2,
+                  "cpuPercentOfVisibleLogicalCpus": 0.5,
+                  "meanRssMiB": 751.1,
+                  "peakRssMiB": 752.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003,
+                  "cpuMs": 3048.2,
+                  "cpuPercentOfOneCore": 101.5,
+                  "cpuPercentOfVisibleLogicalCpus": 12.7,
+                  "meanRssMiB": 757,
+                  "peakRssMiB": 758,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6881.6,
+                  "cpuMs": 3880,
+                  "cpuPercentOfOneCore": 56.4,
+                  "cpuPercentOfVisibleLogicalCpus": 7,
+                  "meanRssMiB": 716.3,
+                  "peakRssMiB": 758.6,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 758.6,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7092,
+                  "medianCurrentMiB": 7245.9,
+                  "peakObservedCurrentMiB": 7258,
+                  "currentEndMiB": 7102.1,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 719.3
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 721.9
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3725.2
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3727.5
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6730.5
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42840064%3A1444.11;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:43705/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:43705/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:43705/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3166451) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:43705/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:43705/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=42840064%3A1444.11;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 2,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 710.2,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 757.3,
+                "coldStartup": {
+                  "durationMs": 757.3,
+                  "cpuMs": 680,
+                  "cpuPercentOfOneCore": 89.8,
+                  "cpuPercentOfVisibleLogicalCpus": 11.2,
+                  "meanRssMiB": 487.3,
+                  "peakRssMiB": 750,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.2,
+                  "cpuMs": 135,
+                  "cpuPercentOfOneCore": 4.5,
+                  "cpuPercentOfVisibleLogicalCpus": 0.6,
+                  "meanRssMiB": 753.2,
+                  "peakRssMiB": 754.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.6,
+                  "cpuMs": 3054.5,
+                  "cpuPercentOfOneCore": 101.7,
+                  "cpuPercentOfVisibleLogicalCpus": 12.7,
+                  "meanRssMiB": 759.1,
+                  "peakRssMiB": 760.2,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6923.6,
+                  "cpuMs": 3890,
+                  "cpuPercentOfOneCore": 56.2,
+                  "cpuPercentOfVisibleLogicalCpus": 7,
+                  "meanRssMiB": 714.8,
+                  "peakRssMiB": 760.7,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 760.7,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7080.9,
+                  "medianCurrentMiB": 7237,
+                  "peakObservedCurrentMiB": 7238.8,
+                  "currentEndMiB": 7106.3,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 757.3
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 759.9
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3763.1
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3765.7
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6769.2
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41447424%3A-1442.04;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:39889/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:39889/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:39889/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3166663) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:39889/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:39889/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41447424%3A-1442.04;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 2,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 952.2,
+            "filterBrokerRssMiB": 76.8,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 756.7,
+                "coldStartup": {
+                  "durationMs": 756.7,
+                  "cpuMs": 785.9,
+                  "cpuPercentOfOneCore": 103.9,
+                  "cpuPercentOfVisibleLogicalCpus": 13,
+                  "meanRssMiB": 623.2,
+                  "peakRssMiB": 1018.8,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3005,
+                  "cpuMs": 175.2,
+                  "cpuPercentOfOneCore": 5.8,
+                  "cpuPercentOfVisibleLogicalCpus": 0.7,
+                  "meanRssMiB": 1020.7,
+                  "peakRssMiB": 1022.3,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.4,
+                  "cpuMs": 3072.7,
+                  "cpuPercentOfOneCore": 102.3,
+                  "cpuPercentOfVisibleLogicalCpus": 12.8,
+                  "meanRssMiB": 1032.2,
+                  "peakRssMiB": 1033,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6845,
+                  "cpuMs": 4060,
+                  "cpuPercentOfOneCore": 59.3,
+                  "cpuPercentOfVisibleLogicalCpus": 7.4,
+                  "meanRssMiB": 959,
+                  "peakRssMiB": 1033,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 1033,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7111.4,
+                  "medianCurrentMiB": 7277.8,
+                  "peakObservedCurrentMiB": 7280.1,
+                  "currentEndMiB": 7135.7,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 756.7
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 759.8
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3764.8
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3767.9
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6772.3
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=39968768%3A-2315.30;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:39489/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:39489/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:39489/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:39489/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:39489/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3166884:3166884:1111/133356.157197:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:39489/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:39489/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=39968768%3A-2315.30;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 3,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 954.3,
+            "filterBrokerRssMiB": 76.3,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 705.8,
+                "coldStartup": {
+                  "durationMs": 705.8,
+                  "cpuMs": 811.6,
+                  "cpuPercentOfOneCore": 115,
+                  "cpuPercentOfVisibleLogicalCpus": 14.4,
+                  "meanRssMiB": 684.6,
+                  "peakRssMiB": 1020.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.6,
+                  "cpuMs": 193,
+                  "cpuPercentOfOneCore": 6.4,
+                  "cpuPercentOfVisibleLogicalCpus": 0.8,
+                  "meanRssMiB": 1022.6,
+                  "peakRssMiB": 1024.4,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.2,
+                  "cpuMs": 3052.1,
+                  "cpuPercentOfOneCore": 101.6,
+                  "cpuPercentOfVisibleLogicalCpus": 12.7,
+                  "meanRssMiB": 1034.2,
+                  "peakRssMiB": 1034.7,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6803.2,
+                  "cpuMs": 4060,
+                  "cpuPercentOfOneCore": 59.7,
+                  "cpuPercentOfVisibleLogicalCpus": 7.5,
+                  "meanRssMiB": 973.7,
+                  "peakRssMiB": 1034.7,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1034.7,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7110.6,
+                  "medianCurrentMiB": 7276.8,
+                  "peakObservedCurrentMiB": 7279.9,
+                  "currentEndMiB": 7110.9,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 705.8
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 709.2
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3713.8
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3716.4
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6720.6
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=40640512%3A-4069.67;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:44795/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:44795/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:44795/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:44795/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:44795/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3167150:3167150:1111/133403.336388:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:44795/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:44795/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=40640512%3A-4069.67;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 3,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 714.8,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 730.4,
+                "coldStartup": {
+                  "durationMs": 730.4,
+                  "cpuMs": 695.9,
+                  "cpuPercentOfOneCore": 95.3,
+                  "cpuPercentOfVisibleLogicalCpus": 11.9,
+                  "meanRssMiB": 517.1,
+                  "peakRssMiB": 754.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.3,
+                  "cpuMs": 140.2,
+                  "cpuPercentOfOneCore": 4.7,
+                  "cpuPercentOfVisibleLogicalCpus": 0.6,
+                  "meanRssMiB": 757.1,
+                  "peakRssMiB": 758.6,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.4,
+                  "cpuMs": 3041.9,
+                  "cpuPercentOfOneCore": 101.3,
+                  "cpuPercentOfVisibleLogicalCpus": 12.7,
+                  "meanRssMiB": 763.5,
+                  "peakRssMiB": 764.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6889.8,
+                  "cpuMs": 3910,
+                  "cpuPercentOfOneCore": 56.8,
+                  "cpuPercentOfVisibleLogicalCpus": 7.1,
+                  "meanRssMiB": 721.6,
+                  "peakRssMiB": 765.2,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 765.2,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7069.9,
+                  "medianCurrentMiB": 7223.1,
+                  "peakObservedCurrentMiB": 7230.8,
+                  "currentEndMiB": 7097.8,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 730.4
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 732.9
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3736.3
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3738.5
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6741.9
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41361408%3A1024.78;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:39337/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:39337/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:39337/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3167409) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:39337/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:39337/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41361408%3A1024.78;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "electron",
+          "trial": 4,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "electronVersion": "46.0.0-alpha.8",
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "passed": true,
+            "runtime": {
+              "electron": "46.0.0-alpha.8",
+              "chromium": "159.0.8140.0",
+              "node": "26.13.0"
+            },
+            "peakTreeRssMiB": 712.8,
+            "peakTreeProcessCount": 9,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 726.1,
+                "coldStartup": {
+                  "durationMs": 726.1,
+                  "cpuMs": 671.5,
+                  "cpuPercentOfOneCore": 92.5,
+                  "cpuPercentOfVisibleLogicalCpus": 11.6,
+                  "meanRssMiB": 520.2,
+                  "peakRssMiB": 753,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3003.3,
+                  "cpuMs": 153.4,
+                  "cpuPercentOfOneCore": 5.1,
+                  "cpuPercentOfVisibleLogicalCpus": 0.6,
+                  "meanRssMiB": 756.1,
+                  "peakRssMiB": 757.6,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3003.4,
+                  "cpuMs": 3036,
+                  "cpuPercentOfOneCore": 101.1,
+                  "cpuPercentOfVisibleLogicalCpus": 12.6,
+                  "meanRssMiB": 761.6,
+                  "peakRssMiB": 762.7,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6889,
+                  "cpuMs": 3890,
+                  "cpuPercentOfOneCore": 56.5,
+                  "cpuPercentOfVisibleLogicalCpus": 7.1,
+                  "meanRssMiB": 720.7,
+                  "peakRssMiB": 763.1,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 11,
+                  "sampleCount": 56
+                },
+                "peakProcessTreeRssMiB": 763.1,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7075.7,
+                  "medianCurrentMiB": 7229.4,
+                  "peakObservedCurrentMiB": 7230.9,
+                  "currentEndMiB": 7099.4,
+                  "sampleCount": 56
+                },
+                "maxProcessCount": 11,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 726.1
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 728.8
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3732.1
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3734.3
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6737.7
+                  }
+                ]
+              }
+            },
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=43032576%3A38.62;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "bramblePassed": true,
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:38095/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe",
+            "engineFile": "/dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/ghostery-engine.bin",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:38095/tracker.js",
+                "resourceType": "script",
+                "cancel": true
+              },
+              {
+                "url": "http://allowed.test:38095/allowed.js",
+                "resourceType": "script",
+                "cancel": false
+              }
+            ],
+            "output": "ELECTRON_POC_RUNTIME={\"electron\":\"46.0.0-alpha.8\",\"chromium\":\"159.0.8140.0\",\"node\":\"26.13.0\"}\n(electron) 'session.loadExtension' is deprecated and will be removed. Please use 'session.extensions.loadExtension' instead.\n(node:3167620) ExtensionLoadWarning: Warnings loading extension at /dev/shm/surffish-deployment-comparison-VnelTm/electron-package/opt/surffish-poc/assets/bramble-probe:\n  Permission 'privacy' is unknown.\n\n(Use `electron --trace-warnings ...` to show where the warning was created)\nELECTRON_POC_EXTENSION={\"id\":\"pembdlclndoelninalgmojnipadkamhi\",\"name\":\"Bramble\"}\nELECTRON_POC_DECISION={\"url\":\"http://doubleclick.net:38095/tracker.js\",\"resourceType\":\"script\",\"cancel\":true}\nELECTRON_POC_DECISION={\"url\":\"http://allowed.test:38095/allowed.js\",\"resourceType\":\"script\",\"cancel\":false}\nELECTRON_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=43032576%3A38.62;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        },
+        {
+          "browser": "cef",
+          "trial": 4,
+          "result": {
+            "process": {
+              "code": 0,
+              "signal": null
+            },
+            "filterMode": "production-live-lists",
+            "blockHost": "doubleclick.net",
+            "serializedEngineBytes": 16398869,
+            "peakTreeRssMiB": 953.6,
+            "filterBrokerRssMiB": 77,
+            "peakTreeProcessCount": 11,
+            "benchmark": {
+              "idleMs": 3000,
+              "activeMs": 3000,
+              "metrics": {
+                "samplingIntervalMs": 125,
+                "pssSamplingIntervalMs": null,
+                "visibleLogicalCpus": 8,
+                "clockTicksPerSecond": 100,
+                "coldStartupMs": 670.8,
+                "coldStartup": {
+                  "durationMs": 670.8,
+                  "cpuMs": 674,
+                  "cpuPercentOfOneCore": 100.5,
+                  "cpuPercentOfVisibleLogicalCpus": 12.6,
+                  "meanRssMiB": 691.2,
+                  "peakRssMiB": 1020.5,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 6
+                },
+                "idle": {
+                  "durationMs": 3004.4,
+                  "cpuMs": 174.4,
+                  "cpuPercentOfOneCore": 5.8,
+                  "cpuPercentOfVisibleLogicalCpus": 0.7,
+                  "meanRssMiB": 1022.6,
+                  "peakRssMiB": 1024,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "active": {
+                  "durationMs": 3004.1,
+                  "cpuMs": 3079.8,
+                  "cpuPercentOfOneCore": 102.5,
+                  "cpuPercentOfVisibleLogicalCpus": 12.8,
+                  "meanRssMiB": 1034.1,
+                  "peakRssMiB": 1034.8,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 24
+                },
+                "overall": {
+                  "durationMs": 6759,
+                  "cpuMs": 3940,
+                  "cpuPercentOfOneCore": 58.3,
+                  "cpuPercentOfVisibleLogicalCpus": 7.3,
+                  "meanRssMiB": 974.3,
+                  "peakRssMiB": 1034.8,
+                  "meanPssMiB": null,
+                  "peakPssMiB": null,
+                  "pssSampleCount": 0,
+                  "maxPssProcessCount": 0,
+                  "maxProcessCount": 13,
+                  "sampleCount": 55
+                },
+                "peakProcessTreeRssMiB": 1034.8,
+                "peakProcessTreePssMiB": null,
+                "sharedCgroupMemory": {
+                  "path": "/manus.slice/manus-cloud-control.service",
+                  "note": "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+                  "memoryMaxMiB": null,
+                  "currentStartMiB": 7102.4,
+                  "medianCurrentMiB": 7266.4,
+                  "peakObservedCurrentMiB": 7274.5,
+                  "currentEndMiB": 7124.9,
+                  "sampleCount": 55
+                },
+                "maxProcessCount": 13,
+                "phases": [
+                  {
+                    "phase": "ready",
+                    "elapsedMs": 670.8
+                  },
+                  {
+                    "phase": "idle-start",
+                    "elapsedMs": 673.7
+                  },
+                  {
+                    "phase": "idle-end",
+                    "elapsedMs": 3678
+                  },
+                  {
+                    "phase": "active-start",
+                    "elapsedMs": 3681.2
+                  },
+                  {
+                    "phase": "active-end",
+                    "elapsedMs": 6685.3
+                  }
+                ]
+              }
+            },
+            "pagePassed": true,
+            "bramblePassed": true,
+            "title": "CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41144320%3A-3800.64;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D",
+            "brambleProbe": {
+              "runtimeId": true,
+              "runtimeMessage": true,
+              "runtimeMessageSucceeded": true,
+              "originProbe": {
+                "pending": false,
+                "ok": true,
+                "status": 200,
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              },
+              "storageGet": true,
+              "background": {
+                "alarms": true,
+                "connectNative": false,
+                "identity": false,
+                "idle": true,
+                "offscreen": true,
+                "phase": "background-imported",
+                "runtimeMessage": true,
+                "storage": true,
+                "windows": true
+              }
+            },
+            "originProbeUrl": "http://site.test:42917/origin",
+            "originRequests": [
+              {
+                "origin": null,
+                "secFetchSite": null,
+                "secFetchMode": null
+              }
+            ],
+            "extensionWorkerFetchReachedEcho": true,
+            "extensionWorkerRequestSeenByCefHandler": false,
+            "unattributedRequests": [
+              {
+                "resourceType": "main_frame",
+                "url": "http://site.test:42917/",
+                "frameUrl": ""
+              }
+            ],
+            "extensionPath": "/dev/shm/surffish-deployment-comparison-VnelTm/cef-package/opt/surffish-poc/assets/bramble-probe",
+            "decisions": [
+              {
+                "url": "http://doubleclick.net:42917/tracker.js",
+                "resourceType": "script",
+                "action": "block"
+              },
+              {
+                "url": "http://allowed.test:42917/allowed.js",
+                "resourceType": "script",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/favicon.ico",
+                "resourceType": "other",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/__bench-phase?name=ready",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/__bench-phase?name=idle-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/__bench-phase?name=idle-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/__bench-phase?name=active-start",
+                "resourceType": "xhr",
+                "action": "allow"
+              },
+              {
+                "url": "http://site.test:42917/__bench-phase?name=active-end",
+                "resourceType": "xhr",
+                "action": "allow"
+              }
+            ],
+            "output": "[3167837:3167837:1111/133424.378004:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.UPower was not provided by any .service files\nPOC_CEF_UNATTRIBUTED\tmain_frame\thttp://site.test:42917/\t\nPOC_CEF_BLOCK\tscript\thttp://doubleclick.net:42917/tracker.js\nCEF_POC_TITLE=CEF_POC_RESULT:tracker=blocked;allowed=loaded;trackerExecuted=false;allowedExecuted=true;bench=41144320%3A-3800.64;bramble=%7B%22runtimeId%22%3Atrue%2C%22runtimeMessage%22%3Atrue%2C%22runtimeMessageSucceeded%22%3Atrue%2C%22originProbe%22%3A%7B%22pending%22%3Afalse%2C%22ok%22%3Atrue%2C%22status%22%3A200%2C%22origin%22%3Anull%2C%22secFetchSite%22%3Anull%2C%22secFetchMode%22%3Anull%7D%2C%22storageGet%22%3Atrue%2C%22background%22%3A%7B%22alarms%22%3Atrue%2C%22connectNative%22%3Afalse%2C%22identity%22%3Afalse%2C%22idle%22%3Atrue%2C%22offscreen%22%3Atrue%2C%22phase%22%3A%22background-imported%22%2C%22runtimeMessage%22%3Atrue%2C%22storage%22%3Atrue%2C%22windows%22%3Atrue%7D%7D\n"
+          }
+        }
+      ]
+    }
+  }
+}

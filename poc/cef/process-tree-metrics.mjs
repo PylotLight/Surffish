@@ -11,6 +11,37 @@ const HZ =
   ) || 100;
 const CPU_COUNT = availableParallelism();
 const MIB = 1024 * 1024;
+const CGROUP_PATH = (() => {
+  try {
+    const entry = readFileSync(`/proc/${process.pid}/cgroup`, "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("0::"));
+    return entry ? entry.slice(3) : null;
+  } catch {
+    return null;
+  }
+})();
+const CGROUP_DIR = CGROUP_PATH ? `/sys/fs/cgroup${CGROUP_PATH}` : null;
+
+function readPssKb(pid) {
+  try {
+    const text = readFileSync(`/proc/${pid}/smaps_rollup`, "utf8");
+    const match = /^Pss:\s+(\d+)\s+kB$/m.exec(text);
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readCgroupValue(name) {
+  if (!CGROUP_DIR) return null;
+  try {
+    const value = readFileSync(`${CGROUP_DIR}/${name}`, "utf8").trim();
+    return value === "max" ? null : Number(value);
+  } catch {
+    return null;
+  }
+}
 
 function processTree(rootPid) {
   const result = spawnSync("ps", ["-eo", "pid=,ppid=,rss="], {
@@ -59,21 +90,45 @@ function round(value, digits = 1) {
 
 export function createProcessTreeMetrics(
   rootPid,
-  { startedAtNs = process.hrtime.bigint(), intervalMs = 125 } = {},
+  {
+    startedAtNs = process.hrtime.bigint(),
+    intervalMs = 125,
+    pssIntervalMs = 500,
+  } = {},
 ) {
+  if (!Number.isSafeInteger(pssIntervalMs) || pssIntervalMs < 0) {
+    throw new Error("pssIntervalMs must be a nonnegative safe integer.");
+  }
+  const pssIntervalNs = pssIntervalMs
+    ? BigInt(pssIntervalMs) * 1_000_000n
+    : null;
   const samples = [];
   const events = [];
   const previousCpuTicks = new Map();
   let cumulativeCpuTicks = 0;
+  let lastPssAtNs = 0n;
   let timer;
   let stopped = false;
 
-  const sample = () => {
+  const sample = (forcePss = false) => {
     const now = process.hrtime.bigint();
     const rows = processTree(rootPid);
     const present = new Set();
+    const samplePss = Boolean(
+      pssIntervalNs &&
+      (forcePss || lastPssAtNs === 0n || now - lastPssAtNs >= pssIntervalNs),
+    );
+    let pssKb = 0;
+    let pssProcessCount = 0;
     for (const row of rows) {
       present.add(row.pid);
+      if (samplePss) {
+        const pss = readPssKb(row.pid);
+        if (pss !== null) {
+          pssKb += pss;
+          pssProcessCount += 1;
+        }
+      }
       const ticks = cpuTicks(row.pid);
       if (ticks === null) continue;
       const previous = previousCpuTicks.get(row.pid);
@@ -89,12 +144,17 @@ export function createProcessTreeMetrics(
       timeNs: now,
       elapsedMs: Number(now - startedAtNs) / 1e6,
       rssKb: rows.reduce((sum, row) => sum + row.rssKb, 0),
+      pssKb: samplePss && pssProcessCount ? pssKb : null,
+      pssProcessCount: samplePss ? pssProcessCount : 0,
+      pssSampled: samplePss,
+      cgroupCurrentBytes: readCgroupValue("memory.current"),
       cpuTicks: cumulativeCpuTicks,
       processCount: rows.length,
     });
+    if (samplePss) lastPssAtNs = now;
   };
 
-  sample();
+  sample(true);
   timer = setInterval(sample, intervalMs);
   timer.unref();
 
@@ -139,6 +199,11 @@ export function createProcessTreeMetrics(
     }
     const cpuMs = (cpu / HZ) * 1000;
     const rssValues = selected.map((entry) => entry.rssKb / 1024);
+    const pssValues = selected
+      .filter((entry) => entry.pssSampled)
+      .map((entry) => entry.pssKb)
+      .filter(Number.isFinite)
+      .map((value) => value / 1024);
     return {
       durationMs: round(durationMs),
       cpuMs: round(cpuMs),
@@ -152,6 +217,16 @@ export function createProcessTreeMetrics(
           )
         : null,
       peakRssMiB: rssValues.length ? round(Math.max(...rssValues)) : null,
+      meanPssMiB: pssValues.length
+        ? round(
+            pssValues.reduce((sum, value) => sum + value, 0) / pssValues.length,
+          )
+        : null,
+      peakPssMiB: pssValues.length ? round(Math.max(...pssValues)) : null,
+      pssSampleCount: pssValues.length,
+      maxPssProcessCount: selected.length
+        ? Math.max(...selected.map((entry) => entry.pssProcessCount))
+        : null,
       maxProcessCount: selected.length
         ? Math.max(...selected.map((entry) => entry.processCount))
         : null,
@@ -163,11 +238,19 @@ export function createProcessTreeMetrics(
     if (!stopped) {
       stopped = true;
       clearInterval(timer);
-      sample();
+      sample(true);
     }
     const byName = (name) =>
       events.find((event) => event.phase === name)?.timeNs;
     const latestNs = samples.at(-1)?.timeNs ?? process.hrtime.bigint();
+    const cgroupValues = samples
+      .map((entry) => entry.cgroupCurrentBytes)
+      .filter(Number.isFinite);
+    const cgroupMiB = cgroupValues.map((value) => value / MIB);
+    const cgroupMiddle = cgroupMiB.toSorted((a, b) => a - b);
+    const cgroupMedian = cgroupMiddle.length
+      ? cgroupMiddle[Math.floor(cgroupMiddle.length / 2)]
+      : null;
     const readyNs = byName("ready");
     const idleStartNs = byName("idle-start");
     const idleEndNs = byName("idle-end");
@@ -175,6 +258,7 @@ export function createProcessTreeMetrics(
     const activeEndNs = byName("active-end");
     return {
       samplingIntervalMs: intervalMs,
+      pssSamplingIntervalMs: pssIntervalNs ? pssIntervalMs : null,
       visibleLogicalCpus: CPU_COUNT,
       clockTicksPerSecond: HZ,
       coldStartupMs: readyNs
@@ -187,6 +271,31 @@ export function createProcessTreeMetrics(
       peakProcessTreeRssMiB: samples.length
         ? round(Math.max(...samples.map((entry) => entry.rssKb / 1024)))
         : null,
+      peakProcessTreePssMiB: samples.some((entry) => entry.pssKb !== null)
+        ? round(
+            Math.max(
+              ...samples
+                .map((entry) => entry.pssKb)
+                .filter(Number.isFinite)
+                .map((value) => value / 1024),
+            ),
+          )
+        : null,
+      sharedCgroupMemory: {
+        path: CGROUP_PATH,
+        note: "memory.current is for the shared sandbox service cgroup, not attributable to this benchmark process tree",
+        memoryMaxMiB:
+          readCgroupValue("memory.max") === null
+            ? null
+            : round(readCgroupValue("memory.max") / MIB),
+        currentStartMiB: cgroupMiB.length ? round(cgroupMiB[0]) : null,
+        medianCurrentMiB: cgroupMedian === null ? null : round(cgroupMedian),
+        peakObservedCurrentMiB: cgroupMiB.length
+          ? round(Math.max(...cgroupMiB))
+          : null,
+        currentEndMiB: cgroupMiB.length ? round(cgroupMiB.at(-1)) : null,
+        sampleCount: cgroupMiB.length,
+      },
       maxProcessCount: samples.length
         ? Math.max(...samples.map((entry) => entry.processCount))
         : null,

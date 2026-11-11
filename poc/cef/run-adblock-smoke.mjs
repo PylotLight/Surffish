@@ -238,6 +238,7 @@ const args = [
   "--disable-gpu",
   "--disable-dev-shm-usage",
   "--use-views",
+  "--lang=en-US",
   `--url=http://site.test:${port}/`,
   `--host-resolver-rules=MAP site.test 127.0.0.1,MAP ${blockHost} 127.0.0.1,MAP allowed.test 127.0.0.1`,
 ];
@@ -261,6 +262,7 @@ if (benchmarkEnabled) {
   processMetrics = createProcessTreeMetrics(process.pid, {
     startedAtNs,
     intervalMs: 125,
+    pssIntervalMs: Number(process.env.SURFFISH_POC_PSS_INTERVAL_MS ?? 500),
   });
 }
 let output = "";

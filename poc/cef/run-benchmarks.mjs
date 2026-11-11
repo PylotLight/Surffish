@@ -57,14 +57,45 @@ const cefEngine = realpathSync(process.env.CEF_POC_ENGINE_FILE);
 const electronEngine = realpathSync(process.env.ELECTRON_POC_ENGINE_FILE);
 const cefExtension = realpathSync(process.env.CEF_POC_EXTENSION_PATH);
 const electronExtension = realpathSync(process.env.ELECTRON_POC_EXTENSION_PATH);
-if (cefEngine !== electronEngine || cefExtension !== electronExtension) {
-  throw new Error(
-    "CEF and Electron must use the identical engine file and staged extension directory.",
-  );
-}
-
 const engineBytes = readFileSync(cefEngine);
 const engineSha256 = createHash("sha256").update(engineBytes).digest("hex");
+const electronEngineBytes = readFileSync(electronEngine);
+const electronEngineSha256 = createHash("sha256")
+  .update(electronEngineBytes)
+  .digest("hex");
+function directorySha256(directory) {
+  const listing = Bun.spawnSync(
+    ["find", directory, "-type", "f", "-printf", "%P\\0"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  if (listing.exitCode !== 0) {
+    throw new Error(`Could not list extension files under ${directory}.`);
+  }
+  const paths = listing.stdout
+    .toString("utf8")
+    .split("\0")
+    .filter(Boolean)
+    .sort();
+  const hash = createHash("sha256");
+  for (const relativePath of paths) {
+    const bytes = readFileSync(resolve(directory, relativePath));
+    hash.update(relativePath);
+    hash.update("\0");
+    hash.update(bytes);
+    hash.update("\0");
+  }
+  return { sha256: hash.digest("hex"), files: paths.length };
+}
+const cefExtensionDigest = directorySha256(cefExtension);
+const electronExtensionDigest = directorySha256(electronExtension);
+if (
+  engineSha256 !== electronEngineSha256 ||
+  cefExtensionDigest.sha256 !== electronExtensionDigest.sha256
+) {
+  throw new Error(
+    "CEF and Electron must use byte-identical filter engines and extension trees.",
+  );
+}
 const blockHost = process.env.CEF_POC_BLOCK_HOST ?? "doubleclick.net";
 if (blockHost !== (process.env.ELECTRON_POC_BLOCK_HOST ?? "doubleclick.net")) {
   throw new Error("CEF and Electron must use the same filter fixture host.");
@@ -99,8 +130,8 @@ function runOne(browser, trial) {
     env.CEF_POC_ENGINE_FILE = cefEngine;
     env.CEF_POC_EXTENSION_PATH = cefExtension;
   } else {
-    env.ELECTRON_POC_ENGINE_FILE = cefEngine;
-    env.ELECTRON_POC_EXTENSION_PATH = cefExtension;
+    env.ELECTRON_POC_ENGINE_FILE = electronEngine;
+    env.ELECTRON_POC_EXTENSION_PATH = electronExtension;
     env.ELECTRON_POC_TMPDIR = process.env.ELECTRON_POC_TMPDIR ?? "/dev/shm";
   }
 
@@ -207,6 +238,8 @@ const byBrowser = Object.fromEntries(
           (metric) => metric.idle?.cpuPercentOfOneCore,
         ),
         idleMeanRssMiB: summarize(metrics, (metric) => metric.idle?.meanRssMiB),
+        idleMeanPssMiB: summarize(metrics, (metric) => metric.idle?.meanPssMiB),
+        idlePeakPssMiB: summarize(metrics, (metric) => metric.idle?.peakPssMiB),
         idlePeakRssMiB: summarize(metrics, (metric) => metric.idle?.peakRssMiB),
         activeCpuMs: summarize(metrics, (metric) => metric.active?.cpuMs),
         activeCpuPercentOfOneCore: summarize(
@@ -217,6 +250,14 @@ const byBrowser = Object.fromEntries(
           metrics,
           (metric) => metric.active?.meanRssMiB,
         ),
+        activeMeanPssMiB: summarize(
+          metrics,
+          (metric) => metric.active?.meanPssMiB,
+        ),
+        activePeakPssMiB: summarize(
+          metrics,
+          (metric) => metric.active?.peakPssMiB,
+        ),
         activePeakRssMiB: summarize(
           metrics,
           (metric) => metric.active?.peakRssMiB,
@@ -224,6 +265,14 @@ const byBrowser = Object.fromEntries(
         peakProcessTreeRssMiB: summarize(
           metrics,
           (metric) => metric.peakProcessTreeRssMiB,
+        ),
+        peakProcessTreePssMiB: summarize(
+          metrics,
+          (metric) => metric.peakProcessTreePssMiB,
+        ),
+        sharedCgroupPeakObservedMiB: summarize(
+          metrics,
+          (metric) => metric.sharedCgroupMemory?.peakObservedCurrentMiB,
         ),
       },
     ];
@@ -286,9 +335,13 @@ const report = {
       sha256: engineSha256,
       filterHost: blockHost,
     },
-    extensionDirectory: cefExtension,
-    measurement:
-      "fresh browser process/profile per run; process-tree RSS and /proc CPU ticks sampled at 125 ms; runtime directories measured for allocated and apparent bytes on /dev/shm tmpfs; 8 visible logical CPUs; host OS filesystem cache not flushed",
+    extensions: {
+      cefDirectory: cefExtension,
+      electronDirectory: electronExtension,
+      sha256: cefExtensionDigest.sha256,
+      files: cefExtensionDigest.files,
+    },
+    measurement: `fresh browser process/profile per run; process-tree RSS and /proc CPU ticks sampled at 125 ms; PSS from /proc/<pid>/smaps_rollup sampled every ${process.env.SURFFISH_POC_PSS_INTERVAL_MS ?? 500} ms (0 disables PSS); shared sandbox service cgroup memory.current also sampled but is not attributable to this process tree; runtime directories measured for allocated and apparent bytes on /dev/shm tmpfs; 8 visible logical CPUs; host OS filesystem cache not flushed`,
   },
   summary: byBrowser,
   runs: results,

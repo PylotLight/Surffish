@@ -33,18 +33,35 @@ The official CEF 156 Linux x64 minimal archive is 333,362,327 bytes (SHA-1 `1cca
 
 Four fresh-process trials per host ran in alternating order against the same local page, Bramble 1.35.0 test copy, and identical 16,398,869-byte ten-list Ghostery engine (SHA-256 `f35d43babd95316a765c32712bf8409ca9d2c8c9fabdd62e2a45aac768205d9d`). The page first waited idle for three seconds, then ran a three-second JavaScript busy loop. Values below are median with min–max across the four runs:
 
-| Metric | CEF 156.0.27 | Electron 46.0.0-alpha.8 |
-| --- | ---: | ---: |
-| Cold process launch to validated page | 712 ms (690–729) | 758 ms (712–766) |
-| Idle CPU over 3 s | 186 ms; 6.2% of one core (175–196; 5.8–6.5%) | 131 ms; 4.4% of one core (126–144; 4.2–4.8%) |
-| Idle mean RSS | 1,021 MiB (1,020–1,022) | 756 MiB (754–756) |
-| Active CPU over 3 s | 3,046 ms; 101.4% of one core (3,036–3,058; 101.0–101.8%) | 3,049 ms; 101.6% of one core (3,022–3,067; 100.6–102.1%) |
-| Active mean RSS | 1,032 MiB (1,031–1,033) | 762 MiB (760–762) |
-| Peak summed process-tree RSS | 1,033 MiB (1,031–1,034) | 763 MiB (762–764) |
+| Metric                                |                                             CEF 156.0.27 |                                  Electron 46.0.0-alpha.8 |
+| ------------------------------------- | -------------------------------------------------------: | -------------------------------------------------------: |
+| Cold process launch to validated page |                                         712 ms (690–729) |                                         758 ms (712–766) |
+| Idle CPU over 3 s                     |             186 ms; 6.2% of one core (175–196; 5.8–6.5%) |             131 ms; 4.4% of one core (126–144; 4.2–4.8%) |
+| Idle mean RSS                         |                                  1,021 MiB (1,020–1,022) |                                        756 MiB (754–756) |
+| Active CPU over 3 s                   | 3,046 ms; 101.4% of one core (3,036–3,058; 101.0–101.8%) | 3,049 ms; 101.6% of one core (3,022–3,067; 100.6–102.1%) |
+| Active mean RSS                       |                                  1,032 MiB (1,031–1,033) |                                        762 MiB (760–762) |
+| Peak summed process-tree RSS          |                                  1,033 MiB (1,031–1,034) |                                        763 MiB (762–764) |
 
-This is a controlled Linux smoke evaluation, not an app benchmark: the host was an 8-logical-CPU Intel Xeon VM at 2.50 GHz with 23.64 GiB RAM, running Linux 6.18.38; both apps used Xvfb and `--no-sandbox`, and the OS file cache was not flushed. CPU ticks and summed RSS were sampled every 125 ms across each test process tree (including the POC runner; CEF’s Ghostery broker is in that runner). RSS can count shared mappings more than once. The active workload is deliberately synthetic; its near-100% one-core result mainly confirms that both engines ran the same busy loop. The small startup difference is not persuasive because the ranges overlap. CEF used more idle CPU and roughly 265 MiB more idle RSS in this fixture; the combined process-tree footprint was roughly 270 MiB higher at peak.
+This is a controlled Linux smoke evaluation, not an app benchmark: the host was an 8-logical-CPU Intel Xeon VM at 2.50 GHz with 23.64 GiB RAM, running Linux 6.18.38; both apps used Xvfb and `--no-sandbox`, and the OS file cache was not flushed. CPU ticks and summed RSS were sampled every 125 ms across each test process tree (including the POC runner; CEF’s Ghostery broker is in that runner). RSS can count shared mappings more than once. The active workload is deliberately synthetic; its near-100% one-core result mainly confirms that both engines ran the same busy loop. The small startup difference is not persuasive because the ranges overlap. CEF used more idle CPU and roughly 265 MiB more idle RSS in this fixture, but RSS overstates the physical-memory gap; the normalized PSS follow-up below puts the difference near 99–104 MiB.
 
 Both hosts passed the actual page-filter assertions and Bramble’s tested module-worker import, runtime messaging, and storage read. CEF still allowed Bramble’s cross-origin worker fetch to reach the local echo endpoint with `Origin: null`, but that fetch did not appear in the CEF request-handler log. The API probe also reported `identity` and `runtime.connectNative` unavailable; popup, autofill, passkeys, OAuth, native messaging, and full Bramble UI were not tested. A fresh filter-list rebuild was attempted twice, but the selected URLhaus host closed the connection; to preserve a true ten-list A/B workload, both runs reused the same earlier all-ten-list engine instead of using the new partial nine-list build. The result JSON records the engine hash and raw trials.
+
+### Normalized runtime package and memory check
+
+To separate deployment payload from debug-symbol and locale baggage, the same CEF and Electron runtime builds were staged with ELF `.debug_*` sections removed and only `en-US.pak` retained. Each amd64 Debian test package included the identical 16,398,869-byte ten-list Ghostery engine (SHA-256 `f35d43babd95316a765c32712bf8409ca9d2c8c9fabdd62e2a45aac768205d9d`) and the same 83-file Bramble probe. Both used `dpkg-deb` with xz level 6. These are runtime-only test packages, not complete Surffish installers; they were smoke-tested from their staging trees but not installed.
+
+| Measure                                                   |                           CEF 156.0.27 |       Electron 46.0.0-alpha.8 |
+| --------------------------------------------------------- | -------------------------------------: | ----------------------------: |
+| Staged runtime payload                                    |          519,462,896 bytes (495.4 MiB) | 288,028,101 bytes (274.7 MiB) |
+| Compressed `.deb` with identical engine and Bramble probe |         132,691,716 bytes (126.54 MiB) | 101,239,444 bytes (96.55 MiB) |
+| Idle mean process-tree PSS                                |                464.6 MiB (462.6–465.1) |       365.8 MiB (365.3–366.8) |
+| Active mean process-tree PSS                              |                471.1 MiB (469.6–472.0) |       367.5 MiB (366.4–368.4) |
+| Idle CPU, separate PSS-disabled pass                      | 180.3 ms / 6.0% of one core (5.8–6.4%) |    137.6 ms / 4.6% (4.2–5.1%) |
+| Active CPU, same synthetic 3-second busy loop             |          3,062 ms / 101.9% of one core |             3,045 ms / 101.4% |
+
+The raw unstripped runtime-tree gap was 5.34×; after removing 968.2 MiB of CEF debug sections (versus 0.8 MiB for Electron) and trimming locales, it was 1.80×. The compressed test-package gap was 1.31×. CEF still used about 99 MiB more idle process-tree PSS and 104 MiB more active PSS; summed RSS exaggerates that difference because it double-counts shared mappings. PSS was sampled from `smaps_rollup` every 500 ms; any PSS peak in the raw results is therefore a sampled maximum, not a guaranteed instantaneous peak. CPU was measured in a separate pass with PSS disabled because frequent PSS reads can perturb the harness CPU result. Four fresh-process runs per host were used for each profile, and all 16 smoke runs passed the page-filter and Bramble-probe assertions.
+
+The cgroup v2 `memory.current` data is retained in the result JSON, but the sandbox exposed only a shared service cgroup, not a private benchmark cgroup; those readings cannot be attributed to the browser process trees and are diagnostic only. Both profiles ran on Linux x64 under Xvfb with `--no-sandbox`, and the active workload is synthetic. Full application dependencies, installers, secure sandbox setup, and macOS/Windows deployment remain untested. See [`deployment-comparison.json`](./deployment-comparison.json) for the raw trials and packaging details.
 
 Only Linux x64 was built and tested. No macOS ARM or Windows CEF build, secure Chromium sandbox, installer/package integration or release-signing path was tested. The sandbox smoke run used `xvfb-run` and `--no-sandbox`; the build emitted the separate `chrome-sandbox` SUID setup instruction. CEF requires platform-specific builds/resources and a lower-level native host, so the Linux result does not establish an acceptable Mac or Windows burden. Electron measured Chromium 159.0.8140.0; the checked CEF index had no Linux x64 build on Chromium 159.
 
@@ -95,6 +112,19 @@ ELECTRON_POC_BLOCK_HOST=doubleclick.net \
 ```
 
 The default output is `poc/cef/benchmark-results.json`; set `SURFFISH_POC_BENCH_OUTPUT` to choose another path. The runner alternates which host goes first and refuses mismatched engine or extension inputs.
+
+For the normalized runtime-only package and memory comparison, prepare the same CEF and Electron runtime trees, the Bramble probe, and the exact ten-list engine recorded above, then run [`run-deployment-comparison.mjs`](./run-deployment-comparison.mjs):
+
+```sh
+CEF_POC_RUNTIME_DIR=/path/to/cef/Release \
+CEF_POC_BINARY=/path/to/cef/Release/minimal \
+ELECTRON_POC_BINARY=/path/to/electron/dist/electron \
+CEF_POC_ENGINE_FILE=/path/to/all-ten-list-engine.bin \
+CEF_POC_EXTENSION_PATH=/path/to/bramble-probe \
+  bun poc/cef/run-deployment-comparison.mjs
+```
+
+The script verifies the engine size and SHA-256 against `benchmark-results.json`, packages both runtimes with the same settings, runs separate sparse-PSS and PSS-disabled CPU profiles, and writes [`deployment-comparison.json`](./deployment-comparison.json). Temporary package files are removed by default; set `SURFFISH_POC_DEPLOY_KEEP=1` only to keep scratch artifacts for debugging.
 
 ## Test status
 
