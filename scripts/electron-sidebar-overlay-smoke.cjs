@@ -545,6 +545,10 @@ async function run() {
     ),
     "the app brand mark is prominent in the top toolbar",
   );
+  // The rail skips alignment during a shape morph and realigns on the next frame; sample only
+  // after that geometry has stopped moving, without relaxing the 1px assertion below.
+  let stableRailOffset = null;
+  let stableRailOffsetSince = 0;
   const sidebarActions = await waitFor(async () => {
     const state = await evaluate(
       rendererViews.content,
@@ -574,6 +578,7 @@ async function run() {
         const panelFirstTab = collapsed ? iconRect(card.querySelector('.sidebar-panel'), '[data-motion-key^="tab:"] .tab-favicon') : null
         return {
           collapsed,
+          reshaping: card?.getAttribute('data-reshaping') ?? null,
           controls,
           labels,
           newTab: shape.querySelector('[aria-label="New tab"]')?.getAttribute('aria-label') ?? null,
@@ -587,8 +592,29 @@ async function run() {
         }
       })()`,
     );
-    return state?.controls.length ? state : null;
-  }, "the active sidebar shape and its actions");
+    if (!state?.controls.length) {
+      stableRailOffset = null;
+      stableRailOffsetSince = 0;
+      return null;
+    }
+    if (!state.collapsed) {
+      stableRailOffset = null;
+      stableRailOffsetSince = 0;
+      return state;
+    }
+    if (state.reshaping !== null || !state.newTabOffset) {
+      stableRailOffset = null;
+      stableRailOffsetSince = 0;
+      return null;
+    }
+    const offset = `${state.newTabOffset.dx.toFixed(2)}:${state.newTabOffset.dy.toFixed(2)}`;
+    if (offset !== stableRailOffset) {
+      stableRailOffset = offset;
+      stableRailOffsetSince = Date.now();
+      return null;
+    }
+    return Date.now() - stableRailOffsetSince >= 100 ? state : null;
+  }, "the active sidebar shape, actions, and settled rail alignment");
   const sidebarControlLabels = sidebarActions.controls.map(
     ({ label }) => label,
   );
