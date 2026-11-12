@@ -35,18 +35,28 @@ describe("sidebar backdrop mode", () => {
     expect(normalizeSidebarBackdropSettings(null)).toEqual({
       blur: true,
       frameTransparency: 80,
+      sidebarPushesPage: true,
     });
     expect(normalizeSidebarBackdropSettings({ blur: "no" })).toEqual({
       blur: true,
       frameTransparency: 80,
+      sidebarPushesPage: true,
     });
     expect(normalizeSidebarBackdropSettings({ blur: false })).toEqual({
       blur: false,
       frameTransparency: 80,
+      sidebarPushesPage: true,
     });
     expect(
       normalizeSidebarBackdropSettings({ blur: true, frameTransparency: 140 }),
-    ).toEqual({ blur: true, frameTransparency: 100 });
+    ).toEqual({ blur: true, frameTransparency: 100, sidebarPushesPage: true });
+    expect(
+      normalizeSidebarBackdropSettings({ sidebarPushesPage: false }),
+    ).toEqual({ blur: true, frameTransparency: 80, sidebarPushesPage: false });
+    expect(
+      normalizeSidebarBackdropSettings({ sidebarPushesPage: "no" })
+        .sidebarPushesPage,
+    ).toBe(true);
   });
 
   test("macOS uses the native compositor blur, everything else the solid tint", () => {

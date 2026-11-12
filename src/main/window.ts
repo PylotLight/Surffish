@@ -21,6 +21,7 @@ import {
   attachBrowserView,
   handleBrowserShortcutInput,
   setBrowserWindowFactory,
+  slideBrowserPage,
   syncBrowserBoundsToWindow,
   type BrowserWindowInit,
 } from "./browser";
@@ -34,6 +35,7 @@ import {
 import {
   attachBrowserShell,
   setBrowserFramePrivate,
+  setPageSlideListener,
   detachBrowserShell,
   isFocusAddressShortcut,
   sendFocusAddressToVisibleRenderer,
@@ -365,6 +367,8 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   };
   win.on("enter-full-screen", broadcastFullscreen);
   win.on("leave-full-screen", broadcastFullscreen);
+  // The hover panel pushing the page aside moves the page card frame by frame (browser.ts).
+  setPageSlideListener(slideBrowserPage);
   attachBrowserShell(
     win,
     { content: contentView, toolbar: toolbarView, sidebar: sidebarView },

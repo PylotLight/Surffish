@@ -83,6 +83,18 @@ export class SidebarOverlayMotion {
     return this.rail || this.target === 1 || this.progress > 0;
   }
 
+  /**
+   * The view's right edge at the current progress (window px): the rail's edge when closed on its
+   * rail, the full panel's edge when open, 0 when nothing is on screen. A pushed page card
+   * (browser-shell.ts) follows this edge frame by frame.
+   */
+  get visibleRight(): number {
+    if (!this.onScreen || this.rect.width <= 0 || this.rect.height <= 0)
+      return 0;
+    const { x, width } = this.frameAt(this.progress);
+    return Math.max(0, x + width);
+  }
+
   /** Lay out at the current progress (window resize, width drag, card inset change). */
   layout(rect: SidebarMotionRect): void {
     this.rect = { ...rect };

@@ -152,6 +152,24 @@ export function AppearanceSettings(): React.JSX.Element {
         </output>
       </SettingsRow>
       <SettingsRow
+        label="Sidebar pushes page"
+        hint="The hover sidebar slides the page aside and matches the frame, instead of floating over it."
+      >
+        <input
+          type="checkbox"
+          className="settings-switch"
+          disabled={!settings}
+          checked={settings?.sidebarPushesPage ?? true}
+          aria-label="Sidebar pushes page"
+          onChange={(event) =>
+            void window.api.browser.sidebarBackdrop
+              .set({ sidebarPushesPage: event.target.checked })
+              .then(setSettings)
+              .catch(() => undefined)
+          }
+        />
+      </SettingsRow>
+      <SettingsRow
         label="Bookmarks bar"
         hint={`Favourites under the toolbar (${isMac ? "⇧⌘B" : "Ctrl+Shift+B"}).`}
       >

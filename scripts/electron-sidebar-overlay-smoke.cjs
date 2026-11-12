@@ -294,11 +294,9 @@ function assertSidebarPinMorph(sample, direction) {
 }
 
 // The frame's opaque surface colour (src/shared/sidebar-card.ts BROWSER_FRAME_SURFACE_ARGB): on
-// Linux (no vibrancy) the toolbar strip, rail, docked panel and the floating hover card all paint
+// Linux (no vibrancy) the toolbar strip, rail, docked panel and the pushing hover panel all paint
 // exactly this. macOS paints glass instead; these pixel checks run on the Linux path only.
 const FRAME_SURFACE_RGB = [25, 27, 31];
-// src/shared/sidebar-card.ts SIDEBAR_FLOAT: the hover card's gap off the frame and its radius.
-const SIDEBAR_FLOAT = { gap: 6, radius: 12 };
 
 /**
  * Toolbar, frame and sidebar meet at the toolbar's bottom line as one surface (no seam): grab the
@@ -414,43 +412,6 @@ async function assertRoundedCardCorner(what, corner) {
   assert.ok(
     !close(inside, FRAME_SURFACE_RGB),
     `${what}: inside the rounded corner the page shows (${inside})`,
-  );
-}
-
-/**
- * The floating hover card's corner over the page is rounded (SIDEBAR_FLOAT.radius): the pixel in
- * the corner is the page (not the card's surface), the pixel further in is the card's surface.
- */
-async function assertFloatingCardCorner(
-  what,
-  { corner, inside, fillTolerance = 3 },
-) {
-  if (process.platform !== "linux" || !process.env.DISPLAY) return;
-  const close = (a, b, tolerance = 3) =>
-    a.every((value, i) => Math.abs(value - b[i]) <= tolerance);
-  let cut = null;
-  let fill = null;
-  const deadline = Date.now() + 3000;
-  while (Date.now() < deadline) {
-    cut = grabWindowPixel(corner.x, corner.y);
-    fill = grabWindowPixel(inside.x, inside.y);
-    if (
-      !close(cut, FRAME_SURFACE_RGB) &&
-      close(fill, FRAME_SURFACE_RGB, fillTolerance)
-    )
-      break;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  }
-  console.log(
-    `[sidebar-overlay-smoke] ${what} at ${corner.x},${corner.y}: corner ${cut.join(",")} inside ${fill.join(",")}`,
-  );
-  assert.ok(
-    !close(cut, FRAME_SURFACE_RGB),
-    `${what}: the card's corner is rounded, the page shows in it (${cut})`,
-  );
-  assert.ok(
-    close(fill, FRAME_SURFACE_RGB, fillTolerance),
-    `${what}: inside its corner the card paints the frame surface (${fill}, want ${FRAME_SURFACE_RGB})`,
   );
 }
 
@@ -1695,8 +1656,15 @@ async function run() {
     "the expanded panel to collapse to its persistent rail after pointer exit and focus release",
   );
 
-  // The rail owns the left edge; hovering it reveals the panel without changing page bounds.
+  // The rail owns the left edge; hovering it reveals the panel, which pushes the page card aside
+  // (Settings → Appearance → Sidebar pushes page, on by default): the card slides right with the
+  // panel's edge and keeps its size (the page never re-lays out; the window edge clips its right
+  // side), then slides back on close.
   const pageAfterHide = fixturePageView.getBounds();
+  assert.ok(
+    pageAfterHide.x >= 83,
+    `the collapsed page sits beside the rail (${JSON.stringify(pageAfterHide)})`,
+  );
   pointerMove(
     mainWindow.getContentBounds().x + 5,
     mainWindow.getContentBounds().y + pageAfterHide.y + 150,
@@ -1708,97 +1676,164 @@ async function run() {
       rendererViews.sidebar.getBounds().x === 0,
     "hover over the live-page edge to reopen the sidebar",
   );
+  // The hover-revealed panel slides out within the frame: from the toolbar's bottom line, never
+  // over the toolbar. Pushing, it is part of the frame: the overlay view is exactly the sidebar
+  // width (no floating-card gap).
+  const revealed = await waitFor(() => {
+    const bounds = rendererViews.sidebar.getBounds();
+    return bounds.x === 0 && bounds.width === widthAfterResize ? bounds : null;
+  }, "the hover-revealed panel to finish opening at the sidebar width");
+  assert.ok(
+    revealed.y >= dockedToolbarBottom - 0.5 &&
+      revealed.y + revealed.height === contentSize[1],
+    `the hover-revealed panel starts at the toolbar's bottom line (${JSON.stringify(revealed)}, toolbar bottom ${dockedToolbarBottom})`,
+  );
+  const pushedPage = await waitFor(() => {
+    const bounds = fixturePageView.getBounds();
+    return bounds.x === revealed.x + revealed.width + PAGE_FRAME_GAP
+      ? bounds
+      : null;
+  }, "the page card to slide the frame gap right of the open panel");
+  console.log(
+    `[sidebar-overlay-smoke] pushed page ${JSON.stringify(pushedPage)} (resting ${JSON.stringify(pageAfterHide)}) beside panel ${JSON.stringify(revealed)}`,
+  );
   assert.deepEqual(
-    fixturePageView.getBounds(),
-    pageAfterHide,
-    "hover reveal overlays the page without moving or resizing it",
+    {
+      y: pushedPage.y,
+      width: pushedPage.width,
+      height: pushedPage.height,
+    },
+    {
+      y: pageAfterHide.y,
+      width: pageAfterHide.width,
+      height: pageAfterHide.height,
+    },
+    "the pushed page card keeps its size (no reflow): only its x moves",
   );
   assert.ok(
-    pageAfterHide.x >= 83,
-    `the collapsed page sits beside the rail (${JSON.stringify(pageAfterHide)})`,
+    pushedPage.x > pageAfterHide.x &&
+      pushedPage.x + pushedPage.width > contentSize[0],
+    `the pushed card runs past the window's right edge, clipped there (${JSON.stringify(pushedPage)}, window ${contentSize[0]})`,
   );
-  // The hover-revealed panel slides out within the frame: from the toolbar's bottom line, over the
-  // page card, never over the toolbar.
+  // Pushing, the panel paints nothing of its own (like the docked panel): no card background,
+  // shadow, blur or snapshot. The window root's ground (glass on macOS, the frame surface here)
+  // is all there is under it.
   {
-    const revealed = rendererViews.sidebar.getBounds();
-    assert.ok(
-      revealed.y >= dockedToolbarBottom - 0.5 &&
-        revealed.y + revealed.height === contentSize[1],
-      `the hover-revealed panel starts at the toolbar's bottom line (${JSON.stringify(revealed)}, toolbar bottom ${dockedToolbarBottom})`,
-    );
-  }
-  // The hover panel is a floating card, not part of the frame: the toolbar's bottom line still
-  // runs over one frame surface (the card stands SIDEBAR_FLOAT.gap below it).
-  await assertFrameJunction("hover panel");
-  {
-    // The overlay view keeps its frame bounds, one float gap wider so the card keeps the sidebar
-    // width; wait for the slide to land before reading the card.
-    const revealed = await waitFor(() => {
-      const bounds = rendererViews.sidebar.getBounds();
-      return bounds.x === 0 &&
-        bounds.width === widthAfterResize + SIDEBAR_FLOAT.gap
-        ? bounds
-        : null;
-    }, "the hover-revealed panel to finish opening as a floating card");
-    const card = await waitFor(
-      () =>
-        evaluate(
-          rendererViews.sidebar,
-          `(() => {
+    const card = await evaluate(
+      rendererViews.sidebar,
+      `(() => {
       const card = document.querySelector('.browser-sidebar')
       if (!card || card.classList.contains('is-collapsed')) return null
       const r = card.getBoundingClientRect()
       const style = getComputedStyle(card)
-      return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: innerHeight - r.bottom,
-        radius: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius] }
+      const backdrop = card.querySelector(':scope > .sidebar-backdrop')
+      return { x: r.x, y: r.y, width: r.width, bottom: innerHeight - r.bottom,
+        background: style.backgroundColor, image: style.backgroundImage,
+        shadow: style.boxShadow, filter: style.backdropFilter || style.webkitBackdropFilter || 'none',
+        backdropShown: Boolean(backdrop && getComputedStyle(backdrop).display !== 'none') }
     })()`,
-        ),
-      "the floating hover card in the sidebar surface",
     );
     console.log(
-      `[sidebar-overlay-smoke] hover card ${JSON.stringify(card)} in view ${JSON.stringify(revealed)}`,
+      `[sidebar-overlay-smoke] pushing panel ${JSON.stringify(card)}`,
     );
+    assert.ok(card, "the expanded panel in the sidebar surface");
     assert.equal(
       card.x,
-      SIDEBAR_FLOAT.gap,
-      "the hover card floats the gap off the window's left edge",
+      0,
+      "the pushing panel is flush with the window's left edge",
     );
     assert.equal(
       card.y,
-      SIDEBAR_FLOAT.gap,
-      "the hover card floats the gap below the toolbar's bottom line",
+      0,
+      "the pushing panel starts at the toolbar's bottom line",
     );
     assert.equal(
       card.bottom,
-      SIDEBAR_FLOAT.gap,
-      "the hover card floats the gap off the window's bottom edge",
+      0,
+      "the pushing panel reaches the window's bottom",
     );
     assert.equal(
       card.width,
       widthAfterResize,
-      "the floating card keeps the sidebar width",
+      "the pushing panel fills its view",
     );
-    assert.deepEqual(
-      card.radius,
-      Array(4).fill(`${SIDEBAR_FLOAT.radius}px`),
-      "the hover card has its own rounded corners on every side",
+    assert.equal(
+      card.background,
+      "rgba(0, 0, 0, 0)",
+      "the pushing panel paints no background of its own",
     );
-    // On screen (the opaque Linux path): the card's corners over the page are rounded, so the page
-    // shows in the corner and the card's own surface a little further in.
-    const right = revealed.x + SIDEBAR_FLOAT.gap + widthAfterResize;
-    const top = revealed.y + SIDEBAR_FLOAT.gap;
-    const bottom = revealed.y + revealed.height - SIDEBAR_FLOAT.gap;
-    await assertFloatingCardCorner("hover card top-right", {
-      corner: { x: right - 1, y: top + 1 },
-      inside: { x: right - 9, y: top + 9 },
-    });
-    captureFullWindow("sidebar-overlay-live-page-hover-card.png");
-    // The panel's footer sits there and shades the card a touch.
-    await assertFloatingCardCorner("hover card bottom-right", {
-      corner: { x: right - 1, y: bottom - 2 },
-      inside: { x: right - 9, y: bottom - 10 },
-      fillTolerance: 8,
-    });
+    assert.equal(card.image, "none", "the pushing panel paints no gradient");
+    assert.equal(
+      card.shadow,
+      "none",
+      "the pushing panel casts no floating-card shadow",
+    );
+    assert.equal(card.filter, "none", "the pushing panel has no CSS blur");
+    assert.equal(
+      card.backdropShown,
+      false,
+      "no page snapshot under the pushing panel",
+    );
+    const backdropState = await evaluate(
+      rendererViews.toolbar,
+      "window.api.browser.sidebarBackdrop.get()",
+    );
+    assert.equal(
+      backdropState.settings.sidebarPushesPage,
+      true,
+      "Sidebar pushes page is on by default",
+    );
+    assert.equal(
+      backdropState.state.nativeOverlay,
+      false,
+      "no native blur/tint layer under the pushing panel (the frame's ground shows)",
+    );
+  }
+  // One surface from the toolbar into the panel, and the panel's empty area is the frame's own
+  // surface (Linux: the opaque frame colour from the window root), not a tint over the page.
+  await assertFrameJunction("pushing hover panel");
+  if (process.platform === "linux" && process.env.DISPLAY) {
+    const close = (a, b) => a.every((value, i) => Math.abs(value - b[i]) <= 3);
+    let pixel = null;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      pixel = grabWindowPixel(
+        revealed.x + revealed.width - 3,
+        revealed.y + revealed.height - 120,
+      );
+      if (close(pixel, FRAME_SURFACE_RGB)) break;
+      await delay(150);
+    }
+    assert.ok(
+      close(pixel, FRAME_SURFACE_RGB),
+      `the pushing panel's area shows the frame surface (${pixel}, want ${FRAME_SURFACE_RGB})`,
+    );
+  }
+  captureFullWindow("sidebar-overlay-live-page-hover-push.png");
+  // Input still hit-tests at the shifted position: a real click on the page's left-edge button
+  // (now right of the panel) reaches the page.
+  {
+    const edgeBefore = await fixturePageView.webContents.executeJavaScript(
+      "window.edgeClickCount || 0",
+    );
+    const edgeRect = await fixturePageView.webContents.executeJavaScript(
+      `(() => { const r = document.querySelector('#edge-target').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
+    );
+    const edgePoint = screenPointForElement(fixturePageView, edgeRect);
+    assert.ok(
+      edgePoint.x - mainWindow.getContentBounds().x >
+        revealed.x + revealed.width,
+      "the page's edge button sits right of the open panel while pushed",
+    );
+    pointerClick(edgePoint.x, edgePoint.y);
+    await waitFor(
+      async () =>
+        (await fixturePageView.webContents.executeJavaScript(
+          "window.edgeClickCount || 0",
+        )) ===
+        edgeBefore + 1,
+      "a real click on the pushed page to reach it at its shifted position",
+    );
   }
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),
@@ -1808,6 +1843,15 @@ async function run() {
     collapsedRailVisible,
     "the hover-only panel to collapse back to the visible rail",
   );
+  await waitFor(() => {
+    const bounds = fixturePageView.getBounds();
+    return (
+      bounds.x === pageAfterHide.x &&
+      bounds.y === pageAfterHide.y &&
+      bounds.width === pageAfterHide.width &&
+      bounds.height === pageAfterHide.height
+    );
+  }, "the page card to slide back beside the rail on close");
 
   // Reveal locks main releases on its own (src/main/sidebar-reveal-guard.ts).
   const chromeState = () =>

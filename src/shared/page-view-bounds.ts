@@ -102,3 +102,28 @@ export function framePageArea(
     height: Math.max(0, bottom - top),
   };
 }
+
+/**
+ * How far the page card slides right while the tab list's hover panel pushes it aside (Settings →
+ * Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail) to the
+ * panel's visible right edge at this point of its open/close slide. The card keeps its width, so
+ * the page never re-lays out; the window edge clips its right side while the panel is open. 0 when
+ * the panel is not pushing or is closed.
+ */
+export function pageSlideOffset({
+  pushing,
+  panelRight,
+  frameLeft,
+}: {
+  pushing: boolean;
+  panelRight: number;
+  frameLeft: number | null;
+}): number {
+  if (!pushing || frameLeft === null) return 0;
+  return Math.max(0, Math.round(panelRight - frameLeft));
+}
+
+/** `rect` moved right by `dx` px, same size (the pushed page card). */
+export function slideViewRect(rect: ViewRect, dx: number): ViewRect {
+  return dx === 0 ? { ...rect } : { ...rect, x: rect.x + Math.round(dx) };
+}

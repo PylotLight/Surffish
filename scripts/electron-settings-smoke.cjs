@@ -44,6 +44,7 @@ const GENERAL_CONTROLS = [
   "Default search engine",
   "Sidebar blur",
   "Frame transparency",
+  "Sidebar pushes page",
   "Show bookmarks bar",
   "Enable the command palette shortcut",
   "Browser and profile to import from",

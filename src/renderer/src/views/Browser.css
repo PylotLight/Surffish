@@ -5366,6 +5366,56 @@
   inset: calc(var(--sidebar-float-gap, 6px) * -1) 0 0
     calc(var(--sidebar-float-gap, 6px) * -1);
 }
+/* Sidebar pushes page (Settings → Appearance, on by default): the tab list's hover panel is not a
+ * card over the page but part of the frame, like the docked panel. Main slides the page card right
+ * with the panel's edge (same size, the window edge clips it; browser-shell.ts syncPageSlide), so
+ * nothing is under the panel but the window root's ground: the macOS vibrancy under the frame tint,
+ * or the opaque frame surface (Linux, Windows, Reduce Transparency, Frame transparency 0). The
+ * overlay view paints nothing of its own there (no tint, blur, shadow or snapshot), exactly like the
+ * docked panel; in-page (New Tab) the card paints the frame's ground, like the docked in-page card.
+ * Fullscreen has no frame to push into, so the panel floats there as before. */
+.app-shell[data-sidebar-push="true"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  top: min(var(--sidebar-card-inset, 0px), 25%);
+  bottom: min(var(--sidebar-card-inset, 0px), 25%);
+  left: 0;
+  border-radius: 0 var(--sidebar-frame-radius, 0px)
+    var(--sidebar-frame-radius, 0px) 0;
+  box-shadow: var(--sidebar-frame-shadow, none);
+  backdrop-filter: none;
+}
+.app-shell[data-sidebar-push="true"][data-surface="sidebar"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  width: 100%;
+  background: transparent;
+}
+.app-shell[data-sidebar-push="true"][data-surface="sidebar"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed)
+  > .sidebar-backdrop {
+  display: none;
+}
+.app-shell[data-sidebar-push="true"][data-surface="content"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  top: var(--sidebar-frame-top, 0px);
+  background: var(--frame-ground, rgb(25, 27, 31));
+}
+.app-shell[data-sidebar-push="true"][data-surface="content"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail.is-private-window:not(.is-collapsed) {
+  background: var(--frame-ground-private, rgb(30, 26, 40));
+}
 /* The private window's violet underline would draw a line across the frame at the toolbar's
  * bottom; the frame's private colour and the omnibox pill mark the window instead. */
 .app-shell:not([data-fullscreen="true"]) .browser-toolbar.is-private {

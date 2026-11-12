@@ -3,7 +3,9 @@ import {
   initialPageViewBounds,
   framePageArea,
   pageFrameLeft,
+  pageSlideOffset,
   pageViewBounds,
+  slideViewRect,
 } from "./page-view-bounds";
 
 const area = { x: 0, y: 50, width: 1200, height: 750 };
@@ -98,5 +100,38 @@ describe("framePageArea", () => {
     expect(framePageArea({ x: 0, y: 0, width: 50, height: 10 }, 84).width).toBe(
       0,
     );
+  });
+});
+
+describe("pushed page card", () => {
+  test("slides by the panel's visible right edge past the rail, never left of it", () => {
+    expect(
+      pageSlideOffset({ pushing: true, panelRight: 320, frameLeft: 84 }),
+    ).toBe(236);
+    expect(
+      pageSlideOffset({ pushing: true, panelRight: 84, frameLeft: 84 }),
+    ).toBe(0);
+    expect(
+      pageSlideOffset({ pushing: true, panelRight: 60.4, frameLeft: 84 }),
+    ).toBe(0);
+    expect(
+      pageSlideOffset({ pushing: true, panelRight: 200.6, frameLeft: 84 }),
+    ).toBe(117);
+  });
+
+  test("nothing when not pushing or there is no frame", () => {
+    expect(
+      pageSlideOffset({ pushing: false, panelRight: 320, frameLeft: 84 }),
+    ).toBe(0);
+    expect(
+      pageSlideOffset({ pushing: true, panelRight: 320, frameLeft: null }),
+    ).toBe(0);
+  });
+
+  test("moves the card without resizing it", () => {
+    const card = { x: 90, y: 56, width: 1104, height: 738 };
+    expect(slideViewRect(card, 236)).toEqual({ ...card, x: 326 });
+    expect(slideViewRect(card, 0)).toEqual(card);
+    expect(slideViewRect(card, 0)).not.toBe(card);
   });
 });

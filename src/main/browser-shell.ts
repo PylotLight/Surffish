@@ -36,7 +36,7 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
-import { pageFrameLeft } from "../shared/page-view-bounds";
+import { pageFrameLeft, pageSlideOffset } from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import { SidebarOverlayMotion } from "./sidebar-motion";
@@ -115,6 +115,17 @@ interface ShellState {
    * overlay view is one SIDEBAR_FLOAT gap wider and the card stands that gap off every frame edge.
    */
   sidebarFloating: boolean;
+  /**
+   * The tab list's hover panel pushes the page card aside instead of floating over it (Settings →
+   * Appearance → Sidebar pushes page; live pages, framed, not docked). The panel is then part of
+   * the frame like the docked one (no tint, blur or shadow of its own) and the page card slides
+   * right with the panel's edge, keeping its size.
+   */
+  sidebarPushing: boolean;
+  /** Where the browser frame's left side ends for live pages (pageFrameLeft), as last laid out. */
+  frameLeft: number | null;
+  /** The page card's slide as last sent to browser.ts (px right of its frame position). */
+  pageSlide: number;
   /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
   sidebarDocked: boolean | null;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
@@ -173,6 +184,44 @@ export function setBrowserFramePrivate(
   shell.scheduleLayout();
 }
 
+/** Settings → Appearance → Sidebar pushes page (sidebar-backdrop.ts owns the setting and calls in). */
+let sidebarPushesPage = true;
+
+/** Sidebar pushes page changed: every window re-lays out (the hover panel floats or pushes). */
+export function setBrowserSidebarPushesPage(value: boolean): void {
+  if (value === sidebarPushesPage) return;
+  sidebarPushesPage = value;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
+
+let pageSlideListener: ((window: BaseWindow, dx: number) => void) | null = null;
+
+/**
+ * browser.ts: move the window's on-screen page card(s) `dx` px right of their frame position,
+ * same size (the hover panel pushing the page). Called once per motion frame while it slides.
+ */
+export function setPageSlideListener(
+  listener: ((window: BaseWindow, dx: number) => void) | null,
+): void {
+  pageSlideListener = listener;
+}
+
+/** Follow the panel's edge with the page card (0 unless the hover panel pushes the page). */
+function syncPageSlide(shell: ShellState): void {
+  const dx = pageSlideOffset({
+    pushing: shell.sidebarPushing,
+    panelRight: shell.sidebarMotion.visibleRight,
+    frameLeft: shell.frameLeft,
+  });
+  if (dx === shell.pageSlide) return;
+  shell.pageSlide = dx;
+  try {
+    pageSlideListener?.(shell.window, dx);
+  } catch (error) {
+    console.warn("Page slide listener failed:", error);
+  }
+}
+
 /** Settings → Appearance → Frame transparency (sidebar-backdrop.ts owns the setting and calls in). */
 let frameTransparency = FRAME_TRANSPARENCY_DEFAULT;
 
@@ -202,6 +251,11 @@ export function getSidebarHoverCardColour(window: BaseWindow): string {
 /** Whether `window`'s tab-list hover panel floats as its own card (see ShellState.sidebarFloating). */
 export function isSidebarFloating(window: BaseWindow): boolean {
   return shells.get(window)?.sidebarFloating === true;
+}
+
+/** Whether `window`'s tab-list hover panel pushes the page aside (see ShellState.sidebarPushing). */
+export function isSidebarPushing(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarPushing === true;
 }
 
 /** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
@@ -462,15 +516,21 @@ function applyShellLayout(shell: ShellState): void {
     frameShown &&
     sidebarPinned &&
     (sidebarMode === "tabs" || sidebarMode === "history");
-  const floating = frameShown && !docked && sidebarMode === "tabs";
+  // The tab list's hover panel either pushes the page card aside (and is the frame's own material,
+  // like the docked panel) or floats over it as its own card (Settings → Sidebar pushes page off).
+  const pushing =
+    frameShown && !docked && sidebarMode === "tabs" && sidebarPushesPage;
+  const floating = frameShown && !docked && sidebarMode === "tabs" && !pushing;
   if (
     shell.sidebarDocked !== docked ||
     shell.frameGlass !== glass ||
-    shell.sidebarFloating !== floating
+    shell.sidebarFloating !== floating ||
+    shell.sidebarPushing !== pushing
   ) {
     shell.sidebarDocked = docked;
     shell.frameGlass = glass;
     shell.sidebarFloating = floating;
+    shell.sidebarPushing = pushing;
     try {
       sidebarDockListener?.(shell.window, docked);
     } catch (error) {
@@ -503,14 +563,9 @@ function applyShellLayout(shell: ShellState): void {
     overlayMode && shell.chromeState.sidebarMode === "tabs" && railWidth > 0;
   const animate = shell.lastOverlayMode === overlayMode;
   shell.lastOverlayMode = overlayMode;
-  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
-  if (overlayShown && !shell.sidebarOverlayShown) {
-    shell.sidebarOverlayShown = true;
-    emitSidebarOverlay(shell, "shown");
-  }
   // Live pages start right of the frame's left side: the rail while the sidebar auto-hides (Gmail's
   // left nav was cut off under it), the panel itself while it is docked. A hover/focus reveal
-  // slides the panel out over the card and never resizes it.
+  // never resizes the page card: it floats over it, or pushes it aside (slides it, same size).
   const frameLeft = pageFrameLeft({
     overlayMode,
     fullscreen,
@@ -519,6 +574,13 @@ function applyShellLayout(shell: ShellState): void {
     sidebarWidth,
     railWidth,
   });
+  shell.frameLeft = frameLeft;
+  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
+  if (overlayShown && !shell.sidebarOverlayShown) {
+    shell.sidebarOverlayShown = true;
+    emitSidebarOverlay(shell, "shown");
+  }
+  syncPageSlide(shell);
   shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
   const cause = shell.layoutCause ?? "layout";
   shell.layoutCause = null;
@@ -578,6 +640,9 @@ export function attachBrowserShell(
     framePrivate: false,
     frameGlass: false,
     sidebarFloating: false,
+    sidebarPushing: false,
+    frameLeft: null,
+    pageSlide: 0,
     sidebarDocked: null,
     lastActiveTabId: null,
     activeTabSince: 0,
@@ -588,7 +653,11 @@ export function attachBrowserShell(
       dismissToolbarPopoversOnPress(shell, "sidebar", mouseEvent.type),
   };
   shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
-    onProgress: (progress) => sidebarMotionListener?.(window, progress),
+    onProgress: (progress) => {
+      // The pushed page card follows the panel's edge on the same frame (main-driven setBounds).
+      syncPageSlide(shell);
+      sidebarMotionListener?.(window, progress);
+    },
     onHidden: () => {
       if (!shell.sidebarOverlayShown) return;
       shell.sidebarOverlayShown = false;

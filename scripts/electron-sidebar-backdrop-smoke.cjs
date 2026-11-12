@@ -195,6 +195,14 @@ async function run() {
       smoke.ADBLOCK_CONFIG,
     ).serialize(),
   );
+  // This smoke measures the floating hover card's own background (blur, tint, snapshot) over a
+  // busy page, so it runs with Settings → Appearance → Sidebar pushes page off: pushing (the
+  // default), the panel has no background of its own and the page slides aside instead
+  // (electron-sidebar-overlay-smoke covers that path).
+  writeFileSync(
+    join(userData, "sidebar-appearance.json"),
+    JSON.stringify({ sidebarPushesPage: false }),
+  );
   const now = Date.now();
   writeFileSync(
     join(userData, "new-tab-photo-cache.json"),

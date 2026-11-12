@@ -309,6 +309,7 @@ import {
   framePageArea,
   initialPageViewBounds,
   pageViewBounds,
+  slideViewRect,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
 import type { TabArchiveCandidate } from "../shared/tab-archive";
@@ -540,6 +541,11 @@ interface BrowserWindowState {
   pageArea?: BrowserBounds;
   /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
   pageFrameLeft?: number | null;
+  /**
+   * The page card's slide right of `browserBounds` while the tab list's hover panel pushes it
+   * aside (browser-shell.ts syncPageSlide): the views move, `browserBounds` stays the frame's rect.
+   */
+  pageSlideX?: number;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -1444,7 +1450,8 @@ function setPageCornerRadius(view: View, radius: number): void {
 }
 
 function applyTabBounds(w: BrowserWindowState): void {
-  const { browserBounds } = w;
+  // A pushed page card slides right with the hover panel, same size (the page never re-lays out).
+  const browserBounds = slideViewRect(w.browserBounds, w.pageSlideX ?? 0);
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
   const split = splitOf(activeTabOf(w));
@@ -6374,6 +6381,30 @@ export function setBrowserBounds(input: unknown): void {
   if (browserBounds.width === 0 || browserBounds.height === 0)
     hideLinkStatus(false, w.window);
   applyTabBounds(w);
+}
+
+/**
+ * The hover panel pushes the page aside (browser-shell.ts): move the window's on-screen page card
+ * `dx` px right of its frame rect, keeping its size. Runs once per motion frame, so the common case
+ * (one page, no split) only moves the active view and its reader; a split goes through the full
+ * layout so its panes and divider surface move together.
+ */
+export function slideBrowserPage(window: BaseWindow, dx: number): void {
+  const w = windowStateFor(window);
+  if (!isLiveWindow(w)) return;
+  const next = Math.max(0, Math.round(dx));
+  if ((w.pageSlideX ?? 0) === next) return;
+  w.pageSlideX = next;
+  const { browserBounds } = w;
+  if (!(browserBounds.width > 0) || !(browserBounds.height > 0)) return;
+  const active = activeTabOf(w);
+  if (!active?.view || splitOf(active)) {
+    applyTabBounds(w);
+    return;
+  }
+  const target = slideViewRect(browserBounds, next);
+  active.view.setBounds(target);
+  readerViewFor(active.view.webContents)?.setBounds(target);
 }
 
 export function syncBrowserBoundsToWindow(

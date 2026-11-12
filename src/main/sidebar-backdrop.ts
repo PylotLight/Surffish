@@ -38,8 +38,10 @@ import {
   isSidebarDocked,
   isSidebarFloating,
   isSidebarOverlayShown,
+  isSidebarPushing,
   sendToMainWindowRenderers,
   setBrowserFrameTransparency,
+  setBrowserSidebarPushesPage,
   setSidebarDockListener,
   setSidebarMotionListener,
   setSidebarOverlayListener,
@@ -126,6 +128,15 @@ function sendState(window: BaseWindow): void {
   view.webContents.send(STATE_CHANNEL, stateFor(window));
 }
 
+/**
+ * The sidebar is part of the frame right now (docked, or the hover panel pushing the page aside):
+ * no page is under it, so it has no tint, blur, shadow or snapshot of its own; the window root's
+ * ground (the vibrancy under the frame tint, or the opaque surface) shows through it.
+ */
+function sidebarIsFrame(window: BaseWindow): boolean {
+  return isSidebarDocked(window) || isSidebarPushing(window);
+}
+
 /** Hide and reset the hover-only native background; the sidebar WebContentsView stays untouched. */
 function clearNativeLayer(window: BaseWindow): void {
   const view = nativeBackdropViews.get(window);
@@ -169,7 +180,7 @@ function applyNativeLayer(
   if (
     !shouldUseNativeSidebarLayer({
       mode: getSidebarBackdropMode(),
-      docked: isSidebarDocked(window),
+      docked: sidebarIsFrame(window),
       visible: isSidebarOverlayShown(window),
     })
   ) {
@@ -235,7 +246,7 @@ function applyShadow(
   if (
     !sidebar ||
     !visible ||
-    isSidebarDocked(window) ||
+    sidebarIsFrame(window) ||
     !isSidebarFloating(window) ||
     !(progress > 0)
   ) {
@@ -252,6 +263,7 @@ function applyShadow(
 function canCapture(window: BaseWindow): boolean {
   return (
     !window.isDestroyed() &&
+    !sidebarIsFrame(window) &&
     window.isVisible() &&
     !window.isMinimized() &&
     getSidebarBackdropMode() === "snapshot"
@@ -426,6 +438,7 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE));
   setBrowserFrameTransparency(settings.frameTransparency);
+  setBrowserSidebarPushesPage(settings.sidebarPushesPage);
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
   setSidebarDockListener((window) =>
@@ -454,6 +467,7 @@ export function registerSidebarBackdropIpc(): void {
     writeUserJson(SETTINGS_FILE, settings);
     // The frame's root ground re-lays out in every window; the hover card repaints below.
     setBrowserFrameTransparency(settings.frameTransparency);
+    setBrowserSidebarPushesPage(settings.sidebarPushesPage);
     applyEverywhere();
     sendToMainWindowRenderers("browser:sidebar-backdrop:settings", {
       ...settings,

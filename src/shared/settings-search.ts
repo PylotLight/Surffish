@@ -190,6 +190,7 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
       "Frame transparency",
       "glass vibrancy translucent opacity tint window frame",
     ],
+    ["Sidebar pushes page", "hover sidebar slide overlay floating card"],
     ["Bookmarks bar", "favourites"],
     [
       "Toolbar",
