@@ -120,6 +120,44 @@ function collapsedRailVisible() {
   return bounds.x === 0 && bounds.width >= 83 && bounds.width <= 85;
 }
 
+// Every row label or row the sidebar renderer would paint right now, with its effective opacity
+// (script fades included): a collapsed rail must paint none (its panel copy is hidden).
+const SIDEBAR_PAINTED_ROWS = `(() => {
+  const card = document.querySelector('.browser-sidebar')
+  const painted = []
+  for (const el of document.querySelectorAll('.browser-sidebar :is(.tab-item, .tab-title, .sidebar-new-tab-row-label)')) {
+    if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) continue
+    let opacity = 1
+    for (let node = el; node && node !== document.documentElement; node = node.parentElement) opacity *= Number(getComputedStyle(node).opacity)
+    if (opacity < 0.05) continue
+    painted.push({ cls: el.className, text: el.textContent.trim().slice(0, 24), left: Math.round(r.left), right: Math.round(r.right), opacity: Number(opacity.toFixed(2)), ghost: Boolean(el.closest('.sidebar-morph-ghost')) })
+  }
+  return { collapsed: Boolean(card?.classList.contains('is-collapsed')), reshaping: card?.getAttribute('data-reshaping') ?? null, cardRight: Math.round(card?.getBoundingClientRect().right ?? 0), painted }
+})()`;
+
+/** Samples SIDEBAR_PAINTED_ROWS on every frame the surface draws for `ms` (a timer ends it if it stops drawing). */
+function sampleSidebarRows(view, ms) {
+  return evaluate(
+    view,
+    `new Promise((resolve) => {
+      const samples = []
+      const started = performance.now()
+      let done = false
+      const finish = () => { if (!done) { done = true; resolve(samples) } }
+      const tick = () => {
+        if (done) return
+        samples.push({ t: Math.round(performance.now() - started), ...${SIDEBAR_PAINTED_ROWS} })
+        if (performance.now() - started < ${ms}) requestAnimationFrame(tick)
+        else finish()
+      }
+      requestAnimationFrame(tick)
+      setTimeout(finish, ${ms} + 250)
+    })`,
+  );
+}
+
 async function evaluate(view, expression) {
   assert.ok(
     view?.webContents && !view.webContents.isDestroyed(),
@@ -1929,6 +1967,124 @@ async function run() {
     async () => !(await chromeState()).sidebarHovered && collapsedRailVisible(),
     "the cursor poll to collapse the panel to its rail after a hover whose mouseleave never came",
     5000,
+  );
+
+  // A tab created while the sidebar rests on its rail never shows its row: not at rest (the
+  // panel's copy of it stays hidden, and a shape change the New Tab renderer made out of sight
+  // is not replayed when it is shown) and not when the rail is opening at that moment (the row
+  // joins the reveal's label beat instead of painting at full strength across the panel: the
+  // full-width "New Tab" row that flashed over the page; shared/sidebar-morph.ts).
+  const railTabsBefore = new Set(
+    (
+      await evaluate(rendererViews.sidebar, "window.api.browser.tabs.get()")
+    ).map((tab) => tab.id),
+  );
+  const railSamples = [
+    sampleSidebarRows(rendererViews.content, 650),
+    sampleSidebarRows(rendererViews.sidebar, 650),
+  ];
+  await evaluate(rendererViews.sidebar, "window.api.browser.tabs.create()");
+  const [contentRailSamples, sidebarRailSamples] =
+    await Promise.all(railSamples);
+  for (const [surface, samples] of [
+    ["content", contentRailSamples],
+    ["sidebar", sidebarRailSamples],
+  ]) {
+    const leaked = samples.filter(
+      (sample) => !sample.collapsed || sample.painted.length > 0,
+    );
+    assert.equal(
+      leaked.length,
+      0,
+      `a New Tab created on the rail paints no row or label in the ${surface} renderer (${samples.length} frames): ${JSON.stringify(leaked.slice(0, 3))}`,
+    );
+  }
+  const railNewTab = (
+    await evaluate(rendererViews.sidebar, "window.api.browser.tabs.get()")
+  ).find((tab) => !railTabsBefore.has(tab.id));
+  assert.ok(railNewTab, "the rail New Tab was created");
+  await evaluate(
+    rendererViews.content,
+    `window.api.browser.tabs.close(${JSON.stringify(railNewTab.id)})`,
+  );
+  await evaluate(
+    rendererViews.content,
+    `(async () => { const tab = (await window.api.browser.tabs.get()).find((candidate) => candidate.url === ${JSON.stringify(fixtureUrl)}); return tab ? window.api.browser.tabs.activate(tab.id) : false })()`,
+  );
+  await waitFor(
+    () =>
+      rendererViews.toolbar.getVisible() &&
+      !rendererViews.content.getVisible() &&
+      collapsedRailVisible(),
+    "the live page and its rail after the rail New Tab check",
+  );
+  const midRevealTabsBefore = (
+    await evaluate(rendererViews.sidebar, "window.api.browser.tabs.get()")
+  ).map((tab) => tab.id);
+  const midReveal = evaluate(
+    rendererViews.sidebar,
+    `(async () => {
+      const before = new Set(${JSON.stringify(midRevealTabsBefore)})
+      const card = document.querySelector('.browser-sidebar')
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
+      const deadline = performance.now() + 8000
+      while (card.getAttribute('data-reshaping') !== 'expand' && performance.now() < deadline) await frame()
+      if (card.getAttribute('data-reshaping') !== 'expand') return { started: false }
+      const created = window.api.browser.tabs.create(${JSON.stringify(`${fixtureUrl}?mid-reveal`)})
+      const frames = []
+      const opacityOf = (el) => { let o = 1; for (let n = el; n && n !== document.documentElement; n = n.parentElement) o *= Number(getComputedStyle(n).opacity); return o }
+      while (card.getAttribute('data-reshaping') === 'expand' && performance.now() < deadline) {
+        const rows = [...card.querySelectorAll('.sidebar-panel:not(.is-shape-hidden) .tab-item[data-browser-tab-id]')]
+        const fresh = rows.find((row) => !before.has(row.dataset.browserTabId))
+        const settled = rows.filter((row) => before.has(row.dataset.browserTabId))
+        if (fresh && settled.length) {
+          frames.push({
+            fresh: Number(opacityOf(fresh.querySelector('.tab-title') ?? fresh).toFixed(2)),
+            settled: Number(Math.max(...settled.map((row) => opacityOf(row.querySelector('.tab-title') ?? row))).toFixed(2)),
+          })
+        }
+        await frame()
+      }
+      return { started: true, created: await created, frames }
+    })()`,
+  );
+  // A real hover on the rail opens it; the tab is created on the reveal's first frame.
+  pointerMove(
+    mainWindow.getContentBounds().x + 20,
+    mainWindow.getContentBounds().y + 220,
+  );
+  const midRevealResult = await midReveal;
+  assert.ok(
+    midRevealResult.started,
+    "a hover on the rail starts the panel's reveal",
+  );
+  const brightRows = midRevealResult.frames.filter(
+    (frame) => frame.fresh > frame.settled + 0.2,
+  );
+  assert.equal(
+    brightRows.length,
+    0,
+    `a row that arrives mid-reveal is never brighter than the rows already there (${midRevealResult.frames.length} frames): ${JSON.stringify(brightRows.slice(0, 3))}`,
+  );
+  console.log(
+    `Rail New Tab: no row painted on the rail (${contentRailSamples.length}+${sidebarRailSamples.length} frames); mid-reveal row on the label beat (${midRevealResult.frames.length} frames).`,
+  );
+  pointerMove(toolbarPoint.x, toolbarPoint.y);
+  if (midRevealResult.created)
+    await evaluate(
+      rendererViews.content,
+      `window.api.browser.tabs.close(${JSON.stringify(midRevealResult.created)})`,
+    );
+  await evaluate(
+    rendererViews.content,
+    `(async () => { const tab = (await window.api.browser.tabs.get()).find((candidate) => candidate.url === ${JSON.stringify(fixtureUrl)}); return tab ? window.api.browser.tabs.activate(tab.id) : false })()`,
+  );
+  await waitFor(
+    async () =>
+      !(await chromeState()).sidebarHovered &&
+      rendererViews.toolbar.getVisible() &&
+      collapsedRailVisible(),
+    "the live page back on its rail after the mid-reveal New Tab check",
   );
 
   // Create and return from the bottom sidebar action to verify the local React surface/tab lifecycle.
