@@ -2018,6 +2018,7 @@ async function run() {
       collapsedRailVisible(),
     "the live page and its rail after the rail New Tab check",
   );
+
   const midRevealTabsBefore = (
     await evaluate(rendererViews.sidebar, "window.api.browser.tabs.get()")
   ).map((tab) => tab.id);
@@ -2225,6 +2226,212 @@ async function run() {
     pageVisibleSidebar,
     "the restored live page keeps its inset-card geometry",
   );
+  // Exercise the real rail-to-New-Tab path, not just tabs.create(): moving onto the collapsed rail
+  // starts its hover reveal, then the revealed row is clicked as the visible renderer swaps to New
+  // Tab. The content renderer is hidden until that swap, so arm a frame-by-frame probe beforehand
+  // and begin sampling on its first visible frame. A settled-geometry check misses a brief flash.
+  await evaluate(
+    rendererViews.toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "tabs", sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })',
+  );
+  pointerMove(toolbarPoint.x, toolbarPoint.y);
+  await waitFor(
+    async () =>
+      !(await chromeState()).sidebarHovered &&
+      !(await chromeState()).sidebarFocused &&
+      collapsedRailVisible(),
+    "the rail to be collapsed and unfocused before clicking its New Tab action",
+  );
+  await evaluate(
+    rendererViews.content,
+    `(() => {
+      const probe = { startedAt: null, frames: [], done: false, rafQueued: false };
+      window.__railNewTabTransitionProbe = probe;
+      const sample = () => {
+        probe.rafQueued = false;
+        if (probe.done) return;
+        if (document.visibilityState !== "visible") {
+          window.setTimeout(schedule, 25);
+          return;
+        }
+        if (probe.startedAt === null) probe.startedAt = performance.now();
+        const card = document.querySelector(".browser-sidebar");
+        const rect = card?.getBoundingClientRect();
+        const painted = [];
+        for (const el of document.querySelectorAll(".browser-sidebar :is(.tab-item, .tab-title, .sidebar-new-tab-row-label)")) {
+          if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
+          const rowRect = el.getBoundingClientRect();
+          const clipped = { left: rowRect.left, right: rowRect.right, top: rowRect.top, bottom: rowRect.bottom };
+          for (let node = el.parentElement; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            const bounds = node.getBoundingClientRect();
+            if (style.overflowX !== "visible") {
+              clipped.left = Math.max(clipped.left, bounds.left);
+              clipped.right = Math.min(clipped.right, bounds.right);
+            }
+            if (style.overflowY !== "visible") {
+              clipped.top = Math.max(clipped.top, bounds.top);
+              clipped.bottom = Math.min(clipped.bottom, bounds.bottom);
+            }
+            if (node === document.documentElement) break;
+          }
+          if (clipped.right <= clipped.left || clipped.bottom <= clipped.top) continue;
+          let opacity = 1;
+          for (let node = el; node && node !== document.documentElement; node = node.parentElement)
+            opacity *= Number(getComputedStyle(node).opacity);
+          if (opacity < 0.05) continue;
+          painted.push({ text: el.textContent.trim().slice(0, 24), left: clipped.left, right: clipped.right, opacity, className: el.className, ghost: Boolean(el.closest(".sidebar-morph-ghost")) });
+        }
+        probe.frames.push({
+          t: Math.round(performance.now() - probe.startedAt),
+          visible: document.visibilityState === "visible",
+          collapsed: Boolean(card?.classList.contains("is-collapsed")),
+          reshaping: card?.getAttribute("data-reshaping") ?? null,
+          cardLeft: rect?.left ?? 0,
+          cardRight: rect?.right ?? 0,
+          cardWidth: rect?.width ?? 0,
+          ghostCount: card?.querySelectorAll(".sidebar-morph-ghost").length ?? 0,
+          painted,
+        });
+        if (performance.now() - probe.startedAt < 900) schedule();
+        else probe.done = true;
+      };
+      const schedule = () => {
+        if (probe.done || probe.rafQueued) return;
+        probe.rafQueued = true;
+        requestAnimationFrame(sample);
+      };
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") probe.rafQueued = false;
+        schedule();
+      });
+      schedule();
+      return true;
+    })()`,
+  );
+  const clickNewTabRect = await evaluate(
+    rendererViews.sidebar,
+    `(() => { const button = document.querySelector(".sidebar-rail-new-tab"); if (!button) return null; const r = button.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
+  );
+  assert.ok(clickNewTabRect, "the collapsed rail's New Tab action exists");
+  const clickNewTabPoint = screenPointForElement(
+    rendererViews.sidebar,
+    clickNewTabRect,
+  );
+  const clickNewTabBefore = new Set(
+    (
+      await evaluate(rendererViews.sidebar, "window.api.browser.tabs.get()")
+    ).map((tab) => tab.id),
+  );
+  pointerMove(clickNewTabPoint.x, clickNewTabPoint.y);
+  await waitFor(
+    () =>
+      rendererViews.sidebar.getVisible() &&
+      rendererViews.sidebar.getBounds().width >= 300 &&
+      evaluate(
+        rendererViews.sidebar,
+        `(() => {
+          const button = document.querySelector(".sidebar-new-tab-row");
+          if (!button || document.querySelector(".browser-sidebar")?.hasAttribute("data-reshaping")) return false;
+          const r = button.getBoundingClientRect();
+          return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest(".sidebar-new-tab-row") === button;
+        })()`,
+      ),
+    "the New Tab row to become hit-testable after hovering from the collapsed rail",
+  );
+  await clickElement(rendererViews.sidebar, ".sidebar-new-tab-row");
+  const clickedRailNewTabId = await waitFor(async () => {
+    const tabs = await evaluate(
+      rendererViews.sidebar,
+      "window.api.browser.tabs.get()",
+    );
+    const active = tabs.find((tab) => tab.active);
+    return active && !clickNewTabBefore.has(active.id) ? active.id : null;
+  }, "the collapsed rail's New Tab click to create and activate a tab");
+  await waitFor(
+    () =>
+      rendererViews.content.getVisible() &&
+      !rendererViews.sidebar.getVisible() &&
+      evaluate(
+        rendererViews.content,
+        'window.api.browser.state().then((state) => state.url.includes("surffish://quick-links"))',
+      ),
+    "the clicked rail New Tab to become the visible content surface",
+  );
+  pointerMove(toolbarPoint.x, toolbarPoint.y);
+  await waitFor(
+    () =>
+      evaluate(
+        rendererViews.content,
+        "Boolean(window.__railNewTabTransitionProbe?.done && window.__railNewTabTransitionProbe.frames.length >= 12)",
+      ),
+    "the in-flight New Tab sidebar frames to finish sampling",
+  );
+  const clickNewTabFrames = await evaluate(
+    rendererViews.content,
+    "window.__railNewTabTransitionProbe.frames",
+  );
+  const collapsedLabelFrames = clickNewTabFrames.filter(
+    (frame) => frame.collapsed && frame.painted.length > 0,
+  );
+  assert.equal(
+    collapsedLabelFrames.length,
+    0,
+    `the rail New Tab transition never paints panel rows while collapsed (${clickNewTabFrames.length} frames): ${JSON.stringify(collapsedLabelFrames.slice(0, 4))}`,
+  );
+  const collapsedGhostFrames = clickNewTabFrames.filter(
+    (frame) => frame.collapsed && frame.ghostCount > 0,
+  );
+  assert.equal(
+    collapsedGhostFrames.length,
+    0,
+    `the rail New Tab transition has no outgoing panel ghost while collapsed (${clickNewTabFrames.length} frames): ${JSON.stringify(collapsedGhostFrames.slice(0, 4))}`,
+  );
+  const labelsOutsideCard = clickNewTabFrames.flatMap((frame) =>
+    frame.painted
+      .filter(
+        (row) =>
+          row.left < frame.cardLeft - 2 || row.right > frame.cardRight + 2,
+      )
+      .map((row) => ({
+        ...row,
+        t: frame.t,
+        cardLeft: frame.cardLeft,
+        cardRight: frame.cardRight,
+        collapsed: frame.collapsed,
+      })),
+  );
+  assert.equal(
+    labelsOutsideCard.length,
+    0,
+    `the rail New Tab transition never paints a full-width label beyond its card (${clickNewTabFrames.length} frames): ${JSON.stringify(labelsOutsideCard.slice(0, 4))}`,
+  );
+  console.log(
+    `Collapsed-rail New Tab click: sampled ${clickNewTabFrames.length} visible handoff frames; no panel label or outgoing ghost painted while collapsed.`,
+  );
+  await evaluate(
+    rendererViews.content,
+    `window.api.browser.tabs.close(${JSON.stringify(clickedRailNewTabId)})`,
+  );
+  await evaluate(
+    rendererViews.content,
+    `(async () => { const tab = (await window.api.browser.tabs.get()).find((candidate) => candidate.url === ${JSON.stringify(fixtureUrl)}); return tab ? window.api.browser.tabs.activate(tab.id) : false })()`,
+  );
+  pointerMove(toolbarPoint.x, toolbarPoint.y);
+  await evaluate(
+    rendererViews.toolbar,
+    "window.api.browser.chrome.set({ sidebarHovered: false, sidebarFocused: false })",
+  );
+  await waitFor(async () => {
+    const chrome = await chromeState();
+    return (
+      !chrome.sidebarHovered &&
+      !chrome.sidebarFocused &&
+      rendererViews.toolbar.getVisible() &&
+      !rendererViews.content.getVisible() &&
+      collapsedRailVisible()
+    );
+  }, "the live page and collapsed rail after the rail-click transition check");
   console.log(
     `BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page card=${JSON.stringify(fixturePageView.getBounds())}; persisted sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and hover stability, pointer resize/persistence, x=5 click-through, overlay page input/wheel, delayed edge reveal, and tab/New Tab lifecycle verified.`,
   );
