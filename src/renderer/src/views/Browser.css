@@ -5772,3 +5772,84 @@
   box-shadow: none;
   backdrop-filter: none;
 }
+
+/* New Tab is a page card like a live page's (PAGE_FRAME_GAP, PAGE_FRAME_RADIUS): inset from the
+ * frame, beside the rail or the docked panel and below the toolbar strip, so the sidebar always
+ * sits on the frame's ground and never on the photo (the macOS glass tint over a photo left the
+ * hover panel's text hard to read). The ground under it is the viewport's, one layer like the
+ * toolbar strip's, so the rail and the panels over it paint none of their own. With Sidebar pushes
+ * page, the hover panel slides the card right like a live page (same size, the edge clips it). */
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:has(> .browser-sidebar.has-rail):has(
+    .browser-viewport > .new-tab-page
+  ) {
+  --new-tab-card-left: min(
+    var(--sidebar-rail-width, 84px),
+    calc(100% - var(--sidebar-card-gutter, 48px))
+  );
+  --new-tab-card-push: 0px;
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout.is-sidebar-docked:has(> .browser-sidebar.has-rail):has(
+    .browser-viewport > .new-tab-page
+  ) {
+  --new-tab-card-left: min(
+    var(--sidebar-width, 320px),
+    calc(100% - var(--sidebar-card-gutter, 48px))
+  );
+}
+.app-shell[data-sidebar-push="true"][data-surface="content"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout.is-sidebar-visible:not(.is-sidebar-docked):has(
+    > .browser-sidebar.has-rail
+  ):has(.browser-viewport > .new-tab-page) {
+  --new-tab-card-push: calc(
+    min(
+        var(--sidebar-width, 320px),
+        calc(100% - var(--sidebar-card-gutter, 48px))
+      ) -
+      var(--new-tab-card-left)
+  );
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:has(> .browser-sidebar.has-rail)
+  .browser-viewport:has(> .new-tab-page) {
+  background: var(--frame-ground, rgb(25, 27, 31));
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:has(> .browser-sidebar.has-rail)
+  .browser-viewport:has(> .new-tab-page.is-private) {
+  background: var(--frame-ground-private, rgb(30, 26, 40));
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:has(> .browser-sidebar.has-rail)
+  .browser-viewport
+  > .new-tab-page {
+  flex: 1 1 auto;
+  width: auto;
+  height: auto;
+  margin: 6px 6px 6px calc(var(--new-tab-card-left, 0px) + 6px);
+  border-radius: 10px;
+  transform: translateX(var(--new-tab-card-push, 0px));
+  transition: transform var(--sidebar-motion-duration, 400ms)
+    var(--sidebar-motion-easing, cubic-bezier(0.16, 1, 0.3, 1));
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:has(.browser-viewport > .new-tab-page)
+  > .browser-sidebar.has-rail.is-collapsed,
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout.is-sidebar-docked:has(.browser-viewport > .new-tab-page)
+  > .browser-sidebar.has-rail,
+.app-shell[data-sidebar-push="true"][data-surface="content"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout:not(.is-sidebar-docked):has(.browser-viewport > .new-tab-page)
+  > .browser-sidebar.has-rail:not(.is-collapsed) {
+  background: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell[data-surface="content"] .browser-viewport > .new-tab-page {
+    transition: none;
+  }
+}
