@@ -3,7 +3,29 @@ import type {
   SidebarBackdropMode,
   SidebarBackdropSettings,
 } from "../../../../shared/sidebar-backdrop";
+import {
+  FRAME_TRANSPARENCY_DEFAULT,
+  FRAME_TRANSPARENCY_MAX,
+  FRAME_TRANSPARENCY_MIN,
+} from "../../../../shared/sidebar-card";
 import { SettingsGroup, SettingsRow } from "./SettingsControls";
+
+const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
+
+/** The system's Reduce Transparency switch (macOS), live. */
+function useReducedTransparency(): boolean {
+  const [reduced, setReduced] = useState(
+    () => window.matchMedia?.(REDUCED_TRANSPARENCY_QUERY).matches === true,
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.(REDUCED_TRANSPARENCY_QUERY);
+    if (!query) return;
+    const update = (): void => setReduced(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return reduced;
+}
 
 const MODE_HINT: Record<SidebarBackdropMode, string> = {
   native:
@@ -13,7 +35,7 @@ const MODE_HINT: Record<SidebarBackdropMode, string> = {
   solid: "The sidebar uses a solid, high-contrast background over sites.",
 };
 
-/** Settings → General → Appearance: sidebar blur and the bookmarks bar. */
+/** Settings → General → Appearance: sidebar blur, frame transparency and the bookmarks bar. */
 export function AppearanceSettings(): React.JSX.Element {
   const [settings, setSettings] = useState<SidebarBackdropSettings | null>(
     null,
@@ -21,6 +43,9 @@ export function AppearanceSettings(): React.JSX.Element {
   const [mode, setMode] = useState<SidebarBackdropMode>("solid");
   const [barVisible, setBarVisible] = useState(false);
   const isMac = window.api.platform === "darwin";
+  const reducedTransparency = useReducedTransparency();
+  // While the slider moves: shown at once, saved and applied to every window as it goes.
+  const [frameDraft, setFrameDraft] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -64,6 +89,28 @@ export function AppearanceSettings(): React.JSX.Element {
       : mode === "solid"
         ? "No blur on this platform yet: the sidebar uses a solid, high-contrast background over sites."
         : MODE_HINT[mode];
+  const frameTransparency =
+    frameDraft ?? settings?.frameTransparency ?? FRAME_TRANSPARENCY_DEFAULT;
+  const frameDisabled = !settings || !isMac || reducedTransparency;
+  const frameHint = !isMac
+    ? "The glass frame is macOS only: here the frame is always solid."
+    : reducedTransparency
+      ? "Reduce Transparency is on in System Settings, so the frame is solid."
+      : "How much of the desktop shows through the toolbar, rail and docked sidebar. 0% is a solid frame. The hover sidebar follows, but always stays a little denser so it reads over pages.";
+  const setFrameTransparency = (value: number): void => {
+    setFrameDraft(value);
+    void window.api.browser.sidebarBackdrop
+      .set({ frameTransparency: value })
+      .then((next) => {
+        setSettings(next);
+        setFrameDraft((draft) => (draft === value ? null : draft));
+      })
+      .catch(() => setFrameDraft(null));
+  };
+  const framePercent =
+    ((frameTransparency - FRAME_TRANSPARENCY_MIN) /
+      (FRAME_TRANSPARENCY_MAX - FRAME_TRANSPARENCY_MIN)) *
+    100;
   return (
     <SettingsGroup title="Sidebar & bookmarks bar">
       <SettingsRow label="Sidebar blur" hint={hint}>
@@ -76,6 +123,47 @@ export function AppearanceSettings(): React.JSX.Element {
           onChange={(event) =>
             void window.api.browser.sidebarBackdrop
               .set({ blur: event.target.checked })
+              .then(setSettings)
+              .catch(() => undefined)
+          }
+        />
+      </SettingsRow>
+      <SettingsRow label="Frame transparency" hint={frameHint}>
+        <input
+          className="settings-range settings-frame-transparency"
+          type="range"
+          min={FRAME_TRANSPARENCY_MIN}
+          max={FRAME_TRANSPARENCY_MAX}
+          step={1}
+          disabled={frameDisabled}
+          value={frameDisabled && settings ? 0 : frameTransparency}
+          style={
+            {
+              "--range-fill": `${frameDisabled && settings ? 0 : framePercent}%`,
+            } as React.CSSProperties
+          }
+          aria-label="Frame transparency"
+          aria-valuetext={`${frameTransparency}%`}
+          onChange={(event) => setFrameTransparency(Number(event.target.value))}
+          onDoubleClick={() => setFrameTransparency(FRAME_TRANSPARENCY_DEFAULT)}
+        />
+        <output className="settings-slider-value">
+          {frameDisabled && settings ? "Solid" : `${frameTransparency}%`}
+        </output>
+      </SettingsRow>
+      <SettingsRow
+        label="Sidebar pushes page"
+        hint="The hover sidebar slides the page aside and matches the frame, instead of floating over it."
+      >
+        <input
+          type="checkbox"
+          className="settings-switch"
+          disabled={!settings}
+          checked={settings?.sidebarPushesPage ?? true}
+          aria-label="Sidebar pushes page"
+          onChange={(event) =>
+            void window.api.browser.sidebarBackdrop
+              .set({ sidebarPushesPage: event.target.checked })
               .then(setSettings)
               .catch(() => undefined)
           }

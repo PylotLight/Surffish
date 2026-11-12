@@ -16,7 +16,7 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { app, BaseWindow, nativeImage } = require("electron");
+const { app, BaseWindow, nativeImage, screen } = require("electron");
 const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 
 const userData = join(
@@ -31,6 +31,9 @@ const label =
 const measureOnly = label === "before";
 
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
+// src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
+const SIDEBAR_FLOAT_GAP = 6;
+
 function busyPage(theme) {
   const dark = theme === "dark";
   const nav = [
@@ -117,6 +120,13 @@ function captureWindow(name) {
   const dir = screenshotDirectory || join(userData, "shots");
   mkdirSync(dir, { recursive: true });
   const { x, y, width, height } = mainWindow.getContentBounds();
+  const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
+  const captureWidth = Math.min(width, display.x + display.width - x);
+  const captureHeight = Math.min(height, display.y + display.height - y);
+  if (captureWidth <= 0 || captureHeight <= 0)
+    throw new Error(
+      "The browser content is outside the visible display bounds",
+    );
   const file = join(dir, name);
   execFileSync("ffmpeg", [
     "-hide_banner",
@@ -125,7 +135,7 @@ function captureWindow(name) {
     "-f",
     "x11grab",
     "-video_size",
-    `${width}x${height}`,
+    `${captureWidth}x${captureHeight}`,
     "-i",
     `${process.env.DISPLAY}.0+${x},${y}`,
     "-frames:v",
@@ -184,6 +194,14 @@ async function run() {
       "||surffish-smoke-never-match.invalid^",
       smoke.ADBLOCK_CONFIG,
     ).serialize(),
+  );
+  // This smoke measures the floating hover card's own background (blur, tint, snapshot) over a
+  // busy page, so it runs with Settings → Appearance → Sidebar pushes page off: pushing (the
+  // default), the panel has no background of its own and the page slides aside instead
+  // (electron-sidebar-overlay-smoke covers that path).
+  writeFileSync(
+    join(userData, "sidebar-appearance.json"),
+    JSON.stringify({ sidebarPushesPage: false }),
   );
   const now = Date.now();
   writeFileSync(
@@ -328,28 +346,131 @@ async function run() {
         );
       }
       if (mode === "native") {
+        const toolbarBottom = await evaluate(
+          toolbar,
+          'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+        );
+        const nativeState = await evaluate(
+          toolbar,
+          "window.api.browser.sidebarBackdrop.get()",
+        );
         assert.equal(
-          sidebarBounds.y,
-          10,
-          "the native-blur view is inset to the card",
+          nativeState.state.nativeOverlay,
+          true,
+          "the floating overlay has a separate native background View over live page pixels",
+        );
+        // Background-only Views: the card's glass layer on top, the shadow layers stacked under it.
+        const nativeViews = mainWindow.contentView.children.filter(
+          (view) => !view.webContents,
         );
         assert.ok(
-          sidebarBounds.height <= mainWindow.getContentBounds().height - 20,
+          nativeViews.length >= 1,
+          "a background-only native View is attached",
+        );
+        const nativeBackdrop = nativeViews.at(-1);
+        const childViews = mainWindow.contentView.children;
+        const pageIndex = childViews.findIndex(
+          (view) =>
+            view.webContents && view.webContents.getURL().includes(`/${theme}`),
+        );
+        assert.ok(
+          pageIndex >= 0,
+          "the live page view is present underneath the sidebar",
+        );
+        assert.ok(
+          pageIndex < childViews.indexOf(nativeBackdrop) &&
+            childViews.indexOf(nativeBackdrop) < childViews.indexOf(toolbar) &&
+            childViews.indexOf(nativeBackdrop) < childViews.indexOf(sidebar),
+          "the native material is above live page pixels but behind toolbar and sidebar content",
+        );
+        assert.equal(nativeBackdrop.getVisible(), true);
+        // The hover panel is a floating card (src/shared/sidebar-card.ts SIDEBAR_FLOAT): its glass
+        // layer is the overlay view's bounds inset by the float gap, rounded.
+        const floatCard = (bounds) => ({
+          x: bounds.x + SIDEBAR_FLOAT_GAP,
+          y: bounds.y + SIDEBAR_FLOAT_GAP,
+          width: bounds.width - SIDEBAR_FLOAT_GAP,
+          height: bounds.height - SIDEBAR_FLOAT_GAP * 2,
+        });
+        assert.deepEqual(
+          nativeBackdrop.getBounds(),
+          floatCard(sidebar.getBounds()),
+          "the native material View is the floating card inside the sidebar's live bounds",
+        );
+        assert.equal(
+          card.backgroundImage,
+          "none",
+          "the native view supplies blur and tint without a CSS glass layer",
+        );
+        assert.equal(
+          card.backgroundColor,
+          "rgba(0, 0, 0, 0)",
+          "native material shows through the transparent sidebar surface",
+        );
+        assert.equal(
+          sidebarBounds.y,
+          toolbarBottom,
+          "the floating overlay starts at the toolbar's bottom edge without a second frame inset",
+        );
+        assert.equal(
+          sidebarBounds.height,
+          mainWindow.getContentBounds().height - toolbarBottom,
+          "the overlay fills the remaining area below the toolbar",
+        );
+        const { sidebarWidth: originalWidth } = await evaluate(
+          toolbar,
+          "window.api.browser.chrome.get()",
+        );
+        const resizedWidth = Math.min(
+          originalWidth + 32,
+          mainWindow.getContentBounds().width - 48,
+        );
+        await evaluate(
+          toolbar,
+          `window.api.browser.chrome.set({ sidebarWidth: ${resizedWidth} })`,
+        );
+        await waitFor(
+          () => sidebar.getBounds().width === resizedWidth + SIDEBAR_FLOAT_GAP,
+          "the floating sidebar to apply its resized width",
+        );
+        assert.deepEqual(
+          nativeBackdrop.getBounds(),
+          floatCard(sidebar.getBounds()),
+          "a width-only layout update keeps native material aligned without a progress change",
+        );
+        await evaluate(
+          toolbar,
+          `window.api.browser.chrome.set({ sidebarWidth: ${originalWidth} })`,
+        );
+        await waitFor(
+          () => sidebar.getBounds().width === originalWidth + SIDEBAR_FLOAT_GAP,
+          "the floating sidebar to restore its original width",
         );
       }
       // The page's nav text and thumbnails must not read through: the empty card area stays flat.
-      assert.ok(
-        results.at(-1).std < 8,
-        `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
-      );
+      // macOS native is glass now (a blur under a 0.75 tint): softened page detail may read
+      // through, so it gets a looser bound than the opaque paths.
+      if (mode !== "native" || process.platform === "darwin")
+        assert.ok(
+          results.at(-1).std <
+            (mode === "native" && process.platform === "darwin" ? 14 : 8),
+          `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
+        );
+      else
+        console.log(
+          "Skipping native-blur contrast assertion: this platform does not provide the macOS compositor layer.",
+        );
     }
     await evaluate(
       toolbar,
       "window.api.browser.chrome.set({ sidebarHovered: false })",
     );
-    await waitFor(() => !sidebar.getVisible(), "the overlay sidebar to hide");
+    await waitFor(() => {
+      const bounds = sidebar.getBounds();
+      return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
+    }, "the hover panel to collapse back to its visible tab rail");
     if (mode === "snapshot") {
-      // Hidden: no snapshot is kept around (and none is taken).
+      // Collapsed: no full-panel snapshot is kept around (and none is taken).
       await waitFor(
         () =>
           evaluate(
@@ -374,6 +495,15 @@ async function run() {
           .state.mode === "solid",
       "blur off to switch to solid",
     );
+    const solidState = await evaluate(
+      toolbar,
+      "window.api.browser.sidebarBackdrop.get()",
+    );
+    assert.equal(
+      solidState.state.nativeOverlay,
+      false,
+      "the solid fallback hides the separate native overlay View",
+    );
     await evaluate(
       toolbar,
       "window.api.browser.chrome.set({ sidebarHovered: true })",
@@ -386,11 +516,15 @@ async function run() {
         ),
       "the solid card",
     );
-    // A view that had the native blur keeps its card-sized frame (blur 0, opaque fill); others stay full height.
+    // Switching to a solid fallback removes the native overlay layer; the sidebar stays below the toolbar.
+    const toolbarBottom = await evaluate(
+      toolbar,
+      'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+    );
     assert.equal(
       sidebar.getBounds().y,
-      mode === "native" ? 10 : 0,
-      "the sidebar view frame after turning blur off",
+      toolbarBottom,
+      "the sidebar view remains aligned to the toolbar after turning blur off",
     );
     await delay(700);
     // Switched at runtime (e.g. native → solid): the card must still paint, over the dark page.

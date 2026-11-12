@@ -23,9 +23,9 @@ import {
  *  - without a rail (a full panel, or leaving the overlay for New Tab): closed the view waits fully
  *    slid out at its card width, and only its x moves. Nothing is resized while it is off screen.
  *
- * The native blur + tint (the view's own background) always moves and grows with the view, and the
- * renderer's card fills whatever width it is given (the panel has a fixed width and is clipped), so
- * an open/close never re-flows the sidebar. The view is hidden only once a close has landed with no
+ * The native blur + tint sibling follows the view's bounds and motion progress, and the renderer's
+ * card fills whatever width it is given (the panel has a fixed width and is clipped), so an
+ * open/close never re-flows the sidebar. The view is hidden only once a close has landed with no
  * rail to show.
  *
  * SURFFISH_SIDEBAR_MOTION=native tries Electron's compositor-animated setBounds instead (no tint
@@ -43,7 +43,7 @@ export interface SidebarMotionRect {
 }
 
 export interface SidebarMotionHooks {
-  /** Every frame, with the eased progress (0 closed … 1 open): sidebar-backdrop ramps the native tint. */
+  /** After motion or a bounds-only layout, with eased progress (0 closed … 1 open). */
   onProgress?: (progress: number) => void;
   /** A close has landed and there is no rail left to show (the view is hidden now). */
   onHidden?: () => void;
@@ -81,6 +81,18 @@ export class SidebarOverlayMotion {
   /** True while the view is on screen (open, opening, still closing, or resting on its rail). */
   get onScreen(): boolean {
     return this.rail || this.target === 1 || this.progress > 0;
+  }
+
+  /**
+   * The view's right edge at the current progress (window px): the rail's edge when closed on its
+   * rail, the full panel's edge when open, 0 when nothing is on screen. A pushed page card
+   * (browser-shell.ts) follows this edge frame by frame.
+   */
+  get visibleRight(): number {
+    if (!this.onScreen || this.rect.width <= 0 || this.rect.height <= 0)
+      return 0;
+    const { x, width } = this.frameAt(this.progress);
+    return Math.max(0, x + width);
   }
 
   /** Lay out at the current progress (window resize, width drag, card inset change). */
@@ -205,12 +217,13 @@ export class SidebarOverlayMotion {
 
   private apply(): void {
     const { height } = this.rect;
-    this.applyFrame(this.progress);
+    const boundsChanged = this.applyFrame(this.progress);
     const visible = this.onScreen && this.rect.width > 0 && height > 0;
     // Hidden, not just slid away, once closed: nothing in it should paint or animate then.
     if (this.view.getVisible() !== visible) this.view.setVisible(visible);
-    if (this.progress !== this.reported) {
-      this.reported = this.progress;
+    const progressChanged = this.progress !== this.reported;
+    if (progressChanged) this.reported = this.progress;
+    if (progressChanged || boundsChanged) {
       this.hooks.onProgress?.(this.progress);
     }
     this.notifyClosed();
@@ -231,9 +244,9 @@ export class SidebarOverlayMotion {
     this.hooks.onHidden?.();
   }
 
-  private applyFrame(progress: number): void {
+  private applyFrame(progress: number): boolean {
     const { y, height } = this.rect;
-    if (this.rect.width <= 0 || height <= 0) return;
+    if (this.rect.width <= 0 || height <= 0) return false;
     const { x, width } = this.frameAt(progress);
     const key = `${x},${y},${width},${height}`;
     // Layout runs on every chrome-state change; only touch the view when its frame really moves
@@ -241,7 +254,9 @@ export class SidebarOverlayMotion {
     if (key !== this.appliedKey) {
       this.appliedKey = key;
       this.view.setBounds({ x, y, width, height });
+      return true;
     }
+    return false;
   }
 
   private clearTimer(): void {

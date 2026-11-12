@@ -6,14 +6,19 @@
  * window vibrancy (NSVisualEffectView) sits *behind* the page view, so it can't reach either.
  * The three paths that do work:
  *  - 'native':   View.setBackgroundBlur (Electron 44): the compositor blurs whatever is under the
- *                sidebar view, live, with no renderer raster work. Paired with a translucent tint
- *                that is still readable on its own in case a platform's compositor can't sample
- *                the page beneath.
+ *                floating hover card, live, with no renderer raster work. On macOS glass the card
+ *                rests as glass: SIDEBAR_HOVER_GLASS_BLUR under the hover tint
+ *                (SIDEBAR_HOVER_GLASS_ARGB, private variant in private windows). Without glass
+ *                (Reduce Transparency, fullscreen) it rests as the frame's opaque surface colour
+ *                and the blur only softens the fade in/out.
  *  - 'snapshot': capture the page strip under the sidebar once when it opens (and again on tab
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
-import { SIDEBAR_CARD } from "./sidebar-card";
+import {
+  FRAME_TRANSPARENCY_DEFAULT,
+  normalizeFrameTransparency,
+} from "./sidebar-card";
 
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
@@ -26,10 +31,25 @@ export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = [
 export interface SidebarBackdropSettings {
   /** Settings → General → Appearance → Sidebar blur. On by default. */
   blur: boolean;
+  /**
+   * Settings → General → Appearance → Frame transparency (macOS glass): 0 solid … 100 clearest,
+   * FRAME_TRANSPARENCY_DEFAULT the stock look. Maps to the frame and hover-card tints in
+   * shared/sidebar-card.ts (frameGlassTints).
+   */
+  frameTransparency: number;
+  /**
+   * Settings → General → Appearance → Sidebar pushes page. On (default): the tab list's hover panel
+   * slides the page card aside (it keeps its size, the window edge clips it) and is the frame's own
+   * material, like the docked panel. Off: the panel floats over the page as its own card (blur,
+   * tint, shadow), the earlier look, kept to compare against.
+   */
+  sidebarPushesPage: boolean;
 }
 
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   blur: true,
+  frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
+  sidebarPushesPage: true,
 };
 
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
@@ -37,8 +57,8 @@ export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
   /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
-  /** The sidebar view itself frames the full-height card (it has used native blur in this window). */
-  framed: boolean;
+  /** True only while a separate native View blurs live page pixels behind a floating sidebar. */
+  nativeOverlay: boolean;
 }
 
 export interface SidebarBackdropImage {
@@ -56,15 +76,33 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius for the native compositor blur (px). */
-export const SIDEBAR_NATIVE_BLUR_RADIUS = 36;
-/** ARGB tint under the native blur: dark enough to read white text even if no blur shows. */
-export const SIDEBAR_NATIVE_TINT = "#C4131619";
-/** ARGB fill for a card-framed view after leaving the native path (blur off at runtime). */
-export const SIDEBAR_FRAMED_SOLID_TINT = "#F2131619";
-/** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
-export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
-export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;
+/** Blur radius under the opaque hover card while it fades in/out (at full strength it is opaque). */
+export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
+/** Blur radius under the glass hover card at rest (macOS glass): the page reads as frosted glass. */
+export const SIDEBAR_HOVER_GLASS_BLUR = 30;
+
+/**
+ * Native hover layer paint at a point of the open/close slide (progress 0..1): `alpha` scales the
+ * card's ground colour, `blur` is the in-window blur radius under it.
+ */
+export function sidebarNativeLayerPaint(
+  progress: number,
+  { glass = false }: { glass?: boolean } = {},
+): {
+  alpha: number;
+  blur: number;
+} {
+  const alpha = Math.max(0.02, Math.min(1, progress));
+  // Glass keeps its blur at rest: that is the material. Opaque, the blur only softens the page
+  // while the layer is still partly see-through; once opaque it is invisible work for the
+  // compositor, so drop it.
+  if (glass)
+    return { alpha, blur: Math.round(SIDEBAR_HOVER_GLASS_BLUR * alpha) };
+  return {
+    alpha,
+    blur: alpha >= 1 ? 0 : Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * alpha),
+  };
+}
 /** Fraction of the captured bitmap's physical width kept before the one-off canvas blur. */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25;
 /** At most one snapshot per this many ms while the sidebar stays open. */
@@ -81,6 +119,11 @@ export function normalizeSidebarBackdropSettings(
       typeof candidate.blur === "boolean"
         ? candidate.blur
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.blur,
+    frameTransparency: normalizeFrameTransparency(candidate.frameTransparency),
+    sidebarPushesPage:
+      typeof candidate.sidebarPushesPage === "boolean"
+        ? candidate.sidebarPushesPage
+        : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
   };
 }
 
@@ -105,12 +148,25 @@ export function resolveSidebarBackdropMode({
   override,
 }: {
   platform: NodeJS.Platform | string;
-  settings: SidebarBackdropSettings;
+  settings: Pick<SidebarBackdropSettings, "blur">;
   override?: SidebarBackdropMode | null;
 }): SidebarBackdropMode {
   if (!settings.blur) return "solid";
   if (override) return override;
   return platform === "darwin" ? "native" : "solid";
+}
+
+/** The docked sidebar is part of the window frame; only a floating overlay needs its own blur layer. */
+export function shouldUseNativeSidebarLayer({
+  mode,
+  docked,
+  visible,
+}: {
+  mode: SidebarBackdropMode;
+  docked: boolean;
+  visible: boolean;
+}): boolean {
+  return mode === "native" && visible && !docked;
 }
 
 export function intersectRects(a: Rect, b: Rect): Rect | null {

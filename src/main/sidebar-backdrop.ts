@@ -1,4 +1,5 @@
 import {
+  View,
   ipcMain,
   type BaseWindow,
   type IpcMainInvokeEvent,
@@ -14,13 +15,10 @@ import {
   normalizeSidebarBackdropSettings,
   parseSidebarBackdropOverride,
   resolveSidebarBackdropMode,
+  shouldUseNativeSidebarLayer,
   sidebarCaptureRegions,
   snapshotDue,
-  SIDEBAR_CARD_INSET,
-  SIDEBAR_CARD_RADIUS,
-  SIDEBAR_NATIVE_BLUR_RADIUS,
-  SIDEBAR_NATIVE_TINT,
-  SIDEBAR_FRAMED_SOLID_TINT,
+  sidebarNativeLayerPaint,
   SIDEBAR_SNAPSHOT_SCALE,
   SIDEBAR_SNAPSHOT_THROTTLE_MS,
   type SidebarBackdropImage,
@@ -32,22 +30,39 @@ import {
   getBrowserChromeState,
   getShellWindowFor,
   getShellWindows,
+  getSidebarHoverCardColour,
   getSidebarOverlayView,
   getWindowRenderers,
+  isBrowserFrameGlass,
   isMainWindowRenderer,
+  isSidebarDocked,
+  isSidebarFloating,
   isSidebarOverlayShown,
+  isSidebarPushing,
   sendToMainWindowRenderers,
+  setBrowserFrameTransparency,
+  setBrowserSidebarPushesPage,
+  setSidebarDockListener,
   setSidebarMotionListener,
-  setSidebarOverlayFrame,
   setSidebarOverlayListener,
 } from "./browser-shell";
 import { scaleArgbAlpha } from "../shared/sidebar-motion";
+import { SIDEBAR_FLOAT, sidebarFloatCardRect } from "../shared/sidebar-card";
+import {
+  hideSidebarCardShadow,
+  updateSidebarCardShadow,
+} from "./sidebar-card-shadow";
 import { readUserJson, writeUserJson } from "./user-json";
 
 /**
  * The overlay sidebar's background over live pages (see shared/sidebar-backdrop.ts for why CSS
- * backdrop-filter and window vibrancy can't do it). 'native' configures the sidebar view's own
- * compositor blur once; 'snapshot' captures the page strip under the sidebar when it opens and
+ * backdrop-filter and window vibrancy can't do it). 'native' configures a separate background-only
+ * View behind the sidebar renderer only while the hover card floats over live page pixels: the
+ * card's rect (SIDEBAR_FLOAT, inset in the overlay view), rounded, glass on macOS (in-window blur
+ * under the hover tint) or the opaque frame surface without glass; docked chrome uses the window's
+ * shared ground. The floating card's soft shadow (sidebar-card-shadow.ts) follows the same rect in
+ * every mode.
+ * 'snapshot' captures the page strip under the sidebar when it opens and
  * on tab/navigation changes while it stays open (throttled), never while it is hidden or the
  * window is minimized/hidden; 'solid' does nothing here (the renderer draws a near-opaque tint).
  */
@@ -71,8 +86,8 @@ interface WindowBackdrop {
   generation: number;
 }
 const perWindow = new WeakMap<BaseWindow, WindowBackdrop>();
-const layered = new WeakSet<BaseWindow>();
-/** The overlay's open progress (sidebar-motion.ts): the view's tint and blur ramp with its slide. */
+const nativeBackdropViews = new WeakMap<BaseWindow, View>();
+/** The overlay's open progress (sidebar-motion.ts): the native background ramps with its slide. */
 const motionProgress = new WeakMap<BaseWindow, number>();
 
 export function getSidebarBackdropMode(): SidebarBackdropMode {
@@ -103,7 +118,7 @@ function stateFor(window: BaseWindow): SidebarBackdropState {
   return {
     mode,
     images: mode === "snapshot" ? windowState(window).images : NO_IMAGES,
-    framed: layered.has(window),
+    nativeOverlay: nativeBackdropViews.get(window)?.getVisible() ?? false,
   };
 }
 
@@ -114,69 +129,141 @@ function sendState(window: BaseWindow): void {
 }
 
 /**
- * Native blur on the sidebar view itself. Once a view has a compositor layer (blur / radius), a
- * fully transparent background stops its web contents drawing at all (seen on Linux/Electron 44),
- * so leaving 'native' at runtime keeps the layer and the card-sized frame, with the blur at 0 and
- * an opaque tint instead. A window that never used the native path keeps its plain view.
+ * The sidebar is part of the frame right now (docked, or the hover panel pushing the page aside):
+ * no page is under it, so it has no tint, blur, shadow or snapshot of its own; the window root's
+ * ground (the vibrancy under the frame tint, or the opaque surface) shows through it.
  */
-function applyNativeLayer(window: BaseWindow): void {
-  const view = getSidebarOverlayView(window);
-  if (!view) return;
-  const native = getSidebarBackdropMode() === "native";
-  if (!native && !layered.has(window)) return;
+function sidebarIsFrame(window: BaseWindow): boolean {
+  return isSidebarDocked(window) || isSidebarPushing(window);
+}
+
+/** Hide and reset the hover-only native background; the sidebar WebContentsView stays untouched. */
+function clearNativeLayer(window: BaseWindow): void {
+  const view = nativeBackdropViews.get(window);
+  if (view) {
+    try {
+      const wasVisible = view.getVisible();
+      view.setVisible(false);
+      view.setBackgroundBlur(0);
+      view.setBackgroundColor("#00000000");
+      if (wasVisible) sendState(window);
+    } catch {
+      // The window is being torn down.
+    }
+  }
+}
+
+/** Create a non-interactive native material view below the toolbar and above live page views. */
+function createNativeBackdropView(window: BaseWindow): View | null {
+  const current = nativeBackdropViews.get(window);
+  if (current) return current;
+  const sidebar = getSidebarOverlayView(window);
+  if (!sidebar || window.isDestroyed()) return null;
+  const backdrop = new View();
+  backdrop.setBounds(sidebar.getBounds());
+  backdrop.setVisible(false);
+  const sidebarIndex = window.contentView.children.indexOf(sidebar);
+  // The toolbar remains above this view; sidebar content remains its topmost sibling.
+  window.contentView.addChildView(backdrop, Math.max(0, sidebarIndex - 1));
+  nativeBackdropViews.set(window, backdrop);
+  return backdrop;
+}
+
+/** A separate compositor backdrop is only visible while the panel floats over live page pixels. */
+function applyNativeLayer(
+  window: BaseWindow,
+  progress = motionProgress.get(window) ?? 0,
+): void {
+  const backdrop = nativeBackdropViews.get(window);
+  const sidebar = getSidebarOverlayView(window);
+  if (!backdrop || !sidebar) return;
+  if (
+    !shouldUseNativeSidebarLayer({
+      mode: getSidebarBackdropMode(),
+      docked: sidebarIsFrame(window),
+      visible: isSidebarOverlayShown(window),
+    })
+  ) {
+    clearNativeLayer(window);
+    return;
+  }
   try {
-    // The card's rounded right side is the view's own uniform clip (Electron has no per-corner
-    // radius): the right corners land exactly on the card's, and the left corners read as a soft
-    // arc blending into the window's own rounded frame. One DIP keeps a zero-radius card painting.
-    view.setBorderRadius(Math.max(1, SIDEBAR_CARD_RADIUS));
-    layered.add(window);
-    paintNativeLayer(window, motionProgress.get(window) ?? 1);
+    const wasVisible = backdrop.getVisible();
+    const floating = isSidebarFloating(window);
+    backdrop.setBounds(
+      floating
+        ? sidebarFloatCardRect(sidebar.getBounds())
+        : sidebar.getBounds(),
+    );
+    backdrop.setBorderRadius(floating ? SIDEBAR_FLOAT.radius : 0);
+    paintNativeLayer(
+      backdrop,
+      progress,
+      getSidebarHoverCardColour(window),
+      isBrowserFrameGlass(window),
+    );
+    backdrop.setVisible(true);
+    if (!wasVisible) sendState(window);
   } catch (error) {
     console.warn("Could not configure the sidebar background blur:", error);
+    clearNativeLayer(window);
   }
-  setSidebarOverlayFrame(window, {
-    inset: SIDEBAR_CARD_INSET,
-    radius: SIDEBAR_CARD_RADIUS,
-  });
 }
 
 /**
- * The view's own tint + blur at a point of the open/close slide: they fade in and out with the
- * panel instead of popping in at full strength before it has moved (one timeline, see
- * shared/sidebar-motion.ts). Only for views that use the native layer.
+ * The background-only View's tint + blur at a point of the open/close slide: they fade in and out
+ * with the panel instead of popping in at full strength before it has moved.
  */
-function paintNativeLayer(window: BaseWindow, progress: number): void {
-  const view = getSidebarOverlayView(window);
-  if (!view || !layered.has(window)) return;
-  const native = getSidebarBackdropMode() === "native";
-  // Never fully transparent: a layered view with a 0-alpha background stops drawing its web
-  // contents at all (see applyNativeLayer), and a collapsed sidebar keeps its icon rail on screen,
-  // which needs its own glass even at progress 0.
-  const ramp = Math.max(0.02, Math.min(1, 0.55 + 0.45 * progress));
-  view.setBackgroundColor(
-    scaleArgbAlpha(
-      native ? SIDEBAR_NATIVE_TINT : SIDEBAR_FRAMED_SOLID_TINT,
-      ramp,
-    ),
-  );
-  view.setBackgroundBlur(
-    native ? Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * ramp) : 0,
-  );
+function paintNativeLayer(
+  view: View,
+  progress: number,
+  colour: string,
+  glass: boolean,
+): void {
+  const { alpha, blur } = sidebarNativeLayerPaint(progress, { glass });
+  view.setBackgroundColor(scaleArgbAlpha(colour, alpha));
+  view.setBackgroundBlur(blur);
 }
 
 function onMotion(window: BaseWindow, progress: number): void {
   motionProgress.set(window, progress);
-  if (!layered.has(window)) return;
   try {
-    paintNativeLayer(window, progress);
+    applyNativeLayer(window, progress);
+    applyShadow(window, progress);
   } catch {
     // The view is going away with its window.
   }
 }
 
+/** The floating hover card's soft shadow, faded with the slide; hidden unless the card floats. */
+function applyShadow(
+  window: BaseWindow,
+  progress = motionProgress.get(window) ?? 0,
+): void {
+  if (window.isDestroyed()) return;
+  const sidebar = getSidebarOverlayView(window);
+  const visible = isSidebarOverlayShown(window);
+  if (
+    !sidebar ||
+    !visible ||
+    sidebarIsFrame(window) ||
+    !isSidebarFloating(window) ||
+    !(progress > 0)
+  ) {
+    hideSidebarCardShadow(window);
+    return;
+  }
+  updateSidebarCardShadow(window, {
+    card: sidebarFloatCardRect(sidebar.getBounds()),
+    below: nativeBackdropViews.get(window) ?? null,
+    strength: progress,
+  });
+}
+
 function canCapture(window: BaseWindow): boolean {
   return (
     !window.isDestroyed() &&
+    !sidebarIsFrame(window) &&
     window.isVisible() &&
     !window.isMinimized() &&
     getSidebarBackdropMode() === "snapshot"
@@ -284,6 +371,12 @@ function onOverlay(
   window: BaseWindow,
   event: "shown" | "hidden" | "prefetch",
 ): void {
+  if (event !== "prefetch") applyShadow(window);
+  if (getSidebarBackdropMode() === "native") {
+    if (event === "shown") applyNativeLayer(window);
+    else if (event === "hidden") clearNativeLayer(window);
+    return;
+  }
   if (getSidebarBackdropMode() !== "snapshot") return;
   const state = windowState(window);
   if (event === "hidden") {
@@ -310,6 +403,7 @@ function onOverlay(
 function applyEverywhere(): void {
   for (const window of getShellWindows()) {
     applyNativeLayer(window);
+    applyShadow(window);
     if (
       getSidebarBackdropMode() === "snapshot" &&
       isSidebarOverlayShown(window)
@@ -319,8 +413,9 @@ function applyEverywhere(): void {
   }
 }
 
-/** A browser window's shell was created: set up its sidebar view's layer. */
+/** A browser window's shell was created: add a hidden native backdrop below its toolbar/sidebar. */
 export function attachSidebarBackdrop(window: BaseWindow): void {
+  createNativeBackdropView(window);
   applyNativeLayer(window);
   sendState(window);
 }
@@ -342,8 +437,13 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 
 export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE));
+  setBrowserFrameTransparency(settings.frameTransparency);
+  setBrowserSidebarPushesPage(settings.sidebarPushesPage);
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
+  setSidebarDockListener((window) =>
+    onMotion(window, motionProgress.get(window) ?? 0),
+  );
   ipcMain.handle("browser:sidebar-backdrop:get", (event) => {
     assertMainRenderer(event);
     const window = getShellWindowFor(event.sender);
@@ -351,7 +451,11 @@ export function registerSidebarBackdropIpc(): void {
       settings: { ...settings },
       state: window
         ? stateFor(window)
-        : { mode: getSidebarBackdropMode(), images: NO_IMAGES, framed: false },
+        : {
+            mode: getSidebarBackdropMode(),
+            images: NO_IMAGES,
+            nativeOverlay: false,
+          },
     };
   });
   ipcMain.handle("browser:sidebar-backdrop:set", (event, input: unknown) => {
@@ -361,6 +465,9 @@ export function registerSidebarBackdropIpc(): void {
       ...(typeof input === "object" && input !== null ? input : {}),
     });
     writeUserJson(SETTINGS_FILE, settings);
+    // The frame's root ground re-lays out in every window; the hover card repaints below.
+    setBrowserFrameTransparency(settings.frameTransparency);
+    setBrowserSidebarPushesPage(settings.sidebarPushesPage);
     applyEverywhere();
     sendToMainWindowRenderers("browser:sidebar-backdrop:settings", {
       ...settings,

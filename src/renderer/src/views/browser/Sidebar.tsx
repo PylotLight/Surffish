@@ -23,6 +23,7 @@ import {
   MORPH_RESHAPE_MS,
   captureSidebarMorph,
   playSidebarMorph,
+  settleSidebarMorph,
   type MorphSnapshot,
 } from "../../../../shared/sidebar-morph";
 import type { SpacesSnapshot } from "../../../../shared/spaces";
@@ -195,13 +196,26 @@ export function Sidebar(props: SidebarProps) {
     const shape = collapsed ? "rail" : "panel";
     if (shape === morphShapeRef.current) {
       // At rest: keep the snapshot fresh, so the next change captures where things stand now.
-      morphSnapshotRef.current = captureSidebarMorph(host);
+      // During a morph, its marks are still travelling; recapturing them here makes the next
+      // transition start from an arbitrary in-flight position.
+      if (!card.hasAttribute("data-reshaping"))
+        morphSnapshotRef.current = captureSidebarMorph(host);
       return;
     }
     const previous = morphShapeRef.current;
     morphShapeRef.current = shape;
     const snapshot = morphSnapshotRef.current;
-    if (snapshot && previous) {
+    if (snapshot && previous && document.visibilityState === "hidden") {
+      // This surface is not drawing (its view is hidden: the content renderer behind a live page,
+      // the overlay over New Tab). A morph played now would only start on its next frame, so the
+      // change would replay in full when the surface is next shown: the panel's copy at full
+      // width over the page, its highlighted row and title, the card shrinking to the rail. The
+      // new shape is simply where it is.
+      window.clearTimeout(morphTimerRef.current);
+      morphTimerRef.current = undefined;
+      settleSidebarMorph(host);
+      card.removeAttribute("data-reshaping");
+    } else if (snapshot && previous) {
       // While the card grows or shrinks the incoming column holds its final width, so the marks'
       // measured destinations stay true and only the space beside them moves (Browser.css keys
       // the hold on the card's direction, not on the shape name).
@@ -222,6 +236,36 @@ export function Sidebar(props: SidebarProps) {
     // The new shape is what the next change captures.
     morphSnapshotRef.current = captureSidebarMorph(host);
   });
+  // While this surface is not drawing, nothing in its sidebar may transition or keep a morph
+  // waiting: Chromium starts both on the next frame, so a change made out of sight (the panel
+  // closing behind a live page, a tab created over New Tab) would play out over the page the
+  // moment the surface is shown. Browser.css drops transitions under [data-offscreen]; a morph
+  // that was running when the surface went out of sight lands at once.
+  useLayoutEffect(() => {
+    const card = sidebarRef.current;
+    const host = morphHostRef.current;
+    if (!card) return;
+    const sync = (): void => {
+      if (document.visibilityState === "hidden") {
+        window.clearTimeout(morphTimerRef.current);
+        morphTimerRef.current = undefined;
+        settleSidebarMorph(host);
+        card.removeAttribute("data-reshaping");
+        card.setAttribute("data-offscreen", "");
+        return;
+      }
+      if (!card.hasAttribute("data-offscreen")) return;
+      // Resolve the styles the hidden document skipped (the shape it changed to) with
+      // transitions still off, so showing the surface starts none.
+      void card.getBoundingClientRect();
+      card.removeAttribute("data-offscreen");
+      if (morphShapeRef.current)
+        morphSnapshotRef.current = captureSidebarMorph(host);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, [sidebarRef]);
   // Scrolling and window resizes move marks without a render: keep the snapshot honest, but never
   // mid-morph, when the marks are still travelling.
   useLayoutEffect(() => {
@@ -240,10 +284,20 @@ export function Sidebar(props: SidebarProps) {
       queued = true;
       requestAnimationFrame(refresh);
     };
+    const refreshAlignedRail = () => {
+      if (
+        card.hasAttribute("data-reshaping") ||
+        morphShapeRef.current !== "rail"
+      )
+        return;
+      morphSnapshotRef.current = captureSidebarMorph(host);
+    };
     host.addEventListener("scroll", queue, { capture: true, passive: true });
+    host.addEventListener("sidebar-rail-aligned", refreshAlignedRail);
     window.addEventListener("resize", queue, { passive: true });
     return () => {
       host.removeEventListener("scroll", queue, true);
+      host.removeEventListener("sidebar-rail-aligned", refreshAlignedRail);
       window.removeEventListener("resize", queue);
       window.clearTimeout(morphTimerRef.current);
     };
@@ -302,31 +356,6 @@ export function Sidebar(props: SidebarProps) {
     >
       {surface === "sidebar" && (
         <SidebarBackdropLayer state={sidebarBackdrop} cardRef={sidebarRef} />
-      )}
-      {window.api.platform === "darwin" && (
-        <div className="sidebar-window-controls" aria-label="Window controls">
-          <button
-            className="sidebar-window-control is-close"
-            type="button"
-            aria-label="Close window"
-            title="Close window"
-            onClick={() => void window.api.browser.windowControl("close")}
-          />
-          <button
-            className="sidebar-window-control is-minimize"
-            type="button"
-            aria-label="Minimize window"
-            title="Minimize window"
-            onClick={() => void window.api.browser.windowControl("minimize")}
-          />
-          <button
-            className="sidebar-window-control is-zoom"
-            type="button"
-            aria-label="Toggle window zoom"
-            title="Toggle window zoom"
-            onClick={() => void window.api.browser.windowControl("toggle-zoom")}
-          />
-        </div>
       )}
       <div
         ref={morphHostRef}
@@ -805,18 +834,21 @@ export function Sidebar(props: SidebarProps) {
             shapeHidden={!collapsed}
             animate={railOnScreen}
             cachedSiteIcons={cachedSiteIcons}
-            onOpenPinnedSite={(site: PinnedSite) => void openPinnedSite(site)}
+            onRevealPins={() =>
+              // Focus in the sidebar keeps the panel revealed; once it is the shape on screen, the
+              // panel's own pins row takes focus (that is where a pin is opened or rearranged).
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() =>
+                  pinnedListRef.current
+                    ?.querySelector<HTMLElement>("button")
+                    ?.focus(),
+                ),
+              )
+            }
             onTogglePinned={() =>
               setSidebarPinned((pinned: boolean) => !pinned)
             }
             onNewTab={createNewTab}
-            onUnpinPinnedSite={(site: PinnedSite) =>
-              void savePinnedSites(
-                pinnedSites.filter(
-                  (pinned: PinnedSite) => pinned.url !== site.url,
-                ),
-              )
-            }
             pinnedSites={railPinnedSites}
             pinnedTabs={railPinnedTabs}
             sidebarPinned={sidebarPinned}

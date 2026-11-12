@@ -33,6 +33,7 @@ import {
   dialog,
   Menu,
   screen,
+  View,
   WebContentsView,
   type BaseWindow,
   type ContextMenuParams,
@@ -41,6 +42,7 @@ import {
   type WebContents,
   type WebFrameMain,
 } from "electron";
+import { PAGE_FRAME_RADIUS } from "../shared/sidebar-card";
 import type {
   BrowserBounds,
   BrowserFindState,
@@ -304,8 +306,10 @@ import {
 } from "./mac-trackpad-swipe";
 import { setPageViewOnScreen, type TabProcessEntry } from "./tab-visibility";
 import {
+  framePageArea,
   initialPageViewBounds,
   pageViewBounds,
+  slideViewRect,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
 import type { TabArchiveCandidate } from "../shared/tab-archive";
@@ -530,6 +534,18 @@ interface BrowserWindowState {
   activeTabId: string | null;
   /** Page area in window coordinates (where the active site view sits). */
   browserBounds: BrowserBounds;
+  /**
+   * The page area as the content renderer measured it (its viewport), before the frame insets it:
+   * browserBounds is the page card derived from it (shared/page-view-bounds.ts framePageArea).
+   */
+  pageArea?: BrowserBounds;
+  /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
+  pageFrameLeft?: number | null;
+  /**
+   * The page card's slide right of `browserBounds` while the tab list's hover panel pushes it
+   * aside (browser-shell.ts syncPageSlide): the views move, `browserBounds` stays the frame's rect.
+   */
+  pageSlideX?: number;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -1424,13 +1440,27 @@ export function getBrowserTabPageInfo(id?: string | null): {
   };
 }
 
+const pageCornerRadii = new WeakMap<View, number>();
+
+/** Rounds a page view's corners, touching the native view only when the radius changes. */
+function setPageCornerRadius(view: View, radius: number): void {
+  if ((pageCornerRadii.get(view) ?? 0) === radius) return;
+  pageCornerRadii.set(view, radius);
+  view.setBorderRadius(radius);
+}
+
 function applyTabBounds(w: BrowserWindowState): void {
-  const { browserBounds } = w;
+  // A pushed page card slides right with the hover panel, same size (the page never re-lays out).
+  const browserBounds = slideViewRect(w.browserBounds, w.pageSlideX ?? 0);
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
   const split = splitOf(activeTabOf(w));
   const layout =
     split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null;
+  // Inside the browser frame (toolbar strip + sidebar, browser-shell.ts) the page is a rounded card
+  // (native View.setBorderRadius: real rounded corners, the frame's material shows through the
+  // cut-outs); a split keeps its own surface and square panes.
+  const framed = pageAreaShown && !layout && (w.pageFrameLeft ?? null) !== null;
   for (const tab of w.tabs) {
     if (!tab.view) continue;
     const pane = split ? split.tabIds.indexOf(tab.id) : -1;
@@ -1452,6 +1482,9 @@ function applyTabBounds(w: BrowserWindowState): void {
       tab.view.setBounds(target);
       reader?.setBounds(target);
     }
+    const radius = visible && framed ? PAGE_FRAME_RADIUS : 0;
+    setPageCornerRadius(tab.view, radius);
+    if (reader) setPageCornerRadius(reader, radius);
     if (!w.window.isDestroyed()) {
       setPageViewOnScreen(
         w.window,
@@ -6332,16 +6365,46 @@ export function setBrowserBounds(input: unknown): void {
     values.some((value) => typeof value !== "number" || !Number.isFinite(value))
   )
     return;
-  const browserBounds = (w.browserBounds = {
+  // The content renderer measures its viewport (full width, from the toolbar's bottom line); live
+  // pages are the card inside the frame (syncBrowserBoundsToWindow), so its report is framed too.
+  w.pageArea = {
     x: Math.max(0, Math.round(bounds.x!)),
     y: Math.max(0, Math.round(bounds.y!)),
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!)),
-  });
+  };
+  const browserBounds = (w.browserBounds = framePageArea(
+    w.pageArea,
+    w.pageFrameLeft ?? null,
+  ));
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
   if (browserBounds.width === 0 || browserBounds.height === 0)
     hideLinkStatus(false, w.window);
   applyTabBounds(w);
+}
+
+/**
+ * The hover panel pushes the page aside (browser-shell.ts): move the window's on-screen page card
+ * `dx` px right of its frame rect, keeping its size. Runs once per motion frame, so the common case
+ * (one page, no split) only moves the active view and its reader; a split goes through the full
+ * layout so its panes and divider surface move together.
+ */
+export function slideBrowserPage(window: BaseWindow, dx: number): void {
+  const w = windowStateFor(window);
+  if (!isLiveWindow(w)) return;
+  const next = Math.max(0, Math.round(dx));
+  if ((w.pageSlideX ?? 0) === next) return;
+  w.pageSlideX = next;
+  const { browserBounds } = w;
+  if (!(browserBounds.width > 0) || !(browserBounds.height > 0)) return;
+  const active = activeTabOf(w);
+  if (!active?.view || splitOf(active)) {
+    applyTabBounds(w);
+    return;
+  }
+  const target = slideViewRect(browserBounds, next);
+  active.view.setBounds(target);
+  readerViewFor(active.view.webContents)?.setBounds(target);
 }
 
 export function syncBrowserBoundsToWindow(
@@ -6349,19 +6412,25 @@ export function syncBrowserBoundsToWindow(
   height: number,
   overlayMode: boolean,
   window?: BaseWindow,
+  frameLeft: number | null = null,
 ): void {
   const w = window ? windowStateFor(window) : currentWindowState();
-  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return;
+  if (!isLiveWindow(w)) return;
+  const nextFrame =
+    overlayMode && frameLeft !== null
+      ? Math.max(0, Math.round(frameLeft))
+      : null;
+  const frameChanged = nextFrame !== (w.pageFrameLeft ?? null);
+  w.pageFrameLeft = nextFrame;
+  if (!overlayMode || width <= 0 || height <= 0) return;
+  const area = w.pageArea ?? w.browserBounds;
+  if (area.width <= 0 || area.height <= 0) return;
+  const y = Math.min(area.y, height);
+  w.pageArea = { x: 0, y, width, height: Math.max(0, height - y) };
+  const nextBounds: BrowserBounds = framePageArea(w.pageArea, nextFrame);
   const { browserBounds } = w;
-  if (browserBounds.width <= 0 || browserBounds.height <= 0) return;
-  const y = Math.min(browserBounds.y, height);
-  const nextBounds: BrowserBounds = {
-    x: 0,
-    y,
-    width,
-    height: Math.max(0, height - y),
-  };
   if (
+    !frameChanged &&
     nextBounds.x === browserBounds.x &&
     nextBounds.y === browserBounds.y &&
     nextBounds.width === browserBounds.width &&

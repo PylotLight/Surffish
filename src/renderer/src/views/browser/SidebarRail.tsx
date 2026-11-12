@@ -6,7 +6,8 @@ import {
 } from "../../../../shared/sidebar-morph";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { TabFavicon } from "../TabIndicators";
-import { PinnedSiteIcon } from "./icons";
+import { PinnedSiteMark } from "./icons";
+import { planRailPinCluster } from "../../../../shared/rail-pin-cluster";
 import { httpOrigin } from "./chrome-helpers";
 
 /**
@@ -33,10 +34,97 @@ export interface SidebarRailProps {
    */
   shapeHidden: boolean;
   sidebarPinned: boolean;
-  onOpenPinnedSite: (site: PinnedSite) => void;
-  onUnpinPinnedSite: (site: PinnedSite) => void;
+  /**
+   * The pin cluster was clicked (or pressed from the keyboard): focus in the sidebar already
+   * reveals the panel, and this hands focus on to its full pins row.
+   */
+  onRevealPins: () => void;
   onTogglePinned: () => void;
   onNewTab: () => void;
+}
+
+type RailPin =
+  | { kind: "tab"; key: string; tab: BrowserTabSummary }
+  | { kind: "site"; key: string; site: PinnedSite };
+
+/**
+ * Every pin as one rail row: marks stacked a little over each other (shared/rail-pin-cluster.ts)
+ * in the panel's own order, the first in front and on the panel row's first pin, "+N" past four.
+ * The active pin keeps its slot and is marked by its ring only. Each mark carries its pin's
+ * motion key, so a shape change glides it between its slot here and its slot in the panel's row
+ * (shared/sidebar-morph.ts). One button: hovering the rail reveals the panel over it, whose pins
+ * row is where a specific pin is opened, dragged or removed, so the cluster never guesses which
+ * pin a click meant.
+ */
+function RailPinCluster({
+  pins,
+  cachedSiteIcons,
+  animate,
+  onReveal,
+}: {
+  pins: RailPin[];
+  cachedSiteIcons: Record<string, string>;
+  animate: boolean;
+  onReveal: () => void;
+}): React.JSX.Element {
+  const plan = planRailPinCluster(pins.length);
+  const names = pins.map((pin) =>
+    pin.kind === "tab" ? pin.tab.title : pin.site.title,
+  );
+  const label = `Pinned: ${names.join(", ")}`;
+  const active = pins.some((pin) => pin.kind === "tab" && pin.tab.active);
+  return (
+    <button
+      className={`sidebar-rail-pins${active ? " is-active" : ""}`}
+      type="button"
+      data-rail-align="pins"
+      aria-label={label}
+      title={label}
+      draggable={false}
+      style={{ "--rail-pins-width": `${plan.width}px` } as React.CSSProperties}
+      onClick={onReveal}
+    >
+      {plan.slots.map((slot, index) => {
+        const style = {
+          "--rail-pin-x": `${slot.x}px`,
+          "--rail-pin-slot": index,
+          zIndex: slot.z,
+        } as React.CSSProperties;
+        const pin = slot.pin === null ? undefined : pins[slot.pin];
+        if (!pin)
+          return (
+            <span
+              key="more"
+              className="sidebar-rail-pins-more"
+              style={style}
+              aria-hidden="true"
+            >
+              +{plan.overflow}
+            </span>
+          );
+        return (
+          <span
+            key={pin.key}
+            className={`sidebar-rail-pins-slot${pin.kind === "tab" && pin.tab.active ? " is-active" : ""}`}
+            style={style}
+            data-motion-key={pin.key}
+            aria-hidden="true"
+          >
+            {pin.kind === "tab" ? (
+              <TabFavicon tab={pin.tab} animate={animate} />
+            ) : (
+              <PinnedSiteMark
+                site={pin.site}
+                cachedFaviconUrl={
+                  cachedSiteIcons[httpOrigin(pin.site.url) ?? ""] ?? null
+                }
+              />
+            )}
+          </span>
+        );
+      })}
+    </button>
+  );
 }
 
 function RailTab({
@@ -124,14 +212,16 @@ function setInlinePx(
   element: HTMLElement,
   property: string,
   px: number | null,
-): void {
+): boolean {
   const current = element.style.getPropertyValue(property);
   if (px === null) {
-    if (current) element.style.removeProperty(property);
-    return;
+    if (!current) return false;
+    element.style.removeProperty(property);
+    return true;
   }
-  if (current && Math.abs(inlinePx(current) - px) < 0.001) return;
+  if (current && Math.abs(inlinePx(current) - px) < 0.001) return false;
   element.style.setProperty(property, `${px}px`);
+  return true;
 }
 
 /**
@@ -157,33 +247,49 @@ function setInlinePx(
  * first frame (perf: "New Tab page shown").
  */
 function alignRailToPanel(rail: HTMLElement): void {
+  // The panel's pin marks are destinations during a shape morph, not live targets. Re-aligning
+  // against them while they travel shifts the rail underneath the flights and leaves pins adrift.
+  if (rail.closest(".browser-sidebar")?.hasAttribute("data-reshaping")) return;
   const panel = rail.parentElement?.querySelector<HTMLElement>(
     ":scope > .sidebar-panel",
   );
   const items = [
     ...rail.querySelectorAll<HTMLElement>(
-      ".sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
+      ".sidebar-rail-pins-row [data-rail-align], .sidebar-rail-scroll > [data-motion-key], .sidebar-rail-scroll > .sidebar-rail-divider",
     ),
   ];
   const pin = rail.querySelector<HTMLElement>('[data-morph="sidebar-pin"]');
   if (!panel) {
+    let changed = false;
     for (const item of items) {
-      setInlinePx(item, "margin-top", null);
-      setInlinePx(item, "--sidebar-rail-mark-dx", null);
+      changed = setInlinePx(item, "margin-top", null) || changed;
+      changed = setInlinePx(item, "--sidebar-rail-mark-dx", null) || changed;
     }
-    if (pin?.style.translate) pin.style.removeProperty("translate");
-    setInlinePx(rail, "--sidebar-rail-mark-shift", null);
+    if (pin?.style.translate) {
+      pin.style.removeProperty("translate");
+      changed = true;
+    }
+    changed = setInlinePx(rail, "--sidebar-rail-mark-shift", null) || changed;
+    if (changed)
+      rail.dispatchEvent(new Event("sidebar-rail-aligned", { bubbles: true }));
     return;
   }
   const counterpart = (item: HTMLElement): HTMLElement | null => {
     const key = item.dataset.motionKey;
+    // The pin cluster lines up on the panel's pins row (its first mark exactly on the row's first
+    // pin, x and y), so the hairline and every tab below line up too: pins take one row in both
+    // shapes, and the first pin never moves between them.
     const row = item.classList.contains("sidebar-rail-divider")
       ? panel.querySelector<HTMLElement>(".sidebar-pinned-divider")
-      : key
+      : item.dataset.railAlign === "pins"
         ? panel.querySelector<HTMLElement>(
-            `[data-motion-key="${CSS.escape(key)}"]`,
+            ".sidebar-pinned-list > [data-motion-key]",
           )
-        : null;
+        : key
+          ? panel.querySelector<HTMLElement>(
+              `[data-motion-key="${CSS.escape(key)}"]`,
+            )
+          : null;
     if (!row || row.getClientRects().length === 0) return null;
     return markOf(row);
   };
@@ -267,12 +373,26 @@ function alignRailToPanel(rail: HTMLElement): void {
       const offset = deviceOffset(from, to, "x");
       if (offset !== 0 && Math.abs(offset) <= MAX_MARK_NUDGE)
         dx = shift + offset;
+    } else if (item.dataset.railAlign === "pins") {
+      // The cluster is centred in the rail and its width follows the pin count, so its first mark
+      // can sit further off the panel's first pin than a nudge: move it all the way, inside the
+      // rail.
+      const offset = deviceOffset(from, to, "x");
+      if (offset !== 0 && Math.abs(shift + offset) < railBox.width / 2)
+        dx = shift + offset;
     }
     const dy = deviceOffset(from, to, "y");
     // Pulled up by at most the gap before it (the panel's rows sit closer than the rail's 44px
-    // marks plus gap), never into the previous mark. The divider keeps its own CSS margin as the
-    // base, so it moves by exactly dy.
-    const margin = Math.max(base + dy, -gap);
+    // marks plus gap), never into the previous mark. The pins row is outside that scroller, so use
+    // its own top padding instead; otherwise its first pin can remain a couple of pixels too low.
+    // The divider keeps its own CSS margin as the base, so it moves by exactly dy.
+    const pullUpLimit =
+      item.dataset.railAlign === "pins"
+        ? Number.parseFloat(
+            getComputedStyle(item.parentElement ?? rail).paddingTop,
+          ) || gap
+        : gap;
+    const margin = Math.max(base + dy, -pullUpLimit);
     moved += margin - base;
     return { item, base, dx, margin: margin !== base ? margin : null };
   });
@@ -289,21 +409,31 @@ function alignRailToPanel(rail: HTMLElement): void {
   }
 
   // Write: only what changed, so a render that moved nothing leaves layout clean.
-  setInlinePx(rail, "--sidebar-rail-mark-shift", shift !== 0 ? shift : null);
+  let changed = setInlinePx(
+    rail,
+    "--sidebar-rail-mark-shift",
+    shift !== 0 ? shift : null,
+  );
   for (const { item, base, dx, margin } of writes) {
-    setInlinePx(item, "--sidebar-rail-mark-dx", dx);
+    changed = setInlinePx(item, "--sidebar-rail-mark-dx", dx) || changed;
     if (margin === null) {
-      if (item.style.marginTop) item.style.marginTop = "";
+      if (item.style.marginTop) {
+        item.style.marginTop = "";
+        changed = true;
+      }
       railBaseMargins.delete(item);
     } else {
       railBaseMargins.set(item, base);
-      setInlinePx(item, "margin-top", margin);
+      changed = setInlinePx(item, "margin-top", margin) || changed;
     }
   }
   if (pin && pin.style.translate !== pinTranslate) {
     if (pinTranslate) pin.style.translate = pinTranslate;
     else pin.style.removeProperty("translate");
+    changed = true;
   }
+  if (changed)
+    rail.dispatchEvent(new Event("sidebar-rail-aligned", { bubbles: true }));
 }
 
 export function SidebarRail({
@@ -314,18 +444,16 @@ export function SidebarRail({
   animate,
   shapeHidden,
   sidebarPinned,
-  onOpenPinnedSite,
-  onUnpinPinnedSite,
+  onRevealPins,
   onTogglePinned,
   onNewTab,
 }: SidebarRailProps): React.JSX.Element {
   const openTabs = tabs.filter((tab) => !tab.pinned);
   const hasPins = pinnedTabs.length > 0 || pinnedSites.length > 0;
   const railRef = useRef<HTMLElement>(null);
-  // Before the sidebar's own layout effect plays the shape morph, so the marks it measures are
-  // already where the rail draws them; only while the rail is the shape on screen in a surface
-  // that paints it (`animate`), so the panel, and the hidden toolbar surface, pay nothing.
-  const aligning = !shapeHidden && animate;
+  // Keep the rail aligned even while the panel is visible, so either direction starts on the
+  // panel's current rows. `animate` is true only for a surface that paints the rail.
+  const aligning = animate;
   useLayoutEffect(() => {
     if (aligning && railRef.current) alignRailToPanel(railRef.current);
   });
@@ -335,18 +463,42 @@ export function SidebarRail({
     if (!aligning) return;
     let frame = 0;
     let live = true;
+    const rail = railRef.current;
+    const panel = rail?.parentElement?.querySelector<HTMLElement>(
+      ":scope > .sidebar-panel",
+    );
+    const card = rail?.closest(".browser-sidebar") ?? null;
     const realign = (): void => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (live && railRef.current) alignRailToPanel(railRef.current);
       });
     };
+    const resizeObserver = new ResizeObserver(realign);
+    if (rail) resizeObserver.observe(rail);
+    if (panel) resizeObserver.observe(panel);
+    if (card) resizeObserver.observe(card);
+    const mutationObserver = new MutationObserver(realign);
+    if (panel)
+      mutationObserver.observe(panel, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+        childList: true,
+        subtree: true,
+      });
+    if (card)
+      mutationObserver.observe(card, {
+        attributes: true,
+        attributeFilter: ["data-reshaping"],
+      });
     window.addEventListener("resize", realign, { passive: true });
     if (document.fonts?.status === "loading")
       void document.fonts.ready.then(realign).catch(() => undefined);
     return () => {
       live = false;
       cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
       window.removeEventListener("resize", realign);
     };
   }, [aligning]);
@@ -356,31 +508,31 @@ export function SidebarRail({
       className={`sidebar-rail ${MORPH_COLUMN_CLASS}${shapeHidden ? ` ${MORPH_HIDDEN_CLASS}` : ""}`}
       aria-label="Sidebar rail"
     >
-      <div className="sidebar-rail-scroll" data-glide-scroller>
-        {pinnedTabs.map((tab) => (
-          <RailTab
-            key={`pinned-tab:${tab.id}`}
-            tab={tab}
+      {/* Out of the tab list's scroller, like the panel's pins row: the cluster never scrolls away,
+       * and a pin gliding to or from its panel slot is clipped only by the card's moving edge
+       * (the scroller clips sideways at the rail's width). */}
+      {hasPins && (
+        <div className="sidebar-rail-pins-row">
+          <RailPinCluster
+            pins={[
+              ...pinnedTabs.map((tab): RailPin => ({
+                kind: "tab",
+                key: `pin:${tab.id}`,
+                tab,
+              })),
+              ...pinnedSites.map((site): RailPin => ({
+                kind: "site",
+                key: `site:${site.url}`,
+                site,
+              })),
+            ]}
+            cachedSiteIcons={cachedSiteIcons}
             animate={animate}
-            motionKey={`pin:${tab.id}`}
+            onReveal={onRevealPins}
           />
-        ))}
-        {pinnedSites.map((site) => (
-          <div
-            className="sidebar-rail-site"
-            key={`pinned-site:${site.url}`}
-            data-motion-key={`site:${site.url}`}
-          >
-            <PinnedSiteIcon
-              site={site}
-              cachedFaviconUrl={
-                cachedSiteIcons[httpOrigin(site.url) ?? ""] ?? null
-              }
-              onOpen={() => onOpenPinnedSite(site)}
-              onUnpin={() => onUnpinPinnedSite(site)}
-            />
-          </div>
-        ))}
+        </div>
+      )}
+      <div className="sidebar-rail-scroll" data-glide-scroller>
         {/* The pins/tabs hairline: shown exactly when the panel shows its own (whenever anything
          * is pinned), aligned onto the panel's line, and crossfaded with it by the morph. */}
         {hasPins && <div className="sidebar-rail-divider" aria-hidden="true" />}

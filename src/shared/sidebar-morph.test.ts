@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  lateArrivalBeatMs,
   planSidebarMorph,
   type MarkRect,
   type MorphTarget,
@@ -7,7 +8,9 @@ import {
   MORPH_LABEL_MS,
   MORPH_FADE_MS,
   MORPH_PAINT_MS,
+  MORPH_ROOM_FALLBACK_MS,
 } from "./sidebar-morph";
+import { isPinMotionKey } from "./rail-pin-cluster";
 import { SIDEBAR_MOTION_MS } from "./sidebar-motion";
 
 const rect = (x: number, y: number, width = 22, height = 22): MarkRect => ({
@@ -109,6 +112,70 @@ describe("planSidebarMorph", () => {
     expect(plan.settled).toHaveLength(2);
   });
 
+  test("under hold, pins glide between their cluster and row slots while tabs stand", () => {
+    // Expand: the rail cluster's slots (12px apart on the row's line) spread to the panel's row
+    // (80px pitch); the first pin is already on its row slot.
+    const step = 12;
+    const pitch = 80;
+    const marks = {
+      "pin:a": rect(30, 14, 24, 24),
+      "pin:b": rect(30 + step, 14, 24, 24),
+      "site:https://c/": rect(30 + step * 2, 14, 24, 24),
+      "tab:x": rect(33, 80),
+    };
+    const plan = planSidebarMorph(
+      marks,
+      [
+        target("pin:a", rect(30, 14, 24, 24)),
+        target("pin:b", rect(30 + pitch, 14, 24, 24)),
+        target("site:https://c/", rect(30 + pitch * 2, 14, 24, 24)),
+        target("site:https://hidden/", rect(30 + pitch * 3, 14, 24, 24)),
+        target("tab:x", rect(40, 90)),
+      ],
+      {
+        edgeFrom: 84,
+        widening: true,
+        hold: true,
+        glide: isPinMotionKey,
+      },
+    );
+    // Only the pins that moved fly, horizontally only, and never wait for room: they ride the
+    // card's own curve and duration.
+    expect(plan.flights.map((flight) => [flight.dx, flight.dy])).toEqual([
+      [step - pitch, 0],
+      [step * 2 - pitch * 2, 0],
+    ]);
+    expect(plan.flights.every((flight) => !flight.trailing)).toBe(true);
+    // The first pin and the held tab settle; the pin behind "+N" has no counterpart (it fades).
+    expect(plan.settled).toHaveLength(2);
+    expect(plan.durationMs).toBeLessThanOrEqual(
+      SIDEBAR_MOTION_MS + MORPH_ROOM_FALLBACK_MS,
+    );
+  });
+
+  test("collapse reverses the glide: row slots gather back into the cluster", () => {
+    const plan = planSidebarMorph(
+      { "pin:a": rect(30, 14, 24, 24), "pin:b": rect(110, 14, 24, 24) },
+      [
+        target("pin:a", rect(30, 14, 24, 24)),
+        target("pin:b", rect(42, 14, 24, 24)),
+      ],
+      { edgeFrom: 320, widening: false, hold: true, glide: isPinMotionKey },
+    );
+    expect(plan.flights.map((flight) => [flight.dx, flight.dy])).toEqual([
+      [68, 0],
+    ]);
+  });
+
+  test("without glide (reduced motion), pins hold like everything else", () => {
+    const plan = planSidebarMorph(
+      { "pin:b": rect(42, 14, 24, 24) },
+      [target("pin:b", rect(110, 14, 24, 24))],
+      { edgeFrom: 84, widening: true, hold: true },
+    );
+    expect(plan.flights).toEqual([]);
+  });
+
   test("flights travel in whole pixels", () => {
     const plan = planSidebarMorph(
       { "tab:a": rect(20.4, 100.6) },
@@ -140,5 +207,55 @@ describe("planSidebarMorph", () => {
     expect(MORPH_FADE_MS).toBeLessThan(MORPH_LABEL_MS);
     expect(MORPH_LABEL_MS / frame).toBeGreaterThanOrEqual(6);
     expect(MORPH_PAINT_MS / frame).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("lateArrivalBeatMs", () => {
+  const arrival = {
+    elapsedMs: 40,
+    insideFading: false,
+    insideMark: false,
+    keyed: true,
+  };
+
+  test("a row mounted mid-reveal joins the label beat where it has reached", () => {
+    // The new tab's row: it must not paint at full strength while its siblings are still
+    // transparent (the full-width row that flashed on a rail click).
+    expect(lateArrivalBeatMs(arrival)).toBe(40);
+    expect(lateArrivalBeatMs({ ...arrival, elapsedMs: 0 })).toBe(0);
+    expect(lateArrivalBeatMs({ ...arrival, elapsedMs: -5 })).toBe(0);
+  });
+
+  test("a badge or moon gained mid-reveal fades on the same beat", () => {
+    expect(
+      lateArrivalBeatMs({ ...arrival, keyed: false, elapsedMs: 120 }),
+    ).toBe(120);
+  });
+
+  test("a part inside one already fading in inherits that fade", () => {
+    expect(lateArrivalBeatMs({ ...arrival, insideFading: true })).toBeNull();
+  });
+
+  test("a swapped favicon stays drawn: marks are shown throughout", () => {
+    expect(
+      lateArrivalBeatMs({ ...arrival, keyed: false, insideMark: true }),
+    ).toBeNull();
+    // A whole new row carries its own mark and fades as one, like any part without a counterpart.
+    expect(lateArrivalBeatMs({ ...arrival, insideMark: true })).toBe(40);
+  });
+
+  test("once the beat has landed, a late part arrives at full strength like its siblings", () => {
+    expect(
+      lateArrivalBeatMs({
+        ...arrival,
+        elapsedMs: MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS,
+      }),
+    ).toBeNull();
+    expect(
+      lateArrivalBeatMs({
+        ...arrival,
+        elapsedMs: MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS - 1,
+      }),
+    ).toBe(MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS - 1);
   });
 });

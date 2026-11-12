@@ -3,7 +3,8 @@
 process.env.SURFFISH_SIDEBAR_CURSOR_POLL ??= "off";
 // The sidebar card must sit on exactly the same window pixels whether the content renderer draws
 // it in-page (New Tab, full panels) or the overlay sidebar view draws it above a live page:
-// x/y/width/height, radius, border, shadow, and the window-control / pinned / tab-list offsets.
+// x/y/width/height, radius, border, shadow, and the pinned / tab-list offsets. Both start at the
+// toolbar's bottom line (the browser frame: the toolbar strip holds the traffic lights).
 // Checks docked and hover-revealed, a private window, and Spaces on. Run once per backdrop path:
 //
 //   SURFFISH_SIDEBAR_BACKDROP=native|solid|snapshot  path to test (default: the platform's own)
@@ -113,18 +114,10 @@ function captureWindow(win, name) {
   ]);
 }
 
-// Card + inner offsets in the view's own coordinates. A `.sidebar-window-controls` probe stands in
-// for the macOS dots on other platforms (same element + CSS), so their spacing is checked here too.
+// Card + inner offsets in the view's own coordinates.
 const MEASURE = `(() => {
   const card = document.querySelector('.browser-sidebar')
   if (!card) return null
-  let probe = null
-  if (!card.querySelector('.sidebar-window-controls')) {
-    probe = document.createElement('div')
-    probe.className = 'sidebar-window-controls'
-    for (let i = 0; i < 3; i++) { const dot = document.createElement('span'); dot.className = 'sidebar-window-control'; probe.appendChild(dot) }
-    card.insertBefore(probe, card.firstChild)
-  }
   const rect = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
   const rail = card.querySelector('.sidebar-rail')
   const panel = card.querySelector('.sidebar-panel')
@@ -135,8 +128,6 @@ const MEASURE = `(() => {
     radius: s.borderTopLeftRadius + ' ' + s.borderTopRightRadius + ' ' + s.borderBottomRightRadius + ' ' + s.borderBottomLeftRadius,
     border: s.borderTopWidth + ' ' + s.borderRightWidth + ' ' + s.borderBottomWidth + ' ' + s.borderLeftWidth + ' ' + s.borderTopStyle + ' ' + s.borderTopColor,
     shadow: s.boxShadow,
-    controls: rect(card.querySelector('.sidebar-window-controls')),
-    firstDot: rect(card.querySelector('.sidebar-window-control')),
     rail: rect(rail),
     railHidden: Boolean(rail?.classList.contains('is-shape-hidden')),
     panelHidden: Boolean(panel?.classList.contains('is-shape-hidden')),
@@ -147,7 +138,6 @@ const MEASURE = `(() => {
     firstTab: rect(card.querySelector('.tab-item')),
     footer: rect(card.querySelector('.sidebar-footer'))
   }
-  probe?.remove()
   return out
 })()`;
 
@@ -169,8 +159,6 @@ async function measure(win, which) {
     ...raw,
     view: bounds,
     card: shift(raw.card),
-    controls: shift(raw.controls),
-    firstDot: shift(raw.firstDot),
     rail: shift(raw.rail),
     railActions: shift(raw.railActions),
     pin: shift(raw.pin),
@@ -194,8 +182,6 @@ function assertSame(inPage, overlay, context) {
   );
   for (const key of [
     "card",
-    "controls",
-    "firstDot",
     "rail",
     "railActions",
     "pinned",
@@ -313,40 +299,33 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     inPage: inPage.card,
     overlay: overlay.card,
     view: overlay.view,
-    framed: overlay.className.includes("is-view-framed"),
   });
   assertSame(inPage, overlay, `${label} / ${context}`);
-  // Both surfaces reach the window's top and bottom, and traffic lights match the native origin.
+  // Both surfaces start at the toolbar's bottom line and reach the window's bottom.
   const [width, height] = win.getContentSize();
   const { sidebarWidth } = await api(win, "chrome.get()");
+  const toolbarBottom = await evaluate(
+    surface(win, "toolbar"),
+    'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
+  );
   const expected = {
     x: 0,
-    y: 0,
+    y: toolbarBottom,
     width: Math.min(sidebarWidth, width - 48),
-    height,
+    height: height - toolbarBottom,
   };
   for (const field of ["x", "y", "width", "height"])
     assert.ok(
-      Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
+      Math.abs(inPage.card[field] - expected[field]) <= 1,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
   assert.equal(
     inPage.radius,
-    "0px 20px 20px 0px",
-    `${context}: frame is rounded on the right, square at the window edge`,
+    "0px 0px 0px 0px",
+    `${context}: the sidebar is part of the frame: square, no rounded corner at the toolbar`,
   );
   for (const surface of [inPage, overlay]) {
-    assert.ok(
-      Math.abs(surface.firstDot.x - 16) <= TOLERANCE &&
-        Math.abs(surface.firstDot.y - 16) <= TOLERANCE,
-      `${context}: traffic lights align to the native (16, 16) origin: ${JSON.stringify(surface.firstDot)}`,
-    );
     if (surface.rail && !surface.railHidden) {
-      assert.ok(
-        surface.firstDot.x + surface.firstDot.width <=
-          surface.rail.x + surface.rail.width + TOLERANCE,
-        `${context}: traffic-light controls fit within the collapsed sidebar`,
-      );
       assert.ok(
         Math.abs(
           surface.rail.y +
@@ -359,12 +338,6 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
         surface.railActions.y + surface.railActions.height <=
           surface.rail.y + surface.rail.height + TOLERANCE,
         `${context}: collapsed actions stay anchored inside the bottom edge`,
-      );
-    } else {
-      assert.ok(
-        surface.firstDot.x + surface.firstDot.width <=
-          surface.card.x + surface.card.width + TOLERANCE,
-        `${context}: traffic-light controls fit within the expanded sidebar`,
       );
     }
   }
@@ -419,6 +392,10 @@ function assertPinStill(collapsedPin, expandedPin, context, dpr) {
 async function assertSidebarState(win, which, context, expanded) {
   const view = surface(win, which);
   const [windowWidth, windowHeight] = win.getContentSize();
+  const toolbarBottom = await evaluate(
+    surface(win, "toolbar"),
+    'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+  );
   const { sidebarWidth } = await api(win, "chrome.get()");
   const expectedWidth = expanded
     ? Math.min(sidebarWidth, windowWidth - 48)
@@ -463,9 +440,9 @@ async function assertSidebarState(win, which, context, expanded) {
   );
   assert.ok(
     Math.abs(state.card.x) <= TOLERANCE &&
-      Math.abs(state.card.y) <= TOLERANCE &&
+      Math.abs(state.card.y - toolbarBottom) <= TOLERANCE &&
       Math.abs(state.card.width - expectedWidth) <= TOLERANCE &&
-      Math.abs(state.card.height - windowHeight) <= TOLERANCE,
+      Math.abs(state.card.height - (windowHeight - toolbarBottom)) <= TOLERANCE,
     `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
   );
   if (expanded) {

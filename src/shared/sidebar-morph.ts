@@ -3,16 +3,17 @@
  * the rail opening back into the list — as one continuous change rather than one column
  * vanishing and another appearing.
  *
- * Everything the two shapes have in common is a site's mark: each one travels from where the old
- * shape drew it to where the new one does, on the same curve the card's width travels on, so the
- * column reads as one surface. What only the old shape had fades where it stood; what only the
- * new shape has fades in around the marks.
+ * Marks shared by the two shapes travel between their measured positions. Ordinary marks follow
+ * the card curve; pinned favicons use a gentler ease-in-out over the same duration, so the compact
+ * cluster spreads or gathers without a front-loaded jump. What only the old shape had fades where
+ * it stood; what only the new shape has fades in around the marks.
  *
  * Every step is a transform or an opacity, carried by the compositor. The only measuring is once
  * before the change (capture) and once after (the flight destinations). The planning is pure and
  * unit-tested; the capture and play below are thin DOM glue around it.
  */
 import { SIDEBAR_MOTION_MS, sidebarMotionEasingCss } from "./sidebar-motion";
+import { isPinMotionKey } from "./rail-pin-cluster";
 
 /** A shape or mark's bounding box, in viewport coordinates. */
 export interface MarkRect {
@@ -72,6 +73,8 @@ export interface MorphPlan {
 
 /** The card's open/close curve (shared/sidebar-motion.ts): marks travel with it. */
 export const MORPH_EASING = sidebarMotionEasingCss();
+/** Pin clusters glide at a balanced pace instead of inheriting the card's front-loaded departure. */
+export const MORPH_PIN_EASING = "cubic-bezier(0.3, 0, 0.7, 1)";
 /** Slow out of the shape and settling late, so a mark stays behind the card's moving edge. */
 export const MORPH_TRAILING_EASING = "cubic-bezier(0.55, 0, 0.25, 1)";
 /** Trailing marks take a little longer than the card so the edge leads them all the way. */
@@ -164,7 +167,7 @@ function measureMarks(column: HTMLElement): Record<string, MarkRect> {
 export function captureSidebarMorph(
   host: HTMLElement | null,
 ): MorphSnapshot | null {
-  if (!host || prefersReducedMotion()) return null;
+  if (!host) return null;
   const column = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!column) return null;
   return {
@@ -202,7 +205,19 @@ export function planSidebarMorph(
     edgeFrom,
     widening,
     hold = false,
-  }: { edgeFrom: number; widening: boolean; hold?: boolean },
+    glide,
+  }: {
+    edgeFrom: number;
+    widening: boolean;
+    hold?: boolean;
+    /**
+     * Keys that travel even under `hold`: the pins, a stacked cluster in the rail and a row in the
+     * panel. They glide over the card's duration with a gentle ease-in-out, never trailing: a pin
+     * bound inside the card's final width stays inside its moving edge all the way, both ends being
+     * inside it, so the row spreads out of the cluster or gathers into it smoothly.
+     */
+    glide?: (key: string) => boolean;
+  },
 ): MorphPlan {
   const flights: FlightPlan[] = [];
   const labels: HTMLElement[] = [];
@@ -218,13 +233,14 @@ export function planSidebarMorph(
     // off the pixel grid for the length of the flight, which reads as a shimmer.
     const dx = Math.round(from.x + from.width / 2 - (to.x + to.width / 2));
     const dy = Math.round(from.y + from.height / 2 - (to.y + to.height / 2));
-    if (hold || (dx === 0 && dy === 0)) {
+    const gliding = Boolean(target.key && glide?.(target.key));
+    if ((hold && !gliding) || (dx === 0 && dy === 0)) {
       // The mark stands where it should; its surroundings simply arrive.
       settled.push(target.element);
       durationMs = Math.max(durationMs, MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS);
       continue;
     }
-    const trailing = widening && to.x + to.width / 2 > edgeFrom;
+    const trailing = !gliding && widening && to.x + to.width / 2 > edgeFrom;
     flights.push({
       element: target.element,
       dx,
@@ -255,8 +271,12 @@ export function playSidebarMorph(
   captured: MorphSnapshot | null,
   host: HTMLElement,
 ): number {
-  if (!captured || prefersReducedMotion()) return 0;
+  if (!captured) return 0;
   const snapshot = captured;
+  // Reduced motion: nothing travels. The pins, which would glide between their cluster and row
+  // slots, crossfade instead (their outgoing copies fade with the old shape, the new ones fade in);
+  // everything else stands in place as it does with motion.
+  const reduce = prefersReducedMotion();
   const incoming = host.querySelector<HTMLElement>(ACTIVE_COLUMN_SELECTOR);
   if (!incoming || incoming === snapshot.column) return 0;
   // A re-toggle while an earlier morph is still running: drop the earlier ghost (it has faded or
@@ -265,28 +285,39 @@ export function playSidebarMorph(
     `:scope > .${MORPH_GHOST_CLASS}`,
   ))
     ghost.remove();
-  releaseColumn(snapshot);
-  const card = host.parentElement ?? host;
+  lateArrivalWatchers.get(host)?.();
+  const targets = measureSidebarTargets(incoming).map((target) =>
+    reduce && target.key && isPinMotionKey(target.key)
+      ? { ...target, key: null }
+      : target,
+  );
+  const incomingKeys = new Set(
+    targets.flatMap((target) => (target.key ? [target.key] : [])),
+  );
   const oldRight = snapshot.rect.x + snapshot.rect.width;
   const newRight = incoming.getBoundingClientRect().right;
-  const plan = planSidebarMorph(
-    snapshot.marks,
-    measureSidebarTargets(incoming),
-    {
-      edgeFrom: oldRight,
-      widening: newRight - oldRight > 1,
-      // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
-      // counterpart never travels: it is shown in place from the first frame. A measured
-      // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
-      // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
-      // in the panel and a column in the rail, swap in place rather than glide.
-      hold: true,
-    },
-  );
+  releaseColumn(snapshot, incomingKeys);
+  const card = host.parentElement ?? host;
+  const plan = planSidebarMorph(snapshot.marks, targets, {
+    edgeFrom: oldRight,
+    widening: newRight - oldRight > 1,
+    // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
+    // counterpart never travels: it is shown in place from the first frame. A measured
+    // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
+    // overlay view, a shape mid-reflow), and flying from it is the jitter. Pinned sites, a row
+    // in the panel and one stacked cluster in the rail, are the exception: they are laid out on
+    // the same line in the same order (rail-pin-cluster.ts), the first pin on the row's first, and
+    // each glides between its cluster slot and its row slot; pins behind the "+N" chip have no
+    // counterpart and fade where the row draws them.
+    hold: true,
+    glide: reduce ? undefined : isPinMotionKey,
+  });
   let total = MORPH_FADE_MS;
   for (const flight of plan.flights) {
     const durationMs =
       SIDEBAR_MOTION_MS * (flight.trailing ? MORPH_TRAILING_FACTOR : 1);
+    const key = flight.element.dataset.motionKey;
+    const pinGlide = Boolean(key && isPinMotionKey(key));
     const animation = flight.element.animate(
       [
         { transform: `translate(${flight.dx}px, ${flight.dy}px)` },
@@ -294,7 +325,11 @@ export function playSidebarMorph(
       ],
       {
         duration: durationMs,
-        easing: flight.trailing ? MORPH_TRAILING_EASING : MORPH_EASING,
+        easing: flight.trailing
+          ? MORPH_TRAILING_EASING
+          : pinGlide
+            ? MORPH_PIN_EASING
+            : MORPH_EASING,
         fill: "backwards",
       },
     );
@@ -303,6 +338,12 @@ export function playSidebarMorph(
   }
   // Whatever in the incoming shape has no counterpart in the old one fades in: the parts the
   // eye follows are the marks, which are already drawn throughout.
+  const beat: LabelBeat = {
+    present: new WeakSet(incoming.querySelectorAll("*")),
+    faded: new WeakSet(),
+    clock: null,
+    startedAt: performance.now(),
+  };
   const travelling = new Set<HTMLElement>();
   for (const flight of plan.flights) travelling.add(flight.element);
   for (const element of plan.settled) travelling.add(element);
@@ -332,23 +373,167 @@ export function playSidebarMorph(
     );
     // Everything around the mark (title, close button, sleep moon, audio and private badges)
     // arrives on the label beat, together, instead of standing at full strength from frame one.
-    revealColumn(element, new Set([mark]));
+    revealColumn(element, new Set([mark]), beat);
   }
-  revealColumn(incoming, travelling);
+  revealColumn(incoming, travelling, beat);
   total = Math.max(
     total,
     MORPH_PAINT_MS,
     MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS,
     MORPH_ROOM_FALLBACK_MS + SIDEBAR_MOTION_MS * MORPH_TRAILING_FACTOR,
   );
+  watchLateArrivals(host, incoming, beat, total);
   return total;
+}
+
+/**
+ * Land whatever morph is running in `host` at once: its fades and flights finish, the outgoing
+ * shape's copy leaves, and nothing more joins its beat. For a surface that is not drawing (its
+ * view hidden behind a live page, or the overlay hidden over New Tab): Chromium starts an
+ * animation on the document's next frame, so a morph played there would wait, and run in full
+ * (the panel's copy at full width, the active row highlighted, its title across the page) the
+ * moment the surface is shown again, long after the change it was for.
+ */
+export function settleSidebarMorph(host: HTMLElement | null): void {
+  if (!host) return;
+  lateArrivalWatchers.get(host)?.();
+  for (const ghost of host.querySelectorAll<HTMLElement>(
+    `:scope > .${MORPH_GHOST_CLASS}`,
+  ))
+    ghost.remove();
+  for (const animation of host.getAnimations({ subtree: true })) {
+    // CSS transitions and animations (spinners, hover fades) are the stylesheet's; only the
+    // morph's own script animations are landed here.
+    if (
+      typeof CSSTransition !== "undefined" &&
+      animation instanceof CSSTransition
+    )
+      continue;
+    if (
+      typeof CSSAnimation !== "undefined" &&
+      animation instanceof CSSAnimation
+    )
+      continue;
+    try {
+      animation.finish();
+    } catch {
+      animation.cancel();
+    }
+  }
+}
+
+/** The label beat of one morph: every part it faded in, and one of those fades to keep time by. */
+interface LabelBeat {
+  /** What the incoming shape held when the morph began: moved later (a reorder), not arrived. */
+  present: WeakSet<Element>;
+  faded: WeakSet<Element>;
+  clock: Animation | null;
+  startedAt: number;
+}
+
+/** How each morph's late-arrival watch is stopped (the next morph on the same host stops it). */
+const lateArrivalWatchers = new WeakMap<HTMLElement, () => void>();
+
+/**
+ * Where a part that arrives in the incoming shape while it is still being revealed (a new tab's
+ * row, a tab that slept or woke and gained or lost its moon, a badge) joins the label beat.
+ * Pure, so it is tested without a document.
+ *
+ * Returns the beat time (ms, the fade's currentTime) to start its fade at, or null to leave it
+ * as drawn:
+ *  - inside a part that is already fading in: it inherits that fade;
+ *  - inside a site mark, unless it is a whole keyed row: marks are drawn throughout;
+ *  - after the beat has landed: its siblings are at full strength too.
+ *
+ * Without this a row mounted mid-morph skipped the fade every other new part got and painted at
+ * full strength, highlight and title across the whole panel width, while the rest of the panel
+ * was still transparent: on a rail click that opened the panel and created a tab, the new row
+ * flashed on its own before the sidebar settled back on its rail.
+ */
+export function lateArrivalBeatMs({
+  elapsedMs,
+  insideFading,
+  insideMark,
+  keyed,
+}: {
+  elapsedMs: number;
+  insideFading: boolean;
+  insideMark: boolean;
+  keyed: boolean;
+}): number | null {
+  if (insideFading) return null;
+  if (insideMark && !keyed) return null;
+  if (!(elapsedMs < MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS)) return null;
+  return Math.max(0, elapsedMs);
+}
+
+/**
+ * For the length of the morph, anything the framework adds to the incoming shape (a new row, a
+ * badge, a moon) fades in on the same beat as the parts that were there when it started, at the
+ * point the beat has reached, so nothing arrives at full strength mid-reveal.
+ */
+function watchLateArrivals(
+  host: HTMLElement,
+  incoming: HTMLElement,
+  beat: LabelBeat,
+  durationMs: number,
+): void {
+  if (typeof MutationObserver === "undefined") return;
+  const observer = new MutationObserver((records) => {
+    const clockTime = beat.clock?.currentTime;
+    const elapsedMs =
+      typeof clockTime === "number"
+        ? clockTime
+        : performance.now() - beat.startedAt;
+    for (const record of records)
+      for (const node of record.addedNodes) {
+        if (
+          !(node instanceof HTMLElement) ||
+          beat.present.has(node) ||
+          !incoming.contains(node)
+        )
+          continue;
+        let insideFading = false;
+        for (
+          let ancestor: HTMLElement | null = node;
+          ancestor && ancestor !== incoming;
+          ancestor = ancestor.parentElement
+        )
+          if (beat.faded.has(ancestor)) {
+            insideFading = true;
+            break;
+          }
+        const keyed = keyOf(node) !== null;
+        const at = lateArrivalBeatMs({
+          elapsedMs,
+          insideFading,
+          insideMark: !keyed && node.closest(MARK_SELECTOR) !== null,
+          keyed,
+        });
+        if (at === null) continue;
+        fadeIn(node, beat).currentTime = at;
+      }
+  });
+  observer.observe(incoming, { childList: true, subtree: true });
+  const timer = setTimeout(stop, durationMs);
+  function stop(): void {
+    clearTimeout(timer);
+    observer.disconnect();
+    if (lateArrivalWatchers.get(host) === stop)
+      lateArrivalWatchers.delete(host);
+  }
+  lateArrivalWatchers.set(host, stop);
 }
 
 /**
  * Fades in whatever in `root` has no counterpart, at the highest level at which it has none, so
  * each travelling mark stays fully drawn throughout.
  */
-function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
+function revealColumn(
+  root: HTMLElement,
+  travelling: Set<HTMLElement>,
+  beat: LabelBeat,
+): void {
   for (const child of Array.from(root.children)) {
     if (!(child instanceof HTMLElement) || travelling.has(child)) continue;
     let holds = false;
@@ -359,10 +544,10 @@ function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
       }
     }
     if (holds) {
-      revealColumn(child, travelling);
+      revealColumn(child, travelling, beat);
       continue;
     }
-    fadeIn(child);
+    fadeIn(child, beat);
   }
 }
 
@@ -370,13 +555,16 @@ function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
  * One fade for every arriving part, from transparent to the part's own opacity (an implicit end
  * keyframe): a close button at 0.42 or a restored moon at 0.5 must not reach 1 and snap back.
  */
-function fadeIn(element: HTMLElement): void {
-  element.animate([{ offset: 0, opacity: 0 }], {
+function fadeIn(element: HTMLElement, beat: LabelBeat): Animation {
+  const animation = element.animate([{ offset: 0, opacity: 0 }], {
     duration: MORPH_LABEL_MS,
     delay: MORPH_LABEL_DELAY_MS,
     easing: MORPH_LABEL_EASING,
     fill: "backwards",
   });
+  beat.faded.add(element);
+  beat.clock ??= animation;
+  return animation;
 }
 
 /**
@@ -413,9 +601,15 @@ function holdUntilRoom(
  * (hidden there for the DOM that automation and smokes read), so the ghost is a pixel copy of
  * it: the copy leaves the document once it has faded, and the framework never touches it.
  */
-function releaseColumn(snapshot: MorphSnapshot): void {
+function releaseColumn(
+  snapshot: MorphSnapshot,
+  incomingKeys: ReadonlySet<string>,
+): void {
   const { column, host, rect } = snapshot;
   if (!column || !host.isConnected) return;
+  // Marks the incoming shape does not draw (the panel's pins row vs the rail's pin cluster) stay
+  // in the copy and fade out with it while their new form fades in: a crossfade, not a blink.
+  const fading = new Set<HTMLElement>();
   const ghost = column.cloneNode(true) as HTMLElement;
   // The copy inherits the hidden shape's classes; the ghost is the one that shows and fades.
   ghost.classList.remove(MORPH_HIDDEN_CLASS);
@@ -425,14 +619,17 @@ function releaseColumn(snapshot: MorphSnapshot): void {
     // A keyed counterpart is drawn by the incoming shape throughout (travelling or settled), so
     // its copy here is withdrawn too, even when it has no site mark (the sidebar pin): fading a
     // second copy over the one that stays reads as a flash.
-    if (keyOf(node)) markOf(node).style.visibility = "hidden";
+    const key = keyOf(node);
+    if (key && incomingKeys.has(key)) markOf(node).style.visibility = "hidden";
+    else if (key) fading.add(markOf(node));
     for (const name of node.getAttributeNames()) {
       if (name === "data-motion-key" || name === "data-morph")
         node.removeAttribute(name);
     }
   }
   for (const mark of ghost.querySelectorAll<HTMLElement>(MARK_SELECTOR))
-    mark.style.visibility = "hidden";
+    if (!fading.has(mark) && !mark.closest("[data-morph-fade]"))
+      mark.style.visibility = "hidden";
   ghost.setAttribute("aria-hidden", "true");
   ghost.inert = true;
   const bounds = host.getBoundingClientRect();
