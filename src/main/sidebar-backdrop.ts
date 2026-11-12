@@ -39,6 +39,7 @@ import {
   isSidebarFloating,
   isSidebarOverlayShown,
   sendToMainWindowRenderers,
+  setBrowserFrameTransparency,
   setSidebarDockListener,
   setSidebarMotionListener,
   setSidebarOverlayListener,
@@ -424,6 +425,7 @@ function assertMainRenderer(event: IpcMainInvokeEvent): void {
 
 export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE));
+  setBrowserFrameTransparency(settings.frameTransparency);
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
   setSidebarDockListener((window) =>
@@ -450,6 +452,8 @@ export function registerSidebarBackdropIpc(): void {
       ...(typeof input === "object" && input !== null ? input : {}),
     });
     writeUserJson(SETTINGS_FILE, settings);
+    // The frame's root ground re-lays out in every window; the hover card repaints below.
+    setBrowserFrameTransparency(settings.frameTransparency);
     applyEverywhere();
     sendToMainWindowRenderers("browser:sidebar-backdrop:settings", {
       ...settings,

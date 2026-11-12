@@ -12,7 +12,7 @@
 // `bun run build && bun run test:electron-settings` (headless Linux: xvfb-run -a electron --no-sandbox ...).
 const smoke = require("./smoke-harness.cjs");
 const assert = require("node:assert/strict");
-const { mkdirSync, writeFileSync } = require("node:fs");
+const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -43,6 +43,7 @@ async function waitFor(predicate, description) {
 const GENERAL_CONTROLS = [
   "Default search engine",
   "Sidebar blur",
+  "Frame transparency",
   "Show bookmarks bar",
   "Enable the command palette shortcut",
   "Browser and profile to import from",
@@ -471,6 +472,138 @@ async function run() {
     await ev(`${row}.querySelector('.settings-row-info').textContent`),
     /Off saves CPU and memory/,
   );
+
+  smoke.step(
+    "Appearance: Frame transparency is saved, broadcast and applied live to every surface",
+  );
+  {
+    const isMac = process.platform === "darwin";
+    const slider = '.settings-view [aria-label="Frame transparency"]';
+    const reduced = await ev(
+      'matchMedia("(prefers-reduced-transparency: reduce)").matches',
+    );
+    assert.equal(
+      await ev(`document.querySelector('${slider}').disabled`),
+      !isMac || reduced,
+      "the slider is live only where the frame can be glass (macOS, no Reduce Transparency)",
+    );
+    if (!isMac)
+      assert.equal(
+        await ev(
+          `document.querySelector('${slider}').closest(".settings-row").querySelector(".settings-slider-value").textContent`,
+        ),
+        "Solid",
+        "non-mac shows the frame as solid",
+      );
+    assert.equal(
+      (
+        await smoke.evaluate(
+          toolbar,
+          "window.api.browser.sidebarBackdrop.get()",
+        )
+      ).settings.frameTransparency,
+      80,
+      "the default is 80% (today's look)",
+    );
+    const shellVar = (contents, name) =>
+      smoke.evaluate(
+        contents,
+        `document.querySelector(".app-shell").style.getPropertyValue(${JSON.stringify(name)})`,
+      );
+    const shellSolid = (contents) =>
+      smoke.evaluate(
+        contents,
+        'document.querySelector(".app-shell").dataset.frameSolid ?? null',
+      );
+    const surfaces = [
+      ["toolbar", toolbar],
+      ["content", content],
+    ];
+    const sidebarView = surface("sidebar");
+    if (sidebarView) surfaces.push(["sidebar", sidebarView.webContents]);
+    for (const [name, contents] of surfaces)
+      assert.equal(
+        await shellVar(contents, "--frame-glass"),
+        "rgba(18, 21, 25, 0.2)",
+        `${name}: default frame tint`,
+      );
+
+    // Set from the settings surface, as the slider does; every surface follows with no reload.
+    const saved = await ev(
+      "window.api.browser.sidebarBackdrop.set({ frameTransparency: 30 })",
+    );
+    assert.equal(saved.frameTransparency, 30);
+    assert.equal(saved.blur, true, "the patch keeps Sidebar blur");
+    for (const [name, contents] of surfaces) {
+      await waitFor(
+        async () =>
+          (await shellVar(contents, "--frame-glass")) ===
+          "rgba(22, 25, 29, 0.702)",
+        `${name}: the 30% frame tint`,
+      );
+      assert.equal(
+        await shellVar(contents, "--sidebar-hover-glass"),
+        "rgba(25, 27, 31, 0.906)",
+        `${name}: the hover card stays denser than the frame`,
+      );
+      assert.equal(await shellSolid(contents), null);
+    }
+    if (!isMac)
+      assert.equal(
+        await ev(
+          `document.querySelector('${slider}').closest(".settings-row").querySelector(".settings-slider-value").textContent`,
+        ),
+        "Solid",
+        "non-mac keeps showing a solid frame whatever is saved",
+      );
+    else if (!reduced)
+      await waitFor(
+        async () =>
+          (await ev(`document.querySelector('${slider}').value`)) === "30",
+        "the slider to follow the saved value",
+      );
+    assert.equal(
+      JSON.parse(
+        readFileSync(join(userData, "sidebar-appearance.json"), "utf8"),
+      ).frameTransparency,
+      30,
+      "persisted with the other appearance settings",
+    );
+
+    await ev(
+      "window.api.browser.sidebarBackdrop.set({ frameTransparency: 0 })",
+    );
+    for (const [name, contents] of surfaces) {
+      await waitFor(
+        async () => (await shellSolid(contents)) === "true",
+        `${name}: 0% marks the frame solid`,
+      );
+      assert.equal(
+        await shellVar(contents, "--frame-glass"),
+        "rgb(25, 27, 31)",
+        `${name}: 0% is the opaque fallback surface`,
+      );
+    }
+    // Junk is clamped in main.
+    assert.equal(
+      (
+        await ev(
+          "window.api.browser.sidebarBackdrop.set({ frameTransparency: 400 })",
+        )
+      ).frameTransparency,
+      100,
+    );
+    await ev(
+      "window.api.browser.sidebarBackdrop.set({ frameTransparency: 80 })",
+    );
+    for (const [name, contents] of surfaces)
+      await waitFor(
+        async () =>
+          (await shellVar(contents, "--frame-glass")) ===
+            "rgba(18, 21, 25, 0.2)" && (await shellSolid(contents)) === null,
+        `${name}: back to the default tint`,
+      );
+  }
 
   smoke.step("No CSS backdrop-filter; Reduce Transparency gets solid fills");
   assert.deepEqual(

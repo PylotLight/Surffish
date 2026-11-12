@@ -3731,6 +3731,13 @@
   width: 240px;
 }
 
+.settings-row-control .settings-frame-transparency {
+  width: 180px;
+}
+.settings-row-control .settings-frame-transparency:disabled {
+  opacity: 0.45;
+}
+
 .settings-slider-row {
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr) 56px;
@@ -5258,6 +5265,14 @@
       rgba(30, 26, 40, 0.702)
     );
   }
+}
+/* Frame transparency 0% (Settings → Appearance): fully solid, the opaque frame and hover card. */
+.app-shell[data-platform="darwin"][data-frame-solid="true"] {
+  --frame-ground: var(--frame-surface, rgb(25, 27, 31));
+  --frame-ground-private: var(--frame-surface-private, rgb(30, 26, 40));
+  --sidebar-hover-ground: var(--frame-surface, rgb(25, 27, 31));
+  --sidebar-hover-ground-private: var(--frame-surface-private, rgb(30, 26, 40));
+  --sidebar-hover-blur: none;
 }
 @media (prefers-reduced-transparency: reduce) {
   .app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {

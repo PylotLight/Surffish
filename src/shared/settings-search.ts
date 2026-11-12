@@ -186,6 +186,10 @@ export const SETTINGS_SEARCH_INDEX: readonly SettingsIndexEntry[] = [
   ...entries("settings", [
     ["Search engine", "address bar"],
     ["Sidebar blur", "transparency"],
+    [
+      "Frame transparency",
+      "glass vibrancy translucent opacity tint window frame",
+    ],
     ["Bookmarks bar", "favourites"],
     [
       "Toolbar",

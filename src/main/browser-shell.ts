@@ -20,6 +20,9 @@ import {
 import {
   browserFrameGroundArgb,
   browserFrameIsGlass,
+  FRAME_TRANSPARENCY_DEFAULT,
+  frameTransparencyAllowsGlass,
+  normalizeFrameTransparency,
   sidebarCardMaxWidth,
   sidebarHoverCardArgb,
   sidebarRailWidth,
@@ -170,6 +173,17 @@ export function setBrowserFramePrivate(
   shell.scheduleLayout();
 }
 
+/** Settings → Appearance → Frame transparency (sidebar-backdrop.ts owns the setting and calls in). */
+let frameTransparency = FRAME_TRANSPARENCY_DEFAULT;
+
+/** The Frame transparency changed: every window re-lays out and re-sets its root ground. */
+export function setBrowserFrameTransparency(value: number): void {
+  const next = normalizeFrameTransparency(value);
+  if (next === frameTransparency) return;
+  frameTransparency = next;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
+
 /** Whether `window`'s frame is macOS glass right now (sidebar-backdrop.ts paints the hover card to match). */
 export function isBrowserFrameGlass(window: BaseWindow): boolean {
   return shells.get(window)?.frameGlass === true;
@@ -181,6 +195,7 @@ export function getSidebarHoverCardColour(window: BaseWindow): string {
   return sidebarHoverCardArgb({
     isPrivate: shell?.framePrivate === true,
     glass: shell?.frameGlass === true,
+    transparency: frameTransparency,
   });
 }
 
@@ -422,16 +437,19 @@ function applyShellLayout(shell: ShellState): void {
   // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
   const fullscreen = shell.window.isFullScreen();
   const frameShown = overlayMode && !fullscreen;
-  const glass = browserFrameIsGlass({
-    platform: process.platform,
-    reducedTransparency: prefersReducedTransparency(),
-    fullscreen,
-  });
+  // Frame transparency 0 is fully solid: the opaque frame and hover card, like Linux.
+  const glass =
+    browserFrameIsGlass({
+      platform: process.platform,
+      reducedTransparency: prefersReducedTransparency(),
+      fullscreen,
+    }) && frameTransparencyAllowsGlass(frameTransparency);
   const ground = frameShown
     ? browserFrameGroundArgb({
         isPrivate: shell.framePrivate,
         glass,
         dark: systemUsesDarkColors(),
+        transparency: frameTransparency,
       })
     : "#00000000";
   if (shell.frameGround !== ground) {

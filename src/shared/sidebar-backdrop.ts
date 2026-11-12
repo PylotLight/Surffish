@@ -15,6 +15,11 @@
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
+import {
+  FRAME_TRANSPARENCY_DEFAULT,
+  normalizeFrameTransparency,
+} from "./sidebar-card";
+
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
 export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = [
@@ -26,10 +31,17 @@ export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = [
 export interface SidebarBackdropSettings {
   /** Settings → General → Appearance → Sidebar blur. On by default. */
   blur: boolean;
+  /**
+   * Settings → General → Appearance → Frame transparency (macOS glass): 0 solid … 100 clearest,
+   * FRAME_TRANSPARENCY_DEFAULT the stock look. Maps to the frame and hover-card tints in
+   * shared/sidebar-card.ts (frameGlassTints).
+   */
+  frameTransparency: number;
 }
 
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   blur: true,
+  frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
 };
 
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
@@ -99,6 +111,7 @@ export function normalizeSidebarBackdropSettings(
       typeof candidate.blur === "boolean"
         ? candidate.blur
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.blur,
+    frameTransparency: normalizeFrameTransparency(candidate.frameTransparency),
   };
 }
 
@@ -123,7 +136,7 @@ export function resolveSidebarBackdropMode({
   override,
 }: {
   platform: NodeJS.Platform | string;
-  settings: SidebarBackdropSettings;
+  settings: Pick<SidebarBackdropSettings, "blur">;
   override?: SidebarBackdropMode | null;
 }): SidebarBackdropMode {
   if (!settings.blur) return "solid";

@@ -179,6 +179,141 @@ export const BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB = "#B31E1A28";
 export const SIDEBAR_HOVER_GLASS_ARGB = "#BF191B1F";
 export const SIDEBAR_HOVER_GLASS_PRIVATE_ARGB = "#BF1E1A28";
 
+/**
+ * Settings → General → Appearance → Frame transparency (macOS glass only): 0 … 100, 100 clearest.
+ * FRAME_TRANSPARENCY_DEFAULT reproduces the tints above byte for byte.
+ */
+export const FRAME_TRANSPARENCY_MIN = 0;
+export const FRAME_TRANSPARENCY_MAX = 100;
+export const FRAME_TRANSPARENCY_DEFAULT = 80;
+/** At 100 every frame tint keeps this share of its default alpha (dark 0.2 → 0.05). */
+export const FRAME_TRANSPARENCY_CLEAREST_FACTOR = 0.25;
+/** At 100 the hover card keeps this share of its default alpha (0.75 → 0.45): it floats over the page and must stay readable. */
+export const SIDEBAR_HOVER_CLEAREST_FACTOR = 0.6;
+
+/** Junk, out of range or fractional input → a whole number in 0 … 100 (default when unreadable). */
+export function normalizeFrameTransparency(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value))
+    return FRAME_TRANSPARENCY_DEFAULT;
+  return Math.round(
+    Math.max(FRAME_TRANSPARENCY_MIN, Math.min(FRAME_TRANSPARENCY_MAX, value)),
+  );
+}
+
+/** Whether the frame can be glass at this transparency: 0 is fully solid, the opaque fallback. */
+export function frameTransparencyAllowsGlass(transparency: number): boolean {
+  return normalizeFrameTransparency(transparency) > FRAME_TRANSPARENCY_MIN;
+}
+
+function parseArgb(argb: string): [number, number, number, number] {
+  const value = argb.replace(/^#/, "");
+  return [0, 2, 4, 6].map((at) => parseInt(value.slice(at, at + 2), 16)) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+}
+
+function toArgb(channels: readonly number[]): string {
+  return `#${channels
+    .map((channel) =>
+      Math.round(Math.max(0, Math.min(255, channel)))
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")
+    .toUpperCase()}`;
+}
+
+/**
+ * One glass tint at a Frame transparency. From 0 to the default the tint runs from the opaque
+ * surface (`solid`, the Linux/Reduce Transparency frame) to its default colour; above the default
+ * its alpha scales down to `clearestFactor` of the default at 100. Every tint (dark, light, private,
+ * hover) follows the same curve, so they keep their proportions. Dark frame: alpha = 1 − 0.01·t up to
+ * t 80 (0.2), then 0.2 → 0.05 at t 100.
+ */
+export function frameGlassTintArgb(
+  base: string,
+  solid: string,
+  transparency: number,
+  clearestFactor: number = FRAME_TRANSPARENCY_CLEAREST_FACTOR,
+): string {
+  const t = normalizeFrameTransparency(transparency);
+  const [a, r, g, b] = parseArgb(base);
+  if (t === FRAME_TRANSPARENCY_DEFAULT) return toArgb([a, r, g, b]);
+  if (t < FRAME_TRANSPARENCY_DEFAULT) {
+    const s = t / FRAME_TRANSPARENCY_DEFAULT;
+    const [sa, sr, sg, sb] = parseArgb(solid);
+    const mix = (from: number, to: number): number => from + (to - from) * s;
+    return toArgb([mix(sa, a), mix(sr, r), mix(sg, g), mix(sb, b)]);
+  }
+  const u =
+    (t - FRAME_TRANSPARENCY_DEFAULT) /
+    (FRAME_TRANSPARENCY_MAX - FRAME_TRANSPARENCY_DEFAULT);
+  return toArgb([a * (1 + (clearestFactor - 1) * u), r, g, b]);
+}
+
+export interface FrameGlassTints {
+  dark: string;
+  darkPrivate: string;
+  light: string;
+  lightPrivate: string;
+  hover: string;
+  hoverPrivate: string;
+}
+
+/** Every glass tint at a Frame transparency (ARGB). The hover card is never clearer than its frame. */
+export function frameGlassTints(transparency: number): FrameGlassTints {
+  const frame = (base: string, isPrivate: boolean): string =>
+    frameGlassTintArgb(base, browserFrameSurfaceArgb(isPrivate), transparency);
+  const dark = frame(BROWSER_FRAME_GLASS_ARGB, false);
+  const darkPrivate = frame(BROWSER_FRAME_GLASS_PRIVATE_ARGB, true);
+  const light = frame(BROWSER_FRAME_GLASS_LIGHT_ARGB, false);
+  const lightPrivate = frame(BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB, true);
+  const hover = (
+    base: string,
+    isPrivate: boolean,
+    floors: string[],
+  ): string => {
+    const tint = frameGlassTintArgb(
+      base,
+      browserFrameSurfaceArgb(isPrivate),
+      transparency,
+      SIDEBAR_HOVER_CLEAREST_FACTOR,
+    );
+    const floor = Math.max(...floors.map((argb) => parseArgb(argb)[0]));
+    const [a, r, g, b] = parseArgb(tint);
+    return toArgb([Math.max(a, floor), r, g, b]);
+  };
+  return {
+    dark,
+    darkPrivate,
+    light,
+    lightPrivate,
+    hover: hover(SIDEBAR_HOVER_GLASS_ARGB, false, [dark, light]),
+    hoverPrivate: hover(SIDEBAR_HOVER_GLASS_PRIVATE_ARGB, true, [
+      darkPrivate,
+      lightPrivate,
+    ]),
+  };
+}
+
+/** The glass tints as the CSS custom properties `.app-shell` carries (the renderer updates them live). */
+export function frameGlassCssVars(
+  transparency: number = FRAME_TRANSPARENCY_DEFAULT,
+): Record<string, string> {
+  const tints = frameGlassTints(transparency);
+  return {
+    "--frame-glass": argbToCss(tints.dark),
+    "--frame-glass-private": argbToCss(tints.darkPrivate),
+    "--frame-glass-light": argbToCss(tints.light),
+    "--frame-glass-light-private": argbToCss(tints.lightPrivate),
+    "--sidebar-hover-glass": argbToCss(tints.hover),
+    "--sidebar-hover-glass-private": argbToCss(tints.hoverPrivate),
+  };
+}
+
 /** The frame surface for a window (private windows get their own tint, still one surface). */
 export function browserFrameSurfaceArgb(isPrivate: boolean): string {
   return isPrivate
@@ -207,34 +342,37 @@ export function browserFrameGroundArgb({
   isPrivate,
   glass,
   dark = true,
+  transparency = FRAME_TRANSPARENCY_DEFAULT,
 }: {
   isPrivate: boolean;
   glass: boolean;
   /** The system appearance (the vibrancy material follows it): dark unless told otherwise. */
   dark?: boolean;
+  /** Settings → Appearance → Frame transparency (0 solid … 100 clearest). */
+  transparency?: number;
 }): string {
-  if (!glass) return browserFrameSurfaceArgb(isPrivate);
-  if (!dark)
-    return isPrivate
-      ? BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB
-      : BROWSER_FRAME_GLASS_LIGHT_ARGB;
-  return isPrivate
-    ? BROWSER_FRAME_GLASS_PRIVATE_ARGB
-    : BROWSER_FRAME_GLASS_ARGB;
+  if (!glass || !frameTransparencyAllowsGlass(transparency))
+    return browserFrameSurfaceArgb(isPrivate);
+  const tints = frameGlassTints(transparency);
+  if (!dark) return isPrivate ? tints.lightPrivate : tints.light;
+  return isPrivate ? tints.darkPrivate : tints.dark;
 }
 
 /** The floating hover card's ground: glass tint (blurred page under it) or the opaque surface. */
 export function sidebarHoverCardArgb({
   isPrivate,
   glass,
+  transparency = FRAME_TRANSPARENCY_DEFAULT,
 }: {
   isPrivate: boolean;
   glass: boolean;
+  /** Settings → Appearance → Frame transparency (0 solid … 100 clearest). */
+  transparency?: number;
 }): string {
-  if (!glass) return browserFrameSurfaceArgb(isPrivate);
-  return isPrivate
-    ? SIDEBAR_HOVER_GLASS_PRIVATE_ARGB
-    : SIDEBAR_HOVER_GLASS_ARGB;
+  if (!glass || !frameTransparencyAllowsGlass(transparency))
+    return browserFrameSurfaceArgb(isPrivate);
+  const tints = frameGlassTints(transparency);
+  return isPrivate ? tints.hoverPrivate : tints.hover;
 }
 
 /**

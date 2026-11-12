@@ -32,13 +32,21 @@ import {
 describe("sidebar backdrop mode", () => {
   test("blur is on by default and survives junk input", () => {
     expect(DEFAULT_SIDEBAR_BACKDROP_SETTINGS.blur).toBe(true);
-    expect(normalizeSidebarBackdropSettings(null)).toEqual({ blur: true });
+    expect(normalizeSidebarBackdropSettings(null)).toEqual({
+      blur: true,
+      frameTransparency: 80,
+    });
     expect(normalizeSidebarBackdropSettings({ blur: "no" })).toEqual({
       blur: true,
+      frameTransparency: 80,
     });
     expect(normalizeSidebarBackdropSettings({ blur: false })).toEqual({
       blur: false,
+      frameTransparency: 80,
     });
+    expect(
+      normalizeSidebarBackdropSettings({ blur: true, frameTransparency: 140 }),
+    ).toEqual({ blur: true, frameTransparency: 100 });
   });
 
   test("macOS uses the native compositor blur, everything else the solid tint", () => {
