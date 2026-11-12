@@ -7,7 +7,7 @@
       "dependencies": {
         "@ghostery/adblocker-electron": "^2.20.3",
         "ssh2": "^1.17.0",
-        "tldts-experimental": "^7.4.21",
+        "tldts-experimental": "^7.4.26",
       },
       "devDependencies": {
         "@mozilla/readability": "^0.6.0",
@@ -18,7 +18,7 @@
         "@types/ssh2": "^1.15.6",
         "@vitejs/plugin-react": "^6.3.0",
         "dompurify": "^3.4.17",
-        "electron": "46.0.0-alpha.9",
+        "electron": "46.0.0-alpha.10",
         "electron-builder": "^26.18.0",
         "electron-vite": "^6.0.0",
         "jsqr": "1.4.0",
@@ -395,7 +395,7 @@
 
     "ejs": ["ejs@3.1.10", "", { "dependencies": { "jake": "^10.8.5" }, "bin": { "ejs": "bin/cli.js" } }, "sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA=="],
 
-    "electron": ["electron@46.0.0-alpha.9", "", { "dependencies": { "@electron-internal/extract-zip": "^1.0.1", "@electron/get": "^5.0.0", "@types/node": "^26.6.5" }, "bin": { "electron": "cli.js", "install-electron": "install.js" } }, "sha512-4tBbIIEHrkzozHuXL0gYqOzCYjs3LL4e+wr5kAxKJ6pYiU7Vwl8hltx3uaCpfRIvCkz53HN3qlYVmpqldW+juQ=="],
+    "electron": ["electron@46.0.0-alpha.10", "", { "dependencies": { "@electron-internal/extract-zip": "^1.0.1", "@electron/get": "^5.0.0", "@types/node": "^26.6.5" }, "bin": { "electron": "cli.js", "install-electron": "install.js" } }, "sha512-uHX3K+T5p4AeYuI0s9GcGKqRwEueraUUCzgpy7IIhwLXCnZ+W3ENg/mVL0J7D3Y6RmeoWjWxSib2sjKcvBfNqA=="],
 
     "electron-builder": ["electron-builder@26.18.0", "", { "dependencies": { "app-builder-lib": "26.18.0", "builder-util": "26.16.0", "builder-util-runtime": "9.7.0", "chalk": "^4.1.2", "ci-info": "^4.2.0", "dmg-builder": "26.18.0", "fs-extra": "^10.1.0", "lazy-val": "^1.0.5", "simple-update-notifier": "2.0.0", "yargs": "^17.6.2" }, "bin": { "electron-builder": "./cli.js", "install-app-deps": "./install-app-deps.js" } }, "sha512-ASgIuQnOq4RuD8jMhS9hI0LS3EMRT1I/M5R6utqifB/BHN80IcCjBdt+DED+NmNPvmBgEtrlExXZitNdA7kXOg=="],
 
@@ -745,9 +745,9 @@
 
     "tinyglobby": ["tinyglobby@0.2.17", "", { "dependencies": { "fdir": "^6.5.0", "picomatch": "^4.0.4" } }, "sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g=="],
 
-    "tldts-core": ["tldts-core@7.4.21", "", {}, "sha512-sj8bAOjYu9juPKgsB3A58Uj91ybcnsRzgEUxbEGACP32rfJ5o9EScerRIfX1c6GPCiQlMoy4rCu2qTVIQgL4UA=="],
+    "tldts-core": ["tldts-core@7.4.26", "", {}, "sha512-fMNX6ToAFZa2pWrKUd95hhwzx4f6tc+TLtjAstkj6L20FCmbsQ7SCciD3tAJQ/er+SmAlanZ8x0qFkNDZaftIg=="],
 
-    "tldts-experimental": ["tldts-experimental@7.4.21", "", { "dependencies": { "tldts-core": "^7.4.21" } }, "sha512-6Ovct/q2PD8X9AJsSwe0h76D8g5WPOLExrCR8wTtVazxp4W1XupthcfoFqK33V/DvSq3luyB+WzvETsJJhIIXA=="],
+    "tldts-experimental": ["tldts-experimental@7.4.26", "", { "dependencies": { "tldts-core": "^7.4.26" } }, "sha512-AJJpeoeOYzGdUyerfURy4IHIQInSES3QZEERNtaKnF/0kuA286zfMn5BON60uncpmDfN97+5hbdgnA/c+X2wMQ=="],
 
     "tmp": ["tmp@0.2.7", "", {}, "sha512-e0votIpp4Uo2AJYSzVHV6xCcawuiez3DzqDAbrTc3YxBkplN6e+dM13ZeIcZnDg/QpSuU2zfZ3rzwY8ukEnaXw=="],
 

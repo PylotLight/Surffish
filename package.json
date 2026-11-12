@@ -219,7 +219,7 @@
     "@types/ssh2": "^1.15.6",
     "@vitejs/plugin-react": "^6.3.0",
     "dompurify": "^3.4.17",
-    "electron": "46.0.0-alpha.9",
+    "electron": "46.0.0-alpha.10",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "jsqr": "1.4.0",
@@ -234,6 +234,6 @@
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.20.3",
     "ssh2": "^1.17.0",
-    "tldts-experimental": "^7.4.21"
+    "tldts-experimental": "^7.4.26"
   }
 }
