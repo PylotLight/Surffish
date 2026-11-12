@@ -6,9 +6,11 @@
  * window vibrancy (NSVisualEffectView) sits *behind* the page view, so it can't reach either.
  * The three paths that do work:
  *  - 'native':   View.setBackgroundBlur (Electron 44): the compositor blurs whatever is under the
- *                sidebar view, live, with no renderer raster work, while it fades in/out; at
- *                rest the layer is the frame's own opaque surface colour (BROWSER_FRAME_SURFACE_ARGB, private
- *                variant in private windows; main paints it), the same colour as the toolbar.
+ *                floating hover card, live, with no renderer raster work. On macOS glass the card
+ *                rests as glass: SIDEBAR_HOVER_GLASS_BLUR under the hover tint
+ *                (SIDEBAR_HOVER_GLASS_ARGB, private variant in private windows). Without glass
+ *                (Reduce Transparency, fullscreen) it rests as the frame's opaque surface colour
+ *                and the blur only softens the fade in/out.
  *  - 'snapshot': capture the page strip under the sidebar once when it opens (and again on tab
  *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
@@ -54,17 +56,28 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius under the hover overlay while it fades in/out (at full strength it is opaque). */
+/** Blur radius under the opaque hover card while it fades in/out (at full strength it is opaque). */
 export const SIDEBAR_NATIVE_BLUR_RADIUS = 20;
+/** Blur radius under the glass hover card at rest (macOS glass): the page reads as frosted glass. */
+export const SIDEBAR_HOVER_GLASS_BLUR = 30;
 
-/** Native hover layer paint at a point of the open/close slide (progress 0..1). */
-export function sidebarNativeLayerPaint(progress: number): {
+/**
+ * Native hover layer paint at a point of the open/close slide (progress 0..1): `alpha` scales the
+ * card's ground colour, `blur` is the in-window blur radius under it.
+ */
+export function sidebarNativeLayerPaint(
+  progress: number,
+  { glass = false }: { glass?: boolean } = {},
+): {
   alpha: number;
   blur: number;
 } {
   const alpha = Math.max(0.02, Math.min(1, progress));
-  // Blur only softens the page while the layer is still partly see-through; once opaque it is
-  // invisible work for the compositor, so drop it.
+  // Glass keeps its blur at rest: that is the material. Opaque, the blur only softens the page
+  // while the layer is still partly see-through; once opaque it is invisible work for the
+  // compositor, so drop it.
+  if (glass)
+    return { alpha, blur: Math.round(SIDEBAR_HOVER_GLASS_BLUR * alpha) };
   return {
     alpha,
     blur: alpha >= 1 ? 0 : Math.round(SIDEBAR_NATIVE_BLUR_RADIUS * alpha),

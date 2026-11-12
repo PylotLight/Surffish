@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  SIDEBAR_FLOAT,
   sidebarCardCssVars,
   sidebarCardInset,
   sidebarCardMaxWidth,
   sidebarCardRect,
+  sidebarFloatCardRect,
+  sidebarFloatShadowRects,
 } from "./sidebar-card";
 
 describe("sidebar card geometry", () => {
@@ -48,6 +51,53 @@ describe("sidebar card geometry", () => {
         .split(/,(?![^(]*\))/)
         .every((shadow) => shadow.trim().startsWith("inset")),
     ).toBe(true);
+  });
+});
+
+describe("floating hover card", () => {
+  test("a small gap off the toolbar line and the window's left and bottom edges, rounded", () => {
+    expect(SIDEBAR_FLOAT.gap).toBeGreaterThanOrEqual(4);
+    expect(SIDEBAR_FLOAT.gap).toBeLessThanOrEqual(8);
+    expect(SIDEBAR_FLOAT.radius).toBeGreaterThanOrEqual(10);
+    expect(SIDEBAR_FLOAT.radius).toBeLessThanOrEqual(12);
+    // The overlay view: from the toolbar's line (50) to the bottom, one gap wider than the sidebar.
+    const view = { x: 0, y: 50, width: 326, height: 750 };
+    expect(sidebarFloatCardRect(view)).toEqual({
+      x: 6,
+      y: 56,
+      width: 320,
+      height: 738,
+    });
+    expect(sidebarFloatCardRect({ x: 0, y: 0, width: 4, height: 8 })).toEqual({
+      x: 6,
+      y: 6,
+      width: 0,
+      height: 0,
+    });
+    const vars = sidebarCardCssVars();
+    expect(vars["--sidebar-float-gap"]).toBe("6px");
+    expect(vars["--sidebar-float-radius"]).toBe("12px");
+  });
+
+  test("the shadow sits down and right of the card, never in its top or left gap", () => {
+    const card = { x: 6, y: 56, width: 320, height: 738 };
+    const layers = sidebarFloatShadowRects(card);
+    expect(layers.length).toBeGreaterThanOrEqual(3);
+    let previousSpread = 0;
+    for (const layer of layers) {
+      expect(layer.x).toBe(card.x);
+      expect(layer.y).toBeGreaterThan(card.y);
+      const spread = layer.x + layer.width - (card.x + card.width);
+      expect(spread).toBeGreaterThan(previousSpread);
+      previousSpread = spread;
+      expect(layer.y + layer.height).toBeGreaterThan(card.y + card.height);
+      expect(layer.radius).toBeGreaterThan(SIDEBAR_FLOAT.radius);
+      expect(layer.alpha).toBeGreaterThan(0);
+      expect(layer.alpha).toBeLessThanOrEqual(0.12);
+    }
+    // Faintest at the outside.
+    expect(layers.at(-1)!.alpha).toBeLessThan(layers[0]!.alpha);
+    expect(sidebarFloatShadowRects({ ...card, width: 0 })).toEqual([]);
   });
 });
 

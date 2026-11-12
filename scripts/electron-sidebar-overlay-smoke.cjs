@@ -293,9 +293,12 @@ function assertSidebarPinMorph(sample, direction) {
   );
 }
 
-// The frame's one surface colour (src/shared/sidebar-card.ts BROWSER_FRAME_SURFACE_ARGB): the
-// toolbar strip, rail, docked panel and hover panel all paint exactly this.
+// The frame's opaque surface colour (src/shared/sidebar-card.ts BROWSER_FRAME_SURFACE_ARGB): on
+// Linux (no vibrancy) the toolbar strip, rail, docked panel and the floating hover card all paint
+// exactly this. macOS paints glass instead; these pixel checks run on the Linux path only.
 const FRAME_SURFACE_RGB = [25, 27, 31];
+// src/shared/sidebar-card.ts SIDEBAR_FLOAT: the hover card's gap off the frame and its radius.
+const SIDEBAR_FLOAT = { gap: 6, radius: 12 };
 
 /**
  * Toolbar, frame and sidebar meet at the toolbar's bottom line as one surface (no seam): grab the
@@ -386,8 +389,7 @@ function grabWindowPixel(x, y) {
 /**
  * The page card's inner corner is rounded against the frame (PAGE_FRAME_RADIUS): the pixel just
  * inside the corner is the frame's surface colour, a pixel further in along the diagonal is the
- * page. `corner` is the card's top-left in the rail and docked states, and in the hover state the
- * point where the panel's right edge crosses the card's top line (the panel's fillet rounds it).
+ * page. `corner` is the card's top-left, in the rail and docked states.
  */
 async function assertRoundedCardCorner(what, corner) {
   if (process.platform !== "linux" || !process.env.DISPLAY) return;
@@ -412,6 +414,43 @@ async function assertRoundedCardCorner(what, corner) {
   assert.ok(
     !close(inside, FRAME_SURFACE_RGB),
     `${what}: inside the rounded corner the page shows (${inside})`,
+  );
+}
+
+/**
+ * The floating hover card's corner over the page is rounded (SIDEBAR_FLOAT.radius): the pixel in
+ * the corner is the page (not the card's surface), the pixel further in is the card's surface.
+ */
+async function assertFloatingCardCorner(
+  what,
+  { corner, inside, fillTolerance = 3 },
+) {
+  if (process.platform !== "linux" || !process.env.DISPLAY) return;
+  const close = (a, b, tolerance = 3) =>
+    a.every((value, i) => Math.abs(value - b[i]) <= tolerance);
+  let cut = null;
+  let fill = null;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    cut = grabWindowPixel(corner.x, corner.y);
+    fill = grabWindowPixel(inside.x, inside.y);
+    if (
+      !close(cut, FRAME_SURFACE_RGB) &&
+      close(fill, FRAME_SURFACE_RGB, fillTolerance)
+    )
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  console.log(
+    `[sidebar-overlay-smoke] ${what} at ${corner.x},${corner.y}: corner ${cut.join(",")} inside ${fill.join(",")}`,
+  );
+  assert.ok(
+    !close(cut, FRAME_SURFACE_RGB),
+    `${what}: the card's corner is rounded, the page shows in it (${cut})`,
+  );
+  assert.ok(
+    close(fill, FRAME_SURFACE_RGB, fillTolerance),
+    `${what}: inside its corner the card paints the frame surface (${fill}, want ${FRAME_SURFACE_RGB})`,
   );
 }
 
@@ -1641,19 +1680,77 @@ async function run() {
       `the hover-revealed panel starts at the toolbar's bottom line (${JSON.stringify(revealed)}, toolbar bottom ${dockedToolbarBottom})`,
     );
   }
+  // The hover panel is a floating card, not part of the frame: the toolbar's bottom line still
+  // runs over one frame surface (the card stands SIDEBAR_FLOAT.gap below it).
   await assertFrameJunction("hover panel");
   {
-    // The panel slid out over the card: its fillet rounds the corner at its right edge. Wait for
-    // the slide to land first (the fillet follows the edge; sampling mid-slide races it).
+    // The overlay view keeps its frame bounds, one float gap wider so the card keeps the sidebar
+    // width; wait for the slide to land before reading the card.
     const revealed = await waitFor(() => {
       const bounds = rendererViews.sidebar.getBounds();
-      return bounds.x === 0 && bounds.width === widthAfterResize
+      return bounds.x === 0 &&
+        bounds.width === widthAfterResize + SIDEBAR_FLOAT.gap
         ? bounds
         : null;
-    }, "the hover-revealed panel to finish opening");
-    await assertRoundedCardCorner("hover panel", {
-      x: revealed.x + revealed.width,
-      y: pageAfterHide.y,
+    }, "the hover-revealed panel to finish opening as a floating card");
+    const card = await waitFor(
+      () =>
+        evaluate(
+          rendererViews.sidebar,
+          `(() => {
+      const card = document.querySelector('.browser-sidebar')
+      if (!card || card.classList.contains('is-collapsed')) return null
+      const r = card.getBoundingClientRect()
+      const style = getComputedStyle(card)
+      return { x: r.x, y: r.y, width: r.width, height: r.height, bottom: innerHeight - r.bottom,
+        radius: [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius] }
+    })()`,
+        ),
+      "the floating hover card in the sidebar surface",
+    );
+    console.log(
+      `[sidebar-overlay-smoke] hover card ${JSON.stringify(card)} in view ${JSON.stringify(revealed)}`,
+    );
+    assert.equal(
+      card.x,
+      SIDEBAR_FLOAT.gap,
+      "the hover card floats the gap off the window's left edge",
+    );
+    assert.equal(
+      card.y,
+      SIDEBAR_FLOAT.gap,
+      "the hover card floats the gap below the toolbar's bottom line",
+    );
+    assert.equal(
+      card.bottom,
+      SIDEBAR_FLOAT.gap,
+      "the hover card floats the gap off the window's bottom edge",
+    );
+    assert.equal(
+      card.width,
+      widthAfterResize,
+      "the floating card keeps the sidebar width",
+    );
+    assert.deepEqual(
+      card.radius,
+      Array(4).fill(`${SIDEBAR_FLOAT.radius}px`),
+      "the hover card has its own rounded corners on every side",
+    );
+    // On screen (the opaque Linux path): the card's corners over the page are rounded, so the page
+    // shows in the corner and the card's own surface a little further in.
+    const right = revealed.x + SIDEBAR_FLOAT.gap + widthAfterResize;
+    const top = revealed.y + SIDEBAR_FLOAT.gap;
+    const bottom = revealed.y + revealed.height - SIDEBAR_FLOAT.gap;
+    await assertFloatingCardCorner("hover card top-right", {
+      corner: { x: right - 1, y: top + 1 },
+      inside: { x: right - 9, y: top + 9 },
+    });
+    captureFullWindow("sidebar-overlay-live-page-hover-card.png");
+    // The panel's footer sits there and shades the card a touch.
+    await assertFloatingCardCorner("hover card bottom-right", {
+      corner: { x: right - 1, y: bottom - 2 },
+      inside: { x: right - 9, y: bottom - 10 },
+      fillTolerance: 8,
     });
   }
   pointerMove(

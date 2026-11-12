@@ -1,9 +1,9 @@
 /* Overlay sidebar background over live pages (see shared/sidebar-backdrop.ts).
  * Native mode paints only in the native view; CSS supplies a flat fallback or snapshot tint, never
  * an extra glass layer over the native material. */
-/* Solid: the frame's own opaque surface colour (--frame-surface, BROWSER_FRAME_SURFACE_ARGB), the
- * exact colour the window root paints under the toolbar strip and rail, so a hover panel is the
- * same surface as the toolbar it grows out of, with no seam at the toolbar line. */
+/* Solid (Linux, Windows, Sidebar blur off): the floating hover card paints the frame's opaque
+ * surface colour (--frame-surface, BROWSER_FRAME_SURFACE_ARGB). It floats off the toolbar's line
+ * with its own rounded corners (Browser.css, SIDEBAR_FLOAT), so it shares no edge to seam at. */
 .app-shell[data-surface="sidebar"][data-surface]
   .browser-sidebar.has-backdrop-solid {
   background: var(--frame-surface, rgb(25, 27, 31));

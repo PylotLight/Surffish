@@ -5228,42 +5228,118 @@
 .app-shell[data-surface="content"] .browser-sidebar {
   top: var(--sidebar-frame-top, 0px);
 }
-/* The collapsed rail and the docked panel are the frame itself: one flat surface with the
- * toolbar strip, square, no hairline or shadow at the toolbar or the page. In-page they paint the
- * frame's opaque colour (--frame-surface), like the in-page toolbar strip; over live pages the
- * window root carries that same colour (BROWSER_FRAME_SURFACE_ARGB), so the overlay view draws no
- * ground of its own there (main also drops the view's own tint and blur), and there is no second
- * layer to seam. The hover panel slid out over the page card paints the identical colour. */
+/* The frame's ground (shared/sidebar-card.ts). macOS: glass, the window's 'sidebar' vibrancy under
+ * a translucent tint (--frame-glass), like Zephium. Everywhere else, with Reduce Transparency on and
+ * in native fullscreen: the opaque surface (--frame-surface). The hover card's ground follows the
+ * same switch (--sidebar-hover-glass over a blur, or the opaque surface). */
+.app-shell {
+  --frame-ground: var(--frame-surface, rgb(25, 27, 31));
+  --frame-ground-private: var(--frame-surface-private, rgb(30, 26, 40));
+  --sidebar-hover-ground: var(--frame-surface, rgb(25, 27, 31));
+  --sidebar-hover-ground-private: var(--frame-surface-private, rgb(30, 26, 40));
+  --sidebar-hover-blur: none;
+}
+.app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {
+  --frame-ground: var(--frame-glass, rgba(18, 21, 25, 0.549));
+  --frame-ground-private: var(--frame-glass-private, rgba(30, 26, 40, 0.549));
+  --sidebar-hover-ground: var(--sidebar-hover-glass, rgba(25, 27, 31, 0.749));
+  --sidebar-hover-ground-private: var(
+    --sidebar-hover-glass-private,
+    rgba(30, 26, 40, 0.749)
+  );
+  --sidebar-hover-blur: blur(30px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {
+    --frame-ground: var(--frame-surface, rgb(25, 27, 31));
+    --frame-ground-private: var(--frame-surface-private, rgb(30, 26, 40));
+    --sidebar-hover-ground: var(--frame-surface, rgb(25, 27, 31));
+    --sidebar-hover-ground-private: var(
+      --frame-surface-private,
+      rgb(30, 26, 40)
+    );
+    --sidebar-hover-blur: none;
+  }
+}
+/* The collapsed rail and the docked panel are the frame itself: one flat ground with the toolbar
+ * strip, square, no hairline or shadow at the toolbar or the page. In-page they paint the frame's
+ * ground (--frame-ground), like the in-page toolbar strip; over live pages the window root carries
+ * that same ground (browserFrameGroundArgb), so the overlay view draws none of its own there (main
+ * also drops the view's own tint and blur), and there is no second layer to seam. */
 .browser-sidebar.has-rail.is-collapsed,
 .browser-layout.is-sidebar-docked .browser-sidebar {
   border-top-right-radius: var(--sidebar-frame-radius, 0px);
   border-bottom-right-radius: var(--sidebar-frame-radius, 0px);
-  background: var(--frame-surface, rgb(25, 27, 31));
+  background: var(--frame-ground, rgb(25, 27, 31));
   box-shadow: var(--sidebar-frame-shadow, none);
 }
 .browser-sidebar.has-rail.is-collapsed.is-private-window,
 .browser-layout.is-sidebar-docked .browser-sidebar.is-private-window {
-  background: var(--frame-surface-private, rgb(30, 26, 40));
+  background: var(--frame-ground-private, rgb(30, 26, 40));
 }
-/* In-page (New Tab, full panels) the toolbar strip and the floating sidebar panel are the same
- * frame surface too: opaque, one colour, no hairline at the toolbar's bottom line. Only native
- * fullscreen (no frame, the strip slides over the page) keeps the strip's own translucent ground. */
+/* In-page (New Tab, full panels) the toolbar strip is the same frame ground too, no hairline at the
+ * toolbar's bottom line. Only native fullscreen (no frame, the strip slides over the page) keeps
+ * the strip's own translucent ground. */
 .app-shell[data-surface="content"]:not([data-fullscreen="true"])
   .browser-chrome {
   border-bottom-color: transparent;
-  background: var(--frame-surface, rgb(25, 27, 31));
+  background: var(--frame-ground, rgb(25, 27, 31));
   backdrop-filter: none;
 }
 .app-shell[data-surface="content"]:not([data-fullscreen="true"])
   .browser-chrome:has(.browser-toolbar.is-private) {
-  background: var(--frame-surface-private, rgb(30, 26, 40));
+  background: var(--frame-ground-private, rgb(30, 26, 40));
 }
 .app-shell[data-surface="content"] .browser-sidebar {
-  background: var(--frame-surface, rgb(25, 27, 31));
+  background: var(--frame-ground, rgb(25, 27, 31));
   backdrop-filter: none;
 }
 .app-shell[data-surface="content"] .browser-sidebar.is-private-window {
-  background: var(--frame-surface-private, rgb(30, 26, 40));
+  background: var(--frame-ground-private, rgb(30, 26, 40));
+}
+/* The tab list's hover panel is a floating card (SIDEBAR_FLOAT, Zephium's hidden-sidebar card), not
+ * part of the frame: it stands --sidebar-float-gap off the toolbar's line and the window's left and
+ * bottom edges, rounded on every corner, so it never shares an edge with the toolbar. Over live
+ * pages the overlay view keeps its frame bounds (one gap wider) and the card insets itself in it;
+ * main insets the native glass layer and the shadow the same way. Docked panels and the collapsed
+ * rail stay the frame; fullscreen has no frame to float off. */
+.app-shell:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  border-radius: var(--sidebar-float-radius, 12px);
+}
+.app-shell[data-surface="sidebar"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  top: var(--sidebar-float-gap, 6px);
+  bottom: var(--sidebar-float-gap, 6px);
+  left: var(--sidebar-float-gap, 6px);
+  width: calc(100% - var(--sidebar-float-gap, 6px));
+}
+/* In-page (New Tab) the card paints its own glass: the hover ground over a CSS blur of the page
+ * below it (the same document, so backdrop-filter sees it), with a soft drop shadow. */
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed) {
+  top: calc(var(--sidebar-frame-top, 0px) + var(--sidebar-float-gap, 6px));
+  bottom: var(--sidebar-float-gap, 6px);
+  left: var(--sidebar-float-gap, 6px);
+  background: var(--sidebar-hover-ground, rgb(25, 27, 31));
+  box-shadow: var(--sidebar-float-shadow, 0 10px 30px rgba(0, 0, 0, 0.35));
+  backdrop-filter: var(--sidebar-hover-blur, none);
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail.is-private-window:not(.is-collapsed) {
+  background: var(--sidebar-hover-ground-private, rgb(30, 26, 40));
+}
+/* The snapshot backdrop is laid out in overlay-view coordinates; the floating card is inset in it. */
+.app-shell[data-surface="sidebar"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked)
+  .browser-sidebar.has-rail:not(.is-collapsed)
+  > .sidebar-backdrop {
+  inset: calc(var(--sidebar-float-gap, 6px) * -1) 0 0
+    calc(var(--sidebar-float-gap, 6px) * -1);
 }
 /* The private window's violet underline would draw a line across the frame at the toolbar's
  * bottom; the frame's private colour and the omnibox pill mark the window instead. */
@@ -5597,7 +5673,7 @@
 }
 
 /* Over live pages the toolbar strip is part of the browser frame: the window root carries the
- * frame's opaque surface colour (main), so the strip draws no ground or bottom hairline of its own, and the strip,
+ * frame's ground (glass on macOS, main), so the strip draws no ground or bottom hairline of its own, and the strip,
  * the rail and the docked panel read as one surface. In fullscreen there is no frame and the strip
  * slides over the page, so it keeps its own ground there. */
 .app-shell[data-surface="toolbar"]:not([data-fullscreen="true"])

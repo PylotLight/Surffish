@@ -28,31 +28,37 @@ import {
 } from "../shared/sidebar-backdrop";
 import {
   getBrowserChromeState,
-  getBrowserFrameSurface,
-  getPageCard,
   getShellWindowFor,
   getShellWindows,
+  getSidebarHoverCardColour,
   getSidebarOverlayView,
   getWindowRenderers,
+  isBrowserFrameGlass,
   isMainWindowRenderer,
   isSidebarDocked,
+  isSidebarFloating,
   isSidebarOverlayShown,
   sendToMainWindowRenderers,
   setSidebarDockListener,
   setSidebarMotionListener,
-  setPageCardListener,
   setSidebarOverlayListener,
 } from "./browser-shell";
 import { scaleArgbAlpha } from "../shared/sidebar-motion";
-import { hoverPanelIsOpaqueFrame } from "../shared/frame-fillets";
-import { updateSidebarFillets } from "./sidebar-fillets";
+import { SIDEBAR_FLOAT, sidebarFloatCardRect } from "../shared/sidebar-card";
+import {
+  hideSidebarCardShadow,
+  updateSidebarCardShadow,
+} from "./sidebar-card-shadow";
 import { readUserJson, writeUserJson } from "./user-json";
 
 /**
  * The overlay sidebar's background over live pages (see shared/sidebar-backdrop.ts for why CSS
  * backdrop-filter and window vibrancy can't do it). 'native' configures a separate background-only
- * View behind the sidebar renderer only while it floats over live page pixels; docked chrome uses
- * the window's shared material.
+ * View behind the sidebar renderer only while the hover card floats over live page pixels: the
+ * card's rect (SIDEBAR_FLOAT, inset in the overlay view), rounded, glass on macOS (in-window blur
+ * under the hover tint) or the opaque frame surface without glass; docked chrome uses the window's
+ * shared ground. The floating card's soft shadow (sidebar-card-shadow.ts) follows the same rect in
+ * every mode.
  * 'snapshot' captures the page strip under the sidebar when it opens and
  * on tab/navigation changes while it stays open (throttled), never while it is hidden or the
  * window is minimized/hidden; 'solid' does nothing here (the renderer draws a near-opaque tint).
@@ -171,8 +177,19 @@ function applyNativeLayer(
   }
   try {
     const wasVisible = backdrop.getVisible();
-    backdrop.setBounds(sidebar.getBounds());
-    paintNativeLayer(backdrop, progress, getBrowserFrameSurface(window));
+    const floating = isSidebarFloating(window);
+    backdrop.setBounds(
+      floating
+        ? sidebarFloatCardRect(sidebar.getBounds())
+        : sidebar.getBounds(),
+    );
+    backdrop.setBorderRadius(floating ? SIDEBAR_FLOAT.radius : 0);
+    paintNativeLayer(
+      backdrop,
+      progress,
+      getSidebarHoverCardColour(window),
+      isBrowserFrameGlass(window),
+    );
     backdrop.setVisible(true);
     if (!wasVisible) sendState(window);
   } catch (error) {
@@ -185,9 +202,14 @@ function applyNativeLayer(
  * The background-only View's tint + blur at a point of the open/close slide: they fade in and out
  * with the panel instead of popping in at full strength before it has moved.
  */
-function paintNativeLayer(view: View, progress: number, surface: string): void {
-  const { alpha, blur } = sidebarNativeLayerPaint(progress);
-  view.setBackgroundColor(scaleArgbAlpha(surface, alpha));
+function paintNativeLayer(
+  view: View,
+  progress: number,
+  colour: string,
+  glass: boolean,
+): void {
+  const { alpha, blur } = sidebarNativeLayerPaint(progress, { glass });
+  view.setBackgroundColor(scaleArgbAlpha(colour, alpha));
   view.setBackgroundBlur(blur);
 }
 
@@ -195,32 +217,34 @@ function onMotion(window: BaseWindow, progress: number): void {
   motionProgress.set(window, progress);
   try {
     applyNativeLayer(window, progress);
-    applyFillets(window, progress);
+    applyShadow(window, progress);
   } catch {
     // The view is going away with its window.
   }
 }
 
-/**
- * The page card's rounded corner where the hover panel's edge crosses it (sidebar-fillets.ts):
- * shown only while the panel is the frame's opaque surface, in the frame's colour.
- */
-function applyFillets(
+/** The floating hover card's soft shadow, faded with the slide; hidden unless the card floats. */
+function applyShadow(
   window: BaseWindow,
   progress = motionProgress.get(window) ?? 0,
 ): void {
   if (window.isDestroyed()) return;
+  const sidebar = getSidebarOverlayView(window);
   const visible = isSidebarOverlayShown(window);
-  updateSidebarFillets(window, {
-    sidebar: getSidebarOverlayView(window),
-    card: getPageCard(window),
-    colour: getBrowserFrameSurface(window),
-    opaque: hoverPanelIsOpaqueFrame({
-      mode: getSidebarBackdropMode(),
-      docked: isSidebarDocked(window),
-      visible,
-      progress: visible ? progress : 0,
-    }),
+  if (
+    !sidebar ||
+    !visible ||
+    isSidebarDocked(window) ||
+    !isSidebarFloating(window) ||
+    !(progress > 0)
+  ) {
+    hideSidebarCardShadow(window);
+    return;
+  }
+  updateSidebarCardShadow(window, {
+    card: sidebarFloatCardRect(sidebar.getBounds()),
+    below: nativeBackdropViews.get(window) ?? null,
+    strength: progress,
   });
 }
 
@@ -334,7 +358,7 @@ function onOverlay(
   window: BaseWindow,
   event: "shown" | "hidden" | "prefetch",
 ): void {
-  if (event !== "prefetch") applyFillets(window);
+  if (event !== "prefetch") applyShadow(window);
   if (getSidebarBackdropMode() === "native") {
     if (event === "shown") applyNativeLayer(window);
     else if (event === "hidden") clearNativeLayer(window);
@@ -366,7 +390,7 @@ function onOverlay(
 function applyEverywhere(): void {
   for (const window of getShellWindows()) {
     applyNativeLayer(window);
-    applyFillets(window);
+    applyShadow(window);
     if (
       getSidebarBackdropMode() === "snapshot" &&
       isSidebarOverlayShown(window)
@@ -405,13 +429,6 @@ export function registerSidebarBackdropIpc(): void {
   setSidebarDockListener((window) =>
     onMotion(window, motionProgress.get(window) ?? 0),
   );
-  setPageCardListener((window) => {
-    try {
-      applyFillets(window);
-    } catch {
-      // The view is going away with its window.
-    }
-  });
   ipcMain.handle("browser:sidebar-backdrop:get", (event) => {
     assertMainRenderer(event);
     const window = getShellWindowFor(event.sender);

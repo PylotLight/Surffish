@@ -1,3 +1,6 @@
+// Namespace import: browser-shell is loaded by plain bun unit tests, where 'electron' is just a
+// path string and a named value import would fail to link.
+import * as electron from "electron";
 import type {
   BaseWindow,
   WebContents,
@@ -15,9 +18,12 @@ import {
   normalizeSidebarWidth,
 } from "../shared/persistence";
 import {
-  browserFrameSurfaceArgb,
+  browserFrameGroundArgb,
+  browserFrameIsGlass,
   sidebarCardMaxWidth,
+  sidebarHoverCardArgb,
   sidebarRailWidth,
+  SIDEBAR_FLOAT,
 } from "../shared/sidebar-card";
 import {
   POPOVER_DISMISS_CHANNEL,
@@ -99,6 +105,13 @@ interface ShellState {
   frameGround: string | null;
   /** Private window: the frame takes the private surface colour (window.ts sets it at creation). */
   framePrivate: boolean;
+  /** The frame is macOS glass right now (vibrancy under a tint), else the opaque surface. */
+  frameGlass: boolean;
+  /**
+   * The tab list's hover panel is a floating card right now (not docked, live pages, framed): the
+   * overlay view is one SIDEBAR_FLOAT gap wider and the card stands that gap off every frame edge.
+   */
+  sidebarFloating: boolean;
   /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
   sidebarDocked: boolean | null;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
@@ -136,8 +149,9 @@ let sidebarDockListener:
 
 /**
  * sidebar-backdrop.ts: the sidebar became docked (pinned open beside the page card) or stopped
- * being docked. Docked, the panel is part of the frame and lets the frame's surface show through, so
- * the sidebar view's own tint and blur drop away.
+ * being docked, or the frame's look changed (glass on/off, the hover card floating or not). Docked,
+ * the panel is part of the frame and lets the frame's ground show through, so the sidebar view's
+ * own tint and blur drop away.
  */
 export function setSidebarDockListener(
   listener: ((window: BaseWindow, docked: boolean) => void) | null,
@@ -145,57 +159,6 @@ export function setSidebarDockListener(
   sidebarDockListener = listener;
 }
 
-/** A live page card's window rect (browser.ts applyTabBounds), or null when no card shows. */
-export interface PageCardRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-const pageCards = new WeakMap<BaseWindow, PageCardRect | null>();
-let pageCardListener: ((window: BaseWindow) => void) | null = null;
-
-/** sidebar-backdrop.ts: hear when a window's rounded page card moves, resizes or goes away. */
-export function setPageCardListener(
-  listener: ((window: BaseWindow) => void) | null,
-): void {
-  pageCardListener = listener;
-}
-
-/**
- * browser.ts: the rounded page card on screen in `window` (null: none, e.g. a split, New Tab or
- * fullscreen). Diffed, so calling it on every bounds pass is cheap.
- */
-export function notePageCard(
-  window: BaseWindow,
-  card: PageCardRect | null,
-): void {
-  const previous = pageCards.get(window) ?? null;
-  if (
-    previous === card ||
-    (previous &&
-      card &&
-      previous.x === card.x &&
-      previous.y === card.y &&
-      previous.width === card.width &&
-      previous.height === card.height)
-  )
-    return;
-  pageCards.set(window, card ? { ...card } : null);
-  try {
-    pageCardListener?.(window);
-  } catch (error) {
-    console.warn("Page card listener failed:", error);
-  }
-}
-
-/** The rounded page card on screen in `window`, if any (see notePageCard). */
-export function getPageCard(window: BaseWindow): PageCardRect | null {
-  return pageCards.get(window) ?? null;
-}
-
-/** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
 /** window.ts: a private window's frame takes the private surface colour. */
 export function setBrowserFramePrivate(
   window: BaseWindow,
@@ -207,11 +170,26 @@ export function setBrowserFramePrivate(
   shell.scheduleLayout();
 }
 
-/** The frame's surface colour for this window (sidebar-backdrop.ts paints the hover layer with it). */
-export function getBrowserFrameSurface(window: BaseWindow): string {
-  return browserFrameSurfaceArgb(shells.get(window)?.framePrivate === true);
+/** Whether `window`'s frame is macOS glass right now (sidebar-backdrop.ts paints the hover card to match). */
+export function isBrowserFrameGlass(window: BaseWindow): boolean {
+  return shells.get(window)?.frameGlass === true;
 }
 
+/** The floating hover card's ground for `window`: its glass tint, or the opaque surface. */
+export function getSidebarHoverCardColour(window: BaseWindow): string {
+  const shell = shells.get(window);
+  return sidebarHoverCardArgb({
+    isPrivate: shell?.framePrivate === true,
+    glass: shell?.frameGlass === true,
+  });
+}
+
+/** Whether `window`'s tab-list hover panel floats as its own card (see ShellState.sidebarFloating). */
+export function isSidebarFloating(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarFloating === true;
+}
+
+/** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
 export function isSidebarDocked(window: BaseWindow): boolean {
   return shells.get(window)?.sidebarDocked === true;
 }
@@ -273,6 +251,27 @@ export function getOverlayToolbarContents(
   if (!shell || !shouldUseNativeOverlays(shell)) return null;
   const contents = shell.views.toolbar.webContents;
   return contents.isDestroyed() ? null : contents;
+}
+
+/** macOS System Settings → Accessibility → Display → Reduce transparency. */
+function prefersReducedTransparency(): boolean {
+  try {
+    return electron.nativeTheme?.prefersReducedTransparency === true;
+  } catch {
+    return false;
+  }
+}
+
+let themeWatched = false;
+/** Reduce Transparency toggled: every window's frame swaps between glass and opaque. */
+function watchFrameTheme(): void {
+  if (themeWatched) return;
+  const theme = electron.nativeTheme;
+  if (!theme || typeof theme.on !== "function") return;
+  themeWatched = true;
+  theme.on("updated", () => {
+    for (const shell of shells.values()) shell.scheduleLayout();
+  });
 }
 
 function shellFor(window?: BaseWindow | null): ShellState | null {
@@ -401,17 +400,23 @@ function applyShellLayout(shell: ShellState): void {
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
   // lives only below the toolbar's bottom line; live pages are a rounded card inset from both by
-  // PAGE_FRAME_GAP. One surface: the window root carries the frame's opaque colour
-  // (browserFrameSurfaceArgb), the toolbar strip, rail and docked panel draw no ground of their own
-  // over it, and the hover panel's own layer paints the identical colour, so the frame is one
-  // continuous surface with no seam in any state; the card's cut-out corners show it too. Opaque,
-  // not a tint over vibrancy: vibrancy reads differently from anything a layer above the page can
-  // paint. Off while the content renderer draws everything in-page (New Tab, full panels) and in
-  // native fullscreen (no frame).
+  // PAGE_FRAME_GAP. One ground: the window root carries the frame's ground (browserFrameGroundArgb)
+  // and the toolbar strip, rail and docked panel draw none of their own over it, so they are one
+  // continuous surface with no seam in any state; the card's cut-out corners show it too. On macOS
+  // the ground is a translucent tint over the window's 'sidebar' vibrancy (glass, like Zephium);
+  // with Reduce Transparency, in fullscreen and on other platforms it is the opaque surface. The
+  // hover panel is not part of this surface: it floats over the page as its own rounded card
+  // (SIDEBAR_FLOAT), so it never shares an edge with the toolbar. Off while the content renderer
+  // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
   const fullscreen = shell.window.isFullScreen();
   const frameShown = overlayMode && !fullscreen;
+  const glass = browserFrameIsGlass({
+    platform: process.platform,
+    reducedTransparency: prefersReducedTransparency(),
+    fullscreen,
+  });
   const ground = frameShown
-    ? browserFrameSurfaceArgb(shell.framePrivate)
+    ? browserFrameGroundArgb({ isPrivate: shell.framePrivate, glass })
     : "#00000000";
   if (shell.frameGround !== ground) {
     shell.frameGround = ground;
@@ -423,8 +428,15 @@ function applyShellLayout(shell: ShellState): void {
     frameShown &&
     sidebarPinned &&
     (sidebarMode === "tabs" || sidebarMode === "history");
-  if (shell.sidebarDocked !== docked) {
+  const floating = frameShown && !docked && sidebarMode === "tabs";
+  if (
+    shell.sidebarDocked !== docked ||
+    shell.frameGlass !== glass ||
+    shell.sidebarFloating !== floating
+  ) {
     shell.sidebarDocked = docked;
+    shell.frameGlass = glass;
+    shell.sidebarFloating = floating;
     try {
       sidebarDockListener?.(shell.window, docked);
     } catch (error) {
@@ -438,12 +450,14 @@ function applyShellLayout(shell: ShellState): void {
   // The view keeps its card width while closed (slid out and hidden, see sidebar-motion.ts), so a
   // reveal never resizes the sidebar renderer. Never wider than the card may get. During a width
   // drag the background-only sibling follows its live bounds; pointer capture stays on the sidebar.
+  // A floating hover card keeps the sidebar width: the view is one float gap wider and the card
+  // stands that gap in from its left edge (the renderer insets it, main insets its glass layer).
   const sidebarWidth = overlaySidebarWidth(shell, width);
   const railWidth = sidebarRailWidth(width);
   const sidebarTop = Math.min(height, frameTop);
   shell.sidebarMotion.layout({
     y: sidebarTop,
-    width: sidebarWidth,
+    width: sidebarWidth + (floating ? SIDEBAR_FLOAT.gap : 0),
     height: Math.max(0, height - sidebarTop),
     railWidth,
   });
@@ -528,6 +542,8 @@ export function attachBrowserShell(
     sidebarOverlayShown: false,
     frameGround: null,
     framePrivate: false,
+    frameGlass: false,
+    sidebarFloating: false,
     sidebarDocked: null,
     lastActiveTabId: null,
     activeTabSince: 0,
@@ -547,6 +563,7 @@ export function attachBrowserShell(
     },
   });
   shells.set(window, shell);
+  watchFrameTheme();
   for (const contents of shell.renderers.keys())
     bindContentsToWindow(contents, window);
   for (const event of WINDOW_LAYOUT_EVENTS)
@@ -566,7 +583,9 @@ export function attachBrowserShell(
     patchChrome: (patch, cause) => setBrowserChromeState(patch, window, cause),
     overlayShown: () =>
       shell.sidebarOverlayShown && shouldUseNativeOverlays(shell),
-    sidebarWidth: () => overlaySidebarWidth(shell),
+    sidebarWidth: () =>
+      overlaySidebarWidth(shell) +
+      (shell.sidebarFloating ? SIDEBAR_FLOAT.gap : 0),
   });
 }
 

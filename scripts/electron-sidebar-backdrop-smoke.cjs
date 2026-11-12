@@ -31,6 +31,9 @@ const label =
 const measureOnly = label === "before";
 
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
+// src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
+const SIDEBAR_FLOAT_GAP = 6;
+
 function busyPage(theme) {
   const dark = theme === "dark";
   const nav = [
@@ -348,15 +351,15 @@ async function run() {
           true,
           "the floating overlay has a separate native background View over live page pixels",
         );
+        // Background-only Views: the card's glass layer on top, the shadow layers stacked under it.
         const nativeViews = mainWindow.contentView.children.filter(
           (view) => !view.webContents,
         );
-        assert.equal(
-          nativeViews.length,
-          1,
-          "one background-only native View is attached",
+        assert.ok(
+          nativeViews.length >= 1,
+          "a background-only native View is attached",
         );
-        const nativeBackdrop = nativeViews[0];
+        const nativeBackdrop = nativeViews.at(-1);
         const childViews = mainWindow.contentView.children;
         const pageIndex = childViews.findIndex(
           (view) =>
@@ -373,10 +376,18 @@ async function run() {
           "the native material is above live page pixels but behind toolbar and sidebar content",
         );
         assert.equal(nativeBackdrop.getVisible(), true);
+        // The hover panel is a floating card (src/shared/sidebar-card.ts SIDEBAR_FLOAT): its glass
+        // layer is the overlay view's bounds inset by the float gap, rounded.
+        const floatCard = (bounds) => ({
+          x: bounds.x + SIDEBAR_FLOAT_GAP,
+          y: bounds.y + SIDEBAR_FLOAT_GAP,
+          width: bounds.width - SIDEBAR_FLOAT_GAP,
+          height: bounds.height - SIDEBAR_FLOAT_GAP * 2,
+        });
         assert.deepEqual(
           nativeBackdrop.getBounds(),
-          sidebar.getBounds(),
-          "the native material View matches the sidebar's live bounds",
+          floatCard(sidebar.getBounds()),
+          "the native material View is the floating card inside the sidebar's live bounds",
         );
         assert.equal(
           card.backgroundImage,
@@ -411,12 +422,12 @@ async function run() {
           `window.api.browser.chrome.set({ sidebarWidth: ${resizedWidth} })`,
         );
         await waitFor(
-          () => sidebar.getBounds().width === resizedWidth,
+          () => sidebar.getBounds().width === resizedWidth + SIDEBAR_FLOAT_GAP,
           "the floating sidebar to apply its resized width",
         );
         assert.deepEqual(
           nativeBackdrop.getBounds(),
-          sidebar.getBounds(),
+          floatCard(sidebar.getBounds()),
           "a width-only layout update keeps native material aligned without a progress change",
         );
         await evaluate(
@@ -424,14 +435,17 @@ async function run() {
           `window.api.browser.chrome.set({ sidebarWidth: ${originalWidth} })`,
         );
         await waitFor(
-          () => sidebar.getBounds().width === originalWidth,
+          () => sidebar.getBounds().width === originalWidth + SIDEBAR_FLOAT_GAP,
           "the floating sidebar to restore its original width",
         );
       }
       // The page's nav text and thumbnails must not read through: the empty card area stays flat.
+      // macOS native is glass now (a blur under a 0.75 tint): softened page detail may read
+      // through, so it gets a looser bound than the opaque paths.
       if (mode !== "native" || process.platform === "darwin")
         assert.ok(
-          results.at(-1).std < 8,
+          results.at(-1).std <
+            (mode === "native" && process.platform === "darwin" ? 14 : 8),
           `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
         );
       else

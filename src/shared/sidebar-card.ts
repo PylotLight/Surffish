@@ -125,28 +125,154 @@ export function sidebarCardCssVars(
     "--sidebar-controls-top": `${geometry.controlsTop}px`,
     "--frame-surface": argbToCss(BROWSER_FRAME_SURFACE_ARGB),
     "--frame-surface-private": argbToCss(BROWSER_FRAME_SURFACE_PRIVATE_ARGB),
+    "--frame-glass": argbToCss(BROWSER_FRAME_GLASS_ARGB),
+    "--frame-glass-private": argbToCss(BROWSER_FRAME_GLASS_PRIVATE_ARGB),
+    "--sidebar-hover-glass": argbToCss(SIDEBAR_HOVER_GLASS_ARGB),
+    "--sidebar-hover-glass-private": argbToCss(
+      SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
+    ),
+    "--sidebar-float-gap": `${SIDEBAR_FLOAT.gap}px`,
+    "--sidebar-float-radius": `${SIDEBAR_FLOAT.radius}px`,
   };
 }
 
 /**
- * The browser frame's one surface colour, ARGB, opaque: rgb(25, 27, 31). The toolbar strip, the
- * rail, the docked panel and the hover panel all show exactly this colour, so they read as one
- * continuous frame with no seam in any state. Over live pages main sets it as the window root's
- * background (browser-shell.ts), under the toolbar strip, rail, docked panel and page card, which
- * draw no ground of their own there; the hover panel's native layer (sidebar-backdrop.ts) and the
- * solid fallback paint the same colour. It is opaque on purpose: a translucent tint over macOS
- * vibrancy reads as a wallpaper-dependent shade that no layer above the page can match (that was
- * the toolbar/hover-panel seam), so the frame trades vibrancy for one exact colour.
+ * The browser frame's opaque surface colour, ARGB: rgb(25, 27, 31). It is the frame wherever there
+ * is no glass: Linux and Windows (no vibrancy), macOS with Reduce Transparency on, native
+ * fullscreen, and the solid hover-panel fallback (Sidebar blur off). Over live pages main sets the
+ * frame's ground (this, or the glass tint below) as the window root's background (browser-shell.ts),
+ * under the toolbar strip, rail, docked panel and page card, which draw no ground of their own
+ * there, so the toolbar, rail and docked panel are always one surface with no seam.
  */
 export const BROWSER_FRAME_SURFACE_ARGB = "#FF191B1F";
 /** The same frame in a private window: one opaque violet-tinted surface, rgb(30, 26, 40). */
 export const BROWSER_FRAME_SURFACE_PRIVATE_ARGB = "#FF1E1A28";
+
+/**
+ * macOS glass (Zephium's look): the window's own NSVisualEffectView ('sidebar' material, the one
+ * Zephium installs in desktop/src/material.rs) under this translucent tint, rgba(18, 21, 25, 0.55).
+ * Lighter than the old #A6121519 (0.65) so the wallpaper reads through as glass; still dark enough
+ * for the toolbar's text over the dark sidebar material. Toolbar, rail and docked panel all sit on
+ * the one window root that carries it, so they stay a single surface.
+ */
+export const BROWSER_FRAME_GLASS_ARGB = "#8C121519";
+/** The glass frame in a private window: the private surface colour at the same strength. */
+export const BROWSER_FRAME_GLASS_PRIVATE_ARGB = "#8C1E1A28";
+
+/**
+ * The floating hover card's tint over the page (macOS glass): the frame surface colour at 0.75,
+ * over the native hover layer's in-window blur (SIDEBAR_HOVER_GLASS_BLUR). Denser than the frame
+ * tint because there is no dark system material under it, only the page.
+ */
+export const SIDEBAR_HOVER_GLASS_ARGB = "#BF191B1F";
+export const SIDEBAR_HOVER_GLASS_PRIVATE_ARGB = "#BF1E1A28";
 
 /** The frame surface for a window (private windows get their own tint, still one surface). */
 export function browserFrameSurfaceArgb(isPrivate: boolean): string {
   return isPrivate
     ? BROWSER_FRAME_SURFACE_PRIVATE_ARGB
     : BROWSER_FRAME_SURFACE_ARGB;
+}
+
+/**
+ * Whether the frame is glass right now: macOS only (the window has vibrancy), never with Reduce
+ * Transparency on, never in native fullscreen (no frame; the strip slides over the page).
+ */
+export function browserFrameIsGlass({
+  platform,
+  reducedTransparency,
+  fullscreen,
+}: {
+  platform: NodeJS.Platform | string;
+  reducedTransparency: boolean;
+  fullscreen: boolean;
+}): boolean {
+  return platform === "darwin" && !reducedTransparency && !fullscreen;
+}
+
+/** The frame's ground over live pages: the glass tint, or the opaque surface without glass. */
+export function browserFrameGroundArgb({
+  isPrivate,
+  glass,
+}: {
+  isPrivate: boolean;
+  glass: boolean;
+}): string {
+  if (!glass) return browserFrameSurfaceArgb(isPrivate);
+  return isPrivate
+    ? BROWSER_FRAME_GLASS_PRIVATE_ARGB
+    : BROWSER_FRAME_GLASS_ARGB;
+}
+
+/** The floating hover card's ground: glass tint (blurred page under it) or the opaque surface. */
+export function sidebarHoverCardArgb({
+  isPrivate,
+  glass,
+}: {
+  isPrivate: boolean;
+  glass: boolean;
+}): string {
+  if (!glass) return browserFrameSurfaceArgb(isPrivate);
+  return isPrivate
+    ? SIDEBAR_HOVER_GLASS_PRIVATE_ARGB
+    : SIDEBAR_HOVER_GLASS_ARGB;
+}
+
+/**
+ * The hover-revealed panel is a floating card, not part of the frame (Zephium's hidden-sidebar
+ * card): it stands `gap` px off the toolbar's bottom line and the window's left and bottom edges,
+ * with its own rounded corners and a soft shadow, so it never shares an edge with the toolbar and
+ * no seam can show. The overlay view itself keeps its frame bounds (x 0, from the toolbar's line to
+ * the bottom; one `gap` wider so the card keeps the sidebar width), so the pointer never falls into
+ * a hole between the rail and the card; the renderer insets its card by `gap` and main insets the
+ * native glass layer and shadow the same way.
+ */
+export const SIDEBAR_FLOAT = Object.freeze({ gap: 6, radius: 12 });
+
+/** The floating card's window rect inside the overlay view's bounds. */
+export function sidebarFloatCardRect(
+  view: CardRect,
+  float: { gap: number } = SIDEBAR_FLOAT,
+): CardRect {
+  const gap = Math.max(0, float.gap);
+  return {
+    x: view.x + gap,
+    y: view.y + gap,
+    width: Math.max(0, view.width - gap),
+    height: Math.max(0, view.height - gap * 2),
+  };
+}
+
+/**
+ * The floating card's soft shadow as a few stacked translucent rounded layers (cheap solid-colour
+ * compositor layers, no blur; they follow the card's bounds every frame of the slide). Offset down
+ * and right, so the top and left gaps stay the frame's own colour; widest layer faintest.
+ */
+const SIDEBAR_FLOAT_SHADOW: readonly {
+  spread: number;
+  alpha: number;
+}[] = Object.freeze([
+  { spread: 2, alpha: 0.1 },
+  { spread: 5, alpha: 0.07 },
+  { spread: 9, alpha: 0.05 },
+  { spread: 14, alpha: 0.03 },
+]);
+const SHADOW_DROP = 2;
+
+/** Each shadow layer's rect and corner radius around a floating card rect. */
+export function sidebarFloatShadowRects(
+  card: CardRect,
+  radius: number = SIDEBAR_FLOAT.radius,
+): (CardRect & { radius: number; alpha: number })[] {
+  if (card.width <= 0 || card.height <= 0) return [];
+  return SIDEBAR_FLOAT_SHADOW.map(({ spread, alpha }) => ({
+    x: card.x,
+    y: card.y + SHADOW_DROP,
+    width: card.width + spread,
+    height: card.height + spread - SHADOW_DROP,
+    radius: radius + spread,
+    alpha,
+  }));
 }
 
 /** `#AARRGGBB` → CSS `rgb(r, g, b)` / `rgba(...)`, as getComputedStyle reports it. */
@@ -162,8 +288,8 @@ export function argbToCss(argb: string): string {
 }
 /**
  * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
- * where the sidebar meets the toolbar they read as the frame's rounded inner corner. A hover panel
- * slid out over the card hides the card's own left corners; its fillets (shared/frame-fillets.ts)
- * round the corner at the panel's edge with the same radius.
+ * where the sidebar meets the toolbar they read as the frame's rounded inner corner, against the
+ * glass (macOS) or the opaque frame. The hover panel floats over the card as its own rounded card
+ * (SIDEBAR_FLOAT), so it needs no corner pieces of its own.
  */
 export const PAGE_FRAME_RADIUS = 10;

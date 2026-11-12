@@ -8,15 +8,23 @@ import {
   shouldUseNativeSidebarLayer,
   sidebarCaptureRegions,
   snapshotDue,
+  SIDEBAR_HOVER_GLASS_BLUR,
   SIDEBAR_NATIVE_BLUR_RADIUS,
   sidebarNativeLayerPaint,
 } from "./sidebar-backdrop";
 import {
+  BROWSER_FRAME_GLASS_ARGB,
+  BROWSER_FRAME_GLASS_PRIVATE_ARGB,
   BROWSER_FRAME_SURFACE_ARGB,
   BROWSER_FRAME_SURFACE_PRIVATE_ARGB,
+  SIDEBAR_HOVER_GLASS_ARGB,
+  SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
   argbToCss,
+  browserFrameGroundArgb,
+  browserFrameIsGlass,
   browserFrameSurfaceArgb,
   sidebarCardCssVars,
+  sidebarHoverCardArgb,
 } from "./sidebar-card";
 
 describe("sidebar backdrop mode", () => {
@@ -103,17 +111,22 @@ describe("sidebar backdrop mode", () => {
     );
   });
 
-  test("toolbar, frame and hover panel are one opaque surface colour", () => {
+  test("the opaque frame surface: Linux, Windows, Reduce Transparency, fullscreen", () => {
     expect(BROWSER_FRAME_SURFACE_ARGB).toBe("#FF191B1F");
     expect(BROWSER_FRAME_SURFACE_PRIVATE_ARGB).toBe("#FF1E1A28");
-    // Fully opaque: a translucent frame would read differently over vibrancy than over the page.
-    expect(BROWSER_FRAME_SURFACE_ARGB.slice(1, 3)).toBe("FF");
-    expect(BROWSER_FRAME_SURFACE_PRIVATE_ARGB.slice(1, 3)).toBe("FF");
     expect(browserFrameSurfaceArgb(false)).toBe(BROWSER_FRAME_SURFACE_ARGB);
     expect(browserFrameSurfaceArgb(true)).toBe(
       BROWSER_FRAME_SURFACE_PRIVATE_ARGB,
     );
-    // The CSS the toolbar / in-page frame / solid hover panel paint is the same colour.
+    for (const isPrivate of [false, true]) {
+      expect(browserFrameGroundArgb({ isPrivate, glass: false })).toBe(
+        browserFrameSurfaceArgb(isPrivate),
+      );
+      expect(sidebarHoverCardArgb({ isPrivate, glass: false })).toBe(
+        browserFrameSurfaceArgb(isPrivate),
+      );
+    }
+    // The CSS the in-page frame / solid hover card paint is the same colour.
     const vars = sidebarCardCssVars();
     expect(vars["--frame-surface"]).toBe("rgb(25, 27, 31)");
     expect(vars["--frame-surface-private"]).toBe("rgb(30, 26, 40)");
@@ -121,11 +134,78 @@ describe("sidebar backdrop mode", () => {
     expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 
-  test("the hover layer ends opaque with no blur and fades in with a blur", () => {
+  test("macOS glass: translucent frame tint over vibrancy, denser hover card tint", () => {
+    const mac = { platform: "darwin", reducedTransparency: false };
+    expect(browserFrameIsGlass({ ...mac, fullscreen: false })).toBe(true);
+    expect(browserFrameIsGlass({ ...mac, fullscreen: true })).toBe(false);
+    expect(
+      browserFrameIsGlass({
+        ...mac,
+        reducedTransparency: true,
+        fullscreen: false,
+      }),
+    ).toBe(false);
+    for (const platform of ["linux", "win32"])
+      expect(
+        browserFrameIsGlass({
+          platform,
+          reducedTransparency: false,
+          fullscreen: false,
+        }),
+      ).toBe(false);
+
+    expect(BROWSER_FRAME_GLASS_ARGB).toBe("#8C121519");
+    expect(browserFrameGroundArgb({ isPrivate: false, glass: true })).toBe(
+      BROWSER_FRAME_GLASS_ARGB,
+    );
+    expect(browserFrameGroundArgb({ isPrivate: true, glass: true })).toBe(
+      BROWSER_FRAME_GLASS_PRIVATE_ARGB,
+    );
+    expect(sidebarHoverCardArgb({ isPrivate: false, glass: true })).toBe(
+      SIDEBAR_HOVER_GLASS_ARGB,
+    );
+    expect(sidebarHoverCardArgb({ isPrivate: true, glass: true })).toBe(
+      SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
+    );
+    // Translucent, so the material reads; the private tint keeps the private surface's colour.
+    for (const glass of [
+      BROWSER_FRAME_GLASS_ARGB,
+      BROWSER_FRAME_GLASS_PRIVATE_ARGB,
+      SIDEBAR_HOVER_GLASS_ARGB,
+      SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
+    ]) {
+      const alpha = parseInt(glass.slice(1, 3), 16);
+      expect(alpha).toBeGreaterThan(0x60);
+      expect(alpha).toBeLessThan(0xff);
+    }
+    expect(BROWSER_FRAME_GLASS_PRIVATE_ARGB.slice(3)).toBe(
+      BROWSER_FRAME_SURFACE_PRIVATE_ARGB.slice(3),
+    );
+    expect(SIDEBAR_HOVER_GLASS_ARGB.slice(3)).toBe(
+      BROWSER_FRAME_SURFACE_ARGB.slice(3),
+    );
+    const vars = sidebarCardCssVars();
+    expect(vars["--frame-glass"]).toBe("rgba(18, 21, 25, 0.549)");
+    expect(vars["--sidebar-hover-glass"]).toBe("rgba(25, 27, 31, 0.749)");
+  });
+
+  test("the opaque hover layer ends with no blur and fades in with a blur", () => {
     expect(sidebarNativeLayerPaint(1)).toEqual({ alpha: 1, blur: 0 });
     expect(sidebarNativeLayerPaint(1.4)).toEqual({ alpha: 1, blur: 0 });
     expect(sidebarNativeLayerPaint(0.5)).toEqual({ alpha: 0.5, blur: 10 });
     expect(sidebarNativeLayerPaint(0).alpha).toBe(0.02);
+  });
+
+  test("the glass hover layer keeps its blur at rest", () => {
+    expect(sidebarNativeLayerPaint(1, { glass: true })).toEqual({
+      alpha: 1,
+      blur: SIDEBAR_HOVER_GLASS_BLUR,
+    });
+    expect(sidebarNativeLayerPaint(0.5, { glass: true })).toEqual({
+      alpha: 0.5,
+      blur: Math.round(SIDEBAR_HOVER_GLASS_BLUR / 2),
+    });
+    expect(sidebarNativeLayerPaint(0, { glass: true }).alpha).toBe(0.02);
   });
 });
 
