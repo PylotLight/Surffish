@@ -14,6 +14,8 @@ import {
 } from "./sidebar-backdrop";
 import {
   BROWSER_FRAME_GLASS_ARGB,
+  BROWSER_FRAME_GLASS_LIGHT_ARGB,
+  BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB,
   BROWSER_FRAME_GLASS_PRIVATE_ARGB,
   BROWSER_FRAME_SURFACE_ARGB,
   BROWSER_FRAME_SURFACE_PRIVATE_ARGB,
@@ -154,7 +156,7 @@ describe("sidebar backdrop mode", () => {
         }),
       ).toBe(false);
 
-    expect(BROWSER_FRAME_GLASS_ARGB).toBe("#8C121519");
+    expect(BROWSER_FRAME_GLASS_ARGB).toBe("#33121519");
     expect(browserFrameGroundArgb({ isPrivate: false, glass: true })).toBe(
       BROWSER_FRAME_GLASS_ARGB,
     );
@@ -167,16 +169,32 @@ describe("sidebar backdrop mode", () => {
     expect(sidebarHoverCardArgb({ isPrivate: true, glass: true })).toBe(
       SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
     );
-    // Translucent, so the material reads; the private tint keeps the private surface's colour.
+    // Light appearance: a heavier wash over the pale material, for the white chrome text.
+    expect(
+      browserFrameGroundArgb({ isPrivate: false, glass: true, dark: false }),
+    ).toBe(BROWSER_FRAME_GLASS_LIGHT_ARGB);
+    expect(
+      browserFrameGroundArgb({ isPrivate: true, glass: true, dark: false }),
+    ).toBe(BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB);
+    expect(
+      browserFrameGroundArgb({ isPrivate: false, glass: false, dark: false }),
+    ).toBe(BROWSER_FRAME_SURFACE_ARGB);
+    const alpha = (argb: string) => parseInt(argb.slice(1, 3), 16);
+    // The dark frame wash is light, so the vibrancy reads as glass and not a flat #1B1D21 (a
+    // 0.55 wash over the dark sidebar material did); the hover card over the page is denser.
     for (const glass of [
       BROWSER_FRAME_GLASS_ARGB,
       BROWSER_FRAME_GLASS_PRIVATE_ARGB,
+    ])
+      expect(alpha(glass)).toBeLessThanOrEqual(0x4d);
+    for (const glass of [
+      BROWSER_FRAME_GLASS_LIGHT_ARGB,
+      BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB,
       SIDEBAR_HOVER_GLASS_ARGB,
       SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
     ]) {
-      const alpha = parseInt(glass.slice(1, 3), 16);
-      expect(alpha).toBeGreaterThan(0x60);
-      expect(alpha).toBeLessThan(0xff);
+      expect(alpha(glass)).toBeGreaterThan(0x80);
+      expect(alpha(glass)).toBeLessThan(0xff);
     }
     expect(BROWSER_FRAME_GLASS_PRIVATE_ARGB.slice(3)).toBe(
       BROWSER_FRAME_SURFACE_PRIVATE_ARGB.slice(3),
@@ -185,7 +203,8 @@ describe("sidebar backdrop mode", () => {
       BROWSER_FRAME_SURFACE_ARGB.slice(3),
     );
     const vars = sidebarCardCssVars();
-    expect(vars["--frame-glass"]).toBe("rgba(18, 21, 25, 0.549)");
+    expect(vars["--frame-glass"]).toBe("rgba(18, 21, 25, 0.2)");
+    expect(vars["--frame-glass-light"]).toBe("rgba(18, 21, 25, 0.702)");
     expect(vars["--sidebar-hover-glass"]).toBe("rgba(25, 27, 31, 0.749)");
   });
 

@@ -5240,14 +5240,24 @@
   --sidebar-hover-blur: none;
 }
 .app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {
-  --frame-ground: var(--frame-glass, rgba(18, 21, 25, 0.549));
-  --frame-ground-private: var(--frame-glass-private, rgba(30, 26, 40, 0.549));
+  --frame-ground: var(--frame-glass, rgba(18, 21, 25, 0.2));
+  --frame-ground-private: var(--frame-glass-private, rgba(30, 26, 40, 0.302));
   --sidebar-hover-ground: var(--sidebar-hover-glass, rgba(25, 27, 31, 0.749));
   --sidebar-hover-ground-private: var(
     --sidebar-hover-glass-private,
     rgba(30, 26, 40, 0.749)
   );
   --sidebar-hover-blur: blur(30px);
+}
+/* Light appearance: the sidebar material turns pale under white chrome text, so a heavier wash. */
+@media (prefers-color-scheme: light) {
+  .app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {
+    --frame-ground: var(--frame-glass-light, rgba(18, 21, 25, 0.702));
+    --frame-ground-private: var(
+      --frame-glass-light-private,
+      rgba(30, 26, 40, 0.702)
+    );
+  }
 }
 @media (prefers-reduced-transparency: reduce) {
   .app-shell[data-platform="darwin"]:not([data-fullscreen="true"]) {

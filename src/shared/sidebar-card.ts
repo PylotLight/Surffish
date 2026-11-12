@@ -127,6 +127,10 @@ export function sidebarCardCssVars(
     "--frame-surface-private": argbToCss(BROWSER_FRAME_SURFACE_PRIVATE_ARGB),
     "--frame-glass": argbToCss(BROWSER_FRAME_GLASS_ARGB),
     "--frame-glass-private": argbToCss(BROWSER_FRAME_GLASS_PRIVATE_ARGB),
+    "--frame-glass-light": argbToCss(BROWSER_FRAME_GLASS_LIGHT_ARGB),
+    "--frame-glass-light-private": argbToCss(
+      BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB,
+    ),
     "--sidebar-hover-glass": argbToCss(SIDEBAR_HOVER_GLASS_ARGB),
     "--sidebar-hover-glass-private": argbToCss(
       SIDEBAR_HOVER_GLASS_PRIVATE_ARGB,
@@ -150,14 +154,22 @@ export const BROWSER_FRAME_SURFACE_PRIVATE_ARGB = "#FF1E1A28";
 
 /**
  * macOS glass (Zephium's look): the window's own NSVisualEffectView ('sidebar' material, the one
- * Zephium installs in desktop/src/material.rs) under this translucent tint, rgba(18, 21, 25, 0.55).
- * Lighter than the old #A6121519 (0.65) so the wallpaper reads through as glass; still dark enough
- * for the toolbar's text over the dark sidebar material. Toolbar, rail and docked panel all sit on
- * the one window root that carries it, so they stay a single surface.
+ * Zephium installs in desktop/src/material.rs) under a light translucent wash. Zephium leaves the
+ * material untinted by default; the dark sidebar material is already a deep grey, so any heavy dark
+ * tint over it reads as a flat, opaque #1B1D21 (that was the 0.55 wash). In dark appearance the wash
+ * is rgba(18, 21, 25, 0.2): the wallpaper's colour and blur read through, the white toolbar text
+ * still reads on the dark material. Toolbar, rail and docked panel all sit on the one window root
+ * that carries it, so they stay a single surface.
  */
-export const BROWSER_FRAME_GLASS_ARGB = "#8C121519";
-/** The glass frame in a private window: the private surface colour at the same strength. */
-export const BROWSER_FRAME_GLASS_PRIVATE_ARGB = "#8C1E1A28";
+export const BROWSER_FRAME_GLASS_ARGB = "#33121519";
+/** The glass frame in a private window: the private violet, a little stronger so it still reads. */
+export const BROWSER_FRAME_GLASS_PRIVATE_ARGB = "#4D1E1A28";
+/**
+ * Light appearance: the sidebar material turns pale and the chrome's text is white, so the wash is
+ * heavier (0.7) to keep it legible; still glass, the wallpaper tints it.
+ */
+export const BROWSER_FRAME_GLASS_LIGHT_ARGB = "#B3121519";
+export const BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB = "#B31E1A28";
 
 /**
  * The floating hover card's tint over the page (macOS glass): the frame surface colour at 0.75,
@@ -194,11 +206,18 @@ export function browserFrameIsGlass({
 export function browserFrameGroundArgb({
   isPrivate,
   glass,
+  dark = true,
 }: {
   isPrivate: boolean;
   glass: boolean;
+  /** The system appearance (the vibrancy material follows it): dark unless told otherwise. */
+  dark?: boolean;
 }): string {
   if (!glass) return browserFrameSurfaceArgb(isPrivate);
+  if (!dark)
+    return isPrivate
+      ? BROWSER_FRAME_GLASS_LIGHT_PRIVATE_ARGB
+      : BROWSER_FRAME_GLASS_LIGHT_ARGB;
   return isPrivate
     ? BROWSER_FRAME_GLASS_PRIVATE_ARGB
     : BROWSER_FRAME_GLASS_ARGB;

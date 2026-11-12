@@ -1325,6 +1325,53 @@ async function run() {
     },
     "the overlay toolbar relies on the same native frame material without a CSS glass layer",
   );
+  // Nothing between the window root's ground (macOS: the vibrancy under its glass wash) and the
+  // eye may paint: every ancestor of the toolbar strip and of the docked panel is see-through, so
+  // the toolbar, rail and docked panel are the window's one glass and not a flat layer over it.
+  const opaqueAncestors = (view, selector) =>
+    evaluate(
+      view,
+      `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)})
+    if (!element) return ['missing ' + ${JSON.stringify(selector)}]
+    const painted = []
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node)
+      const alpha = /rgba?\(([^)]+)\)/.exec(style.backgroundColor)?.[1].split(',')[3]
+      const name = node.tagName.toLowerCase() + (node.className && typeof node.className === 'string' ? '.' + node.className.trim().split(/\s+/).join('.') : '')
+      if (alpha === undefined || Number(alpha) > 0) painted.push(name + ' ' + style.backgroundColor)
+      if (style.backgroundImage !== 'none') painted.push(name + ' ' + style.backgroundImage)
+    }
+    return painted
+  })()`,
+    );
+  assert.deepEqual(
+    await opaqueAncestors(rendererViews.toolbar, ".browser-toolbar"),
+    [],
+    "the toolbar strip and every layer under it in its view are transparent (the frame's glass shows)",
+  );
+  assert.deepEqual(
+    await opaqueAncestors(rendererViews.sidebar, ".browser-sidebar"),
+    [],
+    "the docked panel and every layer under it in its view are transparent (the frame's glass shows)",
+  );
+  // The see-through strip still moves the window: its empty area is a drag region, the controls on
+  // it are not.
+  const regions = await evaluate(
+    rendererViews.toolbar,
+    `(() => {
+    const region = (selector) => { const el = document.querySelector(selector); if (!el) return null; const s = getComputedStyle(el); return s.getPropertyValue('app-region') || s.getPropertyValue('-webkit-app-region') || s.webkitAppRegion || null }
+    return { toolbar: region('.browser-toolbar'), button: region('.toolbar-button'), omnibox: region('.omnibox') }
+  })()`,
+  );
+  console.log(
+    `[sidebar-overlay-smoke] toolbar app regions ${JSON.stringify(regions)}`,
+  );
+  assert.deepEqual(
+    regions,
+    { toolbar: "drag", button: "no-drag", omnibox: "no-drag" },
+    "the transparent toolbar strip drags the window; its buttons and omnibox do not",
+  );
   captureFullWindow("sidebar-overlay-live-page-expanded.png");
   const collapsePinSample = await sampleSidebarPinMorph(
     rendererViews.sidebar,

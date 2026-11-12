@@ -262,8 +262,20 @@ function prefersReducedTransparency(): boolean {
   }
 }
 
+/** The system appearance the window's vibrancy material follows. */
+function systemUsesDarkColors(): boolean {
+  try {
+    return electron.nativeTheme?.shouldUseDarkColors !== false;
+  } catch {
+    return true;
+  }
+}
+
 let themeWatched = false;
-/** Reduce Transparency toggled: every window's frame swaps between glass and opaque. */
+/**
+ * Reduce Transparency or the appearance changed: every window's frame swaps between glass and
+ * opaque, or between its dark and light glass wash.
+ */
 function watchFrameTheme(): void {
   if (themeWatched) return;
   const theme = electron.nativeTheme;
@@ -416,7 +428,11 @@ function applyShellLayout(shell: ShellState): void {
     fullscreen,
   });
   const ground = frameShown
-    ? browserFrameGroundArgb({ isPrivate: shell.framePrivate, glass })
+    ? browserFrameGroundArgb({
+        isPrivate: shell.framePrivate,
+        glass,
+        dark: systemUsesDarkColors(),
+      })
     : "#00000000";
   if (shell.frameGround !== ground) {
     shell.frameGround = ground;
