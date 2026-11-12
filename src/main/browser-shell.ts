@@ -145,6 +145,56 @@ export function setSidebarDockListener(
   sidebarDockListener = listener;
 }
 
+/** A live page card's window rect (browser.ts applyTabBounds), or null when no card shows. */
+export interface PageCardRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const pageCards = new WeakMap<BaseWindow, PageCardRect | null>();
+let pageCardListener: ((window: BaseWindow) => void) | null = null;
+
+/** sidebar-backdrop.ts: hear when a window's rounded page card moves, resizes or goes away. */
+export function setPageCardListener(
+  listener: ((window: BaseWindow) => void) | null,
+): void {
+  pageCardListener = listener;
+}
+
+/**
+ * browser.ts: the rounded page card on screen in `window` (null: none, e.g. a split, New Tab or
+ * fullscreen). Diffed, so calling it on every bounds pass is cheap.
+ */
+export function notePageCard(
+  window: BaseWindow,
+  card: PageCardRect | null,
+): void {
+  const previous = pageCards.get(window) ?? null;
+  if (
+    previous === card ||
+    (previous &&
+      card &&
+      previous.x === card.x &&
+      previous.y === card.y &&
+      previous.width === card.width &&
+      previous.height === card.height)
+  )
+    return;
+  pageCards.set(window, card ? { ...card } : null);
+  try {
+    pageCardListener?.(window);
+  } catch (error) {
+    console.warn("Page card listener failed:", error);
+  }
+}
+
+/** The rounded page card on screen in `window`, if any (see notePageCard). */
+export function getPageCard(window: BaseWindow): PageCardRect | null {
+  return pageCards.get(window) ?? null;
+}
+
 /** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
 /** window.ts: a private window's frame takes the private surface colour. */
 export function setBrowserFramePrivate(

@@ -217,6 +217,7 @@ import {
   sendToWindowRenderers,
   setBrowserChromeState,
   setBrowserPageIsLocalNewTab,
+  notePageCard,
 } from "./browser-shell";
 import {
   attachPagePopups,
@@ -1489,6 +1490,8 @@ function applyTabBounds(w: BrowserWindowState): void {
     }
   }
   if (!w.window.isDestroyed()) {
+    // The hover panel's fillets (sidebar-fillets.ts) round this card's corner at the panel's edge.
+    notePageCard(w.window, framed ? { ...browserBounds } : null);
     updateSplitSurface(
       w.window,
       split && layout

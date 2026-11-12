@@ -29,6 +29,7 @@ import {
 import {
   getBrowserChromeState,
   getBrowserFrameSurface,
+  getPageCard,
   getShellWindowFor,
   getShellWindows,
   getSidebarOverlayView,
@@ -39,9 +40,12 @@ import {
   sendToMainWindowRenderers,
   setSidebarDockListener,
   setSidebarMotionListener,
+  setPageCardListener,
   setSidebarOverlayListener,
 } from "./browser-shell";
 import { scaleArgbAlpha } from "../shared/sidebar-motion";
+import { hoverPanelIsOpaqueFrame } from "../shared/frame-fillets";
+import { updateSidebarFillets } from "./sidebar-fillets";
 import { readUserJson, writeUserJson } from "./user-json";
 
 /**
@@ -191,9 +195,33 @@ function onMotion(window: BaseWindow, progress: number): void {
   motionProgress.set(window, progress);
   try {
     applyNativeLayer(window, progress);
+    applyFillets(window, progress);
   } catch {
     // The view is going away with its window.
   }
+}
+
+/**
+ * The page card's rounded corner where the hover panel's edge crosses it (sidebar-fillets.ts):
+ * shown only while the panel is the frame's opaque surface, in the frame's colour.
+ */
+function applyFillets(
+  window: BaseWindow,
+  progress = motionProgress.get(window) ?? 0,
+): void {
+  if (window.isDestroyed()) return;
+  const visible = isSidebarOverlayShown(window);
+  updateSidebarFillets(window, {
+    sidebar: getSidebarOverlayView(window),
+    card: getPageCard(window),
+    colour: getBrowserFrameSurface(window),
+    opaque: hoverPanelIsOpaqueFrame({
+      mode: getSidebarBackdropMode(),
+      docked: isSidebarDocked(window),
+      visible,
+      progress: visible ? progress : 0,
+    }),
+  });
 }
 
 function canCapture(window: BaseWindow): boolean {
@@ -306,6 +334,7 @@ function onOverlay(
   window: BaseWindow,
   event: "shown" | "hidden" | "prefetch",
 ): void {
+  if (event !== "prefetch") applyFillets(window);
   if (getSidebarBackdropMode() === "native") {
     if (event === "shown") applyNativeLayer(window);
     else if (event === "hidden") clearNativeLayer(window);
@@ -337,6 +366,7 @@ function onOverlay(
 function applyEverywhere(): void {
   for (const window of getShellWindows()) {
     applyNativeLayer(window);
+    applyFillets(window);
     if (
       getSidebarBackdropMode() === "snapshot" &&
       isSidebarOverlayShown(window)
@@ -375,6 +405,13 @@ export function registerSidebarBackdropIpc(): void {
   setSidebarDockListener((window) =>
     onMotion(window, motionProgress.get(window) ?? 0),
   );
+  setPageCardListener((window) => {
+    try {
+      applyFillets(window);
+    } catch {
+      // The view is going away with its window.
+    }
+  });
   ipcMain.handle("browser:sidebar-backdrop:get", (event) => {
     assertMainRenderer(event);
     const window = getShellWindowFor(event.sender);

@@ -360,6 +360,61 @@ async function assertFrameJunction(what, x = 40) {
   );
 }
 
+/** One composited window pixel (content coordinates) as X11 shows it: [r, g, b]. */
+function grabWindowPixel(x, y) {
+  const content = mainWindow.getContentBounds();
+  const file = join(userData, `frame-pixel-${Date.now()}.png`);
+  execFileSync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-f",
+    "x11grab",
+    "-video_size",
+    "1x1",
+    "-i",
+    `${process.env.DISPLAY}.0+${content.x + Math.round(x)},${content.y + Math.round(y)}`,
+    "-frames:v",
+    "1",
+    "-y",
+    file,
+  ]);
+  const bitmap = nativeImage.createFromPath(file).toBitmap(); // BGRA
+  return [bitmap[2], bitmap[1], bitmap[0]];
+}
+
+/**
+ * The page card's inner corner is rounded against the frame (PAGE_FRAME_RADIUS): the pixel just
+ * inside the corner is the frame's surface colour, a pixel further in along the diagonal is the
+ * page. `corner` is the card's top-left in the rail and docked states, and in the hover state the
+ * point where the panel's right edge crosses the card's top line (the panel's fillet rounds it).
+ */
+async function assertRoundedCardCorner(what, corner) {
+  if (process.platform !== "linux" || !process.env.DISPLAY) return;
+  const close = (a, b) => a.every((value, i) => Math.abs(value - b[i]) <= 3);
+  let cut = null;
+  let inside = null;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    cut = grabWindowPixel(corner.x + 1, corner.y + 1);
+    inside = grabWindowPixel(corner.x + 8, corner.y + 8);
+    if (close(cut, FRAME_SURFACE_RGB) && !close(inside, FRAME_SURFACE_RGB))
+      break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  console.log(
+    `[sidebar-overlay-smoke] card corner (${what}) at ${corner.x},${corner.y}: corner ${cut.join(",")} inside ${inside.join(",")}`,
+  );
+  assert.ok(
+    close(cut, FRAME_SURFACE_RGB),
+    `${what}: the page card's inner corner is rounded, the frame shows in it (${cut}, want ${FRAME_SURFACE_RGB})`,
+  );
+  assert.ok(
+    !close(inside, FRAME_SURFACE_RGB),
+    `${what}: inside the rounded corner the page shows (${inside})`,
+  );
+}
+
 function captureFullWindow(name) {
   if (!screenshotDirectory) return;
   mkdirSync(screenshotDirectory, { recursive: true });
@@ -1146,6 +1201,7 @@ async function run() {
     `the collapsed rail starts at the toolbar's bottom line, never over the toolbar (rail y ${collapsedSidebarBounds.y}, toolbar bottom ${toolbarBottom})`,
   );
   await assertFrameJunction("collapsed rail");
+  await assertRoundedCardCorner("collapsed rail", pageHiddenSidebar);
   assert.ok(
     Math.abs(pageHiddenSidebar.y - toolbarBottom - PAGE_FRAME_GAP) <= 1,
     `the live page card keeps the frame gap below the toolbar (page y ${pageHiddenSidebar.y}, toolbar bottom ${toolbarBottom})`,
@@ -1429,6 +1485,7 @@ async function run() {
     "the docked sidebar runs to the window's bottom edge",
   );
   await assertFrameJunction("docked panel");
+  await assertRoundedCardCorner("docked panel", pageVisibleSidebar);
   captureFullWindow("sidebar-overlay-live-page-visible.png");
   // This is an authentic app-window capture over the harness's loopback-only synthetic page.
   captureFullWindow("surffish-current-app.png");
@@ -1585,6 +1642,20 @@ async function run() {
     );
   }
   await assertFrameJunction("hover panel");
+  {
+    // The panel slid out over the card: its fillet rounds the corner at its right edge. Wait for
+    // the slide to land first (the fillet follows the edge; sampling mid-slide races it).
+    const revealed = await waitFor(() => {
+      const bounds = rendererViews.sidebar.getBounds();
+      return bounds.x === 0 && bounds.width === widthAfterResize
+        ? bounds
+        : null;
+    }, "the hover-revealed panel to finish opening");
+    await assertRoundedCardCorner("hover panel", {
+      x: revealed.x + revealed.width,
+      y: pageAfterHide.y,
+    });
+  }
   pointerMove(
     mainWindow.getContentBounds().x + Math.min(700, contentSize[0] - 10),
     mainWindow.getContentBounds().y + pageVisibleSidebar.y + 350,

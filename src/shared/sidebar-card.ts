@@ -162,6 +162,8 @@ export function argbToCss(argb: string): string {
 }
 /**
  * Rounding of the live page card's corners (native View.setBorderRadius, real rounded corners):
- * where the sidebar meets the toolbar they read as the frame's rounded inner corner.
+ * where the sidebar meets the toolbar they read as the frame's rounded inner corner. A hover panel
+ * slid out over the card hides the card's own left corners; its fillets (shared/frame-fillets.ts)
+ * round the corner at the panel's edge with the same radius.
  */
 export const PAGE_FRAME_RADIUS = 10;
