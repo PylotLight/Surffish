@@ -205,12 +205,17 @@ export function Sidebar(props: SidebarProps) {
     const previous = morphShapeRef.current;
     morphShapeRef.current = shape;
     const snapshot = morphSnapshotRef.current;
-    if (snapshot && previous && document.visibilityState === "hidden") {
+    const settleContentCollapse = surface === "content" && shape === "rail";
+    if (
+      snapshot &&
+      previous &&
+      (document.visibilityState === "hidden" || settleContentCollapse)
+    ) {
       // This surface is not drawing (its view is hidden: the content renderer behind a live page,
       // the overlay over New Tab). A morph played now would only start on its next frame, so the
-      // change would replay in full when the surface is next shown: the panel's copy at full
-      // width over the page, its highlighted row and title, the card shrinking to the rail. The
-      // new shape is simply where it is.
+      // change would replay in full when the surface is next shown. The content surface also sits
+      // over the page: do not paint an outgoing full-width panel ghost while its rail is collapsed.
+      // Its card still follows the CSS width transition; only the row-mark morph is settled here.
       window.clearTimeout(morphTimerRef.current);
       morphTimerRef.current = undefined;
       settleSidebarMorph(host);
