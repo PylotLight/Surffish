@@ -285,6 +285,7 @@ export function playSidebarMorph(
     `:scope > .${MORPH_GHOST_CLASS}`,
   ))
     ghost.remove();
+  lateArrivalWatchers.get(host)?.();
   const targets = measureSidebarTargets(incoming).map((target) =>
     reduce && target.key && isPinMotionKey(target.key)
       ? { ...target, key: null }
@@ -337,6 +338,12 @@ export function playSidebarMorph(
   }
   // Whatever in the incoming shape has no counterpart in the old one fades in: the parts the
   // eye follows are the marks, which are already drawn throughout.
+  const beat: LabelBeat = {
+    present: new WeakSet(incoming.querySelectorAll("*")),
+    faded: new WeakSet(),
+    clock: null,
+    startedAt: performance.now(),
+  };
   const travelling = new Set<HTMLElement>();
   for (const flight of plan.flights) travelling.add(flight.element);
   for (const element of plan.settled) travelling.add(element);
@@ -366,23 +373,167 @@ export function playSidebarMorph(
     );
     // Everything around the mark (title, close button, sleep moon, audio and private badges)
     // arrives on the label beat, together, instead of standing at full strength from frame one.
-    revealColumn(element, new Set([mark]));
+    revealColumn(element, new Set([mark]), beat);
   }
-  revealColumn(incoming, travelling);
+  revealColumn(incoming, travelling, beat);
   total = Math.max(
     total,
     MORPH_PAINT_MS,
     MORPH_LABEL_MS + MORPH_LABEL_DELAY_MS,
     MORPH_ROOM_FALLBACK_MS + SIDEBAR_MOTION_MS * MORPH_TRAILING_FACTOR,
   );
+  watchLateArrivals(host, incoming, beat, total);
   return total;
+}
+
+/**
+ * Land whatever morph is running in `host` at once: its fades and flights finish, the outgoing
+ * shape's copy leaves, and nothing more joins its beat. For a surface that is not drawing (its
+ * view hidden behind a live page, or the overlay hidden over New Tab): Chromium starts an
+ * animation on the document's next frame, so a morph played there would wait, and run in full
+ * (the panel's copy at full width, the active row highlighted, its title across the page) the
+ * moment the surface is shown again, long after the change it was for.
+ */
+export function settleSidebarMorph(host: HTMLElement | null): void {
+  if (!host) return;
+  lateArrivalWatchers.get(host)?.();
+  for (const ghost of host.querySelectorAll<HTMLElement>(
+    `:scope > .${MORPH_GHOST_CLASS}`,
+  ))
+    ghost.remove();
+  for (const animation of host.getAnimations({ subtree: true })) {
+    // CSS transitions and animations (spinners, hover fades) are the stylesheet's; only the
+    // morph's own script animations are landed here.
+    if (
+      typeof CSSTransition !== "undefined" &&
+      animation instanceof CSSTransition
+    )
+      continue;
+    if (
+      typeof CSSAnimation !== "undefined" &&
+      animation instanceof CSSAnimation
+    )
+      continue;
+    try {
+      animation.finish();
+    } catch {
+      animation.cancel();
+    }
+  }
+}
+
+/** The label beat of one morph: every part it faded in, and one of those fades to keep time by. */
+interface LabelBeat {
+  /** What the incoming shape held when the morph began: moved later (a reorder), not arrived. */
+  present: WeakSet<Element>;
+  faded: WeakSet<Element>;
+  clock: Animation | null;
+  startedAt: number;
+}
+
+/** How each morph's late-arrival watch is stopped (the next morph on the same host stops it). */
+const lateArrivalWatchers = new WeakMap<HTMLElement, () => void>();
+
+/**
+ * Where a part that arrives in the incoming shape while it is still being revealed (a new tab's
+ * row, a tab that slept or woke and gained or lost its moon, a badge) joins the label beat.
+ * Pure, so it is tested without a document.
+ *
+ * Returns the beat time (ms, the fade's currentTime) to start its fade at, or null to leave it
+ * as drawn:
+ *  - inside a part that is already fading in: it inherits that fade;
+ *  - inside a site mark, unless it is a whole keyed row: marks are drawn throughout;
+ *  - after the beat has landed: its siblings are at full strength too.
+ *
+ * Without this a row mounted mid-morph skipped the fade every other new part got and painted at
+ * full strength, highlight and title across the whole panel width, while the rest of the panel
+ * was still transparent: on a rail click that opened the panel and created a tab, the new row
+ * flashed on its own before the sidebar settled back on its rail.
+ */
+export function lateArrivalBeatMs({
+  elapsedMs,
+  insideFading,
+  insideMark,
+  keyed,
+}: {
+  elapsedMs: number;
+  insideFading: boolean;
+  insideMark: boolean;
+  keyed: boolean;
+}): number | null {
+  if (insideFading) return null;
+  if (insideMark && !keyed) return null;
+  if (!(elapsedMs < MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS)) return null;
+  return Math.max(0, elapsedMs);
+}
+
+/**
+ * For the length of the morph, anything the framework adds to the incoming shape (a new row, a
+ * badge, a moon) fades in on the same beat as the parts that were there when it started, at the
+ * point the beat has reached, so nothing arrives at full strength mid-reveal.
+ */
+function watchLateArrivals(
+  host: HTMLElement,
+  incoming: HTMLElement,
+  beat: LabelBeat,
+  durationMs: number,
+): void {
+  if (typeof MutationObserver === "undefined") return;
+  const observer = new MutationObserver((records) => {
+    const clockTime = beat.clock?.currentTime;
+    const elapsedMs =
+      typeof clockTime === "number"
+        ? clockTime
+        : performance.now() - beat.startedAt;
+    for (const record of records)
+      for (const node of record.addedNodes) {
+        if (
+          !(node instanceof HTMLElement) ||
+          beat.present.has(node) ||
+          !incoming.contains(node)
+        )
+          continue;
+        let insideFading = false;
+        for (
+          let ancestor: HTMLElement | null = node;
+          ancestor && ancestor !== incoming;
+          ancestor = ancestor.parentElement
+        )
+          if (beat.faded.has(ancestor)) {
+            insideFading = true;
+            break;
+          }
+        const keyed = keyOf(node) !== null;
+        const at = lateArrivalBeatMs({
+          elapsedMs,
+          insideFading,
+          insideMark: !keyed && node.closest(MARK_SELECTOR) !== null,
+          keyed,
+        });
+        if (at === null) continue;
+        fadeIn(node, beat).currentTime = at;
+      }
+  });
+  observer.observe(incoming, { childList: true, subtree: true });
+  const timer = setTimeout(stop, durationMs);
+  function stop(): void {
+    clearTimeout(timer);
+    observer.disconnect();
+    if (lateArrivalWatchers.get(host) === stop)
+      lateArrivalWatchers.delete(host);
+  }
+  lateArrivalWatchers.set(host, stop);
 }
 
 /**
  * Fades in whatever in `root` has no counterpart, at the highest level at which it has none, so
  * each travelling mark stays fully drawn throughout.
  */
-function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
+function revealColumn(
+  root: HTMLElement,
+  travelling: Set<HTMLElement>,
+  beat: LabelBeat,
+): void {
   for (const child of Array.from(root.children)) {
     if (!(child instanceof HTMLElement) || travelling.has(child)) continue;
     let holds = false;
@@ -393,10 +544,10 @@ function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
       }
     }
     if (holds) {
-      revealColumn(child, travelling);
+      revealColumn(child, travelling, beat);
       continue;
     }
-    fadeIn(child);
+    fadeIn(child, beat);
   }
 }
 
@@ -404,13 +555,16 @@ function revealColumn(root: HTMLElement, travelling: Set<HTMLElement>): void {
  * One fade for every arriving part, from transparent to the part's own opacity (an implicit end
  * keyframe): a close button at 0.42 or a restored moon at 0.5 must not reach 1 and snap back.
  */
-function fadeIn(element: HTMLElement): void {
-  element.animate([{ offset: 0, opacity: 0 }], {
+function fadeIn(element: HTMLElement, beat: LabelBeat): Animation {
+  const animation = element.animate([{ offset: 0, opacity: 0 }], {
     duration: MORPH_LABEL_MS,
     delay: MORPH_LABEL_DELAY_MS,
     easing: MORPH_LABEL_EASING,
     fill: "backwards",
   });
+  beat.faded.add(element);
+  beat.clock ??= animation;
+  return animation;
 }
 
 /**

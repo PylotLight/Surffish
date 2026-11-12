@@ -5452,6 +5452,14 @@
   border: 0;
   background: transparent;
 }
+/* A surface that is not drawing (its view hidden: the content renderer behind a live page, the
+ * overlay over New Tab) changes shape without transitions. Chromium starts a transition on the
+ * document's next frame, so the card's width and the rows' settles would otherwise wait out of
+ * sight and play in full over the page when the surface is shown (Sidebar.tsx data-offscreen). */
+.browser-sidebar[data-offscreen],
+.browser-sidebar[data-offscreen] * {
+  transition: none !important;
+}
 /* The outgoing shape, re-attached by the morph where it stood and faded out. */
 .sidebar-morph-ghost {
   position: absolute;

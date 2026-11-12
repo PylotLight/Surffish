@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  lateArrivalBeatMs,
   planSidebarMorph,
   type MarkRect,
   type MorphTarget,
@@ -206,5 +207,55 @@ describe("planSidebarMorph", () => {
     expect(MORPH_FADE_MS).toBeLessThan(MORPH_LABEL_MS);
     expect(MORPH_LABEL_MS / frame).toBeGreaterThanOrEqual(6);
     expect(MORPH_PAINT_MS / frame).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("lateArrivalBeatMs", () => {
+  const arrival = {
+    elapsedMs: 40,
+    insideFading: false,
+    insideMark: false,
+    keyed: true,
+  };
+
+  test("a row mounted mid-reveal joins the label beat where it has reached", () => {
+    // The new tab's row: it must not paint at full strength while its siblings are still
+    // transparent (the full-width row that flashed on a rail click).
+    expect(lateArrivalBeatMs(arrival)).toBe(40);
+    expect(lateArrivalBeatMs({ ...arrival, elapsedMs: 0 })).toBe(0);
+    expect(lateArrivalBeatMs({ ...arrival, elapsedMs: -5 })).toBe(0);
+  });
+
+  test("a badge or moon gained mid-reveal fades on the same beat", () => {
+    expect(
+      lateArrivalBeatMs({ ...arrival, keyed: false, elapsedMs: 120 }),
+    ).toBe(120);
+  });
+
+  test("a part inside one already fading in inherits that fade", () => {
+    expect(lateArrivalBeatMs({ ...arrival, insideFading: true })).toBeNull();
+  });
+
+  test("a swapped favicon stays drawn: marks are shown throughout", () => {
+    expect(
+      lateArrivalBeatMs({ ...arrival, keyed: false, insideMark: true }),
+    ).toBeNull();
+    // A whole new row carries its own mark and fades as one, like any part without a counterpart.
+    expect(lateArrivalBeatMs({ ...arrival, insideMark: true })).toBe(40);
+  });
+
+  test("once the beat has landed, a late part arrives at full strength like its siblings", () => {
+    expect(
+      lateArrivalBeatMs({
+        ...arrival,
+        elapsedMs: MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS,
+      }),
+    ).toBeNull();
+    expect(
+      lateArrivalBeatMs({
+        ...arrival,
+        elapsedMs: MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS - 1,
+      }),
+    ).toBe(MORPH_LABEL_DELAY_MS + MORPH_LABEL_MS - 1);
   });
 });
