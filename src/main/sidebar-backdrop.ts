@@ -47,7 +47,8 @@ import {
   setSidebarOverlayListener,
 } from "./browser-shell";
 import { scaleArgbAlpha } from "../shared/sidebar-motion";
-import { SIDEBAR_FLOAT, sidebarFloatCardRect } from "../shared/sidebar-card";
+import { sidebarFloatCardRect } from "../shared/sidebar-card";
+import { applySidebarBackdropFrame } from "./sidebar-native-frame";
 import type { SidebarMotionFrame } from "./sidebar-motion";
 import {
   hideSidebarCardShadow,
@@ -88,7 +89,7 @@ interface WindowBackdrop {
 }
 const perWindow = new WeakMap<BaseWindow, WindowBackdrop>();
 const nativeBackdropViews = new WeakMap<BaseWindow, View>();
-/** The overlay's open progress (sidebar-motion.ts): the native background ramps with its slide. */
+/** Last overlay progress: used to hide floating shadows once the card has fully closed. */
 const motionProgress = new WeakMap<BaseWindow, number>();
 
 export function getSidebarBackdropMode(): SidebarBackdropMode {
@@ -193,8 +194,7 @@ function applyNativeLayer(
     const wasVisible = backdrop.getVisible();
     const floating = isSidebarFloating(window);
     const frame = sidebarFrame ?? sidebar.getBounds();
-    backdrop.setBorderRadius(floating ? SIDEBAR_FLOAT.radius : 0);
-    backdrop.setBounds(floating ? sidebarFloatCardRect(frame) : frame);
+    applySidebarBackdropFrame(backdrop, frame, floating);
     paintNativeLayer(
       backdrop,
       progress,
@@ -238,7 +238,7 @@ function onMotion(
   }
 }
 
-/** The floating hover card's soft shadow, faded with the slide; hidden unless the card floats. */
+/** The floating hover card's soft shadow follows the card edge and is hidden when it closes. */
 function applyShadow(
   window: BaseWindow,
   progress = motionProgress.get(window) ?? 0,
@@ -260,7 +260,7 @@ function applyShadow(
   updateSidebarCardShadow(window, {
     card: sidebarFloatCardRect(sidebarFrame ?? sidebar.getBounds()),
     below: nativeBackdropViews.get(window) ?? null,
-    strength: progress,
+    strength: 1,
   });
 }
 

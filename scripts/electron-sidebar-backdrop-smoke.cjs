@@ -11,7 +11,7 @@ const smoke = require("./smoke-harness.cjs");
 const assert = require("node:assert/strict");
 const { createServer } = require("node:http");
 const { execFileSync, spawn } = require("node:child_process");
-const { mkdirSync, writeFileSync } = require("node:fs");
+const { mkdirSync, readdirSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -29,6 +29,8 @@ const label =
   "default";
 const measureOnly = label === "before";
 const hoverOnly = process.env.SURFFISH_SIDEBAR_HOVER_ONLY === "1";
+const coldHoverOnly =
+  hoverOnly && process.env.SURFFISH_SIDEBAR_COLD_HOVER === "1";
 
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
 // src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
@@ -145,6 +147,7 @@ async function armSidebarHoverProbe(sidebar) {
         const cardRect = rect(card)
         probe.frames.push({
           at: Number((performance.now() - probe.startedAt).toFixed(1)),
+          epoch: Date.now(),
           viewportWidth: document.documentElement.clientWidth,
           reshaping: card?.getAttribute('data-reshaping') ?? null,
           card: cardRect,
@@ -161,13 +164,11 @@ async function armSidebarHoverProbe(sidebar) {
 }
 
 function captureHoverFrames(prefix) {
-  if (
-    !screenshotDirectory ||
-    process.platform !== "linux" ||
-    !process.env.DISPLAY
-  )
+  const dir =
+    screenshotDirectory || (coldHoverOnly ? join(userData, "shots") : null);
+  if (!dir || process.platform !== "linux" || !process.env.DISPLAY)
     return Promise.resolve(null);
-  mkdirSync(screenshotDirectory, { recursive: true });
+  mkdirSync(dir, { recursive: true });
   const { x, y, width, height } = mainWindow.getContentBounds();
   const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
   const captureWidth = Math.min(width, display.x + display.width - x);
@@ -176,7 +177,7 @@ function captureHoverFrames(prefix) {
     return Promise.reject(
       new Error("The browser content is outside the visible display"),
     );
-  const filename = join(screenshotDirectory, `${prefix}-%02d.png`);
+  const filename = join(dir, `${prefix}-%02d.png`);
   return new Promise((resolvePromise, reject) => {
     let stderr = "";
     const child = spawn(
@@ -194,9 +195,9 @@ function captureHoverFrames(prefix) {
         "-i",
         `${process.env.DISPLAY}.0+${x},${y}`,
         "-vf",
-        "fps=12",
+        `fps=${coldHoverOnly ? 30 : 12}`,
         "-frames:v",
-        "8",
+        String(coldHoverOnly ? 24 : 8),
         "-y",
         filename,
       ],
@@ -220,6 +221,174 @@ async function finishSidebarHoverProbe(sidebar) {
     sidebar,
     `(() => { const probe = window.__sidebarHoverRevealProbe; if (!probe) return []; probe.active = false; return probe.frames })()`,
   );
+}
+
+function armNativeHoverProbe(sidebar) {
+  const shellContents = new Set(
+    ["content", "toolbar", "sidebar"]
+      .map((name) => surface(name)?.webContents)
+      .filter(Boolean),
+  );
+  const page = mainWindow.contentView.children.find(
+    (view) => view.webContents && !shellContents.has(view.webContents),
+  );
+  if (!page) throw new Error("Could not find the live page WebContentsView");
+  const frames = [];
+  const startedAt = Date.now();
+  const bounds = (view) => {
+    const rect = view.getBounds();
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    };
+  };
+  const timer = setInterval(() => {
+    const sidebarBounds = bounds(sidebar);
+    const expectedCard = {
+      x: sidebarBounds.x + SIDEBAR_FLOAT_GAP,
+      y: sidebarBounds.y + SIDEBAR_FLOAT_GAP,
+      width: Math.max(0, sidebarBounds.width - SIDEBAR_FLOAT_GAP),
+      height: Math.max(0, sidebarBounds.height - SIDEBAR_FLOAT_GAP * 2),
+    };
+    const nativeViews = mainWindow.contentView.children.flatMap(
+      (view, index) => {
+        if (view.webContents) return [];
+        try {
+          return [{ index, visible: view.getVisible(), bounds: bounds(view) }];
+        } catch {
+          return [];
+        }
+      },
+    );
+    const backdrop = nativeViews.find(
+      (view) =>
+        view.visible &&
+        Math.abs(view.bounds.x - expectedCard.x) <= 1 &&
+        Math.abs(view.bounds.y - expectedCard.y) <= 1 &&
+        Math.abs(view.bounds.width - expectedCard.width) <= 1 &&
+        Math.abs(view.bounds.height - expectedCard.height) <= 1,
+    );
+    frames.push({
+      at: Date.now() - startedAt,
+      epoch: Date.now(),
+      sidebarVisible: sidebar.getVisible(),
+      sidebar: sidebarBounds,
+      page: bounds(page),
+      expectedCard,
+      nativeViews,
+      backdropMatched: Boolean(backdrop),
+    });
+  }, 8);
+  return {
+    stop() {
+      clearInterval(timer);
+      return frames;
+    },
+  };
+}
+
+function assertNativeHoverFrames(frames, theme) {
+  const opening = frames.filter(
+    (frame) => frame.sidebarVisible && frame.sidebar.width > 100,
+  );
+  assert.ok(
+    opening.length >= 12,
+    `${theme} cold hover samples native motion frames (got ${opening.length})`,
+  );
+  assert.ok(
+    Math.max(...opening.map((frame) => frame.sidebar.width)) -
+      Math.min(...opening.map((frame) => frame.sidebar.width)) >
+      24,
+    `${theme} native overlay edge moves across sampled frames`,
+  );
+  for (const frame of opening)
+    assert.ok(
+      frame.backdropMatched,
+      `${theme} native backdrop bounds/radius frame stays registered to the moving floating card (${JSON.stringify({ sidebar: frame.sidebar, expected: frame.expectedCard, native: frame.nativeViews })})`,
+    );
+  const firstPage = frames[0]?.page;
+  assert.ok(firstPage, `${theme} live page is sampled before reveal`);
+  for (const frame of frames)
+    assert.deepEqual(
+      frame.page,
+      firstPage,
+      `${theme} floating sidebar keeps the separate live page frame stationary`,
+    );
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} cold native reveal: ${opening.length} main-process frames; page stationary; native card backing aligned`,
+  );
+}
+
+function assertFirstCoveredCardPixel(prefix, theme) {
+  if (process.platform !== "linux" || !process.env.DISPLAY) return null;
+  const dir = screenshotDirectory || join(userData, "shots");
+  const files = readdirSync(dir)
+    .filter((name) => name.startsWith(`${prefix}-`) && name.endsWith(".png"))
+    .sort();
+  assert.ok(
+    files.length >= 3,
+    `${theme} cold hover compositor frames were captured`,
+  );
+  let firstCovered = null;
+  for (const name of files) {
+    const image = nativeImage.createFromPath(join(dir, name));
+    const { width, height } = image.getSize();
+    const x = 100;
+    const y = 250;
+    if (x >= width || y >= height) continue;
+    const bitmap = image.toBitmap();
+    const index = (y * width + x) * 4;
+    const rgb = {
+      r: bitmap[index + 2],
+      g: bitmap[index + 1],
+      b: bitmap[index],
+    };
+    // The light synthetic page is white at this otherwise empty point. The first darker sample
+    // means the moving native card has reached it; it should already be the opaque frame surface.
+    if (rgb.r < 245 || rgb.g < 245 || rgb.b < 245) {
+      firstCovered = { file: name, x, y, rgb };
+      break;
+    }
+  }
+  assert.ok(
+    firstCovered,
+    `${theme} compositor capture reaches the native card sample point`,
+  );
+  for (const [channel, expected] of Object.entries({ r: 25, g: 27, b: 31 }))
+    assert.ok(
+      Math.abs(firstCovered.rgb[channel] - expected) <= 12,
+      `${theme} first covered pixel is the full native surface, not page text bleed (${JSON.stringify(firstCovered)})`,
+    );
+  return firstCovered;
+}
+
+function assertRendererNativeHoverFrames(rendererFrames, nativeFrames, theme) {
+  const opening = rendererFrames.filter(
+    (frame) => frame.reshaping === "expand",
+  );
+  assert.ok(
+    opening.length >= 4,
+    `${theme} renderer morph samples multiple native-bound frames`,
+  );
+  assert.ok(nativeFrames.length > 0, `${theme} native bounds are sampled`);
+  for (const frame of opening) {
+    const native = nativeFrames.reduce((nearest, candidate) =>
+      Math.abs(candidate.epoch - frame.epoch) <
+      Math.abs(nearest.epoch - frame.epoch)
+        ? candidate
+        : nearest,
+    );
+    assert.ok(
+      Math.abs(native.epoch - frame.epoch) <= 24,
+      `${theme} renderer sample has a nearby native frame sample`,
+    );
+    assert.ok(
+      frame.card.right <= native.sidebar.width + 2,
+      `${theme} rendered card/row-label edge never outruns the native sidebar clip (${frame.card.right}px vs ${native.sidebar.width}px at ${frame.at}ms)`,
+    );
+  }
 }
 
 function assertSidebarHoverRevealFrames(frames, theme) {
@@ -382,6 +551,8 @@ async function run() {
     45000,
   );
   mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
+  if (coldHoverOnly && process.platform === "linux" && process.env.DISPLAY)
+    pointerMove(1200, 750);
   await waitFor(
     () => surface("content") && surface("toolbar") && surface("sidebar"),
     "the renderer surfaces",
@@ -412,7 +583,7 @@ async function run() {
   }
 
   const results = [];
-  for (const theme of ["light", "dark"]) {
+  for (const theme of coldHoverOnly ? ["light"] : ["light", "dark"]) {
     await evaluate(
       toolbar,
       `window.api.browser.navigate(${JSON.stringify(`${origin}/${theme}`)})`,
@@ -428,28 +599,32 @@ async function run() {
     );
     let capture = Promise.resolve(null);
     let captureError;
+    let nativeProbe;
     if (hoverOnly) {
       if (process.platform === "linux" && process.env.DISPLAY)
         pointerMove(
           content.x + content.width - 40,
           content.y + toolbarBottom + 150,
         );
-      await evaluate(
-        toolbar,
-        "window.api.browser.chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
-      );
+      if (!coldHoverOnly)
+        await evaluate(
+          toolbar,
+          "window.api.browser.chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+        );
       await waitFor(() => {
         const bounds = sidebar.getBounds();
         return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
       }, "the live-page sidebar to settle to its collapsed rail");
-      await delay(500);
+      if (coldHoverOnly)
+        captureWindow(`sidebar-native-cold-before-${label}-${theme}.png`);
+      else await delay(500);
+      if (coldHoverOnly) nativeProbe = armNativeHoverProbe(sidebar);
       await armSidebarHoverProbe(sidebar);
-      capture = captureHoverFrames(`sidebar-hover-${label}-${theme}`).catch(
-        (error) => {
-          captureError = error;
-          return null;
-        },
-      );
+      const capturePrefix = `sidebar-hover-${label}-${theme}`;
+      capture = captureHoverFrames(capturePrefix).catch((error) => {
+        captureError = error;
+        return null;
+      });
       // A real pointer move on X11 exercises the collapsed-rail hover handler end to end.
       if (process.platform === "linux" && process.env.DISPLAY) {
         pointerMove(
@@ -489,6 +664,25 @@ async function run() {
       if (!measureOnly) assertSidebarHoverRevealFrames(hoverFrames, theme);
       await capture;
       if (captureError) throw captureError;
+      if (coldHoverOnly) {
+        const nativeFrames = nativeProbe.stop();
+        if (!measureOnly)
+          assertRendererNativeHoverFrames(hoverFrames, nativeFrames, theme);
+        const firstCoveredPixel = measureOnly
+          ? null
+          : assertFirstCoveredCardPixel(
+              `sidebar-hover-${label}-${theme}`,
+              theme,
+            );
+        if (!measureOnly) assertNativeHoverFrames(nativeFrames, theme);
+        const dir = screenshotDirectory || join(userData, "shots");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+          join(dir, `sidebar-native-cold-${label}-${theme}-frames.json`),
+          `${JSON.stringify({ rendererFrames: hoverFrames, nativeFrames, firstCoveredPixel }, null, 2)}\n`,
+        );
+        captureWindow(`sidebar-native-cold-after-${label}-${theme}.png`);
+      }
     }
     const sidebarBounds = sidebar.getBounds();
     const card = await evaluate(

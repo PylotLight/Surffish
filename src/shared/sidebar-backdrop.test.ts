@@ -9,7 +9,6 @@ import {
   sidebarCaptureRegions,
   snapshotDue,
   SIDEBAR_HOVER_GLASS_BLUR,
-  SIDEBAR_NATIVE_BLUR_RADIUS,
   sidebarNativeLayerPaint,
 } from "./sidebar-backdrop";
 import {
@@ -151,7 +150,6 @@ describe("sidebar backdrop mode", () => {
     expect(vars["--frame-surface"]).toBe("rgb(25, 27, 31)");
     expect(vars["--frame-surface-private"]).toBe("rgb(30, 26, 40)");
     expect(argbToCss("#80FF0000")).toBe("rgba(255, 0, 0, 0.502)");
-    expect(SIDEBAR_NATIVE_BLUR_RADIUS).toBe(20);
   });
 
   test("macOS glass: translucent frame tint over vibrancy, denser hover card tint", () => {
@@ -226,23 +224,17 @@ describe("sidebar backdrop mode", () => {
     expect(vars["--sidebar-hover-glass"]).toBe("rgba(25, 27, 31, 0.749)");
   });
 
-  test("the opaque hover layer ends with no blur and fades in with a blur", () => {
-    expect(sidebarNativeLayerPaint(1)).toEqual({ alpha: 1, blur: 0 });
-    expect(sidebarNativeLayerPaint(1.4)).toEqual({ alpha: 1, blur: 0 });
-    expect(sidebarNativeLayerPaint(0.5)).toEqual({ alpha: 0.5, blur: 10 });
-    expect(sidebarNativeLayerPaint(0).alpha).toBe(0.02);
+  test("the opaque native hover surface is full-strength on its first visible frame", () => {
+    for (const progress of [0, 0.01, 0.5, 1, 1.4])
+      expect(sidebarNativeLayerPaint(progress)).toEqual({ alpha: 1, blur: 0 });
   });
 
-  test("the glass hover layer keeps its blur at rest", () => {
-    expect(sidebarNativeLayerPaint(1, { glass: true })).toEqual({
-      alpha: 1,
-      blur: SIDEBAR_HOVER_GLASS_BLUR,
-    });
-    expect(sidebarNativeLayerPaint(0.5, { glass: true })).toEqual({
-      alpha: 0.5,
-      blur: Math.round(SIDEBAR_HOVER_GLASS_BLUR / 2),
-    });
-    expect(sidebarNativeLayerPaint(0, { glass: true }).alpha).toBe(0.02);
+  test("the glass hover material has full tint and blur before the first reveal frame", () => {
+    for (const progress of [0, 0.01, 0.5, 1])
+      expect(sidebarNativeLayerPaint(progress, { glass: true })).toEqual({
+        alpha: 1,
+        blur: SIDEBAR_HOVER_GLASS_BLUR,
+      });
   });
 });
 
