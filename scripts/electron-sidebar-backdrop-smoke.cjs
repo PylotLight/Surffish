@@ -432,7 +432,7 @@ function assertRendererNativeHoverFrames(rendererFrames, nativeFrames, theme) {
 function assertSidebarHoverRevealFrames(
   frames,
   theme,
-  { requireMovingEdge = true } = {},
+  { requireMovingEdge = true, requireLabelTraversal = true } = {},
 ) {
   const opening = frames.filter((frame) => frame.reshaping === "expand");
   assert.ok(
@@ -470,15 +470,19 @@ function assertSidebarHoverRevealFrames(
       `${theme} floating-card radius is present from the first expanding frame`,
     );
   }
-  assert.ok(
-    opening.some(
-      (frame) =>
-        frame.title &&
-        frame.title.left < frame.card.right &&
-        frame.title.right > frame.card.right - 32,
-    ),
-    `${theme} tab labels traverse the active moving-edge fade zone`,
-  );
+  // Hidden macOS CI can inspect layout and WebContents pixels, but it cannot
+  // guarantee an on-screen compositor frame showing a glyph cross the edge.
+  // Snapshot pixels and native in-flight bounds are checked independently.
+  if (requireLabelTraversal)
+    assert.ok(
+      opening.some(
+        (frame) =>
+          frame.title &&
+          frame.title.left < frame.card.right &&
+          frame.title.right > frame.card.right - 32,
+      ),
+      `${theme} tab labels traverse the active moving-edge fade zone`,
+    );
   console.log(
     `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} renderer samples; card edge and radius aligned; content clipped and edge-faded`,
   );
@@ -868,6 +872,7 @@ async function run() {
       if (!measureOnly)
         assertSidebarHoverRevealFrames(hoverFrames, theme, {
           requireMovingEdge: !hiddenMacSmoke,
+          requireLabelTraversal: !hiddenMacSmoke,
         });
       if (!measureOnly && mode === "snapshot")
         assertSnapshotHoverFrames(hoverFrames, theme);
