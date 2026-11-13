@@ -4883,7 +4883,11 @@ export function newPrivateBrowserTab(input?: string): string | null {
     false,
     w,
   );
-  if (id && w) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+  if (id && w) {
+    // Publish the new tab before focusing its bar; otherwise the renderer can select the old tab's URL.
+    broadcastQueue.flushNow();
+    setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+  }
   return id;
 }
 
@@ -4964,8 +4968,11 @@ export function newBrowserTab(
     persistOpenTabs();
     // Only a blank New Tab wants the address bar. A tab opened on a URL (palette "open in new tab",
     // bookmarks) keeps focus on its page, as in Chrome, so typing and Space reach the site.
-    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL)
+    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL) {
+      // `createTab` batches state per frame; send it before the focus request to avoid stale URL text.
+      broadcastQueue.flushNow();
       setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+    }
   }
   return id;
 }
