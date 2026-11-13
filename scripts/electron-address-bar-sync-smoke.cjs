@@ -356,20 +356,31 @@ async function run() {
       `${error.message} — New Tab bar shows ${JSON.stringify(await contentBar())}`,
     );
   });
-  await waitFor(
-    () =>
-      evaluate(
-        content,
-        `document.hasFocus() && document.activeElement === ${INPUT}`,
-      ),
-    "the restored New Tab draft to have the keyboard",
-  );
-  assert.deepEqual(
-    await evaluate(
+  const restoredAddressState = await waitFor(async () => {
+    const state = await evaluate(
       content,
-      `[${INPUT}.selectionStart, ${INPUT}.selectionEnd, ${INPUT}.getAttribute("aria-expanded")]`,
-    ),
-    ["copied query".length, "copied query".length, "false"],
+      `(() => {
+          const input = ${INPUT};
+          return [
+            document.hasFocus(),
+            document.activeElement === input,
+            input.selectionStart,
+            input.selectionEnd,
+            input.getAttribute("aria-expanded"),
+          ];
+        })()`,
+    );
+    return state[0] &&
+      state[1] &&
+      state[2] === "copied query".length &&
+      state[3] === "copied query".length &&
+      state[4] === "false"
+      ? state
+      : null;
+  }, "the restored New Tab draft to have the keyboard and caret, with suggestions closed");
+  assert.deepEqual(
+    restoredAddressState,
+    [true, true, "copied query".length, "copied query".length, "false"],
     "caret back at the end, suggestions stay closed",
   );
   await activate(openedTabId);
