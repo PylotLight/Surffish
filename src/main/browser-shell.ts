@@ -39,7 +39,10 @@ import {
 import { pageFrameLeft, pageSlideOffset } from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
-import { SidebarOverlayMotion } from "./sidebar-motion";
+import {
+  SidebarOverlayMotion,
+  type SidebarMotionFrame,
+} from "./sidebar-motion";
 import { SidebarRevealGuard } from "./sidebar-reveal-guard";
 
 const REVEAL_WIDTH = 14;
@@ -156,7 +159,8 @@ export function setSidebarOverlayListener(
 }
 
 let sidebarMotionListener:
-  ((window: BaseWindow, progress: number) => void) | null = null;
+  | ((window: BaseWindow, progress: number, frame: SidebarMotionFrame) => void)
+  | null = null;
 
 let sidebarDockListener:
   ((window: BaseWindow, docked: boolean) => void) | null = null;
@@ -265,7 +269,13 @@ export function isSidebarDocked(window: BaseWindow): boolean {
 
 /** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), to ramp the native tint. */
 export function setSidebarMotionListener(
-  listener: ((window: BaseWindow, progress: number) => void) | null,
+  listener:
+    | ((
+        window: BaseWindow,
+        progress: number,
+        frame: SidebarMotionFrame,
+      ) => void)
+    | null,
 ): void {
   sidebarMotionListener = listener;
 }
@@ -575,11 +585,11 @@ function applyShellLayout(shell: ShellState): void {
     railWidth,
   });
   shell.frameLeft = frameLeft;
-  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
   if (overlayShown && !shell.sidebarOverlayShown) {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");
   }
+  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
   syncPageSlide(shell);
   shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
   const cause = shell.layoutCause ?? "layout";
@@ -653,10 +663,10 @@ export function attachBrowserShell(
       dismissToolbarPopoversOnPress(shell, "sidebar", mouseEvent.type),
   };
   shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
-    onProgress: (progress) => {
-      // The pushed page card follows the panel's edge on the same frame (main-driven setBounds).
+    onProgress: (progress, frame) => {
+      // Prepare native background and page bounds before exposing the next sidebar frame.
+      sidebarMotionListener?.(window, progress, frame);
       syncPageSlide(shell);
-      sidebarMotionListener?.(window, progress);
     },
     onHidden: () => {
       if (!shell.sidebarOverlayShown) return;

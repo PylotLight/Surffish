@@ -11,6 +11,7 @@ import {
   SIDEBAR_MOTION_FRAME_MS,
   SIDEBAR_MOTION_MS,
   type SidebarMotion,
+  type SidebarMotionMode,
 } from "../shared/sidebar-motion";
 
 /**
@@ -28,8 +29,8 @@ import {
  * open/close never re-flows the sidebar. The view is hidden only once a close has landed with no
  * rail to show.
  *
- * SURFFISH_SIDEBAR_MOTION=native tries Electron's compositor-animated setBounds instead (no tint
- * ramp; on macOS the web contents may not follow the layer animation, so it is opt-in), =off snaps.
+ * SURFFISH_SIDEBAR_MOTION=native tries Electron's compositor-animated setBounds when no coordinated
+ * frame hook is needed. With page/backdrop synchronization, use the shared frame stepper; =off snaps.
  */
 
 const mode = parseSidebarMotionMode(process.env.SURFFISH_SIDEBAR_MOTION);
@@ -42,9 +43,16 @@ export interface SidebarMotionRect {
   railWidth?: number;
 }
 
+export interface SidebarMotionFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface SidebarMotionHooks {
-  /** After motion or a bounds-only layout, with eased progress (0 closed … 1 open). */
-  onProgress?: (progress: number) => void;
+  /** Before the foreground bounds change, prepare the frame's backdrop and page edge. */
+  onProgress?: (progress: number, frame: SidebarMotionFrame) => void;
   /** A close has landed and there is no rail left to show (the view is hidden now). */
   onHidden?: () => void;
 }
@@ -76,6 +84,7 @@ export class SidebarOverlayMotion {
   constructor(
     private readonly view: WebContentsView,
     private readonly hooks: SidebarMotionHooks = {},
+    private readonly motionMode: SidebarMotionMode = mode,
   ) {}
 
   /** True while the view is on screen (open, opening, still closing, or resting on its rail). */
@@ -133,15 +142,14 @@ export class SidebarOverlayMotion {
       this.finish();
       return;
     }
-    if (mode === "native") {
+    if (this.motionMode === "native" && !this.hooks.onProgress) {
       this.runNative();
       return;
     }
     this.motion = startSidebarMotion(this.progress, to, Date.now(), {
       durationMs: SIDEBAR_MOTION_MS,
     });
-    // Show before the first frame so the open starts from the rail (or the edge), not a hidden view.
-    if (to === 1) this.view.setVisible(true);
+    // apply() prepares the backing layer, sets the rail/edge frame, then makes it visible.
     this.step();
   }
 
@@ -173,23 +181,19 @@ export class SidebarOverlayMotion {
     );
     if (this.progress !== to) {
       // Start from wherever it is (the rail, or slid out) before asking for the animated move.
-      this.applyFrame(this.progress);
+      const currentFrame = this.frameAt(this.progress);
+      this.hooks.onProgress?.(this.progress, currentFrame);
+      this.applyFrame(currentFrame);
       this.view.setVisible(true);
       const frame = this.frameAt(to);
-      this.appliedKey = `${frame.x},${this.rect.y},${frame.width},${this.rect.height}`;
-      this.view.setBounds(
-        {
-          x: frame.x,
-          y: this.rect.y,
-          width: frame.width,
-          height: this.rect.height,
-        },
-        { animate: { duration, easing: "ease-out" } },
-      );
       this.progress = to;
+      this.hooks.onProgress?.(to, frame);
+      this.appliedKey = this.frameKey(frame);
+      this.view.setBounds(frame, { animate: { duration, easing: "ease-out" } });
+    } else {
+      this.hooks.onProgress?.(to, this.frameAt(to));
     }
     this.reported = to;
-    this.hooks.onProgress?.(to);
     if (to === 0) {
       this.timer = setTimeout(() => {
         this.timer = null;
@@ -205,27 +209,33 @@ export class SidebarOverlayMotion {
     this.apply();
   }
   /** Where the view's frame sits at a given progress (x from the left, and its width). */
-  private frameAt(progress: number): { x: number; width: number } {
-    const { width, railWidth = 0 } = this.rect;
+  private frameAt(progress: number): SidebarMotionFrame {
+    const { y, width, height, railWidth = 0 } = this.rect;
     if (this.rail && railWidth > 0)
       return {
         x: 0,
+        y,
         width: sidebarRevealWidth(progress, { railWidth, width }),
+        height,
       };
-    return { x: sidebarSlideX(progress, width), width };
+    return { x: sidebarSlideX(progress, width), y, width, height };
   }
 
   private apply(): void {
     const { height } = this.rect;
-    const boundsChanged = this.applyFrame(this.progress);
+    const frame = this.frameAt(this.progress);
+    const key = this.frameKey(frame);
+    const boundsChanged = key !== this.appliedKey;
     const visible = this.onScreen && this.rect.width > 0 && height > 0;
-    // Hidden, not just slid away, once closed: nothing in it should paint or animate then.
-    if (this.view.getVisible() !== visible) this.view.setVisible(visible);
     const progressChanged = this.progress !== this.reported;
     if (progressChanged) this.reported = this.progress;
     if (progressChanged || boundsChanged) {
-      this.hooks.onProgress?.(this.progress);
+      // Move the backing material/page edge first; the foreground must never outrun its clip.
+      this.hooks.onProgress?.(this.progress, frame);
     }
+    if (boundsChanged) this.applyFrame(frame);
+    // Hidden, not just slid away, once closed: nothing in it should paint or animate then.
+    if (this.view.getVisible() !== visible) this.view.setVisible(visible);
     this.notifyClosed();
   }
 
@@ -244,16 +254,18 @@ export class SidebarOverlayMotion {
     this.hooks.onHidden?.();
   }
 
-  private applyFrame(progress: number): boolean {
-    const { y, height } = this.rect;
-    if (this.rect.width <= 0 || height <= 0) return false;
-    const { x, width } = this.frameAt(progress);
-    const key = `${x},${y},${width},${height}`;
+  private frameKey(frame: SidebarMotionFrame): string {
+    return `${frame.x},${frame.y},${frame.width},${frame.height}`;
+  }
+
+  private applyFrame(frame: SidebarMotionFrame): boolean {
+    if (this.rect.width <= 0 || frame.height <= 0) return false;
+    const key = this.frameKey(frame);
     // Layout runs on every chrome-state change; only touch the view when its frame really moves
     // (also keeps a native animated move from being snapped by an unrelated re-layout).
     if (key !== this.appliedKey) {
       this.appliedKey = key;
-      this.view.setBounds({ x, y, width, height });
+      this.view.setBounds(frame);
       return true;
     }
     return false;
