@@ -86,13 +86,13 @@ export function updateSidebarCardShadow(
     rects.forEach((rect, i) => {
       const view = shadow.layers[i];
       if (!view) return;
+      view.setBorderRadius(rect.radius);
       view.setBounds({
         x: rect.x,
         y: rect.y,
         width: rect.width,
         height: rect.height,
       });
-      view.setBorderRadius(rect.radius);
       view.setBackgroundColor(scaleArgbAlpha(alphaBlack(rect.alpha), level));
       view.setVisible(true);
     });

@@ -48,6 +48,7 @@ import {
 } from "./browser-shell";
 import { scaleArgbAlpha } from "../shared/sidebar-motion";
 import { SIDEBAR_FLOAT, sidebarFloatCardRect } from "../shared/sidebar-card";
+import type { SidebarMotionFrame } from "./sidebar-motion";
 import {
   hideSidebarCardShadow,
   updateSidebarCardShadow,
@@ -173,6 +174,7 @@ function createNativeBackdropView(window: BaseWindow): View | null {
 function applyNativeLayer(
   window: BaseWindow,
   progress = motionProgress.get(window) ?? 0,
+  sidebarFrame?: SidebarMotionFrame,
 ): void {
   const backdrop = nativeBackdropViews.get(window);
   const sidebar = getSidebarOverlayView(window);
@@ -190,12 +192,9 @@ function applyNativeLayer(
   try {
     const wasVisible = backdrop.getVisible();
     const floating = isSidebarFloating(window);
-    backdrop.setBounds(
-      floating
-        ? sidebarFloatCardRect(sidebar.getBounds())
-        : sidebar.getBounds(),
-    );
+    const frame = sidebarFrame ?? sidebar.getBounds();
     backdrop.setBorderRadius(floating ? SIDEBAR_FLOAT.radius : 0);
+    backdrop.setBounds(floating ? sidebarFloatCardRect(frame) : frame);
     paintNativeLayer(
       backdrop,
       progress,
@@ -225,11 +224,15 @@ function paintNativeLayer(
   view.setBackgroundBlur(blur);
 }
 
-function onMotion(window: BaseWindow, progress: number): void {
+function onMotion(
+  window: BaseWindow,
+  progress: number,
+  sidebarFrame?: SidebarMotionFrame,
+): void {
   motionProgress.set(window, progress);
   try {
-    applyNativeLayer(window, progress);
-    applyShadow(window, progress);
+    applyNativeLayer(window, progress, sidebarFrame);
+    applyShadow(window, progress, sidebarFrame);
   } catch {
     // The view is going away with its window.
   }
@@ -239,6 +242,7 @@ function onMotion(window: BaseWindow, progress: number): void {
 function applyShadow(
   window: BaseWindow,
   progress = motionProgress.get(window) ?? 0,
+  sidebarFrame?: SidebarMotionFrame,
 ): void {
   if (window.isDestroyed()) return;
   const sidebar = getSidebarOverlayView(window);
@@ -254,7 +258,7 @@ function applyShadow(
     return;
   }
   updateSidebarCardShadow(window, {
-    card: sidebarFloatCardRect(sidebar.getBounds()),
+    card: sidebarFloatCardRect(sidebarFrame ?? sidebar.getBounds()),
     below: nativeBackdropViews.get(window) ?? null,
     strength: progress,
   });

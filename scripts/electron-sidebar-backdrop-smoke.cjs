@@ -1,17 +1,16 @@
-// These open the overlay with chrome.set({ sidebarHovered: true }) while the real cursor sits
-// elsewhere; the cursor poll (src/main/sidebar-reveal-guard.ts) would rightly close it again.
+// Keep the cursor poll off so a real pointer hover can be sampled without the guard closing it.
 process.env.SURFFISH_SIDEBAR_CURSOR_POLL ??= "off";
 // Overlay sidebar legibility over busy live pages: which backdrop path is in force, that it is
-// opaque enough (or blurred) to read, and before/after screenshots. No xdotool needed: the
-// sidebar is revealed through the chrome-state API the hover handler uses.
+// opaque enough (or blurred) to read, frame-by-frame hover reveal, and before/after screenshots.
 //
 //   SURFFISH_SIDEBAR_BACKDROP=solid|snapshot|native  path to test (default: the platform's own)
 //   SURFFISH_SCREENSHOT_DIR=…                        save window captures (needs ffmpeg + X11)
 //   SURFFISH_BACKDROP_LABEL=before                   only measure + capture (for an older build)
+//   SURFFISH_SIDEBAR_HOVER_ONLY=1                    run just the pointer-driven hover regression
 const smoke = require("./smoke-harness.cjs");
 const assert = require("node:assert/strict");
 const { createServer } = require("node:http");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
@@ -29,6 +28,7 @@ const label =
   process.env.SURFFISH_SIDEBAR_BACKDROP ||
   "default";
 const measureOnly = label === "before";
+const hoverOnly = process.env.SURFFISH_SIDEBAR_HOVER_ONLY === "1";
 
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
 // src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
@@ -114,6 +114,164 @@ function surface(name) {
 }
 const evaluate = (view, expression) =>
   view.webContents.executeJavaScript(expression);
+
+function pointerMove(x, y) {
+  execFileSync("xdotool", [
+    "mousemove",
+    String(Math.round(x)),
+    String(Math.round(y)),
+  ]);
+}
+
+async function armSidebarHoverProbe(sidebar) {
+  await evaluate(
+    sidebar,
+    `(() => {
+      const probe = { active: true, frames: [], startedAt: performance.now() }
+      window.__sidebarHoverRevealProbe = probe
+      const rect = (element) => {
+        if (!element) return null
+        const r = element.getBoundingClientRect()
+        return { left: r.left, right: r.right, width: r.width }
+      }
+      const tick = () => {
+        if (!probe.active) return
+        const card = document.querySelector('.browser-sidebar')
+        const body = card?.querySelector('.sidebar-body')
+        const panel = card?.querySelector('.sidebar-panel:not(.is-shape-hidden)')
+        const title = panel?.querySelector('.tab-title')
+        const cardStyle = card ? getComputedStyle(card) : null
+        const bodyStyle = body ? getComputedStyle(body) : null
+        const cardRect = rect(card)
+        probe.frames.push({
+          at: Number((performance.now() - probe.startedAt).toFixed(1)),
+          viewportWidth: document.documentElement.clientWidth,
+          reshaping: card?.getAttribute('data-reshaping') ?? null,
+          card: cardRect,
+          radius: cardStyle?.borderTopRightRadius ?? null,
+          body: body ? { ...rect(body), overflowX: bodyStyle.overflowX, mask: bodyStyle.webkitMaskImage || bodyStyle.maskImage } : null,
+          title: title ? rect(title) : null,
+        })
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+      return true
+    })()`,
+  );
+}
+
+function captureHoverFrames(prefix) {
+  if (
+    !screenshotDirectory ||
+    process.platform !== "linux" ||
+    !process.env.DISPLAY
+  )
+    return Promise.resolve(null);
+  mkdirSync(screenshotDirectory, { recursive: true });
+  const { x, y, width, height } = mainWindow.getContentBounds();
+  const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
+  const captureWidth = Math.min(width, display.x + display.width - x);
+  const captureHeight = Math.min(height, display.y + display.height - y);
+  if (captureWidth <= 0 || captureHeight <= 0)
+    return Promise.reject(
+      new Error("The browser content is outside the visible display"),
+    );
+  const filename = join(screenshotDirectory, `${prefix}-%02d.png`);
+  return new Promise((resolvePromise, reject) => {
+    let stderr = "";
+    const child = spawn(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "x11grab",
+        "-framerate",
+        "60",
+        "-video_size",
+        `${captureWidth}x${captureHeight}`,
+        "-i",
+        `${process.env.DISPLAY}.0+${x},${y}`,
+        "-vf",
+        "fps=12",
+        "-frames:v",
+        "8",
+        "-y",
+        filename,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.once("error", reject);
+    child.once("close", (code) => {
+      if (code === 0) resolvePromise(filename);
+      else
+        reject(
+          new Error(`ffmpeg hover capture exited ${code}: ${stderr.trim()}`),
+        );
+    });
+  });
+}
+
+async function finishSidebarHoverProbe(sidebar) {
+  return evaluate(
+    sidebar,
+    `(() => { const probe = window.__sidebarHoverRevealProbe; if (!probe) return []; probe.active = false; return probe.frames })()`,
+  );
+}
+
+function assertSidebarHoverRevealFrames(frames, theme) {
+  const opening = frames.filter((frame) => frame.reshaping === "expand");
+  assert.ok(
+    opening.length >= 4,
+    `${theme} hover reveal samples multiple rendered expansion frames (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
+  );
+  assert.ok(
+    Math.max(...opening.map((frame) => frame.card.width)) -
+      Math.min(...opening.map((frame) => frame.card.width)) >
+      24,
+    `${theme} hover reveal samples the moving card edge`,
+  );
+  for (const frame of opening) {
+    assert.ok(
+      Math.abs(frame.card.right - frame.viewportWidth) <= 1,
+      `${theme} card edge matches the native view clip (${frame.card.right}px / ${frame.viewportWidth}px)`,
+    );
+    assert.ok(
+      Math.abs(frame.body.right - frame.card.right) <= 1,
+      `${theme} clipped body ends at the moving card edge`,
+    );
+    assert.equal(
+      frame.body.overflowX,
+      "clip",
+      `${theme} body clips to the moving edge`,
+    );
+    assert.match(
+      frame.body.mask,
+      /linear-gradient/,
+      `${theme} content fades at the moving edge`,
+    );
+    assert.equal(
+      frame.radius,
+      "12px",
+      `${theme} floating-card radius is present from the first expanding frame`,
+    );
+  }
+  assert.ok(
+    opening.some(
+      (frame) =>
+        frame.title &&
+        frame.title.left < frame.card.right &&
+        frame.title.right > frame.card.right - 32,
+    ),
+    `${theme} tab labels traverse the active moving-edge fade zone`,
+  );
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} rendered frames; card edge and radius aligned; content clipped and edge-faded`,
+  );
+}
 
 /** The whole window as X11 draws it (every native view composited), as a NativeImage. */
 function captureWindow(name) {
@@ -259,19 +417,59 @@ async function run() {
       toolbar,
       `window.api.browser.navigate(${JSON.stringify(`${origin}/${theme}`)})`,
     );
-    await waitFor(
-      async () =>
-        (await evaluate(toolbar, "window.api.browser.state()")).url.endsWith(
-          `/${theme}`,
-        ) && !(await evaluate(toolbar, "window.api.browser.state()")).loading,
-      `the ${theme} busy page`,
-    );
-    await delay(500);
-    // Reveal the overlay the way the left-edge hover does.
-    await evaluate(
+    await waitFor(async () => {
+      const state = await evaluate(toolbar, "window.api.browser.state()");
+      return state.url.endsWith(`/${theme}`) && !state.loading;
+    }, `the ${theme} busy page`);
+    const content = mainWindow.getContentBounds();
+    const toolbarBottom = await evaluate(
       toolbar,
-      "window.api.browser.chrome.set({ sidebarHovered: true })",
+      'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
     );
+    let capture = Promise.resolve(null);
+    let captureError;
+    if (hoverOnly) {
+      if (process.platform === "linux" && process.env.DISPLAY)
+        pointerMove(
+          content.x + content.width - 40,
+          content.y + toolbarBottom + 150,
+        );
+      await evaluate(
+        toolbar,
+        "window.api.browser.chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+      );
+      await waitFor(() => {
+        const bounds = sidebar.getBounds();
+        return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
+      }, "the live-page sidebar to settle to its collapsed rail");
+      await delay(500);
+      await armSidebarHoverProbe(sidebar);
+      capture = captureHoverFrames(`sidebar-hover-${label}-${theme}`).catch(
+        (error) => {
+          captureError = error;
+          return null;
+        },
+      );
+      // A real pointer move on X11 exercises the collapsed-rail hover handler end to end.
+      if (process.platform === "linux" && process.env.DISPLAY) {
+        pointerMove(
+          content.x + 40,
+          content.y +
+            toolbarBottom +
+            Math.min(150, content.height - toolbarBottom - 20),
+        );
+      } else {
+        await evaluate(
+          toolbar,
+          "window.api.browser.chrome.set({ sidebarHovered: true })",
+        );
+      }
+    } else {
+      await evaluate(
+        toolbar,
+        "window.api.browser.chrome.set({ sidebarHovered: true })",
+      );
+    }
     await waitFor(
       () => sidebar.getVisible() && sidebar.getBounds().width > 0,
       "the overlay sidebar to show",
@@ -286,6 +484,12 @@ async function run() {
         "the blurred page snapshot",
       );
     await delay(700);
+    if (hoverOnly) {
+      const hoverFrames = await finishSidebarHoverProbe(sidebar);
+      if (!measureOnly) assertSidebarHoverRevealFrames(hoverFrames, theme);
+      await capture;
+      if (captureError) throw captureError;
+    }
     const sidebarBounds = sidebar.getBounds();
     const card = await evaluate(
       sidebar,
@@ -481,6 +685,18 @@ async function run() {
         5000,
       ).catch(() => undefined);
     }
+    if (hoverOnly && process.platform === "linux" && process.env.DISPLAY) {
+      const content = mainWindow.getContentBounds();
+      pointerMove(
+        content.x + Math.max(120, content.width - 24),
+        content.y + sidebar.getBounds().y + 120,
+      );
+    }
+  }
+
+  if (hoverOnly) {
+    console.log("Electron sidebar hover-frame smoke passed.");
+    return;
   }
 
   if (!measureOnly) {

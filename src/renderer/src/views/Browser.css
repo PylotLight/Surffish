@@ -5441,6 +5441,24 @@
   padding-top: var(--sidebar-content-top-inset);
 }
 
+/* The overlay view widens one frame at a time. Clip its content to the same moving edge and soften
+ * that edge so labels and pin marks never read as a separate layer over the live page. */
+.browser-sidebar[data-reshaping] > .sidebar-body {
+  overflow: clip;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0,
+    #000 calc(100% - 32px),
+    transparent 100%
+  );
+}
+
 /* The rail holds its designed width (the card is exactly this wide when collapsed), so its marks
  * stand still while the card grows or shrinks around them. */
 .sidebar-rail {

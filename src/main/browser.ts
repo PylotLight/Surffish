@@ -5,6 +5,7 @@ import {
   nativeImagePixelSize,
   nativeImagePixelWidthToDip,
 } from "./capture-page";
+import { applyPageViewFrame } from "./page-view-frame";
 import {
   IS_MAC,
   TAB_COMMAND_SHORTCUTS,
@@ -33,7 +34,6 @@ import {
   dialog,
   Menu,
   screen,
-  View,
   WebContentsView,
   type BaseWindow,
   type ContextMenuParams,
@@ -1440,15 +1440,6 @@ export function getBrowserTabPageInfo(id?: string | null): {
   };
 }
 
-const pageCornerRadii = new WeakMap<View, number>();
-
-/** Rounds a page view's corners, touching the native view only when the radius changes. */
-function setPageCornerRadius(view: View, radius: number): void {
-  if ((pageCornerRadii.get(view) ?? 0) === radius) return;
-  pageCornerRadii.set(view, radius);
-  view.setBorderRadius(radius);
-}
-
 function applyTabBounds(w: BrowserWindowState): void {
   // A pushed page card slides right with the hover panel, same size (the page never re-lays out).
   const browserBounds = slideViewRect(w.browserBounds, w.pageSlideX ?? 0);
@@ -1478,13 +1469,10 @@ function applyTabBounds(w: BrowserWindowState): void {
     // 0x0 (they're detached, which is what throttles them): attaching a 0x0 view and resizing it a
     // moment later showed a frame of stale/empty page on every tab switch (page-view-bounds.ts).
     const target = pageViewBounds(visible && pageAreaShown, bounds);
-    if (target) {
-      tab.view.setBounds(target);
-      reader?.setBounds(target);
-    }
     const radius = visible && framed ? PAGE_FRAME_RADIUS : 0;
-    setPageCornerRadius(tab.view, radius);
-    if (reader) setPageCornerRadius(reader, radius);
+    // Round before moving the page so its first frame at the new edge is never square.
+    applyPageViewFrame(tab.view, target, radius);
+    if (reader) applyPageViewFrame(reader, target, radius);
     if (!w.window.isDestroyed()) {
       setPageViewOnScreen(
         w.window,
