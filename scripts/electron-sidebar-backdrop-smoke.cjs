@@ -31,7 +31,10 @@ const measureOnly = label === "before";
 const hoverOnly = process.env.SURFFISH_SIDEBAR_HOVER_ONLY === "1";
 const coldHoverOnly =
   hoverOnly && process.env.SURFFISH_SIDEBAR_COLD_HOVER === "1";
-
+const canCaptureCompositor =
+  process.platform === "linux" &&
+  Boolean(process.env.DISPLAY) &&
+  process.env.SURFFISH_SMOKE_HIDDEN !== "2";
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
 // src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
 const SIDEBAR_FLOAT_GAP = 6;
@@ -161,9 +164,11 @@ async function armSidebarHoverProbe(sidebar) {
           body: body ? { ...rect(body), overflowX: bodyStyle.overflowX, mask: bodyStyle.webkitMaskImage || bodyStyle.maskImage } : null,
           title: title ? rect(title) : null,
         })
-        requestAnimationFrame(tick)
+        // Never-shown macOS CI windows can throttle rAF to 1–2 fps; timers still sample the
+        // main-process view-bounds stepper so a short reveal cannot finish between samples.
+        setTimeout(tick, 16)
       }
-      requestAnimationFrame(tick)
+      tick()
       return true
     })()`,
   );
@@ -172,8 +177,7 @@ async function armSidebarHoverProbe(sidebar) {
 function captureHoverFrames(prefix) {
   const dir =
     screenshotDirectory || (coldHoverOnly ? join(userData, "shots") : null);
-  if (!dir || process.platform !== "linux" || !process.env.DISPLAY)
-    return Promise.resolve(null);
+  if (!dir || !canCaptureCompositor) return Promise.resolve(null);
   mkdirSync(dir, { recursive: true });
   const { x, y, width, height } = mainWindow.getContentBounds();
   const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
@@ -328,7 +332,7 @@ function assertNativeHoverFrames(frames, theme) {
 }
 
 function assertFirstCoveredCardPixel(prefix, theme) {
-  if (process.platform !== "linux" || !process.env.DISPLAY) return null;
+  if (!canCaptureCompositor) return null;
   const dir = screenshotDirectory || join(userData, "shots");
   const files = readdirSync(dir)
     .filter((name) => name.startsWith(`${prefix}-`) && name.endsWith(".png"))
@@ -401,7 +405,7 @@ function assertSidebarHoverRevealFrames(frames, theme) {
   const opening = frames.filter((frame) => frame.reshaping === "expand");
   assert.ok(
     opening.length >= 4,
-    `${theme} hover reveal samples multiple rendered expansion frames (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
+    `${theme} hover reveal collects multiple expansion samples (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
   );
   assert.ok(
     Math.max(...opening.map((frame) => frame.card.width)) -
@@ -444,7 +448,7 @@ function assertSidebarHoverRevealFrames(frames, theme) {
     `${theme} tab labels traverse the active moving-edge fade zone`,
   );
   console.log(
-    `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} rendered frames; card edge and radius aligned; content clipped and edge-faded`,
+    `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} renderer samples; card edge and radius aligned; content clipped and edge-faded`,
   );
 }
 
@@ -452,14 +456,14 @@ function assertSnapshotHoverFrames(frames, theme) {
   const opening = frames.filter((frame) => frame.reshaping === "expand");
   assert.ok(
     opening.length >= 4,
-    `${theme} snapshot reveal samples multiple in-flight frames`,
+    `${theme} snapshot reveal samples multiple in-flight layout states`,
   );
   const fallbackFrames = opening.filter(
     (frame) => !frame.snapshotReady || Number(frame.snapshotOpacity) < 1,
   );
   assert.ok(
     fallbackFrames.length > 0,
-    `${theme} reveal samples fallback frames while its snapshot is unavailable or fading in`,
+    `${theme} reveal samples fallback states while its snapshot is unavailable or fading in`,
   );
   for (const frame of fallbackFrames) {
     const fallbackAlpha = minAlpha(
@@ -472,7 +476,7 @@ function assertSnapshotHoverFrames(frames, theme) {
     );
   }
   console.log(
-    `[sidebar-backdrop-smoke] ${theme} snapshot reveal: ${opening.length} frames, ${fallbackFrames.length} fallback frames; first-frame tint prevents sharp page bleed`,
+    `[sidebar-backdrop-smoke] ${theme} snapshot reveal: ${opening.length} samples, ${fallbackFrames.length} fallback samples; first-frame tint prevents sharp page bleed`,
   );
 }
 
@@ -650,7 +654,7 @@ async function assertSnapshotBlurPixels(sidebar, theme, localRect, label) {
 
   let rendered;
   let renderedRect;
-  if (process.platform === "linux" && process.env.DISPLAY) {
+  if (canCaptureCompositor) {
     rendered = captureWindow(`sidebar-snapshot-pixels-${label}-${theme}.png`);
     renderedRect = {
       x: left,
@@ -719,8 +723,7 @@ async function run() {
     45000,
   );
   mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
-  if (coldHoverOnly && process.platform === "linux" && process.env.DISPLAY)
-    pointerMove(1200, 750);
+  if (coldHoverOnly && canCaptureCompositor) pointerMove(1200, 750);
   await waitFor(
     () => surface("content") && surface("toolbar") && surface("sidebar"),
     "the renderer surfaces",
@@ -769,7 +772,7 @@ async function run() {
     let captureError;
     let nativeProbe;
     if (hoverOnly) {
-      if (process.platform === "linux" && process.env.DISPLAY)
+      if (canCaptureCompositor)
         pointerMove(
           content.x + content.width - 40,
           content.y + toolbarBottom + 150,
@@ -783,7 +786,7 @@ async function run() {
         const bounds = sidebar.getBounds();
         return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
       }, "the live-page sidebar to settle to its collapsed rail");
-      if (coldHoverOnly && process.platform === "linux" && process.env.DISPLAY)
+      if (coldHoverOnly && canCaptureCompositor)
         captureWindow(`sidebar-${mode}-cold-before-${label}-${theme}.png`);
       else await delay(500);
       if (coldHoverOnly && mode === "native")
@@ -794,8 +797,8 @@ async function run() {
         captureError = error;
         return null;
       });
-      // A real pointer move on X11 exercises the collapsed-rail hover handler end to end.
-      if (process.platform === "linux" && process.env.DISPLAY) {
+      // A real pointer move exercises the X11 handler; hidden runners use the same chrome state.
+      if (canCaptureCompositor) {
         pointerMove(
           content.x + 40,
           content.y +
@@ -854,7 +857,7 @@ async function run() {
           join(dir, `sidebar-${mode}-cold-${label}-${theme}-frames.json`),
           `${JSON.stringify({ rendererFrames: hoverFrames, nativeFrames, firstCoveredPixel }, null, 2)}\n`,
         );
-        if (process.platform === "linux" && process.env.DISPLAY)
+        if (canCaptureCompositor)
           captureWindow(`sidebar-${mode}-cold-after-${label}-${theme}.png`);
       }
     }
@@ -863,7 +866,7 @@ async function run() {
       sidebar,
       `(() => { const el = document.querySelector('.browser-sidebar'); const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return { backgroundImage: s.backgroundImage, backgroundColor: s.backgroundColor, backdropFilter: s.backdropFilter || s.webkitBackdropFilter, className: el.className, top: r.top, bottom: r.bottom, tabsBottom: Math.max(0, ...[...el.querySelectorAll('.tab-item, .sidebar-new-tab-row, .sidebar-pinned-sites, .sidebar-archived')].map((node) => node.getBoundingClientRect().bottom)), footerTop: el.querySelector('.sidebar-footer')?.getBoundingClientRect().top ?? r.bottom } })()`,
     );
-    const windowCapture = process.platform === "linux" && process.env.DISPLAY;
+    const windowCapture = canCaptureCompositor;
     const image = windowCapture
       ? captureWindow(`sidebar-backdrop-${label}-${theme}.png`)
       : await captureSidebarSurface(sidebar);
@@ -1071,7 +1074,7 @@ async function run() {
         5000,
       ).catch(() => undefined);
     }
-    if (hoverOnly && process.platform === "linux" && process.env.DISPLAY) {
+    if (hoverOnly && canCaptureCompositor) {
       const content = mainWindow.getContentBounds();
       pointerMove(
         content.x + Math.max(120, content.width - 24),
