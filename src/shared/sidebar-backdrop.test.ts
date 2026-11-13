@@ -35,27 +35,48 @@ describe("sidebar backdrop mode", () => {
       blur: true,
       frameTransparency: 80,
       sidebarPushesPage: true,
+      sidebarPushStyle: "resize",
     });
     expect(normalizeSidebarBackdropSettings({ blur: "no" })).toEqual({
       blur: true,
       frameTransparency: 80,
       sidebarPushesPage: true,
+      sidebarPushStyle: "resize",
     });
     expect(normalizeSidebarBackdropSettings({ blur: false })).toEqual({
       blur: false,
       frameTransparency: 80,
       sidebarPushesPage: true,
+      sidebarPushStyle: "resize",
     });
     expect(
       normalizeSidebarBackdropSettings({ blur: true, frameTransparency: 140 }),
-    ).toEqual({ blur: true, frameTransparency: 100, sidebarPushesPage: true });
+    ).toEqual({
+      blur: true,
+      frameTransparency: 100,
+      sidebarPushesPage: true,
+      sidebarPushStyle: "resize",
+    });
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: false }),
-    ).toEqual({ blur: true, frameTransparency: 80, sidebarPushesPage: false });
+    ).toEqual({
+      blur: true,
+      frameTransparency: 80,
+      sidebarPushesPage: false,
+      sidebarPushStyle: "resize",
+    });
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: "no" })
         .sidebarPushesPage,
     ).toBe(true);
+    expect(
+      normalizeSidebarBackdropSettings({ sidebarPushStyle: "slide" })
+        .sidebarPushStyle,
+    ).toBe("slide");
+    expect(
+      normalizeSidebarBackdropSettings({ sidebarPushStyle: "wobble" })
+        .sidebarPushStyle,
+    ).toBe("resize");
   });
 
   test("macOS snapshots into its WebContentsView, everything else uses the solid tint", () => {

@@ -104,11 +104,10 @@ export function framePageArea(
 }
 
 /**
- * How far the page card slides right while the tab list's hover panel pushes it aside (Settings →
- * Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail) to the
- * panel's visible right edge at this point of its open/close slide. The card keeps its width, so
- * the page never re-lays out; the window edge clips its right side while the panel is open. 0 when
- * the panel is not pushing or is closed.
+ * How far the page card's left edge moves right while the tab list's hover panel pushes it aside
+ * (Settings → Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail)
+ * to the panel's visible right edge at this point of its open/close slide. 0 when the panel is not
+ * pushing or is closed.
  */
 export function pageSlideOffset({
   pushing,
@@ -123,7 +122,45 @@ export function pageSlideOffset({
   return Math.max(0, Math.round(panelRight - frameLeft));
 }
 
-/** `rect` moved right by `dx` px, same size (the pushed page card). */
+/**
+ * `rect` with its left edge pushed `dx` px right and its right edge kept (the pushed page card):
+ * the page resizes to the room beside the panel instead of sliding under the window's right edge,
+ * so nothing of it is clipped off screen while the panel is open.
+ */
+export function pushViewRect(rect: ViewRect, dx: number): ViewRect {
+  const push = Math.min(Math.max(0, Math.round(dx)), rect.width);
+  return push === 0
+    ? { ...rect }
+    : { ...rect, x: rect.x + push, width: rect.width - push };
+}
+
+/**
+ * Settings → Appearance → Sidebar animation: how the hover panel moves the page it pushes aside.
+ * 'resize' (default): the card's left edge follows the panel and its right edge stays (the page
+ * re-lays out into the room beside it, like Zephium / Arc). 'slide': the card keeps its size and
+ * slides right, the window edge clipping it (no re-layout while it moves).
+ */
+export const SIDEBAR_PUSH_STYLES = ["resize", "slide"] as const;
+export type SidebarPushStyle = (typeof SIDEBAR_PUSH_STYLES)[number];
+export const DEFAULT_SIDEBAR_PUSH_STYLE: SidebarPushStyle = "resize";
+
+export function normalizeSidebarPushStyle(value: unknown): SidebarPushStyle {
+  return (SIDEBAR_PUSH_STYLES as readonly unknown[]).includes(value)
+    ? (value as SidebarPushStyle)
+    : DEFAULT_SIDEBAR_PUSH_STYLE;
+}
+
+/** `rect` moved right by `dx` px, same size (the 'slide' push). */
 export function slideViewRect(rect: ViewRect, dx: number): ViewRect {
-  return dx === 0 ? { ...rect } : { ...rect, x: rect.x + Math.round(dx) };
+  const slide = Math.max(0, Math.round(dx));
+  return slide === 0 ? { ...rect } : { ...rect, x: rect.x + slide };
+}
+
+/** The page card pushed `dx` px aside by the hover panel, in `style`. */
+export function pushedPageRect(
+  rect: ViewRect,
+  dx: number,
+  style: SidebarPushStyle,
+): ViewRect {
+  return style === "slide" ? slideViewRect(rect, dx) : pushViewRect(rect, dx);
 }

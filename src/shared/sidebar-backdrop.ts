@@ -1,3 +1,8 @@
+import {
+  DEFAULT_SIDEBAR_PUSH_STYLE,
+  normalizeSidebarPushStyle,
+  type SidebarPushStyle,
+} from "./page-view-bounds";
 /**
  * How the hover/pinned overlay sidebar gets a legible background over a live page.
  *
@@ -37,17 +42,23 @@ export interface SidebarBackdropSettings {
   frameTransparency: number;
   /**
    * Settings → General → Appearance → Sidebar pushes page. On (default): the tab list's hover panel
-   * slides the page card aside (it keeps its size, the window edge clips it) and is the frame's own
+   * pushes the page card aside (Sidebar animation says how) and is the frame's own
    * material, like the docked panel. Off: the panel floats over the page as its own card (blur,
    * tint, shadow), the earlier look, kept to compare against.
    */
   sidebarPushesPage: boolean;
+  /**
+   * Settings → General → Appearance → Sidebar animation (only while the sidebar pushes the page):
+   * 'resize' shrinks the page from the left as the panel opens, 'slide' moves it right at its size.
+   */
+  sidebarPushStyle: SidebarPushStyle;
 }
 
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   blur: true,
   frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
   sidebarPushesPage: true,
+  sidebarPushStyle: DEFAULT_SIDEBAR_PUSH_STYLE,
 };
 
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
@@ -115,6 +126,7 @@ export function normalizeSidebarBackdropSettings(
       typeof candidate.sidebarPushesPage === "boolean"
         ? candidate.sidebarPushesPage
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
+    sidebarPushStyle: normalizeSidebarPushStyle(candidate.sidebarPushStyle),
   };
 }
 

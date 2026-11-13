@@ -36,7 +36,12 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
-import { pageFrameLeft, pageSlideOffset } from "../shared/page-view-bounds";
+import {
+  DEFAULT_SIDEBAR_PUSH_STYLE,
+  pageFrameLeft,
+  pageSlideOffset,
+  type SidebarPushStyle,
+} from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import {
@@ -121,8 +126,8 @@ interface ShellState {
   /**
    * The tab list's hover panel pushes the page card aside instead of floating over it (Settings →
    * Appearance → Sidebar pushes page; live pages, framed, not docked). The panel is then part of
-   * the frame like the docked one (no tint, blur or shadow of its own) and the page card slides
-   * right with the panel's edge, keeping its size.
+   * the frame like the docked one (no tint, blur or shadow of its own) and the page card's left
+   * edge follows the panel's edge while its right edge stays (the page resizes beside it).
    */
   sidebarPushing: boolean;
   /** Where the browser frame's left side ends for live pages (pageFrameLeft), as last laid out. */
@@ -191,6 +196,20 @@ export function setBrowserFramePrivate(
 /** Settings → Appearance → Sidebar pushes page (sidebar-backdrop.ts owns the setting and calls in). */
 let sidebarPushesPage = true;
 
+/** Settings → Appearance → Sidebar animation: how a pushed page card moves (browser.ts reads it). */
+let sidebarPushStyle: SidebarPushStyle = DEFAULT_SIDEBAR_PUSH_STYLE;
+
+export function getBrowserSidebarPushStyle(): SidebarPushStyle {
+  return sidebarPushStyle;
+}
+
+/** Sidebar animation changed: re-lay out, so a page pushed right now takes the new shape. */
+export function setBrowserSidebarPushStyle(value: SidebarPushStyle): void {
+  if (value === sidebarPushStyle) return;
+  sidebarPushStyle = value;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
+
 /** Sidebar pushes page changed: every window re-lays out (the hover panel floats or pushes). */
 export function setBrowserSidebarPushesPage(value: boolean): void {
   if (value === sidebarPushesPage) return;
@@ -201,8 +220,8 @@ export function setBrowserSidebarPushesPage(value: boolean): void {
 let pageSlideListener: ((window: BaseWindow, dx: number) => void) | null = null;
 
 /**
- * browser.ts: move the window's on-screen page card(s) `dx` px right of their frame position,
- * same size (the hover panel pushing the page). Called once per motion frame while it slides.
+ * browser.ts: push the window's on-screen page card(s)' left edge `dx` px right of their frame
+ * position, right edge kept (the hover panel pushing the page). Called once per motion frame.
  */
 export function setPageSlideListener(
   listener: ((window: BaseWindow, dx: number) => void) | null,
@@ -575,7 +594,7 @@ function applyShellLayout(shell: ShellState): void {
   shell.lastOverlayMode = overlayMode;
   // Live pages start right of the frame's left side: the rail while the sidebar auto-hides (Gmail's
   // left nav was cut off under it), the panel itself while it is docked. A hover/focus reveal
-  // never resizes the page card: it floats over it, or pushes it aside (slides it, same size).
+  // never changes the frame's rect: it floats over the card, or pushes the card's left edge aside.
   const frameLeft = pageFrameLeft({
     overlayMode,
     fullscreen,
