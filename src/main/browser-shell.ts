@@ -267,7 +267,7 @@ export function isSidebarDocked(window: BaseWindow): boolean {
   return shells.get(window)?.sidebarDocked === true;
 }
 
-/** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), to ramp the native tint. */
+/** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), for native shadow visibility. */
 export function setSidebarMotionListener(
   listener:
     | ((

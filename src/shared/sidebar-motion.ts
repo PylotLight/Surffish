@@ -5,12 +5,12 @@
  * itself is the dark, blurred card (main sets its background colour + blur). A CSS transform
  * inside the view can only move the view's *contents*, so the old behaviour was a tint/blur that
  * popped in at full strength while the panel slid in 260ms later, and a close that cut both
- * instantly. Now main drives the view itself along this timeline (it slides as one piece, and
- * the native tint/blur ramp with the same progress), and the in-page sidebar's CSS transition
- * reads the same duration and curve from the custom properties below.
+ * instantly. Now main drives the view itself along this timeline. The native card backing is
+ * prepared before the first visible frame and follows the same native bounds/radius; the in-page
+ * sidebar's CSS transition reads the same duration and curve from the custom properties below.
  */
 
-/** Open and close take the same time and curve (CSS, the overlay view and its tint all use these). */
+/** Open and close take the same time and curve (CSS and the overlay view use these). */
 export const SIDEBAR_MOTION_MS = 400;
 /**
  * cubic-bezier control points: a quick departure that settles long and softly — the reference

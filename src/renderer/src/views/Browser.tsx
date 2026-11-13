@@ -880,7 +880,13 @@ export default function Browser({
   }
 
   function setSidebarHovered(next: boolean): void {
-    updateChromeState({ sidebarHovered: next });
+    // The sidebar labels/pins live in a separate renderer from the native live-page view. Let main
+    // lay out the native sidebar/backdrop/page first; expanding local CSS optimistically exposes
+    // page pixels beyond the still-collapsed native overlay for at least one compositor frame.
+    void window.api.browser.chrome
+      .set({ sidebarHovered: next })
+      .then(setChromeState)
+      .catch(() => undefined);
   }
 
   function setSidebarFocused(next: boolean): void {

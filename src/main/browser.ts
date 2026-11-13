@@ -6398,8 +6398,10 @@ export function slideBrowserPage(window: BaseWindow, dx: number): void {
     return;
   }
   const target = slideViewRect(browserBounds, next);
-  active.view.setBounds(target);
-  readerViewFor(active.view.webContents)?.setBounds(target);
+  const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
+  applyPageViewFrame(active.view, target, radius);
+  const reader = readerViewFor(active.view.webContents);
+  if (reader) applyPageViewFrame(reader, target, radius);
 }
 
 export function syncBrowserBoundsToWindow(

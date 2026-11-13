@@ -9,7 +9,7 @@ import { scaleArgbAlpha } from "../shared/sidebar-motion";
  * background-only Views per window, stacked above the pages and below the card's glass layer, each
  * a translucent black rounded rect a little larger than the card. Solid colour layers only (no
  * blur, no bitmaps), created on first use, moved with the bounds the slide already updates and
- * faded with its progress; hidden whenever the card isn't floating on screen.
+ * shown at full strength whenever the card is floating on screen.
  */
 
 interface WindowShadow {
@@ -58,8 +58,8 @@ export function hideSidebarCardShadow(window: BaseWindow): void {
 }
 
 /**
- * Place the shadow around the floating card at `card` (window DIPs), at `strength` 0..1 (the
- * slide's progress), directly under `below` (the card's glass layer, or the sidebar view).
+ * Place the shadow around the floating card at `card` (window DIPs), at `strength` 0..1, directly
+ * under `below` (the card's native backing layer, or the sidebar view).
  */
 export function updateSidebarCardShadow(
   window: BaseWindow,
