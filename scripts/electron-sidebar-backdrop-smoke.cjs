@@ -35,6 +35,8 @@ const canCaptureCompositor =
   process.platform === "linux" &&
   Boolean(process.env.DISPLAY) &&
   process.env.SURFFISH_SMOKE_HIDDEN !== "2";
+const hiddenMacSmoke =
+  process.platform === "darwin" && process.env.SURFFISH_SMOKE_HIDDEN === "2";
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
 // src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
 const SIDEBAR_FLOAT_GAP = 6;
@@ -331,6 +333,32 @@ function assertNativeHoverFrames(frames, theme) {
   );
 }
 
+function assertSnapshotHoverMotionFrames(frames, theme) {
+  const opening = frames.filter(
+    (frame) => frame.sidebarVisible && frame.sidebar.width > 100,
+  );
+  assert.ok(
+    opening.length >= 12,
+    `${theme} snapshot hover samples main-process view motion (got ${opening.length} samples)`,
+  );
+  const widths = opening.map((frame) => frame.sidebar.width);
+  assert.ok(
+    Math.max(...widths) - Math.min(...widths) > 24,
+    `${theme} snapshot hover's native sidebar bounds move across samples (widths ${JSON.stringify(widths.slice(0, 12))})`,
+  );
+  const firstPage = frames[0]?.page;
+  assert.ok(firstPage, `${theme} live page is sampled before reveal`);
+  for (const frame of frames)
+    assert.deepEqual(
+      frame.page,
+      firstPage,
+      `${theme} floating snapshot sidebar keeps the live page frame stationary`,
+    );
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} snapshot reveal: ${opening.length} main-process bounds samples; page stationary`,
+  );
+}
+
 function assertFirstCoveredCardPixel(prefix, theme) {
   if (!canCaptureCompositor) return null;
   const dir = screenshotDirectory || join(userData, "shots");
@@ -401,18 +429,22 @@ function assertRendererNativeHoverFrames(rendererFrames, nativeFrames, theme) {
   }
 }
 
-function assertSidebarHoverRevealFrames(frames, theme) {
+function assertSidebarHoverRevealFrames(
+  frames,
+  theme,
+  { requireMovingEdge = true } = {},
+) {
   const opening = frames.filter((frame) => frame.reshaping === "expand");
   assert.ok(
     opening.length >= 4,
     `${theme} hover reveal collects multiple expansion samples (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
   );
-  assert.ok(
-    Math.max(...opening.map((frame) => frame.card.width)) -
-      Math.min(...opening.map((frame) => frame.card.width)) >
-      24,
-    `${theme} hover reveal samples the moving card edge`,
-  );
+  const widths = opening.map((frame) => frame.card.width);
+  if (requireMovingEdge)
+    assert.ok(
+      Math.max(...widths) - Math.min(...widths) > 24,
+      `${theme} hover reveal samples the moving card edge (widths ${JSON.stringify(widths.slice(0, 12))})`,
+    );
   for (const frame of opening) {
     assert.ok(
       Math.abs(frame.card.right - frame.viewportWidth) <= 1,
@@ -789,7 +821,7 @@ async function run() {
       if (coldHoverOnly && canCaptureCompositor)
         captureWindow(`sidebar-${mode}-cold-before-${label}-${theme}.png`);
       else await delay(500);
-      if (coldHoverOnly && mode === "native")
+      if (coldHoverOnly && (mode === "native" || mode === "snapshot"))
         nativeProbe = armNativeHoverProbe(sidebar);
       await armSidebarHoverProbe(sidebar);
       const capturePrefix = `sidebar-hover-${label}-${theme}`;
@@ -833,7 +865,10 @@ async function run() {
     await delay(700);
     if (hoverOnly) {
       const hoverFrames = await finishSidebarHoverProbe(sidebar);
-      if (!measureOnly) assertSidebarHoverRevealFrames(hoverFrames, theme);
+      if (!measureOnly)
+        assertSidebarHoverRevealFrames(hoverFrames, theme, {
+          requireMovingEdge: !hiddenMacSmoke,
+        });
       if (!measureOnly && mode === "snapshot")
         assertSnapshotHoverFrames(hoverFrames, theme);
       await capture;
@@ -842,6 +877,8 @@ async function run() {
         const nativeFrames = nativeProbe?.stop() ?? [];
         if (!measureOnly && mode === "native")
           assertRendererNativeHoverFrames(hoverFrames, nativeFrames, theme);
+        if (!measureOnly && mode === "snapshot")
+          assertSnapshotHoverMotionFrames(nativeFrames, theme);
         const firstCoveredPixel =
           measureOnly || mode !== "native"
             ? null
