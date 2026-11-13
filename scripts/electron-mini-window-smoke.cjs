@@ -175,11 +175,19 @@ async function run() {
   // --- 1. Lazy: mini-window.ts is its own chunk, reached only through import().
   smoke.step("mini window module is a lazy chunk");
   const outMain = resolve(__dirname, "../out/main");
+  // Other modules named mini-window-* (shared/mini-window-tab-drag.ts, ...) can get chunks of their
+  // own too, and readdir order follows the content hash: skip every chunk named for one of them.
+  const siblingModules = ["main", "shared"].flatMap((dir) =>
+    readdirSync(resolve(__dirname, "../src", dir))
+      .filter((file) => /^mini-window-.+\.tsx?$/.test(file))
+      .map((file) => file.replace(/\.tsx?$/, "")),
+  );
   const chunk = readdirSync(outMain).find(
     (name) =>
       /^mini-window-[A-Za-z0-9_-]+\.js$/.test(name) &&
       !name.startsWith("mini-window-entry") &&
-      !name.startsWith("mini-window-page"),
+      !name.startsWith("mini-window-page") &&
+      !siblingModules.some((module) => name.startsWith(`${module}-`)),
   );
   assert.ok(chunk, "out/main has a mini-window-*.js chunk");
   for (const name of readdirSync(outMain).filter(
