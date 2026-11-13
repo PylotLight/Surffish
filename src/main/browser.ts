@@ -254,6 +254,7 @@ import {
   dropPrivateWakeSnapshots,
   dropWakeSnapshot,
   endWakeSnapshot,
+  moveWakeSnapshot,
   endWakeSnapshotForTab,
   hasWakeSnapshot,
   keepWakeSnapshot,
@@ -745,6 +746,15 @@ function isTabOnScreen(tab: BrowserTab): boolean {
 }
 
 /** Where a tab's page is drawn (window coordinates): its pane in a split on screen, else the page area. */
+/**
+ * Where `tab`'s page card is on screen right now: pageBoundsOf plus the hover panel's push
+ * (pageSlideX). Anything drawn in place of the live page (the wake snapshot) uses this, or it sits
+ * at the unpushed spot under the pushed panel, which has no ground of its own (it is the frame).
+ */
+function onScreenPageBoundsOf(tab: BrowserTab): BrowserBounds {
+  return slideViewRect(pageBoundsOf(tab), tab.win.pageSlideX ?? 0);
+}
+
 function pageBoundsOf(tab: BrowserTab): BrowserBounds {
   const w = tab.win;
   const split = splitOf(activeTabOf(w));
@@ -1808,7 +1818,7 @@ function activateTabInternal(id: string): boolean {
       w.window,
       tab.id,
       tab.view.webContents,
-      pageBoundsOf(tab),
+      onScreenPageBoundsOf(tab),
       wakeUrl,
       tab.isPrivate ? null : partitionForTab(tab),
     );
@@ -6395,13 +6405,20 @@ export function slideBrowserPage(window: BaseWindow, dx: number): void {
   const active = activeTabOf(w);
   if (!active?.view || splitOf(active)) {
     applyTabBounds(w);
-    return;
+  } else {
+    const target = slideViewRect(browserBounds, next);
+    const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
+    applyPageViewFrame(active.view, target, radius);
+    const reader = readerViewFor(active.view.webContents);
+    if (reader) applyPageViewFrame(reader, target, radius);
   }
-  const target = slideViewRect(browserBounds, next);
-  const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
-  applyPageViewFrame(active.view, target, radius);
-  const reader = readerViewFor(active.view.webContents);
-  if (reader) applyPageViewFrame(reader, target, radius);
+  // A waking tab's picture stands in for the page meanwhile: it slides with the card.
+  moveWakeSnapshot(w.window, (tabId) => {
+    const tab = findTab(tabId);
+    return tab && tab.win === w && isTabOnScreen(tab)
+      ? onScreenPageBoundsOf(tab)
+      : null;
+  });
 }
 
 export function syncBrowserBoundsToWindow(
@@ -7106,7 +7123,7 @@ function presentRestoredTabPicture(w: BrowserWindowState): void {
     w.window,
     tab.id,
     contents,
-    () => pageBoundsOf(tab),
+    () => onScreenPageBoundsOf(tab),
     currentUrl(tab),
     partitionForTab(tab),
     () => isActiveTab(tab) && tab.view?.webContents === contents,

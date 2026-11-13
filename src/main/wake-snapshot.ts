@@ -16,6 +16,7 @@ import {
   WAKE_SNAPSHOT_FADED_CHANNEL,
   WAKE_SNAPSHOT_HIDE_CHANNEL,
   WAKE_SNAPSHOT_INPUT_CHANNEL,
+  WAKE_SNAPSHOT_MOVE_CHANNEL,
   WAKE_SNAPSHOT_JPEG_QUALITY,
   WAKE_SNAPSHOT_LOAD_GRACE_MS,
   WAKE_SNAPSHOT_MAX_SHOW_MS,
@@ -26,6 +27,7 @@ import {
   wakeSnapshotWidth,
   type WakeSnapshotEvent,
   type WakeSnapshotInput,
+  type WakeSnapshotMoveMessage,
   type WakeSnapshotPhase,
   type WakeSnapshotShowMessage,
 } from "../shared/wake-snapshot";
@@ -228,6 +230,35 @@ export function endWakeSnapshot(
   if (!presentation || presentation.tabId === unlessTabId) return;
   presentation.pointerHeld = false;
   finish(presentation);
+}
+
+/**
+ * The page card under `window`'s picture moved (browser.ts slideBrowserPage): move the picture with
+ * it. `rectFor` gives the tab's on-screen page rect, or null when the tab is no longer on screen.
+ * Same size only: a resized page area ends the picture instead (it would no longer fit).
+ */
+export function moveWakeSnapshot(
+  window: BaseWindow,
+  rectFor: (
+    tabId: string,
+  ) => { x: number; y: number; width: number; height: number } | null,
+): void {
+  const presentation = presentations.get(window);
+  if (!presentation || presentation.phase === "gone") return;
+  const next = rectFor(presentation.tabId);
+  const { rect } = presentation;
+  if (!next || next.width !== rect.width || next.height !== rect.height) {
+    endWakeSnapshot(window);
+    return;
+  }
+  if (next.x === rect.x && next.y === rect.y) return;
+  presentation.rect = { ...next };
+  if (presentation.toolbar.isDestroyed()) return;
+  const message: WakeSnapshotMoveMessage = {
+    token: presentation.token,
+    rect: presentation.rect,
+  };
+  presentation.toolbar.send(WAKE_SNAPSHOT_MOVE_CHANNEL, message);
 }
 
 export function endWakeSnapshotForTab(tabId: string): void {
