@@ -134,7 +134,7 @@ const SIDEBAR_PAINTED_ROWS = `(() => {
     if (opacity < 0.05) continue
     painted.push({ cls: el.className, text: el.textContent.trim().slice(0, 24), left: Math.round(r.left), right: Math.round(r.right), opacity: Number(opacity.toFixed(2)), ghost: Boolean(el.closest('.sidebar-morph-ghost')) })
   }
-  return { collapsed: Boolean(card?.classList.contains('is-collapsed')), reshaping: card?.getAttribute('data-reshaping') ?? null, cardRight: Math.round(card?.getBoundingClientRect().right ?? 0), painted }
+  return { collapsed: Boolean(card?.classList.contains('is-collapsed')), reshaping: card?.getAttribute('data-reshaping') ?? null, cardRight: Math.round(card?.getBoundingClientRect().right ?? 0), ghostCount: card?.querySelectorAll('.sidebar-morph-ghost').length ?? 0, painted }
 })()`;
 
 /** Samples SIDEBAR_PAINTED_ROWS on every frame the surface draws for `ms` (a timer ends it if it stops drawing). */
@@ -156,6 +156,23 @@ function sampleSidebarRows(view, ms) {
       setTimeout(finish, ${ms} + 250)
     })`,
   );
+}
+
+function assertNoCollapsedSidebarPaint(frames, context) {
+  const collapsedFrames = frames.filter((frame) => frame.collapsed);
+  assert.ok(
+    collapsedFrames.length >= 3,
+    `${context}: sampled at least three collapsed rendered frames (got ${collapsedFrames.length})`,
+  );
+  const leakingFrames = collapsedFrames.filter(
+    (frame) => frame.painted.length > 0 || frame.ghostCount > 0,
+  );
+  assert.equal(
+    leakingFrames.length,
+    0,
+    `${context}: no expanded labels or panel ghost are painted while collapsed (${frames.length} frames): ${JSON.stringify(leakingFrames.slice(0, 5))}`,
+  );
+  return collapsedFrames.length;
 }
 
 async function evaluate(view, expression) {
@@ -213,9 +230,9 @@ function sampleSidebarPinMorph(view, direction) {
         const tick = () => {
           const phase = card.getAttribute('data-reshaping')
           if (phase === direction) {
-            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector) })
+            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector), paint: ${SIDEBAR_PAINTED_ROWS} })
           } else if (frames.length) {
-            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector) })
+            frames.push({ phase, at: performance.now(), marks: marks(card.querySelector(activeSelector), activeMarksSelector), paint: ${SIDEBAR_PAINTED_ROWS} })
             resolve({ before, frames })
             return
           }
@@ -236,6 +253,23 @@ function sampleSidebarPinMorph(view, direction) {
 }
 
 function assertSidebarPinMorph(sample, direction) {
+  if (direction === "collapse") {
+    const collapsedFrames = sample.frames.filter(
+      (frame) => frame.paint.collapsed,
+    );
+    assert.ok(
+      collapsedFrames.length >= 4,
+      `collapse samples several frames with the rail already marked collapsed (got ${collapsedFrames.length})`,
+    );
+    const paintedCollapsedFrames = collapsedFrames.filter(
+      (frame) => frame.paint.painted.length > 0 || frame.paint.ghostCount > 0,
+    );
+    assert.equal(
+      paintedCollapsedFrames.length,
+      0,
+      `a collapsed live-page sidebar never paints expanded row labels or a panel ghost (${sample.frames.length} rendered frames): ${JSON.stringify(paintedCollapsedFrames.slice(0, 5))}`,
+    );
+  }
   const from =
     direction === "expand" ? sample.before.rail : sample.before.panel;
   const target =
@@ -1336,8 +1370,8 @@ async function run() {
     const painted = []
     for (let node = element; node; node = node.parentElement) {
       const style = getComputedStyle(node)
-      const alpha = /rgba?\(([^)]+)\)/.exec(style.backgroundColor)?.[1].split(',')[3]
-      const name = node.tagName.toLowerCase() + (node.className && typeof node.className === 'string' ? '.' + node.className.trim().split(/\s+/).join('.') : '')
+      const alpha = /rgba?\\(([^)]+)\\)/.exec(style.backgroundColor)?.[1].split(',')[3]
+      const name = node.tagName.toLowerCase() + (node.className && typeof node.className === 'string' ? '.' + node.className.trim().split(/\\s+/).join('.') : '')
       if (alpha === undefined || Number(alpha) > 0) painted.push(name + ' ' + style.backgroundColor)
       if (style.backgroundImage !== 'none') painted.push(name + ' ' + style.backgroundImage)
     }
@@ -2432,6 +2466,191 @@ async function run() {
       collapsedRailVisible()
     );
   }, "the live page and collapsed rail after the rail-click transition check");
+
+  // The real pointer reveal/click/exit was exercised above. Drive the same hover state directly
+  // here so the assertion can sample the entire live-page collapse transition deterministically.
+  const hoverExitProbe = sampleSidebarRows(rendererViews.sidebar, 1700);
+  await evaluate(
+    rendererViews.toolbar,
+    'window.api.browser.chrome.set({ sidebarMode: "tabs", sidebarPinned: false, sidebarHovered: true, sidebarFocused: false })',
+  );
+  await waitFor(
+    async () =>
+      (await chromeState()).sidebarHovered &&
+      rendererViews.sidebar.getBounds().width >= 300,
+    "the collapsed live-page rail to reveal on hover",
+  );
+  await evaluate(
+    rendererViews.toolbar,
+    "window.api.browser.chrome.set({ sidebarHovered: false })",
+  );
+  await waitFor(
+    async () => !(await chromeState()).sidebarHovered && collapsedRailVisible(),
+    "the live-page hover exit to collapse the overlay rail",
+  );
+  const hoverExitFrames = await hoverExitProbe;
+  const hoverCollapsedCount = assertNoCollapsedSidebarPaint(
+    hoverExitFrames,
+    "live-page hover exit",
+  );
+  console.log(
+    `Live-page hover exit: ${hoverExitFrames.length} rendered frames sampled; ${hoverCollapsedCount} collapsed frames contain no expanded label or panel ghost.`,
+  );
+
+  // Focus alone holds the revealed panel open after the pointer leaves. Blurring it then takes the
+  // same collapse path, which must obey the no-panel-paint invariant too.
+  await evaluate(
+    rendererViews.toolbar,
+    "window.api.browser.chrome.set({ sidebarHovered: true, sidebarFocused: false })",
+  );
+  await waitFor(
+    async () =>
+      (await chromeState()).sidebarHovered &&
+      rendererViews.sidebar.getBounds().width >= 300,
+    "the rail to reveal before the focus-exit check",
+  );
+  const focusedRowRect = await evaluate(
+    rendererViews.sidebar,
+    `(() => { const rect = document.querySelector(".sidebar-panel .tab-item")?.getBoundingClientRect(); return rect && { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; })()`,
+  );
+  assert.ok(focusedRowRect, "the revealed panel has a focusable tab row");
+  rendererViews.sidebar.webContents.focus();
+  assert.equal(
+    await evaluate(
+      rendererViews.sidebar,
+      `(() => { const row = document.querySelector(".sidebar-panel .tab-item"); row?.focus(); return Boolean(row && document.activeElement === row); })()`,
+    ),
+    true,
+    "the revealed tab row receives DOM focus",
+  );
+  await waitFor(
+    async () => (await chromeState()).sidebarFocused,
+    "the sidebar focus lock",
+  );
+  const pageExitPoint = {
+    x: mainWindow.getContentBounds().x + 500,
+    y: mainWindow.getContentBounds().y + 230,
+  };
+  pointerMove(pageExitPoint.x, pageExitPoint.y);
+  await delay(300);
+  assert.equal(
+    (await chromeState()).sidebarFocused,
+    true,
+    "moving to the page does not collapse a focused sidebar",
+  );
+  assert.equal(
+    (await chromeState()).sidebarHovered,
+    false,
+    "the pointer has exited while focus holds the panel open",
+  );
+  assert.ok(
+    rendererViews.sidebar.getBounds().width >= 300,
+    "focus keeps the panel expanded after pointer exit",
+  );
+  const focusExitProbe = sampleSidebarRows(rendererViews.sidebar, 1400);
+  await evaluate(rendererViews.sidebar, "document.activeElement?.blur(); true");
+  await waitFor(
+    async () =>
+      !(await chromeState()).sidebarFocused &&
+      !(await chromeState()).sidebarHovered &&
+      collapsedRailVisible(),
+    "the focused live-page sidebar to collapse after blur",
+  );
+  const focusExitFrames = await focusExitProbe;
+  const focusCollapsedCount = assertNoCollapsedSidebarPaint(
+    focusExitFrames,
+    "live-page focus exit",
+  );
+  console.log(
+    `Live-page focus exit: ${focusExitFrames.length} rendered frames sampled; ${focusCollapsedCount} collapsed frames contain no expanded label or panel ghost.`,
+  );
+
+  // Tab-list updates (including a sleeping row and its wake) arrive while the live-page rail stays
+  // collapsed. This covers tab switching and asynchronous row-state changes outside the reveal path.
+  const fixtureTab = (
+    await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+  ).find((tab) => tab.url === fixtureUrl);
+  assert.ok(fixtureTab, "the live fixture tab remains available");
+  const sleepyUrl = `${new URL(fixtureUrl).origin}/sidebar-sleep-wake`;
+  const sleepyTabId = await evaluate(
+    rendererViews.toolbar,
+    `window.api.browser.tabs.create(${JSON.stringify(sleepyUrl)})`,
+  );
+  assert.ok(
+    sleepyTabId,
+    "a second tab is created for switch and sleep coverage",
+  );
+  await waitFor(
+    async () =>
+      (
+        await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+      ).some((tab) => tab.id === sleepyTabId && tab.active),
+    "the new tab to activate before switching back",
+  );
+  await evaluate(
+    rendererViews.toolbar,
+    `window.api.browser.tabs.activate(${JSON.stringify(fixtureTab.id)})`,
+  );
+  await waitFor(
+    async () =>
+      (
+        await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+      ).some((tab) => tab.id === fixtureTab.id && tab.active) &&
+      collapsedRailVisible(),
+    "the live page tab to be active again with the rail collapsed",
+  );
+  const sleepWakeProbe = sampleSidebarRows(rendererViews.sidebar, 3200);
+  assert.equal(
+    await evaluate(
+      rendererViews.content,
+      `window.api.browser.diagnostics.discardTab(${JSON.stringify(sleepyTabId)})`,
+    ),
+    true,
+    "the background test tab is discarded to its sleeping state",
+  );
+  await waitFor(
+    async () =>
+      (
+        await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+      ).some((tab) => tab.id === sleepyTabId && tab.sleeping),
+    "the sleeping tab row to arrive",
+  );
+  await evaluate(
+    rendererViews.toolbar,
+    `window.api.browser.tabs.activate(${JSON.stringify(sleepyTabId)})`,
+  );
+  await waitFor(
+    async () =>
+      (
+        await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+      ).some((tab) => tab.id === sleepyTabId && tab.active && !tab.sleeping),
+    "the sleeping tab to wake when selected",
+  );
+  await evaluate(
+    rendererViews.toolbar,
+    `window.api.browser.tabs.activate(${JSON.stringify(fixtureTab.id)})`,
+  );
+  await waitFor(
+    async () =>
+      (
+        await evaluate(rendererViews.toolbar, "window.api.browser.tabs.get()")
+      ).some((tab) => tab.id === fixtureTab.id && tab.active) &&
+      collapsedRailVisible(),
+    "switching back to the live page without revealing the sidebar",
+  );
+  const sleepWakeFrames = await sleepWakeProbe;
+  const sleepCollapsedCount = assertNoCollapsedSidebarPaint(
+    sleepWakeFrames,
+    "collapsed sidebar during tab switch and sleep/wake",
+  );
+  console.log(
+    `Tab switch and sleep/wake: ${sleepWakeFrames.length} rendered frames sampled; ${sleepCollapsedCount} collapsed frames contain no expanded label or panel ghost.`,
+  );
+  await evaluate(
+    rendererViews.toolbar,
+    `window.api.browser.tabs.close(${JSON.stringify(sleepyTabId)})`,
+  );
+
   console.log(
     `BaseWindow app integration passed: initial shell views=${initialShell.length}; resized live page card=${JSON.stringify(fixturePageView.getBounds())}; persisted sidebar width=${sidebarView.width}; last-tab Command-W keeps the window open, Command-T focuses the address bar, and hover stability, pointer resize/persistence, x=5 click-through, overlay page input/wheel, delayed edge reveal, and tab/New Tab lifecycle verified.`,
   );
