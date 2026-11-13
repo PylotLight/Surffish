@@ -101,6 +101,15 @@ export function installWakeSnapshotLayer(): () => void {
     if (token === hideToken) remove();
   });
 
+  // The pushed page card slid (hover panel opening/closing): the picture moves with it.
+  const offMove = api.onMove((message) => {
+    if (token !== message.token) return;
+    rect = message.rect;
+    if (!layer) return;
+    layer.style.left = `${message.rect.x}px`;
+    layer.style.top = `${message.rect.y}px`;
+  });
+
   /** A press/scroll on the picture (not on toolbar UI) at window point x,y. */
   const landsOnPage = (event: MouseEvent): boolean => {
     if (
@@ -197,6 +206,7 @@ export function installWakeSnapshotLayer(): () => void {
     offShow();
     offFade();
     offHide();
+    offMove();
     remove();
     window.removeEventListener("pointerdown", onPointerDown, true);
     window.removeEventListener("pointermove", onPointerMove, true);
