@@ -42,6 +42,7 @@ import {
   sendToMainWindowRenderers,
   setBrowserFrameTransparency,
   setBrowserSidebarPushesPage,
+  setBrowserSidebarPushStyle,
   setSidebarDockListener,
   setSidebarMotionListener,
   setSidebarOverlayListener,
@@ -445,6 +446,7 @@ export function registerSidebarBackdropIpc(): void {
   settings = normalizeSidebarBackdropSettings(readUserJson(SETTINGS_FILE));
   setBrowserFrameTransparency(settings.frameTransparency);
   setBrowserSidebarPushesPage(settings.sidebarPushesPage);
+  setBrowserSidebarPushStyle(settings.sidebarPushStyle);
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
   setSidebarDockListener((window) =>
@@ -474,6 +476,7 @@ export function registerSidebarBackdropIpc(): void {
     // The frame's root ground re-lays out in every window; the hover card repaints below.
     setBrowserFrameTransparency(settings.frameTransparency);
     setBrowserSidebarPushesPage(settings.sidebarPushesPage);
+    setBrowserSidebarPushStyle(settings.sidebarPushStyle);
     applyEverywhere();
     sendToMainWindowRenderers("browser:sidebar-backdrop:settings", {
       ...settings,

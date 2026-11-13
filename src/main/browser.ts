@@ -217,6 +217,7 @@ import {
   sendToWindowRenderers,
   setBrowserChromeState,
   setBrowserPageIsLocalNewTab,
+  getBrowserSidebarPushStyle,
 } from "./browser-shell";
 import {
   attachPagePopups,
@@ -310,7 +311,7 @@ import {
   framePageArea,
   initialPageViewBounds,
   pageViewBounds,
-  pushViewRect,
+  pushedPageRect,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
 import type { TabArchiveCandidate } from "../shared/tab-archive";
@@ -752,7 +753,11 @@ function isTabOnScreen(tab: BrowserTab): boolean {
  * at the unpushed spot under the pushed panel, which has no ground of its own (it is the frame).
  */
 function onScreenPageBoundsOf(tab: BrowserTab): BrowserBounds {
-  return pushViewRect(pageBoundsOf(tab), tab.win.pageSlideX ?? 0);
+  return pushedPageRect(
+    pageBoundsOf(tab),
+    tab.win.pageSlideX ?? 0,
+    getBrowserSidebarPushStyle(),
+  );
 }
 
 function pageBoundsOf(tab: BrowserTab): BrowserBounds {
@@ -1452,7 +1457,11 @@ export function getBrowserTabPageInfo(id?: string | null): {
 
 function applyTabBounds(w: BrowserWindowState): void {
   // A pushed page card gives up its left side to the hover panel: its right edge stays put.
-  const browserBounds = pushViewRect(w.browserBounds, w.pageSlideX ?? 0);
+  const browserBounds = pushedPageRect(
+    w.browserBounds,
+    w.pageSlideX ?? 0,
+    getBrowserSidebarPushStyle(),
+  );
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
   const split = splitOf(activeTabOf(w));
@@ -6408,7 +6417,11 @@ export function slideBrowserPage(window: BaseWindow, dx: number): void {
   if (!active?.view || splitOf(active)) {
     applyTabBounds(w);
   } else {
-    const target = pushViewRect(browserBounds, next);
+    const target = pushedPageRect(
+      browserBounds,
+      next,
+      getBrowserSidebarPushStyle(),
+    );
     const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
     applyPageViewFrame(active.view, target, radius);
     const reader = readerViewFor(active.view.webContents);

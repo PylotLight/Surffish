@@ -5,7 +5,10 @@ import {
   pageFrameLeft,
   pageSlideOffset,
   pageViewBounds,
+  normalizeSidebarPushStyle,
+  pushedPageRect,
   pushViewRect,
+  slideViewRect,
 } from "./page-view-bounds";
 
 const area = { x: 0, y: 50, width: 1200, height: 750 };
@@ -134,5 +137,22 @@ describe("pushed page card", () => {
     expect(pushViewRect(card, 0)).toEqual(card);
     expect(pushViewRect(card, 0)).not.toBe(card);
     expect(pushViewRect(card, 2000)).toEqual({ ...card, x: 1194, width: 0 });
+  });
+  test("slides the card without resizing it (the 'slide' style)", () => {
+    const card = { x: 90, y: 56, width: 1104, height: 738 };
+    expect(slideViewRect(card, 236)).toEqual({ ...card, x: 326 });
+    expect(pushedPageRect(card, 236, "slide")).toEqual({ ...card, x: 326 });
+    expect(pushedPageRect(card, 236, "resize")).toEqual({
+      ...card,
+      x: 326,
+      width: 868,
+    });
+  });
+
+  test("normalizes the push style, defaulting to resize", () => {
+    expect(normalizeSidebarPushStyle("slide")).toBe("slide");
+    expect(normalizeSidebarPushStyle("resize")).toBe("resize");
+    expect(normalizeSidebarPushStyle("bounce")).toBe("resize");
+    expect(normalizeSidebarPushStyle(undefined)).toBe("resize");
   });
 });

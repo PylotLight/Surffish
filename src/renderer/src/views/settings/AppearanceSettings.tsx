@@ -8,6 +8,7 @@ import {
   FRAME_TRANSPARENCY_MAX,
   FRAME_TRANSPARENCY_MIN,
 } from "../../../../shared/sidebar-card";
+import type { SidebarPushStyle } from "../../../../shared/page-view-bounds";
 import { SettingsGroup, SettingsRow } from "./SettingsControls";
 
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
@@ -153,7 +154,7 @@ export function AppearanceSettings(): React.JSX.Element {
       </SettingsRow>
       <SettingsRow
         label="Sidebar pushes page"
-        hint="The hover sidebar slides the page aside and matches the frame, instead of floating over it."
+        hint="The hover sidebar pushes the page aside and matches the frame, instead of floating over it."
       >
         <input
           type="checkbox"
@@ -168,6 +169,28 @@ export function AppearanceSettings(): React.JSX.Element {
               .catch(() => undefined)
           }
         />
+      </SettingsRow>
+      <SettingsRow
+        label="Sidebar animation"
+        hint="How the page makes room while the hover sidebar pushes it: shrink beside the sidebar, or slide across at its size."
+      >
+        <select
+          className="settings-select"
+          disabled={!settings || settings.sidebarPushesPage === false}
+          value={settings?.sidebarPushStyle ?? "resize"}
+          aria-label="Sidebar animation"
+          onChange={(event) =>
+            void window.api.browser.sidebarBackdrop
+              .set({
+                sidebarPushStyle: event.target.value as SidebarPushStyle,
+              })
+              .then(setSettings)
+              .catch(() => undefined)
+          }
+        >
+          <option value="resize">Resize page</option>
+          <option value="slide">Slide page</option>
+        </select>
       </SettingsRow>
       <SettingsRow
         label="Bookmarks bar"

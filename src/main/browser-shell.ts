@@ -36,7 +36,12 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
-import { pageFrameLeft, pageSlideOffset } from "../shared/page-view-bounds";
+import {
+  DEFAULT_SIDEBAR_PUSH_STYLE,
+  pageFrameLeft,
+  pageSlideOffset,
+  type SidebarPushStyle,
+} from "../shared/page-view-bounds";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import {
@@ -190,6 +195,20 @@ export function setBrowserFramePrivate(
 
 /** Settings → Appearance → Sidebar pushes page (sidebar-backdrop.ts owns the setting and calls in). */
 let sidebarPushesPage = true;
+
+/** Settings → Appearance → Sidebar animation: how a pushed page card moves (browser.ts reads it). */
+let sidebarPushStyle: SidebarPushStyle = DEFAULT_SIDEBAR_PUSH_STYLE;
+
+export function getBrowserSidebarPushStyle(): SidebarPushStyle {
+  return sidebarPushStyle;
+}
+
+/** Sidebar animation changed: re-lay out, so a page pushed right now takes the new shape. */
+export function setBrowserSidebarPushStyle(value: SidebarPushStyle): void {
+  if (value === sidebarPushStyle) return;
+  sidebarPushStyle = value;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
 
 /** Sidebar pushes page changed: every window re-lays out (the hover panel floats or pushes). */
 export function setBrowserSidebarPushesPage(value: boolean): void {
