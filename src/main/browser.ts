@@ -310,7 +310,7 @@ import {
   framePageArea,
   initialPageViewBounds,
   pageViewBounds,
-  slideViewRect,
+  pushViewRect,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
 import type { TabArchiveCandidate } from "../shared/tab-archive";
@@ -543,8 +543,8 @@ interface BrowserWindowState {
   /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
   pageFrameLeft?: number | null;
   /**
-   * The page card's slide right of `browserBounds` while the tab list's hover panel pushes it
-   * aside (browser-shell.ts syncPageSlide): the views move, `browserBounds` stays the frame's rect.
+   * How far the hover panel pushes the page card's left edge right of `browserBounds` (browser-shell.ts
+   * syncPageSlide): the views shrink from the left, `browserBounds` stays the frame's rect.
    */
   pageSlideX?: number;
   findState: FindState;
@@ -752,7 +752,7 @@ function isTabOnScreen(tab: BrowserTab): boolean {
  * at the unpushed spot under the pushed panel, which has no ground of its own (it is the frame).
  */
 function onScreenPageBoundsOf(tab: BrowserTab): BrowserBounds {
-  return slideViewRect(pageBoundsOf(tab), tab.win.pageSlideX ?? 0);
+  return pushViewRect(pageBoundsOf(tab), tab.win.pageSlideX ?? 0);
 }
 
 function pageBoundsOf(tab: BrowserTab): BrowserBounds {
@@ -1451,8 +1451,8 @@ export function getBrowserTabPageInfo(id?: string | null): {
 }
 
 function applyTabBounds(w: BrowserWindowState): void {
-  // A pushed page card slides right with the hover panel, same size (the page never re-lays out).
-  const browserBounds = slideViewRect(w.browserBounds, w.pageSlideX ?? 0);
+  // A pushed page card gives up its left side to the hover panel: its right edge stays put.
+  const browserBounds = pushViewRect(w.browserBounds, w.pageSlideX ?? 0);
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
   const split = splitOf(activeTabOf(w));
@@ -6389,9 +6389,11 @@ export function setBrowserBounds(input: unknown): void {
 }
 
 /**
- * The hover panel pushes the page aside (browser-shell.ts): move the window's on-screen page card
- * `dx` px right of its frame rect, keeping its size. Runs once per motion frame, so the common case
- * (one page, no split) only moves the active view and its reader; a split goes through the full
+ * The hover panel pushes the page aside (browser-shell.ts): the window's on-screen page card's left
+ * edge moves `dx` px right of its frame rect and its right edge stays, so the page resizes into the
+ * room beside the panel (like Zephium / Arc) rather than sliding under the window's right edge.
+ * Runs once per motion frame, so the common case (one page, no split) only resizes the active view
+ * and its reader; a split goes through the full
  * layout so its panes and divider surface move together.
  */
 export function slideBrowserPage(window: BaseWindow, dx: number): void {
@@ -6406,13 +6408,13 @@ export function slideBrowserPage(window: BaseWindow, dx: number): void {
   if (!active?.view || splitOf(active)) {
     applyTabBounds(w);
   } else {
-    const target = slideViewRect(browserBounds, next);
+    const target = pushViewRect(browserBounds, next);
     const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
     applyPageViewFrame(active.view, target, radius);
     const reader = readerViewFor(active.view.webContents);
     if (reader) applyPageViewFrame(reader, target, radius);
   }
-  // A waking tab's picture stands in for the page meanwhile: it slides with the card.
+  // A waking tab's picture stands in for the page meanwhile: it ends once the card resizes.
   moveWakeSnapshot(w.window, (tabId) => {
     const tab = findTab(tabId);
     return tab && tab.win === w && isTabOnScreen(tab)

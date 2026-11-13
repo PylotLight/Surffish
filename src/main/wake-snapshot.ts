@@ -235,7 +235,7 @@ export function endWakeSnapshot(
 /**
  * The page card under `window`'s picture moved (browser.ts slideBrowserPage): move the picture with
  * it. `rectFor` gives the tab's on-screen page rect, or null when the tab is no longer on screen.
- * Same size only: a resized page area ends the picture instead (it would no longer fit).
+ * Same size only: a resized page area (the push resizes the card) ends the picture instead.
  */
 export function moveWakeSnapshot(
   window: BaseWindow,

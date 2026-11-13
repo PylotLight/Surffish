@@ -5,7 +5,7 @@ import {
   pageFrameLeft,
   pageSlideOffset,
   pageViewBounds,
-  slideViewRect,
+  pushViewRect,
 } from "./page-view-bounds";
 
 const area = { x: 0, y: 50, width: 1200, height: 750 };
@@ -128,10 +128,11 @@ describe("pushed page card", () => {
     ).toBe(0);
   });
 
-  test("moves the card without resizing it", () => {
+  test("pushes the card's left edge and keeps its right edge", () => {
     const card = { x: 90, y: 56, width: 1104, height: 738 };
-    expect(slideViewRect(card, 236)).toEqual({ ...card, x: 326 });
-    expect(slideViewRect(card, 0)).toEqual(card);
-    expect(slideViewRect(card, 0)).not.toBe(card);
+    expect(pushViewRect(card, 236)).toEqual({ ...card, x: 326, width: 868 });
+    expect(pushViewRect(card, 0)).toEqual(card);
+    expect(pushViewRect(card, 0)).not.toBe(card);
+    expect(pushViewRect(card, 2000)).toEqual({ ...card, x: 1194, width: 0 });
   });
 });

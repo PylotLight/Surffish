@@ -1729,9 +1729,9 @@ async function run() {
   );
 
   // The rail owns the left edge; hovering it reveals the panel, which pushes the page card aside
-  // (Settings → Appearance → Sidebar pushes page, on by default): the card slides right with the
-  // panel's edge and keeps its size (the page never re-lays out; the window edge clips its right
-  // side), then slides back on close.
+  // (Settings → Appearance → Sidebar pushes page, on by default): the card's left edge follows the
+  // panel's edge and its right edge stays (the page resizes into the room beside the panel, nothing
+  // clipped off the window's right side), then grows back on close.
   const pageAfterHide = fixturePageView.getBounds();
   assert.ok(
     pageAfterHide.x >= 83,
@@ -1772,20 +1772,21 @@ async function run() {
   assert.deepEqual(
     {
       y: pushedPage.y,
-      width: pushedPage.width,
+      right: pushedPage.x + pushedPage.width,
       height: pushedPage.height,
     },
     {
       y: pageAfterHide.y,
-      width: pageAfterHide.width,
+      right: pageAfterHide.x + pageAfterHide.width,
       height: pageAfterHide.height,
     },
-    "the pushed page card keeps its size (no reflow): only its x moves",
+    "the pushed page card keeps its right edge: only its left edge moves (it resizes)",
   );
   assert.ok(
     pushedPage.x > pageAfterHide.x &&
-      pushedPage.x + pushedPage.width > contentSize[0],
-    `the pushed card runs past the window's right edge, clipped there (${JSON.stringify(pushedPage)}, window ${contentSize[0]})`,
+      pushedPage.width < pageAfterHide.width &&
+      pushedPage.x + pushedPage.width <= contentSize[0],
+    `the pushed card fits beside the panel, inside the window (${JSON.stringify(pushedPage)}, window ${contentSize[0]})`,
   );
   // Pushing, the panel paints nothing of its own (like the docked panel): no card background,
   // shadow, blur or snapshot. The window root's ground (glass on macOS, the frame surface here)

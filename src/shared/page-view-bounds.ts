@@ -104,11 +104,10 @@ export function framePageArea(
 }
 
 /**
- * How far the page card slides right while the tab list's hover panel pushes it aside (Settings →
- * Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail) to the
- * panel's visible right edge at this point of its open/close slide. The card keeps its width, so
- * the page never re-lays out; the window edge clips its right side while the panel is open. 0 when
- * the panel is not pushing or is closed.
+ * How far the page card's left edge moves right while the tab list's hover panel pushes it aside
+ * (Settings → Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail)
+ * to the panel's visible right edge at this point of its open/close slide. 0 when the panel is not
+ * pushing or is closed.
  */
 export function pageSlideOffset({
   pushing,
@@ -123,7 +122,14 @@ export function pageSlideOffset({
   return Math.max(0, Math.round(panelRight - frameLeft));
 }
 
-/** `rect` moved right by `dx` px, same size (the pushed page card). */
-export function slideViewRect(rect: ViewRect, dx: number): ViewRect {
-  return dx === 0 ? { ...rect } : { ...rect, x: rect.x + Math.round(dx) };
+/**
+ * `rect` with its left edge pushed `dx` px right and its right edge kept (the pushed page card):
+ * the page resizes to the room beside the panel instead of sliding under the window's right edge,
+ * so nothing of it is clipped off screen while the panel is open.
+ */
+export function pushViewRect(rect: ViewRect, dx: number): ViewRect {
+  const push = Math.min(Math.max(0, Math.round(dx)), rect.width);
+  return push === 0
+    ? { ...rect }
+    : { ...rect, x: rect.x + push, width: rect.width - push };
 }
