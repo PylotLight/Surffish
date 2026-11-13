@@ -296,11 +296,14 @@ export function playSidebarMorph(
   );
   const oldRight = snapshot.rect.x + snapshot.rect.width;
   const newRight = incoming.getBoundingClientRect().right;
-  releaseColumn(snapshot, incomingKeys);
+  const expanding = newRight - oldRight > 1;
+  // The rail is already the visible shape as soon as collapse begins. Keep its marks moving, but
+  // never leave a full-width copy of the outgoing panel over the page while the card shrinks.
+  if (expanding) releaseColumn(snapshot, incomingKeys);
   const card = host.parentElement ?? host;
   const plan = planSidebarMorph(snapshot.marks, targets, {
     edgeFrom: oldRight,
-    widening: newRight - oldRight > 1,
+    widening: expanding,
     // The rail draws every mark where the panel does (SidebarRail's alignRailToPanel), so a
     // counterpart never travels: it is shown in place from the first frame. A measured
     // difference here is the outgoing shape being measured somewhere it is not drawn (a hidden
