@@ -601,7 +601,7 @@ jobs:
         run: swiftc -O -o "$RUNNER_TEMP/window-watch" scripts/ci/window-watch.swift || echo "::warning::window-watch did not build; no external on-screen check"
       - name: Core Electron smokes (2 at a time)
         env:
-          TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors test:electron-certificates"
+          TESTS: "test:electron-security test:electron-table-stakes test:electron-multi-window test:electron-tab-groups test:electron-split-view test:electron-adblock test:electron-nav-errors test:electron-certificates test:electron-sidebar-macos-snapshot"
           # Smokes that need real windows (SURFFISH_SMOKE_HIDDEN=0). None at the moment.
           VISIBLE_TESTS: ""
         run: |

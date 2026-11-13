@@ -59,7 +59,9 @@ import { readUserJson, writeUserJson } from "./user-json";
 /**
  * The overlay sidebar's background over live pages (see shared/sidebar-backdrop.ts for why CSS
  * backdrop-filter and window vibrancy can't do it). 'native' configures a separate background-only
- * View behind the sidebar renderer only while the hover card floats over live page pixels: the
+ * View behind the sidebar renderer only while the hover card floats over live page pixels; on macOS
+ * this is retained for explicit compositor tests, while the default uses the renderer snapshot path:
+ * the generic Views-compositor layer cannot reliably sample native WebContentsView page pixels. The
  * card's rect (SIDEBAR_FLOAT, inset in the overlay view), rounded, glass on macOS (in-window blur
  * under the hover tint) or the opaque frame surface without glass; docked chrome uses the window's
  * shared ground. The floating card's soft shadow (sidebar-card-shadow.ts) follows the same rect in

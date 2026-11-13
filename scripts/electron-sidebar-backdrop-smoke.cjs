@@ -31,7 +31,12 @@ const measureOnly = label === "before";
 const hoverOnly = process.env.SURFFISH_SIDEBAR_HOVER_ONLY === "1";
 const coldHoverOnly =
   hoverOnly && process.env.SURFFISH_SIDEBAR_COLD_HOVER === "1";
-
+const canCaptureCompositor =
+  process.platform === "linux" &&
+  Boolean(process.env.DISPLAY) &&
+  process.env.SURFFISH_SMOKE_HIDDEN !== "2";
+const hiddenMacSmoke =
+  process.platform === "darwin" && process.env.SURFFISH_SMOKE_HIDDEN === "2";
 // A YouTube-ish page: dense left nav text, thumbnails, light and dark variants.
 // src/shared/sidebar-card.ts SIDEBAR_FLOAT.gap: the hover card's gap off the frame.
 const SIDEBAR_FLOAT_GAP = 6;
@@ -144,6 +149,8 @@ async function armSidebarHoverProbe(sidebar) {
         const title = panel?.querySelector('.tab-title')
         const cardStyle = card ? getComputedStyle(card) : null
         const bodyStyle = body ? getComputedStyle(body) : null
+        const backdrop = card?.querySelector('.sidebar-backdrop')
+        const backdropStyle = backdrop ? getComputedStyle(backdrop) : null
         const cardRect = rect(card)
         probe.frames.push({
           at: Number((performance.now() - probe.startedAt).toFixed(1)),
@@ -152,12 +159,18 @@ async function armSidebarHoverProbe(sidebar) {
           reshaping: card?.getAttribute('data-reshaping') ?? null,
           card: cardRect,
           radius: cardStyle?.borderTopRightRadius ?? null,
+          backgroundImage: cardStyle?.backgroundImage ?? 'none',
+          backgroundColor: cardStyle?.backgroundColor ?? 'transparent',
+          snapshotReady: Boolean(backdrop?.classList.contains('is-ready')),
+          snapshotOpacity: backdropStyle?.opacity ?? '0',
           body: body ? { ...rect(body), overflowX: bodyStyle.overflowX, mask: bodyStyle.webkitMaskImage || bodyStyle.maskImage } : null,
           title: title ? rect(title) : null,
         })
-        requestAnimationFrame(tick)
+        // Never-shown macOS CI windows can throttle rAF to 1–2 fps; timers still sample the
+        // main-process view-bounds stepper so a short reveal cannot finish between samples.
+        setTimeout(tick, 16)
       }
-      requestAnimationFrame(tick)
+      tick()
       return true
     })()`,
   );
@@ -166,8 +179,7 @@ async function armSidebarHoverProbe(sidebar) {
 function captureHoverFrames(prefix) {
   const dir =
     screenshotDirectory || (coldHoverOnly ? join(userData, "shots") : null);
-  if (!dir || process.platform !== "linux" || !process.env.DISPLAY)
-    return Promise.resolve(null);
+  if (!dir || !canCaptureCompositor) return Promise.resolve(null);
   mkdirSync(dir, { recursive: true });
   const { x, y, width, height } = mainWindow.getContentBounds();
   const display = screen.getDisplayMatching({ x, y, width, height }).bounds;
@@ -321,8 +333,37 @@ function assertNativeHoverFrames(frames, theme) {
   );
 }
 
+function assertSnapshotHoverProcessFrames(
+  rendererFrames,
+  mainProcessFrames,
+  theme,
+) {
+  const opening = rendererFrames.filter(
+    (frame) => frame.reshaping === "expand",
+  );
+  assert.ok(
+    opening.length >= 4,
+    `${theme} snapshot hover samples renderer in-flight reveal (got ${opening.length} samples)`,
+  );
+  assert.ok(
+    mainProcessFrames.length >= 12,
+    `${theme} snapshot hover samples main-process view bounds (got ${mainProcessFrames.length} samples)`,
+  );
+  const firstPage = mainProcessFrames[0]?.page;
+  assert.ok(firstPage, `${theme} live page is sampled before reveal`);
+  for (const frame of mainProcessFrames)
+    assert.deepEqual(
+      frame.page,
+      firstPage,
+      `${theme} floating snapshot sidebar keeps the live page frame stationary`,
+    );
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} snapshot reveal: ${opening.length} in-flight renderer samples; ${mainProcessFrames.length} main-process bounds samples; page stationary`,
+  );
+}
+
 function assertFirstCoveredCardPixel(prefix, theme) {
-  if (process.platform !== "linux" || !process.env.DISPLAY) return null;
+  if (!canCaptureCompositor) return null;
   const dir = screenshotDirectory || join(userData, "shots");
   const files = readdirSync(dir)
     .filter((name) => name.startsWith(`${prefix}-`) && name.endsWith(".png"))
@@ -391,18 +432,22 @@ function assertRendererNativeHoverFrames(rendererFrames, nativeFrames, theme) {
   }
 }
 
-function assertSidebarHoverRevealFrames(frames, theme) {
+function assertSidebarHoverRevealFrames(
+  frames,
+  theme,
+  { requireMovingEdge = true, requireLabelTraversal = true } = {},
+) {
   const opening = frames.filter((frame) => frame.reshaping === "expand");
   assert.ok(
     opening.length >= 4,
-    `${theme} hover reveal samples multiple rendered expansion frames (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
+    `${theme} hover reveal collects multiple expansion samples (got ${opening.length}; phases=${JSON.stringify([...new Set(frames.map((frame) => frame.reshaping))])}, widths=${JSON.stringify(frames.slice(0, 8).map((frame) => frame.card?.width))})`,
   );
-  assert.ok(
-    Math.max(...opening.map((frame) => frame.card.width)) -
-      Math.min(...opening.map((frame) => frame.card.width)) >
-      24,
-    `${theme} hover reveal samples the moving card edge`,
-  );
+  const widths = opening.map((frame) => frame.card.width);
+  if (requireMovingEdge)
+    assert.ok(
+      Math.max(...widths) - Math.min(...widths) > 24,
+      `${theme} hover reveal samples the moving card edge (widths ${JSON.stringify(widths.slice(0, 12))})`,
+    );
   for (const frame of opening) {
     assert.ok(
       Math.abs(frame.card.right - frame.viewportWidth) <= 1,
@@ -428,17 +473,49 @@ function assertSidebarHoverRevealFrames(frames, theme) {
       `${theme} floating-card radius is present from the first expanding frame`,
     );
   }
-  assert.ok(
-    opening.some(
-      (frame) =>
-        frame.title &&
-        frame.title.left < frame.card.right &&
-        frame.title.right > frame.card.right - 32,
-    ),
-    `${theme} tab labels traverse the active moving-edge fade zone`,
-  );
+  // Hidden macOS CI can inspect layout and WebContents pixels, but it cannot
+  // guarantee an on-screen compositor frame showing a glyph cross the edge.
+  // Snapshot pixels and native in-flight bounds are checked independently.
+  if (requireLabelTraversal)
+    assert.ok(
+      opening.some(
+        (frame) =>
+          frame.title &&
+          frame.title.left < frame.card.right &&
+          frame.title.right > frame.card.right - 32,
+      ),
+      `${theme} tab labels traverse the active moving-edge fade zone`,
+    );
   console.log(
-    `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} rendered frames; card edge and radius aligned; content clipped and edge-faded`,
+    `[sidebar-backdrop-smoke] ${theme} hover reveal: ${opening.length} renderer samples; card edge and radius aligned; content clipped and edge-faded`,
+  );
+}
+
+function assertSnapshotHoverFrames(frames, theme) {
+  const opening = frames.filter((frame) => frame.reshaping === "expand");
+  assert.ok(
+    opening.length >= 4,
+    `${theme} snapshot reveal samples multiple in-flight layout states`,
+  );
+  const fallbackFrames = opening.filter(
+    (frame) => !frame.snapshotReady || Number(frame.snapshotOpacity) < 1,
+  );
+  assert.ok(
+    fallbackFrames.length > 0,
+    `${theme} reveal samples fallback states while its snapshot is unavailable or fading in`,
+  );
+  for (const frame of fallbackFrames) {
+    const fallbackAlpha = minAlpha(
+      frame.backgroundImage,
+      frame.backgroundColor,
+    );
+    assert.ok(
+      fallbackAlpha >= 0.94,
+      `${theme} snapshot card stays nearly opaque while its image is unavailable or fading in (${fallbackAlpha})`,
+    );
+  }
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} snapshot reveal: ${opening.length} samples, ${fallbackFrames.length} fallback samples; first-frame tint prevents sharp page bleed`,
   );
 }
 
@@ -473,18 +550,50 @@ function captureWindow(name) {
   return nativeImage.createFromPath(file);
 }
 
+async function captureSidebarSurface(sidebar) {
+  return sidebar.webContents.capturePage();
+}
+
+function nativeImageScale(image) {
+  const scales = image
+    .getScaleFactors()
+    .filter((scale) => Number.isFinite(scale) && scale > 0);
+  return scales.length > 0 ? Math.max(...scales) : 1;
+}
+
+function pixelData(image) {
+  const scale = nativeImageScale(image);
+  const { width, height } = image.getSize(scale);
+  return {
+    scale,
+    width,
+    height,
+    bitmap: image.toBitmap({ scaleFactor: scale }),
+  };
+}
+
+function luminance(bitmap, width, x, y) {
+  const index = (y * width + x) * 4;
+  return (
+    0.0722 * bitmap[index] +
+    0.7152 * bitmap[index + 1] +
+    0.2126 * bitmap[index + 2]
+  );
+}
+
 /** Luminance spread inside a rect: how much page detail shows through an empty bit of the sidebar. */
 function luminanceStdDev(image, rect) {
-  const { width } = image.getSize();
-  const bitmap = image.toBitmap(); // BGRA
+  const { scale, width, height, bitmap } = pixelData(image);
+  const left = Math.max(0, Math.floor(rect.x * scale));
+  const top = Math.max(0, Math.floor(rect.y * scale));
+  const right = Math.min(width, Math.ceil((rect.x + rect.width) * scale));
+  const bottom = Math.min(height, Math.ceil((rect.y + rect.height) * scale));
   let sum = 0;
   let sumSquares = 0;
   let count = 0;
-  for (let y = rect.y; y < rect.y + rect.height; y += 2) {
-    for (let x = rect.x; x < rect.x + rect.width; x += 2) {
-      const i = (y * width + x) * 4;
-      const lum =
-        0.0722 * bitmap[i] + 0.7152 * bitmap[i + 1] + 0.2126 * bitmap[i + 2];
+  for (let y = top; y < bottom; y += 2) {
+    for (let x = left; x < right; x += 2) {
+      const lum = luminance(bitmap, width, x, y);
       sum += lum;
       sumSquares += lum * lum;
       count++;
@@ -495,6 +604,32 @@ function luminanceStdDev(image, rect) {
     mean,
     std: Math.sqrt(Math.max(0, sumSquares / count - mean * mean)),
   };
+}
+
+/** Mean adjacent-pixel luminance difference: high values expose sharp page glyphs and edges. */
+function edgeEnergy(image, rect) {
+  const { scale, width, height, bitmap } = pixelData(image);
+  const left = Math.max(0, Math.floor((rect?.x ?? 0) * scale));
+  const top = Math.max(0, Math.floor((rect?.y ?? 0) * scale));
+  const right = Math.min(
+    width,
+    Math.ceil(((rect?.x ?? 0) + (rect?.width ?? width / scale)) * scale),
+  );
+  const bottom = Math.min(
+    height,
+    Math.ceil(((rect?.y ?? 0) + (rect?.height ?? height / scale)) * scale),
+  );
+  let total = 0;
+  let count = 0;
+  for (let y = top; y + 1 < bottom; y += 2) {
+    for (let x = left; x + 1 < right; x += 2) {
+      const here = luminance(bitmap, width, x, y);
+      total += Math.abs(luminance(bitmap, width, x + 1, y) - here);
+      total += Math.abs(luminance(bitmap, width, x, y + 1) - here);
+      count += 2;
+    }
+  }
+  return count > 0 ? total / count : 0;
 }
 
 /** Smallest alpha among the rgba() stops of a computed background-image (1 when none). */
@@ -510,6 +645,82 @@ function minAlpha(backgroundImage, backgroundColor) {
     ),
   ].map((match) => Number(match[1]));
   return alphas.length > 0 ? Math.min(...alphas) : 1;
+}
+
+async function assertSnapshotBlurPixels(sidebar, theme, localRect, label) {
+  const page = mainWindow.contentView.children.find(
+    (view) =>
+      view.webContents && view.webContents.getURL().endsWith(`/${theme}`),
+  );
+  assert.ok(page, `${theme} live page view is available for pixel comparison`);
+  const sidebarBounds = sidebar.getBounds();
+  const pageBounds = page.getBounds();
+  const screenRect = {
+    x: sidebarBounds.x + localRect.x,
+    y: sidebarBounds.y + localRect.y,
+    width: localRect.width,
+    height: localRect.height,
+  };
+  const left = Math.max(screenRect.x, pageBounds.x);
+  const top = Math.max(screenRect.y, pageBounds.y);
+  const right = Math.min(
+    screenRect.x + screenRect.width,
+    pageBounds.x + pageBounds.width,
+  );
+  const bottom = Math.min(
+    screenRect.y + screenRect.height,
+    pageBounds.y + pageBounds.height,
+  );
+  assert.ok(
+    right - left >= 40 && bottom - top >= 20,
+    "sample overlaps the live page",
+  );
+
+  const pageRect = {
+    x: left - pageBounds.x,
+    y: top - pageBounds.y,
+    width: right - left,
+    height: bottom - top,
+  };
+  const sidebarRect = {
+    x: left - sidebarBounds.x,
+    y: top - sidebarBounds.y,
+    width: right - left,
+    height: bottom - top,
+  };
+  const rawPage = await page.webContents.capturePage(pageRect);
+  assert.ok(!rawPage.isEmpty(), `${theme} raw page pixels were captured`);
+
+  let rendered;
+  let renderedRect;
+  if (canCaptureCompositor) {
+    rendered = captureWindow(`sidebar-snapshot-pixels-${label}-${theme}.png`);
+    renderedRect = {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    };
+  } else {
+    // The Mac CI runner stays off-screen; capture the actual sidebar WebContents paint, which now
+    // contains the blurred page snapshot instead of depending on a sibling native View layer.
+    rendered = await captureSidebarSurface(sidebar);
+    renderedRect = sidebarRect;
+  }
+  const rawEdges = edgeEnergy(rawPage);
+  const renderedEdges = edgeEnergy(rendered, renderedRect);
+  assert.ok(
+    rawEdges > 1,
+    `${theme} fixture contains sharp page detail (${rawEdges.toFixed(2)})`,
+  );
+  assert.ok(
+    renderedEdges < rawEdges * 0.8,
+    `${theme} sidebar snapshot softens sharp page edges (${renderedEdges.toFixed(2)} vs ${rawEdges.toFixed(2)})`,
+  );
+  console.log(
+    `[sidebar-backdrop-smoke] ${theme} snapshot pixel edge energy: raw ${rawEdges.toFixed(2)}, sidebar ${renderedEdges.toFixed(2)}`,
+  );
+  return { rawEdges, renderedEdges };
 }
 
 async function run() {
@@ -551,8 +762,7 @@ async function run() {
     45000,
   );
   mainWindow.setBounds({ x: 0, y: 0, width: 1280, height: 800 });
-  if (coldHoverOnly && process.platform === "linux" && process.env.DISPLAY)
-    pointerMove(1200, 750);
+  if (coldHoverOnly && canCaptureCompositor) pointerMove(1200, 750);
   await waitFor(
     () => surface("content") && surface("toolbar") && surface("sidebar"),
     "the renderer surfaces",
@@ -578,12 +788,12 @@ async function run() {
     assert.equal(reported.settings.blur, true, "Sidebar blur is on by default");
     const expected =
       process.env.SURFFISH_SIDEBAR_BACKDROP ||
-      (process.platform === "darwin" ? "native" : "solid");
+      (process.platform === "darwin" ? "snapshot" : "solid");
     assert.equal(mode, expected, "the expected backdrop path is in force");
   }
 
   const results = [];
-  for (const theme of coldHoverOnly ? ["light"] : ["light", "dark"]) {
+  for (const theme of ["light", "dark"]) {
     await evaluate(
       toolbar,
       `window.api.browser.navigate(${JSON.stringify(`${origin}/${theme}`)})`,
@@ -601,7 +811,7 @@ async function run() {
     let captureError;
     let nativeProbe;
     if (hoverOnly) {
-      if (process.platform === "linux" && process.env.DISPLAY)
+      if (canCaptureCompositor)
         pointerMove(
           content.x + content.width - 40,
           content.y + toolbarBottom + 150,
@@ -615,18 +825,19 @@ async function run() {
         const bounds = sidebar.getBounds();
         return sidebar.getVisible() && bounds.width > 0 && bounds.width <= 100;
       }, "the live-page sidebar to settle to its collapsed rail");
-      if (coldHoverOnly)
-        captureWindow(`sidebar-native-cold-before-${label}-${theme}.png`);
+      if (coldHoverOnly && canCaptureCompositor)
+        captureWindow(`sidebar-${mode}-cold-before-${label}-${theme}.png`);
       else await delay(500);
-      if (coldHoverOnly) nativeProbe = armNativeHoverProbe(sidebar);
+      if (coldHoverOnly && (mode === "native" || mode === "snapshot"))
+        nativeProbe = armNativeHoverProbe(sidebar);
       await armSidebarHoverProbe(sidebar);
       const capturePrefix = `sidebar-hover-${label}-${theme}`;
       capture = captureHoverFrames(capturePrefix).catch((error) => {
         captureError = error;
         return null;
       });
-      // A real pointer move on X11 exercises the collapsed-rail hover handler end to end.
-      if (process.platform === "linux" && process.env.DISPLAY) {
+      // A real pointer move exercises the X11 handler; hidden runners use the same chrome state.
+      if (canCaptureCompositor) {
         pointerMove(
           content.x + 40,
           content.y +
@@ -661,27 +872,38 @@ async function run() {
     await delay(700);
     if (hoverOnly) {
       const hoverFrames = await finishSidebarHoverProbe(sidebar);
-      if (!measureOnly) assertSidebarHoverRevealFrames(hoverFrames, theme);
+      if (!measureOnly)
+        assertSidebarHoverRevealFrames(hoverFrames, theme, {
+          requireMovingEdge: !hiddenMacSmoke,
+          requireLabelTraversal: !hiddenMacSmoke,
+        });
+      if (!measureOnly && mode === "snapshot")
+        assertSnapshotHoverFrames(hoverFrames, theme);
       await capture;
       if (captureError) throw captureError;
       if (coldHoverOnly) {
-        const nativeFrames = nativeProbe.stop();
-        if (!measureOnly)
+        const nativeFrames = nativeProbe?.stop() ?? [];
+        if (!measureOnly && mode === "native")
           assertRendererNativeHoverFrames(hoverFrames, nativeFrames, theme);
-        const firstCoveredPixel = measureOnly
-          ? null
-          : assertFirstCoveredCardPixel(
-              `sidebar-hover-${label}-${theme}`,
-              theme,
-            );
-        if (!measureOnly) assertNativeHoverFrames(nativeFrames, theme);
+        if (!measureOnly && mode === "snapshot")
+          assertSnapshotHoverProcessFrames(hoverFrames, nativeFrames, theme);
+        const firstCoveredPixel =
+          measureOnly || mode !== "native"
+            ? null
+            : assertFirstCoveredCardPixel(
+                `sidebar-hover-${label}-${theme}`,
+                theme,
+              );
+        if (!measureOnly && mode === "native")
+          assertNativeHoverFrames(nativeFrames, theme);
         const dir = screenshotDirectory || join(userData, "shots");
         mkdirSync(dir, { recursive: true });
         writeFileSync(
-          join(dir, `sidebar-native-cold-${label}-${theme}-frames.json`),
+          join(dir, `sidebar-${mode}-cold-${label}-${theme}-frames.json`),
           `${JSON.stringify({ rendererFrames: hoverFrames, nativeFrames, firstCoveredPixel }, null, 2)}\n`,
         );
-        captureWindow(`sidebar-native-cold-after-${label}-${theme}.png`);
+        if (canCaptureCompositor)
+          captureWindow(`sidebar-${mode}-cold-after-${label}-${theme}.png`);
       }
     }
     const sidebarBounds = sidebar.getBounds();
@@ -689,17 +911,26 @@ async function run() {
       sidebar,
       `(() => { const el = document.querySelector('.browser-sidebar'); const s = getComputedStyle(el); const r = el.getBoundingClientRect(); return { backgroundImage: s.backgroundImage, backgroundColor: s.backgroundColor, backdropFilter: s.backdropFilter || s.webkitBackdropFilter, className: el.className, top: r.top, bottom: r.bottom, tabsBottom: Math.max(0, ...[...el.querySelectorAll('.tab-item, .sidebar-new-tab-row, .sidebar-pinned-sites, .sidebar-archived')].map((node) => node.getBoundingClientRect().bottom)), footerTop: el.querySelector('.sidebar-footer')?.getBoundingClientRect().top ?? r.bottom } })()`,
     );
-    const image = captureWindow(`sidebar-backdrop-${label}-${theme}.png`);
+    const windowCapture = canCaptureCompositor;
+    const image = windowCapture
+      ? captureWindow(`sidebar-backdrop-${label}-${theme}.png`)
+      : await captureSidebarSurface(sidebar);
     // An empty stretch of the card between the tab list and the footer, clear of the edges.
-    const top = Math.round(sidebarBounds.y + card.tabsBottom + 24);
-    const bottom = Math.round(sidebarBounds.y + card.footerTop - 24);
-    const rect = {
+    const localRect = {
       x: 24,
-      y: top,
+      y: Math.round(card.tabsBottom + 24),
       width: Math.max(40, Math.min(sidebarBounds.width - 48, 200)),
-      height: Math.max(20, bottom - top),
+      height: Math.max(20, Math.round(card.footerTop - card.tabsBottom - 48)),
+    };
+    const rect = {
+      ...localRect,
+      y: localRect.y + (windowCapture ? sidebarBounds.y : 0),
     };
     const behind = luminanceStdDev(image, rect);
+    const snapshotPixels =
+      !measureOnly && mode === "snapshot"
+        ? await assertSnapshotBlurPixels(sidebar, theme, localRect, label)
+        : null;
     results.push({
       theme,
       label,
@@ -709,6 +940,7 @@ async function run() {
       minAlpha: minAlpha(card.backgroundImage, card.backgroundColor),
       backdropFilter: card.backdropFilter,
       bounds: sidebarBounds,
+      snapshotPixels,
     });
 
     if (!measureOnly) {
@@ -741,6 +973,10 @@ async function run() {
             'document.querySelector(".sidebar-backdrop-canvas").width > 0',
           ),
           "the snapshot canvas is drawn",
+        );
+        assert.ok(
+          results.at(-1).minAlpha >= 0.94,
+          `the snapshot fallback blocks unblurred page pixels while refreshing (min alpha ${results.at(-1).minAlpha})`,
         );
       }
       if (mode === "native") {
@@ -845,13 +1081,17 @@ async function run() {
           "the floating sidebar to restore its original width",
         );
       }
-      // The page's nav text and thumbnails must not read through: the empty card area stays flat.
-      // macOS native is glass now (a blur under a 0.75 tint): softened page detail may read
-      // through, so it gets a looser bound than the opaque paths.
+      // The page's nav text and thumbnails must not read through sharply. The snapshot's graduated
+      // tint contributes some low-frequency luminance spread, so its pixel edge comparison above
+      // is the primary blur assertion and this remains a looser overall-variance guard.
       if (mode !== "native" || process.platform === "darwin")
         assert.ok(
           results.at(-1).std <
-            (mode === "native" && process.platform === "darwin" ? 14 : 8),
+            (mode === "snapshot"
+              ? 16
+              : mode === "native" && process.platform === "darwin"
+                ? 14
+                : 8),
           `page detail bleeds through the sidebar (${theme}: luminance std ${results.at(-1).std})`,
         );
       else
@@ -879,7 +1119,7 @@ async function run() {
         5000,
       ).catch(() => undefined);
     }
-    if (hoverOnly && process.platform === "linux" && process.env.DISPLAY) {
+    if (hoverOnly && canCaptureCompositor) {
       const content = mainWindow.getContentBounds();
       pointerMove(
         content.x + Math.max(120, content.width - 24),

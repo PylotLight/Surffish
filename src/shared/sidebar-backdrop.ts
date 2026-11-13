@@ -5,13 +5,12 @@
  * WebContentsView, so CSS backdrop-filter inside it only ever sees its own (empty) layer, and
  * window vibrancy (NSVisualEffectView) sits *behind* the page view, so it can't reach either.
  * The three paths that do work:
- *  - 'native':   View.setBackgroundBlur (Electron 44): the compositor blurs whatever is under the
- *                floating hover card, live, with no renderer raster work. On macOS glass the card
- *                uses SIDEBAR_HOVER_GLASS_BLUR under the hover tint (SIDEBAR_HOVER_GLASS_ARGB,
- *                private variant in private windows). Without glass (Reduce Transparency,
- *                fullscreen, and other platforms) it uses the frame's opaque surface colour.
- *  - 'snapshot': capture the page strip under the sidebar once when it opens (and again on tab
- *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
+ *  - 'native':   View.setBackgroundBlur (Electron 44): a live blur in the Chromium Views compositor.
+ *                This remains available for explicit tests, but macOS WebContentsView page pixels
+ *                use native Cocoa surfaces that are not reliably behind this compositor layer.
+ *  - 'snapshot': capture the page strip under the sidebar when it opens (and again on tab switch /
+ *                navigation, throttled), shrink it, blur it once in a canvas, darken it. macOS uses
+ *                this path by default so the blur is painted in the sidebar's own WebContentsView.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
 import {
@@ -56,7 +55,7 @@ export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
   /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
-  /** True only while a separate native View blurs live page pixels behind a floating sidebar. */
+  /** True only while a separate native background View is shown behind a floating sidebar. */
   nativeOverlay: boolean;
 }
 
@@ -130,9 +129,10 @@ export function parseSidebarBackdropOverride(
 }
 
 /**
- * Which path the overlay sidebar uses. Blur off is always solid. macOS defaults to the native
- * compositor blur; other platforms stay on the solid tint. `override` (SURFFISH_SIDEBAR_BACKDROP)
- * picks a path explicitly for testing: blur off still wins.
+ * Which path the overlay sidebar uses. Blur off is always solid. macOS defaults to a captured,
+ * renderer-painted snapshot because native WebContentsView page surfaces are separate from the Views
+ * compositor layer used by View.setBackgroundBlur. Other platforms stay on the solid tint.
+ * `override` (SURFFISH_SIDEBAR_BACKDROP) picks a path explicitly for testing: blur off still wins.
  */
 export function resolveSidebarBackdropMode({
   platform,
@@ -145,7 +145,7 @@ export function resolveSidebarBackdropMode({
 }): SidebarBackdropMode {
   if (!settings.blur) return "solid";
   if (override) return override;
-  return platform === "darwin" ? "native" : "solid";
+  return platform === "darwin" ? "snapshot" : "solid";
 }
 
 /** The docked sidebar is part of the window frame; only a floating overlay needs its own blur layer. */

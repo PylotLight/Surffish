@@ -58,13 +58,13 @@ describe("sidebar backdrop mode", () => {
     ).toBe(true);
   });
 
-  test("macOS uses the native compositor blur, everything else the solid tint", () => {
+  test("macOS snapshots into its WebContentsView, everything else uses the solid tint", () => {
     expect(
       resolveSidebarBackdropMode({
         platform: "darwin",
         settings: { blur: true },
       }),
-    ).toBe("native");
+    ).toBe("snapshot");
     expect(
       resolveSidebarBackdropMode({
         platform: "linux",
@@ -110,6 +110,13 @@ describe("sidebar backdrop mode", () => {
     expect(
       resolveSidebarBackdropMode({
         platform: "linux",
+        settings: { blur: true },
+        override: "native",
+      }),
+    ).toBe("native");
+    expect(
+      resolveSidebarBackdropMode({
+        platform: "darwin",
         settings: { blur: true },
         override: "native",
       }),
