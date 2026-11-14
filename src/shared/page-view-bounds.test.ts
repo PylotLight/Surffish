@@ -155,4 +155,25 @@ describe("pushed page card", () => {
     expect(normalizeSidebarPushStyle("bounce")).toBe("resize");
     expect(normalizeSidebarPushStyle(undefined)).toBe("resize");
   });
+  test("a moving resize keeps the open width and only moves x", () => {
+    const card = { x: 90, y: 56, width: 1104, height: 738 };
+    // Opening/closing mid-way: open width (1104 - 236), x follows the panel.
+    expect(pushedPageRect(card, 100, "resize", 236)).toEqual({
+      ...card,
+      x: 190,
+      width: 868,
+    });
+    // Landing open: same rect as the resting push, so no snap at the end.
+    expect(pushedPageRect(card, 236, "resize", 236)).toEqual(
+      pushedPageRect(card, 236, "resize"),
+    );
+    // Never wider than the plain push, never negative.
+    expect(pushedPageRect(card, 300, "resize", 236).width).toBe(804);
+    expect(pushedPageRect(card, 10, "resize", 5000).width).toBe(0);
+    // Slide ignores it.
+    expect(pushedPageRect(card, 100, "slide", 236)).toEqual({
+      ...card,
+      x: 190,
+    });
+  });
 });

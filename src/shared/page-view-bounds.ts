@@ -156,11 +156,28 @@ export function slideViewRect(rect: ViewRect, dx: number): ViewRect {
   return slide === 0 ? { ...rect } : { ...rect, x: rect.x + slide };
 }
 
-/** The page card pushed `dx` px aside by the hover panel, in `style`. */
+/**
+ * The page card pushed `dx` px aside by the hover panel, in `style`.
+ *
+ * `motionWidthPush`: while the panel is moving, the push the open panel rests at. A 'resize' card
+ * then keeps the open width (rect.width - motionWidthPush) and only its x follows the panel, so
+ * the page re-lays out once (as an open starts, as a close lands) instead of every frame, which
+ * Chromium can't keep up with: a stale frame per step reads as jitter. Opening, the card slides in
+ * at its final width and lands with no snap; closing, it slides back and then widens. `null` (at
+ * rest) gives the plain push.
+ */
 export function pushedPageRect(
   rect: ViewRect,
   dx: number,
   style: SidebarPushStyle,
+  motionWidthPush: number | null = null,
 ): ViewRect {
-  return style === "slide" ? slideViewRect(rect, dx) : pushViewRect(rect, dx);
+  if (style === "slide") return slideViewRect(rect, dx);
+  if (motionWidthPush === null) return pushViewRect(rect, dx);
+  const push = Math.max(0, Math.round(dx));
+  const hold = Math.min(
+    rect.width,
+    Math.max(push, Math.round(motionWidthPush)),
+  );
+  return { ...rect, x: rect.x + push, width: rect.width - hold };
 }

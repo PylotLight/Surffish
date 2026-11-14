@@ -5866,8 +5866,58 @@
   > .browser-sidebar.has-rail:not(.is-collapsed) {
   background: transparent;
 }
+
+/* Settings and the other in-page panels (Network, Downloads) beside the rail, like the New Tab
+ * card: they start right of the collapsed rail instead of under it. When the tab list's hover
+ * panel pushes the page (Sidebar pushes page), they make room the same way a live page does: their
+ * left edge follows the panel and the right edge stays. Floating hover (push off) leaves them by
+ * the rail, under the card; docked keeps the sidebar-width rule above. */
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked):has(> .browser-sidebar.has-rail) {
+  --local-page-left: min(
+    var(--sidebar-rail-width, 84px),
+    calc(100% - var(--sidebar-card-gutter, 48px))
+  );
+}
+.app-shell[data-sidebar-push="true"][data-surface="content"]:not(
+    [data-fullscreen="true"]
+  )
+  .browser-layout.is-sidebar-visible:not(.is-sidebar-docked):has(
+    > .browser-sidebar.has-rail
+  ) {
+  --local-page-left: min(
+    var(--sidebar-width, 320px),
+    calc(100% - var(--sidebar-card-gutter, 48px))
+  );
+}
+.app-shell[data-surface="content"]:not([data-fullscreen="true"])
+  .browser-layout:not(.is-sidebar-docked):has(> .browser-sidebar.has-rail)
+  :is(
+    .settings-subnav,
+    .settings-view:not(.new-tab-customize),
+    .network-view,
+    .downloads-page
+  ) {
+  width: calc(100% - var(--local-page-left));
+  margin-left: var(--local-page-left);
+  transition:
+    margin-left var(--sidebar-motion-duration, 400ms)
+      var(--sidebar-motion-easing, cubic-bezier(0.16, 1, 0.3, 1)),
+    width var(--sidebar-motion-duration, 400ms)
+      var(--sidebar-motion-easing, cubic-bezier(0.16, 1, 0.3, 1));
+}
 @media (prefers-reduced-motion: reduce) {
   .app-shell[data-surface="content"] .browser-viewport > .new-tab-page {
+    transition: none;
+  }
+  .app-shell[data-surface="content"]
+    .browser-layout
+    :is(
+      .settings-subnav,
+      .settings-view:not(.new-tab-customize),
+      .network-view,
+      .downloads-page
+    ) {
     transition: none;
   }
 }
