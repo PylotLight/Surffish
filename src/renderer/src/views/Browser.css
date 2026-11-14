@@ -5614,8 +5614,8 @@
   width: 18px;
   height: 18px;
 }
-/* The rail's pins as one row: each mark stacked a little over the next (shared/rail-pin-cluster.ts
- * gives every slot its x and stacking), ringed in the rail's own tint so the overlaps read. One
+/* The rail's pins as one row: the first pin's mark and a "+N" chip beside it (shared/rail-pin-cluster.ts
+ * gives every slot its x), each ringed in the rail's own tint. One
  * row at the rail's pitch, lined up on the panel's pins row (SidebarRail alignRailToPanel), so
  * the tabs start right below in either shape. */
 .sidebar-rail-pins {
@@ -5643,7 +5643,6 @@
 }
 .sidebar-rail-pins:hover:not(:where([data-reshaping] *)),
 .sidebar-rail-pins:focus-visible {
-  --rail-pins-fan: 3px;
   border-color: rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.085);
 }
@@ -5680,11 +5679,15 @@
   font-size: 11px;
 }
 .sidebar-rail-pins-more {
-  background: rgba(52, 60, 72, 0.98);
-  color: rgba(245, 247, 250, 0.84);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  color: rgba(245, 247, 250, 0.78);
   font-size: 10px;
   font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
   line-height: 1;
+  white-space: nowrap;
 }
 @media (prefers-reduced-motion: reduce) {
   .sidebar-rail-pins-slot,

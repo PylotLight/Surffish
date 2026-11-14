@@ -48,8 +48,8 @@ type RailPin =
   | { kind: "site"; key: string; site: PinnedSite };
 
 /**
- * Every pin as one rail row: marks stacked a little over each other (shared/rail-pin-cluster.ts)
- * in the panel's own order, the first in front and on the panel row's first pin, "+N" past four.
+ * Every pin as one rail row: the first pin's mark (on the panel row's first pin) and a "+N" chip
+ * beside it for the rest (shared/rail-pin-cluster.ts).
  * The active pin keeps its slot and is marked by its ring only. Each mark carries its pin's
  * motion key, so a shape change glides it between its slot here and its slot in the panel's row
  * (shared/sidebar-morph.ts). One button: hovering the rail reveals the panel over it, whose pins
