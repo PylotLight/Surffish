@@ -5892,7 +5892,12 @@
 }
 .app-shell[data-surface="content"]:not([data-fullscreen="true"])
   .browser-layout:not(.is-sidebar-docked):has(> .browser-sidebar.has-rail)
-  :is(.settings-subnav, .settings-view, .network-view, .downloads-page) {
+  :is(
+    .settings-subnav,
+    .settings-view:not(.new-tab-customize),
+    .network-view,
+    .downloads-page
+  ) {
   width: calc(100% - var(--local-page-left));
   margin-left: var(--local-page-left);
   transition:
@@ -5907,7 +5912,12 @@
   }
   .app-shell[data-surface="content"]
     .browser-layout
-    :is(.settings-subnav, .settings-view, .network-view, .downloads-page) {
+    :is(
+      .settings-subnav,
+      .settings-view:not(.new-tab-customize),
+      .network-view,
+      .downloads-page
+    ) {
     transition: none;
   }
 }
