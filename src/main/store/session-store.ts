@@ -47,6 +47,7 @@ interface TabRow {
   window_id: string;
   position: number;
   url: string;
+  title: string;
   pinned: number;
   active: number;
   space_id: string | null;
@@ -93,6 +94,7 @@ const COLUMNS: Record<Table, readonly string[]> = {
     "window_id",
     "position",
     "url",
+    "title",
     "pinned",
     "active",
     "space_id",
@@ -149,7 +151,7 @@ export class SessionStore {
     this.adoptable = [];
     for (const window of windows) {
       const tabs = this.db.all<TabRow>(
-        "SELECT id, window_id, position, url, pinned, active, space_id, group_id FROM session_tabs WHERE window_id = ? AND deleted_at IS NULL ORDER BY position",
+        "SELECT id, window_id, position, url, title, pinned, active, space_id, group_id FROM session_tabs WHERE window_id = ? AND deleted_at IS NULL ORDER BY position",
         window.id,
       );
       if (tabs.length === 0) continue;
@@ -215,6 +217,9 @@ export class SessionStore {
       if (window.focused === 1) focusedIndex = sessionWindows.length;
       sessionWindows.push({
         urls: tabs.map((tab) => tab.url),
+        ...(tabs.some((tab) => tab.title)
+          ? { titles: tabs.map((tab) => tab.title ?? "") }
+          : {}),
         activeIndex: Math.max(
           0,
           tabs.findIndex((tab) => tab.active === 1),
@@ -308,6 +313,7 @@ export class SessionStore {
             window_id: windowId,
             position: index,
             url,
+            title: window.titles?.[index] ?? "",
             pinned: window.pinnedIndexes.includes(index) ? 1 : 0,
             active: index === window.activeIndex ? 1 : 0,
             space_id: window.spaces?.tabSpaces[index] ?? null,

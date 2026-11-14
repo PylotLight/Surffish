@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { planSetupTabClose } from "../shared/bramble-setup-close";
+import { MAX_SAVED_TAB_TITLE } from "../shared/window-session";
 import {
   capturePageWithin,
   nativeImagePixelSize,
@@ -484,6 +485,11 @@ interface BrowserTab {
   /** Tab volume 0..1 (tab-volume.ts) and the site it belongs to; follows the tab across windows and sleep. */
   volume: number;
   volumeOrigin: string | null;
+  /**
+   * The page's last title and the URL it was for: what a sleeping or not-yet-loaded tab shows
+   * (instead of its hostname) and what the session saves, so titles survive sleep and restarts.
+   */
+  savedTitle: { url: string; title: string } | null;
 }
 
 interface PdfEditorTabState {
@@ -810,12 +816,35 @@ export function shouldPauseBackgroundYouTubeAutoplay(
   const tab = tabForContents(contents);
   return Boolean(tab?.pauseAutoplayUntilVisited && !isTabOnScreen(tab));
 }
+/**
+ * The page's own title: live from its view, else the one kept from before it slept (or from the
+ * last run) while it is still for the same URL; "" when there is none.
+ */
+function liveOrSavedTitle(tab: BrowserTab): string {
+  const contents = tab.view?.webContents;
+  const live =
+    contents && !contents.isDestroyed() ? contents.getTitle().trim() : "";
+  if (live) return live;
+  const saved = tab.savedTitle;
+  return saved && saved.url === currentUrl(tab) ? saved.title : "";
+}
+
+/** What the session keeps as a tab's title ("" for none, Surffish's own pages, PDF editor). */
+function sessionTitle(tab: BrowserTab): string {
+  if (tab.pdfEditor || isSettingsTab(tab)) return "";
+  const url = currentUrl(tab);
+  if (url === SURFFISH_QUICK_LINKS_URL) return "";
+  const title = liveOrSavedTitle(tab);
+  // A page with no <title> reports its URL; that is no better than the hostname fallback.
+  return title && title !== url ? title.slice(0, MAX_SAVED_TAB_TITLE) : "";
+}
+
 function pageTitle(tab: BrowserTab): string {
   if (tab.pdfEditor)
     return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty);
   if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return "New Tab";
   if (isSettingsTab(tab)) return SETTINGS_TAB_TITLE;
-  const title = tab.view?.webContents.getTitle().trim();
+  const title = liveOrSavedTitle(tab);
   if (title) return title;
   try {
     return new URL(currentUrl(tab)).hostname || "New tab";
@@ -1298,6 +1327,7 @@ function persistOpenTabs(captureHistoryNow = false): void {
     keptTabs.push(kept);
     return {
       urls: kept.map(currentUrl),
+      titles: kept.map(sessionTitle),
       // Settings active at quit: the tab used before it comes back as the active one.
       activeIndex: sessionActiveIndex(w, kept),
       pinnedIndexes: kept.flatMap((tab, index) => (tab.pinned ? [index] : [])),
@@ -2697,6 +2727,8 @@ function createTabView(
   });
   contents.on("page-title-updated", (_event, title) => {
     if (!isCurrentContents()) return;
+    const trimmed = title.trim();
+    if (trimmed) tab.savedTitle = { url: contents.getURL(), title: trimmed };
     if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title);
     publishState(tab.win);
     refreshTabFavicon(tab);
@@ -4043,6 +4075,7 @@ function createTab(
     groupId: null,
     volume: 1,
     volumeOrigin: null,
+    savedTitle: null,
   };
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length)
@@ -4101,6 +4134,8 @@ export interface BrowserWindowInit {
     spaces?: SavedWindowSpaces | null;
     groups?: readonly SavedTabGroup[];
     histories?: ReadonlyArray<SavedTabHistory | null>;
+    /** Each tab's title from the last run ("" for none), same order as `urls`. */
+    titles?: readonly string[];
   };
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string;
@@ -4204,6 +4239,10 @@ export function attachBrowserView(
       restoredIds.push(id);
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
       const tab = id ? getTab(id) : undefined;
+      // Its title from the last run, so the sidebar shows it before (or without) the page loading.
+      const savedTitle = saved.titles?.[index];
+      if (tab && savedTitle)
+        tab.savedTitle = { url: currentUrl(tab), title: savedTitle };
       if (tab)
         tab.inactiveSince = restoredTabInactiveSince(
           currentUrl(tab),
