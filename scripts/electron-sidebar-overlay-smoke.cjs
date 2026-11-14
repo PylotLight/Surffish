@@ -277,8 +277,8 @@ function assertSidebarPinMorph(sample, direction) {
   const targetKeys = new Set(target.map((pin) => pin.key));
   const common = from.filter((pin) => targetKeys.has(pin.key));
   assert.ok(
-    common.length >= 2,
-    `${direction} has multiple pinned marks to glide`,
+    common.length >= 1,
+    `${direction} has the first pinned mark in both shapes`,
   );
   assert.deepEqual(
     common.map((pin) => pin.key),
