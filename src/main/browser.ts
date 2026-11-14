@@ -548,6 +548,8 @@ interface BrowserWindowState {
    * syncPageSlide): the views shrink from the left, `browserBounds` stays the frame's rect.
    */
   pageSlideX?: number;
+  /** While the hover panel moves: the open push a resizing page card holds its width at. */
+  pageSlideHold?: number | null;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -757,6 +759,7 @@ function onScreenPageBoundsOf(tab: BrowserTab): BrowserBounds {
     pageBoundsOf(tab),
     tab.win.pageSlideX ?? 0,
     getBrowserSidebarPushStyle(),
+    tab.win.pageSlideHold ?? null,
   );
 }
 
@@ -1461,6 +1464,7 @@ function applyTabBounds(w: BrowserWindowState): void {
     w.browserBounds,
     w.pageSlideX ?? 0,
     getBrowserSidebarPushStyle(),
+    w.pageSlideHold ?? null,
   );
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
@@ -6401,16 +6405,25 @@ export function setBrowserBounds(input: unknown): void {
  * The hover panel pushes the page aside (browser-shell.ts): the window's on-screen page card's left
  * edge moves `dx` px right of its frame rect and its right edge stays, so the page resizes into the
  * room beside the panel (like Zephium / Arc) rather than sliding under the window's right edge.
- * Runs once per motion frame, so the common case (one page, no split) only resizes the active view
- * and its reader; a split goes through the full
+ * While the panel moves, `motionWidthPush` holds a resizing card at its open width so only x
+ * changes per frame (one re-layout per open/close; pushedPageRect). Runs once per motion frame, so
+ * the common case (one page, no split) only moves the active view and its reader; a split goes
+ * through the full
  * layout so its panes and divider surface move together.
  */
-export function slideBrowserPage(window: BaseWindow, dx: number): void {
+export function slideBrowserPage(
+  window: BaseWindow,
+  dx: number,
+  motionWidthPush: number | null = null,
+): void {
   const w = windowStateFor(window);
   if (!isLiveWindow(w)) return;
   const next = Math.max(0, Math.round(dx));
-  if ((w.pageSlideX ?? 0) === next) return;
+  const hold = motionWidthPush === null ? null : Math.round(motionWidthPush);
+  if ((w.pageSlideX ?? 0) === next && (w.pageSlideHold ?? null) === hold)
+    return;
   w.pageSlideX = next;
+  w.pageSlideHold = hold;
   const { browserBounds } = w;
   if (!(browserBounds.width > 0) || !(browserBounds.height > 0)) return;
   const active = activeTabOf(w);
@@ -6421,6 +6434,7 @@ export function slideBrowserPage(window: BaseWindow, dx: number): void {
       browserBounds,
       next,
       getBrowserSidebarPushStyle(),
+      hold,
     );
     const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
     applyPageViewFrame(active.view, target, radius);

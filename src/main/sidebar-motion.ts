@@ -104,6 +104,18 @@ export class SidebarOverlayMotion {
     return Math.max(0, x + width);
   }
 
+  /** True while an open/close is under way (the shared frame stepper is running). */
+  get moving(): boolean {
+    return this.motion !== null;
+  }
+
+  /** The view's right edge once fully open (window px), whatever the current progress. */
+  get openRight(): number {
+    if (this.rect.width <= 0 || this.rect.height <= 0) return 0;
+    const { x, width } = this.frameAt(1);
+    return Math.max(0, x + width);
+  }
+
   /** Lay out at the current progress (window resize, width drag, card inset change). */
   layout(rect: SidebarMotionRect): void {
     this.rect = { ...rect };

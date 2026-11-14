@@ -134,6 +134,8 @@ interface ShellState {
   frameLeft: number | null;
   /** The page card's slide as last sent to browser.ts (px right of its frame position). */
   pageSlide: number;
+  /** The open push the page card holds its width at while the panel moves; null at rest. */
+  pageSlideHold: number | null;
   /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
   sidebarDocked: boolean | null;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
@@ -217,15 +219,19 @@ export function setBrowserSidebarPushesPage(value: boolean): void {
   for (const shell of shells.values()) shell.scheduleLayout();
 }
 
-let pageSlideListener: ((window: BaseWindow, dx: number) => void) | null = null;
+type PageSlideListener = (
+  window: BaseWindow,
+  dx: number,
+  motionWidthPush: number | null,
+) => void;
+
+let pageSlideListener: PageSlideListener | null = null;
 
 /**
  * browser.ts: push the window's on-screen page card(s)' left edge `dx` px right of their frame
  * position, right edge kept (the hover panel pushing the page). Called once per motion frame.
  */
-export function setPageSlideListener(
-  listener: ((window: BaseWindow, dx: number) => void) | null,
-): void {
+export function setPageSlideListener(listener: PageSlideListener | null): void {
   pageSlideListener = listener;
 }
 
@@ -236,10 +242,20 @@ function syncPageSlide(shell: ShellState): void {
     panelRight: shell.sidebarMotion.visibleRight,
     frameLeft: shell.frameLeft,
   });
-  if (dx === shell.pageSlide) return;
+  // Mid-motion, the push the open panel rests at: a resizing card holds that width (page-view-bounds).
+  const hold =
+    shell.sidebarMotion.moving && dx > 0
+      ? pageSlideOffset({
+          pushing: shell.sidebarPushing,
+          panelRight: shell.sidebarMotion.openRight,
+          frameLeft: shell.frameLeft,
+        })
+      : null;
+  if (dx === shell.pageSlide && hold === shell.pageSlideHold) return;
   shell.pageSlide = dx;
+  shell.pageSlideHold = hold;
   try {
-    pageSlideListener?.(shell.window, dx);
+    pageSlideListener?.(shell.window, dx, hold);
   } catch (error) {
     console.warn("Page slide listener failed:", error);
   }
@@ -672,6 +688,7 @@ export function attachBrowserShell(
     sidebarPushing: false,
     frameLeft: null,
     pageSlide: 0,
+    pageSlideHold: null,
     sidebarDocked: null,
     lastActiveTabId: null,
     activeTabSince: 0,
