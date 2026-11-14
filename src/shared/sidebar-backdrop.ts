@@ -52,6 +52,12 @@ export interface SidebarBackdropSettings {
    * 'resize' shrinks the page from the left as the panel opens, 'slide' moves it right at its size.
    */
   sidebarPushStyle: SidebarPushStyle;
+  /**
+   * Settings → General → Appearance → Swipe slides page (macOS trackpad back/forward). Off
+   * (default): only the Back/Forward card shows over the page while the fingers move. On: the page
+   * also slides sideways with them, the earlier look.
+   */
+  swipeSlidesPage: boolean;
 }
 
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
@@ -59,6 +65,7 @@ export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
   sidebarPushesPage: true,
   sidebarPushStyle: DEFAULT_SIDEBAR_PUSH_STYLE,
+  swipeSlidesPage: false,
 };
 
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
@@ -127,6 +134,10 @@ export function normalizeSidebarBackdropSettings(
         ? candidate.sidebarPushesPage
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
     sidebarPushStyle: normalizeSidebarPushStyle(candidate.sidebarPushStyle),
+    swipeSlidesPage:
+      typeof candidate.swipeSlidesPage === "boolean"
+        ? candidate.swipeSlidesPage
+        : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.swipeSlidesPage,
   };
 }
 

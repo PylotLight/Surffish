@@ -36,18 +36,21 @@ describe("sidebar backdrop mode", () => {
       frameTransparency: 80,
       sidebarPushesPage: true,
       sidebarPushStyle: "resize",
+      swipeSlidesPage: false,
     });
     expect(normalizeSidebarBackdropSettings({ blur: "no" })).toEqual({
       blur: true,
       frameTransparency: 80,
       sidebarPushesPage: true,
       sidebarPushStyle: "resize",
+      swipeSlidesPage: false,
     });
     expect(normalizeSidebarBackdropSettings({ blur: false })).toEqual({
       blur: false,
       frameTransparency: 80,
       sidebarPushesPage: true,
       sidebarPushStyle: "resize",
+      swipeSlidesPage: false,
     });
     expect(
       normalizeSidebarBackdropSettings({ blur: true, frameTransparency: 140 }),
@@ -56,6 +59,7 @@ describe("sidebar backdrop mode", () => {
       frameTransparency: 100,
       sidebarPushesPage: true,
       sidebarPushStyle: "resize",
+      swipeSlidesPage: false,
     });
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: false }),
@@ -64,7 +68,16 @@ describe("sidebar backdrop mode", () => {
       frameTransparency: 80,
       sidebarPushesPage: false,
       sidebarPushStyle: "resize",
+      swipeSlidesPage: false,
     });
+    expect(
+      normalizeSidebarBackdropSettings({ swipeSlidesPage: true })
+        .swipeSlidesPage,
+    ).toBe(true);
+    expect(
+      normalizeSidebarBackdropSettings({ swipeSlidesPage: "yes" })
+        .swipeSlidesPage,
+    ).toBe(false);
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: "no" })
         .sidebarPushesPage,

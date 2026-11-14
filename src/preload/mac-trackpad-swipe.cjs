@@ -251,7 +251,7 @@ function startSwipePresentation(ipcRenderer, win, doc) {
     removeOverlay();
   }
 
-  function makeOverlay(direction) {
+  function makeOverlay(direction, slide) {
     removeOverlay();
     const isBack = direction === "back";
     const shell = doc.createElement("div");
@@ -276,7 +276,10 @@ function startSwipePresentation(ipcRenderer, win, doc) {
       "display:flex",
       "align-items:center",
       "justify-content:center",
-      `background:linear-gradient(to ${isBack ? "right" : "left"},rgba(20,25,32,.22),transparent)`,
+      // Sliding, the page's edge needs a shade to read as moving; card only, the card is enough.
+      slide
+        ? `background:linear-gradient(to ${isBack ? "right" : "left"},rgba(20,25,32,.22),transparent)`
+        : "background:none",
     ].join(";");
 
     const badge = doc.createElement("div");
@@ -314,26 +317,30 @@ function startSwipePresentation(ipcRenderer, win, doc) {
   }
 
   function render(progress, animate = false, complete = false) {
-    if (!active || !overlay || !savedRootStyles) return;
+    if (!active || !overlay || (active.slide && !savedRootStyles)) return;
     const value = clampProgress(progress);
     const root = doc.documentElement;
     const isBack = active.direction === "back";
-    const travel = complete
-      ? Math.max(1, win.innerWidth * 0.94)
-      : Math.min(win.innerWidth * 0.38, 320) * value;
+    const travel = !active.slide
+      ? 0
+      : complete
+        ? Math.max(1, win.innerWidth * 0.94)
+        : Math.min(win.innerWidth * 0.38, 320) * value;
     const offset = isBack ? travel : -travel;
     const transition = animate
       ? `translate ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1)`
       : "none";
-    root.style.transition = transition;
+    if (active.slide) root.style.transition = transition;
     overlay.shell.style.transition = animate
       ? `translate ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1), opacity ${SETTLE_MS}ms ease`
       : "opacity 70ms linear";
     overlay.badge.style.transition = animate
       ? `transform ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1), opacity ${SETTLE_MS}ms ease`
       : "none";
-    root.style.translate = `${offset}px 0px`;
-    overlay.shell.style.translate = `${-offset}px 0px`;
+    if (active.slide) {
+      root.style.translate = `${offset}px 0px`;
+      overlay.shell.style.translate = `${-offset}px 0px`;
+    }
     overlay.shell.style.opacity = String(Math.min(1, value * 1.8));
     const inset = (1 - value) * 36 * (isBack ? -1 : 1);
     overlay.badge.style.transform = `translateX(${inset}px) scale(${0.92 + value * 0.08})`;
@@ -342,18 +349,21 @@ function startSwipePresentation(ipcRenderer, win, doc) {
   }
 
   function settleBack() {
-    if (!active || !overlay || !savedRootStyles) {
+    if (!active || !overlay || (active.slide && !savedRootStyles)) {
       active = null;
       restoreStyles();
       return;
     }
     const current = active;
     const root = doc.documentElement;
-    root.style.transition = `translate ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1)`;
+    if (current.slide)
+      root.style.transition = `translate ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1)`;
     overlay.shell.style.transition = `translate ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1), opacity ${SETTLE_MS}ms ease`;
     overlay.badge.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(.2,.8,.2,1), opacity ${SETTLE_MS}ms ease`;
-    root.style.translate = "0px 0px";
-    overlay.shell.style.translate = "0px 0px";
+    if (current.slide) {
+      root.style.translate = "0px 0px";
+      overlay.shell.style.translate = "0px 0px";
+    }
     overlay.shell.style.opacity = "0";
     overlay.badge.style.opacity = "0";
     overlay.badge.style.transform = `translateX(${current.direction === "back" ? -36 : 36}px) scale(.92)`;
@@ -370,20 +380,21 @@ function startSwipePresentation(ipcRenderer, win, doc) {
     const onTransitionEnd = (event) => {
       if (event.target === root && event.propertyName === "translate") finish();
     };
-    root.addEventListener("transitionend", onTransitionEnd);
+    // Card only: nothing on the root moves, so the timer alone ends the fade.
+    if (current.slide) root.addEventListener("transitionend", onTransitionEnd);
     finishTimer = setTimeout(finish, SETTLE_MS + 80);
   }
 
-  function begin(direction) {
+  function begin(direction, slide) {
     if (direction !== "back" && direction !== "forward") return;
     clearTimers();
-    if (active || savedRootStyles) {
+    if (active || savedRootStyles || overlay) {
       active = null;
       restoreStyles();
     }
-    active = { direction, progress: 0 };
-    saveRootStyles();
-    makeOverlay(direction);
+    active = { direction, progress: 0, slide: slide === true };
+    if (active.slide) saveRootStyles();
+    makeOverlay(direction, active.slide);
     render(0);
   }
 
@@ -405,12 +416,12 @@ function startSwipePresentation(ipcRenderer, win, doc) {
 
   function reset() {
     clearTimers();
-    if (!active && !savedRootStyles) return;
+    if (!active && !savedRootStyles && !overlay) return;
     settleBack();
   }
 
   ipcRenderer.on(BEGIN_CHANNEL, (_event, payload) =>
-    begin(payload && payload.direction),
+    begin(payload && payload.direction, payload && payload.slide),
   );
   ipcRenderer.on(PROGRESS_CHANNEL, (_event, payload) => {
     if (!active || active.waitingForNavigation || !payload) return;

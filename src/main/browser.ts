@@ -218,6 +218,7 @@ import {
   setBrowserChromeState,
   setBrowserPageIsLocalNewTab,
   getBrowserSidebarPushStyle,
+  getBrowserSwipeSlidesPage,
 } from "./browser-shell";
 import {
   attachPagePopups,
@@ -6617,7 +6618,10 @@ function beginMacTrackpadSwipe(
       token: ++nextMacTrackpadSwipeToken,
     };
     activeMacTrackpadSwipe = swipe;
-    contents.send(MAC_SWIPE_BEGIN_CHANNEL, { direction: swipe.direction });
+    contents.send(MAC_SWIPE_BEGIN_CHANNEL, {
+      direction: swipe.direction,
+      slide: getBrowserSwipeSlidesPage(),
+    });
     return contents.id;
   } catch (error) {
     console.warn("[trackpad swipe] Could not start page navigation:", error);

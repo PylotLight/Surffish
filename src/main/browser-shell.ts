@@ -212,6 +212,17 @@ export function setBrowserSidebarPushStyle(value: SidebarPushStyle): void {
   for (const shell of shells.values()) shell.scheduleLayout();
 }
 
+/** Settings → Appearance → Swipe slides page: whether a back/forward swipe moves the page too. */
+let swipeSlidesPage = false;
+
+export function getBrowserSwipeSlidesPage(): boolean {
+  return swipeSlidesPage;
+}
+
+export function setBrowserSwipeSlidesPage(value: boolean): void {
+  swipeSlidesPage = value;
+}
+
 /** Sidebar pushes page changed: every window re-lays out (the hover panel floats or pushes). */
 export function setBrowserSidebarPushesPage(value: boolean): void {
   if (value === sidebarPushesPage) return;

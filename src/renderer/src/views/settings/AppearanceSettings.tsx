@@ -192,6 +192,26 @@ export function AppearanceSettings(): React.JSX.Element {
           <option value="slide">Slide page</option>
         </select>
       </SettingsRow>
+      {isMac && (
+        <SettingsRow
+          label="Swipe slides page"
+          hint="A two-finger back/forward swipe moves the page with your fingers. Off: only the Back/Forward card shows over the page."
+        >
+          <input
+            type="checkbox"
+            className="settings-switch"
+            disabled={!settings}
+            checked={settings?.swipeSlidesPage ?? false}
+            aria-label="Swipe slides page"
+            onChange={(event) =>
+              void window.api.browser.sidebarBackdrop
+                .set({ swipeSlidesPage: event.target.checked })
+                .then(setSettings)
+                .catch(() => undefined)
+            }
+          />
+        </SettingsRow>
+      )}
       <SettingsRow
         label="Bookmarks bar"
         hint={`Favourites under the toolbar (${isMac ? "⇧⌘B" : "Ctrl+Shift+B"}).`}
