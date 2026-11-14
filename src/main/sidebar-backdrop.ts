@@ -43,6 +43,7 @@ import {
   setBrowserFrameTransparency,
   setBrowserSidebarPushesPage,
   setBrowserSidebarPushStyle,
+  setBrowserSwipeSlidesPage,
   setSidebarDockListener,
   setSidebarMotionListener,
   setSidebarOverlayListener,
@@ -447,6 +448,7 @@ export function registerSidebarBackdropIpc(): void {
   setBrowserFrameTransparency(settings.frameTransparency);
   setBrowserSidebarPushesPage(settings.sidebarPushesPage);
   setBrowserSidebarPushStyle(settings.sidebarPushStyle);
+  setBrowserSwipeSlidesPage(settings.swipeSlidesPage);
   setSidebarOverlayListener(onOverlay);
   setSidebarMotionListener(onMotion);
   setSidebarDockListener((window) =>
@@ -477,6 +479,7 @@ export function registerSidebarBackdropIpc(): void {
     setBrowserFrameTransparency(settings.frameTransparency);
     setBrowserSidebarPushesPage(settings.sidebarPushesPage);
     setBrowserSidebarPushStyle(settings.sidebarPushStyle);
+    setBrowserSwipeSlidesPage(settings.swipeSlidesPage);
     applyEverywhere();
     sendToMainWindowRenderers("browser:sidebar-backdrop:settings", {
       ...settings,
