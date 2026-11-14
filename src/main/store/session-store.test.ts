@@ -85,6 +85,22 @@ test("round-trips windows, tabs, pins, groups, splits and spaces", () => {
   db.close();
 });
 
+test("keeps tab titles across a save and load", () => {
+  const db = SurffishDatabase.open({ path: ":memory:" });
+  const windows = sampleWindows();
+  windows[0]!.titles = ["A page", "", "C page", "D page"];
+  new SessionStore(db).save(normalizeWindowsSession(windows, 0));
+  const loaded = new SessionStore(db).load()!;
+  assert.deepEqual(loaded.windows[0]!.titles, [
+    "A page",
+    "",
+    "C page",
+    "D page",
+  ]);
+  assert.equal(loaded.windows[1]!.titles, undefined);
+  db.close();
+});
+
 test("saving again only writes rows that changed, and closed tabs become tombstones", () => {
   const db = SurffishDatabase.open({ path: ":memory:" });
   const store = new SessionStore(db);

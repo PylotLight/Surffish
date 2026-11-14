@@ -40,6 +40,8 @@ import {
  */
 
 export const MAX_RESTORED_WINDOWS = 12;
+/** Longest tab title kept in the session (longer ones are cut). */
+export const MAX_SAVED_TAB_TITLE = 300;
 
 export interface SavedSessionWindow {
   urls: string[];
@@ -55,6 +57,8 @@ export interface SavedSessionWindow {
   groups?: SavedTabGroup[];
   /** Each tab's back/forward list (tab-history.ts), same order as `urls`, null for none; left out when no tab has one. */
   histories?: Array<SavedTabHistory | null>;
+  /** Each tab's page title ("" for none), same order as `urls`; left out when no tab has one. */
+  titles?: string[];
   /** Runtime tab ids, same order as `urls` (lets the profile database keep stable row ids). Not written to JSON. */
   tabIds?: string[];
   /** Runtime window key (BaseWindow id). Not written to JSON. */
@@ -77,6 +81,8 @@ export interface SessionWindowInput {
   groups?: readonly SavedTabGroup[];
   /** Back/forward lists, same order as `urls` (live captures or read from disk; validated here). */
   histories?: readonly unknown[];
+  /** Page titles, same order as `urls` (validated here). */
+  titles?: readonly unknown[];
   tabIds?: readonly string[];
   windowKey?: string;
 }
@@ -187,6 +193,21 @@ function normalizeHistories(
   return out.some(Boolean) ? out : null;
 }
 
+/** Titles re-pointed at the kept tabs (strings only, trimmed, capped); null when none is left. */
+function normalizeTitles(
+  window: SessionWindowInput,
+  keptCount: number,
+): string[] | null {
+  if (!window.titles || window.titles.length === 0) return null;
+  const out: string[] = Array.from({ length: keptCount }, () => "");
+  for (const [index, at] of keptIndexMap(window, keptCount)) {
+    const title = window.titles[index];
+    if (typeof title === "string")
+      out[at] = title.trim().slice(0, MAX_SAVED_TAB_TITLE);
+  }
+  return out.some(Boolean) ? out : null;
+}
+
 /** One size cap over every window's lists together (tab-history.ts). */
 function capHistories(windows: SavedSessionWindow[]): void {
   const flat = windows.flatMap(
@@ -257,6 +278,7 @@ export function normalizeWindowsSession(
     );
     const tabIds = normalizeTabIds(window, session.urls.length);
     const histories = normalizeHistories(window, session.urls);
+    const titles = normalizeTitles(window, session.urls.length);
     kept.push({
       ...session,
       geometry: window.geometry ? parseSavedWindowState(window.geometry) : null,
@@ -264,6 +286,7 @@ export function normalizeWindowsSession(
       ...(spaces ? { spaces } : {}),
       ...(groups.length > 0 ? { groups } : {}),
       ...(histories ? { histories } : {}),
+      ...(titles ? { titles } : {}),
       ...(tabIds ? { tabIds } : {}),
       ...(typeof window.windowKey === "string"
         ? { windowKey: window.windowKey }
@@ -298,6 +321,7 @@ export function serializeWindowsSession(
         ? { groups: window.groups }
         : {}),
       ...(window.histories ? { histories: window.histories } : {}),
+      ...(window.titles ? { titles: window.titles } : {}),
       ...(window.geometry
         ? {
             bounds: window.geometry.bounds,
@@ -352,6 +376,9 @@ export function parseWindowsSession(
         // Older files have none; each list is checked against its tab's URL in normalizeWindowsSession.
         histories: Array.isArray(window.histories)
           ? (window.histories as unknown[])
+          : [],
+        titles: Array.isArray(window.titles)
+          ? (window.titles as unknown[])
           : [],
       }));
     const focused =
