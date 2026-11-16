@@ -4,7 +4,7 @@ Surffish-only. Bramble's extension build only takes a pasted pairing code (its `
 
 ## Pairing code format
 
-From `flythenimbus/bramble` `packages/core/src/sync/enrollment.ts`: `bramble-pair-1.` followed by base64 of JSON `{ v: 1, groupKey, inviterPub, psk, relay, iceUrl?, exp? }`. The Add a device screen encodes exactly that string as the QR (`QRCodeSVG value={pairingCode}`). The scanner also unwraps the code from a URL or deep link (query, fragment or path, percent-encoded, base64url) in case a future version wraps it, and refuses QRs that aren't a v1 pairing payload (it keeps scanning with a hint).
+From `bramble-sh/bramble` `packages/core/src/sync/enrollment.ts`: `bramble-pair-1.` followed by base64 of JSON `{ v: 1, groupKey, inviterPub, psk, relay, iceUrl?, exp? }`. The Add a device screen encodes exactly that string as the QR (`QRCodeSVG value={pairingCode}`). The scanner also unwraps the code from a URL or deep link (query, fragment or path, percent-encoded, base64url) in case a future version wraps it, and refuses QRs that aren't a v1 pairing payload (it keeps scanning with a hint).
 
 ## How it fits together
 

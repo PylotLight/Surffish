@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 const RELEASES_API =
-  "https://api.github.com/repos/flythenimbus/bramble/releases?per_page=100";
+  "https://api.github.com/repos/bramble-sh/bramble/releases?per_page=100";
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES = 64 * 1024;
 const MAX_ARCHIVE_FILES = 5000;
@@ -83,7 +83,7 @@ function validateAssetUrl(
       `Bramble release is missing the ${assetName} download URL.`,
     );
   const url = new URL(value);
-  const expectedPath = `/flythenimbus/bramble/releases/download/${tag}/${assetName}`;
+  const expectedPath = `/bramble-sh/bramble/releases/download/${tag}/${assetName}`;
   if (
     url.protocol !== "https:" ||
     url.hostname !== "github.com" ||
