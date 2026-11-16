@@ -843,8 +843,7 @@ async function run() {
   );
   assert.ok(
     requests.some(
-      ({ path }) =>
-        path === "/repos/bramble-sh/bramble/releases?per_page=100",
+      ({ path }) => path === "/repos/bramble-sh/bramble/releases?per_page=100",
     ),
     "the synthetic release API received the metadata request",
   );
