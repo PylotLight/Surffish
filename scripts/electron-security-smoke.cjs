@@ -104,7 +104,7 @@ function makeReleaseFixture() {
   const checksums = Buffer.from(`${archiveDigest}  ${zipName}\n`);
   const checksumsDigest = createHash("sha256").update(checksums).digest("hex");
   const base =
-    "https://github.com/flythenimbus/bramble/releases/download/1.28.0-firefox";
+    "https://github.com/bramble-sh/bramble/releases/download/1.28.0-firefox";
   const release = {
     tag_name: "1.28.0-firefox",
     draft: false,
@@ -170,7 +170,7 @@ function startTlsReleaseFixture(profile) {
   const server = createTlsServer({ key, cert }, (request, response) => {
     requests.push({ host: request.headers.host, path: request.url });
     const json = Buffer.from(JSON.stringify([fixture.release]));
-    if (request.url === "/repos/flythenimbus/bramble/releases?per_page=100") {
+    if (request.url === "/repos/bramble-sh/bramble/releases?per_page=100") {
       response.writeHead(200, {
         "content-type": "application/vnd.github+json",
         "content-length": json.length,
@@ -181,7 +181,7 @@ function startTlsReleaseFixture(profile) {
     }
     if (
       request.url ===
-      "/flythenimbus/bramble/releases/download/1.28.0-firefox/bramble_firefox_1.28.0.zip"
+      "/bramble-sh/bramble/releases/download/1.28.0-firefox/bramble_firefox_1.28.0.zip"
     ) {
       if (
         String(request.headers.host).split(":")[0].toLowerCase() ===
@@ -204,7 +204,7 @@ function startTlsReleaseFixture(profile) {
     }
     if (
       request.url ===
-      "/flythenimbus/bramble/releases/download/1.28.0-firefox/SHA256SUMS"
+      "/bramble-sh/bramble/releases/download/1.28.0-firefox/SHA256SUMS"
     ) {
       if (
         String(request.headers.host).split(":")[0].toLowerCase() ===
@@ -843,8 +843,7 @@ async function run() {
   );
   assert.ok(
     requests.some(
-      ({ path }) =>
-        path === "/repos/flythenimbus/bramble/releases?per_page=100",
+      ({ path }) => path === "/repos/bramble-sh/bramble/releases?per_page=100",
     ),
     "the synthetic release API received the metadata request",
   );

@@ -2,7 +2,7 @@
  * Surffish-only: close Bramble's setup tab (options.html) once setup is really done. Staged with the
  * Scan QR helper (same <script> tag, see bramble-poc.ts); Bramble itself is never patched.
  *
- * How Bramble 1.29 signals completion (flythenimbus/bramble packages/core/src/app/OptionsApp.tsx,
+ * How Bramble 1.29 signals completion (bramble-sh/bramble packages/core/src/app/OptionsApp.tsx,
  * SetupShell): after a join ("Connecting to your other device…" -> startJoin resolves), a restore, or
  * a create (once the recovery code screen's Continue is pressed) it swaps the whole page for a terminal
  * "done" screen: a check icon (lucide `svg.lucide-check`), an h1 ("Vault ready" / "Vault unlocked" /

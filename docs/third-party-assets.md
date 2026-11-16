@@ -4,7 +4,7 @@
 
 `src/renderer/src/assets/bramble-extension-icon.png` is an unchanged copy of Bramble's official dark-toolbar icon, selected from the upstream extension repository:
 
-- Repository: [flythenimbus/bramble](https://github.com/flythenimbus/bramble)
+- Repository: [bramble-sh/bramble](https://github.com/bramble-sh/bramble)
 - Upstream revision: `e334625e7fef95c1e1dfbe9b9e46097023bd21e6`
 - Source path: `packages/platform-extension/public/icons/icon-32-dark.png`
 - License: GNU General Public License, version 3 (GPL-3.0)

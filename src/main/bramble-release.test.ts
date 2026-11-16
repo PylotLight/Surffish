@@ -78,7 +78,7 @@ function githubRelease(
 ): Record<string, unknown> {
   const tag = `${version}-firefox`;
   const zipName = `bramble_firefox_${version}.zip`;
-  const root = `https://github.com/flythenimbus/bramble/releases/download/${tag}`;
+  const root = `https://github.com/bramble-sh/bramble/releases/download/${tag}`;
   return {
     tag_name: tag,
     draft: false,
