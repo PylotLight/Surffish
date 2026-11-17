@@ -31,7 +31,7 @@
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
     "test:sidebar-hover-frame": "bun test src/main/sidebar-hover-frame.test.ts",
     "test:electron-sidebar-backdrop": "electron scripts/electron-sidebar-backdrop-smoke.cjs",
-    "test:electron-sidebar-hover-frame": "SURFFISH_SIDEBAR_HOVER_ONLY=1 electron scripts/electron-sidebar-backdrop-smoke.cjs",
+    "test:electron-sidebar-hover-frame": "SURFFISH_SIDEBAR_CURSOR_POLL=on SURFFISH_SIDEBAR_HOVER_ONLY=1 electron scripts/electron-sidebar-backdrop-smoke.cjs",
     "test:electron-sidebar-cold-hover": "SURFFISH_SIDEBAR_BACKDROP=native SURFFISH_SIDEBAR_HOVER_ONLY=1 SURFFISH_SIDEBAR_COLD_HOVER=1 electron scripts/electron-sidebar-backdrop-smoke.cjs",
     "test:electron-sidebar-macos-snapshot": "SURFFISH_SIDEBAR_HOVER_ONLY=1 SURFFISH_SIDEBAR_COLD_HOVER=1 electron scripts/electron-sidebar-backdrop-smoke.cjs",
     "test:browser-chrome-helpers": "bun test src/renderer/src/views/browser/chrome-helpers.test.ts",

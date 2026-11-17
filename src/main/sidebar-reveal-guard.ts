@@ -13,6 +13,7 @@ import {
   sidebarCursorPollWanted,
   sidebarRevealLocks,
   SIDEBAR_CURSOR_POLL_MS,
+  type CursorRect,
   type SidebarReleaseEvent,
   type SidebarRevealLock,
   type SidebarRevealState,
@@ -47,8 +48,8 @@ export interface SidebarRevealHost {
   patchChrome(patch: Partial<BrowserChromeState>, cause: string): void;
   /** The overlay sidebar is on screen above a live page. */
   overlayShown(): boolean;
-  /** The sidebar view's width (its card width while open). */
-  sidebarWidth(): number;
+  /** The sidebar WebContentsView's current bounds in window-content coordinates. */
+  sidebarBounds(): CursorRect;
 }
 
 export interface SidebarRevealDeps {
@@ -341,14 +342,10 @@ export class SidebarRevealGuard {
     const content = this.deps.contentBounds();
     if (!cursor || !content) return;
     const local = { x: cursor.x - content.x, y: cursor.y - content.y };
-    // The whole column the open sidebar occupies (top to bottom of the window), not its mid-slide
-    // frame or the card's inset: only leaving it sideways or out of the window counts.
-    const over = cursorOverSidebar(local, {
-      x: 0,
-      y: 0,
-      width: this.host.sidebarWidth(),
-      height: content.height,
-    });
+    // Native view bounds can move and resize under a stationary cursor while the sidebar animates.
+    // Use the compositor's current frame, including its vertical offset, rather than a guessed
+    // full-height column; renderer mouseleave coordinates are unreliable across native restacks.
+    const over = cursorOverSidebar(local, this.host.sidebarBounds());
     const now = this.deps.now();
     if (over || state.resizing || state.pointerHeld || state.menuOpen) {
       this.outsideSince = null;
