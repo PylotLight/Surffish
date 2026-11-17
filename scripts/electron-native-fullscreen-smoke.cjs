@@ -66,6 +66,20 @@ function surface(name) {
   return views().find((view) => surfaceFor(view) === name);
 }
 
+function visibleChildLayers() {
+  if (!mainWindow || mainWindow.isDestroyed()) return [];
+  return mainWindow.contentView.children
+    .filter((view) => view.getVisible())
+    .map((view) => {
+      if (view === fixturePage) return "live-page";
+      const name = surfaceFor(view);
+      if (name) return `app:${name}`;
+      return view.webContents
+        ? `page:${view.webContents.getURL()}`
+        : "native-view";
+    });
+}
+
 async function evaluate(view, source) {
   assert.ok(view?.webContents && !view.webContents.isDestroyed());
   return smoke.evaluate(view.webContents, source);
@@ -166,6 +180,26 @@ async function run() {
   await waitFor(
     () => !sidebar.getVisible(),
     "the separate sidebar overlay to be removed during native fullscreen",
+  );
+  await waitFor(() => {
+    const layers = visibleChildLayers();
+    return layers.length === 1 && layers[0] === "live-page" ? layers : false;
+  }, "the actual visible child-view stack to contain only the live page");
+  for (const [name, view] of [
+    ["content", content],
+    ["toolbar", toolbar],
+    ["sidebar", sidebar],
+  ]) {
+    assert.deepEqual(
+      await evaluate(view, "window.api.browser.getWindowFullscreenState()"),
+      { windowFullscreen: true, nativeFullscreen: true },
+      `${name} renderer receives native fullscreen state from main`,
+    );
+  }
+  assert.equal(
+    content.getVisible(),
+    false,
+    "the duplicate content renderer is hidden",
   );
   assert.equal(fixturePage.getVisible(), true, "the page remains visible");
   const toolbarChrome = await evaluate(toolbar, chromeState);

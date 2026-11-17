@@ -56,6 +56,7 @@ import {
 } from "../shared/window-geometry";
 import { createFileTextCache } from "../shared/write-skip";
 import { watchShellSurface } from "./crash-guard";
+import { applyNativeFullscreenWindowButtons } from "./native-fullscreen-window-buttons";
 
 const WINDOW_STATE_FILE = "window-state.json";
 const SAVE_DELAY_MS = 400;
@@ -396,6 +397,11 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
       nativeFullscreen,
     };
     fullscreenStates.set(win, state);
+    applyNativeFullscreenWindowButtons(
+      process.platform,
+      nativeFullscreen,
+      (visible) => win.setWindowButtonVisibility(visible),
+    );
     setNativeFullscreenState(win, nativeFullscreen);
     for (const view of [contentView, toolbarView, sidebarView]) {
       if (!view.webContents.isDestroyed()) {
