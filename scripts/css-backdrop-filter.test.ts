@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { transform } from "lightningcss";
+import { applyNativeFullscreenWindowButtons } from "../src/main/native-fullscreen-window-buttons";
 
 // The production renderer CSS is minified by lightningcss (electron.vite.config.ts, cssMinify).
 // Given `backdrop-filter: x; -webkit-backdrop-filter: x;` in one rule, lightningcss keeps only the
@@ -74,6 +75,31 @@ describe("native fullscreen browser chrome", () => {
     expect(browserCss).not.toMatch(
       /\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-chrome:(?:hover|focus-within|focus-visible)/,
     );
+  });
+
+  test("hides macOS native window controls only during app fullscreen", () => {
+    const visibility: boolean[] = [];
+    const setWindowButtonVisibility = (visible: boolean): void => {
+      visibility.push(visible);
+    };
+
+    applyNativeFullscreenWindowButtons(
+      "darwin",
+      true,
+      setWindowButtonVisibility,
+    );
+    applyNativeFullscreenWindowButtons(
+      "darwin",
+      false,
+      setWindowButtonVisibility,
+    );
+    applyNativeFullscreenWindowButtons(
+      "linux",
+      true,
+      setWindowButtonVisibility,
+    );
+
+    expect(visibility).toEqual([false, true]);
   });
 
   test("keeps the website fullscreen top-edge reveal separate", () => {
