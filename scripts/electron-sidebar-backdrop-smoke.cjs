@@ -838,12 +838,64 @@ async function run() {
       });
       // A real pointer move exercises the X11 handler; hidden runners use the same chrome state.
       if (canCaptureCompositor) {
-        pointerMove(
-          content.x + 40,
+        const hoverY =
           content.y +
-            toolbarBottom +
-            Math.min(150, content.height - toolbarBottom - 20),
+          toolbarBottom +
+          Math.min(150, content.height - toolbarBottom - 20);
+        pointerMove(content.x + 40, hoverY);
+        // Move beyond the collapsed rail before its animated native view reaches the
+        // pointer, while staying inside the panel's eventual open width. A delayed
+        // mouseleave must not close the panel after the moving view grows underneath it.
+        const edgeDeadline = Date.now() + 250;
+        let openingWidth = 0;
+        while (Date.now() < edgeDeadline) {
+          const width = sidebar.getBounds().width;
+          if (width > 84 && width < 150) {
+            openingWidth = width;
+            break;
+          }
+          await delay(2);
+        }
+        assert.ok(
+          openingWidth > 84,
+          `native sidebar enters an observable opening frame before pointer crossing (got ${sidebar.getBounds().width}px)`,
         );
+        pointerMove(content.x + 200, hoverY);
+        await delay(600);
+        const chrome = await evaluate(
+          toolbar,
+          "window.api.browser.chrome.get()",
+        );
+        assert.ok(
+          chrome.sidebarHovered &&
+            sidebar.getVisible() &&
+            sidebar.getBounds().width >= 300,
+          `crossing the moving edge into the eventual panel leaves it open under the pointer (${JSON.stringify({ chrome: chrome.sidebarHovered, visible: sidebar.getVisible(), bounds: sidebar.getBounds(), openingWidth })})`,
+        );
+        pointerMove(content.x + 500, hoverY);
+        await waitFor(async () => {
+          const state = await evaluate(
+            toolbar,
+            "window.api.browser.chrome.get()",
+          );
+          return (
+            !state.sidebarHovered &&
+            sidebar.getVisible() &&
+            sidebar.getBounds().width <= 100
+          );
+        }, "a genuine pointer exit collapses the sidebar");
+        pointerMove(content.x + 40, hoverY);
+        await waitFor(async () => {
+          const state = await evaluate(
+            toolbar,
+            "window.api.browser.chrome.get()",
+          );
+          return (
+            state.sidebarHovered &&
+            sidebar.getVisible() &&
+            sidebar.getBounds().width >= 300
+          );
+        }, "re-entering the rail opens the sidebar");
       } else {
         await evaluate(
           toolbar,
