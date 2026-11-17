@@ -1852,9 +1852,9 @@ async function run() {
       "window.api.browser.sidebarBackdrop.get()",
     );
     assert.equal(
-      backdropState.settings.sidebarPushesPage,
-      true,
-      "Sidebar pushes page is on by default",
+      backdropState.settings.sidebarPageMode,
+      "resize",
+      "Sidebar layout defaults to Resize, which pushes the page",
     );
     assert.equal(
       backdropState.state.nativeOverlay,

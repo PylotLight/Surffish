@@ -819,7 +819,8 @@ export default function Browser({
     if (!resize || resize.pointerId !== event.pointerId) return;
     sidebarResizeRef.current = null;
     persistSidebarWidth(resize.width);
-    if (!sidebarPinned && event.clientX >= resize.width) scheduleSidebarHide();
+    if (!sidebarPinned && event.clientX >= resize.width)
+      scheduleSidebarHide(event);
   }
 
   function handleSidebarResizeKeyDown(
@@ -1553,14 +1554,24 @@ export default function Browser({
     // so it's still over the sidebar: don't treat that as the user leaving.
     if (pointerIsOverSidebar(event.clientX, event.clientY)) return;
     sidebarPointerInsideRef.current = false;
-    scheduleSidebarHide();
+    scheduleSidebarHide(event);
   }
 
-  function scheduleSidebarHide(): void {
+  function scheduleSidebarHide(pointer?: {
+    clientX: number;
+    clientY: number;
+  }): void {
     if (sidebarResizeRef.current) return;
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current);
     sidebarHideTimerRef.current = setTimeout(() => {
       sidebarHideTimerRef.current = null;
+      // A native WebContentsView can grow under a stationary cursor without a new
+      // mouseenter. Check the leave point against the card's current bounds so an
+      // old leave cannot close the panel after its moving edge has passed the cursor.
+      if (pointer && pointerIsOverSidebar(pointer.clientX, pointer.clientY)) {
+        sidebarPointerInsideRef.current = true;
+        return;
+      }
       setSidebarHovered(false);
     }, 180);
   }
