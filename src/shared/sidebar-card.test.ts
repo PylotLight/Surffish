@@ -24,6 +24,7 @@ import {
   sidebarCardInset,
   sidebarCardMaxWidth,
   sidebarCardRect,
+  sidebarRailWidthForState,
   sidebarFloatCardRect,
   sidebarFloatShadowRects,
 } from "./sidebar-card";
@@ -45,6 +46,27 @@ describe("sidebar card geometry", () => {
       }),
     ).toEqual({ x: 0, y: 0, width: 252, height: 800 });
     expect(sidebarCardMaxWidth(20)).toBe(0);
+  });
+
+  test("persistent rail is hidden in native and page fullscreen", () => {
+    expect(
+      sidebarRailWidthForState(1280, {
+        nativeFullscreen: false,
+        pageFullscreen: false,
+      }),
+    ).toBe(84);
+    expect(
+      sidebarRailWidthForState(1280, {
+        nativeFullscreen: true,
+        pageFullscreen: false,
+      }),
+    ).toBe(0);
+    expect(
+      sidebarRailWidthForState(1280, {
+        nativeFullscreen: false,
+        pageFullscreen: true,
+      }),
+    ).toBe(0);
   });
 
   test("small windows keep the full-height card attached", () => {

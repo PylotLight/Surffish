@@ -25,7 +25,7 @@ import {
   normalizeFrameTransparency,
   sidebarCardMaxWidth,
   sidebarHoverCardArgb,
-  sidebarRailWidth,
+  sidebarRailWidthForState,
   SIDEBAR_FLOAT,
 } from "../shared/sidebar-card";
 import {
@@ -615,7 +615,10 @@ function applyShellLayout(shell: ShellState): void {
   // stands that gap in from its left edge (the renderer insets it, main insets its glass layer).
   const sidebarWidth = overlaySidebarWidth(shell, width);
   const pageFullscreen = shell.pageFullscreen;
-  const railWidth = pageFullscreen ? 0 : sidebarRailWidth(width);
+  const railWidth = sidebarRailWidthForState(width, {
+    nativeFullscreen: fullscreen,
+    pageFullscreen,
+  });
   const sidebarTop = Math.min(height, frameTop);
   shell.sidebarMotion.layout({
     y: sidebarTop,
@@ -789,9 +792,7 @@ export function attachBrowserShell(
     patchChrome: (patch, cause) => setBrowserChromeState(patch, window, cause),
     overlayShown: () =>
       shell.sidebarOverlayShown && shouldUseNativeOverlays(shell),
-    sidebarWidth: () =>
-      overlaySidebarWidth(shell) +
-      (shell.sidebarFloating ? SIDEBAR_FLOAT.gap : 0),
+    sidebarBounds: () => shell.views.sidebar.getBounds(),
   });
 }
 

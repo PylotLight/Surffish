@@ -88,6 +88,20 @@ export function sidebarRailWidth(
   );
 }
 
+/** Native fullscreen and page/video fullscreen have no persistent sidebar rail. */
+export function sidebarRailWidthForState(
+  windowWidth: number,
+  {
+    nativeFullscreen,
+    pageFullscreen,
+  }: { nativeFullscreen: boolean; pageFullscreen: boolean },
+  geometry: SidebarCardGeometry = SIDEBAR_CARD,
+): number {
+  return nativeFullscreen || pageFullscreen
+    ? 0
+    : sidebarRailWidth(windowWidth, geometry);
+}
+
 /** Where the card sits in window coordinates (border box), for a given window size and sidebar width. */
 export function sidebarCardRect(
   {

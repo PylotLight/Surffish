@@ -1561,6 +1561,13 @@ export default function Browser({
     clientX: number;
     clientY: number;
   }): void {
+    if (surface === "sidebar") {
+      // The native WebContentsView can move or resize beneath a stationary pointer. Its renderer
+      // may report a synthetic leave during that compositor change; main checks the screen cursor
+      // against the live native bounds and owns auto-hide for this surface.
+      sidebarPointerInsideRef.current = false;
+      return;
+    }
     if (sidebarResizeRef.current) return;
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current);
     sidebarHideTimerRef.current = setTimeout(() => {

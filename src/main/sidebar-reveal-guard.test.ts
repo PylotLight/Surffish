@@ -34,6 +34,7 @@ function setup(chrome: Partial<BrowserChromeState> = {}) {
   };
   let now = 1000;
   let cursor = { x: 100, y: 300 };
+  let sidebarBounds = { x: 0, y: 0, width: 320, height: 800 };
   let pollCallback: (() => void) | null = null;
   const lines: string[] = [];
   const patches: Partial<BrowserChromeState>[] = [];
@@ -49,7 +50,7 @@ function setup(chrome: Partial<BrowserChromeState> = {}) {
         guard.noteChromeChanged(cause);
       },
       overlayShown: () => shown,
-      sidebarWidth: () => state.sidebarWidth,
+      sidebarBounds: () => sidebarBounds,
     },
     {
       cursor: () => cursor,
@@ -86,6 +87,9 @@ function setup(chrome: Partial<BrowserChromeState> = {}) {
     },
     setShown: (value: boolean) => {
       shown = value;
+    },
+    setSidebarBounds: (bounds: typeof sidebarBounds) => {
+      sidebarBounds = bounds;
     },
     /** The renderer (or main's reveal timer) setting chrome state, as setBrowserChromeState would. */
     rendererSet: (patch: Partial<BrowserChromeState>) => {
@@ -181,6 +185,26 @@ describe("SidebarRevealGuard", () => {
     t.elapse(SIDEBAR_CURSOR_OUTSIDE_GRACE_MS + SIDEBAR_CURSOR_POLL_MS);
     expect(t.state.sidebarHovered).toBe(false);
     expect(t.lines.at(-1)).toContain("cursor outside sidebar");
+  });
+
+  test("the poll follows the native view as its opening edge grows under a stationary cursor", () => {
+    const t = setup();
+    t.setSidebarBounds({ x: 0, y: 40, width: 84, height: 760 });
+    t.moveCursor(140, 300);
+    t.rendererSet({ sidebarHovered: true });
+    t.elapse(SIDEBAR_CURSOR_POLL_MS);
+    t.setSidebarBounds({ x: 0, y: 40, width: 200, height: 760 });
+    t.elapse(SIDEBAR_CURSOR_OUTSIDE_GRACE_MS + SIDEBAR_CURSOR_POLL_MS);
+    expect(t.state.sidebarHovered).toBe(true);
+  });
+
+  test("the native sidebar poll treats the toolbar above the view as outside", () => {
+    const t = setup();
+    t.setSidebarBounds({ x: 0, y: 40, width: 320, height: 760 });
+    t.moveCursor(200, 20);
+    t.rendererSet({ sidebarHovered: true });
+    t.elapse(SIDEBAR_CURSOR_OUTSIDE_GRACE_MS + SIDEBAR_CURSOR_POLL_MS);
+    expect(t.state.sidebarHovered).toBe(false);
   });
 
   test("no poll while pinned, on a panel, or with the overlay off screen", () => {
