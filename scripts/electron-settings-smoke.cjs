@@ -39,12 +39,12 @@ async function waitFor(predicate, description) {
   );
 }
 
-// Controls General had before the redesign (accessible names); none may go missing.
+// Current General control labels (accessible names); none may go missing.
 const GENERAL_CONTROLS = [
   "Default search engine",
   "Sidebar blur",
   "Frame transparency",
-  "Sidebar pushes page",
+  "Sidebar layout",
   "Show bookmarks bar",
   "Enable the command palette shortcut",
   "Browser and profile to import from",
