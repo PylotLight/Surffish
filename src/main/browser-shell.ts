@@ -149,6 +149,8 @@ interface ShellState {
   sidebarDocked: boolean | null;
   /** Native app fullscreen, distinct from a site requesting HTML fullscreen. */
   nativeFullscreen: boolean;
+  /** A page requested HTML fullscreen (for example, a video player's fullscreen action). */
+  htmlFullscreen: boolean;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
   dismissOnBlur: () => void;
   dismissOnSidebarPress: (
@@ -167,8 +169,6 @@ interface ShellState {
   // fullscreen API or a video stretched to cover the viewport (how X expands its
   // in-feed videos). The sidebar gets out of the way when this happens. */
   pageFullscreen: boolean;
-  /** Whether the sidebar is currently click-through (a fullscreen video takes the page). */
-  pageMouseIgnored: boolean;
   /** Watches the content view for an expanded video; stopped on window detach. Null until attached. */
   pageFullScreenTracker: PageFullScreenTracker;
 }
@@ -459,6 +459,17 @@ export function setNativeFullscreenState(
   shell.scheduleLayout();
 }
 
+/** Keep page-requested HTML fullscreen separate from app/window fullscreen state. */
+export function setHtmlFullscreenState(
+  window: BaseWindow,
+  htmlFullscreen: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.htmlFullscreen === htmlFullscreen) return;
+  shell.htmlFullscreen = htmlFullscreen;
+  shell.scheduleLayout();
+}
+
 function clearRevealTimer(shell: ShellState): void {
   if (shell.revealTimer) clearTimeout(shell.revealTimer);
   shell.revealTimer = null;
@@ -536,6 +547,7 @@ function applyShellLayout(shell: ShellState): void {
   );
   const fullscreen = shell.window.isFullScreen();
   const nativeFullscreen = shell.nativeFullscreen;
+  const pageFullscreen = shell.pageFullscreen || shell.htmlFullscreen;
 
   // Keep the full React renderer alive and correctly sized for New Tab and local panels.
   // When native overlays are active it is hidden, so its full-window bounds cannot steal page input.
@@ -555,8 +567,11 @@ function applyShellLayout(shell: ShellState): void {
     width,
     height: coversPage ? height : toolbarExtent,
   });
-  // Native fullscreen is page-only, even if a wake snapshot was still covering the page.
-  shellViews.toolbar.setVisible(overlayMode && !nativeFullscreen);
+  // Native and page/video fullscreen are content-only. Hide the separate toolbar overlay too, so
+  // it cannot intercept clicks on the page's player controls while its renderer chrome is hidden.
+  shellViews.toolbar.setVisible(
+    overlayMode && !nativeFullscreen && !pageFullscreen,
+  );
 
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
@@ -629,7 +644,6 @@ function applyShellLayout(shell: ShellState): void {
   // A floating hover card keeps the sidebar width: the view is one float gap wider and the card
   // stands that gap in from its left edge (the renderer insets it, main insets its glass layer).
   const sidebarWidth = overlaySidebarWidth(shell, width);
-  const pageFullscreen = shell.pageFullscreen;
   const railWidth = sidebarRailWidthForState(width, {
     nativeFullscreen: fullscreen,
     pageFullscreen,
@@ -644,9 +658,8 @@ function applyShellLayout(shell: ShellState): void {
   // Open/close grows along one timeline while live pages stay on screen; entering or leaving
   // New Tab / a full panel snaps (the in-page sidebar takes over there). With the tab list the
   // collapsed view stays as the icon rail, so the sidebar never vanishes completely.
-  // A fullscreen/expanded video takes the whole window: the sidebar gets out of the way
-  // and does not reveal on hover (its rail is gone). Native window fullscreen is handled
-  // by `fullscreen` above.
+  // A fullscreen/expanded video takes the whole window: close the sidebar without an animation
+  // and remove its native overlay so it cannot cover or intercept the page's player controls.
   const overlayShown =
     overlayMode && sidebarVisible && !pageFullscreen && !nativeFullscreen;
   const railShown =
@@ -673,24 +686,9 @@ function applyShellLayout(shell: ShellState): void {
     emitSidebarOverlay(shell, "shown");
   }
   shell.sidebarMotion.setOpen(overlayShown, {
-    animate: animate && !nativeFullscreen,
+    animate: animate && !nativeFullscreen && !pageFullscreen,
     rail: railShown,
   });
-  // A fullscreen/expanded video should be fully interactive: let the click-through sidebar
-  // pass every event to the page, so its controls work even while the sidebar is rail-less.
-  if (shell.pageMouseIgnored !== pageFullscreen) {
-    shell.pageMouseIgnored = pageFullscreen;
-    (
-      shellViews.sidebar as unknown as {
-        setIgnoreMouseEvents(
-          ignore: boolean,
-          options?: { forward: boolean },
-        ): void;
-      }
-    ).setIgnoreMouseEvents(pageFullscreen, {
-      forward: true,
-    });
-  }
   syncPageSlide(shell);
   shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
   const cause = shell.layoutCause ?? "layout";
@@ -757,12 +755,12 @@ export function attachBrowserShell(
     pageSlideHold: null,
     sidebarDocked: null,
     nativeFullscreen: false,
+    htmlFullscreen: false,
     lastActiveTabId: null,
     activeTabSince: 0,
     revealGuard: null,
     layoutCause: null,
     pageFullscreen: false,
-    pageMouseIgnored: false,
     pageFullScreenTracker: null as unknown as PageFullScreenTracker,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
     dismissOnSidebarPress: (_event, mouseEvent) =>

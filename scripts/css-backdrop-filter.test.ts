@@ -102,12 +102,14 @@ describe("native fullscreen browser chrome", () => {
     expect(visibility).toEqual([false, true]);
   });
 
-  test("keeps the website fullscreen top-edge reveal separate", () => {
+  test("hides Surffish chrome throughout page and video fullscreen", () => {
     const rule = browserCss.match(
-      /\.app-shell\[data-fullscreen="true"\]:not\(\[data-native-fullscreen="true"\]\)\s+\.browser-chrome\s*\{([^}]*)\}/,
+      /\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-chrome,\s*\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-sidebar\s*\{([^}]*)\}/,
     );
-    expect(rule?.[1]).toContain("translateY(calc(-100% + 5px))");
-    expect(browserCss).toContain(".browser-chrome:hover");
-    expect(browserCss).toContain(".browser-chrome:focus-within");
+    expect(rule?.[1]).toMatch(/display:\s*none\s*;/);
+    expect(browserCss).not.toContain("translateY(calc(-100% + 5px))");
+    expect(browserCss).not.toMatch(
+      /\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-chrome:(?:hover|focus-within|focus-visible)/,
+    );
   });
 });

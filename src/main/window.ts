@@ -37,6 +37,7 @@ import {
 import {
   attachBrowserShell,
   setBrowserFramePrivate,
+  setHtmlFullscreenState,
   setNativeFullscreenState,
   setPageSlideListener,
   detachBrowserShell,
@@ -65,6 +66,7 @@ const FULLSCREEN_EVENT_SETTLE_MS = 50;
 interface BrowserFullscreenState {
   windowFullscreen: boolean;
   nativeFullscreen: boolean;
+  htmlFullscreen: boolean;
 }
 
 const fullscreenStates = new WeakMap<BaseWindow, BrowserFullscreenState>();
@@ -73,11 +75,17 @@ ipcMain.handle(
   "browser:window-fullscreen-state",
   (event): BrowserFullscreenState => {
     const window = windowForContents(event.sender);
-    if (!window) return { windowFullscreen: false, nativeFullscreen: false };
+    if (!window)
+      return {
+        windowFullscreen: false,
+        nativeFullscreen: false,
+        htmlFullscreen: false,
+      };
     return (
       fullscreenStates.get(window) ?? {
         windowFullscreen: window.isFullScreen(),
         nativeFullscreen: false,
+        htmlFullscreen: false,
       }
     );
   },
@@ -368,6 +376,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   fullscreenStates.set(win, {
     windowFullscreen: win.isFullScreen(),
     nativeFullscreen: false,
+    htmlFullscreen: false,
   });
   if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath));
   registerBrowserWindow(win);
@@ -395,6 +404,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
     const state = {
       windowFullscreen: win.isFullScreen(),
       nativeFullscreen,
+      htmlFullscreen,
     };
     fullscreenStates.set(win, state);
     applyNativeFullscreenWindowButtons(
@@ -402,6 +412,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
       nativeFullscreen,
       (visible) => win.setWindowButtonVisibility(visible),
     );
+    setHtmlFullscreenState(win, htmlFullscreen);
     setNativeFullscreenState(win, nativeFullscreen);
     for (const view of [contentView, toolbarView, sidebarView]) {
       if (!view.webContents.isDestroyed()) {
@@ -409,6 +420,7 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
           "browser:window-fullscreen",
           state.windowFullscreen,
           state.nativeFullscreen,
+          state.htmlFullscreen,
         );
       }
     }
