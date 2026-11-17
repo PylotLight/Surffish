@@ -8,7 +8,7 @@ import {
   FRAME_TRANSPARENCY_MAX,
   FRAME_TRANSPARENCY_MIN,
 } from "../../../../shared/sidebar-card";
-import type { SidebarPushStyle } from "../../../../shared/page-view-bounds";
+import type { SidebarPageMode } from "../../../../shared/sidebar-backdrop";
 import { SettingsGroup, SettingsRow } from "./SettingsControls";
 
 const REDUCED_TRANSPARENCY_QUERY = "(prefers-reduced-transparency: reduce)";
@@ -153,43 +153,25 @@ export function AppearanceSettings(): React.JSX.Element {
         </output>
       </SettingsRow>
       <SettingsRow
-        label="Sidebar pushes page"
-        hint="The hover sidebar pushes the page aside and matches the frame, instead of floating over it."
-      >
-        <input
-          type="checkbox"
-          className="settings-switch"
-          disabled={!settings}
-          checked={settings?.sidebarPushesPage ?? true}
-          aria-label="Sidebar pushes page"
-          onChange={(event) =>
-            void window.api.browser.sidebarBackdrop
-              .set({ sidebarPushesPage: event.target.checked })
-              .then(setSettings)
-              .catch(() => undefined)
-          }
-        />
-      </SettingsRow>
-      <SettingsRow
-        label="Sidebar animation"
-        hint="How the page makes room while the hover sidebar pushes it: shrink beside the sidebar, or slide across at its size."
+        label="Sidebar layout"
+        hint="How the hover sidebar sits over a page: push the page aside and choose Resize or Slide, or float the sidebar over the page without shifting it."
       >
         <select
           className="settings-select"
-          disabled={!settings || settings.sidebarPushesPage === false}
-          value={settings?.sidebarPushStyle ?? "resize"}
-          aria-label="Sidebar animation"
+          value={settings?.sidebarPageMode ?? "resize"}
+          aria-label="Sidebar layout"
           onChange={(event) =>
             void window.api.browser.sidebarBackdrop
               .set({
-                sidebarPushStyle: event.target.value as SidebarPushStyle,
+                sidebarPageMode: event.target.value as SidebarPageMode,
               })
               .then(setSettings)
               .catch(() => undefined)
           }
         >
-          <option value="resize">Resize page</option>
-          <option value="slide">Slide page</option>
+          <option value="resize">Push and resize page</option>
+          <option value="slide">Push and slide page</option>
+          <option value="float">Float over page</option>
         </select>
       </SettingsRow>
       {isMac && (

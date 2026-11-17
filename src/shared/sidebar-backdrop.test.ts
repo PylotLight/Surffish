@@ -34,22 +34,19 @@ describe("sidebar backdrop mode", () => {
     expect(normalizeSidebarBackdropSettings(null)).toEqual({
       blur: true,
       frameTransparency: 80,
-      sidebarPushesPage: true,
-      sidebarPushStyle: "resize",
+      sidebarPageMode: "resize",
       swipeSlidesPage: false,
     });
     expect(normalizeSidebarBackdropSettings({ blur: "no" })).toEqual({
       blur: true,
       frameTransparency: 80,
-      sidebarPushesPage: true,
-      sidebarPushStyle: "resize",
+      sidebarPageMode: "resize",
       swipeSlidesPage: false,
     });
     expect(normalizeSidebarBackdropSettings({ blur: false })).toEqual({
       blur: false,
       frameTransparency: 80,
-      sidebarPushesPage: true,
-      sidebarPushStyle: "resize",
+      sidebarPageMode: "resize",
       swipeSlidesPage: false,
     });
     expect(
@@ -57,17 +54,16 @@ describe("sidebar backdrop mode", () => {
     ).toEqual({
       blur: true,
       frameTransparency: 100,
-      sidebarPushesPage: true,
-      sidebarPushStyle: "resize",
+      sidebarPageMode: "resize",
       swipeSlidesPage: false,
     });
+    // Legacy JSON (pre-combination): the old toggle + animation select migrate to a mode.
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: false }),
     ).toEqual({
       blur: true,
       frameTransparency: 80,
-      sidebarPushesPage: false,
-      sidebarPushStyle: "resize",
+      sidebarPageMode: "float",
       swipeSlidesPage: false,
     });
     expect(
@@ -78,17 +74,19 @@ describe("sidebar backdrop mode", () => {
       normalizeSidebarBackdropSettings({ swipeSlidesPage: "yes" })
         .swipeSlidesPage,
     ).toBe(false);
+    // Legacy: "pushes page off" (or junk) migrates to the floating 3rd option.
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushesPage: "no" })
-        .sidebarPushesPage,
-    ).toBe(true);
+        .sidebarPageMode,
+    ).toBe("float");
+    // Legacy: an animation select with the toggle on migrates to that push mode.
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushStyle: "slide" })
-        .sidebarPushStyle,
+        .sidebarPageMode,
     ).toBe("slide");
     expect(
       normalizeSidebarBackdropSettings({ sidebarPushStyle: "wobble" })
-        .sidebarPushStyle,
+        .sidebarPageMode,
     ).toBe("resize");
   });
 

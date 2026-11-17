@@ -37,11 +37,16 @@ import {
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
 import {
-  DEFAULT_SIDEBAR_PUSH_STYLE,
   pageFrameLeft,
   pageSlideOffset,
   type SidebarPushStyle,
 } from "../shared/page-view-bounds";
+import {
+  DEFAULT_SIDEBAR_PAGE_MODE,
+  sidebarPushesPageForMode,
+  sidebarPushStyleForMode,
+  type SidebarPageMode,
+} from "../shared/sidebar-backdrop";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import {
@@ -195,20 +200,18 @@ export function setBrowserFramePrivate(
   shell.scheduleLayout();
 }
 
-/** Settings → Appearance → Sidebar pushes page (sidebar-backdrop.ts owns the setting and calls in). */
-let sidebarPushesPage = true;
+/** Settings → Appearance → Sidebar layout mode (sidebar-backdrop.ts owns the setting and calls in). */
+let sidebarPageMode: SidebarPageMode = DEFAULT_SIDEBAR_PAGE_MODE;
 
-/** Settings → Appearance → Sidebar animation: how a pushed page card moves (browser.ts reads it). */
-let sidebarPushStyle: SidebarPushStyle = DEFAULT_SIDEBAR_PUSH_STYLE;
-
+/** How a pushed page card moves (browser.ts reads it). Derived from the layout mode. */
 export function getBrowserSidebarPushStyle(): SidebarPushStyle {
-  return sidebarPushStyle;
+  return sidebarPushStyleForMode(sidebarPageMode);
 }
 
-/** Sidebar animation changed: re-lay out, so a page pushed right now takes the new shape. */
-export function setBrowserSidebarPushStyle(value: SidebarPushStyle): void {
-  if (value === sidebarPushStyle) return;
-  sidebarPushStyle = value;
+/** Settings → Appearance → Sidebar layout changed: every window re-lays out (the hover panel floats or pushes, and how a pushed page makes room). Collapsed from the earlier 'pushes page' 'animation' select into one mode. */
+export function setBrowserSidebarPageMode(value: SidebarPageMode): void {
+  if (value === sidebarPageMode) return;
+  sidebarPageMode = value;
   for (const shell of shells.values()) shell.scheduleLayout();
 }
 
@@ -221,13 +224,6 @@ export function getBrowserSwipeSlidesPage(): boolean {
 
 export function setBrowserSwipeSlidesPage(value: boolean): void {
   swipeSlidesPage = value;
-}
-
-/** Sidebar pushes page changed: every window re-lays out (the hover panel floats or pushes). */
-export function setBrowserSidebarPushesPage(value: boolean): void {
-  if (value === sidebarPushesPage) return;
-  sidebarPushesPage = value;
-  for (const shell of shells.values()) shell.scheduleLayout();
 }
 
 type PageSlideListener = (
@@ -575,7 +571,10 @@ function applyShellLayout(shell: ShellState): void {
   // The tab list's hover panel either pushes the page card aside (and is the frame's own material,
   // like the docked panel) or floats over it as its own card (Settings → Sidebar pushes page off).
   const pushing =
-    frameShown && !docked && sidebarMode === "tabs" && sidebarPushesPage;
+    frameShown &&
+    !docked &&
+    sidebarMode === "tabs" &&
+    sidebarPushesPageForMode(sidebarPageMode);
   const floating = frameShown && !docked && sidebarMode === "tabs" && !pushing;
   if (
     shell.sidebarDocked !== docked ||

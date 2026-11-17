@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SIDEBAR_PUSH_STYLE,
   normalizeSidebarPushStyle,
   type SidebarPushStyle,
 } from "./page-view-bounds";
@@ -31,6 +30,46 @@ export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = [
   "solid",
 ];
 
+/**
+→ Settings → General → Appearance → Sidebar layout: how the hover/pinned sidebar sits over a live
+→ page. →'resize'/'slide' push the page card aside (Sidebar animation says how); →'float' floats the
+→ panel over the page as its own card (the page does not shift). Collapsed from the earlier
+→'Sidebar pushes page' toggle + →'Sidebar animation' select into one control.
+*/
+export const SIDEBAR_PAGE_MODES = ["resize", "slide", "float"] as const;
+export type SidebarPageMode = (typeof SIDEBAR_PAGE_MODES)[number];
+export const DEFAULT_SIDEBAR_PAGE_MODE: SidebarPageMode = "resize";
+
+export function normalizeSidebarPageMode(value: unknown): SidebarPageMode {
+  return (SIDEBAR_PAGE_MODES as readonly unknown[]).includes(value)
+    ? (value as SidebarPageMode)
+    : DEFAULT_SIDEBAR_PAGE_MODE;
+}
+
+/** Whether the hover panel pushes the page aside (vs. floats over it). Derived from the mode. */
+export function sidebarPushesPageForMode(mode: SidebarPageMode): boolean {
+  return mode !== "float";
+}
+
+/** How a pushed page card moves (only used while pushing). Derived from the mode. */
+export function sidebarPushStyleForMode(
+  mode: SidebarPageMode,
+): SidebarPushStyle {
+  return mode === "slide" ? "slide" : "resize";
+}
+
+/** Legacy JSON (pre-combination): derive the mode from the old toggle + animation select. */
+function modeFromLegacy(
+  sidebarPushesPage: unknown,
+  sidebarPushStyle: unknown,
+): SidebarPageMode {
+  // An absent toggle means the old default (pushing on); only an explicit false floats.
+  const pushes =
+    sidebarPushesPage === undefined ||
+    (typeof sidebarPushesPage === "boolean" && sidebarPushesPage);
+  return pushes ? normalizeSidebarPushStyle(sidebarPushStyle) : "float";
+}
+
 export interface SidebarBackdropSettings {
   /** Settings → General → Appearance → Sidebar blur. On by default. */
   blur: boolean;
@@ -41,17 +80,12 @@ export interface SidebarBackdropSettings {
    */
   frameTransparency: number;
   /**
-   * Settings → General → Appearance → Sidebar pushes page. On (default): the tab list's hover panel
-   * pushes the page card aside (Sidebar animation says how) and is the frame's own
-   * material, like the docked panel. Off: the panel floats over the page as its own card (blur,
-   * tint, shadow), the earlier look, kept to compare against.
+   → Settings → General → Appearance → Sidebar layout: how the hover/pinned sidebar sits over a live
+   * page. →'resize'/'slide' push the page card aside (Sidebar animation says how) and are the
+   * frame's own material, like the docked panel; →'float' floats the panel over the page as its own
+   * card (the earlier look). Collapsed from the earlier toggle + select into one control.
    */
-  sidebarPushesPage: boolean;
-  /**
-   * Settings → General → Appearance → Sidebar animation (only while the sidebar pushes the page):
-   * 'resize' shrinks the page from the left as the panel opens, 'slide' moves it right at its size.
-   */
-  sidebarPushStyle: SidebarPushStyle;
+  sidebarPageMode: SidebarPageMode;
   /**
    * Settings → General → Appearance → Swipe slides page (macOS trackpad back/forward). Off
    * (default): only the Back/Forward card shows over the page while the fingers move. On: the page
@@ -63,8 +97,7 @@ export interface SidebarBackdropSettings {
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   blur: true,
   frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
-  sidebarPushesPage: true,
-  sidebarPushStyle: DEFAULT_SIDEBAR_PUSH_STYLE,
+  sidebarPageMode: DEFAULT_SIDEBAR_PAGE_MODE,
   swipeSlidesPage: false,
 };
 
@@ -129,11 +162,13 @@ export function normalizeSidebarBackdropSettings(
         ? candidate.blur
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.blur,
     frameTransparency: normalizeFrameTransparency(candidate.frameTransparency),
-    sidebarPushesPage:
-      typeof candidate.sidebarPushesPage === "boolean"
-        ? candidate.sidebarPushesPage
-        : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
-    sidebarPushStyle: normalizeSidebarPushStyle(candidate.sidebarPushStyle),
+    sidebarPageMode:
+      typeof candidate.sidebarPageMode === "string"
+        ? normalizeSidebarPageMode(candidate.sidebarPageMode)
+        : modeFromLegacy(
+            candidate.sidebarPushesPage,
+            candidate.sidebarPushStyle,
+          ),
     swipeSlidesPage:
       typeof candidate.swipeSlidesPage === "boolean"
         ? candidate.swipeSlidesPage

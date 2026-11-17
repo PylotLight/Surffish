@@ -7,7 +7,10 @@ import {
   sidebarCardCssVars,
 } from "../../shared/sidebar-card";
 import { sidebarMotionCssVars } from "../../shared/sidebar-motion";
-import { DEFAULT_SIDEBAR_BACKDROP_SETTINGS } from "../../shared/sidebar-backdrop";
+import {
+  DEFAULT_SIDEBAR_BACKDROP_SETTINGS,
+  type SidebarPageMode,
+} from "../../shared/sidebar-backdrop";
 
 // One source for the sidebar card's geometry and its open/close timeline (main uses the same
 // numbers for the overlay view).
@@ -17,17 +20,17 @@ const SIDEBAR_CARD_STYLE = {
 } as React.CSSProperties;
 
 /**
- * Settings → Appearance → Frame transparency and Sidebar pushes page, live in every surface
+ * Settings → Appearance → Frame transparency and Sidebar layout mode, live in every surface
  * (toolbar, sidebar, content): main broadcasts the settings to every window's renderers when they
  * change.
  */
 function useFrameSettings(): {
   frameTransparency: number;
-  sidebarPushesPage: boolean;
+  sidebarPageMode: SidebarPageMode;
 } {
   const [value, setValue] = useState({
     frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
-    sidebarPushesPage: DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
+    sidebarPageMode: DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPageMode,
   });
   useEffect(() => {
     const api = window.api.browser.sidebarBackdrop;
@@ -35,13 +38,13 @@ function useFrameSettings(): {
     let mounted = true;
     const apply = (next: {
       frameTransparency: number;
-      sidebarPushesPage?: boolean;
+      sidebarPageMode?: SidebarPageMode;
     }): void =>
       setValue({
         frameTransparency: next.frameTransparency,
-        sidebarPushesPage:
-          next.sidebarPushesPage ??
-          DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPushesPage,
+        sidebarPageMode:
+          next.sidebarPageMode ??
+          DEFAULT_SIDEBAR_BACKDROP_SETTINGS.sidebarPageMode,
       });
     void api
       .get()
@@ -61,7 +64,7 @@ function useFrameSettings(): {
 export default function App(): React.JSX.Element {
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => window.api.browser.onWindowFullscreen(setFullscreen), []);
-  const { frameTransparency, sidebarPushesPage } = useFrameSettings();
+  const { frameTransparency, sidebarPageMode } = useFrameSettings();
   const style = useMemo(
     () =>
       ({
@@ -86,7 +89,7 @@ export default function App(): React.JSX.Element {
       data-frame-solid={
         frameTransparencyAllowsGlass(frameTransparency) ? undefined : "true"
       }
-      data-sidebar-push={sidebarPushesPage ? "true" : undefined}
+      data-sidebar-push={sidebarPageMode !== "float" ? "true" : undefined}
       style={style}
     >
       <Browser surface={surface} />
