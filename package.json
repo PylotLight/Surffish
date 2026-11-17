@@ -29,6 +29,7 @@
     "test:electron-pdf-forms": "bun scripts/electron-pdf-forms-smoke.mjs",
     "test:electron-ui-font": "electron scripts/electron-ui-font-smoke.cjs",
     "test:electron-sidebar-overlay": "electron scripts/electron-sidebar-overlay-smoke.cjs",
+    "test:electron-native-fullscreen": "electron scripts/electron-native-fullscreen-smoke.cjs",
     "test:sidebar-hover-frame": "bun test src/main/sidebar-hover-frame.test.ts",
     "test:electron-sidebar-backdrop": "electron scripts/electron-sidebar-backdrop-smoke.cjs",
     "test:electron-sidebar-hover-frame": "SURFFISH_SIDEBAR_CURSOR_POLL=on SURFFISH_SIDEBAR_HOVER_ONLY=1 electron scripts/electron-sidebar-backdrop-smoke.cjs",

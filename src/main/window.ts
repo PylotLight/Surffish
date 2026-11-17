@@ -3,6 +3,7 @@ import {
   BaseWindow,
   WebContentsView,
   app,
+  ipcMain,
   nativeImage,
   screen,
   shell,
@@ -31,10 +32,12 @@ import {
   currentBrowserWindow,
   registerBrowserWindow,
   runInWindow,
+  windowForContents,
 } from "./window-scope";
 import {
   attachBrowserShell,
   setBrowserFramePrivate,
+  setNativeFullscreenState,
   setPageSlideListener,
   detachBrowserShell,
   isFocusAddressShortcut,
@@ -56,6 +59,28 @@ import { watchShellSurface } from "./crash-guard";
 
 const WINDOW_STATE_FILE = "window-state.json";
 const SAVE_DELAY_MS = 400;
+const FULLSCREEN_EVENT_SETTLE_MS = 50;
+
+interface BrowserFullscreenState {
+  windowFullscreen: boolean;
+  nativeFullscreen: boolean;
+}
+
+const fullscreenStates = new WeakMap<BaseWindow, BrowserFullscreenState>();
+
+ipcMain.handle(
+  "browser:window-fullscreen-state",
+  (event): BrowserFullscreenState => {
+    const window = windowForContents(event.sender);
+    if (!window) return { windowFullscreen: false, nativeFullscreen: false };
+    return (
+      fullscreenStates.get(window) ?? {
+        windowFullscreen: window.isFullScreen(),
+        nativeFullscreen: false,
+      }
+    );
+  },
+);
 
 function windowStatePath(): string {
   return join(app.getPath("userData"), WINDOW_STATE_FILE);
@@ -339,6 +364,10 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
       windowFrameMaterial === "windows-mica" ? "mica" : undefined,
     backgroundColor: isMac ? "#00000000" : "#101418",
   });
+  fullscreenStates.set(win, {
+    windowFullscreen: win.isFullScreen(),
+    nativeFullscreen: false,
+  });
   if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath));
   registerBrowserWindow(win);
   if (geometry?.maximized) win.maximize();
@@ -357,16 +386,55 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   win.contentView.addChildView(contentView);
   win.contentView.addChildView(toolbarView);
   win.contentView.addChildView(sidebarView);
+  let htmlFullscreen = false;
+  let nativeFullscreen = false;
+  let fullscreenSyncTimer: ReturnType<typeof setTimeout> | null = null;
   const broadcastFullscreen = (): void => {
-    const fullscreen = win.isFullScreen();
+    if (win.isDestroyed()) return;
+    const state = {
+      windowFullscreen: win.isFullScreen(),
+      nativeFullscreen,
+    };
+    fullscreenStates.set(win, state);
+    setNativeFullscreenState(win, nativeFullscreen);
     for (const view of [contentView, toolbarView, sidebarView]) {
       if (!view.webContents.isDestroyed()) {
-        view.webContents.send("browser:window-fullscreen", fullscreen);
+        view.webContents.send(
+          "browser:window-fullscreen",
+          state.windowFullscreen,
+          state.nativeFullscreen,
+        );
       }
     }
   };
-  win.on("enter-full-screen", broadcastFullscreen);
-  win.on("leave-full-screen", broadcastFullscreen);
+  const syncNativeFullscreen = (): void => {
+    if (fullscreenSyncTimer) clearTimeout(fullscreenSyncTimer);
+    fullscreenSyncTimer = setTimeout(() => {
+      fullscreenSyncTimer = null;
+      if (win.isDestroyed()) return;
+      const windowFullscreen = win.isFullScreen();
+      if (!windowFullscreen) nativeFullscreen = false;
+      else if (!htmlFullscreen) nativeFullscreen = true;
+      broadcastFullscreen();
+    }, FULLSCREEN_EVENT_SETTLE_MS);
+  };
+  win.on("enter-full-screen", syncNativeFullscreen);
+  win.on("leave-full-screen", syncNativeFullscreen);
+  const htmlFullscreenEvents = win as unknown as {
+    on(
+      event: "enter-html-full-screen" | "leave-html-full-screen",
+      listener: () => void,
+    ): void;
+  };
+  htmlFullscreenEvents.on("enter-html-full-screen", () => {
+    htmlFullscreen = true;
+    broadcastFullscreen();
+  });
+  htmlFullscreenEvents.on("leave-html-full-screen", () => {
+    htmlFullscreen = false;
+    if (!win.isFullScreen()) nativeFullscreen = false;
+    broadcastFullscreen();
+  });
   // The hover panel pushing the page aside moves the page card frame by frame (browser.ts).
   setPageSlideListener(slideBrowserPage);
   attachBrowserShell(

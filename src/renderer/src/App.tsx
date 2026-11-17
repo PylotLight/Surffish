@@ -62,8 +62,31 @@ function useFrameSettings(): {
 }
 
 export default function App(): React.JSX.Element {
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => window.api.browser.onWindowFullscreen(setFullscreen), []);
+  const [fullscreen, setFullscreen] = useState({
+    windowFullscreen: false,
+    nativeFullscreen: false,
+  });
+  useEffect(() => {
+    let mounted = true;
+    let eventVersion = 0;
+    const unsubscribe = window.api.browser.onWindowFullscreen(
+      (windowFullscreen, nativeFullscreen) => {
+        eventVersion += 1;
+        setFullscreen({ windowFullscreen, nativeFullscreen });
+      },
+    );
+    const queryVersion = eventVersion;
+    void window.api.browser
+      .getWindowFullscreenState()
+      .then((state) => {
+        if (mounted && eventVersion === queryVersion) setFullscreen(state);
+      })
+      .catch(() => undefined);
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
   const { frameTransparency, sidebarPageMode } = useFrameSettings();
   const style = useMemo(
     () =>
@@ -85,7 +108,8 @@ export default function App(): React.JSX.Element {
       className="app-shell"
       data-platform={window.api.platform}
       data-surface={surface}
-      data-fullscreen={fullscreen ? "true" : undefined}
+      data-fullscreen={fullscreen.windowFullscreen ? "true" : undefined}
+      data-native-fullscreen={fullscreen.nativeFullscreen ? "true" : undefined}
       data-frame-solid={
         frameTransparencyAllowsGlass(frameTransparency) ? undefined : "true"
       }

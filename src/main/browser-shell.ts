@@ -147,6 +147,8 @@ interface ShellState {
   pageSlideHold: number | null;
   /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
   sidebarDocked: boolean | null;
+  /** Native app fullscreen, distinct from a site requesting HTML fullscreen. */
+  nativeFullscreen: boolean;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
   dismissOnBlur: () => void;
   dismissOnSidebarPress: (
@@ -446,6 +448,17 @@ function scheduleShellLayout(shell: ShellState): void {
   });
 }
 
+/** Keep native app fullscreen separate from page-requested HTML fullscreen. */
+export function setNativeFullscreenState(
+  window: BaseWindow,
+  nativeFullscreen: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.nativeFullscreen === nativeFullscreen) return;
+  shell.nativeFullscreen = nativeFullscreen;
+  shell.scheduleLayout();
+}
+
 function clearRevealTimer(shell: ShellState): void {
   if (shell.revealTimer) clearTimeout(shell.revealTimer);
   shell.revealTimer = null;
@@ -521,6 +534,8 @@ function applyShellLayout(shell: ShellState): void {
     Math.max(toolbarMetrics.toolbarExtent, toolbarHeight),
     height,
   );
+  const fullscreen = shell.window.isFullScreen();
+  const nativeFullscreen = shell.nativeFullscreen;
 
   // Keep the full React renderer alive and correctly sized for New Tab and local panels.
   // When native overlays are active it is hidden, so its full-window bounds cannot steal page input.
@@ -540,7 +555,8 @@ function applyShellLayout(shell: ShellState): void {
     width,
     height: coversPage ? height : toolbarExtent,
   });
-  shellViews.toolbar.setVisible(overlayMode);
+  // Native fullscreen is page-only, even if a wake snapshot was still covering the page.
+  shellViews.toolbar.setVisible(overlayMode && !nativeFullscreen);
 
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
@@ -553,7 +569,6 @@ function applyShellLayout(shell: ShellState): void {
   // hover panel is not part of this surface: it floats over the page as its own rounded card
   // (SIDEBAR_FLOAT), so it never shares an edge with the toolbar. Off while the content renderer
   // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
-  const fullscreen = shell.window.isFullScreen();
   const frameShown = overlayMode && !fullscreen;
   // Frame transparency 0 is fully solid: the opaque frame and hover card, like Linux.
   const glass =
@@ -632,9 +647,13 @@ function applyShellLayout(shell: ShellState): void {
   // A fullscreen/expanded video takes the whole window: the sidebar gets out of the way
   // and does not reveal on hover (its rail is gone). Native window fullscreen is handled
   // by `fullscreen` above.
-  const overlayShown = overlayMode && sidebarVisible && !pageFullscreen;
+  const overlayShown =
+    overlayMode && sidebarVisible && !pageFullscreen && !nativeFullscreen;
   const railShown =
-    overlayMode && shell.chromeState.sidebarMode === "tabs" && railWidth > 0;
+    overlayMode &&
+    shell.chromeState.sidebarMode === "tabs" &&
+    railWidth > 0 &&
+    !nativeFullscreen;
   const animate = shell.lastOverlayMode === overlayMode;
   shell.lastOverlayMode = overlayMode;
   // Live pages start right of the frame's left side: the rail while the sidebar auto-hides (Gmail's
@@ -653,7 +672,10 @@ function applyShellLayout(shell: ShellState): void {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");
   }
-  shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
+  shell.sidebarMotion.setOpen(overlayShown, {
+    animate: animate && !nativeFullscreen,
+    rail: railShown,
+  });
   // A fullscreen/expanded video should be fully interactive: let the click-through sidebar
   // pass every event to the page, so its controls work even while the sidebar is rail-less.
   if (shell.pageMouseIgnored !== pageFullscreen) {
@@ -734,6 +756,7 @@ export function attachBrowserShell(
     pageSlide: 0,
     pageSlideHold: null,
     sidebarDocked: null,
+    nativeFullscreen: false,
     lastActiveTabId: null,
     activeTabSince: 0,
     revealGuard: null,
