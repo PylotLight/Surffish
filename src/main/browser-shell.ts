@@ -47,6 +47,10 @@ import {
   sidebarPushStyleForMode,
   type SidebarPageMode,
 } from "../shared/sidebar-backdrop";
+import {
+  trackPageFullScreen,
+  type PageFullScreenTracker,
+} from "./page-fullscreen";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
 import {
@@ -157,6 +161,14 @@ interface ShellState {
   revealGuard: SidebarRevealGuard | null;
   /** What the next layout is for, for the sidebar lock debug log. */
   layoutCause: string | null;
+  /** The active page looks expanded: a video filled the window, whether through the
+  // fullscreen API or a video stretched to cover the viewport (how X expands its
+  // in-feed videos). The sidebar gets out of the way when this happens. */
+  pageFullscreen: boolean;
+  /** Whether the sidebar is currently click-through (a fullscreen video takes the page). */
+  pageMouseIgnored: boolean;
+  /** Watches the content view for an expanded video; stopped on window detach. Null until attached. */
+  pageFullScreenTracker: PageFullScreenTracker;
 }
 
 export type SidebarOverlayEvent = "shown" | "hidden" | "prefetch";
@@ -602,7 +614,8 @@ function applyShellLayout(shell: ShellState): void {
   // A floating hover card keeps the sidebar width: the view is one float gap wider and the card
   // stands that gap in from its left edge (the renderer insets it, main insets its glass layer).
   const sidebarWidth = overlaySidebarWidth(shell, width);
-  const railWidth = sidebarRailWidth(width);
+  const pageFullscreen = shell.pageFullscreen;
+  const railWidth = pageFullscreen ? 0 : sidebarRailWidth(width);
   const sidebarTop = Math.min(height, frameTop);
   shell.sidebarMotion.layout({
     y: sidebarTop,
@@ -613,7 +626,10 @@ function applyShellLayout(shell: ShellState): void {
   // Open/close grows along one timeline while live pages stay on screen; entering or leaving
   // New Tab / a full panel snaps (the in-page sidebar takes over there). With the tab list the
   // collapsed view stays as the icon rail, so the sidebar never vanishes completely.
-  const overlayShown = overlayMode && sidebarVisible;
+  // A fullscreen/expanded video takes the whole window: the sidebar gets out of the way
+  // and does not reveal on hover (its rail is gone). Native window fullscreen is handled
+  // by `fullscreen` above.
+  const overlayShown = overlayMode && sidebarVisible && !pageFullscreen;
   const railShown =
     overlayMode && shell.chromeState.sidebarMode === "tabs" && railWidth > 0;
   const animate = shell.lastOverlayMode === overlayMode;
@@ -635,6 +651,21 @@ function applyShellLayout(shell: ShellState): void {
     emitSidebarOverlay(shell, "shown");
   }
   shell.sidebarMotion.setOpen(overlayShown, { animate, rail: railShown });
+  // A fullscreen/expanded video should be fully interactive: let the click-through sidebar
+  // pass every event to the page, so its controls work even while the sidebar is rail-less.
+  if (shell.pageMouseIgnored !== pageFullscreen) {
+    shell.pageMouseIgnored = pageFullscreen;
+    (
+      shellViews.sidebar as unknown as {
+        setIgnoreMouseEvents(
+          ignore: boolean,
+          options?: { forward: boolean },
+        ): void;
+      }
+    ).setIgnoreMouseEvents(pageFullscreen, {
+      forward: true,
+    });
+  }
   syncPageSlide(shell);
   shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
   const cause = shell.layoutCause ?? "layout";
@@ -704,6 +735,9 @@ export function attachBrowserShell(
     activeTabSince: 0,
     revealGuard: null,
     layoutCause: null,
+    pageFullscreen: false,
+    pageMouseIgnored: false,
+    pageFullScreenTracker: null as unknown as PageFullScreenTracker,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
     dismissOnSidebarPress: (_event, mouseEvent) =>
       dismissToolbarPopoversOnPress(shell, "sidebar", mouseEvent.type),
@@ -722,6 +756,19 @@ export function attachBrowserShell(
     },
   });
   shells.set(window, shell);
+  // Watch the active page for an expanded video (fullscreen API or a video covering the
+  // viewport). When it expands, the sidebar collapses its rail and goes click-through so the
+  // video is fully interactive; when it shrinks back, the rail returns. Only polls while the
+  // sidebar rail is a floating overlay (live pages).
+  shell.pageFullScreenTracker = trackPageFullScreen(
+    views.content.webContents,
+    (expanded) => {
+      if (shell.pageFullscreen === expanded) return;
+      shell.pageFullscreen = expanded;
+      shell.scheduleLayout();
+    },
+    () => shouldUseNativeOverlays(shell),
+  );
   watchFrameTheme();
   for (const contents of shell.renderers.keys())
     bindContentsToWindow(contents, window);
@@ -779,6 +826,7 @@ export function detachBrowserShell(window?: BaseWindow): void {
     shell.revealGuard = null;
     shell.sidebarMotion.dispose();
     shell.syncPageBounds = null;
+    shell.pageFullScreenTracker.stop();
     for (const contents of shell.renderers.keys())
       retiredRenderers.add(contents);
     shell.renderers.clear();
