@@ -23,6 +23,10 @@ const files = cssFiles(rendererDirectory);
 const blurring = files.filter((file) =>
   /(^|[^-])backdrop-filter:\s*(?!none)/m.test(readFileSync(file, "utf8")),
 );
+const browserCss = readFileSync(
+  join(rendererDirectory, "src/views/Browser.css"),
+  "utf8",
+);
 
 describe("renderer CSS backdrop-filter survives minification", () => {
   test("there are blurring stylesheets to check", () => {
@@ -59,4 +63,25 @@ describe("renderer CSS backdrop-filter survives minification", () => {
       expect(code).not.toMatch(/-webkit-backdrop-filter:(?!none)[^;}]*blur/);
     });
   }
+});
+
+describe("native fullscreen browser chrome", () => {
+  test("hides the toolbar and sidebar without a hover or focus reveal path", () => {
+    const rule = browserCss.match(
+      /\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-chrome,\s*\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-sidebar\s*\{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toMatch(/display:\s*none\s*;/);
+    expect(browserCss).not.toMatch(
+      /\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-chrome:(?:hover|focus-within|focus-visible)/,
+    );
+  });
+
+  test("keeps the website fullscreen top-edge reveal separate", () => {
+    const rule = browserCss.match(
+      /\.app-shell\[data-fullscreen="true"\]:not\(\[data-native-fullscreen="true"\]\)\s+\.browser-chrome\s*\{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toContain("translateY(calc(-100% + 5px))");
+    expect(browserCss).toContain(".browser-chrome:hover");
+    expect(browserCss).toContain(".browser-chrome:focus-within");
+  });
 });

@@ -5755,8 +5755,9 @@
     );
 }
 
-/* Keep the browser chrome (and the existing native traffic-light row) out of the way in native fullscreen. A narrow top reveal strip keeps it reachable. */
-.app-shell[data-fullscreen="true"] .browser-chrome {
+/* Site-requested fullscreen keeps the existing narrow top-edge reveal behavior. */
+.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
+  .browser-chrome {
   position: absolute;
   z-index: 10;
   top: 0;
@@ -5765,15 +5766,25 @@
   transform: translateY(calc(-100% + 5px));
   transition: transform 160ms ease-out;
 }
-.app-shell[data-fullscreen="true"] .browser-chrome:hover,
-.app-shell[data-fullscreen="true"] .browser-chrome:focus-within,
-.app-shell[data-fullscreen="true"] .browser-chrome:focus-visible {
+.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
+  .browser-chrome:hover,
+.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
+  .browser-chrome:focus-within,
+.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
+  .browser-chrome:focus-visible {
   transform: translateY(0);
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-shell[data-fullscreen="true"] .browser-chrome {
+  .app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
+    .browser-chrome {
     transition: none;
   }
+}
+
+/* Native app fullscreen is content-only: no reveal strip, toolbar, or sidebar. */
+.app-shell[data-native-fullscreen="true"] .browser-chrome,
+.app-shell[data-native-fullscreen="true"] .browser-sidebar {
+  display: none;
 }
 
 /* Over live pages the toolbar strip is part of the browser frame: the window root carries the
