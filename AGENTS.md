@@ -5,6 +5,7 @@ Bun + Electron + React desktop browser. Setup, scripts and architecture: [docs/d
 - Before opening a PR: `bun lint` (requires Bun canary), `bun run format:check`, `bun run typecheck`, and `bun run test` must pass.
 - Pure logic goes in `src/shared` with a unit test added to the `test` script in `package.json`.
 - Never cut a release (`bun run release`) without the maintainer's approval.
+- Always push to the remote after committing (unless the user says otherwise). For this PylotLight repo, push with plain `git` — the `~/.local/bin/git` wrapper tunnels the remote through the SOCKS5 forwarder; don't prefix env vars.
 
 ## Release notes
 
