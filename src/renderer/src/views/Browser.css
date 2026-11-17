@@ -5755,30 +5755,11 @@
     );
 }
 
-/* Site-requested fullscreen keeps the existing narrow top-edge reveal behavior. */
-.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
-  .browser-chrome {
-  position: absolute;
-  z-index: 10;
-  top: 0;
-  right: 0;
-  left: 0;
-  transform: translateY(calc(-100% + 5px));
-  transition: transform 160ms ease-out;
-}
-.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
-  .browser-chrome:hover,
-.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
-  .browser-chrome:focus-within,
-.app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
-  .browser-chrome:focus-visible {
-  transform: translateY(0);
-}
-@media (prefers-reduced-motion: reduce) {
-  .app-shell[data-fullscreen="true"]:not([data-native-fullscreen="true"])
-    .browser-chrome {
-    transition: none;
-  }
+/* Page-requested fullscreen (including video players) is content-only: keep the
+ * site's player controls in-page, and never expose Surffish chrome on hover. */
+.app-shell[data-page-fullscreen="true"] .browser-chrome,
+.app-shell[data-page-fullscreen="true"] .browser-sidebar {
+  display: none;
 }
 
 /* Native app fullscreen is content-only: no reveal strip, toolbar, or sidebar. */

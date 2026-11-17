@@ -111,13 +111,18 @@ const api = {
   platform: process.platform,
   browser: {
     onWindowFullscreen: (
-      callback: (fullscreen: boolean, nativeFullscreen: boolean) => void,
+      callback: (
+        fullscreen: boolean,
+        nativeFullscreen: boolean,
+        htmlFullscreen: boolean,
+      ) => void,
     ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         fullscreen: boolean,
         nativeFullscreen: boolean,
-      ): void => callback(fullscreen, nativeFullscreen);
+        htmlFullscreen: boolean,
+      ): void => callback(fullscreen, nativeFullscreen, htmlFullscreen);
       ipcRenderer.on("browser:window-fullscreen", listener);
       return () =>
         ipcRenderer.removeListener("browser:window-fullscreen", listener);
@@ -125,6 +130,7 @@ const api = {
     getWindowFullscreenState: (): Promise<{
       windowFullscreen: boolean;
       nativeFullscreen: boolean;
+      htmlFullscreen: boolean;
     }> => ipcRenderer.invoke("browser:window-fullscreen-state"),
     quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
     windowControl: (

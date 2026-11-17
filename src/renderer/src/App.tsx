@@ -65,14 +65,15 @@ export default function App(): React.JSX.Element {
   const [fullscreen, setFullscreen] = useState({
     windowFullscreen: false,
     nativeFullscreen: false,
+    htmlFullscreen: false,
   });
   useEffect(() => {
     let mounted = true;
     let eventVersion = 0;
     const unsubscribe = window.api.browser.onWindowFullscreen(
-      (windowFullscreen, nativeFullscreen) => {
+      (windowFullscreen, nativeFullscreen, htmlFullscreen) => {
         eventVersion += 1;
-        setFullscreen({ windowFullscreen, nativeFullscreen });
+        setFullscreen({ windowFullscreen, nativeFullscreen, htmlFullscreen });
       },
     );
     const queryVersion = eventVersion;
@@ -110,6 +111,7 @@ export default function App(): React.JSX.Element {
       data-surface={surface}
       data-fullscreen={fullscreen.windowFullscreen ? "true" : undefined}
       data-native-fullscreen={fullscreen.nativeFullscreen ? "true" : undefined}
+      data-page-fullscreen={fullscreen.htmlFullscreen ? "true" : undefined}
       data-frame-solid={
         frameTransparencyAllowsGlass(frameTransparency) ? undefined : "true"
       }

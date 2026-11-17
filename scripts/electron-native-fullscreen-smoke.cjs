@@ -1,4 +1,4 @@
-// Native Electron window fullscreen must show only page content; page HTML/video fullscreen stays separate.
+// Native app and page video fullscreen must show only page content and keep the page controls usable.
 // Run after `bun run build`: `bun run test:electron-native-fullscreen` (headless Linux: prefix with `xvfb-run -a`).
 "use strict";
 
@@ -20,8 +20,9 @@ const server = createServer((_request, response) => {
     "Cache-Control": "no-store",
   });
   response.end(`<!doctype html><meta charset="utf-8"><title>${fixtureTitle}</title>
-    <style>html,body{margin:0;min-height:100%;font:20px system-ui;background:#245b54;color:white}#fullscreen{position:absolute;top:12px;left:12px;padding:14px}</style>
-    <button id="fullscreen" onclick="document.documentElement.requestFullscreen()">Enter page fullscreen</button>
+    <style>html,body{margin:0;min-height:100%;font:20px system-ui;background:#245b54;color:white}#fullscreen{position:absolute;top:12px;left:12px;padding:14px}#player{position:absolute;top:90px;left:12px;width:640px;height:360px;background:#000}#player:fullscreen{width:100vw;height:100vh;object-fit:contain}</style>
+    <video id="player" controls></video>
+    <button id="fullscreen" onclick="document.querySelector('#player').requestFullscreen()">Enter video fullscreen</button>
     <main style="padding:100px 24px">Page content fills the native fullscreen window.</main>`);
 });
 let mainWindow;
@@ -91,6 +92,7 @@ const chromeState = `(() => {
   return {
     fullscreen: shell?.dataset.fullscreen === 'true',
     nativeFullscreen: shell?.dataset.nativeFullscreen === 'true',
+    htmlFullscreen: shell?.dataset.pageFullscreen === 'true',
     display: chrome ? getComputedStyle(chrome).display : null,
     visibility: chrome ? getComputedStyle(chrome).visibility : null,
     transform: chrome ? getComputedStyle(chrome).transform : null,
@@ -192,7 +194,11 @@ async function run() {
   ]) {
     assert.deepEqual(
       await evaluate(view, "window.api.browser.getWindowFullscreenState()"),
-      { windowFullscreen: true, nativeFullscreen: true },
+      {
+        windowFullscreen: true,
+        nativeFullscreen: true,
+        htmlFullscreen: false,
+      },
       `${name} renderer receives native fullscreen state from main`,
     );
   }
@@ -206,6 +212,7 @@ async function run() {
   assert.deepEqual(toolbarChrome, {
     fullscreen: true,
     nativeFullscreen: true,
+    htmlFullscreen: false,
     display: "none",
     visibility: "visible",
     transform: "none",
@@ -234,9 +241,7 @@ async function run() {
   );
   assert.notEqual((await evaluate(toolbar, chromeState)).display, "none");
 
-  smoke.step(
-    "verify page HTML fullscreen does not activate native chrome hiding",
-  );
+  smoke.step("enter page video fullscreen and hide Surffish chrome");
   fixturePage.webContents.focus();
   fixturePage.webContents.sendInputEvent({
     type: "mouseDown",
@@ -256,20 +261,41 @@ async function run() {
     () =>
       smoke.evaluate(
         fixturePage.webContents,
-        "Boolean(document.fullscreenElement)",
+        "document.fullscreenElement === document.querySelector('#player')",
       ),
-    "the fixture page to enter HTML fullscreen",
+    "the fixture video to enter HTML fullscreen",
   );
   await waitFor(async () => {
     const state = await evaluate(toolbar, chromeState);
     return (
+      state.htmlFullscreen &&
       !state.nativeFullscreen &&
-      toolbar.getVisible() &&
-      state.display !== "none"
+      !toolbar.getVisible() &&
+      state.display === "none"
     );
-  }, "website fullscreen to keep the native-only chrome hide inactive");
+  }, "page video fullscreen to hide the toolbar renderer and its chrome");
   assert.equal((await evaluate(toolbar, chromeState)).nativeFullscreen, false);
-  assert.notEqual((await evaluate(toolbar, chromeState)).display, "none");
+  assert.equal(
+    await smoke.evaluate(
+      fixturePage.webContents,
+      "document.fullscreenElement.controls === true",
+    ),
+    true,
+    "the page's video controls remain enabled in fullscreen",
+  );
+  assert.equal(
+    fixturePage.getVisible(),
+    true,
+    "the fullscreen video page remains visible",
+  );
+  assert.equal(
+    await evaluate(
+      sidebar,
+      "getComputedStyle(document.querySelector('.browser-sidebar')).display",
+    ),
+    "none",
+    "the separate sidebar renderer is hidden during page video fullscreen",
+  );
   await smoke.evaluate(fixturePage.webContents, "document.exitFullscreen()");
   await waitFor(
     async () =>
@@ -281,8 +307,13 @@ async function run() {
   );
   await waitFor(async () => {
     const state = await evaluate(toolbar, chromeState);
-    return !state.nativeFullscreen && toolbar.getVisible();
-  }, "the toolbar to remain available after website fullscreen");
+    return (
+      !state.htmlFullscreen &&
+      !state.nativeFullscreen &&
+      toolbar.getVisible() &&
+      state.display !== "none"
+    );
+  }, "normal Surffish chrome to return after page video fullscreen");
 
   console.log("Electron native fullscreen smoke passed.");
 }
