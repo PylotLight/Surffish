@@ -1,0 +1,6 @@
+[test]
+# Load the global electron mock before every test file. The dev `electron` stub
+# exports the binary path as a string, so a runtime `import { app } from "electron"`
+# (used by main-process modules) throws "Export named 'app' not found" under bun
+# canary. This stubs every named export so loading a main module no longer errors.
+setupFiles = ["scripts/test-setup/electron.ts"]
