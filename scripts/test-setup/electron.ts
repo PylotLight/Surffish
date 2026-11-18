@@ -15,6 +15,8 @@
 // unaffected. Test files that need real electron behaviour (e.g. shutdown.test.ts)
 // register their own `mock.module("electron", …)`, which overrides this one.
 
+import { mock } from "bun:test";
+
 const noop = (): unknown => ({});
 
 const apiStub: unknown = new Proxy(noop, {
@@ -23,15 +25,17 @@ const apiStub: unknown = new Proxy(noop, {
       return undefined;
     if (prop === Symbol.toPrimitive) return () => "";
     if (prop === Symbol.iterator) return undefined;
+    if (
+      prop === Symbol.for("nodejs.util.inspect.custom") ||
+      prop === "inspect" ||
+      prop === "toString"
+    )
+      return () => "electron (mock)";
     if (typeof prop === "symbol") return undefined;
-    if (prop === "inspect" || prop === "toString")
-      return () => "electron (mock)";
-    if (prop === Symbol.for("nodejs.util.inspect.custom"))
-      return () => "electron (mock)";
     // Any other property is itself a stub: callable, constructable, with stubbed
     // methods, so `app.getPath(...)`, `browserWindow.getAllWindows()`, etc. no-op.
     return new Proxy(noop, {
-      get(subTarget, subProp) {
+      get(_subTarget, subProp) {
         if (subProp === "then" || subProp === "catch" || subProp === "finally")
           return undefined;
         if (subProp === Symbol.toPrimitive) return () => "";
