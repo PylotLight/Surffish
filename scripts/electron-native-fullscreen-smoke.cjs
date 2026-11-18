@@ -81,6 +81,24 @@ function visibleChildLayers() {
     });
 }
 
+/** The live page view covers the whole window (fullscreen is content-only, no toolbar inset). */
+function pageFillsWindow() {
+  const page = fixturePage.getBounds();
+  const window = mainWindow.getContentBounds();
+  return page.x === 0 &&
+    page.y === 0 &&
+    page.width === window.width &&
+    page.height === window.height
+    ? page
+    : false;
+}
+
+/** The live page view sits below the toolbar again (windowed). */
+function pageBelowToolbar() {
+  const page = fixturePage.getBounds();
+  return page.y > 0 && page.height > 0 ? page : false;
+}
+
 async function evaluate(view, source) {
   assert.ok(view?.webContents && !view.webContents.isDestroyed());
   return smoke.evaluate(view.webContents, source);
@@ -187,6 +205,10 @@ async function run() {
     const layers = visibleChildLayers();
     return layers.length === 1 && layers[0] === "live-page" ? layers : false;
   }, "the actual visible child-view stack to contain only the live page");
+  await waitFor(
+    pageFillsWindow,
+    "the live page to fill the window from its top edge in native fullscreen",
+  );
   for (const [name, view] of [
     ["content", content],
     ["toolbar", toolbar],
@@ -240,6 +262,10 @@ async function run() {
     "normal window chrome to return after native fullscreen",
   );
   assert.notEqual((await evaluate(toolbar, chromeState)).display, "none");
+  await waitFor(
+    pageBelowToolbar,
+    "the live page to sit below the toolbar again after native fullscreen",
+  );
 
   smoke.step("enter page video fullscreen and hide Surffish chrome");
   fixturePage.webContents.focus();
@@ -274,6 +300,10 @@ async function run() {
       state.display === "none"
     );
   }, "page video fullscreen to hide the toolbar renderer and its chrome");
+  await waitFor(
+    pageFillsWindow,
+    "the live page to fill the window from its top edge in video fullscreen",
+  );
   assert.equal((await evaluate(toolbar, chromeState)).nativeFullscreen, false);
   assert.equal(
     await smoke.evaluate(
@@ -314,6 +344,10 @@ async function run() {
       state.display !== "none"
     );
   }, "normal Surffish chrome to return after page video fullscreen");
+  await waitFor(
+    pageBelowToolbar,
+    "the live page to sit below the toolbar again after video fullscreen",
+  );
 
   console.log("Electron native fullscreen smoke passed.");
 }

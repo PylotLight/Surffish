@@ -102,6 +102,8 @@ type BrowserShellLayoutSync = (
   window: BaseWindow,
   /** Where the browser frame's left side ends for live pages, null for no frame (shared/page-view-bounds.ts). */
   frameLeft: number | null,
+  /** Window fullscreen (native or a page's HTML fullscreen): the live page fills the whole window. */
+  contentOnly: boolean,
 ) => void;
 
 /** One window's shell: its three renderer surfaces and the chrome (sidebar/toolbar) state they share. */
@@ -569,9 +571,9 @@ function applyShellLayout(shell: ShellState): void {
   });
   // Native and page/video fullscreen are content-only. Hide the separate toolbar overlay too, so
   // it cannot intercept clicks on the page's player controls while its renderer chrome is hidden.
-  shellViews.toolbar.setVisible(
-    overlayMode && !nativeFullscreen && !pageFullscreen,
-  );
+  // An in-page expanded video (pageFullscreen without window fullscreen) keeps the toolbar: the page
+  // still sits below it, so hiding it would only leave an empty strip.
+  shellViews.toolbar.setVisible(overlayMode && !fullscreen);
 
   // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
   // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
@@ -690,7 +692,16 @@ function applyShellLayout(shell: ShellState): void {
     rail: railShown,
   });
   syncPageSlide(shell);
-  shell.syncPageBounds?.(width, height, overlayMode, shell.window, frameLeft);
+  // Fullscreen is content-only: the page fills the window from its top edge. The content renderer
+  // that measures the page area is hidden over live pages, so it never reports the toolbar going away.
+  shell.syncPageBounds?.(
+    width,
+    height,
+    overlayMode,
+    shell.window,
+    frameLeft,
+    fullscreen,
+  );
   const cause = shell.layoutCause ?? "layout";
   shell.layoutCause = null;
   shell.revealGuard?.noteChromeChanged(cause);
