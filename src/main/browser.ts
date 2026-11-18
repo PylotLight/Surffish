@@ -550,6 +550,8 @@ interface BrowserWindowState {
   pageArea?: BrowserBounds;
   /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
   pageFrameLeft?: number | null;
+  /** Window fullscreen over a live page: the page fills the window (browser-shell.ts). */
+  pageFillsWindow?: { width: number; height: number } | null;
   /**
    * How far the hover panel pushes the page card's left edge right of `browserBounds` (browser-shell.ts
    * syncPageSlide): the views shrink from the left, `browserBounds` stays the frame's rect.
@@ -6431,10 +6433,11 @@ export function setBrowserBounds(input: unknown): void {
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!)),
   };
-  const browserBounds = (w.browserBounds = framePageArea(
-    w.pageArea,
-    w.pageFrameLeft ?? null,
-  ));
+  const fill = w.pageFillsWindow ?? null;
+  const browserBounds = (w.browserBounds =
+    fill && w.pageArea.width > 0 && w.pageArea.height > 0
+      ? { x: 0, y: 0, width: fill.width, height: fill.height }
+      : framePageArea(w.pageArea, w.pageFrameLeft ?? null));
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
   if (browserBounds.width === 0 || browserBounds.height === 0)
     hideLinkStatus(false, w.window);
@@ -6496,21 +6499,32 @@ export function syncBrowserBoundsToWindow(
   overlayMode: boolean,
   window?: BaseWindow,
   frameLeft: number | null = null,
+  contentOnly = false,
 ): void {
   const w = window ? windowStateFor(window) : currentWindowState();
   if (!isLiveWindow(w)) return;
+  const fill = overlayMode && contentOnly && width > 0 && height > 0;
   const nextFrame =
-    overlayMode && frameLeft !== null
+    overlayMode && frameLeft !== null && !fill
       ? Math.max(0, Math.round(frameLeft))
       : null;
-  const frameChanged = nextFrame !== (w.pageFrameLeft ?? null);
+  const prevFill = w.pageFillsWindow ?? null;
+  const frameChanged =
+    nextFrame !== (w.pageFrameLeft ?? null) ||
+    fill !== (prevFill !== null) ||
+    (fill && (prevFill?.width !== width || prevFill?.height !== height));
   w.pageFrameLeft = nextFrame;
+  w.pageFillsWindow = fill ? { width, height } : null;
   if (!overlayMode || width <= 0 || height <= 0) return;
   const area = w.pageArea ?? w.browserBounds;
   if (area.width <= 0 || area.height <= 0) return;
+  // pageArea keeps its top (the toolbar's bottom line) through fullscreen, so leaving it lands the
+  // page back below the toolbar without waiting on the hidden content renderer to measure again.
   const y = Math.min(area.y, height);
   w.pageArea = { x: 0, y, width, height: Math.max(0, height - y) };
-  const nextBounds: BrowserBounds = framePageArea(w.pageArea, nextFrame);
+  const nextBounds: BrowserBounds = fill
+    ? { x: 0, y: 0, width, height }
+    : framePageArea(w.pageArea, nextFrame);
   const { browserBounds } = w;
   if (
     !frameChanged &&
