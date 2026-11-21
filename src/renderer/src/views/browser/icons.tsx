@@ -37,7 +37,7 @@ export function NewTabSiteIcon({
       style={{ width: iconSize, minHeight: iconSize }}
       type="button"
       onClick={onOpen}
-      title={`Open ${site.title} · ${site.origin}`}
+      title={`Open ${site.title} · ${site.url}`}
       aria-label={`Open ${site.title}, ${hostname}`}
     >
       <span className="new-tab-site-icon" aria-hidden="true">

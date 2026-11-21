@@ -49,7 +49,7 @@ test("omits pinned origins from frequent tiles and respects the local tile cap",
   assert.equal(sites[0]?.origin, "https://site10.test");
 });
 
-test("normalizes favorite tiles by origin and rejects unsafe or credential-bearing URLs", () => {
+test("keeps a favourite's own page URL and uses its origin only for the icon", () => {
   assert.deepEqual(
     toQuickLinkSite({
       title: "  Example  ",
@@ -57,9 +57,23 @@ test("normalizes favorite tiles by origin and rejects unsafe or credential-beari
     }),
     {
       title: "Example",
-      url: "https://example.test",
+      url: "https://example.test/path?q=secret",
       origin: "https://example.test",
     },
+  );
+  // Two favourites on one site stay two different pages, not one root-domain tile.
+  assert.deepEqual(
+    [
+      toQuickLinkSite({ title: "Maps", url: "https://www.google.com/maps" }),
+      toQuickLinkSite({
+        title: "Mail",
+        url: "https://www.google.com/mail/u/0",
+      }),
+    ].map((site) => [site?.title, site?.url, site?.origin]),
+    [
+      ["Maps", "https://www.google.com/maps", "https://www.google.com"],
+      ["Mail", "https://www.google.com/mail/u/0", "https://www.google.com"],
+    ],
   );
   assert.equal(
     toQuickLinkSite({ title: "Unsafe", url: "javascript:alert(1)" }),
@@ -84,7 +98,7 @@ test("carries a saved favicon to favorite and most-visited site tiles", () => {
     }),
     {
       title: "Favorite",
-      url: "https://favorite.test",
+      url: "https://favorite.test/",
       origin: "https://favorite.test",
       faviconUrl,
     },

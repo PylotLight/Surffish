@@ -3784,7 +3784,7 @@ export default function Browser({
                               >
                                 {frequentlyVisitedSites.map((site) => (
                                   <NewTabSiteIcon
-                                    key={site.origin}
+                                    key={site.url}
                                     site={site}
                                     faviconUrl={
                                       cachedSiteIcons[site.origin] ??
@@ -3816,7 +3816,7 @@ export default function Browser({
                             >
                               {favoriteSites.map((site) => (
                                 <NewTabSiteIcon
-                                  key={site.origin}
+                                  key={site.url}
                                   site={site}
                                   faviconUrl={
                                     cachedSiteIcons[site.origin] ??

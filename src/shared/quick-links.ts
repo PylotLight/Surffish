@@ -1,4 +1,5 @@
 import type { BrowsingHistoryEntry, PinnedSite } from "./types";
+import { normalizeBookmarkUrl } from "./bookmarks.ts";
 import { normalizeHttpOrigin } from "./persistence.ts";
 
 export const MAX_FREQUENT_SITES = 8;
@@ -67,12 +68,17 @@ export function buildFrequentSites(
     }));
 }
 
+/**
+ * A favourite opens its own page, not the site root: the URL keeps its path, query and hash
+ * (a bookmarked Google Maps page stays Maps). The origin is only the key for its icon.
+ */
 export function toQuickLinkSite(site: PinnedSite): QuickLinkSite | null {
+  const url = normalizeBookmarkUrl(site.url);
   const origin = normalizeHttpOrigin(site.url);
-  if (!origin) return null;
+  if (!url || !origin) return null;
   return {
     title: site.title.trim() || new URL(origin).hostname,
-    url: origin,
+    url,
     origin,
     ...(site.faviconUrl ? { faviconUrl: site.faviconUrl } : {}),
   };
