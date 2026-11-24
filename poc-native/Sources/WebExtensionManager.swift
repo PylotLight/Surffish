@@ -27,7 +27,11 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     
     public var bramblePopupWebView: WKWebView? {
         guard let ctx = brambleContext, let action = ctx.action(for: nil) else { return nil }
-        return action.popupWebView
+        if let webView = action.popupWebView {
+            BrambleNativeBridge.shared.applyTo(userContentController: webView.configuration.userContentController)
+            return webView
+        }
+        return nil
     }
     
     public func context(for url: URL) -> WKWebExtensionContext? {
@@ -40,7 +44,15 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     }
     
     public func openBrambleOptionsTab() {
-        guard let ctx = brambleContext, let url = ctx.optionsPageURL else { return }
+        guard let ctx = brambleContext else {
+            print("[WebExtension] Warning: Bramble context is nil, cannot open options")
+            return
+        }
+        guard let url = ctx.optionsPageURL else {
+            print("[WebExtension] Warning: Bramble optionsPageURL is nil")
+            return
+        }
+        print("[WebExtension] Opening Bramble options tab: \(url.absoluteString)")
         _ = TabManager.shared.createTab(url: url, makeActive: true)
     }
     
@@ -48,6 +60,19 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public func loadExtension(from directoryURL: URL) async throws -> LoadedExtensionInfo {
         let ext = try await WKWebExtension(resourceBaseURL: directoryURL)
         let context = WKWebExtensionContext(for: ext)
+        
+        let name = ext.displayName ?? directoryURL.lastPathComponent
+        let isBramble = name.lowercased().contains("bramble") || directoryURL.lastPathComponent.lowercased().contains("bramble")
+        
+        // Ensure stable uniqueIdentifier so WebKit storage/origin (IndexedDB, localStorage)
+        // is never partitioned under random UUIDs across app launches!
+        if isBramble {
+            context.uniqueIdentifier = "bramble-extension-vault-stable"
+            self.brambleContext = context
+        } else {
+            let safeName = name.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
+            context.uniqueIdentifier = safeName.isEmpty ? UUID().uuidString : safeName
+        }
         
         // Grant all requested permissions
         for perm in ext.requestedPermissions {
@@ -59,8 +84,14 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         
         try controller.load(context)
         
+        // Load background worker / service script so message passing and storage sync are immediately live
+        try? await context.loadBackgroundContent()
+        
+        if let extConfig = context.webViewConfiguration {
+            BrambleNativeBridge.shared.applyTo(userContentController: extConfig.userContentController)
+        }
+        
         let hasPopup = (context.action(for: nil)?.popupWebView != nil)
-        let name = ext.displayName ?? directoryURL.lastPathComponent
         
         let info = LoadedExtensionInfo(
             id: ext.displayName ?? UUID().uuidString,
@@ -166,16 +197,40 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         return dir
     }
     
-    public func loadDefaultExtensions(basePath: String) async {
-        let bramblePath = (basePath as NSString).appendingPathComponent("poc-native/Resources/bramble")
-        let brambleUrl = URL(fileURLWithPath: bramblePath)
-        if FileManager.default.fileExists(atPath: brambleUrl.appendingPathComponent("manifest.json").path) {
+    public func loadDefaultExtensions(basePath: String? = nil) async {
+        var brambleUrl: URL?
+        
+        // 1. Check Application Support/SurffishNative/Bramble
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appSupportBramble = appSupport.appendingPathComponent("SurffishNative/Bramble")
+        if FileManager.default.fileExists(atPath: appSupportBramble.appendingPathComponent("manifest.json").path) {
+            brambleUrl = appSupportBramble
+        }
+        // 2. Check basePath
+        else if let base = basePath {
+            let path = (base as NSString).appendingPathComponent("poc-native/Resources/bramble")
+            let u = URL(fileURLWithPath: path)
+            if FileManager.default.fileExists(atPath: u.appendingPathComponent("manifest.json").path) {
+                brambleUrl = u
+            }
+        }
+        // 3. Fallback to repo path
+        if brambleUrl == nil {
+            let fallback = URL(fileURLWithPath: "/Users/lochy/repos/Personal/Surffish/poc-native/Resources/bramble")
+            if FileManager.default.fileExists(atPath: fallback.appendingPathComponent("manifest.json").path) {
+                brambleUrl = fallback
+            }
+        }
+        
+        if let bUrl = brambleUrl {
             do {
-                try await loadExtension(from: brambleUrl)
-                print("[WebExtension] Loaded real Bramble successfully!")
+                try await loadExtension(from: bUrl)
+                print("[WebExtension] Loaded real Bramble successfully from \(bUrl.path)!")
             } catch {
                 print("[WebExtension] Error loading real Bramble: \(error)")
             }
+        } else {
+            print("[WebExtension] Warning: Bramble extension directory could not be located!")
         }
         
         let extDir = extensionsDirectory()
@@ -187,12 +242,14 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             }
         }
         
-        let probes = ["chromium-mv3", "bitwarden-mv2"]
-        for name in probes {
-            let path = (basePath as NSString).appendingPathComponent("scripts/fixtures/extension-probes/\(name)")
-            let url = URL(fileURLWithPath: path)
-            if FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) {
-                _ = try? await loadExtension(from: url)
+        if let base = basePath {
+            let probes = ["chromium-mv3", "bitwarden-mv2"]
+            for name in probes {
+                let path = (base as NSString).appendingPathComponent("scripts/fixtures/extension-probes/\(name)")
+                let url = URL(fileURLWithPath: path)
+                if FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) {
+                    _ = try? await loadExtension(from: url)
+                }
             }
         }
     }

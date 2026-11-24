@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-public final class MainWindowController: NSWindowController, NSWindowDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
+public final class MainWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
     
     private var omniboxView: OmniboxView!
     private var sidebarView: SidebarView!
@@ -236,6 +236,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, O
     public func omniboxDidRequestBramblePopup(sender: NSButton) {
         if let popover = bramblePopover, popover.isShown {
             popover.performClose(nil)
+            bramblePopover = nil
             return
         }
         
@@ -244,8 +245,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, O
             return
         }
         
+        // Reload popup webview to ensure updated storage / sync state is rendered
+        popupWebView.reload()
+        
         let popover = NSPopover()
         popover.behavior = .transient
+        popover.delegate = self
         // Bramble's native dimensions: 500 x 550
         popover.contentSize = NSSize(width: 500, height: 550)
         
@@ -264,6 +269,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, O
     
     public func closeBramblePopover() {
         bramblePopover?.performClose(nil)
+        bramblePopover = nil
+    }
+    
+    // MARK: - NSPopoverDelegate
+    public func popoverDidClose(_ notification: Notification) {
+        WebExtensionManager.shared.brambleContext?.action(for: nil)?.closePopup()
+        bramblePopover = nil
     }
 
     // MARK: - SidebarViewDelegate

@@ -10,10 +10,16 @@ public final class AdBlockManager {
     
     private let defaultRulesJson = """
     [
-        {
-            "trigger": { "url-filter": ".*(doubleclick\\\\.net|googlesyndication\\\\.com|adservice\\\\.google\\\\.com|adnxs\\\\.com|criteo\\\\.net|amazon-adsystem\\\\.com|moatads\\\\.com|taboola\\\\.com|outbrain\\\\.com|scorecardresearch\\\\.com).*" },
-            "action": { "type": "block" }
-        },
+        { "trigger": { "url-filter": ".*doubleclick\\\\.net.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*googlesyndication\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*adservice\\\\.google\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*adnxs\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*criteo\\\\.net.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*amazon-adsystem\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*moatads\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*taboola\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*outbrain\\\\.com.*" }, "action": { "type": "block" } },
+        { "trigger": { "url-filter": ".*scorecardresearch\\\\.com.*" }, "action": { "type": "block" } },
         {
             "trigger": { "url-filter": ".*" },
             "action": {

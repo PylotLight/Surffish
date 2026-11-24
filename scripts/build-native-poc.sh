@@ -10,6 +10,14 @@ RESOURCES_DIR="${APP_DIR}/Contents/Resources"
 echo "==> Building SurffishNative.app..."
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
+# Stage Bramble into Application Support if not already present
+APP_SUPPORT_BRAMBLE="${HOME}/Library/Application Support/SurffishNative/Bramble"
+if [ ! -f "${APP_SUPPORT_BRAMBLE}/manifest.json" ] && [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
+    echo "==> Staging Bramble into ${APP_SUPPORT_BRAMBLE}..."
+    mkdir -p "${APP_SUPPORT_BRAMBLE}"
+    cp -R "${ROOT_DIR}/poc-native/Resources/bramble/"* "${APP_SUPPORT_BRAMBLE}/"
+fi
+
 cat << 'EOF' > "${APP_DIR}/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

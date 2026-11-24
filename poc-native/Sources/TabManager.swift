@@ -76,13 +76,18 @@ public final class TabManager: NSObject, WKNavigationDelegate {
            let ctx = WebExtensionManager.shared.context(for: url),
            let extConfig = ctx.webViewConfiguration {
             config = extConfig
+            BrambleNativeBridge.shared.applyTo(userContentController: config.userContentController)
         } else {
             config = WKWebViewConfiguration()
             config.webExtensionController = WebExtensionManager.shared.controller
             AdBlockManager.shared.applyTo(userContentController: config.userContentController)
+            BrambleNativeBridge.shared.applyTo(userContentController: config.userContentController)
         }
         
         let webView = WKWebView(frame: .zero, configuration: config)
+        if #available(macOS 13.3, *) {
+            webView.isInspectable = true
+        }
         
         // Native gestures
         webView.allowsBackForwardNavigationGestures = true

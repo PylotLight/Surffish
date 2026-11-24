@@ -32,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct Main {
     static func main() {
+        setbuf(stdout, nil)
+        setbuf(stderr, nil)
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

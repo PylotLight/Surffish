@@ -2692,6 +2692,34 @@ async function Oa(e, t, n = {}) {
       },
     },
     s;
+  if (window.webkit?.messageHandlers?.brambleBiometrics) {
+    let b64Salt = "";
+    const saltBytes =
+      t instanceof Uint8Array ? t : new Uint8Array(t.buffer || t);
+    for (let k = 0; k < saltBytes.length; k++)
+      b64Salt += String.fromCharCode(saltBytes[k]);
+    b64Salt = btoa(b64Salt);
+    try {
+      const res =
+        await window.webkit.messageHandlers.brambleBiometrics.postMessage({
+          action: "get",
+          salt: b64Salt,
+        });
+      if (res && res.ok) {
+        const binHmac = atob(res.hmacSecret);
+        const hmacSecret = new Uint8Array(binHmac.length);
+        for (let k = 0; k < binHmac.length; k++)
+          hmacSecret[k] = binHmac.charCodeAt(k);
+        const rawId = e[0]?.credentialId
+          ? new Uint8Array(e[0].credentialId)
+          : new Uint8Array(16);
+        return { rawId: rawId, hmacSecret: hmacSecret };
+      }
+    } catch (err) {
+      if (n.forUnlock) throw Error(Da(e));
+      throw err;
+    }
+  }
   try {
     s = await ma(() => navigator.credentials.get({ publicKey: o }));
   } catch (t) {
@@ -2727,6 +2755,37 @@ async function Aa(e, t = { kind: `securityKey` }) {
   let i = new Uint8Array(32);
   globalThis.crypto.getRandomValues(i);
   let a = t.rpId ?? ba(t.kind);
+  if (
+    t.kind === "platform" &&
+    window.webkit?.messageHandlers?.brambleBiometrics
+  ) {
+    let b64Salt = "";
+    for (let k = 0; k < i.length; k++) b64Salt += String.fromCharCode(i[k]);
+    b64Salt = btoa(b64Salt);
+    const res =
+      await window.webkit.messageHandlers.brambleBiometrics.postMessage({
+        action: "create",
+        salt: b64Salt,
+      });
+    if (!res || !res.ok)
+      throw new DOMException(
+        "Registration cancelled or failed",
+        "NotAllowedError",
+      );
+    const binCred = atob(res.credentialId);
+    const s = new Uint8Array(binCred.length);
+    for (let k = 0; k < binCred.length; k++) s[k] = binCred.charCodeAt(k);
+    const binHmac = atob(res.hmacSecret);
+    const hmacSecret = new Uint8Array(binHmac.length);
+    for (let k = 0; k < binHmac.length; k++)
+      hmacSecret[k] = binHmac.charCodeAt(k);
+    return {
+      credentialId: s,
+      salt: i,
+      hmacSecret: hmacSecret,
+      synced: false,
+    };
+  }
   try {
     let o = await ma(() =>
       navigator.credentials.create({
