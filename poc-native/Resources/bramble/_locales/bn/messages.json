@@ -1,0 +1,186 @@
+{
+  "extDescription": {
+    "message": "লোকাল-ফার্স্ট, এনক্রিপ্ট করা পাসওয়ার্ড ম্যানেজার। কোনো ক্লাউড ডেটাবেস নেই।",
+    "description": "Chrome Web Store / extension description shown under the name."
+  },
+  "cmdLockVault": {
+    "message": "Bramble লক করুন",
+    "description": "Keyboard-shortcut command label shown in chrome://extensions/shortcuts."
+  },
+  "cmdFillLogin": {
+    "message": "লগইন পূরণ করুন",
+    "description": "Keyboard-shortcut command label shown in chrome://extensions/shortcuts. Fills the saved login for the page."
+  },
+  "notNow": {
+    "message": "এখন নয়",
+    "description": "Dismiss button on the save / passkey corner prompt."
+  },
+  "toggleShow": {
+    "message": "দেখান",
+    "description": "Reveal the captured password in the save-login card."
+  },
+  "toggleHide": {
+    "message": "লুকান",
+    "description": "Hide the revealed password in the save-login card."
+  },
+  "menuNeverForSite": {
+    "message": "এই সাইটে কখনো না",
+    "description": "Overflow-menu action: stop offering to save logins on this site."
+  },
+  "fieldUsername": {
+    "message": "ইউজারনেম",
+    "description": "Field label in the save-login card."
+  },
+  "fieldPassword": {
+    "message": "পাসওয়ার্ড",
+    "description": "Field label in the save-login card."
+  },
+  "fieldAccount": {
+    "message": "অ্যাকাউন্ট",
+    "description": "Field label showing the account name in the update / passkey card."
+  },
+  "saveNewLogin": {
+    "message": "নতুন লগইন সেভ করুন",
+    "description": "Title of the card offering to save a newly captured login."
+  },
+  "actionSave": {
+    "message": "সেভ করুন",
+    "description": "Primary button: save the captured login."
+  },
+  "actionUnlockAndSave": {
+    "message": "আনলক করে সেভ করুন",
+    "description": "Primary button when the vault is locked: unlock, then save."
+  },
+  "updateExistingTitle": {
+    "message": "আগের কোনো লগইন আপডেট করবেন?",
+    "description": "Card title when several saved logins could be updated."
+  },
+  "updateSavedTitle": {
+    "message": "সেভ করা লগইন আপডেট করবেন?",
+    "description": "Card title when one saved login could be updated."
+  },
+  "actionUpdate": {
+    "message": "আপডেট করুন",
+    "description": "Primary button: update the saved login with the new password."
+  },
+  "actionUnlockAndUpdate": {
+    "message": "আনলক করে আপডেট করুন",
+    "description": "Primary button when the vault is locked: unlock, then update."
+  },
+  "saveAsNew": {
+    "message": "নতুন হিসেবে সেভ করুন",
+    "description": "Secondary button: save as a separate login instead of updating."
+  },
+  "saveAsNewHint": {
+    "message": "আপডেট না করে আলাদা লগইন হিসেবে সেভ করুন",
+    "description": "Tooltip for the 'Save as new' button."
+  },
+  "passkeySignInWhich": {
+    "message": "কোন পাসকি দিয়ে সাইন ইন করবেন?",
+    "description": "Passkey card title when the site offers a choice of passkeys."
+  },
+  "passkeyUseTitle": {
+    "message": "আপনার পাসকি ব্যবহার করবেন?",
+    "description": "Passkey card title when signing in with a single passkey."
+  },
+  "passkeyAddToTitle": {
+    "message": "এই পাসকি যে লগইনে যোগ করবেন…",
+    "description": "Passkey card title: choose which saved login to attach a new passkey to."
+  },
+  "passkeyAddTitle": {
+    "message": "একটি পাসকি যোগ করবেন?",
+    "description": "Passkey card title when adding a passkey to an existing login."
+  },
+  "passkeySaveTitle": {
+    "message": "একটি পাসকি সেভ করবেন?",
+    "description": "Passkey card title when saving a brand-new passkey."
+  },
+  "passkeyUnlockUseNote": {
+    "message": "এই সাইটে আপনার পাসকি ব্যবহার করতে Bramble আনলক করুন।",
+    "description": "Explains the locked passkey sign-in prompt."
+  },
+  "passkeyUnlockSaveNote": {
+    "message": "এই সাইটের জন্য পাসকি সেভ করতে Bramble আনলক করুন।",
+    "description": "Explains the locked passkey save prompt."
+  },
+  "passkeyRequestedBy": {
+    "message": "অনুরোধ করেছে",
+    "description": "Label in the passkey card naming the site that asked, when it isn't the page the card is shown on (an embedded frame)."
+  },
+  "passkeyAddsTo": {
+    "message": "যে লগইনে যোগ হবে",
+    "description": "Label showing which login a new passkey will be attached to."
+  },
+  "passkeyCreateNewLogin": {
+    "message": "নতুন লগইন তৈরি করুন",
+    "description": "Option to attach the passkey to a brand-new login instead of an existing one."
+  },
+  "passkeyUse": {
+    "message": "পাসকি ব্যবহার করুন",
+    "description": "Primary button: sign in with the passkey."
+  },
+  "passkeyAdd": {
+    "message": "পাসকি যোগ করুন",
+    "description": "Primary button: attach the passkey to a login."
+  },
+  "passkeySave": {
+    "message": "পাসকি সেভ করুন",
+    "description": "Primary button: save the new passkey."
+  },
+  "passkeyUnlockUse": {
+    "message": "আনলক করে ব্যবহার করুন",
+    "description": "Primary button when locked: unlock, then sign in with the passkey."
+  },
+  "passkeyUnlockAdd": {
+    "message": "আনলক করে যোগ করুন",
+    "description": "Primary button when locked: unlock, then attach the passkey."
+  },
+  "vaultLocked": {
+    "message": "ভল্ট লক করা",
+    "description": "Autofill dropdown row shown when the vault is locked."
+  },
+  "vaultLockedUnlockHint": {
+    "message": "নতুন উইন্ডোতে আনলক করতে ক্লিক করুন",
+    "description": "Sub-text under 'Vault locked' in the autofill dropdown."
+  },
+  "newLoginTitle": {
+    "message": "নতুন লগইন",
+    "description": "Last row of the autofill dropdown under a site's saved logins. Opens Bramble's form to save another login for this site."
+  },
+  "suggestPasswordUse": {
+    "message": "প্রস্তাবিত পাসওয়ার্ড ব্যবহার করুন",
+    "description": "Sub-text under the generated password in the autofill dropdown; the row fills a strong password on signup forms."
+  },
+  "suggestPasswordRegenerate": {
+    "message": "অন্য একটি পাসওয়ার্ড তৈরি করুন",
+    "description": "Accessible label for the regenerate button on the suggested-password row."
+  },
+  "pickerUseKeyboard": {
+    "message": "এই পেজে অটোফিল করতে ↓ আর Enter ব্যবহার করুন",
+    "description": "Shown in the autofill dropdown when a click was refused because the browser could not confirm the list is fully visible (something on the page covers or filters it). The arrow-key and Enter path still works."
+  },
+  "aliasUse": {
+    "message": "নতুন বিকল্প ইমেইল ব্যবহার করুন",
+    "description": "Sub-text on the email-alias row in the autofill dropdown; the row creates a fresh forwarding address at the user's alias provider and fills it into a signup form."
+  },
+  "aliasTitle": {
+    "message": "বিকল্প ইমেইল",
+    "description": "Title of the email-alias row in the autofill dropdown."
+  },
+  "aliasWorking": {
+    "message": "বিকল্প ইমেইল তৈরি করা হচ্ছে...",
+    "description": "Shown on the email-alias row while the request to the alias provider is in flight."
+  },
+  "aliasFailed": {
+    "message": "বিকল্প ইমেইল তৈরি করা যায়নি",
+    "description": "Shown on the email-alias row when the alias provider rejected the request. The provider's own explanation is shown beneath as plain text."
+  },
+  "aliasRetry": {
+    "message": "আবার চেষ্টা করুন",
+    "description": "Accessible label for the retry button on a failed email-alias row."
+  },
+  "cardUsedHere": {
+    "message": "এখানে ব্যবহৃত",
+    "description": "Badge on the autofill dropdown row for the card already filled elsewhere on this page (a hosted-fields checkout asks once per frame)."
+  }
+}

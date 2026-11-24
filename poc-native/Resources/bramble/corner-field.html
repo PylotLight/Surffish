@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Bramble</title>
+    <style>
+      html,
+      body {
+        --lightningcss-light: initial;
+        --lightningcss-dark: ;
+        color-scheme: light dark;
+        background: 0 0;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      @media (prefers-color-scheme: dark) {
+        html,
+        body {
+          --lightningcss-light: ;
+          --lightningcss-dark: initial;
+        }
+      }
+      input {
+        box-sizing: border-box;
+        color: #fff;
+        background: #ffffff0f;
+        border: 1px solid #ffffff1a;
+        border-radius: 8px;
+        outline: none;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 10px 12px;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        font-size: 13px;
+        display: block;
+      }
+      input:focus {
+        border-color: #ffffffb3;
+      }
+    </style>
+    <script type="module" crossorigin src="/corner-field.js"></script>
+  </head>
+  <body>
+    <input
+      type="text"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      spellcheck="false"
+    />
+  </body>
+</html>

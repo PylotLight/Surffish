@@ -42,3 +42,4 @@ packages/cli/release.json
 # local build leftovers (swift build cache, empty native/ scratch)
 .build/
 native/
+poc-native/build/
