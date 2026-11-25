@@ -196,8 +196,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         newTabButton.toolTip = "New tab"
         for button in [extensionsButton, settingsButton, quitButton] {
             button.title = collapsed ? "" : (button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish")
-            button.imagePosition = .imageOnly
-            button.alignment = .center
+            button.imagePosition = collapsed ? .imageOnly : .imageLeading
+            button.alignment = collapsed ? .center : .left
             button.toolTip = button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish"
         }
         footer.alignment = collapsed ? .centerX : .leading
