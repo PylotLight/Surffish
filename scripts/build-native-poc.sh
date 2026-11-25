@@ -47,6 +47,7 @@ xcrun swiftc \
   -module-cache-path /tmp/swift-cache \
   -framework AppKit \
   -framework WebKit \
+  -framework Network \
   -framework LocalAuthentication \
   -o "${MACOS_DIR}/SurffishNative" \
   "${ROOT_DIR}"/poc-native/Sources/*.swift
