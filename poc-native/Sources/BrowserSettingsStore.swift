@@ -1,6 +1,6 @@
 import Foundation
 
-public enum BrowserSearchEngine: String, CaseIterable, Codable {
+public enum BrowserSearchEngine: String, CaseIterable, Codable, Hashable {
     case duckDuckGo
     case google
     case bing
@@ -28,6 +28,55 @@ public enum BrowserSearchEngine: String, CaseIterable, Codable {
     }
 }
 
+public enum NewTabTheme: String, CaseIterable, Codable, Identifiable, Hashable {
+    case midnight
+    case ocean
+    case forest
+    case ember
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .midnight: return "Midnight"
+        case .ocean: return "Ocean"
+        case .forest: return "Forest"
+        case .ember: return "Ember"
+        }
+    }
+
+    public var backgroundCSS: String {
+        switch self {
+        case .midnight:
+            return "radial-gradient(ellipse at 50% 24%, rgba(78, 103, 139, .23), transparent 48%), linear-gradient(145deg, #171d27 0%, #10151d 52%, #151a23 100%)"
+        case .ocean:
+            return "radial-gradient(ellipse at 72% 18%, rgba(38, 139, 170, .24), transparent 48%), linear-gradient(145deg, #10232e 0%, #10171f 56%, #13242b 100%)"
+        case .forest:
+            return "radial-gradient(ellipse at 28% 20%, rgba(75, 133, 94, .25), transparent 48%), linear-gradient(145deg, #17251f 0%, #111914 56%, #1b2721 100%)"
+        case .ember:
+            return "radial-gradient(ellipse at 68% 22%, rgba(174, 100, 62, .24), transparent 48%), linear-gradient(145deg, #2b201d 0%, #171514 56%, #29201d 100%)"
+        }
+    }
+}
+
+public enum NewTabSiteSource: String, CaseIterable, Codable, Identifiable, Hashable {
+    case automatic
+    case pinned
+    case recent
+    case bookmarks
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .pinned: return "Pinned sites"
+        case .recent: return "Recently visited"
+        case .bookmarks: return "Bookmarks"
+        }
+    }
+}
+
 public struct BrowserSettings: Codable {
     public var version: Int
     public var searchEngine: BrowserSearchEngine
@@ -40,10 +89,13 @@ public struct BrowserSettings: Codable {
     public var sshProxyShareEnabled: Bool
     public var sshProxyBindAddress: String
     public var adBlockingEnabled: Bool
+    public var newTabTheme: NewTabTheme
+    public var newTabSiteSource: NewTabSiteSource
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
         case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
+        case newTabTheme, newTabSiteSource
     }
 
     public init(
@@ -57,7 +109,9 @@ public struct BrowserSettings: Codable {
         sshProxyPort: Int = 1080,
         sshProxyShareEnabled: Bool = false,
         sshProxyBindAddress: String = "127.0.0.1",
-        adBlockingEnabled: Bool = false
+        adBlockingEnabled: Bool = false,
+        newTabTheme: NewTabTheme = .midnight,
+        newTabSiteSource: NewTabSiteSource = .automatic
     ) {
         self.version = version
         self.searchEngine = searchEngine
@@ -70,6 +124,8 @@ public struct BrowserSettings: Codable {
         self.sshProxyShareEnabled = sshProxyShareEnabled
         self.sshProxyBindAddress = sshProxyBindAddress
         self.adBlockingEnabled = adBlockingEnabled
+        self.newTabTheme = newTabTheme
+        self.newTabSiteSource = newTabSiteSource
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,6 +141,8 @@ public struct BrowserSettings: Codable {
         sshProxyShareEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyShareEnabled) ?? false
         sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
         adBlockingEnabled = try values.decodeIfPresent(Bool.self, forKey: .adBlockingEnabled) ?? false
+        newTabTheme = try values.decodeIfPresent(NewTabTheme.self, forKey: .newTabTheme) ?? .midnight
+        newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
     }
 
     public static let defaults = BrowserSettings(
@@ -98,7 +156,9 @@ public struct BrowserSettings: Codable {
         sshProxyPort: 1080,
         sshProxyShareEnabled: false,
         sshProxyBindAddress: "127.0.0.1",
-        adBlockingEnabled: false
+        adBlockingEnabled: false,
+        newTabTheme: .midnight,
+        newTabSiteSource: .automatic
     )
 
     public var startPageURL: URL {

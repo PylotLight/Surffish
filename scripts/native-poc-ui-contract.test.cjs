@@ -7,10 +7,11 @@ const root = path.resolve(__dirname, "..");
 const read = (relativePath) =>
   fs.readFileSync(path.join(root, relativePath), "utf8");
 
-test("native sidebar has one collapse affordance in the toolbar", () => {
+test("native sidebar has one collapse affordance and a persistent SwiftUI compact rail", () => {
   const sidebar = read("poc-native/Sources/SidebarView.swift");
   const toolbar = read("poc-native/Sources/OmniboxView.swift");
   const window = read("poc-native/Sources/MainWindowController.swift");
+  const shell = read("poc-native/Sources/BrowserShellView.swift");
 
   assert.doesNotMatch(
     sidebar,
@@ -22,24 +23,25 @@ test("native sidebar has one collapse affordance in the toolbar", () => {
   );
   assert.match(toolbar, /omniboxDidShowTabs/);
   assert.match(window, /sidebarView\.showTabs\(\)/);
-  assert.match(sidebar, /reloadPinnedTabs\(\)/);
-  assert.match(
-    window,
-    /sidebarView\.topAnchor\.constraint\(equalTo: omniboxView\.bottomAnchor\)/,
-  );
-  assert.match(
-    window,
-    /contentView\.addSubview\(omniboxView, positioned: \.above, relativeTo: sidebarView\)/,
-  );
+  assert.match(sidebar, /pinnedClusterButton/);
+  assert.match(sidebar, /matchedGeometryEffect/);
+  assert.match(sidebar, /onFocusChange/);
+  assert.match(window, /sidebarFocusChanged/);
+  assert.match(window, /Task\.sleep\(for: \.milliseconds\(180\)\)/);
+  assert.match(window, /shellLayoutModel\.sidebarWidth/);
+  assert.match(shell, /Color\.clear\.frame\(width: layout\.sidebarWidth\)/);
+  assert.match(shell, /HostedAppKitView\(view: pageCard\)/);
+  assert.doesNotMatch(window, /sidebarWidthConstraint/);
 });
 
-test("native sidebar exposes real History and Bookmarks panels", () => {
+test("native sidebar exposes real History, Bookmarks, and Reading List panels", () => {
   const sidebar = read("poc-native/Sources/SidebarView.swift");
   const library = read("poc-native/Sources/BrowserLibraryStore.swift");
   const tabs = read("poc-native/Sources/TabManager.swift");
 
   assert.match(sidebar, /func showHistory\(\)/);
   assert.match(sidebar, /func showBookmarks\(\)/);
+  assert.match(sidebar, /func showReadingList\(\)/);
   assert.match(
     library,
     /BrowserProfile\.current\.fileURL\("browser-library\.json"\)/,
@@ -48,10 +50,8 @@ test("native sidebar exposes real History and Bookmarks panels", () => {
   assert.match(tabs, /BrowserLibraryStore\.shared\.recordVisit/);
 });
 
-test("settings pages expose saved ad blocking and profile-scoped website clearing", () => {
-  const settings = read(
-    "poc-native/Sources/BrowserSettingsWindowController.swift",
-  );
+test("SwiftUI settings preserve real ad blocking, website clearing, SSH, extensions, and New Tab controls", () => {
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
   const model = read("poc-native/Sources/BrowserSettingsStore.swift");
   const blocker = read("poc-native/Sources/AdBlockManager.swift");
 
@@ -62,7 +62,10 @@ test("settings pages expose saved ad blocking and profile-scoped website clearin
     "Connection",
     "About",
   ]) {
-    assert.ok(settings.includes(`"${page}"`), `missing ${page} settings page`);
+    assert.ok(
+      settings.includes(`= \"${page}\"`),
+      `missing ${page} settings page`,
+    );
   }
   assert.match(model, /adBlockingEnabled/);
   assert.match(
@@ -73,13 +76,19 @@ test("settings pages expose saved ad blocking and profile-scoped website clearin
     settings,
     /WKWebsiteDataStore\(forIdentifier: BrowserProfile\.current\.websiteDataStoreIdentifier\)/,
   );
+  assert.match(settings, /WebExtensionManager\.shared\.uninstallExtension/);
+  assert.match(settings, /SshConfigHostDiscovery\.discover\(\)/);
+  assert.match(settings, /model\.newTabTheme/);
+  assert.match(settings, /model\.newTabSiteSource/);
+  assert.match(model, /newTabTheme/);
+  assert.match(model, /newTabSiteSource/);
   assert.match(
     blocker,
     /BrowserSettingsStore\.shared\.settings\.adBlockingEnabled/,
   );
 });
 
-test("built-in New Tab uses the profile search engine and hides recent history in private tabs", () => {
+test("built-in New Tab uses profile settings and hides recent history in private tabs", () => {
   const page = read("poc-native/Sources/BrowserNewTabSchemeHandler.swift");
   const settings = read("poc-native/Sources/BrowserSettingsStore.swift");
   const tabs = read("poc-native/Sources/TabManager.swift");
@@ -97,11 +106,14 @@ test("built-in New Tab uses the profile search engine and hides recent history i
   );
   assert.match(page, /includeHistory: !isPrivateTab/);
   assert.match(page, /let recent = includeHistory \? recentHistory/);
-  assert.match(page, /BrowserSettingsStore\.shared\.settings\.searchEngine/);
+  assert.match(page, /let settings = BrowserSettingsStore\.shared\.settings/);
+  assert.match(page, /settings\.searchEngine/);
+  assert.match(page, /settings\.newTabTheme\.backgroundCSS/);
+  assert.match(page, /switch settings\.newTabSiteSource/);
   assert.match(page, /searchURL\(for: marker\)/);
 });
 
-test("pinned bookmarks migrate safely and appear in the native pinned-site strip", () => {
+test("pinned bookmarks migrate safely and share an animated compact-rail cluster", () => {
   const library = read("poc-native/Sources/BrowserLibraryStore.swift");
   const sidebar = read("poc-native/Sources/SidebarView.swift");
   const window = read("poc-native/Sources/MainWindowController.swift");
@@ -112,9 +124,32 @@ test("pinned bookmarks migrate safely and appear in the native pinned-site strip
   );
   assert.match(library, /togglePinnedBookmark\(id: UUID\)/);
   assert.match(sidebar, /bookmarks\.filter\(\\\.isPinned\)/);
-  assert.match(sidebar, /onPinnedSiteClicked/);
+  assert.match(sidebar, /pinnedSites/);
+  assert.match(sidebar, /pinned-cluster/);
   assert.match(sidebar, /Pin to Pinned Sites/);
   assert.match(window, /sidebarDidToggleBookmarkPin/);
+});
+
+test("reading list is profile-local, private-safe, and wired through toolbar, panel, and menu", () => {
+  const library = read("poc-native/Sources/BrowserLibraryStore.swift");
+  const toolbar = read("poc-native/Sources/OmniboxView.swift");
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  const menu = read("poc-native/Sources/MainMenu.swift");
+
+  assert.match(library, /readingList: \[BrowserReadingListEntry\]/);
+  assert.match(library, /toggleReadingList\(url: URL, title: String\)/);
+  assert.match(library, /setReadingListRead\(id: UUID, isRead: Bool\)/);
+  assert.match(library, /removeReadingListEntry\(id: UUID\)/);
+  assert.match(toolbar, /!tab\.isPrivate/);
+  assert.match(toolbar, /omniboxDidToggleReadingList/);
+  assert.match(window, /!tab\.isPrivate/);
+  assert.match(window, /sidebarDidOpenReadingListEntry/);
+  assert.match(window, /sidebarDidToggleReadingListRead/);
+  assert.match(window, /sidebarDidRemoveReadingListEntry/);
+  assert.match(sidebar, /case readingList/);
+  assert.match(sidebar, /Mark as Unread/);
+  assert.match(menu, /menuShowReadingList/);
 });
 
 test("native find-in-page and duplicate/reopen actions are wired to WebKit and menus", () => {
@@ -141,6 +176,22 @@ test("native find-in-page and duplicate/reopen actions are wired to WebKit and m
   assert.match(tabs, /if !closingTab\.isPrivate/);
   assert.match(tabs, /isPrivate: tab\.isPrivate/);
   assert.match(sidebar, /Duplicate Tab/);
+});
+
+test("browser shell and settings are hosted in SwiftUI with AppKit/WebKit bridges", () => {
+  const shell = read("poc-native/Sources/BrowserShellView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  const settingsWindow = read(
+    "poc-native/Sources/BrowserSettingsWindowController.swift",
+  );
+  const build = read("scripts/build-native-poc.sh");
+
+  assert.match(shell, /import SwiftUI/);
+  assert.match(shell, /HostedAppKitView/);
+  assert.match(window, /NSHostingView<BrowserShellView>/);
+  assert.match(window, /WKWebExtensionWindow/);
+  assert.match(settingsWindow, /NSHostingView\(rootView: BrowserSettingsView/);
+  assert.match(build, /-framework SwiftUI/);
 });
 
 test("roadmap describes the implemented SSH dynamic SOCKS endpoint, not the obsolete NAS forward", () => {

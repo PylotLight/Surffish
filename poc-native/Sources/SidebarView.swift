@@ -1,4 +1,6 @@
 import AppKit
+import Observation
+import SwiftUI
 
 public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidSelectTab(id: UUID)
@@ -9,676 +11,619 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidOpenLibraryURL(_ url: URL)
     func sidebarDidRemoveBookmark(id: UUID)
     func sidebarDidToggleBookmarkPin(id: UUID)
+    func sidebarDidOpenReadingListEntry(id: UUID, url: URL)
+    func sidebarDidToggleReadingListRead(id: UUID)
+    func sidebarDidRemoveReadingListEntry(id: UUID)
     func sidebarDidClearHistory()
     func sidebarDidOpenExtensions()
     func sidebarDidOpenSettings()
+    func sidebarDidRequestReveal()
     func sidebarDidQuit()
 }
 
-private enum SidebarContentMode {
+private enum SidebarContentMode: Equatable {
     case tabs
     case history
     case bookmarks
+    case readingList
 }
 
-private final class SidebarRowView: NSView {
-    var onSelect: (() -> Void)?
-    var onHover: ((Bool) -> Void)?
-    private var tracking: NSTrackingArea?
+@MainActor
+@Observable
+private final class SidebarViewModel {
+    weak var delegate: SidebarViewDelegate?
+    var tabs: [TabItem] = []
+    var history: [BrowserHistoryEntry] = []
+    var bookmarks: [BrowserBookmark] = []
+    var readingList: [BrowserReadingListEntry] = []
+    var activeTabID: UUID?
+    var contentMode: SidebarContentMode = .tabs
+    var isSettingsTabActive = false
+    var isExpanded = true
+    var isFocused = false
+    var onHoverChange: ((Bool) -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let next = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(next)
-        tracking = next
+    var requiresExpandedPanel: Bool { contentMode != .tabs }
+    var pinnedTabs: [TabItem] { tabs.filter(\.isPinned) }
+    var unpinnedTabs: [TabItem] { tabs.filter { !$0.isPinned } }
+    var pinnedSites: [BrowserBookmark] { bookmarks.filter(\.isPinned) }
+    var pinnedItemCount: Int { pinnedTabs.count + pinnedSites.count }
+
+    init() { refresh() }
+
+    func refresh() {
+        tabs = TabManager.shared.tabs
+        activeTabID = TabManager.shared.activeTabId
+        history = BrowserLibraryStore.shared.history
+        bookmarks = BrowserLibraryStore.shared.bookmarks
+        readingList = BrowserLibraryStore.shared.readingList
     }
 
-    override func mouseEntered(with event: NSEvent) { onHover?(true) }
-    override func mouseExited(with event: NSEvent) { onHover?(false) }
-    override func mouseDown(with event: NSEvent) { onSelect?() }
+    func show(_ mode: SidebarContentMode) {
+        contentMode = mode
+        isSettingsTabActive = false
+        refresh()
+    }
 }
 
-public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTableViewDelegate {
-    public weak var delegate: SidebarViewDelegate?
-    public var onHoverChange: ((Bool) -> Void)?
-    private let workspaceLabel = NSTextField(labelWithString: "TABS")
-    private let newTabButton = NSButton()
-    private let clearHistoryButton = NSButton()
-    private let tableView = NSTableView()
-    private let scrollView = NSScrollView()
-    private let pinnedScrollView = NSScrollView()
-    private let pinnedStrip = NSStackView()
-    private var pinnedStripHeightConstraint: NSLayoutConstraint!
-    private var newTabWidthConstraint: NSLayoutConstraint!
-    private let footer = NSStackView()
-    private let settingsButton = NSButton()
-    private let quitButton = NSButton()
-    private var isSettingsTabActive = false
-    private var isCollapsed = true
-    private var contentMode: SidebarContentMode = .tabs
-    private var tracking: NSTrackingArea?
+/// AppKit keeps the window integration stable; the actual sidebar UI is a SwiftUI view.
+@MainActor
+public final class SidebarView: NSView {
+    private let model: SidebarViewModel
+    private let hostingView: NSHostingView<NativeSidebarRootView>
+
+    public weak var delegate: SidebarViewDelegate? {
+        didSet { model.delegate = delegate }
+    }
+
+    public var onHoverChange: ((Bool) -> Void)? {
+        didSet { model.onHoverChange = onHoverChange }
+    }
+
+    public var onFocusChange: ((Bool) -> Void)? {
+        didSet { model.onFocusChange = onFocusChange }
+    }
+
+    public var requiresExpandedPanel: Bool { model.requiresExpandedPanel }
+    public var isInteractionFocused: Bool { model.isFocused }
 
     public override init(frame frameRect: NSRect) {
+        let model = SidebarViewModel()
+        self.model = model
+        hostingView = NSHostingView(rootView: NativeSidebarRootView(model: model))
         super.init(frame: frameRect)
-        setupUI()
+        installHostingView()
     }
 
     public required init?(coder: NSCoder) {
+        let model = SidebarViewModel()
+        self.model = model
+        hostingView = NSHostingView(rootView: NativeSidebarRootView(model: model))
         super.init(coder: coder)
-        setupUI()
+        installHostingView()
     }
 
-    public override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let tracking { removeTrackingArea(tracking) }
-        let next = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(next)
-        tracking = next
-    }
-
-    public override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
-    public override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
-
-    private func setupUI() {
-        material = .underWindowBackground
-        blendingMode = .withinWindow
-        state = .active
+    private func installHostingView() {
         wantsLayer = true
-
-        workspaceLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        workspaceLabel.textColor = NSColor(white: 0.95, alpha: 0.62)
-        workspaceLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(workspaceLabel)
-
-        configureIconButton(newTabButton, symbol: "plus", tooltip: "New tab", action: #selector(onNewTab))
-        configureIconButton(clearHistoryButton, symbol: "trash", tooltip: "Clear history", action: #selector(onClearHistory))
-        clearHistoryButton.isHidden = true
-
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
-        column.width = 260
-        tableView.addTableColumn(column)
-        tableView.headerView = nil
-        tableView.backgroundColor = .clear
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.rowHeight = 42
-        tableView.intercellSpacing = NSSize(width: 0, height: 3)
-        tableView.selectionHighlightStyle = .none
-        tableView.focusRingType = .none
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scrollView)
-
-        pinnedStrip.orientation = .horizontal
-        pinnedStrip.alignment = .centerY
-        pinnedStrip.distribution = .fill
-        pinnedStrip.spacing = 6
-        pinnedStrip.translatesAutoresizingMaskIntoConstraints = true
-        pinnedStrip.frame = NSRect(x: 0, y: 0, width: 260, height: 38)
-        pinnedStrip.autoresizingMask = [.height]
-        pinnedScrollView.documentView = pinnedStrip
-        pinnedScrollView.hasHorizontalScroller = false
-        pinnedScrollView.hasVerticalScroller = false
-        pinnedScrollView.drawsBackground = false
-        pinnedScrollView.borderType = .noBorder
-        pinnedScrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(pinnedScrollView)
-
-        footer.orientation = .vertical
-        footer.alignment = .leading
-        footer.distribution = .fill
-        footer.spacing = 4
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(footer)
-
-        configureFooterButton(settingsButton, symbol: "gearshape", title: "Settings", action: #selector(onSettings))
-        configureFooterButton(quitButton, symbol: "power", title: "Quit Surffish", action: #selector(onQuit))
-        footer.addArrangedSubview(settingsButton)
-        footer.addArrangedSubview(quitButton)
-
-        pinnedStripHeightConstraint = pinnedScrollView.heightAnchor.constraint(equalToConstant: 0)
-        newTabWidthConstraint = newTabButton.widthAnchor.constraint(equalToConstant: 260)
+        layer?.backgroundColor = NSColor.clear.cgColor
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        addSubview(hostingView)
         NSLayoutConstraint.activate([
-            workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            workspaceLabel.centerYAnchor.constraint(equalTo: clearHistoryButton.centerYAnchor),
-            clearHistoryButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            clearHistoryButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            clearHistoryButton.widthAnchor.constraint(equalToConstant: 30),
-            clearHistoryButton.heightAnchor.constraint(equalToConstant: 30),
-            workspaceLabel.trailingAnchor.constraint(lessThanOrEqualTo: clearHistoryButton.leadingAnchor, constant: -8),
-
-            newTabButton.topAnchor.constraint(equalTo: clearHistoryButton.bottomAnchor, constant: 12),
-            newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            newTabWidthConstraint,
-            newTabButton.heightAnchor.constraint(equalToConstant: 30),
-
-            pinnedScrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 8),
-            pinnedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            pinnedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            pinnedStripHeightConstraint,
-
-            scrollView.topAnchor.constraint(equalTo: pinnedScrollView.bottomAnchor, constant: 6),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
-
-            footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16)
+            hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-        setCollapsed(false)
-    }
-
-    private func configureIconButton(_ button: NSButton, symbol: String, tooltip: String, action: Selector) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
-        button.imagePosition = .imageOnly
-        button.bezelStyle = .rounded
-        button.isBordered = false
-        button.contentTintColor = .secondaryLabelColor
-        button.toolTip = tooltip
-        button.target = self
-        button.action = action
-        button.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(button)
-    }
-
-    private func configureFooterButton(_ button: NSButton, symbol: String, title: String, action: Selector) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        button.imagePosition = .imageLeading
-        button.alignment = .left
-        button.title = title
-        button.font = .systemFont(ofSize: 12, weight: .medium)
-        button.contentTintColor = .secondaryLabelColor
-        button.bezelStyle = .rounded
-        button.isBordered = false
-        button.target = self
-        button.action = action
-        button.toolTip = title
-        button.setAccessibilityLabel(title)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 32).isActive = true
     }
 
     public func setCollapsed(_ collapsed: Bool) {
-        guard isCollapsed != collapsed else { return }
-        isCollapsed = collapsed
-        workspaceLabel.isHidden = collapsed
-        clearHistoryButton.isHidden = collapsed || contentMode != .history
-        newTabWidthConstraint.constant = collapsed ? 30 : 260
-        newTabButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
-        newTabButton.title = collapsed ? "" : "New tab"
-        newTabButton.imagePosition = collapsed ? .imageOnly : .imageLeading
-        newTabButton.alignment = collapsed ? .center : .left
-        newTabButton.contentTintColor = .secondaryLabelColor
-        newTabButton.toolTip = "New tab"
-        for button in [settingsButton, quitButton] {
-            button.title = collapsed ? "" : (button === settingsButton ? "Settings" : "Quit Surffish")
-            button.imagePosition = collapsed ? .imageOnly : .imageLeading
-            button.alignment = collapsed ? .center : .left
-            button.toolTip = button === settingsButton ? "Settings" : "Quit Surffish"
-        }
-        footer.alignment = collapsed ? .centerX : .leading
-        tableView.reloadData()
-        updateHeader()
-        reloadPinnedTabs()
-        needsLayout = true
+        model.isExpanded = !collapsed
     }
 
-    public func reloadTabs() {
-        tableView.reloadData()
-        reloadPinnedTabs()
-        updateHeader()
-    }
+    public func reloadTabs() { model.refresh() }
 
-    public func showTabs() {
-        contentMode = .tabs
-        isSettingsTabActive = false
-        updateHeader()
-        tableView.reloadData()
-        reloadPinnedTabs()
-    }
-
-    public func showHistory() {
-        contentMode = .history
-        isSettingsTabActive = false
-        updateHeader()
-        tableView.reloadData()
-        reloadPinnedTabs()
-    }
-
-    public func showBookmarks() {
-        contentMode = .bookmarks
-        isSettingsTabActive = false
-        updateHeader()
-        tableView.reloadData()
-        reloadPinnedTabs()
-    }
-
-    private func updateHeader() {
-        switch contentMode {
-        case .tabs:
-            workspaceLabel.stringValue = "TABS"
-        case .history:
-            workspaceLabel.stringValue = "HISTORY"
-        case .bookmarks:
-            workspaceLabel.stringValue = "BOOKMARKS"
-        }
-        clearHistoryButton.isHidden = isCollapsed || contentMode != .history
-    }
-
-    private func reloadPinnedTabs() {
-        pinnedStrip.arrangedSubviews.forEach { view in
-            pinnedStrip.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        let pinnedSites: [BrowserBookmark]
-        let pinnedTabs: [TabItem]
-        switch contentMode {
-        case .tabs:
-            pinnedSites = BrowserLibraryStore.shared.bookmarks.filter(\.isPinned)
-            pinnedTabs = TabManager.shared.tabs.filter(\.isPinned)
-        case .history, .bookmarks:
-            pinnedSites = []
-            pinnedTabs = []
-        }
-        let totalPins = pinnedSites.count + pinnedTabs.count
-        pinnedScrollView.isHidden = totalPins == 0
-        pinnedStripHeightConstraint.constant = totalPins == 0 ? 0 : 38
-        let displayedSites = isCollapsed ? Array(pinnedSites.prefix(1)) : pinnedSites
-        let remainingSlots = isCollapsed ? max(0, 1 - displayedSites.count) : pinnedTabs.count
-        let displayedTabs = isCollapsed ? Array(pinnedTabs.prefix(remainingSlots)) : pinnedTabs
-        for (index, bookmark) in displayedSites.enumerated() {
-            let button = NSButton()
-            button.bezelStyle = .regularSquare
-            button.isBordered = false
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: bookmark.title)
-            button.toolTip = bookmark.title.isEmpty ? "Pinned site" : bookmark.title
-            button.tag = index
-            button.target = self
-            button.action = #selector(onPinnedSiteClicked(_:))
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.widthAnchor.constraint(equalToConstant: isCollapsed ? 26 : 30).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            pinnedStrip.addArrangedSubview(button)
-            if let url = URL(string: bookmark.url) { loadFavicon(for: url, into: button) }
-        }
-        for (index, tab) in displayedTabs.enumerated() {
-            let button = NSButton()
-            button.bezelStyle = .regularSquare
-            button.isBordered = false
-            button.imagePosition = .imageOnly
-            button.imageScaling = .scaleProportionallyDown
-            button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: tab.title)
-            button.toolTip = tab.title.isEmpty ? "Pinned tab" : tab.title
-            button.tag = index
-            button.target = self
-            button.action = #selector(onPinnedTabClicked(_:))
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.widthAnchor.constraint(equalToConstant: isCollapsed ? 26 : 30).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 30).isActive = true
-            pinnedStrip.addArrangedSubview(button)
-            loadFavicon(for: tab, into: button)
-        }
-        let visiblePinCount = displayedSites.count + displayedTabs.count
-        if isCollapsed && totalPins > visiblePinCount {
-            let overflow = NSTextField(labelWithString: "+\(totalPins - visiblePinCount)")
-            overflow.font = .systemFont(ofSize: 10, weight: .semibold)
-            overflow.textColor = .secondaryLabelColor
-            pinnedStrip.addArrangedSubview(overflow)
-        }
-        let stripWidth = isCollapsed ? 56 : max(260, CGFloat(visiblePinCount) * 36)
-        pinnedStrip.setFrameSize(NSSize(width: stripWidth, height: 38))
-    }
+    public func showTabs() { model.show(.tabs) }
+    public func showHistory() { model.show(.history) }
+    public func showBookmarks() { model.show(.bookmarks) }
+    public func showReadingList() { model.show(.readingList) }
 
     public func setSettingsTabActive(_ active: Bool) {
-        isSettingsTabActive = active
-        if active { contentMode = .tabs }
-        updateHeader()
-        tableView.reloadData()
-        reloadPinnedTabs()
-        settingsButton.contentTintColor = active ? .controlAccentColor : .secondaryLabelColor
+        model.isSettingsTabActive = active
+        if active { model.contentMode = .tabs }
+        model.refresh()
+    }
+}
+
+@MainActor
+private struct NativeSidebarRootView: View {
+    @Bindable var model: SidebarViewModel
+    @FocusState private var hasFocus: Bool
+    @Namespace private var morphNamespace
+
+    private let railWidth: CGFloat = 64
+    private var showsTabRail: Bool { model.contentMode == .tabs && !model.isExpanded }
+    private let panelWidth: CGFloat = 280
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if showsTabRail {
+                tabRail
+                    .frame(width: railWidth)
+                    .transition(.opacity)
+            } else {
+                expandedPanel
+                    .frame(width: panelWidth)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SidebarVisualEffectBackground())
+        .onHover { model.onHoverChange?($0) }
+        .onChange(of: hasFocus) { _, focused in
+            model.isFocused = focused
+            model.onFocusChange?(focused)
+        }
+        .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.34), value: model.isExpanded)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Surffish sidebar")
     }
 
-    public func numberOfRows(in tableView: NSTableView) -> Int {
-        switch contentMode {
-        case .tabs:
-            return TabManager.shared.tabs.filter { !$0.isPinned }.count + (isSettingsTabActive ? 1 : 0)
-        case .history:
-            return BrowserLibraryStore.shared.history.count
-        case .bookmarks:
-            return BrowserLibraryStore.shared.bookmarks.count
+    private var tabRail: some View {
+        VStack(spacing: 7) {
+            if model.pinnedItemCount > 0 {
+                pinnedClusterButton
+            }
+
+            ForEach(model.unpinnedTabs) { tab in
+                compactTabButton(tab)
+            }
+
+            Spacer(minLength: 6)
+
+            railButton("New tab", symbol: "plus", action: { model.delegate?.sidebarDidCreateNewTab() })
+            railButton("Settings", symbol: "gearshape", action: { model.delegate?.sidebarDidOpenSettings() })
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .frame(maxHeight: .infinity)
+    }
+
+    private var pinnedClusterButton: some View {
+        let firstSite = model.pinnedSites.first
+        let firstTab = model.pinnedTabs.first
+        let title = firstSite?.title ?? firstTab?.title ?? "Pinned items"
+        let count = model.pinnedItemCount
+        return Button {
+            model.delegate?.sidebarDidRequestReveal()
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(Color.white.opacity(0.09))
+                    .frame(width: 36, height: 36)
+                    .matchedGeometryEffect(id: "pinned-cluster", in: morphNamespace)
+                    .overlay {
+                        Text(String(title.first ?? "•").uppercased())
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                    }
+                if count > 1 {
+                    Text("+\(count - 1)")
+                        .font(.system(size: 8, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(.gray.opacity(0.82), in: Capsule())
+                        .offset(x: 8, y: 5)
+                }
+            }
+            .frame(width: 48, height: 42)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($hasFocus)
+        .help("Show \(count) pinned tabs and sites")
+        .accessibilityLabel("Pinned sites and tabs, \(count) total")
+        .contextMenu {
+            Button("Show Tabs") { model.delegate?.sidebarDidRequestReveal() }
         }
     }
 
-    public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        switch contentMode {
-        case .history:
-            let entries = BrowserLibraryStore.shared.history
-            guard entries.indices.contains(row), let url = URL(string: entries[row].url) else { return nil }
-            return configureLibraryRow(title: entries[row].title, url: url, symbol: "clock.arrow.circlepath", row: row, removable: false)
-        case .bookmarks:
-            let entries = BrowserLibraryStore.shared.bookmarks
-            guard entries.indices.contains(row), let url = URL(string: entries[row].url) else { return nil }
-            return configureLibraryRow(title: entries[row].title, url: url, symbol: "bookmark.fill", row: row, removable: true, bookmarkID: entries[row].id, isPinned: entries[row].isPinned)
-        case .tabs:
-            break
+    private func compactTabButton(_ tab: TabItem) -> some View {
+        Button {
+            model.delegate?.sidebarDidSelectTab(id: tab.id)
+        } label: {
+            ZStack(alignment: .bottomTrailing) {
+            RoundedRectangle(cornerRadius: 11)
+                    .fill(tab.id == model.activeTabID ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.055))
+                    .frame(width: 38, height: 38)
+                    .matchedGeometryEffect(id: "tab-\(tab.id)", in: morphNamespace)
+                    .overlay {
+                        Text(String((tab.webView.title ?? tab.title).first ?? "•").uppercased())
+                            .font(.system(size: 12, weight: tab.id == model.activeTabID ? .semibold : .medium))
+                            .foregroundStyle(tab.id == model.activeTabID ? .primary : .secondary)
+                    }
+                if tab.isPrivate {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.purple)
+                        .padding(2)
+                        .background(.black.opacity(0.72), in: Circle())
+                        .offset(x: 4, y: 4)
+                }
+                if tab.webView.isLoading {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                        .offset(x: 3, y: 3)
+                }
+            }
+            .frame(width: 48, height: 42)
+            .contentShape(Rectangle())
         }
-        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
-        let cell = SidebarRowView()
-        cell.wantsLayer = true
-        cell.layer?.cornerRadius = 9
-        cell.layer?.backgroundColor = NSColor(white: 1, alpha: 0.035).cgColor
-
-        if isSettingsTabActive && row == tabs.count {
-            configureSettingsRow(cell)
-            cell.onSelect = { [weak self] in self?.delegate?.sidebarDidOpenSettings() }
-            return cell
+        .buttonStyle(.plain)
+        .focused($hasFocus)
+        .help(tab.title.isEmpty ? "New Tab" : tab.title)
+        .accessibilityLabel(tab.title.isEmpty ? "New Tab" : tab.title)
+        .contextMenu {
+            Button("Duplicate Tab") { model.delegate?.sidebarDidDuplicateTab(id: tab.id) }
+            Button("Pin Tab") { model.delegate?.sidebarDidTogglePinTab(id: tab.id) }
+            Divider()
+            Button("Close Tab", role: .destructive) { model.delegate?.sidebarDidCloseTab(id: tab.id) }
         }
-        guard row >= 0, row < tabs.count else { return nil }
-        let tab = tabs[row]
-        let active = !isSettingsTabActive && TabManager.shared.activeTabId == tab.id
-        cell.layer?.backgroundColor = active
-            ? NSColor(white: 1, alpha: 0.13).cgColor
-            : NSColor(white: 1, alpha: 0.025).cgColor
+    }
 
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: tab.isPinned ? "pin.fill" : "globe", accessibilityDescription: "Tab")
-        icon.contentTintColor = .secondaryLabelColor
-        icon.imageScaling = .scaleProportionallyDown
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon)
+    private func railButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, height: 38)
+                .contentShape(RoundedRectangle(cornerRadius: 11))
+        }
+        .buttonStyle(.plain)
+        .focused($hasFocus)
+        .help(title)
+        .accessibilityLabel(title)
+    }
 
-        let title = NSTextField(labelWithString: tab.title.isEmpty ? "New Tab" : tab.title)
-        title.font = .systemFont(ofSize: 12, weight: active ? .semibold : .regular)
-        title.textColor = active ? .labelColor : .secondaryLabelColor
-        title.lineBreakMode = .byTruncatingTail
-        title.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(title)
+    private var expandedPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(panelTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                if model.contentMode == .history {
+                    Button {
+                        model.delegate?.sidebarDidClearHistory()
+                        model.refresh()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear history")
+                    .accessibilityLabel("Clear history")
+                }
+            }
+            .frame(height: 24)
 
-        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")!, target: self, action: #selector(onCloseTabClicked(_:)))
-        close.isBordered = false
-        close.contentTintColor = .tertiaryLabelColor
-        close.toolTip = "Close tab"
-        close.tag = row
-        close.translatesAutoresizingMaskIntoConstraints = false
-        close.isHidden = true
-        cell.addSubview(close)
+            if model.contentMode == .tabs {
+                Button {
+                    model.delegate?.sidebarDidCreateNewTab()
+                } label: {
+                    Label("New tab", systemImage: "plus")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .frame(height: 32)
+                        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+                .focused($hasFocus)
 
-        let pin = NSButton(image: NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin", accessibilityDescription: "Toggle pin")!, target: self, action: #selector(onPinTabClicked(_:)))
-        pin.isBordered = false
-        pin.contentTintColor = .tertiaryLabelColor
-        pin.toolTip = tab.isPinned ? "Unpin tab" : "Pin tab"
-        pin.tag = row
-        pin.translatesAutoresizingMaskIntoConstraints = false
-        pin.isHidden = true
-        cell.addSubview(pin)
+                if model.pinnedItemCount > 0 { pinnedStrip }
+            }
 
-        var iconConstraints: [NSLayoutConstraint] = [
-            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
-            icon.trailingAnchor.constraint(equalTo: title.leadingAnchor, constant: -10),
-            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            title.trailingAnchor.constraint(equalTo: pin.leadingAnchor, constant: -4),
-            pin.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -2),
-            pin.widthAnchor.constraint(equalToConstant: 22),
-            pin.heightAnchor.constraint(equalToConstant: 22),
-            close.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            close.widthAnchor.constraint(equalToConstant: 22),
-            close.heightAnchor.constraint(equalToConstant: 22)
-        ]
-        iconConstraints.append(
-            isCollapsed
-                ? icon.centerXAnchor.constraint(equalTo: cell.centerXAnchor)
-                : icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12)
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    switch model.contentMode {
+                    case .tabs:
+                        ForEach(model.unpinnedTabs) { tab in tabRow(tab) }
+                        if model.isSettingsTabActive { settingsRow }
+                    case .history:
+                        if model.history.isEmpty { emptyMessage("No browsing history yet") }
+                        ForEach(model.history) { entry in historyRow(entry) }
+                    case .bookmarks:
+                        if model.bookmarks.isEmpty { emptyMessage("Save a page to see it here") }
+                        ForEach(model.bookmarks) { bookmark in bookmarkRow(bookmark) }
+                    case .readingList:
+                        if model.readingList.isEmpty { emptyMessage("Save a page for later from the toolbar") }
+                        ForEach(model.readingList) { entry in readingListRow(entry) }
+                    }
+                }
+                .padding(.bottom, 6)
+            }
+            .scrollIndicators(.visible)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                footerButton("Settings", symbol: "gearshape", action: { model.delegate?.sidebarDidOpenSettings() })
+                footerButton("Quit", symbol: "power", action: { model.delegate?.sidebarDidQuit() })
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.top, 12)
+        .padding(.bottom, 14)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.black.opacity(0.035))
+    }
+
+    private var panelTitle: String {
+        switch model.contentMode {
+        case .tabs: return model.isSettingsTabActive ? "TABS · SETTINGS" : "TABS"
+        case .history: return "HISTORY"
+        case .bookmarks: return "BOOKMARKS"
+        case .readingList: return "READING LIST"
+        }
+    }
+
+    private var pinnedStrip: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
+                ForEach(model.pinnedSites) { bookmark in
+                    Button {
+                        guard let url = URL(string: bookmark.url) else { return }
+                        model.delegate?.sidebarDidOpenLibraryURL(url)
+                    } label: {
+                        pinMark(title: bookmark.title, symbol: "globe", isClusterTarget: bookmark.id == model.pinnedSites.first?.id)
+                    }
+                    .buttonStyle(.plain)
+                    .help(bookmark.title.isEmpty ? bookmark.url : bookmark.title)
+                    .accessibilityLabel(bookmark.title.isEmpty ? "Pinned site" : bookmark.title)
+                }
+                ForEach(model.pinnedTabs) { tab in
+                    Button {
+                        model.delegate?.sidebarDidSelectTab(id: tab.id)
+                    } label: {
+                        pinMark(
+                            title: tab.title,
+                            symbol: "pin.fill",
+                            isClusterTarget: model.pinnedSites.isEmpty && tab.id == model.pinnedTabs.first?.id
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(tab.title.isEmpty ? "Pinned tab" : tab.title)
+                    .accessibilityLabel(tab.title.isEmpty ? "Pinned tab" : tab.title)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .scrollIndicators(.hidden)
+        .frame(height: 36)
+    }
+
+    private func pinMark(title: String, symbol: String, isClusterTarget: Bool = false) -> some View {
+        ZStack {
+            if isClusterTarget {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.white.opacity(0.075))
+                    .frame(width: 30, height: 30)
+                    .matchedGeometryEffect(id: "pinned-cluster", in: morphNamespace)
+            } else {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.white.opacity(0.075))
+                    .frame(width: 30, height: 30)
+            }
+            Text(String(title.first ?? "•").uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                        .offset(x: 3, y: 3)
+                }
+        }
+    }
+
+    private func tabRow(_ tab: TabItem) -> some View {
+        HStack(spacing: 4) {
+            Button {
+                model.delegate?.sidebarDidSelectTab(id: tab.id)
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: tab.isPrivate ? "hand.raised.fill" : "globe")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(tab.isPrivate ? Color.purple : Color.secondary)
+                        .frame(width: 18)
+                    Text(tab.webView.title ?? (tab.title.isEmpty ? "New Tab" : tab.title))
+                        .font(.system(size: 12, weight: tab.id == model.activeTabID ? .semibold : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 2)
+                    if tab.webView.isLoading {
+                        ProgressView().controlSize(.mini).frame(width: 14, height: 14)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($hasFocus)
+            .help(tab.title.isEmpty ? "New Tab" : tab.title)
+
+            Button {
+                model.delegate?.sidebarDidCloseTab(id: tab.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Close tab")
+            .accessibilityLabel("Close \(tab.title.isEmpty ? "New Tab" : tab.title)")
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 36)
+        .background(tab.id == model.activeTabID ? Color.white.opacity(0.13) : Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+        .background {
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.clear)
+                .matchedGeometryEffect(id: "tab-\(tab.id)", in: morphNamespace)
+        }
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .focused($hasFocus)
+        .contextMenu {
+            Button("Duplicate Tab") { model.delegate?.sidebarDidDuplicateTab(id: tab.id) }
+            Button("Pin Tab") { model.delegate?.sidebarDidTogglePinTab(id: tab.id) }
+            Divider()
+            Button("Close Tab", role: .destructive) { model.delegate?.sidebarDidCloseTab(id: tab.id) }
+        }
+    }
+
+    private func historyRow(_ entry: BrowserHistoryEntry) -> some View {
+        let url = URL(string: entry.url)
+        return libraryRow(
+            title: entry.title,
+            detail: url?.host ?? entry.url,
+            symbol: "clock.arrow.circlepath",
+            action: { if let url { model.delegate?.sidebarDidOpenLibraryURL(url) } }
         )
-        NSLayoutConstraint.activate(iconConstraints)
-        title.isHidden = isCollapsed
-        cell.onSelect = { [weak self] in self?.delegate?.sidebarDidSelectTab(id: tab.id) }
-        cell.onHover = { [weak close, weak pin] hovering in
-            close?.isHidden = !hovering || self.isCollapsed
-            pin?.isHidden = !hovering || self.isCollapsed
-        }
-        let tabMenu = NSMenu()
-        let duplicate = NSMenuItem(title: "Duplicate Tab", action: #selector(onDuplicateTabFromMenu(_:)), keyEquivalent: "")
-        duplicate.target = self
-        duplicate.representedObject = tab.id
-        tabMenu.addItem(duplicate)
-        let pinItem = NSMenuItem(title: tab.isPinned ? "Unpin Tab" : "Pin Tab", action: #selector(onTogglePinTabFromMenu(_:)), keyEquivalent: "")
-        pinItem.target = self
-        pinItem.representedObject = tab.id
-        tabMenu.addItem(pinItem)
-        tabMenu.addItem(.separator())
-        let closeItem = NSMenuItem(title: "Close Tab", action: #selector(onCloseTabFromMenu(_:)), keyEquivalent: "")
-        closeItem.target = self
-        closeItem.representedObject = tab.id
-        tabMenu.addItem(closeItem)
-        cell.menu = tabMenu
-        loadFavicon(for: tab, into: icon)
-        return cell
     }
 
-    private func configureLibraryRow(title text: String, url: URL, symbol: String, row: Int, removable: Bool, bookmarkID: UUID? = nil, isPinned: Bool = false) -> NSView {
-        let cell = SidebarRowView()
-        cell.wantsLayer = true
-        cell.layer?.cornerRadius = 9
-        cell.layer?.backgroundColor = NSColor(white: 1, alpha: 0.025).cgColor
-
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: text)
-        icon.contentTintColor = .secondaryLabelColor
-        icon.imageScaling = .scaleProportionallyDown
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon)
-
-        let title = NSTextField(labelWithString: text.isEmpty ? (url.host ?? url.absoluteString) : text)
-        title.font = .systemFont(ofSize: 12, weight: .medium)
-        title.textColor = .labelColor
-        title.lineBreakMode = .byTruncatingTail
-        title.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(title)
-
-        let detail = NSTextField(labelWithString: url.host ?? url.absoluteString)
-        detail.font = .systemFont(ofSize: 10, weight: .regular)
-        detail.textColor = .tertiaryLabelColor
-        detail.lineBreakMode = .byTruncatingTail
-        detail.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(detail)
-
-        let titleTrailingConstraint: NSLayoutConstraint
-        var close: NSButton?
-        if removable {
-            let button = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Remove bookmark")!, target: self, action: #selector(onRemoveBookmarkClicked(_:)))
-            button.isBordered = false
-            button.contentTintColor = .tertiaryLabelColor
-            button.toolTip = "Remove bookmark"
-            button.tag = row
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.isHidden = true
-            cell.addSubview(button)
-            close = button
-            titleTrailingConstraint = title.trailingAnchor.constraint(equalTo: button.leadingAnchor, constant: -4)
-            button.widthAnchor.constraint(equalToConstant: 22).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
-            button.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6).isActive = true
-            button.centerYAnchor.constraint(equalTo: cell.centerYAnchor).isActive = true
-        } else {
-            titleTrailingConstraint = title.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10)
-        }
-
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
-            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            titleTrailingConstraint,
-            title.topAnchor.constraint(equalTo: cell.topAnchor, constant: 6),
-            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            detail.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-            detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 1),
-            detail.bottomAnchor.constraint(lessThanOrEqualTo: cell.bottomAnchor, constant: -5)
-        ])
-        cell.onSelect = { [weak self] in self?.delegate?.sidebarDidOpenLibraryURL(url) }
-        cell.onHover = { [weak close] hovering in close?.isHidden = !hovering }
-        if let bookmarkID {
-            let menu = NSMenu()
-            let pin = NSMenuItem(title: isPinned ? "Remove from Pinned Sites" : "Pin to Pinned Sites", action: #selector(onToggleBookmarkPin(_:)), keyEquivalent: "")
-            pin.target = self
-            pin.representedObject = bookmarkID
-            menu.addItem(pin)
-            let open = NSMenuItem(title: "Open", action: #selector(onOpenBookmark(_:)), keyEquivalent: "")
-            open.target = self
-            open.representedObject = url
-            menu.addItem(open)
-            cell.menu = menu
-        }
-        return cell
-    }
-
-    private func configureSettingsRow(_ cell: SidebarRowView) {
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")
-        icon.contentTintColor = .secondaryLabelColor
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(icon)
-        let title = NSTextField(labelWithString: "Settings")
-        title.font = .systemFont(ofSize: 12, weight: .medium)
-        title.textColor = .labelColor
-        title.translatesAutoresizingMaskIntoConstraints = false
-        title.isHidden = isCollapsed
-        cell.addSubview(title)
-        var settingsConstraints: [NSLayoutConstraint] = [
-            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18),
-            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8)
-        ]
-        settingsConstraints.append(
-            isCollapsed
-                ? icon.centerXAnchor.constraint(equalTo: cell.centerXAnchor)
-                : icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12)
+    private func bookmarkRow(_ bookmark: BrowserBookmark) -> some View {
+        libraryRow(
+            title: bookmark.title,
+            detail: URL(string: bookmark.url)?.host ?? bookmark.url,
+            symbol: bookmark.isPinned ? "pin.fill" : "bookmark.fill",
+            action: { if let url = URL(string: bookmark.url) { model.delegate?.sidebarDidOpenLibraryURL(url) } }
         )
-        NSLayoutConstraint.activate(settingsConstraints)
-    }
-
-    private func loadFavicon(for tab: TabItem, into button: NSButton) {
-        guard let host = tab.webView.url?.host ?? tab.url?.host,
-              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
-              let url = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else { return }
-        URLSession.shared.dataTask(with: url) { [weak button] data, _, _ in
-            guard let data, let image = NSImage(data: data) else { return }
-            DispatchQueue.main.async {
-                guard let button, button.window != nil else { return }
-                button.image = image
+        .contextMenu {
+            Button(bookmark.isPinned ? "Remove from Pinned Sites" : "Pin to Pinned Sites") {
+                model.delegate?.sidebarDidToggleBookmarkPin(id: bookmark.id)
             }
-        }.resume()
-    }
-
-    private func loadFavicon(for url: URL, into button: NSButton) {
-        guard let host = url.host,
-              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
-              let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else { return }
-        URLSession.shared.dataTask(with: faviconURL) { [weak button] data, _, _ in
-            guard let data, let image = NSImage(data: data) else { return }
-            DispatchQueue.main.async {
-                guard let button, button.window != nil else { return }
-                button.image = image
+            Button("Open") {
+                if let url = URL(string: bookmark.url) { model.delegate?.sidebarDidOpenLibraryURL(url) }
             }
-        }.resume()
-    }
-
-    private func loadFavicon(for tab: TabItem, into imageView: NSImageView) {
-        guard let host = tab.webView.url?.host ?? tab.url?.host,
-              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
-              let url = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else {
-            imageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Tab")
-            return
+            Divider()
+            Button("Remove Bookmark", role: .destructive) { model.delegate?.sidebarDidRemoveBookmark(id: bookmark.id) }
         }
-        let tabID = tab.id
-        URLSession.shared.dataTask(with: url) { [weak imageView] data, _, _ in
-            guard let data, let image = NSImage(data: data) else { return }
-            DispatchQueue.main.async {
-                guard let imageView, imageView.window != nil else { return }
-                imageView.image = image
+    }
+
+    private func readingListRow(_ entry: BrowserReadingListEntry) -> some View {
+        libraryRow(
+            title: entry.title,
+            detail: URL(string: entry.url)?.host ?? entry.url,
+            symbol: entry.isRead ? "book.closed" : "book.closed.fill",
+            action: {
+                guard let url = URL(string: entry.url) else { return }
+                model.delegate?.sidebarDidOpenReadingListEntry(id: entry.id, url: url)
             }
-        }.resume()
-        _ = tabID
+        )
+        .opacity(entry.isRead ? 0.68 : 1)
+        .contextMenu {
+            Button(entry.isRead ? "Mark as Unread" : "Mark as Read") {
+                model.delegate?.sidebarDidToggleReadingListRead(id: entry.id)
+            }
+            Button("Open") {
+                if let url = URL(string: entry.url) {
+                    model.delegate?.sidebarDidOpenReadingListEntry(id: entry.id, url: url)
+                }
+            }
+            Divider()
+            Button("Remove from Reading List", role: .destructive) {
+                model.delegate?.sidebarDidRemoveReadingListEntry(id: entry.id)
+            }
+        }
     }
 
-    @objc private func onPinnedTabClicked(_ sender: NSButton) {
-        let tabs = TabManager.shared.tabs.filter(\.isPinned)
-        guard sender.tag >= 0, sender.tag < tabs.count else { return }
-        delegate?.sidebarDidSelectTab(id: tabs[sender.tag].id)
-    }
-    @objc private func onPinnedSiteClicked(_ sender: NSButton) {
-        let sites = BrowserLibraryStore.shared.bookmarks.filter(\.isPinned)
-        guard sites.indices.contains(sender.tag), let url = URL(string: sites[sender.tag].url) else { return }
-        delegate?.sidebarDidOpenLibraryURL(url)
-    }
-    @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
-    @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
-    @objc private func onQuit() { delegate?.sidebarDidQuit() }
-    @objc private func onPinTabClicked(_ sender: NSButton) {
-        let row = sender.tag
-        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
-        guard row >= 0, row < tabs.count else { return }
-        delegate?.sidebarDidTogglePinTab(id: tabs[row].id)
-    }
-    @objc private func onDuplicateTabFromMenu(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        delegate?.sidebarDidDuplicateTab(id: id)
-    }
-    @objc private func onTogglePinTabFromMenu(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        delegate?.sidebarDidTogglePinTab(id: id)
-    }
-    @objc private func onCloseTabFromMenu(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        delegate?.sidebarDidCloseTab(id: id)
-    }
-    @objc private func onCloseTabClicked(_ sender: NSButton) {
-        let row = sender.tag
-        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
-        guard row >= 0, row < tabs.count else { return }
-        delegate?.sidebarDidCloseTab(id: tabs[row].id)
+    private func libraryRow(title: String, detail: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title.isEmpty ? detail : title)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(detail)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 42)
+            .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .focused($hasFocus)
     }
 
-    @objc private func onRemoveBookmarkClicked(_ sender: NSButton) {
-        let bookmarks = BrowserLibraryStore.shared.bookmarks
-        guard bookmarks.indices.contains(sender.tag) else { return }
-        delegate?.sidebarDidRemoveBookmark(id: bookmarks[sender.tag].id)
+    private var settingsRow: some View {
+        Button {
+            model.delegate?.sidebarDidOpenSettings()
+        } label: {
+            Label("Settings", systemImage: "gearshape.fill")
+                .font(.system(size: 12, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .frame(height: 36)
+                .background(Color.accentColor.opacity(0.16), in: RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .focused($hasFocus)
     }
 
-    @objc private func onToggleBookmarkPin(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? UUID else { return }
-        delegate?.sidebarDidToggleBookmarkPin(id: id)
+    private func footerButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .focused($hasFocus)
+        .help(title)
     }
 
-    @objc private func onOpenBookmark(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        delegate?.sidebarDidOpenLibraryURL(url)
+    private func emptyMessage(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+    }
+}
+
+@MainActor
+private struct SidebarVisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .underWindowBackground
+        view.blendingMode = .withinWindow
+        view.state = .active
+        view.wantsLayer = true
+        return view
     }
 
-    @objc private func onClearHistory() { delegate?.sidebarDidClearHistory() }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

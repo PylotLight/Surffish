@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import SwiftUI
 import WebKit
 
 private final class SurffishBrowserWindow: NSWindow {
@@ -10,6 +11,16 @@ private final class SurffishBrowserWindow: NSWindow {
            event.clickCount == 2,
            let contentView,
            let titlebarBackgroundView {
+            let hitView = contentView.hitTest(contentView.convert(event.locationInWindow, from: nil))
+            var viewIsToolbarDescendant = false
+            var ancestor = hitView
+            while let current = ancestor {
+                if current === titlebarBackgroundView {
+                    viewIsToolbarDescendant = true
+                    break
+                }
+                ancestor = current.superview
+            }
             let point = contentView.convert(event.locationInWindow, from: nil)
             let titlebarRect = NSRect(
                 x: contentView.bounds.minX,
@@ -18,7 +29,7 @@ private final class SurffishBrowserWindow: NSWindow {
                 height: 34
             )
             if titlebarRect.contains(point),
-               contentView.hitTest(point) === titlebarBackgroundView {
+               viewIsToolbarDescendant {
                 zoom(nil)
                 return
             }
@@ -33,11 +44,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var sidebarView: SidebarView!
     private var webContainerView: NSView!
     private var findBarView: FindBarView!
-    
-    private var sidebarLeadingConstraint: NSLayoutConstraint!
-    private var sidebarWidthConstraint: NSLayoutConstraint!
+    private var shellHostingView: NSHostingView<BrowserShellView>!
+    private let shellLayoutModel = BrowserShellLayoutModel()
+
     private var isSidebarVisible: Bool = true
     private var isSidebarHovered: Bool = false
+    private var isSidebarFocused: Bool = false
+    private var isSidebarRevealRequested: Bool = false
+    private var sidebarRevealTask: Task<Void, Never>?
     private let sidebarWidth: CGFloat = 280.0
     private let collapsedSidebarWidth: CGFloat = 64.0
     
@@ -103,17 +117,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         rootGlass.addSubview(frameTint)
         contentView.addSubview(rootGlass)
         
-        // 2. Full-height Left Sidebar (traffic lights sit inside top of sidebar)
+        // 2. AppKit/WebKit surfaces hosted by the SwiftUI-first browser shell.
         sidebarView = SidebarView(frame: .zero)
         sidebarView.delegate = self
-        sidebarView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(sidebarView)
-        
-        // 3. Top Omnibox / Toolbar (aligned to right of sidebar)
+        sidebarView.onHoverChange = { [weak self] hovering in
+            self?.sidebarHoverChanged(hovering)
+        }
+        sidebarView.onFocusChange = { [weak self] focused in
+            self?.sidebarFocusChanged(focused)
+        }
+
+        // 3. Top Omnibox / Toolbar (the one persistent collapse control).
         omniboxView = OmniboxView(frame: .zero)
         omniboxView.delegate = self
-        omniboxView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(omniboxView)
         (window as? SurffishBrowserWindow)?.titlebarBackgroundView = omniboxView
         
         // 4. Web Content Container (inset dark rounded card)
@@ -124,55 +140,36 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         webContainerView.layer?.borderColor = NSColor(white: 1.0, alpha: 0.12).cgColor
         webContainerView.layer?.borderWidth = 1
         webContainerView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1.0).cgColor
-        webContainerView.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(webContainerView)
 
         findBarView = FindBarView(frame: .zero)
         findBarView.delegate = self
         findBarView.translatesAutoresizingMaskIntoConstraints = false
         findBarView.isHidden = true
         webContainerView.addSubview(findBarView)
-        
-        // Constraints: Single unified frame!
-        sidebarLeadingConstraint = sidebarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
-        sidebarWidthConstraint = sidebarView.widthAnchor.constraint(equalToConstant: sidebarWidth)
-        sidebarView.onHoverChange = { [weak self] hovering in
-            self?.sidebarHoverChanged(hovering)
-        }
 
+        shellLayoutModel.sidebarWidth = sidebarWidth
+        shellHostingView = NSHostingView(rootView: BrowserShellView(
+            layout: shellLayoutModel,
+            toolbar: omniboxView,
+            sidebar: sidebarView,
+            pageCard: webContainerView
+        ))
+        shellHostingView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(shellHostingView)
         NSLayoutConstraint.activate([
-            // Root glass fills window
             rootGlass.topAnchor.constraint(equalTo: contentView.topAnchor),
             rootGlass.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             rootGlass.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             rootGlass.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            
-            // Sidebar starts below the shared toolbar frame and floats over the page.
-            sidebarLeadingConstraint,
-            sidebarView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor),
-            sidebarView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            sidebarWidthConstraint,
-            
-            // Omnibox starts to right of sidebar and extends across top
-            omniboxView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            omniboxView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: collapsedSidebarWidth),
-            omniboxView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            omniboxView.heightAnchor.constraint(equalToConstant: 50),
-            
-            // Web view container sits below Omnibox
-            webContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: collapsedSidebarWidth + 8),
-            webContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 8),
-            webContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            shellHostingView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            shellHostingView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            shellHostingView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            shellHostingView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             findBarView.topAnchor.constraint(equalTo: webContainerView.topAnchor, constant: 12),
             findBarView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor, constant: -12),
             findBarView.widthAnchor.constraint(equalToConstant: 420),
-            findBarView.heightAnchor.constraint(equalToConstant: 42),
+            findBarView.heightAnchor.constraint(equalToConstant: 42)
         ])
-        // Keep the page card behind the sidebar while leaving the toolbar (including
-        // its only sidebar-toggle button) visible above the panel in both states.
-        contentView.addSubview(sidebarView, positioned: .above, relativeTo: webContainerView)
-        contentView.addSubview(omniboxView, positioned: .above, relativeTo: sidebarView)
         
         TabManager.shared.delegate = self
         WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in
@@ -180,9 +177,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
         let savedSidebarState = BrowserSettingsStore.shared.settings.showSidebarAtStartup
         isSidebarVisible = savedSidebarState
-        sidebarLeadingConstraint.constant = 0
-        sidebarWidthConstraint.constant = savedSidebarState ? sidebarWidth : collapsedSidebarWidth
-        sidebarView.setCollapsed(!savedSidebarState)
+        updateSidebarWidth(animated: false)
 
     }
 
@@ -248,6 +243,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuShowTabs() { omniboxDidShowTabs() }
     @objc public func menuShowHistory() { omniboxDidShowHistory() }
     @objc public func menuShowBookmarks() { omniboxDidShowBookmarks() }
+    @objc public func menuShowReadingList() { omniboxDidShowReadingList() }
     @objc public func menuOpenSettings() {
         showSettingsTab()
     }
@@ -409,6 +405,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     public func omniboxDidToggleSidebar() {
         isSidebarVisible.toggle()
+        isSidebarRevealRequested = false
+        if !isSidebarVisible && sidebarView.requiresExpandedPanel {
+            sidebarView.showTabs()
+        }
         updateSidebarWidth(animated: true)
         var settings = BrowserSettingsStore.shared.settings
         settings.showSidebarAtStartup = isSidebarVisible
@@ -431,10 +431,25 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         sidebarView.showBookmarks()
     }
 
+    public func omniboxDidShowReadingList() {
+        revealSidebarForLibrary()
+        sidebarView.showReadingList()
+    }
+
     public func omniboxDidToggleBookmark() {
         guard let tab = TabManager.shared.activeTab,
               let url = tab.webView.url ?? tab.url else { return }
         _ = BrowserLibraryStore.shared.toggleBookmark(url: url, title: tab.webView.title ?? tab.title)
+        sidebarView.reloadTabs()
+        omniboxView.updateForTab(tab)
+    }
+
+    public func omniboxDidToggleReadingList() {
+        guard let tab = TabManager.shared.activeTab,
+              !tab.isPrivate,
+              let url = tab.webView.url ?? tab.url,
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
+        _ = BrowserLibraryStore.shared.toggleReadingList(url: url, title: tab.webView.title ?? tab.title)
         sidebarView.reloadTabs()
         omniboxView.updateForTab(tab)
     }
@@ -445,6 +460,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
         if !isSidebarVisible {
             isSidebarVisible = true
+            isSidebarRevealRequested = false
             var settings = BrowserSettingsStore.shared.settings
             settings.showSidebarAtStartup = true
             BrowserSettingsStore.shared.update(settings)
@@ -453,32 +469,44 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     private func settingsDidChange(_ settings: BrowserSettings) {
-        guard isSidebarVisible != settings.showSidebarAtStartup else { return }
-        isSidebarVisible = settings.showSidebarAtStartup
-        updateSidebarWidth(animated: true)
+        if isSidebarVisible != settings.showSidebarAtStartup {
+            isSidebarVisible = settings.showSidebarAtStartup
+            updateSidebarWidth(animated: true)
+        }
+        for tab in TabManager.shared.tabs where tab.webView.url?.scheme == "surffish" && tab.webView.url?.host == "newtab" {
+            tab.webView.reload()
+        }
     }
 
     private func sidebarHoverChanged(_ hovering: Bool) {
-        isSidebarHovered = hovering
-        guard !isSidebarVisible else { return }
+        sidebarRevealTask?.cancel()
+        if hovering {
+            isSidebarHovered = true
+            updateSidebarWidth(animated: true)
+            return
+        }
+        sidebarRevealTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(180))
+            guard let self, !Task.isCancelled else { return }
+            self.isSidebarHovered = false
+            self.updateSidebarWidth(animated: true)
+        }
+    }
+
+    private func sidebarFocusChanged(_ focused: Bool) {
+        isSidebarFocused = focused
+        if !focused && !isSidebarHovered {
+            isSidebarRevealRequested = false
+        }
         updateSidebarWidth(animated: true)
     }
 
     private func updateSidebarWidth(animated: Bool) {
-        let expanded = isSidebarVisible || isSidebarHovered
-        sidebarWidthConstraint.constant = expanded ? sidebarWidth : collapsedSidebarWidth
+        let expanded = isSidebarVisible || isSidebarHovered || isSidebarFocused
+            || isSidebarRevealRequested || sidebarView.requiresExpandedPanel
+        shellLayoutModel.sidebarWidth = expanded ? sidebarWidth : collapsedSidebarWidth
         sidebarView.setCollapsed(!expanded)
-        let changes = { self.window?.contentView?.layoutSubtreeIfNeeded() }
-        if animated {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.34
-                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)
-                context.allowsImplicitAnimation = true
-                changes()
-            }
-        } else {
-            changes()
-        }
+        window?.contentView?.layoutSubtreeIfNeeded()
     }
     
     private func showExtensionInstallSheet() {
@@ -571,8 +599,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidOpenExtensions() { menuOpenSettings() }
     public func sidebarDidOpenSettings() { menuOpenSettings() }
     public func sidebarDidQuit() { NSApp.terminate(nil) }
+    public func sidebarDidRequestReveal() {
+        isSidebarRevealRequested = true
+        updateSidebarWidth(animated: true)
+    }
     public func sidebarDidOpenLibraryURL(_ url: URL) {
-        guard let tab = TabManager.shared.activeTab else { return }
+        guard let tab = TabManager.shared.activeTab else {
+            _ = TabManager.shared.createTab(url: url, makeActive: true)
+            return
+        }
         tab.webView.load(URLRequest(url: url))
     }
     public func sidebarDidRemoveBookmark(id: UUID) {
@@ -587,6 +622,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidClearHistory() {
         BrowserLibraryStore.shared.clearHistory()
         sidebarView.reloadTabs()
+    }
+
+    public func sidebarDidOpenReadingListEntry(id: UUID, url: URL) {
+        BrowserLibraryStore.shared.setReadingListRead(id: id, isRead: true)
+        sidebarView.reloadTabs()
+        sidebarDidOpenLibraryURL(url)
+    }
+    public func sidebarDidToggleReadingListRead(id: UUID) {
+        guard let entry = BrowserLibraryStore.shared.readingList.first(where: { $0.id == id }) else { return }
+        BrowserLibraryStore.shared.setReadingListRead(id: id, isRead: !entry.isRead)
+        sidebarView.reloadTabs()
+    }
+    public func sidebarDidRemoveReadingListEntry(id: UUID) {
+        BrowserLibraryStore.shared.removeReadingListEntry(id: id)
+        sidebarView.reloadTabs()
+        if let tab = TabManager.shared.activeTab { omniboxView.updateForTab(tab) }
     }
 
     private func runTouchIDTest() {

@@ -60,20 +60,33 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
     @MainActor
     private static func pageHTML(includeHistory: Bool) -> String {
         let library = BrowserLibraryStore.shared
+        let settings = BrowserSettingsStore.shared.settings
         let pinned = library.bookmarks.filter(\.isPinned)
         let fallbackBookmarks = library.bookmarks
         let recent = includeHistory ? recentHistory(from: library.history) : []
+        let pinnedLinks = Array(pinned.prefix(8)).compactMap { SiteLink(title: $0.title, url: $0.url) }
+        let bookmarkLinks = Array(fallbackBookmarks.prefix(8)).compactMap { SiteLink(title: $0.title, url: $0.url) }
         let sites: [SiteLink]
         let sectionTitle: String
-        if !pinned.isEmpty {
-            sites = Array(pinned.prefix(8)).compactMap { SiteLink(title: $0.title, url: $0.url) }
+        switch settings.newTabSiteSource {
+        case .automatic where !pinnedLinks.isEmpty:
+            sites = pinnedLinks
             sectionTitle = "Pinned sites"
-        } else if !recent.isEmpty {
+        case .automatic where !recent.isEmpty:
             sites = Array(recent.prefix(8))
             sectionTitle = "Recently visited"
-        } else {
-            sites = Array(fallbackBookmarks.prefix(8)).compactMap { SiteLink(title: $0.title, url: $0.url) }
+        case .automatic:
+            sites = bookmarkLinks
             sectionTitle = sites.isEmpty ? "Your web, at a glance" : "Bookmarks"
+        case .pinned:
+            sites = pinnedLinks
+            sectionTitle = "Pinned sites"
+        case .recent:
+            sites = Array(recent.prefix(8))
+            sectionTitle = "Recently visited"
+        case .bookmarks:
+            sites = bookmarkLinks
+            sectionTitle = "Bookmarks"
         }
         let links = sites.map { site in
             let label = escapeHTML(site.title.isEmpty ? (site.url.host ?? site.url.absoluteString) : site.title)
@@ -85,7 +98,7 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
         let emptyState = sites.isEmpty
             ? "<p class=\"empty\">Bookmark a page or visit a site and it will be easy to find here.</p>"
             : ""
-        let engine = BrowserSettingsStore.shared.settings.searchEngine
+        let engine = settings.searchEngine
         let marker = "SURFFISHQUERYTOKEN"
         let searchPrefix = engine.searchURL(for: marker)?.absoluteString.replacingOccurrences(of: marker, with: "")
             ?? "https://duckduckgo.com/?q="
@@ -104,8 +117,7 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
             :root { color-scheme: dark; font: 15px -apple-system, BlinkMacSystemFont, sans-serif; }
             * { box-sizing: border-box; }
             body { min-height: 100vh; margin: 0; display: grid; place-items: center; color: #f4f6fa;
-              background: radial-gradient(ellipse at 50% 24%, rgba(78,103,139,.23), transparent 48%),
-                          linear-gradient(145deg, #171d27 0%, #10151d 52%, #151a23 100%); }
+              background: \(settings.newTabTheme.backgroundCSS); }
             main { width: min(760px, calc(100% - 40px)); padding: 52px 0 40px; }
             .brand { margin: 0 0 7px; color: #b8c4d6; font-size: 11px; font-weight: 700; letter-spacing: .24em; text-align: center; }
             #clock { margin: 0; font-size: clamp(58px, 10vw, 88px); font-weight: 300; letter-spacing: -.065em; text-align: center; font-variant-numeric: tabular-nums; }

@@ -33,7 +33,7 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 
 ### Landed
 
-- Native AppKit window, sidebar, toolbar/omnibox, WKWebView tabs, menu and Testing menu.
+- SwiftUI-first browser shell, compact rail/full sidebar panels and Settings surfaces, hosted by AppKit; WKWebView tabs, toolbar/omnibox, menus and Testing menu remain native integrations.
 - Stable tab identifiers, pinning, groups/Space metadata and saved session.
 - Private tabs use non-persistent WebKit data stores and are excluded from saved sessions.
 - Versioned settings and session persistence.
@@ -47,16 +47,16 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 - Configurable local listen port; the default is `127.0.0.1:1080`.
 - Loopback-only listener by default; optional `0.0.0.0` binding when external sharing is enabled.
 - Copyable `socks5h://127.0.0.1:<port>` endpoint.
-- Profile-local persistent bookmarks and browsing history, excluding private-tab navigations.
+- Profile-local persistent bookmarks, browsing history and Reading List; private-tab navigations remain excluded from history and Reading List additions.
 - Native Settings pages for General, Privacy, Extensions, Connection and About, with saved controls for the supported behaviors.
 - One sidebar collapse control in the toolbar; sidebar tabs, history and bookmarks surfaces with a separate pinned-tab strip.
 - macOS 26 arm64 build workflow.
 
 ### Implementation status for the native parity pass
 
-- **Implemented:** the single toolbar sidebar toggle; a glass-backed sidebar with Tabs, History and Bookmarks panels; profile-local bookmark/history storage; native Settings pages for General, Privacy, Extensions, Connection and About; a persisted WebKit content-rule toggle; and profile-scoped website-data clearing.
-- **Added in the current feature branch; macOS 26 arm64 build passed:** a local `surffish://newtab/` dashboard using the profile search engine and pinned/recent/bookmark links (with recent history hidden in private tabs); migration from the legacy external New Tab default while preserving custom start pages; basic native find-in-page; duplicate and in-memory reopen-closed-tab actions (private tabs excluded from reopen); bookmark pin migration and pinned-site sidebar actions; and tab/bookmark context menus. The [manual native build](https://github.com/PylotLight/Surffish/actions/runs/45620765079) and focused source-contract suite passed; interactive runtime QA remains open.
-- **Incomplete:** full Electron settings parity, downloads, reading list, true lazy session restoration, window geometry/multiple windows, comprehensive navigation history, drag/reorder and multi-select tab operations, robust error/crash UI, site permission/certificate management, production filter-list updates, and the broader M1–M6 feature inventory below. New Tab customization, full find-result UX and persistent closed-tab recovery are also not implemented. Settings expose only controls backed by native behavior; they do not imply the remaining categories are done.
+- **Implemented:** the single toolbar sidebar toggle; SwiftUI compact rail/full-panel shell with a pinned cluster, animated reveal and page-card width coordination; profile-local bookmarks, history and Reading List; SwiftUI Settings pages for General, Privacy, Extensions, Connection and About; profile-scoped website-data clearing; and persisted WebKit content-rule enablement.
+- **Added in the current feature branch; fresh macOS build pending:** a local `surffish://newtab/` dashboard using the profile search engine and pinned/recent/bookmark links (with recent history hidden in private tabs); saved local New Tab themes and quick-link sources with existing pages refreshed on Save & Apply; migration from the legacy external New Tab default while preserving custom start pages; native find-in-page; duplicate and in-memory reopen-closed-tab actions (private tabs excluded from reopen); bookmark pin migration and pinned-site actions; a Reading List toolbar/panel with read/unread and remove actions; and tab/library context menus. Focused source-contract tests cover these code paths; a fresh native macOS 26 arm64 build and interactive runtime QA remain open.
+- **Incomplete:** full Electron settings parity, downloads, true lazy session restoration, window geometry/multiple windows, comprehensive navigation history, drag/reorder and multi-select tab operations, exact Electron rail choreography/resize, robust error/crash UI, site permission/certificate management, production filter-list updates, and the broader M1–M6 feature inventory below. New Tab custom shortcuts/photo backgrounds/weather, full find-result UX and persistent closed-tab recovery are not implemented. Settings expose only controls backed by native behavior; they do not imply the remaining categories are done.
 - **Obsolete roadmap assumptions:** references to forwarding `-L` traffic to a separately managed NAS SOCKS daemon, configuring a NAS SOCKS host/port, or treating that NAS daemon as the exit are stale. The implementation uses `ssh -D`; the SSH host is the exit point. Do not reintroduce the old model without an explicit product decision.
 - **Runtime QA boundary:** this Linux environment cannot launch AppKit/WebKit. The macOS 26 GitHub Actions build passed for this feature branch; interactive browser QA still needs a macOS 26+ machine. The tunnel is mostly working in the POC; remaining SSH-host, sleep/wake, LAN-client and tunnel-drop acceptance is separate follow-up, not a blocker for this UI parity pass.
 - **WebKit compatibility limits:** Chrome-only extension APIs and Chromium DevTools request interception/process metrics are not assumed to exist. Record each incompatibility and design native alternatives; do not label them complete based on a Settings control or a successful compile.
@@ -84,7 +84,7 @@ The POC's SSH path is mostly working. The remaining checks below are acceptance/
 - Tab creation/close, pinning, keyboard shortcuts and basic duplicate/reopen/context-menu actions now exist; drag reorder, full reopen persistence and the complete Electron tab interaction model remain required.
 - Session restore without eagerly loading every restored tab; persist active tab and window state.
 - Persistent profile data separation, private browsing isolation and browsing-data deletion.
-- Reading list with persistent storage and basic management UI; bookmarks and history now have profile-local stores and sidebar management surfaces.
+- Reading List now has profile-local persistence, toolbar add/remove, panel open/read/unread/remove and private-tab exclusion; search, sorting, counts and richer offline/article metadata remain open.
 - Downloads with progress, pause/resume, reveal/open and destination settings.
 - Native permissions, certificate information and safe navigation decisions.
 - Production-quality ad/tracker blocking and filter-list updates; the current native rule set remains intentionally limited.

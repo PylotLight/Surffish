@@ -60,6 +60,7 @@ public func setupApplicationMenu() {
     let bookmarksItem = NSMenuItem(title: "Bookmarks", action: #selector(MainWindowController.menuShowBookmarks), keyEquivalent: "O")
     bookmarksItem.keyEquivalentModifierMask = [.command, .shift]
     viewMenu.addItem(bookmarksItem)
+    viewMenu.addItem(NSMenuItem(title: "Reading List", action: #selector(MainWindowController.menuShowReadingList), keyEquivalent: ""))
     viewMenu.addItem(NSMenuItem.separator())
     viewMenu.addItem(NSMenuItem(title: "Reload Page", action: #selector(MainWindowController.menuReload), keyEquivalent: "r"))
     viewMenu.addItem(NSMenuItem(title: "Find in Page…", action: #selector(MainWindowController.menuFind), keyEquivalent: "f"))

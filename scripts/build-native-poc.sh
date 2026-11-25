@@ -28,6 +28,7 @@ build_profile_app() {
       -target arm64-apple-macosx26.0 \
       -module-cache-path /tmp/swift-cache \
       -framework AppKit \
+      -framework SwiftUI \
       -framework WebKit \
       -framework Network \
       -framework LocalAuthentication \

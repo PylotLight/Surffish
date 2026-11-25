@@ -43,15 +43,50 @@ public struct BrowserBookmark: Codable, Identifiable {
     }
 }
 
+public struct BrowserReadingListEntry: Codable, Identifiable {
+    public let id: UUID
+    public let url: String
+    public var title: String
+    public let addedAt: Date
+    public var isRead: Bool
+
+    public init(id: UUID = UUID(), url: String, title: String, addedAt: Date = Date(), isRead: Bool = false) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.addedAt = addedAt
+        self.isRead = isRead
+    }
+}
+
 @MainActor
 public final class BrowserLibraryStore {
     public static let shared = BrowserLibraryStore()
     public private(set) var history: [BrowserHistoryEntry] = []
     public private(set) var bookmarks: [BrowserBookmark] = []
+    public private(set) var readingList: [BrowserReadingListEntry] = []
 
     private struct Snapshot: Codable {
         var history: [BrowserHistoryEntry]
         var bookmarks: [BrowserBookmark]
+        var readingList: [BrowserReadingListEntry]
+
+        private enum CodingKeys: String, CodingKey {
+            case history, bookmarks, readingList
+        }
+
+        init(history: [BrowserHistoryEntry], bookmarks: [BrowserBookmark], readingList: [BrowserReadingListEntry]) {
+            self.history = history
+            self.bookmarks = bookmarks
+            self.readingList = readingList
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            history = try values.decodeIfPresent([BrowserHistoryEntry].self, forKey: .history) ?? []
+            bookmarks = try values.decodeIfPresent([BrowserBookmark].self, forKey: .bookmarks) ?? []
+            readingList = try values.decodeIfPresent([BrowserReadingListEntry].self, forKey: .readingList) ?? []
+        }
     }
 
     private let fileURL: URL
@@ -70,6 +105,7 @@ public final class BrowserLibraryStore {
            let saved = try? decoder.decode(Snapshot.self, from: data) {
             history = saved.history.sorted { $0.visitedAt > $1.visitedAt }
             bookmarks = saved.bookmarks.sorted { $0.createdAt < $1.createdAt }
+            readingList = saved.readingList.sorted { $0.addedAt > $1.addedAt }
         }
     }
 
@@ -123,6 +159,30 @@ public final class BrowserLibraryStore {
         return bookmarks[index].isPinned
     }
 
+    @discardableResult
+    public func toggleReadingList(url: URL, title: String) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return false }
+        if let index = readingList.firstIndex(where: { $0.url == url.absoluteString }) {
+            readingList.remove(at: index)
+            persist()
+            return false
+        }
+        readingList.insert(BrowserReadingListEntry(url: url.absoluteString, title: title), at: 0)
+        persist()
+        return true
+    }
+
+    public func setReadingListRead(id: UUID, isRead: Bool) {
+        guard let index = readingList.firstIndex(where: { $0.id == id }) else { return }
+        readingList[index].isRead = isRead
+        persist()
+    }
+
+    public func removeReadingListEntry(id: UUID) {
+        readingList.removeAll { $0.id == id }
+        persist()
+    }
+
     public func clearHistory() {
         history.removeAll()
         persist()
@@ -130,7 +190,7 @@ public final class BrowserLibraryStore {
 
     private func persist() {
         do {
-            let data = try encoder.encode(Snapshot(history: history, bookmarks: bookmarks))
+            let data = try encoder.encode(Snapshot(history: history, bookmarks: bookmarks, readingList: readingList))
             try data.write(to: fileURL, options: .atomic)
         } catch {
             NSLog("[Library] Could not save bookmarks/history: %@", error.localizedDescription)
