@@ -216,7 +216,7 @@ public final class SshTunnelManager {
                     let listening = await Self.isListening(port: port)
                     if listening {
                         reconnectAttempt = 0
-                        updateStatus("SOCKS5 ready · \(bindAddress):\(port) → NAS \(upstreamHost):\(upstreamPort) via \(target)")
+                        updateStatus("SSH forward ready · \(bindAddress):\(port) → NAS SOCKS5 \(upstreamHost):\(upstreamPort) via \(target)")
                         if browserEnabled { TabManager.shared.reloadAllTabs() }
                         return
                     }
