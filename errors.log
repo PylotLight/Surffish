@@ -1,0 +1,35 @@
+==> Using macOS 26 SDK /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk with the selected Command Line Tools.
+==> Building Surffish Native for macOS 26 / Apple Silicon...
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:579:9: warning: result of 'GroupBox<Label, Content>' initializer is unused [#NoUsage]
+577 | 
+578 |     private var generalPage: some View {
+579 |         GroupBox("Browser") {
+    |         `- warning: result of 'GroupBox<Label, Content>' initializer is unused [#NoUsage]
+580 |             VStack(alignment: .leading, spacing: 12) {
+581 |                 Picker("Search engine", selection: $model.searchEngine) {
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:609:9: warning: result of 'GroupBox<Label, Content>' initializer is unused [#NoUsage]
+607 |             .padding(.top, 6)
+608 |         }
+609 |         GroupBox("Downloads") {
+    |         `- warning: result of 'GroupBox<Label, Content>' initializer is unused [#NoUsage]
+610 |             VStack(alignment: .leading, spacing: 10) {
+611 |                 Toggle("Ask where to save each download", isOn: $model.askWhereToSaveDownloads)
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:578:40: error: function declares an opaque return type, but has no return statements in its body from which to infer an underlying type [#OpaqueTypeInference]
+576 |     }
+577 | 
+578 |     private var generalPage: some View {
+    |                                        `- error: function declares an opaque return type, but has no return statements in its body from which to infer an underlying type [#OpaqueTypeInference]
+579 |         GroupBox("Browser") {
+580 |             VStack(alignment: .leading, spacing: 12) {
+    :
+607 |             .padding(.top, 6)
+608 |         }
+609 |         GroupBox("Downloads") {
+    |         `- note: did you mean to return the last expression?
+610 |             VStack(alignment: .leading, spacing: 10) {
+611 |                 Toggle("Ask where to save each download", isOn: $model.askWhereToSaveDownloads)
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#OpaqueTypeInference]: <https://docs.swift.org/compiler/documentation/diagnostics/opaque-type-inference>
