@@ -116,7 +116,9 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         pinnedStrip.alignment = .centerY
         pinnedStrip.distribution = .fill
         pinnedStrip.spacing = 6
-        pinnedStrip.translatesAutoresizingMaskIntoConstraints = false
+        pinnedStrip.translatesAutoresizingMaskIntoConstraints = true
+        pinnedStrip.frame = NSRect(x: 0, y: 0, width: 260, height: 38)
+        pinnedStrip.autoresizingMask = [.height]
         pinnedScrollView.documentView = pinnedStrip
         pinnedScrollView.hasHorizontalScroller = false
         pinnedScrollView.hasVerticalScroller = false
