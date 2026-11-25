@@ -260,6 +260,14 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             pinnedStrip.addArrangedSubview(button)
             loadFavicon(for: tab, into: button)
         }
+        if isCollapsed && pinned.count > 1 {
+            let overflow = NSTextField(labelWithString: "+\(pinned.count - 1)")
+            overflow.font = .systemFont(ofSize: 10, weight: .semibold)
+            overflow.textColor = .secondaryLabelColor
+            pinnedStrip.addArrangedSubview(overflow)
+        }
+        let stripWidth = isCollapsed ? 56 : max(260, CGFloat(displayed.count) * 36)
+        pinnedStrip.setFrameSize(NSSize(width: stripWidth, height: 38))
     }
 
     public func setSettingsTabActive(_ active: Bool) {
