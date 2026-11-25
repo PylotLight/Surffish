@@ -1,4 +1,5 @@
 import Foundation
+import CFNetwork
 import WebKit
 
 public struct LoadedExtensionInfo: Identifiable {
@@ -18,6 +19,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public private(set) var loadedExtensions: [LoadedExtensionInfo] = []
     public var onExtensionsChanged: (([LoadedExtensionInfo]) -> Void)?
     public private(set) var brambleContext: WKWebExtensionContext?
+    private var brambleNativeConnections: [ObjectIdentifier: BrambleNativeMessagingConnection] = [:]
 
     private let brambleChromeStoreID = "kmokhdhoggbdcgoepifeckhgbfakaknm"
     private let brambleFirefoxSlug = "bramble"
@@ -47,6 +49,67 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             return ext.context
         }
         return brambleContext
+    }
+
+    public func webExtensionController(
+        _ controller: WKWebExtensionController,
+        promptForPermissions permissions: Set<WKWebExtension.Permission>,
+        in tab: (any WKWebExtensionTab)?,
+        for extensionContext: WKWebExtensionContext,
+        completionHandler: @escaping (Set<WKWebExtension.Permission>, Date?) -> Void
+    ) {
+        let nativeMessaging = WKWebExtension.Permission.nativeMessaging
+        guard permissions.contains(nativeMessaging) else {
+            completionHandler([], nil)
+            DeveloperConsole.shared.record(level: "WARN", source: "Extension Permissions", message: "Denied unhandled permission request: \(permissions.map(\\.rawValue).joined(separator: \", \"))")
+            return
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Allow Bramble to connect to its desktop app?"
+        alert.informativeText = "Bramble needs this permission to talk to the desktop app. It lets the Bramble extension exchange encrypted vault-linking and sync messages with the Bramble app running on this Mac. Only grant this to Bramble."
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Don't Allow")
+        let allowed = alert.runModal() == .alertFirstButtonReturn
+        let granted = allowed ? [nativeMessaging] : []
+        completionHandler(Set(granted), nil)
+        DeveloperConsole.shared.record(
+            level: allowed ? "INFO" : "WARN",
+            source: "Extension Permissions",
+            message: "\(allowed ? \"Granted\" : \"Denied\") nativeMessaging for \(extensionContext.webExtension.displayName ?? \"extension\")"
+        )
+    }
+
+    public func webExtensionController(
+        _ controller: WKWebExtensionController,
+        connectUsing port: WKWebExtension.MessagePort,
+        for extensionContext: WKWebExtensionContext,
+        completionHandler: @escaping ((any Error)?) -> Void
+    ) {
+        guard extensionContext.uniqueIdentifier == "bramble-extension-vault-stable",
+              port.applicationIdentifier == "app.bramble.desktop" else {
+            let error = NSError(domain: "SurffishBrambleNativeMessaging", code: 1, userInfo: [NSLocalizedDescriptionKey: "Only Bramble may connect to app.bramble.desktop."])
+            DeveloperConsole.shared.record(level: "WARN", source: "Native Messaging", message: error.localizedDescription)
+            completionHandler(error)
+            return
+        }
+
+        let connection = BrambleNativeMessagingConnection(port: port)
+        let key = ObjectIdentifier(port)
+        brambleNativeConnections[key] = connection
+        connection.onDisconnect = { [weak self] in
+            self?.brambleNativeConnections.removeValue(forKey: key)
+        }
+        connection.start { error in
+            if let error {
+                self.brambleNativeConnections.removeValue(forKey: key)
+                DeveloperConsole.shared.record(level: "ERROR", source: "Native Messaging · Bramble", message: error.localizedDescription)
+            } else {
+                DeveloperConsole.shared.record(level: "INFO", source: "Native Messaging · Bramble", message: "Connected to the Bramble desktop app.")
+            }
+            completionHandler(error)
+        }
     }
 
     public func openBrambleOptionsTab() {
@@ -221,7 +284,18 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         print("[WebExtension] Downloading extension from \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.setValue("Surffish Native Extension Installer", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let configuration = URLSessionConfiguration.ephemeral
+        if let proxyPort = SshTunnelManager.shared.browserProxyPort {
+            configuration.connectionProxyDictionary = [
+                kCFNetworkProxiesSOCKSEnable as String: 1,
+                kCFNetworkProxiesSOCKSProxy as String: "127.0.0.1",
+                kCFNetworkProxiesSOCKSPort as String: Int(proxyPort)
+            ]
+            DeveloperConsole.shared.record(level: "INFO", source: "Extension Installer", message: "Downloading through the configured SSH SOCKS5 tunnel on 127.0.0.1:\(proxyPort).")
+        }
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw Self.error("Extension download failed (HTTP \(status)).")
