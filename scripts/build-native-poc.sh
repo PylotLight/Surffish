@@ -62,12 +62,6 @@ build_profile_app() {
 </plist>
 EOF
 
-    local profile_support="${HOME}/Library/Application Support/SurffishNative/Profiles/${profile^}/Bramble"
-    if [ ! -f "${profile_support}/manifest.json" ] && [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
-        mkdir -p "${profile_support}"
-        cp -R "${ROOT_DIR}/poc-native/Resources/bramble/"* "${profile_support}/"
-    fi
-
     echo "==> Built ${app_dir} (${profile} profile)"
 }
 
