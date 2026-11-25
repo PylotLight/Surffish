@@ -1,14 +1,7 @@
 name: Native macOS 26 build
 
 on:
-  push:
-    branches:
-      - poc/native-webkit-app
-      - fix/native-browser-polish-2026-11-25
-    paths:
-      - "poc-native/**"
-      - "scripts/build-native-poc.sh"
-      - ".github/workflows/native-macos-build.yml"
+  # Manual only: avoid consuming Actions minutes on every native POC push.
   workflow_dispatch:
 
 jobs:
