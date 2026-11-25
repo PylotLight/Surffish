@@ -29,6 +29,7 @@ public final class SshTunnelManager {
         self.enabled = enabled
         self.target = target.trimmingCharacters(in: .whitespacesAndNewlines)
         generation += 1
+        reconnectAttempt = 0
         reconnectTask?.cancel()
         reconnectTask = nil
         await stopProcess()
