@@ -62,10 +62,7 @@ test("settings pages expose saved ad blocking and profile-scoped website clearin
     "Connection",
     "About",
   ]) {
-    assert.ok(
-      settings.includes(`\"${page}\"`),
-      `missing ${page} settings page`,
-    );
+    assert.ok(settings.includes(`"${page}"`), `missing ${page} settings page`);
   }
   assert.match(model, /adBlockingEnabled/);
   assert.match(
@@ -87,7 +84,12 @@ test("roadmap describes the implemented SSH dynamic SOCKS endpoint, not the obso
   const readme = read("poc-native/README.md");
 
   assert.match(readme, /OpenSSH dynamic forwarding/);
-  assert.match(roadmap, /ssh -D/);
+  const acceptance = roadmap.slice(
+    roadmap.indexOf("## MVP acceptance criteria"),
+  );
+  assert.match(acceptance, /ssh -D/);
+  assert.match(acceptance, /local dynamic SOCKS5 listen port/);
+  assert.doesNotMatch(acceptance, /existing SOCKS5 host\/port/);
   assert.doesNotMatch(roadmap, /SSH `-L`/);
   assert.doesNotMatch(roadmap, /^\s*- Verify the NAS SOCKS host\/port/m);
   assert.match(roadmap, /Obsolete roadmap assumptions/);

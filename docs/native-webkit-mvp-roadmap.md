@@ -407,7 +407,7 @@ The native browser is MVP-ready when:
 - Production and Development launch independently and never share cookies, sessions, settings or installed extensions.
 - A normal browsing session survives quit/relaunch; private browsing leaves no persistent session/history/site data.
 - Tabs, navigation, pinned tabs, bookmarks, history, downloads and permissions work reliably.
-- A user can enter an SSH alias for the NAS, configure its existing SOCKS5 host/port, choose a custom local listen port, start the SSH forward and copy a working `socks5h://` endpoint for other apps.
+- A user can configure an SSH destination, choose the local dynamic SOCKS5 listen port, start the managed `ssh -D` tunnel and copy a working `socks5h://127.0.0.1:<port>` endpoint for other apps; the SSH host is the network exit point, and no separate NAS SOCKS server is required.
 - Browser routing can be enabled independently from external SOCKS sharing.
 - The endpoint binds to loopback by default; LAN access requires explicit opt-in.
 - Tunnel loss never silently falls back to direct browser traffic.
