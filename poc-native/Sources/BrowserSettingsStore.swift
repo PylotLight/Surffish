@@ -42,6 +42,24 @@ public struct BrowserSettings: Codable {
         case sshProxyEnabled, sshHost
     }
 
+    public init(
+        version: Int,
+        searchEngine: BrowserSearchEngine,
+        startPage: String,
+        restoreSession: Bool,
+        showSidebarAtStartup: Bool,
+        sshProxyEnabled: Bool,
+        sshHost: String
+    ) {
+        self.version = version
+        self.searchEngine = searchEngine
+        self.startPage = startPage
+        self.restoreSession = restoreSession
+        self.showSidebarAtStartup = showSidebarAtStartup
+        self.sshProxyEnabled = sshProxyEnabled
+        self.sshHost = sshHost
+    }
+
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
