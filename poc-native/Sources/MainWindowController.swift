@@ -317,18 +317,31 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             return
         }
         
-        // Reload popup webview to ensure updated storage / sync state is rendered
+        // Give the extension popup a predictable, roomy viewport. WebKit can
+        // otherwise retain a narrow size from the popup's initial layout.
+        let popupSize = NSSize(width: 460, height: 640)
         popupWebView.reload()
-        
+        popupWebView.removeFromSuperview()
+        popupWebView.translatesAutoresizingMaskIntoConstraints = false
+
+        let popupHost = NSView(frame: NSRect(origin: .zero, size: popupSize))
+        popupHost.wantsLayer = true
+        popupHost.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        popupHost.addSubview(popupWebView)
+        NSLayoutConstraint.activate([
+            popupWebView.leadingAnchor.constraint(equalTo: popupHost.leadingAnchor),
+            popupWebView.trailingAnchor.constraint(equalTo: popupHost.trailingAnchor),
+            popupWebView.topAnchor.constraint(equalTo: popupHost.topAnchor),
+            popupWebView.bottomAnchor.constraint(equalTo: popupHost.bottomAnchor)
+        ])
+
         let popover = NSPopover()
         popover.behavior = .transient
         popover.delegate = self
-        // Keep the extension popup within the browser window while preserving
-        // the extension's native aspect ratio.
-        popover.contentSize = NSSize(width: 420, height: 560)
-        
+        popover.contentSize = popupSize
+
         let vc = NSViewController()
-        vc.view = popupWebView
+        vc.view = popupHost
         popover.contentViewController = vc
         
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
