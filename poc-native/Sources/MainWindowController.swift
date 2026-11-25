@@ -215,7 +215,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func tabManagerDidChangeActiveTab(to tab: TabItem) {
-        isShowingSettingsTab = false
         sidebarView.setSettingsTabActive(false)
         settingsViewController?.view.removeFromSuperview()
         displayBrowserTab(tab)
