@@ -15,7 +15,6 @@ public final class BrowserSettingsViewController: NSViewController {
     private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep the local SOCKS endpoint running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
-    private let sshStatus = NSTextField(labelWithString: "Not configured")
 
     public override func loadView() {
         let root = NSView()
@@ -52,8 +51,6 @@ public final class BrowserSettingsViewController: NSViewController {
         sshProxyPort.widthAnchor.constraint(equalToConstant: 110).isActive = true
         sshProxyBindAddress.addItems(withTitles: ["This Mac only (127.0.0.1)", "LAN devices (0.0.0.0)"])
         sshProxyBindAddress.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        sshStatus.textColor = .secondaryLabelColor
-        sshStatus.maximumNumberOfLines = 3
 
         let sshHostControls = NSStackView(views: [sshHost, sshHostSearchButton])
         sshHostControls.orientation = .horizontal
@@ -98,7 +95,6 @@ public final class BrowserSettingsViewController: NSViewController {
             makeRow(title: "Shared SOCKS5 port", control: sshProxyPort),
             makeRow(title: "Listen address", control: sshProxyBindAddress),
             warning,
-            sshStatus,
             actionRow
         ])
         stack.orientation = .vertical
@@ -123,16 +119,6 @@ public final class BrowserSettingsViewController: NSViewController {
             actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
-        SshTunnelManager.shared.onStatusChange = { [weak self] status in
-            DispatchQueue.main.async {
-                self?.sshStatus.stringValue = status
-            }
-        }
-    }
-
-    public override func viewDidAppear() {
-        super.viewDidAppear()
-        sshStatus.stringValue = SshTunnelManager.shared.status
     }
 
     private func makeRow(title: String, control: NSView) -> NSView {
@@ -158,7 +144,6 @@ public final class BrowserSettingsViewController: NSViewController {
         sshProxyShareEnabled.state = settings.sshProxyShareEnabled ? .on : .off
         sshProxyPort.stringValue = String(settings.sshProxyPort)
         sshProxyBindAddress.selectItem(at: settings.sshProxyBindAddress == "0.0.0.0" ? 1 : 0)
-        sshStatus.stringValue = SshTunnelManager.shared.status
     }
 
     @objc private func searchSshHosts() {
@@ -228,7 +213,6 @@ public final class BrowserSettingsViewController: NSViewController {
         }
 
         BrowserSettingsStore.shared.update(next)
-        sshStatus.stringValue = "Settings saved · applying SSH connection…"
         Task { [weak self] in
             await SshTunnelManager.shared.configure(
                 browserEnabled: next.sshProxyEnabled,
@@ -237,7 +221,6 @@ public final class BrowserSettingsViewController: NSViewController {
                 port: next.sshProxyPort,
                 bindAddress: next.sshProxyBindAddress
             )
-            self?.sshStatus.stringValue = SshTunnelManager.shared.status
         }
     }
 
