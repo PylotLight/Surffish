@@ -106,6 +106,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         TabManager.shared.delegate = self
         let savedSidebarState = BrowserSessionStore.shared.load()?.sidebarVisible ?? true
         isSidebarVisible = savedSidebarState
+        TabManager.shared.setSidebarVisible(savedSidebarState)
         sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
 
         // Restore persistent tabs; private browsing state is intentionally not restored.
@@ -230,6 +231,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             sidebarLeadingConstraint.constant = isSidebarVisible ? 0 : -sidebarWidth
             window?.contentView?.layoutSubtreeIfNeeded()
         }
+        TabManager.shared.persistSession(sidebarVisible: isSidebarVisible)
     }
     
     private func showExtensionInstallSheet() {
