@@ -23,6 +23,8 @@ public final class SshTunnelManager {
     private var generation = 0
     private var reconnectAttempt = 0
     private var hasReloadedTabsForCurrentConfiguration = false
+    private var hasAppliedProxyConfiguration = false
+    private var appliedBrowserProxyPort: UInt16?
     private var reconnectTask: Task<Void, Never>?
 
     private let startupTimeout: TimeInterval = 8
@@ -290,8 +292,11 @@ public final class SshTunnelManager {
 
     private func applyProxyToBrowserStores(port: UInt16?) {
         let browserPort = browserEnabled ? port : nil
+        guard !hasAppliedProxyConfiguration || appliedBrowserProxyPort != browserPort else { return }
         WebKitProxyController.apply(port: browserPort)
         TabManager.shared.applyProxyConfiguration(port: browserPort)
+        appliedBrowserProxyPort = browserPort
+        hasAppliedProxyConfiguration = true
     }
 
     private func updateStatus(_ value: String) {
