@@ -352,6 +352,7 @@ The Electron settings surface currently contains these categories/components. Na
 ## Delivery phases
 
 ### M0 — Native foundation and networking MVP
+
 - macOS 26 build, two app bundles and profile isolation.
 - Stable native browser shell and persistent/private tabs.
 - Configurable SSH SOCKS5 endpoint usable by browser and other applications.
@@ -360,6 +361,7 @@ The Electron settings surface currently contains these categories/components. Na
 - Runtime validation on the developer Mac and NAS.
 
 ### M1 — Daily-browser usability
+
 - Complete tab operations, navigation history, session/window restore.
 - Production sidebar, toolbar, tab groups and command palette.
 - Bookmarks, history, reading list and downloads.
@@ -367,26 +369,31 @@ The Electron settings surface currently contains these categories/components. Na
 - Find-in-page, zoom, context menus and private windows.
 
 ### M2 — Network and privacy parity
+
 - Proxy health, kill switch, local-network bypass and one-proxy site rules.
 - Network inspector, HAR and request overrides.
 - Ad blocking and filter updates.
 - HTTPS-only, certificates, permissions, site settings and data clearing.
 
 ### M3 — Extensions and productivity
+
 - Extension manager and Bramble integration.
 - Reader, Read Aloud, translation and PDF viewer/editor.
 - Screenshots, feeds, page watchers and clean links.
 
 ### M4 — Organization and advanced UI
+
 - Spaces, groups, split view and tab overview.
 - Glance, mini windows and menubar surfaces.
 - Toolbar customization, full settings search and command palette parity.
 
 ### M5 — Integrations and performance
+
 - Cast, Local AI, weather, memory saver, tab archive and preconnect.
 - Wake snapshots, task manager, diagnostics and lifecycle hardening.
 
 ### M6 — Release parity and polish
+
 - Complete settings category parity.
 - Full keyboard/accessibility support and macOS polish.
 - Data migration, import/export and update system.
