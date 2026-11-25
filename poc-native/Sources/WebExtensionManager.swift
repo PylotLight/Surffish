@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import CFNetwork
 import WebKit
