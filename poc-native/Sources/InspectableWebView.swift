@@ -1,8 +1,8 @@
 import AppKit
 import WebKit
 
-/// Browser context menu exposed by right-click and Option-click. Inspection is
-/// performed by Safari Web Inspector, which is the supported public WebKit UI.
+/// Browser context menu. Surffish's native Developer Tools console is the default
+/// inspection surface; Safari Web Inspector remains available for advanced debugging.
 public final class InspectableWebView: WKWebView {
     private var contextMenuPoint: NSPoint = .zero
 
@@ -45,9 +45,13 @@ public final class InspectableWebView: WKWebView {
 
         menu.addItem(.separator())
 
-        let inspect = NSMenuItem(title: "Inspect Page in Web Inspector…", action: #selector(inspectPage), keyEquivalent: "")
+        let inspect = NSMenuItem(title: "Developer Tools", action: #selector(openDeveloperTools), keyEquivalent: "")
         inspect.target = self
         menu.addItem(inspect)
+
+        let safariInspect = NSMenuItem(title: "Inspect with Safari Web Inspector…", action: #selector(openSafariInspector), keyEquivalent: "")
+        safariInspect.target = self
+        menu.addItem(safariInspect)
 
         menu.popUp(positioning: nil, at: contextMenuPoint, in: self)
     }
@@ -57,28 +61,33 @@ public final class InspectableWebView: WKWebView {
     @objc private func reloadFromMenu() {
         if isLoading { stopLoading() } else { reload() }
     }
+
     @objc private func copyPageURL() {
         guard let url else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
     }
 
-    @objc private func inspectPage() {
+    @objc private func openDeveloperTools() {
+        DeveloperConsole.shared.show()
+    }
+
+    @objc private func openSafariInspector() {
         isInspectable = true
-        let alert = NSAlert()
-        alert.messageText = "Inspect this page"
-        alert.informativeText = """
-        Surffish has enabled Web Inspector for this page.
+        guard let safariURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else {
+            DeveloperConsole.shared.record(level: "ERROR", source: "Web Inspector", message: "Safari could not be located.")
+            return
+        }
 
-        Safari owns the Web Inspector interface. Open Safari, enable Develop > Show Web Inspector if needed, then choose Develop > This Mac > Surffish Dev > \(title ?? url?.host ?? "Current Page").
-
-        For extension background pages and service workers, use Safari > Develop > Inspect Apps and Devices, then select Surffish.
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open Safari")
-        alert.addButton(withTitle: "OK")
-        if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.launchApplication("Safari")
+        NSWorkspace.shared.openApplication(
+            at: safariURL,
+            configuration: NSWorkspace.OpenConfiguration()
+        ) { _, error in
+            if let error {
+                Task { @MainActor in
+                    DeveloperConsole.shared.record(level: "ERROR", source: "Web Inspector", message: error.localizedDescription)
+                }
+            }
         }
     }
 }
