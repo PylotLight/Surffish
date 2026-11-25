@@ -98,7 +98,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         } else {
             configuration = WKWebViewConfiguration()
-            configuration.websiteDataStore = isPrivate ? .nonPersistent() : .default()
+            configuration.websiteDataStore = isPrivate ? .nonPersistent() : WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
             configuration.webExtensionController = WebExtensionManager.shared.controller
             AdBlockManager.shared.applyTo(userContentController: configuration.userContentController)
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
