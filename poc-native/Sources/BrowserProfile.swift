@@ -38,4 +38,13 @@ public enum BrowserProfile: String, CaseIterable {
     public func fileURL(_ filename: String) -> URL {
         applicationSupportDirectory.appendingPathComponent(filename)
     }
+
+    public var websiteDataStoreIdentifier: UUID {
+        switch self {
+        case .development:
+            return UUID(uuidString: "D9D2C03A-9E57-4A0D-9F11-6F36A4D2A001")!
+        case .production:
+            return UUID(uuidString: "A4B7D10E-2C91-4F63-8B25-9E73C0D5B002")!
+        }
+    }
 }
