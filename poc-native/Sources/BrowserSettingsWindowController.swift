@@ -213,7 +213,7 @@ public final class BrowserSettingsViewController: NSViewController {
         }
 
         BrowserSettingsStore.shared.update(next)
-        Task { [weak self] in
+        Task {
             await SshTunnelManager.shared.configure(
                 browserEnabled: next.sshProxyEnabled,
                 serverEnabled: next.sshProxyShareEnabled,
