@@ -20,6 +20,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     private let extensionsButton = NSButton(title: "Extensions", target: nil, action: nil)
     private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
     private let quitButton = NSButton(title: "Quit Surffish", target: nil, action: nil)
+    private var isSettingsTabActive = false
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -126,12 +127,44 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
 
     public func reloadTabs() { tableView.reloadData() }
 
+    public func setSettingsTabActive(_ active: Bool) {
+        isSettingsTabActive = active
+        tableView.reloadData()
+    }
+
     public func numberOfRows(in tableView: NSTableView) -> Int {
-        TabManager.shared.tabs.count
+        TabManager.shared.tabs.count + (isSettingsTabActive ? 1 : 0)
     }
 
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let tabs = TabManager.shared.tabs
+        if isSettingsTabActive && row == tabs.count {
+            let cell = NSView()
+            cell.wantsLayer = true
+            cell.layer?.cornerRadius = 8
+            cell.layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.14).cgColor
+
+            let bar = NSView(frame: NSRect(x: 0, y: 4, width: 3, height: 28))
+            bar.wantsLayer = true
+            bar.layer?.backgroundColor = NSColor.systemBlue.cgColor
+            bar.layer?.cornerRadius = 1.5
+            cell.addSubview(bar)
+
+            let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 15, height: 15))
+            icon.image = NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")
+            icon.contentTintColor = .secondaryLabelColor
+            cell.addSubview(icon)
+
+            let title = NSTextField(labelWithString: "Settings")
+            title.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+            title.textColor = .white
+            title.frame = NSRect(x: 34, y: 8, width: 188, height: 20)
+            cell.addSubview(title)
+
+            let click = NSClickGestureRecognizer(target: self, action: #selector(onTabRowClicked(_:)))
+            cell.addGestureRecognizer(click)
+            return cell
+        }
         guard row >= 0, row < tabs.count else { return nil }
         let tab = tabs[row]
         let active = TabManager.shared.activeTabId == tab.id
@@ -184,8 +217,13 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
 
     @objc private func onTabRowClicked(_ gesture: NSClickGestureRecognizer) {
         let row = tableView.row(at: gesture.location(in: tableView))
-        guard row >= 0, row < TabManager.shared.tabs.count else { return }
-        delegate?.sidebarDidSelectTab(id: TabManager.shared.tabs[row].id)
+        let tabs = TabManager.shared.tabs
+        if isSettingsTabActive && row == tabs.count {
+            delegate?.sidebarDidOpenSettings()
+            return
+        }
+        guard row >= 0, row < tabs.count else { return }
+        delegate?.sidebarDidSelectTab(id: tabs[row].id)
     }
 
     @objc private func onPinTabClicked(_ sender: NSButton) {
