@@ -5,6 +5,9 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidCloseTab(id: UUID)
     func sidebarDidCreateNewTab()
     func sidebarDidTogglePinTab(id: UUID)
+    func sidebarDidOpenExtensions()
+    func sidebarDidOpenSettings()
+    func sidebarDidQuit()
 }
 
 public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTableViewDelegate {
@@ -13,6 +16,10 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     private let newTabButton = NSButton(title: "+ New Tab", target: nil, action: nil)
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
+    private let footer = NSStackView()
+    private let extensionsButton = NSButton(title: "Extensions", target: nil, action: nil)
+    private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
+    private let quitButton = NSButton(title: "Quit Surffish", target: nil, action: nil)
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -32,7 +39,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
 
         let tintView = NSView()
         tintView.wantsLayer = true
-        tintView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.55).cgColor
+        tintView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.72).cgColor
         tintView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(tintView)
 
@@ -55,7 +62,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         tableView.backgroundColor = .clear
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 34
+        tableView.rowHeight = 36
         tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.selectionHighlightStyle = .none
 
@@ -66,21 +73,55 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
 
+        footer.orientation = .vertical
+        footer.alignment = .leading
+        footer.distribution = .fill
+        footer.spacing = 5
+        footer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(footer)
+
+        configureFooterButton(extensionsButton, symbol: "puzzlepiece.extension", action: #selector(onExtensions))
+        configureFooterButton(settingsButton, symbol: "gearshape", action: #selector(onSettings))
+        configureFooterButton(quitButton, symbol: "power", action: #selector(onQuit))
+        footer.addArrangedSubview(extensionsButton)
+        footer.addArrangedSubview(settingsButton)
+        footer.addArrangedSubview(quitButton)
+
         NSLayoutConstraint.activate([
             tintView.topAnchor.constraint(equalTo: topAnchor),
             tintView.leadingAnchor.constraint(equalTo: leadingAnchor),
             tintView.trailingAnchor.constraint(equalTo: trailingAnchor),
             tintView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
             workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
             workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             newTabButton.centerYAnchor.constraint(equalTo: workspaceLabel.centerYAnchor),
             newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             newTabButton.widthAnchor.constraint(equalToConstant: 90),
+
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 12),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16)
+            scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
+
+            footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -18)
         ])
+    }
+
+    private func configureFooterButton(_ button: NSButton, symbol: String, action: Selector) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: button.title)
+        button.imagePosition = .imageLeading
+        button.alignment = .left
+        button.font = .systemFont(ofSize: 12, weight: .medium)
+        button.contentTintColor = .secondaryLabelColor
+        button.bezelStyle = .rounded
+        button.isBordered = false
+        button.target = self
+        button.action = action
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 30).isActive = true
     }
 
     public func reloadTabs() { tableView.reloadData() }
@@ -102,7 +143,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             : NSColor(white: 1.0, alpha: 0.04).cgColor
 
         if active {
-            let bar = NSView(frame: NSRect(x: 0, y: 4, width: 3, height: 26))
+            let bar = NSView(frame: NSRect(x: 0, y: 4, width: 3, height: 28))
             bar.wantsLayer = true
             bar.layer?.backgroundColor = NSColor.systemBlue.cgColor
             bar.layer?.cornerRadius = 1.5
@@ -110,30 +151,30 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         }
 
         let iconName = tab.isPinned ? "pin.fill" : (tab.isLoading ? "arrow.triangle.2.circlepath" : "globe")
-        let icon = NSImageView(frame: NSRect(x: 10, y: 9, width: 15, height: 15))
+        let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 15, height: 15))
         icon.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Tab")
         icon.contentTintColor = .secondaryLabelColor
         cell.addSubview(icon)
 
-        let title = NSTextField(labelWithString: tab.title)
+        let title = NSTextField(labelWithString: tab.title.isEmpty ? "New Tab" : tab.title)
         title.font = NSFont.systemFont(ofSize: 12, weight: active ? .medium : .regular)
         title.textColor = active ? .white : .labelColor
         title.lineBreakMode = .byTruncatingTail
-        title.frame = NSRect(x: 34, y: 7, width: 188, height: 20)
+        title.frame = NSRect(x: 34, y: 8, width: 188, height: 20)
         cell.addSubview(title)
 
         let pin = NSButton(image: NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin", accessibilityDescription: "Toggle pin")!, target: self, action: #selector(onPinTabClicked(_:)))
         pin.isBordered = false
         pin.contentTintColor = .secondaryLabelColor
         pin.tag = row
-        pin.frame = NSRect(x: 228, y: 7, width: 20, height: 20)
+        pin.frame = NSRect(x: 228, y: 8, width: 20, height: 20)
         cell.addSubview(pin)
 
         let close = NSButton(title: "×", target: self, action: #selector(onCloseTabClicked(_:)))
         close.isBordered = false
         close.font = NSFont.systemFont(ofSize: 13)
         close.tag = row
-        close.frame = NSRect(x: 254, y: 7, width: 20, height: 20)
+        close.frame = NSRect(x: 254, y: 8, width: 20, height: 20)
         cell.addSubview(close)
 
         let click = NSClickGestureRecognizer(target: self, action: #selector(onTabRowClicked(_:)))
@@ -160,4 +201,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     }
 
     @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
+    @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
+    @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
+    @objc private func onQuit() { delegate?.sidebarDidQuit() }
 }
