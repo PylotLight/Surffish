@@ -13,7 +13,7 @@ This branch is a native-first browser implementation. The production Electron ap
 - `OmniboxView.swift`: native navigation controls, address/search field, load progress and Bramble extension action.
 - `MainMenu.swift`: standard macOS menus plus a dedicated **Testing** menu for temporary prototype hooks.
 
-Normal tabs use WebKit's persistent default website data store. Private tabs use a non-persistent data store and are excluded from the saved session. The session restores stable tab IDs, URLs, titles, pin state, group metadata, Space metadata and the active tab.
+Normal tabs use WebKit's persistent default website data store. Private tabs use a non-persistent data store and are excluded from the saved session. The session restores stable tab IDs, URLs, titles, pin state, group metadata, Space metadata and the active tab. Window preferences live separately from tab-session data.
 
 ## Production parity migration
 
