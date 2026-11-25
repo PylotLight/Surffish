@@ -70,6 +70,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public private(set) var activeTabId: UUID?
     public private(set) var isRestoringSession = false
     private var restoredSessionTabIDs: Set<UUID> = []
+    private var deferredRestoredTabIDs: Set<UUID> = []
     private var recentlyClosedTabs: [SavedBrowserTab] = []
     private let maximumRecentlyClosedTabs = 20
 
@@ -88,7 +89,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         id: UUID = UUID(),
         isPinned: Bool = false,
         groupID: UUID? = nil,
-        spaceID: String = "default"
+        spaceID: String = "default",
+        deferNavigation: Bool = false
     ) -> TabItem {
         let targetURL = url ?? Self.startPage
         let configuration: WKWebViewConfiguration
@@ -126,7 +128,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             id: id,
             title: targetURL.scheme == "webkit-extension" ? "Extension" : "New Tab",
             url: targetURL,
-            isLoading: true,
+            isLoading: !deferNavigation,
             isPinned: isPinned,
             isPrivate: isPrivate,
             groupID: groupID,
@@ -141,7 +143,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         tabs.insert(tab, at: insertionIndex)
 
         if makeActive || activeTabId == nil { activeTabId = tab.id }
-        webView.load(URLRequest(url: targetURL))
+        if deferNavigation { deferredRestoredTabIDs.insert(id) }
+        else { webView.load(URLRequest(url: targetURL)) }
         notifyTabsChanged()
         if let active = activeTab { delegate?.tabManagerDidChangeActiveTab(to: active) }
         return tab
@@ -167,7 +170,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
                 id: savedTab.id,
                 isPinned: savedTab.isPinned,
                 groupID: savedTab.groupID,
-                spaceID: savedTab.spaceID
+                spaceID: savedTab.spaceID,
+                deferNavigation: true
             )
             if let tab = tabs.first(where: { $0.id == savedTab.id }), !savedTab.title.isEmpty {
                 tab.title = savedTab.title
@@ -185,6 +189,12 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         } else {
             activeTabId = tabs.first?.id
         }
+        if let activeID = activeTabId,
+           deferredRestoredTabIDs.remove(activeID) != nil,
+           let active = tabs.first(where: { $0.id == activeID }) {
+            active.isLoading = true
+            active.webView.load(URLRequest(url: active.url ?? Self.startPage))
+        }
         isRestoringSession = false
         if let active = activeTab { delegate?.tabManagerDidChangeActiveTab(to: active) }
         notifyTabsChanged()
@@ -194,6 +204,10 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public func selectTab(id: UUID) {
         guard activeTabId != id, let tab = tabs.first(where: { $0.id == id }) else { return }
         activeTabId = id
+        if deferredRestoredTabIDs.remove(id) != nil {
+            tab.isLoading = true
+            tab.webView.load(URLRequest(url: tab.url ?? Self.startPage))
+        }
         delegate?.tabManagerDidChangeActiveTab(to: tab)
         notifyTabsChanged()
     }
@@ -222,6 +236,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             }
         }
         restoredSessionTabIDs.remove(id)
+        deferredRestoredTabIDs.remove(id)
         closingTab.webView.stopLoading()
         closingTab.webView.navigationDelegate = nil
 

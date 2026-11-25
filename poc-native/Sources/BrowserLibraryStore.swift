@@ -188,6 +188,31 @@ public final class BrowserLibraryStore {
         persist()
     }
 
+    public func clearHistory(since startDate: Date) {
+        history.removeAll { $0.visitedAt >= startDate }
+        persist()
+    }
+
+    public func removeHistoryEntry(id: UUID) {
+        history.removeAll { $0.id == id }
+        persist()
+    }
+
+    public func removeHistoryURL(_ url: String) {
+        history.removeAll { $0.url == url }
+        persist()
+    }
+
+    public func clearHistory(forSite site: String) {
+        let normalizedSite = site.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        guard !normalizedSite.isEmpty else { return }
+        history.removeAll { entry in
+            guard let host = URL(string: entry.url)?.host?.lowercased() else { return false }
+            return host == normalizedSite || host.hasSuffix("." + normalizedSite)
+        }
+        persist()
+    }
+
     private func persist() {
         do {
             let data = try encoder.encode(Snapshot(history: history, bookmarks: bookmarks, readingList: readingList))

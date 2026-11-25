@@ -29,6 +29,27 @@ private enum SidebarContentMode: Equatable {
     case readingList
 }
 
+private enum HistoryTimeFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case today = "Today"
+    case sevenDays = "7 days"
+    case thirtyDays = "30 days"
+    var id: String { rawValue }
+
+    func includes(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard self != .all else { return true }
+        let days = self == .today ? 0 : (self == .sevenDays ? 6 : 29)
+        guard let start = calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now)) else { return false }
+        return date >= start && date <= now
+    }
+
+    func startDate(now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        guard self != .all else { return nil }
+        let days = self == .today ? 0 : (self == .sevenDays ? 6 : 29)
+        return calendar.date(byAdding: .day, value: -days, to: calendar.startOfDay(for: now))
+    }
+}
+
 @MainActor
 @Observable
 private final class SidebarViewModel {
@@ -40,6 +61,7 @@ private final class SidebarViewModel {
     var activeTabID: UUID?
     var contentMode: SidebarContentMode = .tabs
     var searchText = ""
+    var historyTimeFilter: HistoryTimeFilter = .all
     var isSettingsTabActive = false
     var isExpanded = true
     var isPinned = false
@@ -354,15 +376,19 @@ private struct NativeSidebarRootView: View {
                 Spacer(minLength: 0)
                 if model.contentMode == .history {
                     Button {
-                        model.delegate?.sidebarDidClearHistory()
+                        if let start = model.historyTimeFilter.startDate() {
+                            BrowserLibraryStore.shared.clearHistory(since: start)
+                        } else {
+                            model.delegate?.sidebarDidClearHistory()
+                        }
                         model.refresh()
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 12, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .help("Clear history")
-                    .accessibilityLabel("Clear history")
+                    .help(model.historyTimeFilter == .all ? "Clear all history" : "Clear history for \(model.historyTimeFilter.rawValue)")
+                    .accessibilityLabel(model.historyTimeFilter == .all ? "Clear all history" : "Clear history for \(model.historyTimeFilter.rawValue)")
                 }
             }
             .frame(height: 24)
@@ -390,6 +416,21 @@ private struct NativeSidebarRootView: View {
             .padding(.horizontal, 9)
             .frame(height: 30)
             .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+
+            if model.contentMode == .history {
+                HStack(spacing: 5) {
+                    ForEach(HistoryTimeFilter.allCases) { filter in
+                        Button(filter.rawValue) { model.historyTimeFilter = filter }
+                            .font(.system(size: 10, weight: model.historyTimeFilter == filter ? .semibold : .regular))
+                            .foregroundStyle(model.historyTimeFilter == filter ? .primary : .secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(model.historyTimeFilter == filter ? Color.white.opacity(0.13) : Color.white.opacity(0.045), in: Capsule())
+                            .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
 
             if model.contentMode == .tabs {
                 Button {
@@ -470,7 +511,7 @@ private struct NativeSidebarRootView: View {
     private var filteredTabs: [TabItem] { model.unpinnedTabs.filter(model.tabMatches) }
     private var filteredPinnedTabs: [TabItem] { model.pinnedTabs.filter(model.tabMatches) }
     private var filteredPinnedSites: [BrowserBookmark] { model.pinnedSites.filter(model.bookmarkMatches) }
-    private var filteredHistory: [BrowserHistoryEntry] { model.history.filter(model.historyMatches) }
+    private var filteredHistory: [BrowserHistoryEntry] { model.history.filter { model.historyMatches($0) && model.historyTimeFilter.includes($0.visitedAt) } }
     private var filteredBookmarks: [BrowserBookmark] { model.bookmarks.filter(model.bookmarkMatches) }
     private var filteredReadingList: [BrowserReadingListEntry] { model.readingList.filter(model.readingListMatches) }
 
@@ -606,6 +647,18 @@ private struct NativeSidebarRootView: View {
             symbol: "clock.arrow.circlepath",
             action: { if let url { model.delegate?.sidebarDidOpenLibraryURL(url) } }
         )
+        .contextMenu {
+            Button("Remove from History", role: .destructive) {
+                BrowserLibraryStore.shared.removeHistoryEntry(id: entry.id)
+                model.refresh()
+            }
+            if let host = url?.host {
+                Button("Clear History for \(host)", role: .destructive) {
+                    BrowserLibraryStore.shared.clearHistory(forSite: host)
+                    model.refresh()
+                }
+            }
+        }
     }
 
     private func bookmarkRow(_ bookmark: BrowserBookmark) -> some View {

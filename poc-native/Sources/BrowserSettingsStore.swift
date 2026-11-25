@@ -79,6 +79,22 @@ public enum NewTabSiteSource: String, CaseIterable, Codable, Identifiable, Hasha
     }
 }
 
+public enum NewTabClockSize: String, CaseIterable, Codable, Identifiable, Hashable {
+    case compact
+    case regular
+    case large
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .compact: return "Compact"
+        case .regular: return "Regular"
+        case .large: return "Large"
+        }
+    }
+}
+
 public struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable {
     public var id: UUID
     public var title: String
@@ -108,11 +124,15 @@ public struct BrowserSettings: Codable {
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
     public var customQuickLinks: [BrowserNewTabQuickLink]
+    public var newTabUses24HourClock: Bool
+    public var newTabShowsDate: Bool
+    public var newTabClockSize: NewTabClockSize
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup, sidebarPinned, sidebarWidth
         case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
         case newTabTheme, newTabSiteSource, customQuickLinks
+        case newTabUses24HourClock, newTabShowsDate, newTabClockSize
     }
 
     public init(
@@ -131,7 +151,10 @@ public struct BrowserSettings: Codable {
         adBlockingEnabled: Bool = false,
         newTabTheme: NewTabTheme = .midnight,
         newTabSiteSource: NewTabSiteSource = .automatic,
-        customQuickLinks: [BrowserNewTabQuickLink] = []
+        customQuickLinks: [BrowserNewTabQuickLink] = [],
+        newTabUses24HourClock: Bool = false,
+        newTabShowsDate: Bool = true,
+        newTabClockSize: NewTabClockSize = .regular
     ) {
         self.version = version
         self.searchEngine = searchEngine
@@ -149,6 +172,9 @@ public struct BrowserSettings: Codable {
         self.newTabTheme = newTabTheme
         self.newTabSiteSource = newTabSiteSource
         self.customQuickLinks = customQuickLinks
+        self.newTabUses24HourClock = newTabUses24HourClock
+        self.newTabShowsDate = newTabShowsDate
+        self.newTabClockSize = newTabClockSize
     }
 
     public init(from decoder: Decoder) throws {
@@ -170,6 +196,9 @@ public struct BrowserSettings: Codable {
         newTabTheme = try values.decodeIfPresent(NewTabTheme.self, forKey: .newTabTheme) ?? .midnight
         newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
         customQuickLinks = try values.decodeIfPresent([BrowserNewTabQuickLink].self, forKey: .customQuickLinks) ?? []
+        newTabUses24HourClock = try values.decodeIfPresent(Bool.self, forKey: .newTabUses24HourClock) ?? false
+        newTabShowsDate = try values.decodeIfPresent(Bool.self, forKey: .newTabShowsDate) ?? true
+        newTabClockSize = try values.decodeIfPresent(NewTabClockSize.self, forKey: .newTabClockSize) ?? .regular
     }
 
     public static let minimumSidebarWidth = 220
@@ -191,7 +220,10 @@ public struct BrowserSettings: Codable {
         adBlockingEnabled: false,
         newTabTheme: .midnight,
         newTabSiteSource: .automatic,
-        customQuickLinks: []
+        customQuickLinks: [],
+        newTabUses24HourClock: false,
+        newTabShowsDate: true,
+        newTabClockSize: .regular
     )
 
     public var startPageURL: URL {

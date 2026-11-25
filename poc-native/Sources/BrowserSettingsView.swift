@@ -44,6 +44,9 @@ public final class BrowserSettingsModel {
     public var sidebarWidth: Double
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
+    public var newTabUses24HourClock: Bool
+    public var newTabShowsDate: Bool
+    public var newTabClockSize: NewTabClockSize
     public var customQuickLinks: [BrowserNewTabQuickLink]
     public var newQuickLinkTitle = ""
     public var newQuickLinkURL = ""
@@ -79,6 +82,9 @@ public final class BrowserSettingsModel {
         sidebarWidth = Double(settings.sidebarWidth)
         newTabTheme = settings.newTabTheme
         newTabSiteSource = settings.newTabSiteSource
+        newTabUses24HourClock = settings.newTabUses24HourClock
+        newTabShowsDate = settings.newTabShowsDate
+        newTabClockSize = settings.newTabClockSize
         customQuickLinks = settings.customQuickLinks
         adBlockingEnabled = settings.adBlockingEnabled
         sshProxyEnabled = settings.sshProxyEnabled
@@ -174,6 +180,9 @@ public final class BrowserSettingsModel {
         next.sidebarWidth = min(max(Int(sidebarWidth.rounded()), BrowserSettings.minimumSidebarWidth), BrowserSettings.maximumSidebarWidth)
         next.newTabTheme = newTabTheme
         next.newTabSiteSource = newTabSiteSource
+        next.newTabUses24HourClock = newTabUses24HourClock
+        next.newTabShowsDate = newTabShowsDate
+        next.newTabClockSize = newTabClockSize
         guard customQuickLinks.count <= 12 else {
             showAlert(title: "Too many shortcuts", message: "New Tab supports up to 12 custom shortcuts.")
             return
@@ -298,6 +307,7 @@ public struct BrowserSettingsView: View {
             .init(id: "sidebar-pinned", title: "Keep sidebar open", detail: "Keep the sidebar expanded when the pointer leaves", section: .general, terms: "sidebar pin keep open hover"),
             .init(id: "sidebar-width", title: "Sidebar width", detail: "Adjust the sidebar between 220 and 440 points", section: .general, terms: "sidebar resize width size"),
             .init(id: "newtab-theme", title: "New Tab background", detail: "Choose one of the built-in color themes", section: .appearance, terms: "appearance theme background color new tab"),
+            .init(id: "newtab-clock", title: "New Tab clock", detail: "Choose 12- or 24-hour time, date visibility and clock size", section: .appearance, terms: "clock time 12 24 hour date size appearance new tab"),
             .init(id: "newtab-links", title: "New Tab shortcuts", detail: "Choose a source or manage custom shortcuts", section: .appearance, terms: "quick links favorites bookmarks pinned recent custom new tab"),
             .init(id: "ad-blocking", title: "Advertising and tracking", detail: "Enable the built-in WebKit content rules", section: .privacy, terms: "privacy ad blocker tracking content rules"),
             .init(id: "site-data", title: "Website data", detail: "Clear cookies, caches and storage for this profile", section: .privacy, terms: "privacy cookies cache storage clear site data"),
@@ -562,6 +572,16 @@ public struct BrowserSettingsView: View {
                     Picker("Quick link source", selection: $model.newTabSiteSource) {
                         ForEach(NewTabSiteSource.allCases) { source in
                             Text(source.displayName).tag(source)
+                        }
+                    }
+                    Picker("Clock format", selection: $model.newTabUses24HourClock) {
+                        Text("12-hour").tag(false)
+                        Text("24-hour").tag(true)
+                    }
+                    Toggle("Show date", isOn: $model.newTabShowsDate)
+                    Picker("Clock size", selection: $model.newTabClockSize) {
+                        ForEach(NewTabClockSize.allCases) { size in
+                            Text(size.displayName).tag(size)
                         }
                     }
                     Text(newTabSourceDescription)

@@ -112,6 +112,19 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
             ?? "https://duckduckgo.com/?q="
         let searchPrefixJSON = (try? JSONEncoder().encode(searchPrefix)).flatMap { String(data: $0, encoding: .utf8) }
             ?? "\"https://duckduckgo.com/?q=\""
+        let clockSizeClass: String
+        switch settings.newTabClockSize {
+        case .compact: clockSizeClass = "clock-compact"
+        case .regular: clockSizeClass = "clock-regular"
+        case .large: clockSizeClass = "clock-large"
+        }
+        let clockConfig: [String: Any] = [
+            "uses24Hour": settings.newTabUses24HourClock,
+            "showsDate": settings.newTabShowsDate,
+            "size": settings.newTabClockSize.rawValue
+        ]
+        let clockConfigJSON = (try? JSONSerialization.data(withJSONObject: clockConfig, options: [.sortedKeys]))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{\"uses24Hour\":false,\"showsDate\":true,\"size\":\"regular\"}"
 
         return """
         <!doctype html>
@@ -128,7 +141,10 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
               background: \(settings.newTabTheme.backgroundCSS); }
             main { width: min(760px, calc(100% - 40px)); padding: 52px 0 40px; }
             .brand { margin: 0 0 7px; color: #b8c4d6; font-size: 11px; font-weight: 700; letter-spacing: .24em; text-align: center; }
-            #clock { margin: 0; font-size: clamp(58px, 10vw, 88px); font-weight: 300; letter-spacing: -.065em; text-align: center; font-variant-numeric: tabular-nums; }
+            #clock { margin: 0; font-weight: 300; letter-spacing: -.065em; text-align: center; font-variant-numeric: tabular-nums; }
+            #clock.clock-compact { font-size: clamp(42px, 7vw, 60px); }
+            #clock.clock-regular { font-size: clamp(58px, 10vw, 88px); }
+            #clock.clock-large { font-size: clamp(72px, 13vw, 112px); }
             #date { margin: 4px 0 30px; color: #aeb9c8; font-size: 14px; text-align: center; }
             form { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 17px;
               border: 1px solid rgba(255,255,255,.13); border-radius: 16px; background: rgba(255,255,255,.075);
@@ -157,8 +173,8 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
         <body>
           <main>
             <p class="brand">SURFFISH</p>
-            <h1 id="clock">--:--</h1>
-            <p id="date"></p>
+            <h1 id="clock" class="\(clockSizeClass)">--:--</h1>
+            <p id="date" style="display: \(settings.newTabShowsDate ? "block" : "none")"></p>
             <form id="search" role="search">
               <span aria-hidden="true">⌕</span>
               <input id="query" type="search" placeholder="Search the web or enter a URL" aria-label="Search the web" autocomplete="off" autofocus>
@@ -171,13 +187,19 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
           </main>
           <script>
             const searchPrefix = \(searchPrefixJSON);
+            const clockConfig = \(clockConfigJSON);
             const clock = document.getElementById('clock');
             const date = document.getElementById('date');
             const query = document.getElementById('query');
             function updateClock() {
               const now = new Date();
-              clock.textContent = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(now);
-              date.textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(now);
+              clock.textContent = new Intl.DateTimeFormat(undefined, {
+                hour: '2-digit', minute: '2-digit', hourCycle: clockConfig.uses24Hour ? 'h23' : 'h12'
+              }).format(now);
+              date.hidden = !clockConfig.showsDate;
+              if (clockConfig.showsDate) {
+                date.textContent = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(now);
+              }
             }
             updateClock(); setInterval(updateClock, 30000);
             document.getElementById('search').addEventListener('submit', event => {
