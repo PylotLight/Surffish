@@ -91,6 +91,6 @@ open "poc-native/build/Surffish.app"
 open "poc-native/build/Surffish Dev.app"
 ```
 
-The script compiles the Swift sources against `arm64-apple-macosx26.0` and packages both profile apps. When standalone Command Line Tools are selected, it automatically uses the newest installed macOS 26 SDK. This avoids a SwiftUI toolchain issue where the macOS 27 SDK exposes `@State` as a macro but the CLT-only package does not include the required `SwiftUIMacros` plugin. If no macOS 26 SDK is installed, select full Xcode or install a compatible SDK; the script now reports that requirement directly.
+The script compiles the Swift sources against `arm64-apple-macosx26.0` and packages both profile apps. When standalone Command Line Tools are selected, it uses the newest installed macOS 26 SDK; if none is available, it temporarily selects an installed full Xcode without changing the system-wide developer directory. This avoids the SwiftUI macro/plugin mismatch in the macOS 27 SDK with CLT-only builds. If neither option is installed, the script reports the required setup and exits before compiling.
 
 Third-party extensions are installed separately from their official stores through Testing → Install Extension. GitHub Actions validates the build on a macOS 26 arm64 runner.

@@ -62,6 +62,15 @@ public func setupApplicationMenu() {
     viewMenu.addItem(bookmarksItem)
     viewMenu.addItem(NSMenuItem(title: "Reading List", action: #selector(MainWindowController.menuShowReadingList), keyEquivalent: ""))
     viewMenu.addItem(NSMenuItem.separator())
+    let zoomIn = NSMenuItem(title: "Zoom In", action: #selector(TabManager.menuZoomIn), keyEquivalent: "=")
+    zoomIn.target = TabManager.shared
+    viewMenu.addItem(zoomIn)
+    let zoomOut = NSMenuItem(title: "Zoom Out", action: #selector(TabManager.menuZoomOut), keyEquivalent: "-")
+    zoomOut.target = TabManager.shared
+    viewMenu.addItem(zoomOut)
+    let zoomReset = NSMenuItem(title: "Reset Zoom", action: #selector(TabManager.menuZoomReset), keyEquivalent: "0")
+    zoomReset.target = TabManager.shared
+    viewMenu.addItem(zoomReset)
     viewMenu.addItem(NSMenuItem(title: "Reload Page", action: #selector(MainWindowController.menuReload), keyEquivalent: "r"))
     viewMenu.addItem(NSMenuItem(title: "Find in Page…", action: #selector(MainWindowController.menuFind), keyEquivalent: "f"))
     viewMenu.addItem(NSMenuItem(title: "Find Next", action: #selector(MainWindowController.menuFindNext), keyEquivalent: "g"))

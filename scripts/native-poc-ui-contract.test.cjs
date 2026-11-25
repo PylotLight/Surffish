@@ -274,7 +274,10 @@ test("native Settings uses searchable section navigation without implying unsupp
   const settings = read("poc-native/Sources/BrowserSettingsView.swift");
 
   assert.match(settings, /case appearance = "Appearance"/);
-  assert.match(settings, /TextField\("Search settings", text: \$settingsSearchQuery\)/);
+  assert.match(
+    settings,
+    /TextField\("Search settings", text: \$settingsSearchQuery\)/,
+  );
   assert.match(settings, /filteredSearchEntries/);
   assert.match(settings, /No supported settings match/);
   assert.match(settings, /case \.appearance: appearancePage/);
@@ -290,13 +293,22 @@ test("custom New Tab shortcuts are validated, profile-persisted, rendered, and r
   const page = read("poc-native/Sources/BrowserNewTabSchemeHandler.swift");
   const window = read("poc-native/Sources/MainWindowController.swift");
 
-  assert.match(store, /struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable/);
+  assert.match(
+    store,
+    /struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable/,
+  );
   assert.match(store, /customQuickLinks: \[BrowserNewTabQuickLink\]/);
-  assert.match(store, /decodeIfPresent\(\[BrowserNewTabQuickLink\]\.self, forKey: \.customQuickLinks\) \?\? \[\]/);
+  assert.match(
+    store,
+    /decodeIfPresent\(\[BrowserNewTabQuickLink\]\.self, forKey: \.customQuickLinks\) \?\? \[\]/,
+  );
   assert.match(store, /case custom/);
   assert.match(settings, /func addCustomQuickLink\(\)/);
   assert.match(settings, /\["http", "https"\]\.contains\(scheme\)/);
-  assert.match(settings, /components\.user == nil, components\.password == nil/);
+  assert.match(
+    settings,
+    /components\.user == nil, components\.password == nil/,
+  );
   assert.match(settings, /customQuickLinks\.count < 12/);
   assert.match(settings, /func removeCustomQuickLink\(id: UUID\)/);
   assert.match(page, /case \.custom:/);
@@ -316,5 +328,8 @@ test("expanded sidebar content follows the live resizable shell width", () => {
   assert.match(sidebar, /expandedPanel\s*\.frame\(width: model\.panelWidth\)/);
   assert.doesNotMatch(sidebar, /private let panelWidth: CGFloat = 280/);
   assert.match(shell, /onSidebarWidthChanged/);
-  assert.match(window, /sidebarView\.setPanelWidth\(shellLayoutModel\.sidebarWidth\)/);
+  assert.match(
+    window,
+    /sidebarView\.setPanelWidth\(shellLayoutModel\.sidebarWidth\)/,
+  );
 });

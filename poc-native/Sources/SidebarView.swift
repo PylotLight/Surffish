@@ -29,6 +29,14 @@ private enum SidebarContentMode: Equatable {
     case readingList
 }
 
+private enum LibrarySortOrder: String, CaseIterable, Identifiable {
+    case defaultOrder = "Default"
+    case newestFirst = "Newest"
+    case oldestFirst = "Oldest"
+    case titleAscending = "Title A–Z"
+    case titleDescending = "Title Z–A"
+    var id: String { rawValue }
+}
 private enum HistoryTimeFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case today = "Today"
@@ -62,6 +70,27 @@ private final class SidebarViewModel {
     var contentMode: SidebarContentMode = .tabs
     var searchText = ""
     var historyTimeFilter: HistoryTimeFilter = .all
+    var historySortOrder: LibrarySortOrder = .defaultOrder
+    var bookmarksSortOrder: LibrarySortOrder = .defaultOrder
+    var readingListSortOrder: LibrarySortOrder = .defaultOrder
+    var librarySortOrder: LibrarySortOrder {
+        get {
+            switch contentMode {
+            case .history: return historySortOrder
+            case .bookmarks: return bookmarksSortOrder
+            case .readingList: return readingListSortOrder
+            case .tabs: return .defaultOrder
+            }
+        }
+        set {
+            switch contentMode {
+            case .history: historySortOrder = newValue
+            case .bookmarks: bookmarksSortOrder = newValue
+            case .readingList: readingListSortOrder = newValue
+            case .tabs: break
+            }
+        }
+    }
     var isSettingsTabActive = false
     var isExpanded = true
     var isPinned = false
@@ -374,6 +403,12 @@ private struct NativeSidebarRootView: View {
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
+                if model.contentMode != .tabs {
+                    Text("\(visibleLibraryCount) results")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityLabel("\(visibleLibraryCount) results")
+                }
                 if model.contentMode == .history {
                     Button {
                         if let start = model.historyTimeFilter.startDate() {
@@ -432,6 +467,31 @@ private struct NativeSidebarRootView: View {
                 }
             }
 
+            if model.contentMode != .tabs {
+                HStack(spacing: 5) {
+                    if model.contentMode == .history { Spacer(minLength: 0) }
+                    Menu {
+                        ForEach(LibrarySortOrder.allCases) { order in
+                            Button {
+                                model.librarySortOrder = order
+                            } label: {
+                                if model.librarySortOrder == order {
+                                    Label(order.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(order.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Sort: \(model.librarySortOrder.rawValue)", systemImage: "arrow.up.arrow.down")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("Sort \(panelTitle.lowercased())")
+                }
+            }
             if model.contentMode == .tabs {
                 Button {
                     model.delegate?.sidebarDidCreateNewTab()
@@ -511,9 +571,32 @@ private struct NativeSidebarRootView: View {
     private var filteredTabs: [TabItem] { model.unpinnedTabs.filter(model.tabMatches) }
     private var filteredPinnedTabs: [TabItem] { model.pinnedTabs.filter(model.tabMatches) }
     private var filteredPinnedSites: [BrowserBookmark] { model.pinnedSites.filter(model.bookmarkMatches) }
-    private var filteredHistory: [BrowserHistoryEntry] { model.history.filter { model.historyMatches($0) && model.historyTimeFilter.includes($0.visitedAt) } }
-    private var filteredBookmarks: [BrowserBookmark] { model.bookmarks.filter(model.bookmarkMatches) }
-    private var filteredReadingList: [BrowserReadingListEntry] { model.readingList.filter(model.readingListMatches) }
+    private var filteredHistory: [BrowserHistoryEntry] {
+        sorted(model.history.filter { model.historyMatches($0) && model.historyTimeFilter.includes($0.visitedAt) }, date: \.visitedAt, title: \.title)
+    }
+    private var filteredBookmarks: [BrowserBookmark] {
+        sorted(model.bookmarks.filter(model.bookmarkMatches), date: \.createdAt, title: \.title)
+    }
+    private var filteredReadingList: [BrowserReadingListEntry] {
+        sorted(model.readingList.filter(model.readingListMatches), date: \.addedAt, title: \.title)
+    }
+    private var visibleLibraryCount: Int {
+        switch model.contentMode {
+        case .history: return filteredHistory.count
+        case .bookmarks: return filteredBookmarks.count
+        case .readingList: return filteredReadingList.count
+        case .tabs: return 0
+        }
+    }
+    private func sorted<Entry>(_ entries: [Entry], date: KeyPath<Entry, Date>, title: KeyPath<Entry, String>) -> [Entry] {
+        switch model.librarySortOrder {
+        case .defaultOrder: return entries
+        case .newestFirst: return entries.sorted { $0[keyPath: date] > $1[keyPath: date] }
+        case .oldestFirst: return entries.sorted { $0[keyPath: date] < $1[keyPath: date] }
+        case .titleAscending: return entries.sorted { $0[keyPath: title].localizedCaseInsensitiveCompare($1[keyPath: title]) == .orderedAscending }
+        case .titleDescending: return entries.sorted { $0[keyPath: title].localizedCaseInsensitiveCompare($1[keyPath: title]) == .orderedDescending }
+        }
+    }
 
     private var pinnedStrip: some View {
         ScrollView(.horizontal) {

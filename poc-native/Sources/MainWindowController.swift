@@ -266,18 +266,61 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         findBarView.focusAndSelectAll()
     }
 
+    private var findRequestID = 0
+
     private func searchInPage(_ query: String, backwards: Bool) {
+        findRequestID += 1
+        let requestID = findRequestID
         guard !query.isEmpty, let tab = TabManager.shared.activeTab else {
             findBarView.setStatus("")
             return
         }
+        findBarView.setStatus("Counting…")
         let configuration = WKFindConfiguration()
         configuration.caseSensitive = false
         configuration.wraps = true
         configuration.backwards = backwards
+        let searchedWebView = tab.webView
         tab.webView.find(query, configuration: configuration) { [weak self] result in
             DispatchQueue.main.async {
-                self?.findBarView.setStatus(result.matchFound ? "Found" : "No matches")
+                guard let self, self.findRequestID == requestID,
+                      self.findBarView.query == query,
+                      TabManager.shared.activeTab?.webView === searchedWebView else { return }
+                self.findBarView.setStatus(result.matchFound ? "Counting…" : "No matches")
+            }
+        }
+
+        // WKWebView.find reports only matchFound, not Electron's active ordinal or total.
+        // Count independently using read-only DOM traversal; this is an approximate total
+        // (text nodes are counted separately and browser find may treat hidden content differently).
+        let encodedQuery = (try? JSONSerialization.data(withJSONObject: [query], options: []))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        let countScript = """
+        (() => {
+          const needle = \(encodedQuery)[0].toLocaleLowerCase();
+          if (!needle) return 0;
+          const walker = document.createTreeWalker(document.body || document.documentElement, NodeFilter.SHOW_TEXT);
+          let total = 0, node;
+          while ((node = walker.nextNode())) {
+            const parent = node.parentElement;
+            if (!parent || parent.closest('script,style,noscript,template,[hidden],[aria-hidden="true"]')) continue;
+            const text = node.nodeValue.toLocaleLowerCase();
+            for (let from = 0, at; (at = text.indexOf(needle, from)) !== -1; from = at + needle.length) total++;
+          }
+          return total;
+        })()
+        """
+        tab.webView.evaluateJavaScript(countScript) { [weak self, weak webView = tab.webView] value, _ in
+            DispatchQueue.main.async {
+                guard let self, let webView,
+                      self.findRequestID == requestID,
+                      self.findBarView.query == query,
+                      TabManager.shared.activeTab?.webView === webView else { return }
+                guard let count = value as? Int else {
+                    self.findBarView.setStatus("Match count unavailable")
+                    return
+                }
+                self.findBarView.setStatus(count == 0 ? "0 matches*" : "\(count) matches*")
             }
         }
     }
@@ -287,6 +330,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     public func findBarDidClose(_ findBar: FindBarView) {
+        findRequestID += 1
         findBarView.isHidden = true
         if let active = TabManager.shared.activeTab { window?.makeFirstResponder(active.webView) }
     }

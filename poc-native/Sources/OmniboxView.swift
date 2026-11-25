@@ -57,6 +57,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
 
     private let pillContainer = NSView()
     private let securityIcon = NSImageView()
+    private let zoomButton = NSButton()
     private let addressField = NSTextField()
     private let progressBar = NSProgressIndicator()
     private weak var activeTab: TabItem?
@@ -108,6 +109,14 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         securityIcon.contentTintColor = .secondaryLabelColor
         securityIcon.translatesAutoresizingMaskIntoConstraints = false
         pillContainer.addSubview(securityIcon)
+        zoomButton.bezelStyle = .inline
+        zoomButton.isBordered = false
+        zoomButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        zoomButton.target = self
+        zoomButton.action = #selector(onResetZoom)
+        zoomButton.translatesAutoresizingMaskIntoConstraints = false
+        zoomButton.isHidden = true
+        pillContainer.addSubview(zoomButton)
 
         addressField.isBordered = false
         addressField.drawsBackground = false
@@ -201,7 +210,9 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             securityIcon.heightAnchor.constraint(equalToConstant: 13),
 
             addressField.leadingAnchor.constraint(equalTo: securityIcon.trailingAnchor, constant: 8),
-            addressField.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -10),
+            addressField.trailingAnchor.constraint(equalTo: zoomButton.leadingAnchor, constant: -5),
+            zoomButton.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -8),
+            zoomButton.centerYAnchor.constraint(equalTo: pillContainer.centerYAnchor),
             addressField.centerYAnchor.constraint(equalTo: pillContainer.centerYAnchor),
 
             progressBar.leadingAnchor.constraint(equalTo: pillContainer.leadingAnchor, constant: 2),
@@ -259,6 +270,13 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     public func updateForTab(_ tab: TabItem) {
         activeTab = tab
         refreshExtensionButton()
+        let zoomURL = tab.webView.url ?? tab.url
+        let zoom = tab.webView.pageZoom
+        let supportsZoom = BrowserPageZoomStore.shared.zoom(for: zoomURL, isPrivate: tab.isPrivate) != 1 || abs(zoom - 1) > 0.001
+        zoomButton.isHidden = !supportsZoom
+        zoomButton.title = "\(Int((zoom * 100).rounded()))%"
+        zoomButton.toolTip = "Page zoom — click to reset to 100%"
+        zoomButton.accessibilityLabel = zoomButton.toolTip
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
         let activeURL = tab.webView.url ?? tab.url
@@ -342,6 +360,12 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     @objc private func visitHistoryItem(_ sender: NSMenuItem) {
         guard let item = sender.representedObject as? WKBackForwardListItem else { return }
         activeTab?.webView.go(to: item)
+    }
+
+    @objc private func onResetZoom() {
+        guard let tab = activeTab else { return }
+        tab.webView.pageZoom = BrowserPageZoomStore.shared.step(.reset, current: tab.webView.pageZoom, for: tab.webView.url ?? tab.url, isPrivate: tab.isPrivate)
+        updateForTab(tab)
     }
 
     @objc private func onFieldSubmit() {

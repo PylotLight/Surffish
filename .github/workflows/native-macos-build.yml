@@ -11,8 +11,17 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Check native browser UI contracts
-        run: node --test scripts/native-poc-ui-contract.test.cjs scripts/native-poc-toolchain-contract.test.cjs
+      - name: Check native browser source contracts
+        run: |
+          node --test \
+            scripts/native-poc-ui-contract.test.cjs \
+            scripts/native-poc-history-contract.test.cjs \
+            scripts/native-poc-newtab-clock-contract.test.cjs \
+            scripts/native-poc-toolchain-contract.test.cjs \
+            scripts/native-poc-zoom-contract.test.cjs \
+            scripts/native-poc-library-contract.test.cjs \
+            scripts/native-poc-find-contract.test.cjs
+          node scripts/native-poc-lazy-restore-contract.test.cjs
 
       - name: Build native browser
         run: |

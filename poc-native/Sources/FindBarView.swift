@@ -47,6 +47,8 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.alignment = .right
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.toolTip = "Approximate text-node count; excludes some hidden content and may differ from WebKit find results"
+        statusLabel.setAccessibilityLabel("Approximate find result count")
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         configureButton(previousButton, symbol: "chevron.up", label: "Find previous", action: #selector(findPrevious))

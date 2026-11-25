@@ -7,8 +7,8 @@ STAGING_DIR="${BUILD_DIR}/staging"
 
 # macOS 27 SDKs express SwiftUI @State as a macro. The SwiftUIMacros plugin is
 # bundled with full Xcode, not the standalone Command Line Tools package. When
-# CLT is selected, pin to an installed macOS 26 SDK (the project's deployment
-# baseline) so these SwiftUI declarations remain buildable without that plugin.
+# CLT is selected, prefer an installed macOS 26 SDK; otherwise use full Xcode
+# for its plugin instead of failing with a cascading SwiftUI macro diagnostic.
 ACTIVE_DEVELOPER_DIR="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p 2>/dev/null || true)}"
 if [[ -z "${SDKROOT:-}" && "${ACTIVE_DEVELOPER_DIR}" == */CommandLineTools ]]; then
     sdk_dir="${ACTIVE_DEVELOPER_DIR}/SDKs"
@@ -21,9 +21,20 @@ if [[ -z "${SDKROOT:-}" && "${ACTIVE_DEVELOPER_DIR}" == */CommandLineTools ]]; t
         export SDKROOT
         echo "==> Using macOS 26 SDK ${SDKROOT} with the selected Command Line Tools."
     else
-        echo "ERROR: The selected Command Line Tools use the macOS 27 SDK, whose SwiftUI @State macro requires the SwiftUIMacros plugin bundled with full Xcode."
-        echo "Install/select full Xcode, or install a macOS 26 SDK and set SDKROOT to its .sdk path before building."
-        exit 1
+        full_xcode_candidates=()
+        for candidate in /Applications/Xcode*.app/Contents/Developer; do
+            [[ -d "${candidate}" ]] && full_xcode_candidates+=("${candidate}")
+        done
+        if (( ${#full_xcode_candidates[@]} > 0 )); then
+            DEVELOPER_DIR="${full_xcode_candidates[${#full_xcode_candidates[@]}-1]}"
+            ACTIVE_DEVELOPER_DIR="${DEVELOPER_DIR}"
+            export DEVELOPER_DIR
+            echo "==> Using installed full Xcode at ${DEVELOPER_DIR} for its SwiftUIMacros plugin."
+        else
+            echo "ERROR: The selected Command Line Tools use the macOS 27 SDK, whose SwiftUI @State macro requires the SwiftUIMacros plugin bundled with full Xcode."
+            echo "Install full Xcode, or install a macOS 26 SDK and set SDKROOT to its .sdk path before building."
+            exit 1
+        fi
     fi
 fi
 

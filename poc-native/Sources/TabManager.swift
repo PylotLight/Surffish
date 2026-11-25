@@ -143,6 +143,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         tabs.insert(tab, at: insertionIndex)
 
         if makeActive || activeTabId == nil { activeTabId = tab.id }
+        applyPageZoom(to: tab)
         if deferNavigation { deferredRestoredTabIDs.insert(id) }
         else { webView.load(URLRequest(url: targetURL)) }
         notifyTabsChanged()
@@ -240,6 +241,10 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         closingTab.webView.stopLoading()
         closingTab.webView.navigationDelegate = nil
 
+        if closingTab.isPrivate && !tabs.contains(where: \.isPrivate) {
+            BrowserPageZoomStore.shared.clearPrivateOverrides()
+        }
+
         if tabs.isEmpty {
             activeTabId = nil
             _ = createTab(url: Self.startPage)
@@ -311,6 +316,23 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         }
     }
 
+    @objc public func menuZoomIn() { stepActivePageZoom(.zoomIn) }
+    @objc public func menuZoomOut() { stepActivePageZoom(.zoomOut) }
+    @objc public func menuZoomReset() { stepActivePageZoom(.reset) }
+
+    public func stepActivePageZoom(_ action: BrowserPageZoomAction) {
+        guard let tab = activeTab else { return }
+        let url = tab.webView.url ?? tab.url
+        let factor = BrowserPageZoomStore.shared.step(action, current: tab.webView.pageZoom, for: url, isPrivate: tab.isPrivate)
+        tab.webView.pageZoom = factor
+        delegate?.tabManagerDidChangeActiveTab(to: tab)
+    }
+
+    public func applyPageZoom(to tab: TabItem) {
+        let url = tab.webView.url ?? tab.url
+        tab.webView.pageZoom = BrowserPageZoomStore.shared.zoom(for: url, isPrivate: tab.isPrivate)
+    }
+
     public func reloadAllTabs() {
         for tab in tabs {
             tab.webView.reload()
@@ -361,6 +383,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
         tab.isLoading = false
         tab.url = webView.url
+        applyPageZoom(to: tab)
         if let title = webView.title, !title.isEmpty { tab.title = title }
         else if let host = webView.url?.host { tab.title = host }
         let wasRestoredNavigation = restoredSessionTabIDs.remove(tab.id) != nil

@@ -250,6 +250,12 @@ public final class BrowserSettingsModel {
         saveStatus = "SOCKS5 address copied"
     }
 
+    public func resetAllPageZoom() {
+        BrowserPageZoomStore.shared.clearAll()
+        for tab in TabManager.shared.tabs { TabManager.shared.applyPageZoom(to: tab) }
+        saveStatus = "All saved page zoom reset to 100%"
+    }
+
     public func clearWebsiteData() {
         let dataStore = WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
@@ -655,6 +661,9 @@ public struct BrowserSettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Reset all saved page zoom") { model.resetAllPageZoom() }
+                    Text("Page zoom is saved per website for this profile; private-session changes are temporary.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("Clear profile website data…") { model.isConfirmingClearData = true }
                 }
                 .padding(.top, 6)

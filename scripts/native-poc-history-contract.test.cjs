@@ -4,7 +4,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
-const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
+const read = (relativePath) =>
+  fs.readFileSync(path.join(root, relativePath), "utf8");
 
 test("history filters use calendar-day boundaries and expose all requested choices", () => {
   const sidebar = read("poc-native/Sources/SidebarView.swift");
@@ -24,9 +25,15 @@ test("history clear actions honor the selected period and persist in profile JSO
   const sidebar = read("poc-native/Sources/SidebarView.swift");
   assert.match(store, /func clearHistory\(since startDate: Date/);
   assert.match(store, /history\.removeAll \{ \$0\.visitedAt >= startDate \}/);
-  assert.match(sidebar, /BrowserLibraryStore\.shared\.clearHistory\(since: start\)/);
+  assert.match(
+    sidebar,
+    /BrowserLibraryStore\.shared\.clearHistory\(since: start\)/,
+  );
   assert.match(sidebar, /model\.historyTimeFilter\.startDate\(\)/);
-  assert.match(store, /BrowserProfile\.current\.fileURL\("browser-library\.json"\)/);
+  assert.match(
+    store,
+    /BrowserProfile\.current\.fileURL\("browser-library\.json"\)/,
+  );
   assert.match(store, /try data\.write\(to: fileURL, options: \.atomic\)/);
   assert.match(store, /guard !isPrivate/);
 });
@@ -39,10 +46,16 @@ test("individual entries and exact URLs can be removed; site clearing matches ho
   assert.match(store, /func removeHistoryURL\(_ url: String\)/);
   assert.match(store, /history\.removeAll \{ \$0\.url == url \}/);
   assert.match(store, /func clearHistory\(forSite site: String\)/);
-  assert.match(store, /host == normalizedSite \|\| host\.hasSuffix\("\." \+ normalizedSite\)/);
+  assert.match(
+    store,
+    /host == normalizedSite \|\| host\.hasSuffix\("\." \+ normalizedSite\)/,
+  );
   assert.match(sidebar, /Remove from History/);
   assert.ok(sidebar.includes("Clear History for \\(host)"));
-  assert.match(sidebar, /BrowserLibraryStore\.shared\.clearHistory\(forSite: host\)/);
+  assert.match(
+    sidebar,
+    /BrowserLibraryStore\.shared\.clearHistory\(forSite: host\)/,
+  );
   assert.doesNotMatch(sidebar, /WKWebsiteDataStore/);
   assert.doesNotMatch(store, /WKWebsiteDataStore/);
 });
