@@ -72,6 +72,12 @@ public final class SshTunnelManager {
             updateStatus("Enter an SSH host alias or user@host")
             return
         }
+        guard Self.isValidTarget(self.target) else {
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
+            updateStatus("Invalid SSH target · use one host alias or user@host")
+            return
+        }
         guard ["127.0.0.1", "0.0.0.0"].contains(bindAddress) else {
             proxyPort = browserEnabled ? 1 : nil
             applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
@@ -243,6 +249,14 @@ public final class SshTunnelManager {
         }
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe = nil
+    }
+
+    private static func isValidTarget(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 255,
+              let first = value.unicodeScalars.first,
+              CharacterSet.alphanumerics.contains(first) else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@%+:-[]")
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
     private static func shouldRetry(_ detail: String) -> Bool {
