@@ -73,6 +73,7 @@ public final class SshTunnelManager {
             // Install the proxy before launching SSH. If the tunnel fails, WebKit continues
             // pointing at this loopback endpoint and cannot silently fall back to a direct route.
             applyProxyToBrowserStores(port: port)
+            TabManager.shared.reloadAllTabs()
 
             let child = Process()
             child.executableURL = executableURL
