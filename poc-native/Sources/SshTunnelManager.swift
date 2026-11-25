@@ -232,7 +232,7 @@ public final class SshTunnelManager {
         let existing = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
         environment["PATH"] = (existing + paths.filter { !existing.contains($0) }).joined(separator: ":")
 
-        if environment["SSH_AUTH_SOCK"] == nil,
+        if environment["SSH_AUTH_SOCK"]?.isEmpty != false,
            let socket = launchdEnvironmentValue("SSH_AUTH_SOCK") {
             environment["SSH_AUTH_SOCK"] = socket
         }
