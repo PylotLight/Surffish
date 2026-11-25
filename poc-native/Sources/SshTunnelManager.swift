@@ -7,6 +7,8 @@ public final class SshTunnelManager {
     public static let shared = SshTunnelManager()
 
     public private(set) var status = "Not configured"
+    public private(set) var diagnosticsText = "SSH diagnostics will appear here after saving the connection settings."
+    public var onDiagnosticsChange: ((String) -> Void)?
     public private(set) var proxyPort: UInt16?
     public var browserProxyPort: UInt16? { browserEnabled ? proxyPort : nil }
     public var onStatusChange: ((String) -> Void)?
@@ -43,6 +45,8 @@ public final class SshTunnelManager {
         self.enabled = browserEnabled || serverEnabled
         self.target = target.trimmingCharacters(in: .whitespacesAndNewlines)
         self.bindAddress = serverEnabled ? bindAddress : "127.0.0.1"
+        diagnosticsText = "Target: \(self.target)\nSSH executable: /usr/bin/ssh\nSOCKS5 listener: \(self.bindAddress):\(port)\n\nStarting OpenSSH with verbose connection diagnostics…"
+        onDiagnosticsChange?(diagnosticsText)
         guard (1...65535).contains(port), let validPort = UInt16(exactly: port) else {
             generation += 1
             reconnectTask?.cancel()
@@ -135,6 +139,7 @@ public final class SshTunnelManager {
             let child = Process()
             child.executableURL = executableURL
             child.arguments = (bindAddress == "0.0.0.0" ? ["-g"] : []) + [
+                "-vv",
                 "-N",
                 "-D", "\(bindAddress):\(port)",
                 "-o", "ExitOnForwardFailure=yes",
@@ -159,7 +164,8 @@ public final class SshTunnelManager {
                 guard let output = String(data: data, encoding: .utf8) else { return }
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.stderrText = String((self.stderrText + output).suffix(4_000))
+                    self.stderrText = String((self.stderrText + output).suffix(12_000))
+                    self.appendDiagnostics(output)
                 }
             }
 
@@ -175,6 +181,12 @@ public final class SshTunnelManager {
                     self.updateStatus(detail.isEmpty
                         ? "SSH tunnel exited (code \(terminated.terminationStatus))"
                         : "SSH tunnel exited: \(detail)")
+                    self.appendDiagnostics("\nSSH process exited with code \(terminated.terminationStatus).\n")
+                    DeveloperConsole.shared.record(
+                        level: "ERROR",
+                        source: "SSH",
+                        message: "SSH process exited with code \(terminated.terminationStatus). \(self.stderrText.suffix(8_000))"
+                    )
                     if Self.shouldRetry(detail) {
                         self.scheduleReconnect(generation: runID)
                     }
@@ -207,6 +219,7 @@ public final class SshTunnelManager {
                         .suffix(2)
                         .joined(separator: " ")
                     updateStatus(detail.isEmpty ? "SSH exited before opening the SOCKS5 port" : detail)
+                    DeveloperConsole.shared.record(level: "ERROR", source: "SSH", message: "SSH exited before opening SOCKS5. \(stderrText.suffix(8_000))")
                     if Self.shouldRetry(detail) {
                         scheduleReconnect(generation: runID)
                     }
@@ -216,6 +229,8 @@ public final class SshTunnelManager {
             }
 
             updateStatus("SSH did not open the SOCKS5 port within 8 seconds")
+            appendDiagnostics("\nTimed out waiting for the local SOCKS5 listener.\n")
+            DeveloperConsole.shared.record(level: "ERROR", source: "SSH", message: "Timed out waiting for SOCKS5 listener. \(stderrText.suffix(8_000))")
             child.terminate()
             scheduleReconnect(generation: runID)
         } catch {
@@ -299,9 +314,18 @@ public final class SshTunnelManager {
         hasAppliedProxyConfiguration = true
     }
 
+    private func appendDiagnostics(_ value: String) {
+        diagnosticsText = String((diagnosticsText + value).suffix(16_000))
+        onDiagnosticsChange?(diagnosticsText)
+    }
+
     private func updateStatus(_ value: String) {
         status = value
         onStatusChange?(value)
+        let level = value.localizedCaseInsensitiveContains("ready") ? "INFO"
+            : (value.localizedCaseInsensitiveContains("connect") || value.localizedCaseInsensitiveContains("disabled") ? "INFO" : "ERROR")
+        DeveloperConsole.shared.record(level: level, source: "SSH", message: value)
+        appendDiagnostics("\n[\(Date())] \(value)\n")
         NSLog("[SSH] %@", value)
     }
 
