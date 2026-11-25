@@ -11,6 +11,16 @@ public protocol OmniboxViewDelegate: AnyObject {
     func omniboxDidRequestExtensionManagement()
 }
 
+private final class ExtensionToolbarButton: NSButton {
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height), in: self)
+    }
+}
+
 public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     public weak var delegate: OmniboxViewDelegate?
 
@@ -24,7 +34,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     private let addressField = NSTextField()
     private let progressBar = NSProgressIndicator()
 
-    private let brambleBtn = NSButton()
+    private let brambleBtn = ExtensionToolbarButton()
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
