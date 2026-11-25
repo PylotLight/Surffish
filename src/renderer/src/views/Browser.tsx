@@ -733,6 +733,7 @@ export default function Browser({
     useState<NetworkHelperUsage | null>(null);
   const [sshHostAliases, setSshHostAliases] = useState<string[]>([]);
   const [sshHostAliasesMessage, setSshHostAliasesMessage] = useState("");
+  const [sshHostAliasQuery, setSshHostAliasQuery] = useState("");
   const [searchingSshHosts, setSearchingSshHosts] = useState(false);
   const sshTunnelStatus = describeSshTunnelStatus(
     networkHelper?.sshTunnel ?? null,
@@ -4415,7 +4416,10 @@ export default function Browser({
                             {SURFFISH_NETWORK_HELPER.host}:{proxy.port}
                           </code>
                           . Choose a free port; the SSH-side listener is private
-                          and selected automatically.
+                          and selected automatically. Other apps can use this same
+                          endpoint for TCP CONNECT traffic. Requests fail closed if
+                          the SSH tunnel is off or unreachable. Surffish site rules
+                          and local-network bypass apply only inside Surffish.
                         </p>
                       )}
                       <div className="settings-inline-fields ssh-host-row">
@@ -4448,7 +4452,20 @@ export default function Browser({
                       </div>
                       {sshHostAliases.length > 0 && (
                         <label className="settings-field settings-field-grow">
-                          <span>Saved SSH hosts</span>
+                          <span>Search saved SSH configs</span>
+                          <input
+                            type="search"
+                            value={sshHostAliasQuery}
+                            placeholder="Filter aliases…"
+                            spellCheck={false}
+                            onChange={(event) => setSshHostAliasQuery(event.target.value)}
+                            aria-label="Search saved SSH configs"
+                          />
+                        </label>
+                      )}
+                      {sshHostAliases.length > 0 && (
+                        <label className="settings-field settings-field-grow">
+                          <span>SSH config matches</span>
                           <select
                             className="settings-select"
                             value={
@@ -4465,11 +4482,13 @@ export default function Browser({
                             aria-label="Choose a saved SSH host alias"
                           >
                             <option value="">Choose a host…</option>
-                            {sshHostAliases.map((alias) => (
-                              <option key={alias} value={alias}>
-                                {alias}
-                              </option>
-                            ))}
+                            {sshHostAliases
+                              .filter((alias) => alias.toLowerCase().includes(sshHostAliasQuery.trim().toLowerCase()))
+                              .map((alias) => (
+                                <option key={alias} value={alias}>
+                                  {alias}
+                                </option>
+                              ))}
                           </select>
                         </label>
                       )}
@@ -4571,7 +4590,7 @@ export default function Browser({
                           ? networkHelper?.error
                             ? `Unavailable — ${networkHelper.error}`
                             : networkHelper?.listening
-                              ? `Listening at ${SURFFISH_NETWORK_HELPER.host}:${proxy.port} while a Surffish browser window is open.`
+                              ? `Shared SOCKS listener: Listening at ${SURFFISH_NETWORK_HELPER.host}:${proxy.port} while a Surffish browser window is open.`
                               : "Starting the shared listener…"
                           : proxy.sshHost?.trim()
                             ? "Off. Enable SOCKS5 and Save to open the shared listener."
