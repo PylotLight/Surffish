@@ -70,10 +70,6 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
       if (window.__surffishBrambleDefaultManagerDismissalInstalled) return;
       window.__surffishBrambleDefaultManagerDismissalInstalled = true;
 
-      const extensionAPI = globalThis.browser ?? globalThis.chrome;
-      // Leave Chromium/Firefox alone: they can actually apply this browser setting.
-      if (extensionAPI?.privacy?.services?.passwordSavingEnabled) return;
-
       const key = "pref.defaultManagerPromptDismissed";
       document.addEventListener("click", (event) => {
         if (window.__surffishBrambleDefaultManagerReplay) return;
@@ -82,6 +78,9 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         const label = button?.textContent?.replace(/\s+/g, " ").trim().toLowerCase();
         if (!button || label !== "make default") return;
 
+        const extensionAPI = globalThis.browser ?? globalThis.chrome;
+        // Leave Chromium/Firefox alone: they can actually apply this browser setting.
+        if (extensionAPI?.privacy?.services?.passwordSavingEnabled) return;
         const storage = extensionAPI?.storage?.local;
         if (typeof storage?.set !== "function") return;
 
