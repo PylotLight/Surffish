@@ -36,10 +36,13 @@ public struct BrowserSettings: Codable {
     public var showSidebarAtStartup: Bool
     public var sshProxyEnabled: Bool
     public var sshHost: String
+    public var sshProxyPort: Int
+    public var sshProxyShareEnabled: Bool
+    public var sshProxyBindAddress: String
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
-        case sshProxyEnabled, sshHost
+        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress
     }
 
     public init(
@@ -49,7 +52,10 @@ public struct BrowserSettings: Codable {
         restoreSession: Bool,
         showSidebarAtStartup: Bool,
         sshProxyEnabled: Bool,
-        sshHost: String
+        sshHost: String,
+        sshProxyPort: Int = 1080,
+        sshProxyShareEnabled: Bool = false,
+        sshProxyBindAddress: String = "127.0.0.1"
     ) {
         self.version = version
         self.searchEngine = searchEngine
@@ -58,6 +64,9 @@ public struct BrowserSettings: Codable {
         self.showSidebarAtStartup = showSidebarAtStartup
         self.sshProxyEnabled = sshProxyEnabled
         self.sshHost = sshHost
+        self.sshProxyPort = sshProxyPort
+        self.sshProxyShareEnabled = sshProxyShareEnabled
+        self.sshProxyBindAddress = sshProxyBindAddress
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,6 +78,9 @@ public struct BrowserSettings: Codable {
         showSidebarAtStartup = try values.decodeIfPresent(Bool.self, forKey: .showSidebarAtStartup) ?? true
         sshProxyEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyEnabled) ?? false
         sshHost = try values.decodeIfPresent(String.self, forKey: .sshHost) ?? ""
+        sshProxyPort = try values.decodeIfPresent(Int.self, forKey: .sshProxyPort) ?? 1080
+        sshProxyShareEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyShareEnabled) ?? false
+        sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
     }
 
     public static let defaults = BrowserSettings(
@@ -78,7 +90,10 @@ public struct BrowserSettings: Codable {
         restoreSession: true,
         showSidebarAtStartup: true,
         sshProxyEnabled: false,
-        sshHost: ""
+        sshHost: "",
+        sshProxyPort: 1080,
+        sshProxyShareEnabled: false,
+        sshProxyBindAddress: "127.0.0.1"
     )
 
     public var startPageURL: URL {
@@ -100,10 +115,9 @@ public final class BrowserSettingsStore {
     private let decoder = JSONDecoder()
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let directory = support.appendingPathComponent("SurffishNative", isDirectory: true)
+        let directory = BrowserProfile.current.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("browser-settings.json")
+        fileURL = BrowserProfile.current.fileURL("browser-settings.json")
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? Data(contentsOf: fileURL),
