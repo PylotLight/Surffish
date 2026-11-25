@@ -17,11 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
 
-        // Do not instantiate WKWebExtension from the bundled Bramble files during
-        // startup. The current Bramble MV3 manifest triggers a crash inside
-        // WebKit's WKWebExtension initializer on affected macOS builds.
-        // Keep the browser launch path independent of extension parsing until
-        // the manifest has been made WebKit-compatible and tested separately.
+        // Restore extensions from this profile's persistent Extensions directory.
+        // Loading happens before session restoration so restored webkit-extension:// tabs
+        // can resolve their owning extension context.
         Task { [weak self] in
             let settings = BrowserSettingsStore.shared.settings
             await SshTunnelManager.shared.configure(
@@ -33,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 upstreamHost: settings.sshRemoteSocksHost,
                 upstreamPort: settings.sshRemoteSocksPort
             )
+            await WebExtensionManager.shared.loadInstalledExtensions()
             await MainActor.run {
                 self?.windowController?.restoreBrowserSession()
             }
