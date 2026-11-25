@@ -34,13 +34,33 @@ public struct BrowserSettings: Codable {
     public var startPage: String
     public var restoreSession: Bool
     public var showSidebarAtStartup: Bool
+    public var sshProxyEnabled: Bool
+    public var sshHost: String
+
+    private enum CodingKeys: String, CodingKey {
+        case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
+        case sshProxyEnabled, sshHost
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        searchEngine = try values.decodeIfPresent(BrowserSearchEngine.self, forKey: .searchEngine) ?? .duckDuckGo
+        startPage = try values.decodeIfPresent(String.self, forKey: .startPage) ?? BrowserSettings.defaults.startPage
+        restoreSession = try values.decodeIfPresent(Bool.self, forKey: .restoreSession) ?? true
+        showSidebarAtStartup = try values.decodeIfPresent(Bool.self, forKey: .showSidebarAtStartup) ?? true
+        sshProxyEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyEnabled) ?? false
+        sshHost = try values.decodeIfPresent(String.self, forKey: .sshHost) ?? ""
+    }
 
     public static let defaults = BrowserSettings(
         version: 1,
         searchEngine: .duckDuckGo,
         startPage: "https://online.bonjourr.fr/",
         restoreSession: true,
-        showSidebarAtStartup: true
+        showSidebarAtStartup: true,
+        sshProxyEnabled: false,
+        sshHost: ""
     )
 
     public var startPageURL: URL {
