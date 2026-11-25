@@ -1,0 +1,32 @@
+==> Using macOS 26 SDK /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk with the selected Command Line Tools.
+==> Building Surffish Native for macOS 26 / Apple Silicon...
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserNavigationError.swift:31:34: warning: 'NSURLErrorFailingURLStringErrorKey' was deprecated in macOS 15.4: Use NSURLErrorFailingURLErrorKey instead [#DeprecatedDeclaration]
+29 | 
+30 |         let failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
+31 |             ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
+   |                                  `- warning: 'NSURLErrorFailingURLStringErrorKey' was deprecated in macOS 15.4: Use NSURLErrorFailingURLErrorKey instead [#DeprecatedDeclaration]
+32 |             ?? fallbackURL
+33 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+==> WARNING: No Apple-issued signing identity found; using ad-hoc signing.
+==> Set SURFFISH_CODESIGN_IDENTITY to an Apple Development or Developer ID Application identity for reliable Local Network privacy.
+/Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish.app: replacing existing signature
+==> Built /Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish.app (production profile)
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserNavigationError.swift:31:34: warning: 'NSURLErrorFailingURLStringErrorKey' was deprecated in macOS 15.4: Use NSURLErrorFailingURLErrorKey instead [#DeprecatedDeclaration]
+29 | 
+30 |         let failedURL = (nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL)
+31 |             ?? (nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String).flatMap { URL(string: $0) }
+   |                                  `- warning: 'NSURLErrorFailingURLStringErrorKey' was deprecated in macOS 15.4: Use NSURLErrorFailingURLErrorKey instead [#DeprecatedDeclaration]
+32 |             ?? fallbackURL
+33 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+==> WARNING: No Apple-issued signing identity found; using ad-hoc signing.
+==> Set SURFFISH_CODESIGN_IDENTITY to an Apple Development or Developer ID Application identity for reliable Local Network privacy.
+/Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish Dev.app: replacing existing signature
+==> Built /Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish Dev.app (development profile)
+==> Verified distinct executable UUIDs: production 7073CDDE-38E0-34E9-B7D2-1267DD795B66, development 665B0EC6-C6EE-34CF-9821-CD0521D08F0F
+==> Both macOS 26 applications built successfully.
+Production: /Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish.app
+Development: /Users/lochy/repos/Personal/Surffish/poc-native/build/Surffish Dev.app
