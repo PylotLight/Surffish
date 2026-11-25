@@ -215,11 +215,10 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     private static func chromeExtensionID(from input: String) -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if let components = URLComponents(string: trimmed),
-           let idIndex = components.path.split(separator: "/").firstIndex(of: "detail") {
-            let parts = components.path.split(separator: "/")
-            if parts.count > idIndex + 1 { return String(parts[idIndex + 1]) }
+           let lastPathComponent = components.path.split(separator: "/").last {
+            return String(lastPathComponent)
         }
-        return (trimmed as NSString).lastPathComponent.components(separatedBy: "?").first ?? trimmed
+        return trimmed.components(separatedBy: "?").first ?? trimmed
     }
 
     private static func crxPayload(from data: Data) throws -> Data {
