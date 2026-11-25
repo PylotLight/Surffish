@@ -4,7 +4,7 @@ import WebKit
 public final class AdBlockManager {
     public static let shared = AdBlockManager()
     
-    public private(set) var isEnabled: Bool = true
+    public private(set) var isEnabled: Bool = false
     private var ruleList: WKContentRuleList?
     private let ruleListIdentifier = "surffish-adblock-rules"
     
