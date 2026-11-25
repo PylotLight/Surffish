@@ -19,7 +19,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Surffish Settings"
+        window.title = "Surffish Settings — \(BrowserProfile.current.displayName)"
         window.center()
         super.init(window: window)
         buildInterface()
@@ -32,7 +32,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
 
     private func buildInterface() {
         guard let content = window?.contentView else { return }
-        let heading = NSTextField(labelWithString: "Browser")
+        let heading = NSTextField(labelWithString: "Browser — \(BrowserProfile.current.displayName)")
         heading.font = .systemFont(ofSize: 22, weight: .semibold)
 
         let description = NSTextField(wrappingLabelWithString: "Core browser preferences. More production settings categories will be migrated into this native settings window in subsequent phases.")
