@@ -1,6 +1,9 @@
 import AppKit
 
-public final class BrowserSettingsWindowController: NSWindowController {
+@MainActor
+public final class BrowserSettingsViewController: NSViewController {
+    public var onClose: (() -> Void)?
+
     private let searchEngine = NSPopUpButton()
     private let startPage = NSTextField()
     private let restoreSession = NSButton(checkboxWithTitle: "Restore tabs from the previous session", target: nil, action: nil)
@@ -13,42 +16,29 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
     private let sshStatus = NSTextField(labelWithString: "Not configured")
+    private let diagnosticsView = NSTextView()
 
-    public init() {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Surffish Settings — \(BrowserProfile.current.displayName)"
-        window.center()
-        super.init(window: window)
+    public override func loadView() {
+        let root = NSView()
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor(red: 0.075, green: 0.08, blue: 0.095, alpha: 1).cgColor
+        view = root
         buildInterface()
         loadSettings()
     }
 
-    public required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
     private func buildInterface() {
-        guard let content = window?.contentView else { return }
-        let heading = NSTextField(labelWithString: "Browser — \(BrowserProfile.current.displayName)")
-        heading.font = .systemFont(ofSize: 22, weight: .semibold)
+        let heading = NSTextField(labelWithString: "Settings")
+        heading.font = .systemFont(ofSize: 25, weight: .semibold)
 
-        let description = NSTextField(wrappingLabelWithString: "Core browser preferences. More production settings categories will be migrated into this native settings window in subsequent phases.")
+        let description = NSTextField(wrappingLabelWithString: "Configure Surffish and inspect live connection diagnostics without leaving the browser.")
         description.textColor = .secondaryLabelColor
         description.maximumNumberOfLines = 2
 
         searchEngine.addItems(withTitles: BrowserSearchEngine.allCases.map(\.displayName))
         searchEngine.widthAnchor.constraint(equalToConstant: 220).isActive = true
-
         startPage.placeholderString = "https://online.bonjourr.fr/"
         startPage.widthAnchor.constraint(equalToConstant: 440).isActive = true
-
-        let searchRow = makeRow(title: "Search engine", control: searchEngine)
-        let startRow = makeRow(title: "New tab page", control: startPage)
 
         let connectionHeading = NSTextField(labelWithString: "Connection")
         connectionHeading.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -65,45 +55,106 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshProxyBindAddress.widthAnchor.constraint(equalToConstant: 220).isActive = true
         sshStatus.textColor = .secondaryLabelColor
         sshStatus.maximumNumberOfLines = 3
+
         let sshHostControls = NSStackView(views: [sshHost, sshHostSearchButton])
         sshHostControls.orientation = .horizontal
         sshHostControls.alignment = .centerY
         sshHostControls.spacing = 8
-        let sshHostRow = makeRow(title: "SSH host", control: sshHostControls)
-        let sshHostHint = NSTextField(wrappingLabelWithString: "Search reads Host names from your local ~/.ssh/config (including included config files). Select one to fill this field, or enter an SSH alias or user@host manually. With an SSH alias, the shared port above is used by Surffish and other apps.")
-        sshHostHint.textColor = .secondaryLabelColor
-        sshHostHint.maximumNumberOfLines = 3
-        let sshPortRow = makeRow(title: "Shared SOCKS5 port", control: sshProxyPort)
-        let sshBindRow = makeRow(title: "Listen address", control: sshProxyBindAddress)
-        let proxySharingWarning = NSTextField(wrappingLabelWithString: "Surffish creates a local SOCKS5 proxy and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
-        proxySharingWarning.textColor = .secondaryLabelColor
-        proxySharingWarning.maximumNumberOfLines = 3
+
+        let hostHint = NSTextField(wrappingLabelWithString: "Search reads Host names from your local ~/.ssh/config (including included config files). Select one to fill this field, or enter an SSH alias or user@host manually. OpenSSH reads the host, SSH port, identity and authentication settings from that configuration.")
+        hostHint.textColor = .secondaryLabelColor
+        hostHint.maximumNumberOfLines = 3
+
+        let warning = NSTextField(wrappingLabelWithString: "Surffish opens a local SOCKS5 endpoint and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
+        warning.textColor = .secondaryLabelColor
+        warning.maximumNumberOfLines = 3
 
         let copyProxyButton = NSButton(title: "Copy local SOCKS5 address", target: self, action: #selector(copyProxyAddress))
         copyProxyButton.bezelStyle = .rounded
-        let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
+        let saveButton = NSButton(title: "Save & Apply", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
+        let doneButton = NSButton(title: "Done", target: self, action: #selector(closeSettings))
+        doneButton.bezelStyle = .rounded
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshHostHint, sshHostSearchStatus, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
+        let actionRow = NSStackView(views: [copyProxyButton, NSView(), saveButton, doneButton])
+        actionRow.orientation = .horizontal
+        actionRow.alignment = .centerY
+        actionRow.distribution = .fill
+        actionRow.spacing = 10
+
+        diagnosticsView.isEditable = false
+        diagnosticsView.isRichText = false
+        diagnosticsView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        diagnosticsView.textColor = .textColor
+        diagnosticsView.backgroundColor = NSColor(white: 0.055, alpha: 1)
+        diagnosticsView.textContainerInset = NSSize(width: 10, height: 8)
+        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
+        let diagnosticsScroll = NSScrollView()
+        diagnosticsScroll.documentView = diagnosticsView
+        diagnosticsScroll.hasVerticalScroller = true
+        diagnosticsScroll.hasHorizontalScroller = true
+        diagnosticsScroll.borderType = .bezelBorder
+        diagnosticsScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
+
+        let stack = NSStackView(views: [
+            heading,
+            description,
+            makeRow(title: "Search engine", control: searchEngine),
+            makeRow(title: "New tab page", control: startPage),
+            restoreSession,
+            showSidebar,
+            connectionHeading,
+            sshProxyEnabled,
+            makeRow(title: "SSH host", control: sshHostControls),
+            hostHint,
+            sshHostSearchStatus,
+            sshProxyShareEnabled,
+            makeRow(title: "Shared SOCKS5 port", control: sshProxyPort),
+            makeRow(title: "Listen address", control: sshProxyBindAddress),
+            warning,
+            sshStatus,
+            copyProxyButton,
+            NSTextField(labelWithString: "SSH connection diagnostics"),
+            diagnosticsScroll,
+            actionRow
+        ])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 18
+        stack.spacing = 13
         stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+
+        let scroll = NSScrollView()
+        scroll.documentView = stack
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scroll)
 
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 28),
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 32),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -32),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -24)
+            scroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 34),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -34),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
+            stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor, constant: -4),
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+
+        SshTunnelManager.shared.onStatusChange = { [weak self] status in
+            self?.sshStatus.stringValue = status
+        }
+        SshTunnelManager.shared.onDiagnosticsChange = { [weak self] text in
+            self?.diagnosticsView.string = text
+            let end = (text as NSString).length
+            if end > 0 { self?.diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0)) }
+        }
     }
 
     private func makeRow(title: String, control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 130).isActive = true
         let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
         row.alignment = .centerY
@@ -124,9 +175,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshProxyPort.stringValue = String(settings.sshProxyPort)
         sshProxyBindAddress.selectItem(at: settings.sshProxyBindAddress == "0.0.0.0" ? 1 : 0)
         sshStatus.stringValue = SshTunnelManager.shared.status
-        SshTunnelManager.shared.onStatusChange = { [weak self] status in
-            DispatchQueue.main.async { self?.sshStatus.stringValue = status }
-        }
+        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
     }
 
     @objc private func searchSshHosts() {
@@ -166,44 +215,39 @@ public final class BrowserSettingsWindowController: NSWindowController {
            let engine = BrowserSearchEngine.allCases.first(where: { $0.displayName == title }) {
             next.searchEngine = engine
         }
+
         let proposedStartPage = startPage.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: proposedStartPage),
            let scheme = url.scheme?.lowercased(),
            scheme == "http" || scheme == "https" {
             next.startPage = url.absoluteString
         } else {
-            let alert = NSAlert()
-            alert.messageText = "Invalid new tab page"
-            alert.informativeText = "Enter a complete HTTP or HTTPS URL."
-            alert.alertStyle = .warning
-            alert.runModal()
+            showValidationAlert(title: "Invalid new tab page", message: "Enter a complete HTTP or HTTPS URL.")
             return
         }
+
         next.restoreSession = restoreSession.state == .on
         next.showSidebarAtStartup = showSidebar.state == .on
         next.sshProxyEnabled = sshProxyEnabled.state == .on
         next.sshProxyShareEnabled = sshProxyShareEnabled.state == .on
         next.sshHost = sshHost.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
         guard let port = Int(sshProxyPort.stringValue), (1...65535).contains(port) else {
-            let alert = NSAlert()
-            alert.messageText = "Invalid SOCKS5 port"
-            alert.informativeText = "Enter a port between 1 and 65535."
-            alert.alertStyle = .warning
-            alert.runModal()
+            showValidationAlert(title: "Invalid SOCKS5 port", message: "Enter a port between 1 and 65535.")
             return
         }
         next.sshProxyPort = port
         next.sshProxyBindAddress = next.sshProxyShareEnabled && sshProxyBindAddress.indexOfSelectedItem == 1 ? "0.0.0.0" : "127.0.0.1"
+
         if (next.sshProxyEnabled || next.sshProxyShareEnabled) && next.sshHost.isEmpty {
-            let alert = NSAlert()
-            alert.messageText = "SSH host required"
-            alert.informativeText = "Enter an SSH config alias or user@host, or turn off browser proxy routing and external SOCKS sharing."
-            alert.alertStyle = .warning
-            alert.runModal()
+            showValidationAlert(title: "SSH host required", message: "Enter an SSH config alias or user@host, or turn off browser proxy routing and external SOCKS sharing.")
             return
         }
+
         BrowserSettingsStore.shared.update(next)
-        Task {
+        sshStatus.stringValue = "Settings saved · applying SSH connection…"
+        diagnosticsView.string = "Saved target: \(next.sshHost)\nSOCKS5 port: \(next.sshProxyPort)\n\nApplying configuration…"
+        Task { [weak self] in
             await SshTunnelManager.shared.configure(
                 browserEnabled: next.sshProxyEnabled,
                 serverEnabled: next.sshProxyShareEnabled,
@@ -211,8 +255,20 @@ public final class BrowserSettingsWindowController: NSWindowController {
                 port: next.sshProxyPort,
                 bindAddress: next.sshProxyBindAddress
             )
-            sshStatus.stringValue = SshTunnelManager.shared.status
+            self?.sshStatus.stringValue = SshTunnelManager.shared.status
+            self?.diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
         }
-        window?.close()
+    }
+
+    private func showValidationAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: view.window ?? NSWindow())
+    }
+
+    @objc private func closeSettings() {
+        onClose?()
     }
 }
