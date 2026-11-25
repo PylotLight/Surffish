@@ -37,14 +37,12 @@ public struct BrowserSettings: Codable {
     public var sshProxyEnabled: Bool
     public var sshHost: String
     public var sshProxyPort: Int
-    public var sshRemoteSocksHost: String
-    public var sshRemoteSocksPort: Int
     public var sshProxyShareEnabled: Bool
     public var sshProxyBindAddress: String
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
-        case sshProxyEnabled, sshHost, sshProxyPort, sshRemoteSocksHost, sshRemoteSocksPort, sshProxyShareEnabled, sshProxyBindAddress
+        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress
     }
 
     public init(
@@ -56,8 +54,6 @@ public struct BrowserSettings: Codable {
         sshProxyEnabled: Bool,
         sshHost: String,
         sshProxyPort: Int = 1080,
-        sshRemoteSocksHost: String = "127.0.0.1",
-        sshRemoteSocksPort: Int = 1080,
         sshProxyShareEnabled: Bool = false,
         sshProxyBindAddress: String = "127.0.0.1"
     ) {
@@ -69,8 +65,6 @@ public struct BrowserSettings: Codable {
         self.sshProxyEnabled = sshProxyEnabled
         self.sshHost = sshHost
         self.sshProxyPort = sshProxyPort
-        self.sshRemoteSocksHost = sshRemoteSocksHost
-        self.sshRemoteSocksPort = sshRemoteSocksPort
         self.sshProxyShareEnabled = sshProxyShareEnabled
         self.sshProxyBindAddress = sshProxyBindAddress
     }
@@ -85,8 +79,6 @@ public struct BrowserSettings: Codable {
         sshProxyEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyEnabled) ?? false
         sshHost = try values.decodeIfPresent(String.self, forKey: .sshHost) ?? ""
         sshProxyPort = try values.decodeIfPresent(Int.self, forKey: .sshProxyPort) ?? 1080
-        sshRemoteSocksHost = try values.decodeIfPresent(String.self, forKey: .sshRemoteSocksHost) ?? "127.0.0.1"
-        sshRemoteSocksPort = try values.decodeIfPresent(Int.self, forKey: .sshRemoteSocksPort) ?? 1080
         sshProxyShareEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyShareEnabled) ?? false
         sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
     }
@@ -100,8 +92,6 @@ public struct BrowserSettings: Codable {
         sshProxyEnabled: false,
         sshHost: "",
         sshProxyPort: 1080,
-        sshRemoteSocksHost: "127.0.0.1",
-        sshRemoteSocksPort: 1080,
         sshProxyShareEnabled: false,
         sshProxyBindAddress: "127.0.0.1"
     )
