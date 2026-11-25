@@ -90,20 +90,16 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         let targetURL = url ?? Self.startPage
         let configuration: WKWebViewConfiguration
 
-        if targetURL.scheme == "webkit-extension",
-           let context = WebExtensionManager.shared.context(for: targetURL),
-           let extensionConfiguration = context.webViewConfiguration,
-           !isPrivate {
-            configuration = extensionConfiguration
-            configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
-            BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
-        } else {
-            configuration = WKWebViewConfiguration()
-            configuration.websiteDataStore = isPrivate ? .nonPersistent() : WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
-            configuration.webExtensionController = WebExtensionManager.shared.controller
-            AdBlockManager.shared.applyTo(userContentController: configuration.userContentController)
-            BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
-        }
+        // Each tab owns a fresh configuration. Reusing the extension context's
+        // configuration for an options page after WebKit has created its popup
+        // can abort in WKWebView._initializeWithConfiguration.
+        configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = isPrivate
+            ? .nonPersistent()
+            : WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
+        configuration.webExtensionController = WebExtensionManager.shared.controller
+        AdBlockManager.shared.applyTo(userContentController: configuration.userContentController)
+        BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
 
         WebKitProxyController.apply(port: SshTunnelManager.shared.browserProxyPort, to: configuration.websiteDataStore)
 
