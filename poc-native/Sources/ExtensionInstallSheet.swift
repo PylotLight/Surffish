@@ -49,6 +49,15 @@ public final class ExtensionInstallSheet: NSWindowController {
         contentView.addSubview(firefoxButton)
         installButtons.append(firefoxButton)
 
+        let firefoxStoreButton = NSButton(
+            title: "Browse Bramble on Firefox Add-ons",
+            target: self,
+            action: #selector(openFirefoxStore)
+        )
+        firefoxStoreButton.bezelStyle = .rounded
+        firefoxStoreButton.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(firefoxStoreButton)
+
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
@@ -110,7 +119,12 @@ public final class ExtensionInstallSheet: NSWindowController {
             firefoxButton.trailingAnchor.constraint(equalTo: chromeButton.trailingAnchor),
             firefoxButton.heightAnchor.constraint(equalToConstant: 30),
 
-            separator.topAnchor.constraint(equalTo: firefoxButton.bottomAnchor, constant: 14),
+            firefoxStoreButton.topAnchor.constraint(equalTo: firefoxButton.bottomAnchor, constant: 7),
+            firefoxStoreButton.leadingAnchor.constraint(equalTo: firefoxButton.leadingAnchor),
+            firefoxStoreButton.trailingAnchor.constraint(equalTo: firefoxButton.trailingAnchor),
+            firefoxStoreButton.heightAnchor.constraint(equalToConstant: 28),
+
+            separator.topAnchor.constraint(equalTo: firefoxStoreButton.bottomAnchor, constant: 12),
             separator.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
 
@@ -176,6 +190,11 @@ public final class ExtensionInstallSheet: NSWindowController {
 
     @objc private func installBrambleFirefox() {
         install { try await WebExtensionManager.shared.installBrambleFromFirefoxAddons() }
+    }
+
+    @objc private func openFirefoxStore() {
+        guard let url = URL(string: "https://addons.mozilla.org/en-US/firefox/addon/bramble/") else { return }
+        _ = TabManager.shared.createTab(url: url, makeActive: true)
     }
 
     @objc private func installCustomChrome() {
