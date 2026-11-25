@@ -5,6 +5,9 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let startPage = NSTextField()
     private let restoreSession = NSButton(checkboxWithTitle: "Restore tabs from the previous session", target: nil, action: nil)
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
+    private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through an SSH SOCKS5 proxy", target: nil, action: nil)
+    private let sshHost = NSTextField()
+    private let sshStatus = NSTextField(labelWithString: "Not configured")
 
     public init() {
         let window = NSWindow(
@@ -42,11 +45,19 @@ public final class BrowserSettingsWindowController: NSWindowController {
         let searchRow = makeRow(title: "Search engine", control: searchEngine)
         let startRow = makeRow(title: "New tab page", control: startPage)
 
+        let connectionHeading = NSTextField(labelWithString: "Connection")
+        connectionHeading.font = .systemFont(ofSize: 17, weight: .semibold)
+        sshHost.placeholderString = "SSH config alias or user@host"
+        sshHost.widthAnchor.constraint(equalToConstant: 440).isActive = true
+        sshStatus.textColor = .secondaryLabelColor
+        sshStatus.maximumNumberOfLines = 2
+        let sshHostRow = makeRow(title: "SSH host", control: sshHost)
+
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, saveButton])
+        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshStatus, saveButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 18
@@ -78,6 +89,12 @@ public final class BrowserSettingsWindowController: NSWindowController {
         startPage.stringValue = settings.startPage
         restoreSession.state = settings.restoreSession ? .on : .off
         showSidebar.state = settings.showSidebarAtStartup ? .on : .off
+        sshProxyEnabled.state = settings.sshProxyEnabled ? .on : .off
+        sshHost.stringValue = settings.sshHost
+        sshStatus.stringValue = SshTunnelManager.shared.status
+        SshTunnelManager.shared.onStatusChange = { [weak self] status in
+            DispatchQueue.main.async { self?.sshStatus.stringValue = status }
+        }
     }
 
     @objc private func saveSettings() {
@@ -102,7 +119,24 @@ public final class BrowserSettingsWindowController: NSWindowController {
         }
         next.restoreSession = restoreSession.state == .on
         next.showSidebarAtStartup = showSidebar.state == .on
+        next.sshProxyEnabled = sshProxyEnabled.state == .on
+        next.sshHost = sshHost.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if next.sshProxyEnabled && next.sshHost.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "SSH host required"
+            alert.informativeText = "Enter an SSH config alias or user@host, or turn off the SSH SOCKS5 proxy."
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
         BrowserSettingsStore.shared.update(next)
+        Task {
+            await SshTunnelManager.shared.configure(enabled: next.sshProxyEnabled, target: next.sshHost)
+            await MainActor.run {
+                TabManager.shared.applyProxyConfiguration(port: SshTunnelManager.shared.proxyPort)
+                TabManager.shared.reloadAllTabs()
+            }
+        }
         window?.close()
     }
 }
