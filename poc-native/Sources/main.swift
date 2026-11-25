@@ -21,7 +21,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let cwd = FileManager.default.currentDirectoryPath
         Task { [weak self] in
             let settings = BrowserSettingsStore.shared.settings
-            await SshTunnelManager.shared.configure(enabled: settings.sshProxyEnabled, target: settings.sshHost)
+            await SshTunnelManager.shared.configure(
+                browserEnabled: settings.sshProxyEnabled,
+                serverEnabled: settings.sshProxyShareEnabled,
+                target: settings.sshHost,
+                port: settings.sshProxyPort,
+                bindAddress: settings.sshProxyBindAddress
+            )
             await WebExtensionManager.shared.loadDefaultExtensions(basePath: cwd)
             await MainActor.run {
                 self?.windowController?.restoreBrowserSession()
