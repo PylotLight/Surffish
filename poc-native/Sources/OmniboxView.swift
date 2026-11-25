@@ -12,8 +12,10 @@ public protocol OmniboxViewDelegate: AnyObject {
 }
 
 private final class ExtensionToolbarButton: NSButton {
+    var contextMenu: NSMenu?
+
     override func rightMouseDown(with event: NSEvent) {
-        guard let menu else {
+        guard let menu = contextMenu else {
             super.rightMouseDown(with: event)
             return
         }
@@ -100,7 +102,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         extensionMenu.addItem(.separator())
         extensionMenu.addItem(withTitle: "Open Bramble", action: #selector(onBrambleClicked), keyEquivalent: "")
         extensionMenu.items.forEach { $0.target = self }
-        brambleBtn.menu = extensionMenu
+        brambleBtn.contextMenu = extensionMenu
 
         NSLayoutConstraint.activate([
             sidebarToggleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
