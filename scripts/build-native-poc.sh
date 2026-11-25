@@ -74,7 +74,7 @@ EOF
     if [[ -n "${signing_identity}" ]]; then
         echo "==> Signing ${app_name} with ${signing_identity}"
         /usr/bin/codesign --force --deep --sign "${signing_identity}" \
-            --options runtime --timestamp=none "${app_dir}"
+            --timestamp=none "${app_dir}"
     else
         echo "==> WARNING: No Apple-issued signing identity found; using ad-hoc signing."
         echo "==> Set SURFFISH_CODESIGN_IDENTITY to an Apple Development or Developer ID Application identity for reliable Local Network privacy."
