@@ -28,6 +28,16 @@ See [the migration plan](../docs/native-webkit-frame-ui.md). The work is phased:
 
 The current implementation is the start of phase 1, not a claim of production parity.
 
+## Native SSH SOCKS5 routing
+
+The Connection settings can start a managed tunnel using the macOS OpenSSH binary at `/usr/bin/ssh`. Enter an SSH config alias or `user@host`; OpenSSH itself resolves `~/.ssh/config`, Include files, ProxyJump/ProxyCommand, identities, known_hosts and ssh-agent. Surffish launches it without a shell using `ssh -N -D 127.0.0.1:<ephemeral-port>` and keeps the listener loopback-only.
+
+The local SOCKS5 endpoint is attached to WebKit through `WKWebsiteDataStore.proxyConfigurations` and `Network.ProxyConfiguration(socksv5Proxy:)`. This is supported by the native target (macOS 15.4). It does not change macOS system proxy settings or route unrelated applications. Normal and private WebKit stores receive the same selected route. Proxy failover is explicitly disabled; while SSH is enabled but unavailable, WebKit remains pointed at the dead loopback endpoint rather than silently browsing directly.
+
+The tunnel manager reads the launchd SSH agent socket for Finder-launched apps, adds standard Homebrew paths for SSH ProxyCommand helpers, monitors the local SOCKS listener, reports stderr diagnostics and retries unexpected/transient failures. Host-key and authentication failures are surfaced rather than retried indefinitely. Unknown host keys must first be trusted through the user's normal OpenSSH workflow.
+
+This first native networking increment provides one browser-wide SSH route. Production's per-site routing rules, multiple SOCKS endpoints, network inspector, shared external-app SOCKS relay and richer proxy health UI remain to be ported. The Electron TypeScript implementation is the behavioural reference; its Electron-specific runtime cannot be linked into the native Swift app.
+
 ## Testing menu
 
 Temporary proof-of-concept hooks are available under **Testing**:
