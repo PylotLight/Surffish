@@ -13,6 +13,7 @@ public protocol OmniboxViewDelegate: AnyObject {
     func omniboxDidShowReadingList()
     func omniboxDidToggleBookmark()
     func omniboxDidToggleReadingList()
+    func omniboxDidRequestDownloads(sender: NSButton)
     func omniboxDidRequestBramblePopup(sender: NSButton)
     func omniboxDidRequestExtensionManagement()
 }
@@ -54,6 +55,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     private let readingListBtn = NSButton()
     private let bookmarkBtn = NSButton()
     private let readingListSaveBtn = NSButton()
+    private let downloadsBtn = NSButton()
 
     private let pillContainer = NSView()
     private let securityIcon = NSImageView()
@@ -96,6 +98,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         configureButton(readingListBtn, symbol: "text.book.closed", label: "Reading List", action: #selector(onReadingList))
         configureButton(bookmarkBtn, symbol: "bookmark", label: "Bookmark this page", action: #selector(onToggleBookmark))
         configureButton(readingListSaveBtn, symbol: "text.badge.plus", label: "Save for later", action: #selector(onToggleReadingList))
+        configureButton(downloadsBtn, symbol: "arrow.down.circle", label: "Downloads", action: #selector(onDownloads))
 
         pillContainer.wantsLayer = true
         pillContainer.layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.52).cgColor
@@ -200,7 +203,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             readingListSaveBtn.heightAnchor.constraint(equalToConstant: 30),
 
             pillContainer.leadingAnchor.constraint(equalTo: readingListSaveBtn.trailingAnchor, constant: 10),
-            pillContainer.trailingAnchor.constraint(equalTo: brambleBtn.leadingAnchor, constant: -10),
+            pillContainer.trailingAnchor.constraint(equalTo: downloadsBtn.leadingAnchor, constant: -8),
             pillContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
             pillContainer.heightAnchor.constraint(equalToConstant: 32),
 
@@ -219,6 +222,11 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             progressBar.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -2),
             progressBar.bottomAnchor.constraint(equalTo: pillContainer.bottomAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 2),
+
+            downloadsBtn.trailingAnchor.constraint(equalTo: brambleBtn.leadingAnchor, constant: -4),
+            downloadsBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
+            downloadsBtn.widthAnchor.constraint(equalToConstant: 30),
+            downloadsBtn.heightAnchor.constraint(equalToConstant: 30),
 
             brambleBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             brambleBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -380,6 +388,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     @objc private func onReadingList() { delegate?.omniboxDidShowReadingList() }
     @objc private func onToggleBookmark() { delegate?.omniboxDidToggleBookmark() }
     @objc private func onToggleReadingList() { delegate?.omniboxDidToggleReadingList() }
+    @objc private func onDownloads() { delegate?.omniboxDidRequestDownloads(sender: downloadsBtn) }
     @objc private func onBack() { delegate?.omniboxDidClickBack() }
     @objc private func onForward() { delegate?.omniboxDidClickForward() }
     @objc private func onReload() { delegate?.omniboxDidClickReload() }

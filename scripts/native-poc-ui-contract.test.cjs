@@ -352,3 +352,84 @@ test("New Tab shortcuts can be reordered accessibly and the saved order is rende
   assert.ok(settings.includes(String.raw`Move \(link.title) down`));
   assert.match(page, /settings\.customQuickLinks\.prefix\(12\)/);
 });
+
+test("native downloads use WebKit, profile-local history, private exclusion, and supported actions", () => {
+  const downloads = read("poc-native/Sources/BrowserDownloads.swift");
+  const settings = read("poc-native/Sources/BrowserSettingsStore.swift");
+  const settingsView = read("poc-native/Sources/BrowserSettingsView.swift");
+  const tabs = read("poc-native/Sources/TabManager.swift");
+
+  assert.match(
+    downloads,
+    /BrowserDownloadManager: NSObject, WKDownloadDelegate/,
+  );
+  assert.match(
+    downloads,
+    /BrowserProfile\.current\.fileURL\(Self\.historyFilename\)/,
+  );
+  assert.match(downloads, /let stored = entries\.filter \{ !\$0\.isPrivate \}/);
+  assert.match(downloads, /func forgetFinishedPrivateDownloads\(\)/);
+  assert.match(downloads, /resumeDownload\(fromResumeData:/);
+  assert.match(downloads, /download\.cancel\(nil\)/);
+  assert.match(downloads, /func canResume\(_ id: UUID\)/);
+  assert.match(downloads, /safeFilename\(_ value: String\)/);
+  assert.match(downloads, /safeSource\(_ url: URL\?\)/);
+  assert.match(downloads, /defaultDownloadsDirectoryAfterFailure\(\)/);
+  assert.match(downloads, /destinationWarning/);
+  assert.match(
+    downloads,
+    /createDirectory\(at: configured, withIntermediateDirectories: true\)/,
+  );
+  assert.match(downloads, /activateFileViewerSelecting/);
+  assert.match(downloads, /NSWorkspace\.shared\.open\(url\)/);
+  assert.doesNotMatch(downloads, /func pause\(/);
+  assert.match(settings, /downloadsDirectory: String/);
+  assert.match(settings, /askWhereToSaveDownloads: Bool/);
+  assert.match(settingsView, /chooseDownloadsDirectory\(\)/);
+  assert.match(settingsView, /Ask where to save each download/);
+  assert.match(settingsView, /downloads-folder/);
+  assert.match(
+    tabs,
+    /navigationAction\.shouldPerformDownload \? \.download : \.allow/,
+  );
+  assert.match(
+    tabs,
+    /responseRequiresDownload\(navigationResponse\) \|\| !navigationResponse\.canShowMIMEType/,
+  );
+  assert.match(tabs, /value\(forHTTPHeaderField: "Content-Disposition"\)/);
+  assert.match(
+    tabs,
+    /disposition\.caseInsensitiveCompare\("attachment"\) == \.orderedSame/,
+  );
+  assert.match(
+    tabs,
+    /beginTracking\(download, in: webView, isPrivate: isPrivate\)/,
+  );
+  assert.match(tabs, /forgetFinishedPrivateDownloads\(\)/);
+});
+
+test("downloads are reachable from toolbar, full sidebar, and View menu without adding a collapse control", () => {
+  const toolbar = read("poc-native/Sources/OmniboxView.swift");
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  const menu = read("poc-native/Sources/MainMenu.swift");
+
+  assert.match(toolbar, /downloadsBtn = NSButton/);
+  assert.match(toolbar, /omniboxDidRequestDownloads\(sender: NSButton\)/);
+  assert.match(sidebar, /case downloads/);
+  assert.match(
+    sidebar,
+    /BrowserDownloadsSidebarView\(searchText: model\.searchText\)/,
+  );
+  assert.match(window, /BrowserDownloadsPopoverView/);
+  assert.match(window, /showDownloadsSidebar\(\)/);
+  assert.match(menu, /menuShowDownloads/);
+  assert.equal(
+    (toolbar.match(/sidebarToggleBtn\s*=\s*NSButton/g) || []).length,
+    1,
+  );
+  assert.doesNotMatch(
+    sidebar,
+    /collapseButton|sidebarDidToggleSidebar|onCollapse/,
+  );
+});

@@ -243,6 +243,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
         if closingTab.isPrivate && !tabs.contains(where: \.isPrivate) {
             BrowserPageZoomStore.shared.clearPrivateOverrides()
+            BrowserDownloadManager.shared.forgetFinishedPrivateDownloads()
         }
 
         if tabs.isEmpty {
@@ -372,6 +373,54 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     }
 
     // MARK: WKNavigationDelegate
+
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if responseRequiresDownload(navigationResponse) || !navigationResponse.canShowMIMEType {
+            decisionHandler(.download)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+
+    private func responseRequiresDownload(_ navigationResponse: WKNavigationResponse) -> Bool {
+        guard let httpResponse = navigationResponse.response as? HTTPURLResponse,
+              let contentDisposition = httpResponse.value(forHTTPHeaderField: "Content-Disposition"),
+              let disposition = contentDisposition
+                .split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false)
+                .first?
+                .trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return disposition.caseInsensitiveCompare("attachment") == .orderedSame
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload
+    ) {
+        let isPrivate = tabs.first(where: { $0.webView === webView })?.isPrivate ?? false
+        BrowserDownloadManager.shared.beginTracking(download, in: webView, isPrivate: isPrivate)
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        navigationResponse: WKNavigationResponse,
+        didBecome download: WKDownload
+    ) {
+        let isPrivate = tabs.first(where: { $0.webView === webView })?.isPrivate ?? false
+        BrowserDownloadManager.shared.beginTracking(download, in: webView, isPrivate: isPrivate)
+    }
 
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }

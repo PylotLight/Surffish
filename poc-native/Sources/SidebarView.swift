@@ -27,6 +27,7 @@ private enum SidebarContentMode: Equatable {
     case history
     case bookmarks
     case readingList
+    case downloads
 }
 
 private enum LibrarySortOrder: String, CaseIterable, Identifiable {
@@ -79,7 +80,7 @@ private final class SidebarViewModel {
             case .history: return historySortOrder
             case .bookmarks: return bookmarksSortOrder
             case .readingList: return readingListSortOrder
-            case .tabs: return .defaultOrder
+            case .tabs, .downloads: return .defaultOrder
             }
         }
         set {
@@ -87,7 +88,7 @@ private final class SidebarViewModel {
             case .history: historySortOrder = newValue
             case .bookmarks: bookmarksSortOrder = newValue
             case .readingList: readingListSortOrder = newValue
-            case .tabs: break
+            case .tabs, .downloads: break
             }
         }
     }
@@ -237,6 +238,7 @@ public final class SidebarView: NSView {
     public func showHistory() { model.show(.history) }
     public func showBookmarks() { model.show(.bookmarks) }
     public func showReadingList() { model.show(.readingList) }
+    public func showDownloads() { model.show(.downloads) }
 
     public func setSettingsTabActive(_ active: Bool) {
         model.isSettingsTabActive = active
@@ -476,7 +478,7 @@ private struct NativeSidebarRootView: View {
                 }
             }
 
-            if model.contentMode != .tabs {
+            if model.contentMode == .history || model.contentMode == .bookmarks || model.contentMode == .readingList {
                 HStack(spacing: 5) {
                     if model.contentMode == .history { Spacer(minLength: 0) }
                     Menu {
@@ -518,27 +520,33 @@ private struct NativeSidebarRootView: View {
                 if !filteredPinnedTabs.isEmpty || !filteredPinnedSites.isEmpty { pinnedStrip }
             }
 
-            ScrollView {
-                LazyVStack(spacing: 5) {
-                    switch model.contentMode {
-                    case .tabs:
-                        if filteredTabs.isEmpty && filteredPinnedTabs.isEmpty && filteredPinnedSites.isEmpty && !model.isSettingsTabActive { emptyMessage(model.searchText.isEmpty ? "No tabs open" : "No tabs match ‘\(model.searchText)’") }
-                        ForEach(filteredTabs) { tab in tabRow(tab) }
-                        if model.isSettingsTabActive { settingsRow }
-                    case .history:
-                        if filteredHistory.isEmpty { emptyMessage(model.searchText.isEmpty ? "No browsing history yet" : "No history matches ‘\(model.searchText)’") }
-                        ForEach(filteredHistory) { entry in historyRow(entry) }
-                    case .bookmarks:
-                        if filteredBookmarks.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page to see it here" : "No bookmarks match ‘\(model.searchText)’") }
-                        ForEach(filteredBookmarks) { bookmark in bookmarkRow(bookmark) }
-                    case .readingList:
-                        if filteredReadingList.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page for later from the toolbar" : "No reading-list items match ‘\(model.searchText)’") }
-                        ForEach(filteredReadingList) { entry in readingListRow(entry) }
+            if model.contentMode == .downloads {
+                BrowserDownloadsSidebarView(searchText: model.searchText)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 5) {
+                        switch model.contentMode {
+                        case .tabs:
+                            if filteredTabs.isEmpty && filteredPinnedTabs.isEmpty && filteredPinnedSites.isEmpty && !model.isSettingsTabActive { emptyMessage(model.searchText.isEmpty ? "No tabs open" : "No tabs match ‘\(model.searchText)’") }
+                            ForEach(filteredTabs) { tab in tabRow(tab) }
+                            if model.isSettingsTabActive { settingsRow }
+                        case .history:
+                            if filteredHistory.isEmpty { emptyMessage(model.searchText.isEmpty ? "No browsing history yet" : "No history matches ‘\(model.searchText)’") }
+                            ForEach(filteredHistory) { entry in historyRow(entry) }
+                        case .bookmarks:
+                            if filteredBookmarks.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page to see it here" : "No bookmarks match ‘\(model.searchText)’") }
+                            ForEach(filteredBookmarks) { bookmark in bookmarkRow(bookmark) }
+                        case .readingList:
+                            if filteredReadingList.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page for later from the toolbar" : "No reading-list items match ‘\(model.searchText)’") }
+                            ForEach(filteredReadingList) { entry in readingListRow(entry) }
+                        case .downloads:
+                            EmptyView()
+                        }
                     }
+                    .padding(.bottom, 6)
                 }
-                .padding(.bottom, 6)
+                .scrollIndicators(.visible)
             }
-            .scrollIndicators(.visible)
 
             Spacer(minLength: 0)
 
@@ -565,6 +573,7 @@ private struct NativeSidebarRootView: View {
         case .history: return "HISTORY"
         case .bookmarks: return "BOOKMARKS"
         case .readingList: return "READING LIST"
+        case .downloads: return "DOWNLOADS"
         }
     }
 
@@ -574,6 +583,7 @@ private struct NativeSidebarRootView: View {
         case .history: return "Search history"
         case .bookmarks: return "Search bookmarks"
         case .readingList: return "Search reading list"
+        case .downloads: return "Search downloads"
         }
     }
 
@@ -594,7 +604,7 @@ private struct NativeSidebarRootView: View {
         case .history: return filteredHistory.count
         case .bookmarks: return filteredBookmarks.count
         case .readingList: return filteredReadingList.count
-        case .tabs: return 0
+        case .tabs, .downloads: return 0
         }
     }
     private func sorted<Entry>(_ entries: [Entry], date: KeyPath<Entry, Date>, title: KeyPath<Entry, String>) -> [Entry] {

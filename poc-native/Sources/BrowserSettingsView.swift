@@ -52,6 +52,8 @@ public final class BrowserSettingsModel {
     public var newQuickLinkURL = ""
     public var adBlockingEnabled: Bool
     public var historyRetention: HistoryRetention
+    public var downloadsDirectory: String
+    public var askWhereToSaveDownloads: Bool
     public var sshProxyEnabled: Bool
     public var sshHost: String
     public var sshProxyShareEnabled: Bool
@@ -89,6 +91,8 @@ public final class BrowserSettingsModel {
         customQuickLinks = settings.customQuickLinks
         adBlockingEnabled = settings.adBlockingEnabled
         historyRetention = settings.historyRetention
+        downloadsDirectory = settings.downloadsDirectory
+        askWhereToSaveDownloads = settings.askWhereToSaveDownloads
         sshProxyEnabled = settings.sshProxyEnabled
         sshHost = settings.sshHost
         sshProxyShareEnabled = settings.sshProxyShareEnabled
@@ -197,6 +201,8 @@ public final class BrowserSettingsModel {
         next.newTabShowsDate = newTabShowsDate
         next.newTabClockSize = newTabClockSize
         next.historyRetention = historyRetention
+        next.downloadsDirectory = downloadsDirectory
+        next.askWhereToSaveDownloads = askWhereToSaveDownloads
         guard customQuickLinks.count <= 12 else {
             showAlert(title: "Too many shortcuts", message: "New Tab supports up to 12 custom shortcuts.")
             return
@@ -253,6 +259,25 @@ public final class BrowserSettingsModel {
                 port: next.sshProxyPort,
                 bindAddress: next.sshProxyBindAddress
             )
+        }
+    }
+
+    public func chooseDownloadsDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Downloads Folder"
+        panel.prompt = "Choose Folder"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: downloadsDirectory, isDirectory: true)
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let directory = panel.url else { return }
+            self?.downloadsDirectory = directory.standardizedFileURL.path
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            panel.begin(completionHandler: finish)
         }
     }
 
@@ -326,6 +351,8 @@ public struct BrowserSettingsView: View {
             .init(id: "sidebar-startup", title: "Sidebar visibility", detail: "Choose whether the sidebar opens at startup", section: .general, terms: "sidebar startup show"),
             .init(id: "sidebar-pinned", title: "Keep sidebar open", detail: "Keep the sidebar expanded when the pointer leaves", section: .general, terms: "sidebar pin keep open hover"),
             .init(id: "sidebar-width", title: "Sidebar width", detail: "Adjust the sidebar between 220 and 440 points", section: .general, terms: "sidebar resize width size"),
+            .init(id: "downloads-folder", title: "Downloads folder", detail: "Choose where downloaded files are saved", section: .general, terms: "downloads destination folder save location path"),
+            .init(id: "downloads-ask", title: "Ask where to save downloads", detail: "Choose a destination for each download", section: .general, terms: "downloads destination ask save prompt"),
             .init(id: "newtab-theme", title: "New Tab background", detail: "Choose one of the built-in color themes", section: .appearance, terms: "appearance theme background color new tab"),
             .init(id: "newtab-clock", title: "New Tab clock", detail: "Choose 12- or 24-hour time, date visibility and clock size", section: .appearance, terms: "clock time 12 24 hour date size appearance new tab"),
             .init(id: "newtab-links", title: "New Tab shortcuts", detail: "Choose a source or manage custom shortcuts", section: .appearance, terms: "quick links favorites bookmarks pinned recent custom new tab"),
@@ -575,6 +602,27 @@ public struct BrowserSettingsView: View {
                         step: 10
                     )
                     .accessibilityLabel("Sidebar width")
+                }
+            }
+            .padding(.top, 6)
+        }
+        GroupBox("Downloads") {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Ask where to save each download", isOn: $model.askWhereToSaveDownloads)
+                Text("Downloads are stored in the selected folder. History is kept separately for each browser profile; private-tab entries are not saved.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.downloadsDirectory)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                HStack {
+                    Button("Choose Folder…") { model.chooseDownloadsDirectory() }
+                    Button("Use Default") { model.downloadsDirectory = BrowserSettings.defaultDownloadsDirectory }
+                        .disabled(model.downloadsDirectory == BrowserSettings.defaultDownloadsDirectory)
                 }
             }
             .padding(.top, 6)

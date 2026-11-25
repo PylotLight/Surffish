@@ -61,6 +61,7 @@ public func setupApplicationMenu() {
     bookmarksItem.keyEquivalentModifierMask = [.command, .shift]
     viewMenu.addItem(bookmarksItem)
     viewMenu.addItem(NSMenuItem(title: "Reading List", action: #selector(MainWindowController.menuShowReadingList), keyEquivalent: ""))
+    viewMenu.addItem(NSMenuItem(title: "Downloads", action: #selector(MainWindowController.menuShowDownloads), keyEquivalent: ""))
     viewMenu.addItem(NSMenuItem.separator())
     let zoomIn = NSMenuItem(title: "Zoom In", action: #selector(TabManager.menuZoomIn), keyEquivalent: "=")
     zoomIn.target = TabManager.shared

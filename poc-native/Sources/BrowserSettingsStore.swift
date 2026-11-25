@@ -149,6 +149,8 @@ public struct BrowserSettings: Codable {
     public var sshProxyBindAddress: String
     public var adBlockingEnabled: Bool
     public var historyRetention: HistoryRetention
+    public var downloadsDirectory: String
+    public var askWhereToSaveDownloads: Bool
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
     public var customQuickLinks: [BrowserNewTabQuickLink]
@@ -159,6 +161,7 @@ public struct BrowserSettings: Codable {
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup, sidebarPinned, sidebarWidth
         case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled, historyRetention
+        case downloadsDirectory, askWhereToSaveDownloads
         case newTabTheme, newTabSiteSource, customQuickLinks
         case newTabUses24HourClock, newTabShowsDate, newTabClockSize
     }
@@ -178,6 +181,8 @@ public struct BrowserSettings: Codable {
         sshProxyBindAddress: String = "127.0.0.1",
         adBlockingEnabled: Bool = false,
         historyRetention: HistoryRetention = .never,
+        downloadsDirectory: String = Self.defaultDownloadsDirectory,
+        askWhereToSaveDownloads: Bool = false,
         newTabTheme: NewTabTheme = .midnight,
         newTabSiteSource: NewTabSiteSource = .automatic,
         customQuickLinks: [BrowserNewTabQuickLink] = [],
@@ -199,6 +204,8 @@ public struct BrowserSettings: Codable {
         self.sshProxyBindAddress = sshProxyBindAddress
         self.adBlockingEnabled = adBlockingEnabled
         self.historyRetention = historyRetention
+        self.downloadsDirectory = downloadsDirectory
+        self.askWhereToSaveDownloads = askWhereToSaveDownloads
         self.newTabTheme = newTabTheme
         self.newTabSiteSource = newTabSiteSource
         self.customQuickLinks = customQuickLinks
@@ -224,6 +231,8 @@ public struct BrowserSettings: Codable {
         sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
         adBlockingEnabled = try values.decodeIfPresent(Bool.self, forKey: .adBlockingEnabled) ?? false
         historyRetention = try values.decodeIfPresent(HistoryRetention.self, forKey: .historyRetention) ?? .never
+        downloadsDirectory = try values.decodeIfPresent(String.self, forKey: .downloadsDirectory) ?? Self.defaultDownloadsDirectory
+        askWhereToSaveDownloads = try values.decodeIfPresent(Bool.self, forKey: .askWhereToSaveDownloads) ?? false
         newTabTheme = try values.decodeIfPresent(NewTabTheme.self, forKey: .newTabTheme) ?? .midnight
         newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
         customQuickLinks = try values.decodeIfPresent([BrowserNewTabQuickLink].self, forKey: .customQuickLinks) ?? []
@@ -234,6 +243,8 @@ public struct BrowserSettings: Codable {
 
     public static let minimumSidebarWidth = 220
     public static let maximumSidebarWidth = 440
+    public static let defaultDownloadsDirectory = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.path
+        ?? (NSHomeDirectory() + "/Downloads")
 
     public static let defaults = BrowserSettings(
         version: 1,
@@ -250,6 +261,8 @@ public struct BrowserSettings: Codable {
         sshProxyBindAddress: "127.0.0.1",
         adBlockingEnabled: false,
         historyRetention: .never,
+        downloadsDirectory: defaultDownloadsDirectory,
+        askWhereToSaveDownloads: false,
         newTabTheme: .midnight,
         newTabSiteSource: .automatic,
         customQuickLinks: [],

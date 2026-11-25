@@ -57,6 +57,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private let collapsedSidebarWidth: CGFloat = 64.0
     
     private var bramblePopover: NSPopover?
+    private var downloadsPopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
     private var settingsViewController: BrowserSettingsViewController?
     
@@ -256,6 +257,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuShowHistory() { omniboxDidShowHistory() }
     @objc public func menuShowBookmarks() { omniboxDidShowBookmarks() }
     @objc public func menuShowReadingList() { omniboxDidShowReadingList() }
+    @objc public func menuShowDownloads() { showDownloadsSidebar() }
     @objc public func menuOpenSettings() {
         showSettingsTab()
     }
@@ -658,6 +660,33 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     public func omniboxDidRequestExtensionManagement() { showSettingsTab() }
 
+    public func omniboxDidRequestDownloads(sender: NSButton) {
+        if let popover = downloadsPopover, popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+
+        let size = NSSize(width: 390, height: 390)
+        let controller = NSHostingController(rootView: BrowserDownloadsPopoverView { [weak self] in
+            self?.showDownloadsSidebar()
+        })
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.delegate = self
+        popover.contentSize = size
+        controller.preferredContentSize = size
+        popover.contentViewController = controller
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        downloadsPopover = popover
+    }
+
+    private func showDownloadsSidebar() {
+        downloadsPopover?.performClose(nil)
+        sidebarView.showDownloads()
+        isSidebarRevealRequested = true
+        updateSidebarWidth(animated: true)
+    }
+
     public func closeBramblePopover() {
         bramblePopover?.performClose(nil)
         bramblePopover = nil
@@ -665,6 +694,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     // MARK: - NSPopoverDelegate
     public func popoverDidClose(_ notification: Notification) {
+        if let popover = notification.object as? NSPopover, popover === downloadsPopover {
+            downloadsPopover = nil
+            return
+        }
         WebExtensionManager.shared.brambleContext?.action(for: nil)?.closePopup()
         bramblePopover = nil
     }
