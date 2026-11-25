@@ -142,11 +142,11 @@ public final class BrowserSettingsWindowController: NSWindowController {
                 self.sshHost.addItems(withObjectValues: aliases)
                 self.sshHostSearchStatus.stringValue = aliases.isEmpty
                     ? "No saved Host aliases found in ~/.ssh/config. You can still enter user@host manually."
-                    : "Found \\(aliases.count) saved SSH \\(aliases.count == 1 ? "host" : "hosts"). Choose one or keep typing manually."
+                    : "Found \(aliases.count) saved SSH \(aliases.count == 1 ? "host" : "hosts"). Choose one or keep typing manually."
                 self.sshHostSearchButton.isEnabled = true
             } catch {
                 guard let self else { return }
-                self.sshHostSearchStatus.stringValue = "Could not search SSH config: \\(error.localizedDescription)"
+                self.sshHostSearchStatus.stringValue = "Could not search SSH config: \(error.localizedDescription)"
                 self.sshHostSearchButton.isEnabled = true
             }
         }
