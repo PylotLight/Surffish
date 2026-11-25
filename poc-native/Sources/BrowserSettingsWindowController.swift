@@ -65,11 +65,13 @@ public final class BrowserSettingsWindowController: NSWindowController {
         proxySharingWarning.textColor = .secondaryLabelColor
         proxySharingWarning.maximumNumberOfLines = 3
 
+        let copyProxyButton = NSButton(title: "Copy SOCKS5 address", target: self, action: #selector(copyProxyAddress))
+        copyProxyButton.bezelStyle = .rounded
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, saveButton])
+        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 18
@@ -110,6 +112,13 @@ public final class BrowserSettingsWindowController: NSWindowController {
         SshTunnelManager.shared.onStatusChange = { [weak self] status in
             DispatchQueue.main.async { self?.sshStatus.stringValue = status }
         }
+    }
+
+    @objc private func copyProxyAddress() {
+        let settings = BrowserSettingsStore.shared.settings
+        let host = settings.sshProxyBindAddress == "0.0.0.0" ? "127.0.0.1" : settings.sshProxyBindAddress
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("socks5h://\(host):\(settings.sshProxyPort)", forType: .string)
     }
 
     @objc private func saveSettings() {
