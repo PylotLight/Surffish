@@ -111,7 +111,9 @@ public final class SshTunnelManager {
                     self.updateStatus(detail.isEmpty
                         ? "SSH tunnel exited (code \(terminated.terminationStatus))"
                         : "SSH tunnel exited: \(detail)")
-                    self.scheduleReconnect(generation: runID)
+                    if Self.shouldRetry(detail) {
+                        self.scheduleReconnect(generation: runID)
+                    }
                 }
             }
 
@@ -136,7 +138,9 @@ public final class SshTunnelManager {
                         .suffix(2)
                         .joined(separator: " ")
                     updateStatus(detail.isEmpty ? "SSH exited before opening the SOCKS5 port" : detail)
-                    scheduleReconnect(generation: runID)
+                    if Self.shouldRetry(detail) {
+                        scheduleReconnect(generation: runID)
+                    }
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(100))
@@ -176,6 +180,20 @@ public final class SshTunnelManager {
         }
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe = nil
+    }
+
+    private static func shouldRetry(_ detail: String) -> Bool {
+        let message = detail.lowercased()
+        let permanentFailures = [
+            "host key verification failed",
+            "permission denied",
+            "bad configuration option",
+            "bad owner or permissions",
+            "invalid format",
+            "no such identity",
+            "too many authentication failures"
+        ]
+        return !permanentFailures.contains(where: { message.contains($0) })
     }
 
     private func updateStatus(_ value: String) {
