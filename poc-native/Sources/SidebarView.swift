@@ -175,7 +175,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         guard row >= 0, row < tabs.count else { return nil }
         let tab = tabs[row]
         let active = !isSettingsTabActive && TabManager.shared.activeTabId == tab.id
-        let cell = NSView()
+        let cell = SidebarRowView()
         cell.wantsLayer = true
         cell.layer?.cornerRadius = 8
         cell.layer?.backgroundColor = active
