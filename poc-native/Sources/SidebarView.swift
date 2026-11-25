@@ -71,7 +71,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         
         // TableView for tabs
         let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabCol"))
-        col.width = 240
+        col.width = 280
         tableView.addTableColumn(col)
         tableView.headerView = nil
         tableView.backgroundColor = .clear
@@ -156,51 +156,51 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             
             // Inset top 48 for window traffic lights
             workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
-            workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             
             newTabBtn.centerYAnchor.constraint(equalTo: workspaceLabel.centerYAnchor),
             newTabBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            newTabBtn.widthAnchor.constraint(equalToConstant: 78),
+            newTabBtn.widthAnchor.constraint(equalToConstant: 90),
             
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 12),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 26),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             scrollView.heightAnchor.constraint(equalToConstant: 210),
             
             extHeader.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 14),
-            extHeader.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            extHeader.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             
             extScroll.topAnchor.constraint(equalTo: extHeader.bottomAnchor, constant: 6),
-            extScroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            extScroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            extScroll.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            extScroll.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             extScroll.heightAnchor.constraint(equalToConstant: 90),
             
             openBrambleBtn.topAnchor.constraint(equalTo: extScroll.bottomAnchor, constant: 6),
-            openBrambleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            openBrambleBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            openBrambleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            openBrambleBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             installExtBtn.topAnchor.constraint(equalTo: openBrambleBtn.bottomAnchor, constant: 6),
-            installExtBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            installExtBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            installExtBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            installExtBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             bottomDivider.topAnchor.constraint(equalTo: installExtBtn.bottomAnchor, constant: 12),
-            bottomDivider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            bottomDivider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            bottomDivider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            bottomDivider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             adBlockBtn.topAnchor.constraint(equalTo: bottomDivider.bottomAnchor, constant: 8),
-            adBlockBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            adBlockBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            adBlockBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            adBlockBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             biometricsBtn.topAnchor.constraint(equalTo: adBlockBtn.bottomAnchor, constant: 6),
-            biometricsBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            biometricsBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            biometricsBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 22),
+            biometricsBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             biometricsStatus.topAnchor.constraint(equalTo: biometricsBtn.bottomAnchor, constant: 4),
-            biometricsStatus.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            biometricsStatus.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             biometricsStatus.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             
             ramBadge.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
-            ramBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            ramBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
         ])
         
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -266,14 +266,14 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         label.font = NSFont.systemFont(ofSize: 12, weight: isActive ? .medium : .regular)
         label.textColor = isActive ? .white : .labelColor
         label.lineBreakMode = .byTruncatingTail
-        label.frame = NSRect(x: 32, y: 7, width: 165, height: 20)
+        label.frame = NSRect(x: 36, y: 7, width: 204, height: 20)
         cell.addSubview(label)
         
         let closeBtn = NSButton(title: "✕", target: self, action: #selector(onCloseTabClicked(_:)))
         closeBtn.isBordered = false
         closeBtn.font = NSFont.systemFont(ofSize: 10)
         closeBtn.tag = row
-        closeBtn.frame = NSRect(x: 205, y: 8, width: 20, height: 18)
+        closeBtn.frame = NSRect(x: 250, y: 8, width: 20, height: 18)
         cell.addSubview(closeBtn)
         
         let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(onTabRowClicked(_:)))
