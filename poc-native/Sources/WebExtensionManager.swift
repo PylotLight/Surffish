@@ -13,283 +13,325 @@ public struct LoadedExtensionInfo: Identifiable {
 
 public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelegate {
     public static let shared = WebExtensionManager()
-    
+
     public let controller = WKWebExtensionController()
     public private(set) var loadedExtensions: [LoadedExtensionInfo] = []
     public var onExtensionsChanged: (([LoadedExtensionInfo]) -> Void)?
-    
     public private(set) var brambleContext: WKWebExtensionContext?
-    
+
+    private let brambleChromeStoreID = "kmokhdhoggbdcgoepifeckhgbfakaknm"
+    private let brambleFirefoxSlug = "bramble"
+
     private override init() {
         super.init()
         controller.delegate = self
     }
-    
+
     public var bramblePopupWebView: WKWebView? {
         guard let ctx = brambleContext, let action = ctx.action(for: nil) else { return nil }
-        if let webView = action.popupWebView {
-            BrambleNativeBridge.shared.applyTo(userContentController: webView.configuration.userContentController)
-            return webView
-        }
-        return nil
+        guard let webView = action.popupWebView else { return nil }
+        BrambleNativeBridge.shared.applyTo(userContentController: webView.configuration.userContentController)
+        return webView
     }
-    
+
     public func context(for url: URL) -> WKWebExtensionContext? {
-        for ext in loadedExtensions {
-            if url.absoluteString.hasPrefix(ext.context.baseURL.absoluteString) {
-                return ext.context
-            }
+        for ext in loadedExtensions where url.absoluteString.hasPrefix(ext.context.baseURL.absoluteString) {
+            return ext.context
         }
         return brambleContext
     }
-    
+
     public func openBrambleOptionsTab() {
-        guard let ctx = brambleContext else {
-            print("[WebExtension] Warning: Bramble context is nil, cannot open options")
+        guard let ctx = brambleContext, let url = ctx.optionsPageURL else {
+            print("[WebExtension] Bramble options page is not available")
             return
         }
-        guard let url = ctx.optionsPageURL else {
-            print("[WebExtension] Warning: Bramble optionsPageURL is nil")
-            return
-        }
-        print("[WebExtension] Opening Bramble options tab: \(url.absoluteString)")
         _ = TabManager.shared.createTab(url: url, makeActive: true)
     }
-    
+
+    @discardableResult
+    public func installBrambleFromChromeStore() async throws -> LoadedExtensionInfo {
+        try await installFromChromeWebStore(idOrUrl: brambleChromeStoreID, installName: "bramble")
+    }
+
+    @discardableResult
+    public func installBrambleFromFirefoxAddons() async throws -> LoadedExtensionInfo {
+        let url = URL(string: "https://addons.mozilla.org/firefox/downloads/latest/\(brambleFirefoxSlug)/latest.xpi")!
+        return try await downloadAndInstall(url: url, installName: "bramble-firefox", archiveType: .zip)
+    }
+
     @discardableResult
     public func loadExtension(from directoryURL: URL) async throws -> LoadedExtensionInfo {
         let ext = try await WKWebExtension(resourceBaseURL: directoryURL)
         let context = WKWebExtensionContext(for: ext)
-        
         let name = ext.displayName ?? directoryURL.lastPathComponent
-        let isBramble = name.lowercased().contains("bramble") || directoryURL.lastPathComponent.lowercased().contains("bramble")
-        
-        // Ensure stable uniqueIdentifier so WebKit storage/origin (IndexedDB, localStorage)
-        // is never partitioned under random UUIDs across app launches!
+        let isBramble = name.localizedCaseInsensitiveContains("bramble") ||
+            directoryURL.lastPathComponent.localizedCaseInsensitiveContains("bramble")
+
         if isBramble {
+            // Keep WebKit's extension origin stable between app launches and updates.
             context.uniqueIdentifier = "bramble-extension-vault-stable"
-            self.brambleContext = context
         } else {
             let safeName = name.lowercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }
             context.uniqueIdentifier = safeName.isEmpty ? UUID().uuidString : safeName
         }
-        
-        // Grant all requested permissions
-        for perm in ext.requestedPermissions {
-            context.setPermissionStatus(.grantedExplicitly, for: perm)
+
+        // WebKit requires the host to make a permission decision before loading.
+        // This POC grants the extension's declared permissions so the vault's
+        // storage, autofill and background features can be exercised end-to-end.
+        for permission in ext.requestedPermissions {
+            context.setPermissionStatus(.grantedExplicitly, for: permission)
         }
         for pattern in ext.requestedPermissionMatchPatterns {
             context.setPermissionStatus(.grantedExplicitly, for: pattern)
         }
-        
+
         try controller.load(context)
-        
-        // Load background worker / service script so message passing and storage sync are immediately live
         try? await context.loadBackgroundContent()
-        
-        if let extConfig = context.webViewConfiguration {
-            BrambleNativeBridge.shared.applyTo(userContentController: extConfig.userContentController)
+
+        if let configuration = context.webViewConfiguration {
+            BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         }
-        
-        let hasPopup = (context.action(for: nil)?.popupWebView != nil)
-        
+
         let info = LoadedExtensionInfo(
-            id: ext.displayName ?? UUID().uuidString,
+            id: isBramble ? "bramble" : (ext.displayName ?? UUID().uuidString),
             name: name,
             version: ext.version ?? "1.0",
             manifestVersion: ext.manifestVersion,
             path: directoryURL.path,
-            hasPopup: hasPopup,
+            hasPopup: context.action(for: nil)?.popupWebView != nil,
             context: context
         )
-        
-        if name.lowercased().contains("bramble") {
-            self.brambleContext = context
+
+        if isBramble {
+            brambleContext = context
         }
-        
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.loadedExtensions.append(info)
-            self.onExtensionsChanged?(self.loadedExtensions)
+
+        await MainActor.run {
+            if !loadedExtensions.contains(where: { $0.id == info.id }) {
+                loadedExtensions.append(info)
+            }
+            onExtensionsChanged?(loadedExtensions)
         }
-        
-        print("[WebExtension] Loaded: \(info.name) v\(info.version) (hasPopup: \(hasPopup))")
+
+        print("[WebExtension] Loaded: \(info.name) v\(info.version) (manifest \(info.manifestVersion), popup: \(info.hasPopup))")
         return info
     }
-    
-    public func installFromChromeWebStore(idOrUrl: String) async throws -> LoadedExtensionInfo {
-        var cleanId = idOrUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleanId.contains("/") {
-            cleanId = (cleanId as NSString).lastPathComponent.components(separatedBy: "?").first ?? cleanId
+
+    @discardableResult
+    public func installFromChromeWebStore(idOrUrl: String, installName: String? = nil) async throws -> LoadedExtensionInfo {
+        let cleanID = Self.chromeExtensionID(from: idOrUrl)
+        guard cleanID.count == 32, cleanID.allSatisfy({ ("a"..."p").contains(String($0)) }) else {
+            throw Self.error("Invalid Chrome Web Store extension ID or URL.")
         }
-        
-        guard cleanId.count == 32 else {
-            throw NSError(domain: "WebExtension", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid Chrome extension ID: must be 32 characters."])
-        }
-        
-        let crxUrlStr = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0.0.0&acceptformat=crx3&x=id%3D\(cleanId)%26uc"
-        guard let crxUrl = URL(string: crxUrlStr) else {
-            throw NSError(domain: "WebExtension", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
-        }
-        
-        print("[WebExtension] Downloading CRX for \(cleanId)...")
-        let (data, response) = try await URLSession.shared.data(from: crxUrl)
-        guard let httpResp = response as? HTTPURLResponse, httpResp.statusCode == 200 else {
-            throw NSError(domain: "WebExtension", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to download CRX (HTTP status error)"])
-        }
-        
-        let dest = extensionsDirectory().appendingPathComponent(cleanId)
-        try extractCrx(data: data, destination: dest)
-        
-        return try await loadExtension(from: dest)
+
+        let urlString = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0.0.0&acceptformat=crx3&x=id%3D\(cleanID)%26uc"
+        guard let url = URL(string: urlString) else { throw Self.error("Could not construct Chrome Web Store download URL.") }
+        return try await downloadAndInstall(url: url, installName: installName ?? cleanID, archiveType: .crx)
     }
-    
+
+    @discardableResult
     public func installFromZipOrDirectory(url: URL) async throws -> LoadedExtensionInfo {
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-            return try await loadExtension(from: url)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw Self.error("The selected extension path does not exist.")
         }
-        
-        let id = UUID().uuidString
-        let dest = extensionsDirectory().appendingPathComponent(id)
-        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-q", "-o", url.path, "-d", dest.path]
-        try process.run()
-        process.waitUntilExit()
-        
-        return try await loadExtension(from: dest)
+        if isDirectory.boolValue {
+            let root = try Self.findManifestRoot(in: url)
+            return try await loadExtension(from: root)
+        }
+        return try await downloadAndInstall(url: url, installName: UUID().uuidString, archiveType: .zip)
     }
-    
-    private func extractCrx(data: Data, destination: URL) throws {
-        guard data.count > 16 else {
-            throw NSError(domain: "CRX", code: 1, userInfo: [NSLocalizedDescriptionKey: "CRX file too small"])
-        }
-        let magic = String(data: data.subdata(in: 0..<4), encoding: .utf8)
-        guard magic == "Cr24" else {
-            throw NSError(domain: "CRX", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid CRX magic bytes"])
-        }
-        let headerSize = data.subdata(in: 8..<12).withUnsafeBytes { $0.load(as: UInt32.self) }
-        let zipOffset = 12 + Int(headerSize)
-        guard data.count > zipOffset else {
-            throw NSError(domain: "CRX", code: 3, userInfo: [NSLocalizedDescriptionKey: "Malformed CRX header"])
-        }
-        
-        let zipData = data.subdata(in: zipOffset..<data.count)
-        let tempZip = destination.appendingPathComponent("temp.zip")
-        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-        try zipData.write(to: tempZip)
-        
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-q", "-o", tempZip.path, "-d", destination.path]
-        try process.run()
-        process.waitUntilExit()
-        try? FileManager.default.removeItem(at: tempZip)
-    }
-    
+
     public func extensionsDirectory() -> URL {
-        let dir = BrowserProfile.current.applicationSupportDirectory.appendingPathComponent("Extensions", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+        let directory = BrowserProfile.current.applicationSupportDirectory
+            .appendingPathComponent("Extensions", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
-    
-    public func loadDefaultExtensions(basePath: String? = nil) async {
-        var brambleUrl: URL?
-        
-        // 1. Check Application Support/SurffishNative/Bramble
-        let appSupportBramble = BrowserProfile.current.applicationSupportDirectory.appendingPathComponent("Bramble", isDirectory: true)
-        if FileManager.default.fileExists(atPath: appSupportBramble.appendingPathComponent("manifest.json").path) {
-            brambleUrl = appSupportBramble
-        }
-        // 2. Check the app bundle so Finder launches do not depend on the working directory.
-        else if let resourceURL = Bundle.main.resourceURL {
-            let bundled = resourceURL.appendingPathComponent("Bramble", isDirectory: true)
-            if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("manifest.json").path) {
-                brambleUrl = bundled
-            }
-        }
-        // 3. Development source-tree fallback.
-        if brambleUrl == nil, let base = basePath {
-            let path = (base as NSString).appendingPathComponent("poc-native/Resources/bramble")
-            let u = URL(fileURLWithPath: path)
-            if FileManager.default.fileExists(atPath: u.appendingPathComponent("manifest.json").path) {
-                brambleUrl = u
-            }
-        }
-        if let bUrl = brambleUrl {
+
+    // Load only extensions explicitly installed into this profile. There is no
+    // app-bundle copy and no source-tree fallback.
+    public func loadInstalledExtensions() async {
+        let root = extensionsDirectory()
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        for entry in entries {
             do {
-                try await loadExtension(from: bUrl)
-                print("[WebExtension] Loaded real Bramble successfully from \(bUrl.path)!")
+                let extensionRoot = try Self.findManifestRoot(in: entry)
+                _ = try await loadExtension(from: extensionRoot)
             } catch {
-                print("[WebExtension] Error loading real Bramble: \(error)")
-            }
-        } else {
-            print("[WebExtension] Warning: Bramble extension directory could not be located!")
-        }
-        
-        let extDir = extensionsDirectory()
-        if let contents = try? FileManager.default.contentsOfDirectory(at: extDir, includingPropertiesForKeys: nil) {
-            for subDir in contents {
-                if FileManager.default.fileExists(atPath: subDir.appendingPathComponent("manifest.json").path) {
-                    _ = try? await loadExtension(from: subDir)
-                }
+                print("[WebExtension] Skipping \(entry.lastPathComponent): \(error.localizedDescription)")
             }
         }
-        
     }
-    
-    // MARK: - WKWebExtensionControllerDelegate
+
+    private enum ArchiveType { case crx, zip }
+
+    private func downloadAndInstall(url: URL, installName: String, archiveType: ArchiveType) async throws -> LoadedExtensionInfo {
+        print("[WebExtension] Downloading extension from \(url.absoluteString)")
+        var request = URLRequest(url: url)
+        request.setValue("Surffish Native Extension Installer", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw Self.error("Extension download failed (HTTP \(status)).")
+        }
+        guard !data.isEmpty else { throw Self.error("The extension download was empty.") }
+
+        let staging = extensionsDirectory().appendingPathComponent(".install-\(UUID().uuidString)", isDirectory: true)
+        let destination = extensionsDirectory().appendingPathComponent(installName, isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        do {
+            let zipData: Data
+            switch archiveType {
+            case .crx: zipData = try Self.crxPayload(from: data)
+            case .zip: zipData = data
+            }
+            let archive = staging.appendingPathComponent("package.zip")
+            try zipData.write(to: archive, options: .atomic)
+            try Self.unzip(archive, into: staging)
+            try? FileManager.default.removeItem(at: archive)
+            let extensionRoot = try Self.findManifestRoot(in: staging)
+
+            // Preserve the previous installed copy until the new package has
+            // downloaded and unpacked successfully.
+            let replacement = extensionsDirectory().appendingPathComponent(".replacement-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.moveItem(at: extensionRoot, to: replacement)
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: replacement, to: destination)
+            try? FileManager.default.removeItem(at: staging)
+            return try await loadExtension(from: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
+    }
+
+    private static func chromeExtensionID(from input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let components = URLComponents(string: trimmed),
+           let idIndex = components.path.split(separator: "/").firstIndex(of: "detail") {
+            let parts = components.path.split(separator: "/")
+            if parts.count > idIndex + 1 { return String(parts[idIndex + 1]) }
+        }
+        return (trimmed as NSString).lastPathComponent.components(separatedBy: "?").first ?? trimmed
+    }
+
+    private static func crxPayload(from data: Data) throws -> Data {
+        guard data.count >= 12, String(data: data.prefix(4), encoding: .utf8) == "Cr24" else {
+            throw error("The Chrome Web Store did not return a valid CRX package.")
+        }
+        let version = readUInt32LE(data, at: 4)
+        let zipOffset: Int
+        switch version {
+        case 2:
+            let publicKeyLength = Int(readUInt32LE(data, at: 8))
+            guard data.count >= 16 + publicKeyLength else { throw error("Malformed CRX2 header.") }
+            let signatureLength = Int(readUInt32LE(data, at: 12 + publicKeyLength))
+            zipOffset = 16 + publicKeyLength + signatureLength
+        case 3:
+            let headerLength = Int(readUInt32LE(data, at: 8))
+            zipOffset = 12 + headerLength
+        default:
+            throw error("Unsupported CRX package version \(version).")
+        }
+        guard zipOffset > 0, zipOffset < data.count else { throw error("Malformed CRX header or missing ZIP payload.") }
+        return data.subdata(in: zipOffset..<data.count)
+    }
+
+    private static func readUInt32LE(_ data: Data, at offset: Int) -> UInt32 {
+        guard offset >= 0, offset + 4 <= data.count else { return 0 }
+        return UInt32(data[offset]) |
+            (UInt32(data[offset + 1]) << 8) |
+            (UInt32(data[offset + 2]) << 16) |
+            (UInt32(data[offset + 3]) << 24)
+    }
+
+    private static func unzip(_ archive: URL, into directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-q", archive.path, "-d", directory.path]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw error("The downloaded extension archive could not be unpacked.")
+        }
+    }
+
+    private static func findManifestRoot(in directory: URL) throws -> URL {
+        let directManifest = directory.appendingPathComponent("manifest.json")
+        if FileManager.default.fileExists(atPath: directManifest.path) { return directory }
+
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for child in children {
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: child.path, isDirectory: &isDirectory),
+               isDirectory.boolValue,
+               FileManager.default.fileExists(atPath: child.appendingPathComponent("manifest.json").path) {
+                return child
+            }
+        }
+        throw error("No manifest.json was found in the downloaded extension package.")
+    }
+
+    private static func error(_ message: String) -> NSError {
+        NSError(domain: "Surffish.WebExtensionInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    // MARK: WKWebExtensionControllerDelegate
+
     public func webExtensionController(
         _ controller: WKWebExtensionController,
         openWindowsFor extensionContext: WKWebExtensionContext
     ) -> [WKWebExtensionWindow] {
-        if let win = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
-            return [win]
+        if let window = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
+            return [window]
         }
         return []
     }
-    
+
     public func webExtensionController(
         _ controller: WKWebExtensionController,
         focusedWindowFor extensionContext: WKWebExtensionContext
     ) -> WKWebExtensionWindow? {
-        if let win = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
-            return win
-        }
-        return nil
+        NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController
     }
-    
+
     public func webExtensionController(
         _ controller: WKWebExtensionController,
         openNewTabUsing configuration: WKWebExtension.TabConfiguration,
         for extensionContext: WKWebExtensionContext,
         completionHandler: @escaping (WKWebExtensionTab?, Error?) -> Void
     ) {
-        print("[WebExtension] Delegate openNewTabUsing: \(configuration.url?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
-            if let win = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
-                win.closeBramblePopover()
+            if let window = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
+                window.closeBramblePopover()
             }
             let tab = TabManager.shared.createTab(url: configuration.url, makeActive: configuration.shouldBeActive)
             completionHandler(tab, nil)
         }
     }
-    
+
     public func webExtensionController(
         _ controller: WKWebExtensionController,
         openOptionsPageFor extensionContext: WKWebExtensionContext,
         completionHandler: @escaping (Error?) -> Void
     ) {
-        print("[WebExtension] Delegate openOptionsPageFor called: \(extensionContext.optionsPageURL?.absoluteString ?? "nil")")
         DispatchQueue.main.async {
-            if let win = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
-                win.closeBramblePopover()
+            if let window = NSApp.windows.first(where: { $0.windowController is MainWindowController })?.windowController as? MainWindowController {
+                window.closeBramblePopover()
             }
-            if let optionsURL = extensionContext.optionsPageURL {
-                _ = TabManager.shared.createTab(url: optionsURL, makeActive: true)
+            if let url = extensionContext.optionsPageURL {
+                _ = TabManager.shared.createTab(url: url, makeActive: true)
             }
             completionHandler(nil)
         }
