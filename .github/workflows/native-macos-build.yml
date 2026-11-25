@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - poc/native-webkit-app
+      - fix/native-browser-polish-2026-11-25
     paths:
       - "poc-native/**"
       - "scripts/build-native-poc.sh"

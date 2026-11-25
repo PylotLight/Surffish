@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import WebKit
 
 public final class MainWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
@@ -42,7 +43,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private func setupUI() {
         guard let window = window, let contentView = window.contentView else { return }
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.055, green: 0.06, blue: 0.075, alpha: 1).cgColor
+        // Keep the root transparent so the unified NSVisualEffectView below can
+        // actually sample the desktop backdrop. An opaque layer here disables glass.
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
         
         // 1. Unified root glass background (seamless single frame across entire window)
         let rootGlass = NSVisualEffectView()
@@ -51,6 +54,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         rootGlass.state = .active
         rootGlass.wantsLayer = true
         rootGlass.translatesAutoresizingMaskIntoConstraints = false
+
+        // One shared tint surface spans the sidebar and toolbar. This avoids the visible
+        // material seam caused by giving the two adjacent regions separate backgrounds.
+        let frameTint = NSView(frame: rootGlass.bounds)
+        frameTint.wantsLayer = true
+        let frameGradient = CAGradientLayer()
+        frameGradient.colors = [
+            NSColor(red: 0.063, green: 0.078, blue: 0.098, alpha: 0.60).cgColor,
+            NSColor(red: 0.153, green: 0.180, blue: 0.216, alpha: 0.44).cgColor,
+            NSColor(red: 0.071, green: 0.086, blue: 0.106, alpha: 0.56).cgColor
+        ]
+        frameGradient.locations = [0.0, 0.58, 1.0]
+        frameGradient.startPoint = CGPoint(x: 0.5, y: 1.0)
+        frameGradient.endPoint = CGPoint(x: 0.5, y: 0.0)
+        frameTint.layer = frameGradient
+        frameTint.autoresizingMask = [.width, .height]
+        rootGlass.addSubview(frameTint)
         contentView.addSubview(rootGlass)
         
         // 2. Full-height Left Sidebar (traffic lights sit inside top of sidebar)
@@ -317,19 +337,34 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             return
         }
         
-        // Reload popup webview to ensure updated storage / sync state is rendered
+        // Give the extension popup a predictable, roomy viewport. WebKit can
+        // otherwise retain a narrow size from the popup's initial layout.
+        let popupSize = NSSize(width: 500, height: 550)
         popupWebView.reload()
-        
+        popupWebView.removeFromSuperview()
+        popupWebView.translatesAutoresizingMaskIntoConstraints = false
+
+        let popupHost = NSView(frame: NSRect(origin: .zero, size: popupSize))
+        popupHost.wantsLayer = true
+        popupHost.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        popupHost.addSubview(popupWebView)
+        NSLayoutConstraint.activate([
+            popupWebView.leadingAnchor.constraint(equalTo: popupHost.leadingAnchor),
+            popupWebView.trailingAnchor.constraint(equalTo: popupHost.trailingAnchor),
+            popupWebView.topAnchor.constraint(equalTo: popupHost.topAnchor),
+            popupWebView.bottomAnchor.constraint(equalTo: popupHost.bottomAnchor)
+        ])
+
         let popover = NSPopover()
         popover.behavior = .transient
         popover.delegate = self
-        // Keep the extension popup within the browser window while preserving
-        // the extension's native aspect ratio.
-        popover.contentSize = NSSize(width: 420, height: 560)
-        
+        popover.contentSize = popupSize
+
         let vc = NSViewController()
-        vc.view = popupWebView
+        vc.preferredContentSize = popupSize
+        vc.view = popupHost
         popover.contentViewController = vc
+        popover.contentSize = popupSize
         
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         self.bramblePopover = popover

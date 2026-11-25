@@ -36,7 +36,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     }
 
     private func setupView() {
-        material = .headerView
+        material = .underWindowBackground
         blendingMode = .withinWindow
         state = .active
         wantsLayer = true

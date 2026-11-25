@@ -10,6 +10,14 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidQuit()
 }
 
+private final class SidebarRowView: NSView {
+    var onSelect: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onSelect?()
+    }
+}
+
 public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTableViewDelegate {
     public weak var delegate: SidebarViewDelegate?
     private let workspaceLabel = NSTextField(labelWithString: "Tabs")
@@ -33,26 +41,28 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     }
 
     private func setupUI() {
-        material = .sidebar
-        blendingMode = .behindWindow
+        material = .underWindowBackground
+        blendingMode = .withinWindow
         state = .active
         wantsLayer = true
 
-        let tintView = NSView()
-        tintView.wantsLayer = true
-        tintView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.72).cgColor
-        tintView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(tintView)
-
-        workspaceLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        workspaceLabel.textColor = .labelColor
+        // The shared window glass/tint is drawn once behind this view and the omnibox.
+        // Keeping the sidebar itself transparent avoids a hard vertical seam at the toolbar.
+        workspaceLabel.stringValue = "TABS"
+        workspaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        workspaceLabel.textColor = NSColor(white: 0.95, alpha: 0.62)
         workspaceLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(workspaceLabel)
 
+        newTabButton.title = ""
+        newTabButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
+        newTabButton.imagePosition = .imageOnly
         newTabButton.bezelStyle = .rounded
+        newTabButton.isBordered = false
+        newTabButton.contentTintColor = .secondaryLabelColor
+        newTabButton.toolTip = "New tab"
         newTabButton.target = self
         newTabButton.action = #selector(onNewTab)
-        newTabButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         newTabButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(newTabButton)
 
@@ -63,8 +73,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         tableView.backgroundColor = .clear
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 36
-        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.rowHeight = 40
+        tableView.intercellSpacing = NSSize(width: 0, height: 3)
         tableView.selectionHighlightStyle = .none
 
         scrollView.documentView = tableView
@@ -89,16 +99,12 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         footer.addArrangedSubview(quitButton)
 
         NSLayoutConstraint.activate([
-            tintView.topAnchor.constraint(equalTo: topAnchor),
-            tintView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tintView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            tintView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
             workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
             workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             newTabButton.centerYAnchor.constraint(equalTo: workspaceLabel.centerYAnchor),
             newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            newTabButton.widthAnchor.constraint(equalToConstant: 90),
+            newTabButton.widthAnchor.constraint(equalToConstant: 28),
+            newTabButton.heightAnchor.constraint(equalToConstant: 28),
 
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 12),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -139,7 +145,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let tabs = TabManager.shared.tabs
         if isSettingsTabActive && row == tabs.count {
-            let cell = NSView()
+            let cell = SidebarRowView()
             cell.wantsLayer = true
             cell.layer?.cornerRadius = 8
             cell.layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.14).cgColor
@@ -161,14 +167,13 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             title.frame = NSRect(x: 34, y: 8, width: 188, height: 20)
             cell.addSubview(title)
 
-            let click = NSClickGestureRecognizer(target: self, action: #selector(onTabRowClicked(_:)))
-            cell.addGestureRecognizer(click)
+            cell.onSelect = { [weak self] in self?.delegate?.sidebarDidOpenSettings() }
             return cell
         }
         guard row >= 0, row < tabs.count else { return nil }
         let tab = tabs[row]
         let active = !isSettingsTabActive && TabManager.shared.activeTabId == tab.id
-        let cell = NSView()
+        let cell = SidebarRowView()
         cell.wantsLayer = true
         cell.layer?.cornerRadius = 8
         cell.layer?.backgroundColor = active
@@ -203,27 +208,20 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         pin.frame = NSRect(x: 228, y: 8, width: 20, height: 20)
         cell.addSubview(pin)
 
-        let close = NSButton(title: "×", target: self, action: #selector(onCloseTabClicked(_:)))
+        let close = NSButton(
+            image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")!,
+            target: self,
+            action: #selector(onCloseTabClicked(_:))
+        )
         close.isBordered = false
-        close.font = NSFont.systemFont(ofSize: 13)
+        close.contentTintColor = .tertiaryLabelColor
+        close.toolTip = "Close tab"
         close.tag = row
         close.frame = NSRect(x: 254, y: 8, width: 20, height: 20)
         cell.addSubview(close)
 
-        let click = NSClickGestureRecognizer(target: self, action: #selector(onTabRowClicked(_:)))
-        cell.addGestureRecognizer(click)
+        cell.onSelect = { [weak self] in self?.delegate?.sidebarDidSelectTab(id: tab.id) }
         return cell
-    }
-
-    @objc private func onTabRowClicked(_ gesture: NSClickGestureRecognizer) {
-        let row = tableView.row(at: gesture.location(in: tableView))
-        let tabs = TabManager.shared.tabs
-        if isSettingsTabActive && row == tabs.count {
-            delegate?.sidebarDidOpenSettings()
-            return
-        }
-        guard row >= 0, row < tabs.count else { return }
-        delegate?.sidebarDidSelectTab(id: tabs[row].id)
     }
 
     @objc private func onPinTabClicked(_ sender: NSButton) {
