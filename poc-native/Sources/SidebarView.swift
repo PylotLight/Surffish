@@ -4,9 +4,11 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidSelectTab(id: UUID)
     func sidebarDidCloseTab(id: UUID)
     func sidebarDidCreateNewTab()
+    func sidebarDidDuplicateTab(id: UUID)
     func sidebarDidTogglePinTab(id: UUID)
     func sidebarDidOpenLibraryURL(_ url: URL)
     func sidebarDidRemoveBookmark(id: UUID)
+    func sidebarDidToggleBookmarkPin(id: UUID)
     func sidebarDidClearHistory()
     func sidebarDidOpenExtensions()
     func sidebarDidOpenSettings()
@@ -285,17 +287,40 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             pinnedStrip.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let pinned: [TabItem]
+        let pinnedSites: [BrowserBookmark]
+        let pinnedTabs: [TabItem]
         switch contentMode {
         case .tabs:
-            pinned = TabManager.shared.tabs.filter(\.isPinned)
+            pinnedSites = BrowserLibraryStore.shared.bookmarks.filter(\.isPinned)
+            pinnedTabs = TabManager.shared.tabs.filter(\.isPinned)
         case .history, .bookmarks:
-            pinned = []
+            pinnedSites = []
+            pinnedTabs = []
         }
-        pinnedScrollView.isHidden = pinned.isEmpty
-        pinnedStripHeightConstraint.constant = pinned.isEmpty ? 0 : 38
-        let displayed = isCollapsed ? Array(pinned.prefix(1)) : pinned
-        for (index, tab) in displayed.enumerated() {
+        let totalPins = pinnedSites.count + pinnedTabs.count
+        pinnedScrollView.isHidden = totalPins == 0
+        pinnedStripHeightConstraint.constant = totalPins == 0 ? 0 : 38
+        let displayedSites = isCollapsed ? Array(pinnedSites.prefix(1)) : pinnedSites
+        let remainingSlots = isCollapsed ? max(0, 1 - displayedSites.count) : pinnedTabs.count
+        let displayedTabs = isCollapsed ? Array(pinnedTabs.prefix(remainingSlots)) : pinnedTabs
+        for (index, bookmark) in displayedSites.enumerated() {
+            let button = NSButton()
+            button.bezelStyle = .regularSquare
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: bookmark.title)
+            button.toolTip = bookmark.title.isEmpty ? "Pinned site" : bookmark.title
+            button.tag = index
+            button.target = self
+            button.action = #selector(onPinnedSiteClicked(_:))
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: isCollapsed ? 26 : 30).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            pinnedStrip.addArrangedSubview(button)
+            if let url = URL(string: bookmark.url) { loadFavicon(for: url, into: button) }
+        }
+        for (index, tab) in displayedTabs.enumerated() {
             let button = NSButton()
             button.bezelStyle = .regularSquare
             button.isBordered = false
@@ -312,13 +337,14 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             pinnedStrip.addArrangedSubview(button)
             loadFavicon(for: tab, into: button)
         }
-        if isCollapsed && pinned.count > 1 {
-            let overflow = NSTextField(labelWithString: "+\(pinned.count - 1)")
+        let visiblePinCount = displayedSites.count + displayedTabs.count
+        if isCollapsed && totalPins > visiblePinCount {
+            let overflow = NSTextField(labelWithString: "+\(totalPins - visiblePinCount)")
             overflow.font = .systemFont(ofSize: 10, weight: .semibold)
             overflow.textColor = .secondaryLabelColor
             pinnedStrip.addArrangedSubview(overflow)
         }
-        let stripWidth = isCollapsed ? 56 : max(260, CGFloat(displayed.count) * 36)
+        let stripWidth = isCollapsed ? 56 : max(260, CGFloat(visiblePinCount) * 36)
         pinnedStrip.setFrameSize(NSSize(width: stripWidth, height: 38))
     }
 
@@ -351,7 +377,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         case .bookmarks:
             let entries = BrowserLibraryStore.shared.bookmarks
             guard entries.indices.contains(row), let url = URL(string: entries[row].url) else { return nil }
-            return configureLibraryRow(title: entries[row].title, url: url, symbol: "bookmark.fill", row: row, removable: true)
+            return configureLibraryRow(title: entries[row].title, url: url, symbol: "bookmark.fill", row: row, removable: true, bookmarkID: entries[row].id, isPinned: entries[row].isPinned)
         case .tabs:
             break
         }
@@ -431,11 +457,26 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             close?.isHidden = !hovering || self.isCollapsed
             pin?.isHidden = !hovering || self.isCollapsed
         }
+        let tabMenu = NSMenu()
+        let duplicate = NSMenuItem(title: "Duplicate Tab", action: #selector(onDuplicateTabFromMenu(_:)), keyEquivalent: "")
+        duplicate.target = self
+        duplicate.representedObject = tab.id
+        tabMenu.addItem(duplicate)
+        let pinItem = NSMenuItem(title: tab.isPinned ? "Unpin Tab" : "Pin Tab", action: #selector(onTogglePinTabFromMenu(_:)), keyEquivalent: "")
+        pinItem.target = self
+        pinItem.representedObject = tab.id
+        tabMenu.addItem(pinItem)
+        tabMenu.addItem(.separator())
+        let closeItem = NSMenuItem(title: "Close Tab", action: #selector(onCloseTabFromMenu(_:)), keyEquivalent: "")
+        closeItem.target = self
+        closeItem.representedObject = tab.id
+        tabMenu.addItem(closeItem)
+        cell.menu = tabMenu
         loadFavicon(for: tab, into: icon)
         return cell
     }
 
-    private func configureLibraryRow(title text: String, url: URL, symbol: String, row: Int, removable: Bool) -> NSView {
+    private func configureLibraryRow(title text: String, url: URL, symbol: String, row: Int, removable: Bool, bookmarkID: UUID? = nil, isPinned: Bool = false) -> NSView {
         let cell = SidebarRowView()
         cell.wantsLayer = true
         cell.layer?.cornerRadius = 9
@@ -498,6 +539,18 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         ])
         cell.onSelect = { [weak self] in self?.delegate?.sidebarDidOpenLibraryURL(url) }
         cell.onHover = { [weak close] hovering in close?.isHidden = !hovering }
+        if let bookmarkID {
+            let menu = NSMenu()
+            let pin = NSMenuItem(title: isPinned ? "Remove from Pinned Sites" : "Pin to Pinned Sites", action: #selector(onToggleBookmarkPin(_:)), keyEquivalent: "")
+            pin.target = self
+            pin.representedObject = bookmarkID
+            menu.addItem(pin)
+            let open = NSMenuItem(title: "Open", action: #selector(onOpenBookmark(_:)), keyEquivalent: "")
+            open.target = self
+            open.representedObject = url
+            menu.addItem(open)
+            cell.menu = menu
+        }
         return cell
     }
 
@@ -542,6 +595,19 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         }.resume()
     }
 
+    private func loadFavicon(for url: URL, into button: NSButton) {
+        guard let host = url.host,
+              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
+              let faviconURL = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else { return }
+        URLSession.shared.dataTask(with: faviconURL) { [weak button] data, _, _ in
+            guard let data, let image = NSImage(data: data) else { return }
+            DispatchQueue.main.async {
+                guard let button, button.window != nil else { return }
+                button.image = image
+            }
+        }.resume()
+    }
+
     private func loadFavicon(for tab: TabItem, into imageView: NSImageView) {
         guard let host = tab.webView.url?.host ?? tab.url?.host,
               let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
@@ -565,6 +631,11 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         guard sender.tag >= 0, sender.tag < tabs.count else { return }
         delegate?.sidebarDidSelectTab(id: tabs[sender.tag].id)
     }
+    @objc private func onPinnedSiteClicked(_ sender: NSButton) {
+        let sites = BrowserLibraryStore.shared.bookmarks.filter(\.isPinned)
+        guard sites.indices.contains(sender.tag), let url = URL(string: sites[sender.tag].url) else { return }
+        delegate?.sidebarDidOpenLibraryURL(url)
+    }
     @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
     @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
     @objc private func onQuit() { delegate?.sidebarDidQuit() }
@@ -573,6 +644,18 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
         guard row >= 0, row < tabs.count else { return }
         delegate?.sidebarDidTogglePinTab(id: tabs[row].id)
+    }
+    @objc private func onDuplicateTabFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        delegate?.sidebarDidDuplicateTab(id: id)
+    }
+    @objc private func onTogglePinTabFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        delegate?.sidebarDidTogglePinTab(id: id)
+    }
+    @objc private func onCloseTabFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        delegate?.sidebarDidCloseTab(id: id)
     }
     @objc private func onCloseTabClicked(_ sender: NSButton) {
         let row = sender.tag
@@ -585,6 +668,16 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         let bookmarks = BrowserLibraryStore.shared.bookmarks
         guard bookmarks.indices.contains(sender.tag) else { return }
         delegate?.sidebarDidRemoveBookmark(id: bookmarks[sender.tag].id)
+    }
+
+    @objc private func onToggleBookmarkPin(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        delegate?.sidebarDidToggleBookmarkPin(id: id)
+    }
+
+    @objc private func onOpenBookmark(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        delegate?.sidebarDidOpenLibraryURL(url)
     }
 
     @objc private func onClearHistory() { delegate?.sidebarDidClearHistory() }

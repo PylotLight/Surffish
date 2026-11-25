@@ -70,6 +70,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public private(set) var activeTabId: UUID?
     public private(set) var isRestoringSession = false
     private var restoredSessionTabIDs: Set<UUID> = []
+    private var recentlyClosedTabs: [SavedBrowserTab] = []
+    private let maximumRecentlyClosedTabs = 20
 
     public var activeTab: TabItem? {
         guard let id = activeTabId else { return nil }
@@ -112,6 +114,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             DeveloperConsole.shared.install(on: configuration.userContentController)
         }
 
+        configuration.setURLSchemeHandler(BrowserNewTabSchemeHandler.shared, forURLScheme: "surffish")
         WebKitProxyController.apply(port: SshTunnelManager.shared.browserProxyPort, to: configuration.websiteDataStore)
 
         let webView = InspectableWebView(frame: .zero, configuration: configuration)
@@ -156,7 +159,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         for savedTab in saved.tabs {
             guard let url = URL(string: savedTab.url),
                   let scheme = url.scheme?.lowercased(),
-                  ["http", "https", "file", "webkit-extension"].contains(scheme) else { continue }
+                  ["http", "https", "file", "webkit-extension", "surffish"].contains(scheme) else { continue }
             restoredSessionTabIDs.insert(savedTab.id)
             _ = createTab(
                 url: url,
@@ -199,6 +202,25 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let closingActive = activeTabId == id
         let closingTab = tabs.remove(at: index)
+        if !closingTab.isPrivate,
+           let url = closingTab.webView.url ?? closingTab.url,
+           let scheme = url.scheme?.lowercased(),
+           ["http", "https", "file", "webkit-extension", "surffish"].contains(scheme) {
+            recentlyClosedTabs.insert(
+                SavedBrowserTab(
+                    id: closingTab.id,
+                    url: url.absoluteString,
+                    title: closingTab.webView.title ?? closingTab.title,
+                    isPinned: closingTab.isPinned,
+                    groupID: closingTab.groupID,
+                    spaceID: closingTab.spaceID
+                ),
+                at: 0
+            )
+            if recentlyClosedTabs.count > maximumRecentlyClosedTabs {
+                recentlyClosedTabs.removeLast(recentlyClosedTabs.count - maximumRecentlyClosedTabs)
+            }
+        }
         restoredSessionTabIDs.remove(id)
         closingTab.webView.stopLoading()
         closingTab.webView.navigationDelegate = nil
@@ -215,6 +237,36 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             delegate?.tabManagerDidChangeActiveTab(to: tabs[nextIndex])
         }
         notifyTabsChanged()
+    }
+
+    public var canReopenClosedTab: Bool { !recentlyClosedTabs.isEmpty }
+
+    @discardableResult
+    public func reopenClosedTab() -> TabItem? {
+        guard !recentlyClosedTabs.isEmpty else { return nil }
+        let saved = recentlyClosedTabs.removeFirst()
+        guard let url = URL(string: saved.url) else { return nil }
+        return createTab(
+            url: url,
+            makeActive: true,
+            isPinned: saved.isPinned,
+            groupID: saved.groupID,
+            spaceID: saved.spaceID
+        )
+    }
+
+    @discardableResult
+    public func duplicateTab(id: UUID) -> TabItem? {
+        guard let tab = tabs.first(where: { $0.id == id }),
+              let url = tab.webView.url ?? tab.url else { return nil }
+        return createTab(
+            url: url,
+            makeActive: true,
+            isPrivate: tab.isPrivate,
+            isPinned: tab.isPinned,
+            groupID: tab.groupID,
+            spaceID: tab.spaceID
+        )
     }
 
     public func togglePinned(id: UUID) {

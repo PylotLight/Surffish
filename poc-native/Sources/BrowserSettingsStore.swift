@@ -90,7 +90,7 @@ public struct BrowserSettings: Codable {
     public static let defaults = BrowserSettings(
         version: 1,
         searchEngine: .duckDuckGo,
-        startPage: "https://online.bonjourr.fr/",
+        startPage: "surffish://newtab/",
         restoreSession: true,
         showSidebarAtStartup: true,
         sshProxyEnabled: false,
@@ -104,7 +104,7 @@ public struct BrowserSettings: Codable {
     public var startPageURL: URL {
         guard let url = URL(string: startPage),
               let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
+              scheme == "http" || scheme == "https" || (scheme == "surffish" && url.host == "newtab") else {
             return URL(string: BrowserSettings.defaults.startPage)!
         }
         return url
@@ -113,6 +113,7 @@ public struct BrowserSettings: Codable {
 
 public final class BrowserSettingsStore {
     public static let shared = BrowserSettingsStore()
+    private static let legacyExternalStartPage = "https://online.bonjourr.fr/"
 
     public private(set) var settings: BrowserSettings
     private let fileURL: URL
@@ -128,7 +129,14 @@ public final class BrowserSettingsStore {
         if let data = try? Data(contentsOf: fileURL),
            let saved = try? decoder.decode(BrowserSettings.self, from: data),
            saved.version == BrowserSettings.defaults.version {
-            settings = saved
+            if saved.startPage == Self.legacyExternalStartPage {
+                var migrated = saved
+                migrated.startPage = BrowserSettings.defaults.startPage
+                settings = migrated
+                persist(migrated)
+            } else {
+                settings = saved
+            }
         } else {
             settings = BrowserSettings.defaults
         }
@@ -136,6 +144,10 @@ public final class BrowserSettingsStore {
 
     public func update(_ settings: BrowserSettings) {
         self.settings = settings
+        persist(settings)
+    }
+
+    private func persist(_ settings: BrowserSettings) {
         do {
             let data = try encoder.encode(settings)
             try data.write(to: fileURL, options: .atomic)

@@ -49,7 +49,7 @@ public final class BrowserSettingsViewController: NSViewController {
 
         searchEngine.addItems(withTitles: BrowserSearchEngine.allCases.map(\.displayName))
         searchEngine.widthAnchor.constraint(equalToConstant: 220).isActive = true
-        startPage.placeholderString = "https://online.bonjourr.fr/"
+        startPage.placeholderString = "surffish://newtab/ or https://example.com"
         startPage.widthAnchor.constraint(equalToConstant: 440).isActive = true
 
         let extensionHeading = makeSectionHeading("Extensions")
@@ -414,10 +414,10 @@ public final class BrowserSettingsViewController: NSViewController {
         let proposedStartPage = startPage.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: proposedStartPage),
            let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
+           scheme == "http" || scheme == "https" || (scheme == "surffish" && url.host == "newtab") {
             next.startPage = url.absoluteString
         } else {
-            showValidationAlert(title: "Invalid new tab page", message: "Enter a complete HTTP or HTTPS URL.")
+            showValidationAlert(title: "Invalid new tab page", message: "Enter the built-in surffish://newtab/ page or a complete HTTP or HTTPS URL.")
             return
         }
 

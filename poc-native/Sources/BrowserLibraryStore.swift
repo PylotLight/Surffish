@@ -19,12 +19,27 @@ public struct BrowserBookmark: Codable, Identifiable {
     public var url: String
     public var title: String
     public let createdAt: Date
+    public var isPinned: Bool
 
-    public init(id: UUID = UUID(), url: String, title: String, createdAt: Date = Date()) {
+    private enum CodingKeys: String, CodingKey {
+        case id, url, title, createdAt, isPinned
+    }
+
+    public init(id: UUID = UUID(), url: String, title: String, createdAt: Date = Date(), isPinned: Bool = false) {
         self.id = id
         self.url = url
         self.title = title
         self.createdAt = createdAt
+        self.isPinned = isPinned
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        url = try values.decode(String.self, forKey: .url)
+        title = try values.decode(String.self, forKey: .title)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
     }
 }
 
@@ -98,6 +113,14 @@ public final class BrowserLibraryStore {
     public func removeBookmark(id: UUID) {
         bookmarks.removeAll { $0.id == id }
         persist()
+    }
+
+    @discardableResult
+    public func togglePinnedBookmark(id: UUID) -> Bool {
+        guard let index = bookmarks.firstIndex(where: { $0.id == id }) else { return false }
+        bookmarks[index].isPinned.toggle()
+        persist()
+        return bookmarks[index].isPinned
     }
 
     public func clearHistory() {

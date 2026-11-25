@@ -79,6 +79,66 @@ test("settings pages expose saved ad blocking and profile-scoped website clearin
   );
 });
 
+test("built-in New Tab uses the profile search engine and hides recent history in private tabs", () => {
+  const page = read("poc-native/Sources/BrowserNewTabSchemeHandler.swift");
+  const settings = read("poc-native/Sources/BrowserSettingsStore.swift");
+  const tabs = read("poc-native/Sources/TabManager.swift");
+
+  assert.match(settings, /startPage: "surffish:\/\/newtab\/"/);
+  assert.match(settings, /scheme == "surffish" && url\.host == "newtab"/);
+  assert.match(settings, /legacyExternalStartPage/);
+  assert.match(
+    settings,
+    /migrated\.startPage = BrowserSettings\.defaults\.startPage/,
+  );
+  assert.match(
+    tabs,
+    /setURLSchemeHandler\(BrowserNewTabSchemeHandler\.shared, forURLScheme: "surffish"\)/,
+  );
+  assert.match(page, /includeHistory: !isPrivateTab/);
+  assert.match(page, /let recent = includeHistory \? recentHistory/);
+  assert.match(page, /BrowserSettingsStore\.shared\.settings\.searchEngine/);
+  assert.match(page, /searchURL\(for: marker\)/);
+});
+
+test("pinned bookmarks migrate safely and appear in the native pinned-site strip", () => {
+  const library = read("poc-native/Sources/BrowserLibraryStore.swift");
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+
+  assert.match(
+    library,
+    /decodeIfPresent\(Bool\.self, forKey: \.isPinned\) \?\? false/,
+  );
+  assert.match(library, /togglePinnedBookmark\(id: UUID\)/);
+  assert.match(sidebar, /bookmarks\.filter\(\\\.isPinned\)/);
+  assert.match(sidebar, /onPinnedSiteClicked/);
+  assert.match(sidebar, /Pin to Pinned Sites/);
+  assert.match(window, /sidebarDidToggleBookmarkPin/);
+});
+
+test("native find-in-page and duplicate/reopen actions are wired to WebKit and menus", () => {
+  const findBar = read("poc-native/Sources/FindBarView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  const menu = read("poc-native/Sources/MainMenu.swift");
+  const tabs = read("poc-native/Sources/TabManager.swift");
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+
+  assert.match(window, /WKFindConfiguration\(\)/);
+  assert.match(window, /configuration\.caseInsensitive = true/);
+  assert.match(window, /configuration\.wraps = true/);
+  assert.match(findBar, /findPreviousOccurrence/);
+  assert.match(findBar, /cancelOperation/);
+  assert.match(menu, /menuFind/);
+  assert.match(menu, /menuDuplicateActiveTab/);
+  assert.match(menu, /menuReopenClosedTab/);
+  assert.match(tabs, /func duplicateTab\(id: UUID\)/);
+  assert.match(tabs, /func reopenClosedTab\(\)/);
+  assert.match(tabs, /if !closingTab\.isPrivate/);
+  assert.match(tabs, /isPrivate: tab\.isPrivate/);
+  assert.match(sidebar, /Duplicate Tab/);
+});
+
 test("roadmap describes the implemented SSH dynamic SOCKS endpoint, not the obsolete NAS forward", () => {
   const roadmap = read("docs/native-webkit-mvp-roadmap.md");
   const readme = read("poc-native/README.md");

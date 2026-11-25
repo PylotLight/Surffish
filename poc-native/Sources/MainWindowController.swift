@@ -27,11 +27,12 @@ private final class SurffishBrowserWindow: NSWindow {
     }
 }
 
-public final class MainWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
+public final class MainWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, FindBarViewDelegate, WKWebExtensionWindow {
     
     private var omniboxView: OmniboxView!
     private var sidebarView: SidebarView!
     private var webContainerView: NSView!
+    private var findBarView: FindBarView!
     
     private var sidebarLeadingConstraint: NSLayoutConstraint!
     private var sidebarWidthConstraint: NSLayoutConstraint!
@@ -125,6 +126,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         webContainerView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1.0).cgColor
         webContainerView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(webContainerView)
+
+        findBarView = FindBarView(frame: .zero)
+        findBarView.delegate = self
+        findBarView.translatesAutoresizingMaskIntoConstraints = false
+        findBarView.isHidden = true
+        webContainerView.addSubview(findBarView)
         
         // Constraints: Single unified frame!
         sidebarLeadingConstraint = sidebarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
@@ -157,6 +164,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             webContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 8),
             webContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            findBarView.topAnchor.constraint(equalTo: webContainerView.topAnchor, constant: 12),
+            findBarView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor, constant: -12),
+            findBarView.widthAnchor.constraint(equalToConstant: 420),
+            findBarView.heightAnchor.constraint(equalToConstant: 42),
         ])
         // Keep the page card behind the sidebar while leaving the toolbar (including
         // its only sidebar-toggle button) visible above the panel in both states.
@@ -213,6 +224,25 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
     }
     @objc public func menuReload() { omniboxDidClickReload() }
+    @objc public func menuFind() { showFindBar() }
+    @objc public func menuFindNext() {
+        if findBarView.isHidden { showFindBar() }
+        findBarView.findNextOccurrence()
+    }
+    @objc public func menuFindPrevious() {
+        if findBarView.isHidden { showFindBar() }
+        findBarView.findPreviousOccurrence()
+    }
+    @objc public func menuReopenClosedTab() { _ = TabManager.shared.reopenClosedTab() }
+    @objc public func menuDuplicateActiveTab() {
+        if let id = TabManager.shared.activeTabId { _ = TabManager.shared.duplicateTab(id: id) }
+    }
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(MainWindowController.menuReopenClosedTab) {
+            return TabManager.shared.canReopenClosedTab
+        }
+        return true
+    }
     @objc public func menuToggleSidebar() { omniboxDidToggleSidebar() }
     @objc public func menuFocusAddress() { omniboxView.focusAddressField() }
     @objc public func menuShowTabs() { omniboxDidShowTabs() }
@@ -220,6 +250,38 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuShowBookmarks() { omniboxDidShowBookmarks() }
     @objc public func menuOpenSettings() {
         showSettingsTab()
+    }
+
+    private func showFindBar() {
+        if settingsViewController?.view.superview != nil { showActiveBrowserTab() }
+        guard TabManager.shared.activeTab != nil else { return }
+        findBarView.isHidden = false
+        findBarView.focusAndSelectAll()
+    }
+
+    private func searchInPage(_ query: String, backwards: Bool) {
+        guard !query.isEmpty, let tab = TabManager.shared.activeTab else {
+            findBarView.setStatus("")
+            return
+        }
+        let configuration = WKFindConfiguration()
+        configuration.caseInsensitive = true
+        configuration.wraps = true
+        configuration.backwards = backwards
+        tab.webView.findString(query, with: configuration) { [weak self] result in
+            DispatchQueue.main.async {
+                self?.findBarView.setStatus(result.matchFound ? "Found" : "No matches")
+            }
+        }
+    }
+
+    public func findBar(_ findBar: FindBarView, didSearch query: String, backwards: Bool) {
+        searchInPage(query, backwards: backwards)
+    }
+
+    public func findBarDidClose(_ findBar: FindBarView) {
+        findBarView.isHidden = true
+        if let active = TabManager.shared.activeTab { window?.makeFirstResponder(active.webView) }
     }
 
     private func showSettingsTab() {
@@ -290,7 +352,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private func displayBrowserTab(_ tab: TabItem) {
         progressObservation?.invalidate()
         progressObservation = nil
-        webContainerView.subviews.forEach { $0.removeFromSuperview() }
+        webContainerView.subviews.forEach { if $0 !== findBarView { $0.removeFromSuperview() } }
 
         tab.webView.translatesAutoresizingMaskIntoConstraints = false
         webContainerView.addSubview(tab.webView)
@@ -301,10 +363,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             tab.webView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor),
             tab.webView.bottomAnchor.constraint(equalTo: webContainerView.bottomAnchor),
         ])
+        webContainerView.addSubview(findBarView, positioned: .above, relativeTo: tab.webView)
 
         setupProgressObserver()
         omniboxView.updateForTab(tab)
         sidebarView.reloadTabs()
+        if !findBarView.isHidden { searchInPage(findBarView.query, backwards: false) }
     }
     
     // MARK: - OmniboxViewDelegate
@@ -313,7 +377,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         var targetUrl: URL?
         
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("webkit-extension://") {
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("webkit-extension://") || trimmed.hasPrefix("surffish://newtab") {
             targetUrl = URL(string: trimmed)
         } else if trimmed.contains(".") && !trimmed.contains(" ") {
             targetUrl = URL(string: "https://" + trimmed)
@@ -502,6 +566,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidSelectTab(id: UUID) { TabManager.shared.selectTab(id: id) }
     public func sidebarDidCloseTab(id: UUID) { TabManager.shared.closeTab(id: id) }
     public func sidebarDidCreateNewTab() { _ = TabManager.shared.createTab() }
+    public func sidebarDidDuplicateTab(id: UUID) { _ = TabManager.shared.duplicateTab(id: id) }
     public func sidebarDidTogglePinTab(id: UUID) { TabManager.shared.togglePinned(id: id) }
     public func sidebarDidOpenExtensions() { menuOpenSettings() }
     public func sidebarDidOpenSettings() { menuOpenSettings() }
@@ -514,6 +579,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         BrowserLibraryStore.shared.removeBookmark(id: id)
         sidebarView.reloadTabs()
         if let tab = TabManager.shared.activeTab { omniboxView.updateForTab(tab) }
+    }
+    public func sidebarDidToggleBookmarkPin(id: UUID) {
+        _ = BrowserLibraryStore.shared.togglePinnedBookmark(id: id)
+        sidebarView.reloadTabs()
     }
     public func sidebarDidClearHistory() {
         BrowserLibraryStore.shared.clearHistory()

@@ -28,6 +28,12 @@ public func setupApplicationMenu() {
     
     fileMenu.addItem(NSMenuItem(title: "New Tab", action: #selector(MainWindowController.menuNewTab), keyEquivalent: "t"))
     fileMenu.addItem(NSMenuItem(title: "Close Tab", action: #selector(MainWindowController.menuCloseTab), keyEquivalent: "w"))
+    let reopenTab = NSMenuItem(title: "Reopen Closed Tab", action: #selector(MainWindowController.menuReopenClosedTab), keyEquivalent: "t")
+    reopenTab.keyEquivalentModifierMask = [.command, .shift]
+    fileMenu.addItem(reopenTab)
+    let duplicateTab = NSMenuItem(title: "Duplicate Tab", action: #selector(MainWindowController.menuDuplicateActiveTab), keyEquivalent: "d")
+    duplicateTab.keyEquivalentModifierMask = [.command, .shift]
+    fileMenu.addItem(duplicateTab)
     
     // 3. Edit Menu (Standard text shortcuts Cmd+Z, Cmd+X, Cmd+C, Cmd+V, Cmd+A)
     let editMenuItem = NSMenuItem()
@@ -56,6 +62,11 @@ public func setupApplicationMenu() {
     viewMenu.addItem(bookmarksItem)
     viewMenu.addItem(NSMenuItem.separator())
     viewMenu.addItem(NSMenuItem(title: "Reload Page", action: #selector(MainWindowController.menuReload), keyEquivalent: "r"))
+    viewMenu.addItem(NSMenuItem(title: "Find in Page…", action: #selector(MainWindowController.menuFind), keyEquivalent: "f"))
+    viewMenu.addItem(NSMenuItem(title: "Find Next", action: #selector(MainWindowController.menuFindNext), keyEquivalent: "g"))
+    let findPrevious = NSMenuItem(title: "Find Previous", action: #selector(MainWindowController.menuFindPrevious), keyEquivalent: "G")
+    findPrevious.keyEquivalentModifierMask = [.command, .shift]
+    viewMenu.addItem(findPrevious)
     viewMenu.addItem(NSMenuItem(title: "Toggle Sidebar", action: #selector(MainWindowController.menuToggleSidebar), keyEquivalent: "\\"))
     viewMenu.addItem(NSMenuItem(title: "Focus Address Bar", action: #selector(MainWindowController.menuFocusAddress), keyEquivalent: "l"))
     let developerToolsItem = NSMenuItem(title: "Developer Tools", action: #selector(MainWindowController.menuOpenDeveloperTools), keyEquivalent: "i")

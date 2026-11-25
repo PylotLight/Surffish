@@ -55,7 +55,8 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 ### Implementation status for the native parity pass
 
 - **Implemented:** the single toolbar sidebar toggle; a glass-backed sidebar with Tabs, History and Bookmarks panels; profile-local bookmark/history storage; native Settings pages for General, Privacy, Extensions, Connection and About; a persisted WebKit content-rule toggle; and profile-scoped website-data clearing.
-- **Incomplete:** full Electron settings parity, downloads, reading list, true lazy session restoration, window geometry/multiple windows, find-in-page, robust error/crash UI, site permission/certificate management, production filter-list updates, and the broader M1–M6 feature inventory below. Settings expose only controls backed by native behavior; they do not imply the remaining categories are done.
+- **Added in the current feature branch; macOS build and runtime QA pending:** a local `surffish://newtab/` dashboard using the profile search engine and pinned/recent/bookmark links (with recent history hidden in private tabs); migration from the legacy external New Tab default while preserving custom start pages; basic native find-in-page; duplicate and in-memory reopen-closed-tab actions (private tabs excluded from reopen); bookmark pin migration and pinned-site sidebar actions; and tab/bookmark context menus. The focused source-contract suite covers these paths but does not replace compilation or runtime testing.
+- **Incomplete:** full Electron settings parity, downloads, reading list, true lazy session restoration, window geometry/multiple windows, comprehensive navigation history, drag/reorder and multi-select tab operations, robust error/crash UI, site permission/certificate management, production filter-list updates, and the broader M1–M6 feature inventory below. New Tab customization, full find-result UX and persistent closed-tab recovery are also not implemented. Settings expose only controls backed by native behavior; they do not imply the remaining categories are done.
 - **Obsolete roadmap assumptions:** references to forwarding `-L` traffic to a separately managed NAS SOCKS daemon, configuring a NAS SOCKS host/port, or treating that NAS daemon as the exit are stale. The implementation uses `ssh -D`; the SSH host is the exit point. Do not reintroduce the old model without an explicit product decision.
 - **Runtime QA boundary:** this Linux environment cannot launch AppKit/WebKit. The macOS 26 GitHub Actions build can compile the app; interactive browser QA still needs a macOS 26+ machine. The tunnel is mostly working in the POC; remaining SSH-host, sleep/wake, LAN-client and tunnel-drop acceptance is separate follow-up, not a blocker for this UI parity pass.
 - **WebKit compatibility limits:** Chrome-only extension APIs and Chromium DevTools request interception/process metrics are not assumed to exist. Record each incompatibility and design native alternatives; do not label them complete based on a Settings control or a successful compile.
@@ -80,7 +81,7 @@ The POC's SSH path is mostly working. The remaining checks below are acceptance/
 
 - Restore real per-tab back/forward history, navigation state and proper load/error handling.
 - Browser window geometry, multiple windows and reliable app lifecycle.
-- Tab creation/close/reopen, drag reorder, pinning, tab context menus and keyboard shortcuts.
+- Tab creation/close, pinning, keyboard shortcuts and basic duplicate/reopen/context-menu actions now exist; drag reorder, full reopen persistence and the complete Electron tab interaction model remain required.
 - Session restore without eagerly loading every restored tab; persist active tab and window state.
 - Persistent profile data separation, private browsing isolation and browsing-data deletion.
 - Reading list with persistent storage and basic management UI; bookmarks and history now have profile-local stores and sidebar management surfaces.
@@ -88,7 +89,7 @@ The POC's SSH path is mostly working. The remaining checks below are acceptance/
 - Native permissions, certificate information and safe navigation decisions.
 - Production-quality ad/tracker blocking and filter-list updates; the current native rule set remains intentionally limited.
 - Expanded Settings category parity; all controls currently exposed by native Settings must remain persisted and connected to behavior.
-- Error pages, crash recovery, loading indicators, progress and find-in-page.
+- Error pages, crash recovery, loading indicators and progress; basic native find-in-page is added, but match counts and complete find UX remain open.
 - macOS runtime QA on the user's machine, including real SSH and browser usage.
 
 ## Electron feature parity inventory
@@ -367,6 +368,7 @@ The Electron settings surface currently contains these categories/components. Na
 - Bookmarks, history, reading list and downloads.
 - New Tab and appearance settings.
 - Find-in-page, zoom, context menus and private windows.
+- **Current status: partial.** This parity pass adds a basic local New Tab, find-in-page, duplicate/reopen actions, pinned sites and context menus; downloads, reading list, full navigation/session behavior, appearance controls and production rail interactions remain open.
 
 ### M2 — Network and privacy parity
 
