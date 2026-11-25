@@ -26,7 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 serverEnabled: settings.sshProxyShareEnabled,
                 target: settings.sshHost,
                 port: settings.sshProxyPort,
-                bindAddress: settings.sshProxyBindAddress
+                bindAddress: settings.sshProxyBindAddress,
+                upstreamHost: settings.sshRemoteSocksHost,
+                upstreamPort: settings.sshRemoteSocksPort
             )
             await WebExtensionManager.shared.loadDefaultExtensions(basePath: cwd)
             await MainActor.run {
