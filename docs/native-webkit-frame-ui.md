@@ -30,6 +30,7 @@ The native browser is a full product replacement effort, not a UI-only WebKit wr
 See [Native MVP and Electron feature parity roadmap](native-webkit-mvp-roadmap.md).
 
 That document contains:
+
 - The current landed implementation and outstanding networking/browser MVP acceptance criteria.
 - The full Electron feature inventory grouped into 22 categories.
 - The complete Settings category inventory.
