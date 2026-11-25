@@ -379,6 +379,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func omniboxDidRequestBramblePopup(sender: NSButton) {
+        if NSEvent.modifierFlags.contains(.option) {
+            showSettingsTab()
+            return
+        }
         guard WebExtensionManager.shared.brambleContext != nil else {
             showExtensionInstallSheet()
             return
@@ -433,6 +437,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
     }
     
+    public func omniboxDidRequestExtensionManagement() { showSettingsTab() }
+
     public func closeBramblePopover() {
         bramblePopover?.performClose(nil)
         bramblePopover = nil
