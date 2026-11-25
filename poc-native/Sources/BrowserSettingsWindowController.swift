@@ -5,18 +5,16 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let startPage = NSTextField()
     private let restoreSession = NSButton(checkboxWithTitle: "Restore tabs from the previous session", target: nil, action: nil)
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
-    private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through the NAS SOCKS5 proxy", target: nil, action: nil)
+    private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through an SSH SOCKS5 proxy", target: nil, action: nil)
     private let sshHost = NSTextField()
     private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep the local SOCKS endpoint running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
-    private let sshRemoteSocksHost = NSTextField()
-    private let sshRemoteSocksPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
     private let sshStatus = NSTextField(labelWithString: "Not configured")
 
     public init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -55,10 +53,6 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshHost.placeholderString = "SSH config alias or user@host"
         sshHost.widthAnchor.constraint(equalToConstant: 440).isActive = true
         sshProxyPort.placeholderString = "1080"
-        sshRemoteSocksHost.placeholderString = "127.0.0.1"
-        sshRemoteSocksHost.widthAnchor.constraint(equalToConstant: 300).isActive = true
-        sshRemoteSocksPort.placeholderString = "1080"
-        sshRemoteSocksPort.widthAnchor.constraint(equalToConstant: 110).isActive = true
         sshProxyPort.widthAnchor.constraint(equalToConstant: 110).isActive = true
         sshProxyBindAddress.addItems(withTitles: ["This Mac only (127.0.0.1)", "LAN devices (0.0.0.0)"])
         sshProxyBindAddress.widthAnchor.constraint(equalToConstant: 220).isActive = true
@@ -66,10 +60,8 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshStatus.maximumNumberOfLines = 3
         let sshHostRow = makeRow(title: "SSH host", control: sshHost)
         let sshPortRow = makeRow(title: "Local listen port", control: sshProxyPort)
-        let sshRemoteHostRow = makeRow(title: "NAS SOCKS host", control: sshRemoteSocksHost)
-        let sshRemotePortRow = makeRow(title: "NAS SOCKS port", control: sshRemoteSocksPort)
         let sshBindRow = makeRow(title: "Listen address", control: sshProxyBindAddress)
-        let proxySharingWarning = NSTextField(wrappingLabelWithString: "Surffish forwards the local SOCKS5 connection through SSH to the existing SOCKS5 service on your NAS. The NAS SOCKS host is resolved from the NAS side. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.") 
+        let proxySharingWarning = NSTextField(wrappingLabelWithString: "Surffish creates a local SOCKS5 proxy and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
         proxySharingWarning.textColor = .secondaryLabelColor
         proxySharingWarning.maximumNumberOfLines = 3
 
@@ -79,7 +71,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshRemoteHostRow, sshRemotePortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
+        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 18
@@ -115,8 +107,6 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshHost.stringValue = settings.sshHost
         sshProxyShareEnabled.state = settings.sshProxyShareEnabled ? .on : .off
         sshProxyPort.stringValue = String(settings.sshProxyPort)
-        sshRemoteSocksHost.stringValue = settings.sshRemoteSocksHost
-        sshRemoteSocksPort.stringValue = String(settings.sshRemoteSocksPort)
         sshProxyBindAddress.selectItem(at: settings.sshProxyBindAddress == "0.0.0.0" ? 1 : 0)
         sshStatus.stringValue = SshTunnelManager.shared.status
         SshTunnelManager.shared.onStatusChange = { [weak self] status in
@@ -165,24 +155,6 @@ public final class BrowserSettingsWindowController: NSWindowController {
             return
         }
         next.sshProxyPort = port
-        next.sshRemoteSocksHost = sshRemoteSocksHost.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let remotePort = Int(sshRemoteSocksPort.stringValue), (1...65535).contains(remotePort) else {
-            let alert = NSAlert()
-            alert.messageText = "Invalid NAS SOCKS5 port"
-            alert.informativeText = "Enter the port used by the SOCKS5 service on your NAS."
-            alert.alertStyle = .warning
-            alert.runModal()
-            return
-        }
-        next.sshRemoteSocksPort = remotePort
-        guard !next.sshRemoteSocksHost.isEmpty else {
-            let alert = NSAlert()
-            alert.messageText = "NAS SOCKS5 host required"
-            alert.informativeText = "Enter the NAS-side SOCKS5 bind address, normally 127.0.0.1."
-            alert.alertStyle = .warning
-            alert.runModal()
-            return
-        }
         next.sshProxyBindAddress = next.sshProxyShareEnabled && sshProxyBindAddress.indexOfSelectedItem == 1 ? "0.0.0.0" : "127.0.0.1"
         if (next.sshProxyEnabled || next.sshProxyShareEnabled) && next.sshHost.isEmpty {
             let alert = NSAlert()
@@ -199,9 +171,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
                 serverEnabled: next.sshProxyShareEnabled,
                 target: next.sshHost,
                 port: next.sshProxyPort,
-                bindAddress: next.sshProxyBindAddress,
-                upstreamHost: next.sshRemoteSocksHost,
-                upstreamPort: next.sshRemoteSocksPort
+                bindAddress: next.sshProxyBindAddress
             )
             sshStatus.stringValue = SshTunnelManager.shared.status
         }
