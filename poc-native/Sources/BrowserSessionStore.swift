@@ -38,10 +38,9 @@ public final class BrowserSessionStore {
     private let decoder = JSONDecoder()
 
     private init() {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let directory = support.appendingPathComponent("SurffishNative", isDirectory: true)
+        let directory = BrowserProfile.current.applicationSupportDirectory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("browser-session.json")
+        fileURL = BrowserProfile.current.fileURL("browser-session.json")
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     }
