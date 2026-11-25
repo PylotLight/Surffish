@@ -62,6 +62,26 @@ build_profile_app() {
 </plist>
 EOF
 
+    # Local Network privacy on macOS tracks apps by their code signature.
+    # Prefer an Apple-issued development/distribution identity when one is installed.
+    local signing_identity="${SURFFISH_CODESIGN_IDENTITY:-}"
+    if [[ -z "${signing_identity}" ]]; then
+        signing_identity="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+            | /usr/bin/sed -nE 's/.*"((Apple Development|Developer ID Application):[^"]+)".*/\1/p' \
+            | /usr/bin/head -n 1)"
+    fi
+
+    if [[ -n "${signing_identity}" ]]; then
+        echo "==> Signing ${app_name} with ${signing_identity}"
+        /usr/bin/codesign --force --deep --sign "${signing_identity}" \
+            --options runtime --timestamp=none "${app_dir}"
+    else
+        echo "==> WARNING: No Apple-issued signing identity found; using ad-hoc signing."
+        echo "==> Set SURFFISH_CODESIGN_IDENTITY to an Apple Development or Developer ID Application identity for reliable Local Network privacy."
+        /usr/bin/codesign --force --deep --sign - --timestamp=none "${app_dir}"
+    fi
+    /usr/bin/codesign --verify --deep --strict "${app_dir}"
+
     echo "==> Built ${app_dir} (${profile} profile)"
 }
 
