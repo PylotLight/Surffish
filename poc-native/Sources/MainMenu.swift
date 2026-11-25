@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 public func setupApplicationMenu() {
     let mainMenu = NSMenu()
     

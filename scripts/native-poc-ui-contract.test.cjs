@@ -425,6 +425,7 @@ test("downloads are reachable from toolbar, full sidebar, and View menu without 
   assert.match(window, /BrowserDownloadsPopoverView/);
   assert.match(window, /showDownloadsSidebar\(\)/);
   assert.match(menu, /menuShowDownloads/);
+  assert.match(menu, /@MainActor\s+public func setupApplicationMenu/);
   assert.equal(
     (toolbar.match(/sidebarToggleBtn\s*=\s*NSButton/g) || []).length,
     1,
