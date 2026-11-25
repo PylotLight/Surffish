@@ -63,7 +63,7 @@ public final class DeveloperConsole: NSObject, WKScriptMessageHandler {
             let nsError = error as NSError
             let metadata = nsError.userInfo
                 .filter { key, _ in
-                    ["WKWebExtensionErrorSourceURL", "WKWebExtensionErrorLineNumber", "WKWebExtensionErrorColumnNumber", "NSUnderlyingError"].contains(key)
+                    ["WKWebExtensionErrorSourceURL", "WKWebExtensionErrorLineNumber", "WKWebExtensionErrorColumnNumber", "WKJavaScriptExceptionSourceURL", "WKJavaScriptExceptionLineNumber", "WKJavaScriptExceptionColumnNumber", "WKJavaScriptExceptionMessage", "NSUnderlyingError"].contains(key)
                 }
                 .map { "\($0.key)=\($0.value)" }
                 .sorted()
