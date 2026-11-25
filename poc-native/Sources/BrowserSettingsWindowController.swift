@@ -97,7 +97,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
             alert.messageText = "Invalid new tab page"
             alert.informativeText = "Enter a complete HTTP or HTTPS URL."
             alert.alertStyle = .warning
-            alert.beginSheetModal(for: window!)
+            alert.runModal()
             return
         }
         next.restoreSession = restoreSession.state == .on
