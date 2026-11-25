@@ -38,10 +38,13 @@ if [[ -z "${SDKROOT:-}" && "${ACTIVE_DEVELOPER_DIR}" == */CommandLineTools ]]; t
     fi
 fi
 
-SWIFT_SDK_FLAGS=()
-if [[ -n "${SDKROOT:-}" ]]; then
-    SWIFT_SDK_FLAGS=(-sdk "${SDKROOT}")
-fi
+compile_swift() {
+    if [[ -n "${SDKROOT:-}" ]]; then
+        xcrun swiftc -sdk "${SDKROOT}" "$@"
+    else
+        xcrun swiftc "$@"
+    fi
+}
 
 echo "==> Building Surffish Native for macOS 26 / Apple Silicon..."
 mkdir -p "${STAGING_DIR}"
@@ -62,8 +65,7 @@ build_profile_app() {
     # Compile each profile separately. Local Network privacy uses the main
     # executable UUID as part of app identity; sharing one Mach-O between the
     # production and development bundles makes that identity ambiguous.
-    xcrun swiftc \
-      "${SWIFT_SDK_FLAGS[@]}" \
+    compile_swift \
       -parse-as-library \
       -target arm64-apple-macosx26.0 \
       -module-cache-path /tmp/swift-cache \

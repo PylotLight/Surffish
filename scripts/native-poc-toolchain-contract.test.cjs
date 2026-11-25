@@ -19,7 +19,10 @@ test("native build avoids the missing SwiftUIMacros plugin on CLT-only SDK 27", 
   );
   assert.match(buildScript, /export DEVELOPER_DIR/);
   assert.match(buildScript, /SDKROOT/);
-  assert.match(buildScript, /SWIFT_SDK_FLAGS=\(\)/);
+  assert.match(buildScript, /compile_swift\(\)/);
+  assert.match(buildScript, /xcrun swiftc -sdk "\$\{SDKROOT\}" "\$@"/);
+  assert.match(buildScript, /xcrun swiftc "\$@"/);
+  assert.doesNotMatch(buildScript, /SWIFT_SDK_FLAGS\[@\]/);
   assert.match(buildScript, /-sdk/);
   assert.match(buildScript, /SwiftUIMacros plugin/);
   assert.match(buildScript, /Install full Xcode/);
