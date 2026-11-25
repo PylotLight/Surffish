@@ -25,7 +25,7 @@ Each profile has a separate Application Support directory under:
 ~/Library/Application Support/SurffishNative/Profiles/Development/
 ```
 
-Settings, sessions, installed extensions and profile website data are isolated. Persistent WebKit stores use distinct stable identifiers; private tabs use non-persistent stores. The two app bundles have distinct bundle identifiers and can run side-by-side.
+Settings, sessions, installed extensions and profile website data are isolated. Extensions are downloaded on demand and stored under each profile's `Extensions/` directory; no third-party extension code is bundled in either app. Persistent WebKit stores use distinct stable identifiers; private tabs use non-persistent stores. The two app bundles have distinct bundle identifiers and can run side-by-side.
 
 For command-line launches, `--profile production`, `--profile development` or `SURFFISH_PROFILE=development` selects the profile.
 
@@ -37,7 +37,7 @@ For command-line launches, `--profile production`, `--profile development` or `S
 - `BrowserSettingsStore.swift`: versioned settings with backward-compatible defaults.
 - `MainWindowController.swift`: native window, sidebar, toolbar, WebKit content and browser commands.
 - `SidebarView.swift` and `OmniboxView.swift`: native browser chrome.
-- `WebExtensionManager.swift`: WebKit Web Extensions and profile-specific extension installation.
+- `WebExtensionManager.swift`: WebKit Web Extensions, Chrome Web Store CRX installs, Firefox Add-ons XPI installs and profile-specific extension storage.
 - `SshTunnelManager.swift`: native OpenSSH local TCP forwarding to the NAS SOCKS5 service, readiness, status and reconnect.
 - `WebKitProxyController.swift`: WebKit SOCKSv5 proxy configuration with failover disabled.
 
@@ -89,4 +89,4 @@ open "poc-native/build/Surffish.app"
 open "poc-native/build/Surffish Dev.app"
 ```
 
-The script compiles the Swift sources against `arm64-apple-macosx26.0` and packages both profile apps, including the Bramble extension resources. GitHub Actions validates the build on a macOS 26 arm64 runner.
+The script compiles the Swift sources against `arm64-apple-macosx26.0` and packages both profile apps. Third-party extensions are installed separately from their official stores through Testing → Install Extension. GitHub Actions validates the build on a macOS 26 arm64 runner.
