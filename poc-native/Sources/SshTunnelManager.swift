@@ -20,6 +20,8 @@ public final class SshTunnelManager {
     private var browserEnabled = false
     private var bindAddress = "127.0.0.1"
     private var configuredPort: UInt16 = 1080
+    private var upstreamHost = "127.0.0.1"
+    private var upstreamPort: UInt16 = 1080
     private var generation = 0
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
@@ -34,7 +36,9 @@ public final class SshTunnelManager {
         serverEnabled: Bool,
         target: String,
         port: Int,
-        bindAddress: String
+        bindAddress: String,
+        upstreamHost: String,
+        upstreamPort: Int
     ) async {
         self.browserEnabled = browserEnabled
         self.enabled = browserEnabled || serverEnabled
@@ -51,6 +55,29 @@ public final class SshTunnelManager {
             updateStatus("SOCKS5 port must be between 1 and 65535 · browser traffic remains blocked")
             return
         }
+        guard (1...65535).contains(upstreamPort), let validUpstreamPort = UInt16(exactly: upstreamPort) else {
+            generation += 1
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            await stopProcess()
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
+            updateStatus("NAS SOCKS5 port must be between 1 and 65535")
+            return
+        }
+        let cleanUpstreamHost = upstreamHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidUpstreamHost(cleanUpstreamHost) else {
+            generation += 1
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            await stopProcess()
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
+            updateStatus("Enter a valid NAS SOCKS5 hostname or IP address")
+            return
+        }
+        self.upstreamHost = cleanUpstreamHost
+        self.upstreamPort = validUpstreamPort
         self.configuredPort = validPort
         generation += 1
         reconnectAttempt = 0
@@ -134,7 +161,7 @@ public final class SshTunnelManager {
             child.executableURL = executableURL
             child.arguments = (bindAddress == "0.0.0.0" ? ["-g"] : []) + [
                 "-N",
-                "-D", "\(bindAddress):\(port)",
+                "-L", "\(bindAddress):\(port):\(upstreamHost):\(upstreamPort)",
                 "-o", "ExitOnForwardFailure=yes",
                 "-o", "BatchMode=yes",
                 "-o", "ServerAliveInterval=30",
@@ -189,7 +216,7 @@ public final class SshTunnelManager {
                     let listening = await Self.isListening(port: port)
                     if listening {
                         reconnectAttempt = 0
-                        updateStatus("SOCKS5 ready · \(bindAddress):\(port) via \(target)")
+                        updateStatus("SOCKS5 ready · \(bindAddress):\(port) → NAS \(upstreamHost):\(upstreamPort) via \(target)")
                         if browserEnabled { TabManager.shared.reloadAllTabs() }
                         return
                     }
@@ -259,6 +286,13 @@ public final class SshTunnelManager {
         return value.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
+    private static func isValidUpstreamHost(_ value: String) -> Bool {
+        guard !value.isEmpty, value.utf8.count <= 253 else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:")
+        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
+            && !value.hasPrefix(".") && !value.hasSuffix(".")
+    }
+
     private static func shouldRetry(_ detail: String) -> Bool {
         let message = detail.lowercased()
         let permanentFailures = [
@@ -275,7 +309,8 @@ public final class SshTunnelManager {
             "too many authentication failures",
             "address already in use",
             "cannot listen to port",
-            "could not request local forwarding"
+            "could not request local forwarding",
+            "administratively prohibited"
         ]
         return !permanentFailures.contains(where: { message.contains($0) })
     }
