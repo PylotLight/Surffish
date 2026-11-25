@@ -152,7 +152,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuShowDiagnostics() {
         let memory = PerformanceMonitor.shared.memoryUsageMB
         let extensionCount = WebExtensionManager.shared.loadedExtensions.count
-        let message = "Resident memory: \\(String(format: "%.1f", memory)) MB\\nLoaded extensions: \\(extensionCount)\\nOpen tabs: \\(TabManager.shared.tabs.count)"
+        let message = "Resident memory: \(String(format: "%.1f", memory)) MB\nLoaded extensions: \(extensionCount)\nOpen tabs: \(TabManager.shared.tabs.count)"
         let alert = NSAlert()
         alert.messageText = "Surffish Native Diagnostics"
         alert.informativeText = message
