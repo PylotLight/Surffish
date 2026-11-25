@@ -1,6 +1,7 @@
 import Network
 import WebKit
 
+@MainActor
 public enum WebKitProxyController {
     public static func apply(port: UInt16?, to dataStore: WKWebsiteDataStore = .default()) {
         guard let port,
@@ -10,6 +11,8 @@ public enum WebKitProxyController {
         }
 
         let endpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: endpointPort)
-        dataStore.proxyConfigurations = [ProxyConfiguration(socksv5Proxy: endpoint)]
+        var proxy = ProxyConfiguration(socksv5Proxy: endpoint)
+        proxy.allowFailover = false
+        dataStore.proxyConfigurations = [proxy]
     }
 }
