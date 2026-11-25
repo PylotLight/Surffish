@@ -34,15 +34,16 @@ public final class SshTunnelManager {
 
         guard enabled else {
             proxyPort = nil
-            WebKitProxyController.apply(port: nil)
+            applyProxyToBrowserStores(port: nil)
+            TabManager.shared.reloadAllTabs()
             updateStatus("SOCKS5 proxy disabled")
             return
         }
 
         guard !self.target.isEmpty else {
-            proxyPort = nil
-            WebKitProxyController.apply(port: nil)
-            updateStatus("Enter an SSH host alias or user@host")
+            proxyPort = 1
+            applyProxyToBrowserStores(port: 1)
+            updateStatus("Enter an SSH host alias or user@host · traffic remains blocked")
             return
         }
 
@@ -56,7 +57,8 @@ public final class SshTunnelManager {
         reconnectTask = nil
         await stopProcess()
         proxyPort = nil
-        WebKitProxyController.apply(port: nil)
+        applyProxyToBrowserStores(port: nil)
+        TabManager.shared.reloadAllTabs()
         updateStatus("Stopped")
     }
 
@@ -70,7 +72,7 @@ public final class SshTunnelManager {
 
             // Install the proxy before launching SSH. If the tunnel fails, WebKit continues
             // pointing at this loopback endpoint and cannot silently fall back to a direct route.
-            WebKitProxyController.apply(port: port)
+            applyProxyToBrowserStores(port: port)
 
             let child = Process()
             child.executableURL = executableURL
@@ -127,6 +129,7 @@ public final class SshTunnelManager {
                     let listening = await Self.isListening(port: port)
                     if listening {
                         updateStatus("Connected · 127.0.0.1:\(port)")
+                        TabManager.shared.reloadAllTabs()
                         return
                     }
                 }
@@ -176,7 +179,9 @@ public final class SshTunnelManager {
             while child.isRunning && Date() < deadline {
                 try? await Task.sleep(for: .milliseconds(50))
             }
-            if child.isRunning { child.interrupt() }
+            if child.isRunning {
+                _ = Darwin.kill(child.processIdentifier, SIGKILL)
+            }
         }
         stderrPipe?.fileHandleForReading.readabilityHandler = nil
         stderrPipe = nil
@@ -194,6 +199,11 @@ public final class SshTunnelManager {
             "too many authentication failures"
         ]
         return !permanentFailures.contains(where: { message.contains($0) })
+    }
+
+    private func applyProxyToBrowserStores(port: UInt16?) {
+        WebKitProxyController.apply(port: port)
+        TabManager.shared.applyProxyConfiguration(port: port)
     }
 
     private func updateStatus(_ value: String) {
