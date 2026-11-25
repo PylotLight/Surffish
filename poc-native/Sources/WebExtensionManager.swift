@@ -191,8 +191,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     }
     
     public func extensionsDirectory() -> URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("SurffishNative/Extensions")
+        let dir = BrowserProfile.current.applicationSupportDirectory.appendingPathComponent("Extensions", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -201,8 +200,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         var brambleUrl: URL?
         
         // 1. Check Application Support/SurffishNative/Bramble
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appSupportBramble = appSupport.appendingPathComponent("SurffishNative/Bramble")
+        let appSupportBramble = BrowserProfile.current.applicationSupportDirectory.appendingPathComponent("Bramble", isDirectory: true)
         if FileManager.default.fileExists(atPath: appSupportBramble.appendingPathComponent("manifest.json").path) {
             brambleUrl = appSupportBramble
         }
