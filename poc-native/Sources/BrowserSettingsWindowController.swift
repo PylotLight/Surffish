@@ -114,7 +114,6 @@ public final class BrowserSettingsViewController: NSViewController {
             makeRow(title: "Listen address", control: sshProxyBindAddress),
             warning,
             sshStatus,
-            copyProxyButton,
             NSTextField(labelWithString: "SSH connection diagnostics"),
             diagnosticsScroll,
             actionRow
@@ -265,7 +264,7 @@ public final class BrowserSettingsViewController: NSViewController {
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .warning
-        alert.beginSheetModal(for: view.window ?? NSWindow())
+        alert.runModal()
     }
 
     @objc private func closeSettings() {
