@@ -7,7 +7,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
     private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through an SSH SOCKS5 proxy", target: nil, action: nil)
     private let sshHost = NSTextField()
-    private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Expose this SOCKS5 proxy to other applications", target: nil, action: nil)
+    private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep SOCKS5 service running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
     private let sshStatus = NSTextField(labelWithString: "Not configured")
@@ -61,7 +61,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         let sshHostRow = makeRow(title: "SSH host", control: sshHost)
         let sshPortRow = makeRow(title: "SOCKS5 port", control: sshProxyPort)
         let sshBindRow = makeRow(title: "Listen address", control: sshProxyBindAddress)
-        let proxySharingWarning = NSTextField(wrappingLabelWithString: "LAN mode exposes an unauthenticated SOCKS5 listener to your local network. Use This Mac only unless you specifically need other devices to connect, and protect LAN access with your firewall.") 
+        let proxySharingWarning = NSTextField(wrappingLabelWithString: "Other applications on this Mac can use the loopback endpoint whenever the tunnel is running. LAN mode additionally exposes an unauthenticated SOCKS5 listener to other devices; only enable it on a trusted network and protect access with your firewall.") 
         proxySharingWarning.textColor = .secondaryLabelColor
         proxySharingWarning.maximumNumberOfLines = 3
 
