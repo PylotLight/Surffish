@@ -181,11 +181,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
         settingsView.isHidden = false
         window?.title = "Settings — Surffish · \(BrowserProfile.current.displayName)"
-        sidebarView.reloadTabs()
+        sidebarView.setSettingsTabActive(true)
     }
 
     private func showActiveBrowserTab() {
         isShowingSettingsTab = false
+        sidebarView.setSettingsTabActive(false)
         settingsViewController?.view.removeFromSuperview()
         if let active = TabManager.shared.activeTab {
             displayBrowserTab(active)
@@ -218,6 +219,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     public func tabManagerDidChangeActiveTab(to tab: TabItem) {
         isShowingSettingsTab = false
+        sidebarView.setSettingsTabActive(false)
         settingsViewController?.view.removeFromSuperview()
         displayBrowserTab(tab)
         window?.title = "Surffish — \(BrowserProfile.current.displayName)"
