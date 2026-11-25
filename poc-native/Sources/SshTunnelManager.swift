@@ -419,11 +419,12 @@ public final class SshTunnelManager {
         guard (values["proxyjump"] ?? "none").lowercased() == "none",
               (values["proxycommand"] ?? "none").lowercased() == "none",
               let host = values["hostname"], !host.isEmpty,
-              let portValue = values["port"].flatMap(UInt16.init), portValue > 0 else {
+              let portText = values["port"],
+              let portValue = UInt16(portText), portValue > 0 else {
             return nil
         }
 
-        let octets = host.split(separator: ".").compactMap { UInt8($0) }
+        let octets = host.split(separator: ".").compactMap { UInt8(String($0)) }
         guard octets.count == 4 else { return nil }
         let isPrivate =
             octets[0] == 10 ||
