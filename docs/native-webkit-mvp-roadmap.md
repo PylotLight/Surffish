@@ -40,6 +40,7 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 - Development and Production profile directories.
 - Separate persistent WebKit website data store identifiers for Development and Production.
 - Profile-isolated extension installation directories and Bramble lookup.
+- Profile-specific Bramble Touch ID PRF secrets in Keychain, preventing Development and Production from sharing the same biometric secret.
 - Native OpenSSH dynamic forwarding with launchd SSH-agent discovery, Homebrew PATH support, process monitoring, diagnostics and reconnect backoff.
 - WebKit SOCKSv5 proxy configuration with proxy failover disabled.
 - Independent browser proxy and external SOCKS service settings.
