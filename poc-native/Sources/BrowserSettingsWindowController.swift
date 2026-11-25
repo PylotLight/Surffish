@@ -195,7 +195,7 @@ public final class BrowserSettingsViewController: NSViewController {
             actionRow.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
             actionRow.heightAnchor.constraint(equalToConstant: 34)
         ])
-        selectPage(0)
+        displayPage(at: 0)
     }
 
     private func makePage(_ sections: [NSView]) -> NSStackView {
@@ -270,10 +270,10 @@ public final class BrowserSettingsViewController: NSViewController {
     }
 
     @objc private func selectPage(_ sender: NSSegmentedControl) {
-        selectPage(sender.selectedSegment)
+        displayPage(at: sender.selectedSegment)
     }
 
-    private func selectPage(_ index: Int) {
+    private func displayPage(at index: Int) {
         guard pageStacks.indices.contains(index) else { return }
         activePageWidthConstraint?.isActive = false
         let stack = pageStacks[index]
