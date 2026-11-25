@@ -7,7 +7,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
     private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through the NAS SOCKS5 proxy", target: nil, action: nil)
     private let sshHost = NSTextField()
-    private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Share the local SOCKS5 endpoint with other applications", target: nil, action: nil)
+    private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep the local SOCKS endpoint running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
     private let sshRemoteSocksHost = NSTextField()
     private let sshRemoteSocksPort = NSTextField()
