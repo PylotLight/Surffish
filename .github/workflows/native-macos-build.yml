@@ -1,4 +1,4 @@
-name: Native macOS build
+name: Native macOS 26 build
 
 on:
   push:
