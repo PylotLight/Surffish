@@ -42,7 +42,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private func setupUI() {
         guard let window = window, let contentView = window.contentView else { return }
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.055, green: 0.06, blue: 0.075, alpha: 1).cgColor
+        // Keep the root transparent so the unified NSVisualEffectView below can
+        // actually sample the desktop backdrop. An opaque layer here disables glass.
+        contentView.layer?.backgroundColor = NSColor.clear.cgColor
         
         // 1. Unified root glass background (seamless single frame across entire window)
         let rootGlass = NSVisualEffectView()
