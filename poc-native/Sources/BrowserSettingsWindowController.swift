@@ -89,11 +89,17 @@ public final class BrowserSettingsViewController: NSViewController {
         diagnosticsView.textColor = NSColor(white: 0.92, alpha: 1)
         diagnosticsView.backgroundColor = NSColor(white: 0.055, alpha: 1)
         diagnosticsView.textContainerInset = NSSize(width: 10, height: 8)
+        diagnosticsView.isHorizontallyResizable = false
+        diagnosticsView.isVerticallyResizable = true
+        diagnosticsView.autoresizingMask = [.width]
+        diagnosticsView.textContainer?.widthTracksTextView = true
+        diagnosticsView.textContainer?.lineBreakMode = .byCharWrapping
         diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
         let diagnosticsScroll = NSScrollView()
         diagnosticsScroll.documentView = diagnosticsView
         diagnosticsScroll.hasVerticalScroller = true
-        diagnosticsScroll.hasHorizontalScroller = true
+        diagnosticsScroll.hasHorizontalScroller = false
+        diagnosticsScroll.autohidesScrollers = true
         diagnosticsScroll.borderType = .bezelBorder
         diagnosticsScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
 
