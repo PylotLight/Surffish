@@ -21,6 +21,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public var onExtensionsChanged: (([LoadedExtensionInfo]) -> Void)?
     public private(set) var brambleContext: WKWebExtensionContext?
     private var brambleNativeConnections: [ObjectIdentifier: BrambleNativeMessagingConnection] = [:]
+    private let brambleWorkaroundControllers = NSHashTable<WKUserContentController>.weakObjects()
 
     private static let brambleNativeMessagingPermissionKey =
         "Surffish.\(BrowserProfile.current.rawValue).Bramble.nativeMessaging.allowed"
@@ -45,8 +46,59 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         guard let webView = action.popupWebView else { return nil }
         BrambleNativeBridge.shared.applyTo(userContentController: webView.configuration.userContentController)
         DeveloperConsole.shared.install(on: webView.configuration.userContentController)
+        installBrambleDefaultManagerDismissal(on: webView.configuration.userContentController)
         return webView
     }
+
+    /// Bramble's default-manager action relies on the WebExtensions privacy API. WebKit
+    /// doesn't expose that Chrome-specific setting, so the action can leave its one-time
+    /// reminder visible on every popup open. Persist the card's own dismiss preference when
+    /// the user accepts the action, without pretending that WebKit's password setting changed.
+    private func installBrambleDefaultManagerDismissal(on userContentController: WKUserContentController) {
+        guard !brambleWorkaroundControllers.contains(userContentController) else { return }
+        brambleWorkaroundControllers.add(userContentController)
+        userContentController.addUserScript(WKUserScript(
+            source: Self.brambleDefaultManagerDismissalScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true,
+            in: .page
+        ))
+    }
+
+    private static let brambleDefaultManagerDismissalScript = #"""
+    (() => {
+      if (window.__surffishBrambleDefaultManagerDismissalInstalled) return;
+      window.__surffishBrambleDefaultManagerDismissalInstalled = true;
+
+      const extensionAPI = globalThis.browser ?? globalThis.chrome;
+      // Leave Chromium/Firefox alone: they can actually apply this browser setting.
+      if (extensionAPI?.privacy?.services?.passwordSavingEnabled) return;
+
+      const key = "pref.defaultManagerPromptDismissed";
+      document.addEventListener("click", (event) => {
+        if (window.__surffishBrambleDefaultManagerReplay) return;
+        const target = event.target;
+        const button = target instanceof Element ? target.closest("button") : null;
+        const label = button?.textContent?.replace(/\\s+/g, " ").trim().toLowerCase();
+        if (!button || label !== "make default") return;
+
+        const storage = extensionAPI?.storage?.local;
+        if (typeof storage?.set !== "function") return;
+
+        // Save the one-time reminder dismissal before Bramble's click handler requests
+        // an unsupported permission and leaves the card's state at "browser".
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.__surffishBrambleDefaultManagerReplay = true;
+        Promise.resolve(storage.set({ [key]: true }))
+          .catch(() => {})
+          .finally(() => {
+            button.click();
+            window.__surffishBrambleDefaultManagerReplay = false;
+          });
+      }, true);
+    })();
+    """#
 
     public func context(for url: URL) -> WKWebExtensionContext? {
         for ext in loadedExtensions where url.absoluteString.hasPrefix(ext.context.baseURL.absoluteString) {
@@ -154,6 +206,9 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         if let configuration = context.webViewConfiguration {
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
             DeveloperConsole.shared.install(on: configuration.userContentController)
+            if isBramble {
+                installBrambleDefaultManagerDismissal(on: configuration.userContentController)
+            }
         }
 
         if isBramble, let previousContext = brambleContext {
