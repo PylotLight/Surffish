@@ -22,6 +22,9 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public private(set) var brambleContext: WKWebExtensionContext?
     private var brambleNativeConnections: [ObjectIdentifier: BrambleNativeMessagingConnection] = [:]
 
+    private static let brambleNativeMessagingPermissionKey =
+        "Surffish.\(BrowserProfile.current.rawValue).Bramble.nativeMessaging.allowed"
+
     private let brambleChromeStoreID = "kmokhdhoggbdcgoepifeckhgbfakaknm"
     private let brambleFirefoxSlug = "bramble"
 
@@ -73,6 +76,9 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Don't Allow")
         let allowed = alert.runModal() == .alertFirstButtonReturn
+        if allowed, extensionContext.uniqueIdentifier == "bramble-extension-vault-stable" {
+            UserDefaults.standard.set(true, forKey: Self.brambleNativeMessagingPermissionKey)
+        }
         let granted = allowed ? [nativeMessaging] : []
         completionHandler(Set(granted), nil)
         DeveloperConsole.shared.record(
@@ -171,6 +177,10 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         // storage, autofill and background features can be exercised end-to-end.
         for permission in ext.requestedPermissions {
             context.setPermissionStatus(.grantedExplicitly, for: permission)
+        }
+        if isBramble,
+           UserDefaults.standard.bool(forKey: Self.brambleNativeMessagingPermissionKey) {
+            context.setPermissionStatus(.grantedExplicitly, for: .nativeMessaging)
         }
         for pattern in ext.requestedPermissionMatchPatterns {
             context.setPermissionStatus(.grantedExplicitly, for: pattern)
