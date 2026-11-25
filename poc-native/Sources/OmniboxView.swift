@@ -327,9 +327,10 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
 
         let menu = NSMenu(title: forward ? "Forward History" : "Back History")
         for historyItem in items.prefix(20) {
-            let title = historyItem.title.isEmpty
+            let pageTitle = historyItem.title ?? ""
+            let title = pageTitle.isEmpty
                 ? (historyItem.url.host ?? historyItem.url.absoluteString)
-                : historyItem.title
+                : pageTitle
             let menuItem = NSMenuItem(title: title, action: #selector(visitHistoryItem(_:)), keyEquivalent: "")
             menuItem.representedObject = historyItem
             menuItem.target = self

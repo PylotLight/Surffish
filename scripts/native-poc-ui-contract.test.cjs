@@ -265,6 +265,7 @@ test("native back and forward buttons expose each tab's WebKit history on right-
   assert.match(toolbar, /historyMenuProvider/);
   assert.match(toolbar, /backForwardList\.backList/);
   assert.match(toolbar, /backForwardList\.forwardList/);
+  assert.match(toolbar, /historyItem\.title \?\? ""/);
   assert.match(toolbar, /webView\.go\(to: item\)/);
   assert.match(toolbar, /right-click for history/);
 });
