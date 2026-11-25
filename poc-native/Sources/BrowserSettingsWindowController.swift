@@ -86,7 +86,7 @@ public final class BrowserSettingsViewController: NSViewController {
         diagnosticsView.isEditable = false
         diagnosticsView.isRichText = false
         diagnosticsView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        diagnosticsView.textColor = .textColor
+        diagnosticsView.textColor = NSColor(white: 0.92, alpha: 1)
         diagnosticsView.backgroundColor = NSColor(white: 0.055, alpha: 1)
         diagnosticsView.textContainerInset = NSSize(width: 10, height: 8)
         diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
@@ -141,12 +141,29 @@ public final class BrowserSettingsViewController: NSViewController {
         ])
 
         SshTunnelManager.shared.onStatusChange = { [weak self] status in
-            self?.sshStatus.stringValue = status
+            DispatchQueue.main.async {
+                self?.sshStatus.stringValue = status
+            }
         }
         SshTunnelManager.shared.onDiagnosticsChange = { [weak self] text in
-            self?.diagnosticsView.string = text
-            let end = (text as NSString).length
-            if end > 0 { self?.diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0)) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.diagnosticsView.string = text
+                let end = (text as NSString).length
+                if end > 0 {
+                    self.diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0))
+                }
+            }
+        }
+    }
+
+    public override func viewDidAppear() {
+        super.viewDidAppear()
+        sshStatus.stringValue = SshTunnelManager.shared.status
+        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
+        let end = (diagnosticsView.string as NSString).length
+        if end > 0 {
+            diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0))
         }
     }
 
