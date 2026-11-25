@@ -79,7 +79,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         if (window.__surffishBrambleDefaultManagerReplay) return;
         const target = event.target;
         const button = target instanceof Element ? target.closest("button") : null;
-        const label = button?.textContent?.replace(/\\s+/g, " ").trim().toLowerCase();
+        const label = button?.textContent?.replace(/\s+/g, " ").trim().toLowerCase();
         if (!button || label !== "make default") return;
 
         const storage = extensionAPI?.storage?.local;
