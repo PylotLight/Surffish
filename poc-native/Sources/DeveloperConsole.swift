@@ -260,6 +260,8 @@ private final class DeveloperConsoleWindowController: NSWindowController {
         // width tied to the viewport and wrap instead of expanding the window.
         textView.isHorizontallyResizable = false
         textView.isVerticallyResizable = true
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineBreakMode = .byCharWrapping
